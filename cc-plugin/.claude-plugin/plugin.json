@@ -1,0 +1,13 @@
+{
+    "name": "agent-swarm",
+    "description": "Plugin for agent swarming like a boss.",
+    "version": "1.0.2",
+    "author": {
+        "name": "desplega.ai",
+        "email": "contact@desplega.ai"
+    },
+    "homepage": "https://desplega.ai",
+    "repository": "https://github.com/desplega-ai/ai-toolbox",
+    "keywords": ["ai", "agent", "toolbox", "plugin", "swarm"],
+    "license": "MIT"
+}

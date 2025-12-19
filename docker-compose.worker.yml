@@ -1,0 +1,39 @@
+# Docker Compose for Agent Swarm Worker
+#
+# Usage:
+#   docker-compose -f docker-compose.worker.yml up --build
+#
+# Required environment variables (in .env.docker or passed directly):
+#   - CLAUDE_CODE_OAUTH_TOKEN: OAuth token for Claude CLI
+#   - API_KEY: API key for MCP server authentication
+#
+# Optional environment variables:
+#   - AGENT_ID: UUID for agent identification (assigned on join if not set)
+#   - MCP_BASE_URL: MCP server URL (default: http://host.docker.internal:3013)
+#   - SESSION_ID: Folder name for logs (auto-generated if not provided)
+#   - WORKER_YOLO: If "true", continue on errors (default: false)
+
+services:
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - API_KEY=${API_KEY}
+      - AGENT_ID=${AGENT_ID:-}
+      # Use host.docker.internal to reach host's localhost on Mac/Windows
+      # On Linux, use --add-host=host.docker.internal:host-gateway or --network host
+      - MCP_BASE_URL=${MCP_BASE_URL:-http://host.docker.internal:3013}
+      - SESSION_ID=${SESSION_ID:-}
+      - WORKER_YOLO=${WORKER_YOLO:-false}
+      # GitHub credentials for git push and PR operations
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_EMAIL=${GITHUB_EMAIL:-}
+      - GITHUB_NAME=${GITHUB_NAME:-}
+    volumes:
+      - ./logs:/logs
+      # Optional: mount a workspace directory for persistent work
+      # - ./workspace:/workspace
+    restart: unless-stopped
+    # No port mappings needed - worker only makes outbound connections

@@ -1,0 +1,71 @@
+{
+  "description": "Hookify plugin - User-configurable hooks from .local.md files",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bunx @desplega.ai/agent-swarm@latest hook"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bunx @desplega.ai/agent-swarm@latest hook"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bunx @desplega.ai/agent-swarm@latest hook"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bunx @desplega.ai/agent-swarm@latest hook"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bunx @desplega.ai/agent-swarm@latest hook"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bunx @desplega.ai/agent-swarm@latest hook"
+          }
+        ]
+      }
+    ]
+  }
+}

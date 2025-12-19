@@ -1,0 +1,61 @@
+{
+  "name": "@desplega.ai/agent-swarm",
+  "version": "1.6.0",
+  "description": "Agent orchestration layer MCP for Claude Code, Codex, Gemini CLI, and more!",
+  "module": "src/http.ts",
+  "type": "module",
+  "bin": {
+    "agent-swarm": "./src/cli.tsx"
+  },
+  "@desplega.ai/agent-swarm": "link:@desplega.ai/agent-swarm",
+  "config": {
+    "name": "agent-swarm"
+  },
+  "scripts": {
+    "tsc:check": "bun tsc --noEmit",
+    "cli": "bun src/cli.tsx",
+    "hook": "bun src/hooks/hook.ts",
+    "claude": "bun src/cli.tsx claude",
+    "claude:headless": "bun src/cli.tsx claude --headless",
+    "worker": "bun src/cli.tsx worker",
+    "worker:yolo": "bun src/cli.tsx worker --yolo",
+    "lead": "bun src/cli.tsx lead",
+    "lead:yolo": "bun src/cli.tsx lead --yolo",
+    "dev": "bun --hot src/stdio.ts",
+    "dev:http": "bun --hot src/http.ts",
+    "start": "bun src/stdio.ts",
+    "start:http": "bun src/http.ts",
+    "inspector": "bunx @modelcontextprotocol/inspector --transport stdio bun src/stdio.ts",
+    "inspector:http": "bunx @modelcontextprotocol/inspector --transport http http://localhost:3013/mcp",
+    "lint": "biome check src",
+    "lint:fix": "biome check --write src",
+    "format": "biome format --write src",
+    "build:binary": "bun build ./src/cli.tsx --compile --target=bun-linux-x64 --outfile ./dist/agent-swarm",
+    "build:binary:arm64": "bun build ./src/cli.tsx --compile --target=bun-linux-arm64 --outfile ./dist/agent-swarm",
+    "docker:build:worker": "docker build -f Dockerfile.worker -t agent-swarm-worker:latest .",
+    "docker:run:worker": "docker run --rm -it --env-file .env.docker -v ./logs:/logs -v ./work:/workspace agent-swarm-worker:latest",
+    "docker:run:lead": "docker run --rm -it --env-file .env.docker-lead -e AGENT_ROLE=lead -v ./logs:/logs -v ./work:/workspace agent-swarm-worker:latest",
+    "deploy:install": "bun deploy/install.ts",
+    "deploy:update": "bun deploy/update.ts",
+    "deploy:uninstall": "bun deploy/uninstall.ts",
+    "deploy:docker": "bun deploy/docker-push.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.9",
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@inkjs/ui": "^2.0.0",
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "@slack/bolt": "^4.6.0",
+    "@types/react": "^19.2.7",
+    "date-fns": "^4.1.0",
+    "ink": "^6.5.1",
+    "react": "^19.2.3",
+    "react-devtools-core": "^7.0.1",
+    "zod": "^4.2.1"
+  }
+}

@@ -1,0 +1,23 @@
+# Docker Compose for Agent Swarm Lead
+#
+# Usage:
+#   docker-compose -f docker-compose.lead.yml up --build
+#
+# Uses the same Dockerfile as worker, just with AGENT_ROLE=lead
+
+services:
+  lead:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      - AGENT_ROLE=lead
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - API_KEY=${API_KEY}
+      - AGENT_ID=${AGENT_ID:-}
+      - MCP_BASE_URL=${MCP_BASE_URL:-http://host.docker.internal:3013}
+      - SESSION_ID=${SESSION_ID:-}
+      - LEAD_YOLO=${LEAD_YOLO:-false}
+    volumes:
+      - ./logs:/logs
+    restart: unless-stopped

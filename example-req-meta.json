@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "signal": {},
+    "sessionId": "942c8196-66ad-4c1f-b31e-7331ce7f4bb9",
+    "_meta": {
+      "progressToken": 3
+    },
+    "requestId": 3,
+    "requestInfo": {
+      "headers": {
+        "accept": "application/json, text/event-stream",
+        "accept-encoding": "gzip, deflate, br",
+        "authorization": "Bearer 123123",
+        "connection": "keep-alive",
+        "content-length": "119",
+        "content-type": "application/json",
+        "host": "localhost:3013",
+        "mcp-protocol-version": "2025-11-25",
+        "mcp-session-id": "942c8196-66ad-4c1f-b31e-7331ce7f4bb9",
+        "user-agent": "node-fetch"
+      }
+    }
+  }
+}

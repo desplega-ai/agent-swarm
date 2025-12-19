@@ -1,0 +1,69 @@
+{
+    "display_information": {
+        "name": "agent-swarm",
+        "description": "Your Agent Swarm",
+        "background_color": "#000000"
+    },
+    "features": {
+        "app_home": {
+            "home_tab_enabled": false,
+            "messages_tab_enabled": true,
+            "messages_tab_read_only_enabled": false
+        },
+        "bot_user": {
+            "display_name": "agent-swarm",
+            "always_online": true
+        },
+        "slash_commands": [
+            {
+                "command": "/agent-swarm-status",
+                "description": "Check status of available agents",
+                "should_escape": false
+            },
+            {
+                "command": "/agent-swarm-help",
+                "description": "Show help for using the Agent Swarm bot",
+                "should_escape": false
+            }
+        ]
+    },
+    "oauth_config": {
+        "scopes": {
+            "bot": [
+                "app_mentions:read",
+                "channels:history",
+                "channels:read",
+                "chat:write",
+                "chat:write.customize",
+                "chat:write.public",
+                "commands",
+                "groups:history",
+                "groups:read",
+                "im:history",
+                "im:read",
+                "im:write",
+                "mpim:history",
+                "mpim:read",
+                "mpim:write",
+                "users:read"
+            ]
+        }
+    },
+    "settings": {
+        "event_subscriptions": {
+            "bot_events": [
+                "app_mention",
+                "message.channels",
+                "message.groups",
+                "message.im",
+                "message.mpim"
+            ]
+        },
+        "interactivity": {
+            "is_enabled": true
+        },
+        "org_deploy_enabled": false,
+        "socket_mode_enabled": true,
+        "token_rotation_enabled": false
+    }
+}

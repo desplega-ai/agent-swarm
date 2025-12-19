@@ -1,0 +1,129 @@
+# Agent Swarm Worker Dockerfile
+# Runs Claude in headless loop mode as a worker agent
+# Multi-stage build: compiles to standalone binary with full dev environment
+
+# Stage 1: Build the binary
+FROM oven/bun:latest AS builder
+WORKDIR /build
+COPY package.json bun.lock* ./
+RUN bun install --frozen-lockfile
+COPY src/ ./src/
+COPY tsconfig.json ./
+RUN bun build ./src/cli.tsx --compile --outfile ./agent-swarm
+
+# Stage 2: Full development environment
+FROM ubuntu:24.04
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install comprehensive development tools
+RUN apt-get update && apt-get install -y \
+    # Essential tools
+    curl wget ca-certificates gnupg lsb-release \
+    # Version control
+    git git-lfs \
+    # Editors
+    vim nano \
+    # Build tools
+    build-essential make cmake gcc g++ \
+    # Python
+    python3 python3-pip python3-venv \
+    # Common utilities
+    jq tree htop unzip zip tar gzip \
+    # Network tools
+    openssh-client \
+    # sudo for package installation
+    sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 22.x (LTS)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update \
+    && apt-get install -y gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Bun (for running JS/TS projects)
+RUN curl -fsSL https://bun.sh/install | bash
+ENV BUN_INSTALL="/root/.bun"
+ENV PATH="$BUN_INSTALL/bin:$PATH"
+
+# Create non-root user with sudo access (passwordless)
+# NOTE: Claude requires non-root for --dangerously-skip-permissions
+# Worker runs as non-root but CAN use sudo for installing packages
+RUN useradd -m -s /bin/bash -G sudo worker \
+    && echo "worker ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+USER worker
+WORKDIR /home/worker
+ENV HOME=/home/worker
+ENV BUN_INSTALL="/home/worker/.bun"
+
+# Install Bun for worker user (need to set HOME explicitly in RUN)
+RUN HOME=/home/worker BUN_INSTALL=/home/worker/.bun curl -fsSL https://bun.sh/install | bash
+ENV PATH="/home/worker/.bun/bin:$PATH"
+
+# Install Claude CLI using official installer
+RUN HOME=/home/worker curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="/home/worker/.local/bin:$PATH"
+
+# Setup .claude directory
+RUN mkdir -p /home/worker/.claude/commands
+RUN mkdir -p /home/worker/.claude/agents
+RUN echo '{"hasCompletedOnboarding":true,"bypassPermissionsModeAccepted":true}' > /home/worker/.claude.json
+
+# Settings with hooks pointing to compiled binary
+RUN echo '{ \
+  "permissions": { "allow": ["mcp__agent-swarm__*"] }, \
+  "enableAllProjectMcpServers": true, \
+  "enabledMcpjsonServers": ["agent-swarm"], \
+  "hooks": { \
+    "SessionStart": [{"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]}], \
+    "UserPromptSubmit": [{"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]}], \
+    "PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]}], \
+    "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]}], \
+    "PreCompact": [{"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]}], \
+    "Stop": [{"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]}] \
+  } \
+}' > /home/worker/.claude/settings.json
+
+# Copy binary from builder
+USER root
+COPY --from=builder /build/agent-swarm /usr/local/bin/agent-swarm
+RUN chmod +x /usr/local/bin/agent-swarm
+
+# Copy commands
+COPY --chown=worker:worker cc-plugin/commands/* /home/worker/.claude/commands/
+COPY --chown=worker:worker cc-plugin/agents/* /home/worker/.claude/agents/
+
+# Create directories
+RUN mkdir -p /workspace /logs && chown worker:worker /workspace /logs
+
+COPY --chown=worker:worker docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+USER worker
+WORKDIR /workspace
+VOLUME ["/logs"]
+
+# Environment
+ENV AGENT_ROLE=worker
+ENV WORKER_YOLO=false
+ENV MCP_BASE_URL=http://host.docker.internal:3013
+ENV WORKER_LOG_DIR=/logs
+ENV LEAD_LOG_DIR=/logs
+ENV WORKER_SYSTEM_PROMPT=""
+ENV WORKER_SYSTEM_PROMPT_FILE=""
+ENV LEAD_SYSTEM_PROMPT=""
+ENV LEAD_SYSTEM_PROMPT_FILE=""
+ENV STARTUP_SCRIPT_STRICT=true
+ENV PATH="/home/worker/.local/bin:/home/worker/.bun/bin:$PATH"
+
+ENTRYPOINT ["/docker-entrypoint.sh"]

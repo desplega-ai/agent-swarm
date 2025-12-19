@@ -1,0 +1,17 @@
+[Unit]
+Description=Agent Swarm MCP Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/agent-swarm
+ExecStart=/usr/local/bin/bun run start:http
+ExecStartPost=/bin/sh -c 'sleep 2 && curl -sf http://localhost:3013/health || exit 1'
+Restart=always
+RestartSec=5
+EnvironmentFile=/opt/agent-swarm/.env
+
+[Install]
+WantedBy=multi-user.target

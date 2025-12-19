@@ -1,0 +1,61 @@
+# Dependencies
+node_modules/
+
+# Logs
+logs/
+*.log
+
+# Bindings
+work/
+
+# Database
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+build/
+*.tsbuildinfo
+
+# Environment files (secrets should be passed via env vars)
+.env
+.env.*
+!.env.example
+
+# Backup files
+*.bak
+
+# Claude local config (will be created in container)
+.claude/
+.mcp.json
+
+# Test files
+*.test.ts
+*.spec.ts
+__tests__/
+coverage/
+
+# Documentation
+*.md
+!cc-plugin/**/*.md
+
+# Other dockerfiles and compose files
+Dockerfile
+docker-compose.yml
+docker-compose.*.yml
+!docker-compose.worker.yml
