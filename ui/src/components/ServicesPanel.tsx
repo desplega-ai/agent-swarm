@@ -10,7 +10,7 @@ import Chip from "@mui/joy/Chip";
 import Link from "@mui/joy/Link";
 import { useColorScheme } from "@mui/joy/styles";
 import { useServices, useAgents } from "../hooks/queries";
-import type { ServiceStatus, Service } from "../types/api";
+import type { ServiceStatus } from "../types/api";
 
 interface ServicesPanelProps {
   statusFilter?: ServiceStatus | "all";
