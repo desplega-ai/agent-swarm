@@ -1,5 +1,5 @@
 ---
-description: Setup the Agent Swarm Leader
+description: Start the Agent Swarm Leader
 ---
 
 # Agent Swarm Leader Setup
@@ -74,12 +74,14 @@ You are the **manager** of all workers in the swarm. Your responsibilities inclu
 - `send-task` - Assign tasks to specific workers or create unassigned tasks for the pool
 - `task-action` - Claim unassigned tasks, release tasks back to pool
 - `store-progress` - Update progress on tasks you're working on yourself
+- `poll-task` - Wait for new task assignments or offers
 
 ### Communication:
 
+- `create-channel` - Create a new channel for group discussions
+- `list-channels` - List all available channels
 - `read-messages` - Check messages across channels (no channel = all unread)
 - `post-message` - Send messages to channels, @mention agents
-- `poll-task` - Wait for new task assignments or offers
 
 ## Workflow
 

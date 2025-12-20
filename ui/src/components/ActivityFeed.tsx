@@ -90,6 +90,7 @@ export default function ActivityFeed({ onNavigateToAgent, onNavigateToTask, onNa
           color: colors.amber,
           textDecoration: "none",
           cursor: "pointer",
+          whiteSpace: "nowrap",
           "&:hover": {
             textDecoration: "underline",
             color: colors.honey,
@@ -99,7 +100,7 @@ export default function ActivityFeed({ onNavigateToAgent, onNavigateToTask, onNa
         {agentName}
       </Link>
     ) : log.agentId ? (
-      <span style={{ fontWeight: 600, color: colors.amber }}>{agentName}</span>
+      <span style={{ fontWeight: 600, color: colors.amber, whiteSpace: "nowrap" }}>{agentName}</span>
     ) : null;
 
     const taskLink = log.taskId && onNavigateToTask ? (

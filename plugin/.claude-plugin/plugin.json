@@ -7,7 +7,7 @@
         "email": "contact@desplega.ai"
     },
     "homepage": "https://desplega.ai",
-    "repository": "https://github.com/desplega-ai/ai-toolbox",
+    "repository": "https://github.com/desplega-ai/agent-swarm",
     "keywords": ["ai", "agent", "toolbox", "plugin", "swarm"],
     "license": "MIT"
 }

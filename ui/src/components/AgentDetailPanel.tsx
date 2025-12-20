@@ -141,6 +141,7 @@ export default function AgentDetailPanel({
             fontWeight: 600,
             fontSize: "1.1rem",
             color: agent.isLead ? colors.amber : "text.primary",
+            whiteSpace: "nowrap",
           }}
         >
           {agent.name}

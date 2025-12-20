@@ -42,6 +42,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# Install PM2 globally for process management
+RUN npm install -g pm2
+
 # Install GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
     && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
@@ -100,8 +103,9 @@ COPY --from=builder /build/agent-swarm /usr/local/bin/agent-swarm
 RUN chmod +x /usr/local/bin/agent-swarm
 
 # Copy commands
-COPY --chown=worker:worker cc-plugin/commands/* /home/worker/.claude/commands/
-COPY --chown=worker:worker cc-plugin/agents/* /home/worker/.claude/agents/
+COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/
+COPY --chown=worker:worker plugin/agents/* /home/worker/.claude/agents/
+COPY --chown=worker:worker plugin/skills/* /home/worker/.claude/skills/
 
 # Create directories
 RUN mkdir -p /workspace /logs && chown worker:worker /workspace /logs
@@ -112,6 +116,9 @@ RUN chmod +x /docker-entrypoint.sh
 USER worker
 WORKDIR /workspace
 VOLUME ["/logs"]
+
+# Expose service port for PM2 processes
+EXPOSE 3000
 
 # Environment
 ENV AGENT_ROLE=worker

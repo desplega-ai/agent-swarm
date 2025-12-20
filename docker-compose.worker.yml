@@ -31,9 +31,13 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
       - GITHUB_NAME=${GITHUB_NAME:-}
+      # Service registry URL (for service discovery)
+      - SWARM_URL=${SWARM_URL:-localhost}
+    ports:
+      # Expose service port for PM2 processes
+      - "${SERVICE_PORT:-3000}:3000"
     volumes:
       - ./logs:/logs
       # Optional: mount a workspace directory for persistent work
       # - ./workspace:/workspace
     restart: unless-stopped
-    # No port mappings needed - worker only makes outbound connections

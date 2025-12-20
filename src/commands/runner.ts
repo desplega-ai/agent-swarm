@@ -1,4 +1,5 @@
 import { mkdir } from "node:fs/promises";
+import { getBasePrompt } from "../prompts/base-prompt.ts";
 
 /** Configuration for a runner role (worker or lead) */
 export interface RunnerConfig {
@@ -16,6 +17,10 @@ export interface RunnerConfig {
   systemPromptEnvVar: string;
   /** Environment variable name for system prompt file path, e.g., "WORKER_SYSTEM_PROMPT_FILE" */
   systemPromptFileEnvVar: string;
+  /** Environment variable name for agent name, e.g., "AGENT_NAME" */
+  nameEnvVar: string;
+  /** Environment variable name for swarm URL, e.g., "SWARM_URL" */
+  swarmUrlEnvVar: string;
 }
 
 export interface RunnerOptions {
@@ -172,6 +177,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     metadataType,
     systemPromptEnvVar,
     systemPromptFileEnvVar,
+    nameEnvVar,
+    swarmUrlEnvVar,
   } = config;
 
   const sessionId = process.env.SESSION_ID || crypto.randomUUID().slice(0, 8);
@@ -183,14 +190,23 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   const prompt = opts.prompt || defaultPrompt;
   const isYolo = opts.yolo || process.env[yoloEnvVar] === "true";
 
-  // Resolve system prompt: CLI flag > env var
-  let resolvedSystemPrompt: string | undefined;
+  // Get agent name and swarm URL for base prompt
+  const agentName = process.env[nameEnvVar] || "agent";
+  const swarmUrl = process.env[swarmUrlEnvVar] || "localhost";
+
+  // Generate base prompt that's always included
+  const basePrompt = getBasePrompt({ role, name: agentName, swarmUrl });
+
+  // Resolve additional system prompt: CLI flag > env var
+  let additionalSystemPrompt: string | undefined;
   const systemPromptText = opts.systemPrompt || process.env[systemPromptEnvVar];
   const systemPromptFilePath = opts.systemPromptFile || process.env[systemPromptFileEnvVar];
 
   if (systemPromptText) {
-    resolvedSystemPrompt = systemPromptText;
-    console.log(`[${role}] Using system prompt from ${opts.systemPrompt ? "CLI flag" : "env var"}`);
+    additionalSystemPrompt = systemPromptText;
+    console.log(
+      `[${role}] Using additional system prompt from ${opts.systemPrompt ? "CLI flag" : "env var"}`,
+    );
   } else if (systemPromptFilePath) {
     try {
       const file = Bun.file(systemPromptFilePath);
@@ -198,9 +214,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         console.error(`[${role}] ERROR: System prompt file not found: ${systemPromptFilePath}`);
         process.exit(1);
       }
-      resolvedSystemPrompt = await file.text();
-      console.log(`[${role}] Loaded system prompt from file: ${systemPromptFilePath}`);
-      console.log(`[${role}] System prompt length: ${resolvedSystemPrompt.length} characters`);
+      additionalSystemPrompt = await file.text();
+      console.log(`[${role}] Loaded additional system prompt from file: ${systemPromptFilePath}`);
+      console.log(
+        `[${role}] Additional system prompt length: ${additionalSystemPrompt.length} characters`,
+      );
     } catch (error) {
       console.error(`[${role}] ERROR: Failed to read system prompt file: ${systemPromptFilePath}`);
       console.error(error);
@@ -208,12 +226,23 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     }
   }
 
+  // Combine base prompt with any additional system prompt
+  const resolvedSystemPrompt = additionalSystemPrompt
+    ? `${basePrompt}\n\n${additionalSystemPrompt}`
+    : basePrompt;
+
   console.log(`[${role}] Starting ${role}`);
   console.log(`[${role}] Session ID: ${sessionId}`);
   console.log(`[${role}] Log directory: ${logDir}`);
   console.log(`[${role}] YOLO mode: ${isYolo ? "enabled" : "disabled"}`);
   console.log(`[${role}] Prompt: ${prompt}`);
-  console.log(`[${role}] System prompt: ${resolvedSystemPrompt ? "provided" : "none"}`);
+  console.log(`[${role}] Agent name: ${agentName}`);
+  console.log(`[${role}] Swarm URL: ${swarmUrl}`);
+  console.log(`[${role}] Base prompt: included (${basePrompt.length} chars)`);
+  console.log(
+    `[${role}] Additional system prompt: ${additionalSystemPrompt ? "provided" : "none"}`,
+  );
+  console.log(`[${role}] Total system prompt length: ${resolvedSystemPrompt.length} chars`);
 
   let iteration = 0;
 

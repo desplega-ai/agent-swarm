@@ -8,20 +8,25 @@ import { registerGetTasksTool } from "./tools/get-tasks";
 import { registerJoinSwarmTool } from "./tools/join-swarm";
 // Messaging capability
 import { registerListChannelsTool } from "./tools/list-channels";
+import { registerListServicesTool } from "./tools/list-services";
 import { registerMyAgentInfoTool } from "./tools/my-agent-info";
 import { registerPollTaskTool } from "./tools/poll-task";
 import { registerPostMessageTool } from "./tools/post-message";
 import { registerReadMessagesTool } from "./tools/read-messages";
+// Services capability
+import { registerRegisterServiceTool } from "./tools/register-service";
 import { registerSendTaskTool } from "./tools/send-task";
 import { registerStoreProgressTool } from "./tools/store-progress";
 // Task pool capability
 import { registerTaskActionTool } from "./tools/task-action";
+import { registerUnregisterServiceTool } from "./tools/unregister-service";
 // Profiles capability
 import { registerUpdateProfileTool } from "./tools/update-profile";
+import { registerUpdateServiceStatusTool } from "./tools/update-service-status";
 
 // Capability-based feature flags
 // Default: all capabilities enabled
-const DEFAULT_CAPABILITIES = "core,task-pool,messaging,profiles";
+const DEFAULT_CAPABILITIES = "core,task-pool,messaging,profiles,services";
 const CAPABILITIES = new Set(
   (process.env.CAPABILITIES || DEFAULT_CAPABILITIES).split(",").map((s) => s.trim()),
 );
@@ -77,6 +82,14 @@ export function createServer() {
   // Profiles capability - agent profile management
   if (hasCapability("profiles")) {
     registerUpdateProfileTool(server);
+  }
+
+  // Services capability - PM2/background service registry
+  if (hasCapability("services")) {
+    registerRegisterServiceTool(server);
+    registerUnregisterServiceTool(server);
+    registerListServicesTool(server);
+    registerUpdateServiceStatusTool(server);
   }
 
   return server;

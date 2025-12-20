@@ -244,6 +244,7 @@ function MentionInput({
                     fontWeight: 600,
                     fontSize: "0.85rem",
                     color: colors.amber,
+                    whiteSpace: "nowrap",
                   }}
                 >
                   {agent.name}
@@ -315,8 +316,16 @@ function MessageItem({
       return message.content;
     }
 
-    // Split by @mention pattern
-    const mentionPattern = /@(\w+)/g;
+    // Build a regex pattern from agent names (sorted by length, longest first to match "master lord" before "master")
+    const agentNames = Array.from(agentsByName.keys()).sort((a, b) => b.length - a.length);
+    if (agentNames.length === 0) {
+      return message.content;
+    }
+
+    // Escape special regex characters in agent names
+    const escapedNames = agentNames.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const mentionPattern = new RegExp(`@(${escapedNames.join('|')})(?=\\s|$|[.,!?;:])`, 'g');
+
     const parts: React.ReactNode[] = [];
     let lastIndex = 0;
     let match;
@@ -348,6 +357,7 @@ function MessageItem({
               color: colors.amber,
               textDecoration: "none",
               cursor: "pointer",
+              whiteSpace: "nowrap",
               bgcolor: isDark ? "rgba(245, 166, 35, 0.1)" : "rgba(212, 136, 6, 0.08)",
               px: 0.5,
               borderRadius: "4px",
@@ -370,6 +380,7 @@ function MessageItem({
             sx={{
               fontWeight: 600,
               color: colors.gold,
+              whiteSpace: "nowrap",
               bgcolor: isDark ? "rgba(212, 165, 116, 0.1)" : "rgba(139, 105, 20, 0.08)",
               px: 0.5,
               borderRadius: "4px",
@@ -447,6 +458,7 @@ function MessageItem({
               color: colors.amber,
               textDecoration: "none",
               cursor: "pointer",
+              whiteSpace: "nowrap",
               "&:hover": {
                 textDecoration: "underline",
                 color: colors.honey,
@@ -462,6 +474,7 @@ function MessageItem({
               fontWeight: 600,
               fontSize: "0.85rem",
               color: message.agentId ? colors.amber : colors.blue,
+              whiteSpace: "nowrap",
             }}
           >
             {message.agentName || "Human"}

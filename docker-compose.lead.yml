@@ -18,6 +18,11 @@ services:
       - MCP_BASE_URL=${MCP_BASE_URL:-http://host.docker.internal:3013}
       - SESSION_ID=${SESSION_ID:-}
       - LEAD_YOLO=${LEAD_YOLO:-false}
+      # Service registry URL (for service discovery)
+      - SWARM_URL=${SWARM_URL:-localhost}
+    ports:
+      # Expose service port for PM2 processes
+      - "${SERVICE_PORT:-3000}:3000"
     volumes:
       - ./logs:/logs
     restart: unless-stopped

@@ -11,6 +11,8 @@ import type {
   Channel,
   ChannelMessage,
   ChannelType,
+  Service,
+  ServiceStatus,
 } from "../types";
 
 let db: Database | null = null;
@@ -121,6 +123,26 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE,
       FOREIGN KEY (channelId) REFERENCES channels(id) ON DELETE CASCADE
     );
+
+    -- Services table (for PM2/background services)
+    CREATE TABLE IF NOT EXISTS services (
+      id TEXT PRIMARY KEY,
+      agentId TEXT NOT NULL,
+      name TEXT NOT NULL,
+      port INTEGER NOT NULL DEFAULT 3000,
+      description TEXT,
+      url TEXT,
+      healthCheckPath TEXT DEFAULT '/health',
+      status TEXT NOT NULL DEFAULT 'starting' CHECK(status IN ('starting', 'healthy', 'unhealthy', 'stopped')),
+      metadata TEXT DEFAULT '{}',
+      createdAt TEXT NOT NULL,
+      lastUpdatedAt TEXT NOT NULL,
+      FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE,
+      UNIQUE(agentId, name)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_services_agentId ON services(agentId);
+    CREATE INDEX IF NOT EXISTS idx_services_status ON services(status);
   `);
 
   // Seed default general channel if it doesn't exist
@@ -1529,4 +1551,205 @@ export function getInboxSummary(agentId: string): InboxSummary {
     inProgressCount: inProgressResult?.count ?? 0,
     recentMentions,
   };
+}
+
+// ============================================================================
+// Service Operations (PM2/background services)
+// ============================================================================
+
+type ServiceRow = {
+  id: string;
+  agentId: string;
+  name: string;
+  port: number;
+  description: string | null;
+  url: string | null;
+  healthCheckPath: string | null;
+  status: ServiceStatus;
+  metadata: string | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+};
+
+function rowToService(row: ServiceRow): Service {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    name: row.name,
+    port: row.port,
+    description: row.description ?? undefined,
+    url: row.url ?? undefined,
+    healthCheckPath: row.healthCheckPath ?? "/health",
+    status: row.status,
+    metadata: row.metadata ? JSON.parse(row.metadata) : {},
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+export interface CreateServiceOptions {
+  port?: number;
+  description?: string;
+  url?: string;
+  healthCheckPath?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export function createService(
+  agentId: string,
+  name: string,
+  options?: CreateServiceOptions,
+): Service {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  const row = getDb()
+    .prepare<ServiceRow, (string | number | null)[]>(
+      `INSERT INTO services (id, agentId, name, port, description, url, healthCheckPath, status, metadata, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'starting', ?, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      agentId,
+      name,
+      options?.port ?? 3000,
+      options?.description ?? null,
+      options?.url ?? null,
+      options?.healthCheckPath ?? "/health",
+      JSON.stringify(options?.metadata ?? {}),
+      now,
+      now,
+    );
+
+  if (!row) throw new Error("Failed to create service");
+
+  try {
+    createLogEntry({
+      eventType: "service_registered",
+      agentId,
+      newValue: name,
+      metadata: { serviceId: id, port: options?.port ?? 3000 },
+    });
+  } catch {}
+
+  return rowToService(row);
+}
+
+export function getServiceById(id: string): Service | null {
+  const row = getDb().prepare<ServiceRow, [string]>("SELECT * FROM services WHERE id = ?").get(id);
+  return row ? rowToService(row) : null;
+}
+
+export function getServiceByAgentAndName(agentId: string, name: string): Service | null {
+  const row = getDb()
+    .prepare<ServiceRow, [string, string]>("SELECT * FROM services WHERE agentId = ? AND name = ?")
+    .get(agentId, name);
+  return row ? rowToService(row) : null;
+}
+
+export function getServicesByAgentId(agentId: string): Service[] {
+  return getDb()
+    .prepare<ServiceRow, [string]>("SELECT * FROM services WHERE agentId = ? ORDER BY name")
+    .all(agentId)
+    .map(rowToService);
+}
+
+export interface ServiceFilters {
+  agentId?: string;
+  name?: string;
+  status?: ServiceStatus;
+}
+
+export function getAllServices(filters?: ServiceFilters): Service[] {
+  const conditions: string[] = [];
+  const params: string[] = [];
+
+  if (filters?.agentId) {
+    conditions.push("agentId = ?");
+    params.push(filters.agentId);
+  }
+
+  if (filters?.name) {
+    conditions.push("name LIKE ?");
+    params.push(`%${filters.name}%`);
+  }
+
+  if (filters?.status) {
+    conditions.push("status = ?");
+    params.push(filters.status);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const query = `SELECT * FROM services ${whereClause} ORDER BY
+    CASE status
+      WHEN 'healthy' THEN 1
+      WHEN 'starting' THEN 2
+      WHEN 'unhealthy' THEN 3
+      WHEN 'stopped' THEN 4
+    END, name`;
+
+  return getDb()
+    .prepare<ServiceRow, string[]>(query)
+    .all(...params)
+    .map(rowToService);
+}
+
+export function updateServiceStatus(id: string, status: ServiceStatus): Service | null {
+  const oldService = getServiceById(id);
+  if (!oldService) return null;
+
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<ServiceRow, [ServiceStatus, string, string]>(
+      `UPDATE services SET status = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *`,
+    )
+    .get(status, now, id);
+
+  if (row && oldService.status !== status) {
+    try {
+      createLogEntry({
+        eventType: "service_status_change",
+        agentId: oldService.agentId,
+        oldValue: oldService.status,
+        newValue: status,
+        metadata: { serviceId: id, serviceName: oldService.name },
+      });
+    } catch {}
+  }
+
+  return row ? rowToService(row) : null;
+}
+
+export function deleteService(id: string): boolean {
+  const service = getServiceById(id);
+  if (service) {
+    try {
+      createLogEntry({
+        eventType: "service_unregistered",
+        agentId: service.agentId,
+        oldValue: service.name,
+        metadata: { serviceId: id },
+      });
+    } catch {}
+  }
+
+  const result = getDb().run("DELETE FROM services WHERE id = ?", [id]);
+  return result.changes > 0;
+}
+
+export function deleteServicesByAgentId(agentId: string): number {
+  const services = getServicesByAgentId(agentId);
+  for (const service of services) {
+    try {
+      createLogEntry({
+        eventType: "service_unregistered",
+        agentId,
+        oldValue: service.name,
+        metadata: { serviceId: service.id },
+      });
+    } catch {}
+  }
+
+  const result = getDb().run("DELETE FROM services WHERE agentId = ?", [agentId]);
+  return result.changes;
 }

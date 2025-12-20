@@ -84,6 +84,7 @@ function AgentRow({ agent, selected, onClick, isDark }: AgentsRowProps) {
               fontFamily: "code",
               fontWeight: 600,
               color: agent.isLead ? colors.amber : "text.primary",
+              whiteSpace: "nowrap",
             }}
           >
             {agent.name}

@@ -365,7 +365,8 @@ const httpServer = createHttpServer(async (req, res) => {
       return;
     }
 
-    const limit = queryParams.get("limit") ? parseInt(queryParams.get("limit")!, 10) : 50;
+    const limitParam = queryParams.get("limit");
+    const limit = limitParam ? parseInt(limitParam, 10) : 50;
     const since = queryParams.get("since") || undefined;
     const before = queryParams.get("before") || undefined;
 

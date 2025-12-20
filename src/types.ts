@@ -109,6 +109,26 @@ export type ChannelType = z.infer<typeof ChannelTypeSchema>;
 export type Channel = z.infer<typeof ChannelSchema>;
 export type ChannelMessage = z.infer<typeof ChannelMessageSchema>;
 
+// Service Types (for PM2/background services)
+export const ServiceStatusSchema = z.enum(["starting", "healthy", "unhealthy", "stopped"]);
+
+export const ServiceSchema = z.object({
+  id: z.uuid(),
+  agentId: z.uuid(),
+  name: z.string().min(1).max(50),
+  port: z.number().int().min(1).max(65535).default(3000),
+  description: z.string().max(500).optional(),
+  url: z.string().url().optional(),
+  healthCheckPath: z.string().default("/health"),
+  status: ServiceStatusSchema.default("starting"),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  createdAt: z.iso.datetime(),
+  lastUpdatedAt: z.iso.datetime(),
+});
+
+export type ServiceStatus = z.infer<typeof ServiceStatusSchema>;
+export type Service = z.infer<typeof ServiceSchema>;
+
 // Agent Log Types
 export const AgentLogEventTypeSchema = z.enum([
   "agent_joined",
@@ -117,13 +137,17 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_created",
   "task_status_change",
   "task_progress",
-  // New events
+  // Task pool events
   "task_offered",
   "task_accepted",
   "task_rejected",
   "task_claimed",
   "task_released",
   "channel_message",
+  // Service registry events
+  "service_registered",
+  "service_unregistered",
+  "service_status_change",
 ]);
 
 export const AgentLogSchema = z.object({

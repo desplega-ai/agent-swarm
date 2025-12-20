@@ -1,5 +1,5 @@
 ---
-description: Setup and start an Agent Swarm Worker
+description: Start an Agent Swarm Worker
 ---
 
 # Agent Swarm Worker

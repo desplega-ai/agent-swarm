@@ -10,6 +10,8 @@ const leadConfig: RunnerConfig = {
   metadataType: "lead_metadata",
   systemPromptEnvVar: "LEAD_SYSTEM_PROMPT",
   systemPromptFileEnvVar: "LEAD_SYSTEM_PROMPT_FILE",
+  nameEnvVar: "AGENT_NAME",
+  swarmUrlEnvVar: "SWARM_URL",
 };
 
 export async function runLead(opts: LeadOptions) {

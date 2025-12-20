@@ -10,6 +10,8 @@ const workerConfig: RunnerConfig = {
   metadataType: "worker_metadata",
   systemPromptEnvVar: "WORKER_SYSTEM_PROMPT",
   systemPromptFileEnvVar: "WORKER_SYSTEM_PROMPT_FILE",
+  nameEnvVar: "AGENT_NAME",
+  swarmUrlEnvVar: "SWARM_URL",
 };
 
 export async function runWorker(opts: WorkerOptions) {

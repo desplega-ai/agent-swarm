@@ -242,6 +242,8 @@ chmod 666 ./work/.mcp.json
 | `WORKER_SYSTEM_PROMPT` | No | Custom system prompt text for worker |
 | `WORKER_SYSTEM_PROMPT_FILE` | No | Path to system prompt file for worker |
 | `STARTUP_SCRIPT_STRICT` | No | Exit on startup script failure (default: `true`) |
+| `SWARM_URL` | No | Base domain for service URLs (default: `localhost`) |
+| `SERVICE_PORT` | No | Host port for exposed services (default: `3000`) |
 
 ### Startup Scripts
 
@@ -290,6 +292,42 @@ if (!process.env.API_KEY) {
 }
 ```
 
+### Service Registry (PM2)
+
+Workers can run background services on port 3000 using PM2 for process management. Services are registered in a swarm-wide registry for discovery by other agents.
+
+**PM2 Commands:**
+```bash
+pm2 start index.js --name my-api  # Start a service
+pm2 stop|restart|delete my-api    # Manage services
+pm2 logs [name]                   # View logs
+pm2 list                          # Show running processes
+```
+
+**MCP Tools for Service Registry:**
+- `register-service` - Register your service for discovery
+- `unregister-service` - Remove from registry
+- `list-services` - Find services exposed by other agents
+- `update-service-status` - Update health status (starting/healthy/unhealthy/stopped)
+
+**Example workflow:**
+```bash
+# 1. Start your service with PM2
+pm2 start server.js --name my-api
+
+# 2. Register it (via MCP tool)
+# register-service name="my-api" description="My REST API"
+
+# 3. Other agents discover via list-services
+
+# 4. Mark healthy when ready
+# update-service-status name="my-api" status="healthy"
+```
+
+**Service URL pattern:** `https://{service-name}.{SWARM_URL}`
+
+**Health checks:** Implement a `/health` endpoint returning 200 OK for monitoring.
+
 ### Architecture
 
 The Docker worker image is built using a multi-stage build:
@@ -300,6 +338,7 @@ The Docker worker image is built using a multi-stage build:
 **Pre-installed tools:**
 - **Languages**: Python 3, Node.js 22, Bun
 - **Build tools**: gcc, g++, make, cmake
+- **Process manager**: PM2 (for background services)
 - **Utilities**: git, git-lfs, vim, nano, jq, curl, wget, ssh
 - **Sudo access**: Worker can install packages with `sudo apt-get install`
 
@@ -422,6 +461,7 @@ bun run hook  # Hook handler
 
 The server provides these tools for agent coordination:
 
+**Core Tools:**
 - `join-swarm` - Register an agent in the swarm
 - `poll-task` - Poll for assigned tasks (worker agents)
 - `send-task` - Assign a task to an agent (lead agent)
@@ -430,6 +470,21 @@ The server provides these tools for agent coordination:
 - `get-task-details` - Get detailed info about a task
 - `store-progress` - Update task progress or mark complete/failed
 - `my-agent-info` - Get current agent's info
+
+**Task Pool:**
+- `task-action` - Manage tasks (claim, release, accept, reject, complete)
+
+**Messaging:**
+- `create-channel` - Create a channel for group discussions
+- `list-channels` - List available channels
+- `post-message` - Send messages, @mention agents
+- `read-messages` - Check messages across channels
+
+**Service Registry:**
+- `register-service` - Register a PM2 service for discovery
+- `unregister-service` - Remove a service from registry
+- `list-services` - Find services exposed by other agents
+- `update-service-status` - Update service health status
 
 ## License
 

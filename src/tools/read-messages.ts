@@ -10,6 +10,7 @@ import {
   updateReadState,
 } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
+import type { ChannelMessage } from "@/types";
 import { ChannelMessageSchema } from "@/types";
 
 export const registerReadMessagesTool = (server: McpServer) => {
@@ -127,7 +128,7 @@ export const registerReadMessagesTool = (server: McpServer) => {
           };
         }
 
-        let messages;
+        let messages: ChannelMessage[] = [];
 
         if (mentionsOnly) {
           // Get messages that mention this agent
