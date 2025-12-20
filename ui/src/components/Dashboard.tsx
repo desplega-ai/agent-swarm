@@ -9,6 +9,7 @@ import Header from "./Header";
 import StatsBar from "./StatsBar";
 import AgentsPanel from "./AgentsPanel";
 import TasksPanel from "./TasksPanel";
+import ServicesPanel from "./ServicesPanel";
 import ActivityFeed from "./ActivityFeed";
 import AgentDetailPanel from "./AgentDetailPanel";
 import TaskDetailPanel from "./TaskDetailPanel";
@@ -22,7 +23,7 @@ interface DashboardProps {
 function getUrlParams() {
   const params = new URLSearchParams(window.location.search);
   return {
-    tab: params.get("tab") as "agents" | "tasks" | "chat" | null,
+    tab: params.get("tab") as "agents" | "tasks" | "chat" | "services" | null,
     agent: params.get("agent"),
     task: params.get("task"),
     channel: params.get("channel"),
@@ -100,7 +101,7 @@ function updateUrl(params: {
 }
 
 export default function Dashboard({ onSettingsClick }: DashboardProps) {
-  const [activeTab, setActiveTab] = useState<"agents" | "tasks" | "chat">("agents");
+  const [activeTab, setActiveTab] = useState<"agents" | "tasks" | "chat" | "services">("agents");
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
@@ -137,6 +138,8 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
       if (params.thread) {
         setSelectedThreadId(params.thread);
       }
+    } else if (params.tab === "services") {
+      setActiveTab("services");
     } else {
       setActiveTab("agents");
       if (params.agent) {
@@ -187,19 +190,32 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
   };
 
   const handleTabChange = (_: unknown, value: string | number | null) => {
-    const tab = value as "agents" | "tasks" | "chat";
+    const tab = value as "agents" | "tasks" | "chat" | "services";
     setActiveTab(tab);
     // Clear selections, filters, and expand when switching tabs
     setExpandDetail(false);
     if (tab === "agents") {
       setSelectedTaskId(null);
+      setSelectedChannelId(null);
+      setSelectedThreadId(null);
       setPreFilterAgentId(undefined);
       setTaskStatusFilter("all");
-      updateUrl({ tab: "agents", task: null, taskStatus: null, expand: false });
+      updateUrl({ tab: "agents", task: null, channel: null, taskStatus: null, expand: false });
     } else if (tab === "tasks") {
       setSelectedAgentId(null);
+      setSelectedChannelId(null);
+      setSelectedThreadId(null);
       setAgentStatusFilter("all");
-      updateUrl({ tab: "tasks", agent: null, agentStatus: null, expand: false });
+      updateUrl({ tab: "tasks", agent: null, channel: null, agentStatus: null, expand: false });
+    } else if (tab === "services") {
+      setSelectedAgentId(null);
+      setSelectedTaskId(null);
+      setSelectedChannelId(null);
+      setSelectedThreadId(null);
+      setPreFilterAgentId(undefined);
+      setAgentStatusFilter("all");
+      setTaskStatusFilter("all");
+      updateUrl({ tab: "services", agent: null, task: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
     } else {
       // chat tab
       setSelectedAgentId(null);
@@ -340,6 +356,7 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
             <Tab value="agents">AGENTS</Tab>
             <Tab value="tasks">TASKS</Tab>
             <Tab value="chat">CHAT</Tab>
+            <Tab value="services">SERVICES</Tab>
           </TabList>
 
           {/* Agents Tab */}
@@ -468,6 +485,22 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
               onSelectThread={handleSelectThread}
               onNavigateToAgent={handleNavigateToAgent}
             />
+          </TabPanel>
+
+          {/* Services Tab */}
+          <TabPanel
+            value="services"
+            sx={{
+              p: 0,
+              pt: 2,
+              flex: 1,
+              minHeight: 0,
+              "&[hidden]": {
+                display: "none",
+              },
+            }}
+          >
+            <ServicesPanel />
           </TabPanel>
         </Tabs>
       </Box>

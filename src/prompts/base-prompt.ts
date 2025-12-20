@@ -91,7 +91,7 @@ Port 3000 is exposed for web apps or APIs. Use PM2 for robust process management
 
 **Auto-Restart:** Registered services are automatically restarted on container restart via ecosystem.config.js.
 
-Your service URL pattern: \`https://{name}.{swarmUrl}\`
+Your service URL will be: \`https://{agentId}.{swarmUrl}\` (based on your agent ID, not name)
 
 **Health Checks:** Implement a \`/health\` endpoint returning 200 OK for monitoring.
 `;
@@ -99,11 +99,13 @@ Your service URL pattern: \`https://{name}.{swarmUrl}\`
 export type BasePromptArgs = {
   role: string;
   name: string;
+  agentId: string;
   swarmUrl: string;
 };
 
 export const getBasePrompt = (args: BasePromptArgs): string => {
   return BASE_PROMPT.replace("{name}", args.name)
+    .replace("{agentId}", args.agentId)
     .replace("{swarmUrl}", args.swarmUrl)
     .replace("{role}", args.role);
 };

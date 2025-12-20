@@ -16,6 +16,7 @@ import {
   getAllAgentsWithTasks,
   getAllChannels,
   getAllLogs,
+  getAllServices,
   getAllTasks,
   getChannelById,
   getChannelMessages,
@@ -368,6 +369,26 @@ const httpServer = createHttpServer(async (req, res) => {
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(stats));
+    return;
+  }
+
+  // GET /api/services - List all services (with optional filters: status, agentId, name)
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "services" &&
+    !pathSegments[2]
+  ) {
+    const status = queryParams.get("status") as import("./types").ServiceStatus | null;
+    const agentId = queryParams.get("agentId");
+    const name = queryParams.get("name");
+    const services = getAllServices({
+      status: status || undefined,
+      agentId: agentId || undefined,
+      name: name || undefined,
+    });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ services }));
     return;
   }
 

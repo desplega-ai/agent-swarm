@@ -1,5 +1,10 @@
-import { getAgentById, getAllAgents } from "../be/db";
+import { getAgentById, getAgentWorkingOnThread, getAllAgents } from "../be/db";
 import type { AgentMatch } from "./types";
+
+interface ThreadContext {
+  channelId: string;
+  threadTs: string;
+}
 
 // Common 3-letter words to exclude from matching
 const COMMON_WORDS = new Set([
@@ -65,12 +70,15 @@ function isMatchableWord(word: string): boolean {
  * - `swarm#<uuid>` → exact agent by ID
  * - `swarm#all` → all non-lead agents
  * - Partial name match (3+ chars, not common words) → agent by name
+ * - Multiple partial matches → route to lead (let lead decide)
+ * - Thread follow-up (no match but agent working on thread) → route to that agent
  * - Bot @mention only → lead agent
  */
 export function routeMessage(
   text: string,
   _botUserId: string,
   botMentioned: boolean,
+  threadContext?: ThreadContext,
 ): AgentMatch[] {
   const matches: AgentMatch[] = [];
   const agents = getAllAgents().filter((a) => a.status !== "offline");
@@ -109,6 +117,29 @@ export function routeMessage(
           break;
         }
       }
+    }
+
+    // If multiple agents matched a partial name, route to lead instead (let lead decide)
+    if (matches.length > 1) {
+      const lead = agents.find((a) => a.isLead);
+      if (lead) {
+        const matchedWords = matches.map((m) => m.matchedText).join(", ");
+        const matchedAgents = matches.map((m) => m.agent.name).join(", ");
+        return [
+          {
+            agent: lead,
+            matchedText: `ambiguous match "${matchedWords}" (could be: ${matchedAgents})`,
+          },
+        ];
+      }
+    }
+  }
+
+  // Thread follow-up: If no matches and we're in a thread, check if an agent is working on it
+  if (matches.length === 0 && threadContext) {
+    const workingAgent = getAgentWorkingOnThread(threadContext.channelId, threadContext.threadTs);
+    if (workingAgent && workingAgent.status !== "offline") {
+      matches.push({ agent: workingAgent, matchedText: "thread follow-up" });
     }
   }
 

@@ -725,6 +725,27 @@ export function getInProgressSlackTasks(): AgentTask[] {
     .map(rowToAgentTask);
 }
 
+/**
+ * Find an agent that has an active task (in_progress or pending) in a specific Slack thread.
+ * Used for routing thread follow-up messages to the same agent.
+ */
+export function getAgentWorkingOnThread(channelId: string, threadTs: string): Agent | null {
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      `SELECT * FROM agent_tasks
+       WHERE source = 'slack'
+       AND slackChannelId = ?
+       AND slackThreadTs = ?
+       AND status IN ('in_progress', 'pending')
+       ORDER BY createdAt DESC
+       LIMIT 1`,
+    )
+    .get(channelId, threadTs);
+
+  if (!row || !row.agentId) return null;
+  return getAgentById(row.agentId);
+}
+
 export function completeTask(id: string, output?: string): AgentTask | null {
   const oldTask = getTaskById(id);
   const finishedAt = new Date().toISOString();
@@ -1277,6 +1298,15 @@ export function createChannel(
   return rowToChannel(row);
 }
 
+export function getMessageById(id: string): ChannelMessage | null {
+  const row = getDb()
+    .prepare<ChannelMessageRow, [string]>("SELECT * FROM channel_messages WHERE id = ?")
+    .get(id);
+  if (!row) return null;
+  const agent = row.agentId ? getAgentById(row.agentId) : null;
+  return rowToChannelMessage(row, agent?.name);
+}
+
 export function getChannelById(id: string): Channel | null {
   const row = getDb().prepare<ChannelRow, [string]>("SELECT * FROM channels WHERE id = ?").get(id);
   return row ? rowToChannel(row) : null;
@@ -1336,27 +1366,44 @@ export function postMessage(
     });
   } catch {}
 
+  // Determine which agents should receive tasks
+  let targetMentions = options?.mentions ?? [];
+
+  // Thread follow-up: If no explicit mentions and this is a reply, inherit from parent message
+  if (targetMentions.length === 0 && options?.replyToId) {
+    const parentMessage = getMessageById(options.replyToId);
+    if (parentMessage?.mentions && parentMessage.mentions.length > 0) {
+      targetMentions = parentMessage.mentions;
+    }
+  }
+
   // Auto-create tasks for mentions (directly assigned to mentioned agent)
-  if (options?.mentions && options.mentions.length > 0) {
+  if (targetMentions.length > 0) {
     const sender = agentId ? getAgentById(agentId) : null;
     const channel = getChannelById(channelId);
     const senderName = sender?.name ?? "Human";
     const channelName = channel?.name ?? "unknown";
     const truncated = content.length > 80 ? `${content.slice(0, 80)}...` : content;
+    const isThreadFollowUp =
+      options?.replyToId && (!options.mentions || options.mentions.length === 0);
 
     // Dedupe mentions (self-mentions allowed - agents can create tasks for themselves)
-    const uniqueMentions = [...new Set(options.mentions)];
+    const uniqueMentions = [...new Set(targetMentions)];
 
     for (const mentionedAgentId of uniqueMentions) {
       // Skip if agent doesn't exist
       const mentionedAgent = getAgentById(mentionedAgentId);
       if (!mentionedAgent) continue;
 
-      createTaskExtended(`@mention from ${senderName} in #${channelName}: "${truncated}"`, {
+      const taskDescription = isThreadFollowUp
+        ? `Thread follow-up from ${senderName} in #${channelName}: "${truncated}"`
+        : `@mention from ${senderName} in #${channelName}: "${truncated}"`;
+
+      createTaskExtended(taskDescription, {
         agentId: mentionedAgentId, // Direct assignment
         creatorAgentId: agentId ?? undefined,
         source: "mcp",
-        taskType: "mention",
+        taskType: isThreadFollowUp ? "thread_followup" : "mention",
         priority: 50,
         mentionMessageId: id,
         mentionChannelId: channelId,

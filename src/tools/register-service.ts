@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { upsertService } from "@/be/db";
+import { getAgentById, upsertService } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import { ServiceSchema } from "@/types";
 
@@ -12,22 +12,9 @@ export const registerRegisterServiceTool = (server: McpServer) => {
     {
       title: "Register Service",
       description:
-        "Register a background service (e.g., PM2 process) for discovery by other agents and ecosystem-based restart. Use this after starting a service with PM2. If a service with the same name exists, it will be updated.",
+        "Register a background service (e.g., PM2 process) for discovery by other agents. The service URL is automatically derived from your agent ID (https://{AGENT_ID}.{SWARM_URL}). Each agent can only run one service on port 3000.",
       inputSchema: z.object({
-        name: z
-          .string()
-          .min(1)
-          .max(50)
-          .describe("Service name (used in URL subdomain and PM2 process name)."),
         script: z.string().min(1).describe("Path to the script to run (required for PM2 restart)."),
-        port: z
-          .number()
-          .int()
-          .min(1)
-          .max(65535)
-          .default(3000)
-          .optional()
-          .describe("Port the service runs on (default: 3000)."),
         description: z.string().optional().describe("What this service does."),
         healthCheckPath: z
           .string()
@@ -54,7 +41,7 @@ export const registerRegisterServiceTool = (server: McpServer) => {
       }),
     },
     async (
-      { name, script, port, description, healthCheckPath, cwd, interpreter, args, env, metadata },
+      { script, description, healthCheckPath, cwd, interpreter, args, env, metadata },
       requestInfo,
       _meta,
     ) => {
@@ -69,12 +56,26 @@ export const registerRegisterServiceTool = (server: McpServer) => {
       }
 
       try {
-        // Compute URL based on swarm configuration
-        const servicePort = port ?? 3000;
-        const url = `https://${name}.${SWARM_URL}`;
+        // Look up the agent to get its name
+        const agent = getAgentById(requestInfo.agentId);
+        if (!agent) {
+          return {
+            content: [{ type: "text", text: "Agent not found. Join the swarm first." }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: "Agent not found. Join the swarm first.",
+            },
+          };
+        }
+
+        // Service name uses agent ID (stable, URL-safe) for subdomain
+        const serviceName = agent.id;
+        const servicePort = 3000; // Fixed port - only one service per worker
+        const url = `https://${serviceName}.${SWARM_URL}`;
 
         // Upsert: create or update if exists
-        const service = upsertService(requestInfo.agentId, name, {
+        const service = upsertService(requestInfo.agentId, serviceName, {
           script,
           port: servicePort,
           description,
@@ -91,13 +92,13 @@ export const registerRegisterServiceTool = (server: McpServer) => {
           content: [
             {
               type: "text",
-              text: `Registered service "${name}" at ${url}. Status: ${service.status}. Use update-service-status to mark as healthy.`,
+              text: `Registered service "${serviceName}" at ${url}. Status: ${service.status}. Use update-service-status to mark as healthy.`,
             },
           ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: true,
-            message: `Registered service "${name}" at ${url}.`,
+            message: `Registered service "${serviceName}" at ${url}.`,
             service,
           },
         };

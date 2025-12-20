@@ -1,6 +1,6 @@
 {
   "name": "@desplega.ai/agent-swarm",
-  "version": "1.7.2",
+  "version": "1.7.3",
   "description": "Agent orchestration layer MCP for Claude Code, Codex, Gemini CLI, and more!",
   "module": "src/http.ts",
   "type": "module",

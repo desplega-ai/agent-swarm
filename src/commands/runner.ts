@@ -216,12 +216,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   const prompt = opts.prompt || defaultPrompt;
   const isYolo = opts.yolo || process.env[yoloEnvVar] === "true";
 
-  // Get agent name and swarm URL for base prompt
+  // Get agent identity and swarm URL for base prompt
+  const agentId = process.env.AGENT_ID || "unknown";
   const agentName = process.env[nameEnvVar] || "agent";
   const swarmUrl = process.env[swarmUrlEnvVar] || "localhost";
 
   // Generate base prompt that's always included
-  const basePrompt = getBasePrompt({ role, name: agentName, swarmUrl });
+  const basePrompt = getBasePrompt({ role, name: agentName, agentId, swarmUrl });
 
   // Resolve additional system prompt: CLI flag > env var
   let additionalSystemPrompt: string | undefined;

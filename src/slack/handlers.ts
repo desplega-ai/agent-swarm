@@ -164,8 +164,13 @@ export function registerMessageHandler(app: App): void {
     // Check if bot was mentioned
     const botMentioned = msg.text.includes(`<@${botUserId}>`);
 
+    // Build thread context for routing (if we're in a thread)
+    const routingThreadContext = msg.thread_ts
+      ? { channelId: msg.channel, threadTs: msg.thread_ts }
+      : undefined;
+
     // Route message to agents
-    const matches = routeMessage(msg.text, botUserId, botMentioned);
+    const matches = routeMessage(msg.text, botUserId, botMentioned, routingThreadContext);
 
     if (matches.length === 0) {
       // No agents matched - ignore message unless bot was directly mentioned
