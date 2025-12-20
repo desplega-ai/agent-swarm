@@ -38,12 +38,39 @@ echo "PM2 Home: ${PM2_HOME:-~/.pm2}"
 # Ensure PM2 home directory exists (for persistence in /workspace)
 mkdir -p "${PM2_HOME:-$HOME/.pm2}"
 pm2 startup > /dev/null 2>&1 || true
-# Restore previously saved processes (from pm2 save)
-if pm2 resurrect 2>/dev/null; then
-    echo "PM2 restored saved processes"
-    pm2 list
+
+# Restore services from ecosystem (database-driven, more reliable than pm2 resurrect)
+ECOSYSTEM_FILE="/workspace/ecosystem.config.js"
+if [ -n "$AGENT_ID" ]; then
+    echo "Fetching ecosystem config from MCP server..."
+    if curl -s -f -H "Authorization: Bearer ${API_KEY}" \
+       -H "X-Agent-ID: ${AGENT_ID}" \
+       "${MCP_URL}/ecosystem" > /tmp/ecosystem.json 2>/dev/null; then
+
+        # Check if there are any apps to start
+        APP_COUNT=$(cat /tmp/ecosystem.json | jq -r '.apps | length' 2>/dev/null || echo "0")
+
+        if [ "$APP_COUNT" -gt "0" ]; then
+            echo "Found $APP_COUNT registered service(s)"
+            # Convert JSON to JS module
+            echo "module.exports = $(cat /tmp/ecosystem.json);" > "$ECOSYSTEM_FILE"
+            echo "Starting services from ecosystem file..."
+            pm2 start "$ECOSYSTEM_FILE" || true
+            pm2 list
+        else
+            echo "No services registered for this agent"
+        fi
+        rm -f /tmp/ecosystem.json
+    else
+        echo "Could not fetch ecosystem config (MCP server may be unavailable)"
+    fi
 else
-    echo "PM2 daemon ready (no saved processes)"
+    echo "AGENT_ID not set, skipping ecosystem restore"
+fi
+
+# Fallback: try pm2 resurrect for any locally saved processes
+if pm2 resurrect 2>/dev/null; then
+    pm2 list 2>/dev/null || true
 fi
 echo "=========================="
 

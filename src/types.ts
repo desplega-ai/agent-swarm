@@ -121,6 +121,14 @@ export const ServiceSchema = z.object({
   url: z.string().url().optional(),
   healthCheckPath: z.string().default("/health"),
   status: ServiceStatusSchema.default("starting"),
+
+  // PM2 configuration (required for ecosystem-based restart)
+  script: z.string().min(1), // Path to script (required)
+  cwd: z.string().optional(), // Working directory (defaults to script dir)
+  interpreter: z.string().optional(), // e.g., "node", "bun" (auto-detected if not set)
+  args: z.array(z.string()).optional(), // Command line arguments
+  env: z.record(z.string(), z.string()).optional(), // Environment variables
+
   metadata: z.record(z.string(), z.unknown()).default({}),
   createdAt: z.iso.datetime(),
   lastUpdatedAt: z.iso.datetime(),

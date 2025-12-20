@@ -1,6 +1,29 @@
 import { mkdir } from "node:fs/promises";
 import { getBasePrompt } from "../prompts/base-prompt.ts";
 
+/** Save PM2 process list for persistence across container restarts */
+async function savePm2State(role: string): Promise<void> {
+  try {
+    console.log(`[${role}] Saving PM2 process list...`);
+    await Bun.$`pm2 save`.quiet();
+    console.log(`[${role}] PM2 state saved`);
+  } catch {
+    // PM2 not available or no processes - silently ignore
+  }
+}
+
+/** Setup signal handlers for graceful shutdown */
+function setupShutdownHandlers(role: string): void {
+  const shutdown = async (signal: string) => {
+    console.log(`\n[${role}] Received ${signal}, shutting down...`);
+    await savePm2State(role);
+    process.exit(0);
+  };
+
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+}
+
 /** Configuration for a runner role (worker or lead) */
 export interface RunnerConfig {
   /** Role name for logging, e.g., "worker" or "lead" */
@@ -180,6 +203,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     nameEnvVar,
     swarmUrlEnvVar,
   } = config;
+
+  // Setup graceful shutdown handlers (saves PM2 state on Ctrl+C)
+  setupShutdownHandlers(role);
 
   const sessionId = process.env.SESSION_ID || crypto.randomUUID().slice(0, 8);
   const baseLogDir = process.env[logDirEnvVar] || "./logs";

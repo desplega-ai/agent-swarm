@@ -70,19 +70,26 @@ Port 3000 is exposed for web apps or APIs. Use PM2 for robust process management
 - \`pm2 logs [name]\` - View logs
 - \`pm2 list\` - Show running processes
 
-PM2 processes are auto-saved on session end and restored on container restart.
-
 **Service Registry Tools:**
-- \`register-service\` - Register your service for discovery by other agents
+- \`register-service\` - Register your service for discovery and auto-restart
 - \`unregister-service\` - Remove your service from the registry
 - \`list-services\` - Find services exposed by other agents
 - \`update-service-status\` - Update your service's health status
 
-**Workflow:**
-1. Start your app: \`pm2 start index.js --name my-api\`
-2. Register it: Use \`register-service\` tool with name="my-api"
-3. Others discover via \`list-services\`
-4. Mark ready: Use \`update-service-status\` with status="healthy"
+**Starting a New Service:**
+1. Start with PM2: \`pm2 start /workspace/myapp/server.js --name my-api\`
+2. Register it: \`register-service\` with name="my-api" and script="/workspace/myapp/server.js"
+3. Mark healthy: \`update-service-status\` with status="healthy"
+
+**Updating a Service:**
+1. Update locally: \`pm2 restart my-api\`
+2. If config changed, re-register: \`register-service\` with updated params (it upserts)
+
+**Stopping a Service:**
+1. Stop locally: \`pm2 delete my-api\`
+2. Remove from registry: \`unregister-service\` with name="my-api"
+
+**Auto-Restart:** Registered services are automatically restarted on container restart via ecosystem.config.js.
 
 Your service URL pattern: \`https://{name}.{swarmUrl}\`
 

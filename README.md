@@ -295,38 +295,55 @@ if (!process.env.API_KEY) {
 
 ### Service Registry (PM2)
 
-Workers can run background services on port 3000 using PM2 for process management. Services are registered in a swarm-wide registry for discovery by other agents.
+Workers can run background services on port 3000 using PM2 for process management. Services are registered in a swarm-wide registry for discovery by other agents and **automatic restart on container restart**.
 
 **PM2 Commands:**
 ```bash
-pm2 start index.js --name my-api  # Start a service
-pm2 stop|restart|delete my-api    # Manage services
-pm2 logs [name]                   # View logs
-pm2 list                          # Show running processes
-pm2 save                          # Save process list (auto-runs on session end)
+pm2 start /workspace/app/server.js --name my-api  # Start a service
+pm2 stop|restart|delete my-api                     # Manage services
+pm2 logs [name]                                    # View logs
+pm2 list                                           # Show running processes
 ```
 
-> **Note:** PM2 processes are automatically saved when the Claude session ends and restored on container restart. PM2 state is stored in `/workspace/.pm2` (via `PM2_HOME` env var) so it persists in the mounted volume.
-
 **MCP Tools for Service Registry:**
-- `register-service` - Register your service for discovery
-- `unregister-service` - Remove from registry
+- `register-service` - Register your service for discovery and auto-restart (requires `script` path)
+- `unregister-service` - Remove from registry (service won't auto-restart)
 - `list-services` - Find services exposed by other agents
 - `update-service-status` - Update health status (starting/healthy/unhealthy/stopped)
 
-**Example workflow:**
+**Starting a New Service:**
 ```bash
 # 1. Start your service with PM2
-pm2 start server.js --name my-api
+pm2 start /workspace/myapp/server.js --name my-api
 
-# 2. Register it (via MCP tool)
-# register-service name="my-api" description="My REST API"
+# 2. Register it with script path for auto-restart (via MCP tool)
+# register-service name="my-api" script="/workspace/myapp/server.js" port=3000
 
-# 3. Other agents discover via list-services
-
-# 4. Mark healthy when ready
+# 3. Mark healthy when ready
 # update-service-status name="my-api" status="healthy"
 ```
+
+**Updating a Service:**
+```bash
+# Update locally
+pm2 restart my-api
+
+# If config changed (e.g., env vars), re-register
+# register-service name="my-api" script="/workspace/myapp/server.js" env={"NODE_ENV":"production"}
+```
+Note: `register-service` upserts - it updates if the service already exists.
+
+**Stopping a Service:**
+```bash
+# Stop locally
+pm2 delete my-api
+
+# Remove from registry so it won't auto-restart
+# unregister-service name="my-api"
+```
+
+**Auto-Restart on Container Restart:**
+Services registered with `register-service` are automatically restarted on container restart. The container fetches the ecosystem config from the MCP server and starts all registered services via `ecosystem.config.js`.
 
 **Service URL pattern:** `https://{service-name}.{SWARM_URL}`
 

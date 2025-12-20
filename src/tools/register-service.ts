@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { createService, getServiceByAgentAndName } from "@/be/db";
+import { upsertService } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import { ServiceSchema } from "@/types";
 
@@ -12,13 +12,14 @@ export const registerRegisterServiceTool = (server: McpServer) => {
     {
       title: "Register Service",
       description:
-        "Register a background service (e.g., PM2 process) for discovery by other agents. Use this after starting a service with PM2.",
+        "Register a background service (e.g., PM2 process) for discovery by other agents and ecosystem-based restart. Use this after starting a service with PM2. If a service with the same name exists, it will be updated.",
       inputSchema: z.object({
         name: z
           .string()
           .min(1)
           .max(50)
           .describe("Service name (used in URL subdomain and PM2 process name)."),
+        script: z.string().min(1).describe("Path to the script to run (required for PM2 restart)."),
         port: z
           .number()
           .int()
@@ -32,10 +33,19 @@ export const registerRegisterServiceTool = (server: McpServer) => {
           .string()
           .optional()
           .describe("Health check endpoint path (default: /health)."),
-        metadata: z
-          .record(z.string(), z.unknown())
+        cwd: z.string().optional().describe("Working directory for the script."),
+        interpreter: z
+          .string()
           .optional()
-          .describe("Additional metadata (e.g., PM2 process name, version)."),
+          .describe(
+            "Interpreter to use (e.g., 'node', 'bun'). Auto-detected from extension if not set.",
+          ),
+        args: z.array(z.string()).optional().describe("Command line arguments for the script."),
+        env: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe("Environment variables for the process."),
+        metadata: z.record(z.string(), z.unknown()).optional().describe("Additional metadata."),
       }),
       outputSchema: z.object({
         success: z.boolean(),
@@ -43,7 +53,11 @@ export const registerRegisterServiceTool = (server: McpServer) => {
         service: ServiceSchema.optional(),
       }),
     },
-    async ({ name, port, description, healthCheckPath, metadata }, requestInfo, _meta) => {
+    async (
+      { name, script, port, description, healthCheckPath, cwd, interpreter, args, env, metadata },
+      requestInfo,
+      _meta,
+    ) => {
       if (!requestInfo.agentId) {
         return {
           content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
@@ -54,30 +68,22 @@ export const registerRegisterServiceTool = (server: McpServer) => {
         };
       }
 
-      // Check if service already exists for this agent
-      const existing = getServiceByAgentAndName(requestInfo.agentId, name);
-      if (existing) {
-        return {
-          content: [{ type: "text", text: `Service "${name}" is already registered.` }],
-          structuredContent: {
-            yourAgentId: requestInfo.agentId,
-            success: false,
-            message: `Service "${name}" is already registered.`,
-            service: existing,
-          },
-        };
-      }
-
       try {
         // Compute URL based on swarm configuration
         const servicePort = port ?? 3000;
         const url = `https://${name}.${SWARM_URL}`;
 
-        const service = createService(requestInfo.agentId, name, {
+        // Upsert: create or update if exists
+        const service = upsertService(requestInfo.agentId, name, {
+          script,
           port: servicePort,
           description,
           url,
           healthCheckPath: healthCheckPath ?? "/health",
+          cwd,
+          interpreter,
+          args,
+          env,
           metadata,
         });
 
@@ -85,7 +91,7 @@ export const registerRegisterServiceTool = (server: McpServer) => {
           content: [
             {
               type: "text",
-              text: `Registered service "${name}" at ${url}. Status: starting. Use update-service-status to mark as healthy.`,
+              text: `Registered service "${name}" at ${url}. Status: ${service.status}. Use update-service-status to mark as healthy.`,
             },
           ],
           structuredContent: {

@@ -134,6 +134,12 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       url TEXT,
       healthCheckPath TEXT DEFAULT '/health',
       status TEXT NOT NULL DEFAULT 'starting' CHECK(status IN ('starting', 'healthy', 'unhealthy', 'stopped')),
+      -- PM2 configuration for ecosystem-based restart
+      script TEXT NOT NULL DEFAULT '',
+      cwd TEXT,
+      interpreter TEXT,
+      args TEXT, -- JSON array
+      env TEXT,  -- JSON object
       metadata TEXT DEFAULT '{}',
       createdAt TEXT NOT NULL,
       lastUpdatedAt TEXT NOT NULL,
@@ -265,6 +271,33 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   }
   try {
     db.run(`ALTER TABLE agents ADD COLUMN capabilities TEXT DEFAULT '[]'`);
+  } catch {
+    /* exists */
+  }
+
+  // Service PM2 columns migration
+  try {
+    db.run(`ALTER TABLE services ADD COLUMN script TEXT NOT NULL DEFAULT ''`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE services ADD COLUMN cwd TEXT`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE services ADD COLUMN interpreter TEXT`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE services ADD COLUMN args TEXT`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE services ADD COLUMN env TEXT`);
   } catch {
     /* exists */
   }
@@ -1566,6 +1599,12 @@ type ServiceRow = {
   url: string | null;
   healthCheckPath: string | null;
   status: ServiceStatus;
+  // PM2 configuration
+  script: string;
+  cwd: string | null;
+  interpreter: string | null;
+  args: string | null; // JSON array
+  env: string | null; // JSON object
   metadata: string | null;
   createdAt: string;
   lastUpdatedAt: string;
@@ -1581,6 +1620,12 @@ function rowToService(row: ServiceRow): Service {
     url: row.url ?? undefined,
     healthCheckPath: row.healthCheckPath ?? "/health",
     status: row.status,
+    // PM2 configuration
+    script: row.script,
+    cwd: row.cwd ?? undefined,
+    interpreter: row.interpreter ?? undefined,
+    args: row.args ? JSON.parse(row.args) : undefined,
+    env: row.env ? JSON.parse(row.env) : undefined,
     metadata: row.metadata ? JSON.parse(row.metadata) : {},
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
@@ -1592,31 +1637,42 @@ export interface CreateServiceOptions {
   description?: string;
   url?: string;
   healthCheckPath?: string;
+  // PM2 configuration
+  script: string; // Required
+  cwd?: string;
+  interpreter?: string;
+  args?: string[];
+  env?: Record<string, string>;
   metadata?: Record<string, unknown>;
 }
 
 export function createService(
   agentId: string,
   name: string,
-  options?: CreateServiceOptions,
+  options: CreateServiceOptions,
 ): Service {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
   const row = getDb()
     .prepare<ServiceRow, (string | number | null)[]>(
-      `INSERT INTO services (id, agentId, name, port, description, url, healthCheckPath, status, metadata, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'starting', ?, ?, ?) RETURNING *`,
+      `INSERT INTO services (id, agentId, name, port, description, url, healthCheckPath, status, script, cwd, interpreter, args, env, metadata, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
       agentId,
       name,
-      options?.port ?? 3000,
-      options?.description ?? null,
-      options?.url ?? null,
-      options?.healthCheckPath ?? "/health",
-      JSON.stringify(options?.metadata ?? {}),
+      options.port ?? 3000,
+      options.description ?? null,
+      options.url ?? null,
+      options.healthCheckPath ?? "/health",
+      options.script,
+      options.cwd ?? null,
+      options.interpreter ?? null,
+      options.args ? JSON.stringify(options.args) : null,
+      options.env ? JSON.stringify(options.env) : null,
+      JSON.stringify(options.metadata ?? {}),
       now,
       now,
     );
@@ -1735,6 +1791,48 @@ export function deleteService(id: string): boolean {
 
   const result = getDb().run("DELETE FROM services WHERE id = ?", [id]);
   return result.changes > 0;
+}
+
+/** Upsert a service - update if exists (by agentId + name), create if not */
+export function upsertService(
+  agentId: string,
+  name: string,
+  options: CreateServiceOptions,
+): Service {
+  const existing = getServiceByAgentAndName(agentId, name);
+
+  if (existing) {
+    // Update existing service
+    const now = new Date().toISOString();
+    const row = getDb()
+      .prepare<ServiceRow, (string | number | null)[]>(
+        `UPDATE services SET
+          port = ?, description = ?, url = ?, healthCheckPath = ?,
+          script = ?, cwd = ?, interpreter = ?, args = ?, env = ?,
+          metadata = ?, lastUpdatedAt = ?
+        WHERE id = ? RETURNING *`,
+      )
+      .get(
+        options.port ?? existing.port,
+        options.description ?? existing.description ?? null,
+        options.url ?? existing.url ?? null,
+        options.healthCheckPath ?? existing.healthCheckPath ?? "/health",
+        options.script,
+        options.cwd ?? null,
+        options.interpreter ?? null,
+        options.args ? JSON.stringify(options.args) : null,
+        options.env ? JSON.stringify(options.env) : null,
+        JSON.stringify(options.metadata ?? existing.metadata ?? {}),
+        now,
+        existing.id,
+      );
+
+    if (!row) throw new Error("Failed to update service");
+    return rowToService(row);
+  }
+
+  // Create new service
+  return createService(agentId, name, options);
 }
 
 export function deleteServicesByAgentId(agentId: string): number {
