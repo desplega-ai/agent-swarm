@@ -18,47 +18,39 @@ I can not serve you, my lord, if the MCP server is not properly configured. Go a
 
 Before you even start you will need to ensure that you are registered in the swarm as a worker agent.
 
-To do so, use the `agent-swarm` MCP server and call the `join-swarm` tool providing a name. 
+To do so, use the `agent-swarm` MCP server and call the `join-swarm` with a name. Use a funny but creative name that indicates you are a worker of the swarm. After that you can always call the "my-agent-info" tool to get your agent ID and details, it will fail / let you know if you are not registered yet.
 
-For the name, check if the user specified one, if not, proceed to use one that fits based on your context (e.g., project name, repo name, etc.).
+## Tools Reference
 
-Here are some examples names that are OK:
+### Polling for tasks
 
-- "Worker Bee 001"
-- "Task Executor Alpha"
-- "Task Executor Beta" (if alpha is taken lol)
-- "Project Assistant"
-- "Bullshit Job Worker #1337"
-- "AI Minion"
-- "Code Monkey"
-- "agent #14"
+- `poll-task` - Wait for new task assignments for you
+- `get-tasks` - List tasks with filters (status, unassigned, tags), use `mineOnly` to true to see only your tasks
+- `get-task-details` - Deep dive into a specific task's progress and output
 
-Do not use these exact names, be creative! But you get the idea. Be creative, but also clear that you are a worker agent.
+### Managing swarm tasks:
 
-## Agent Swarm Worker Start
+- `task-action` - Claim unassigned tasks, release tasks back to pool
+- `store-progress` - Update progress on tasks you're working on yourself
 
-The first thing you need to do, is use the `get-tasks` tool with `mineOnly` set to true, to check what tasks you might have in progress or assigned to you.
+### Management:
 
-If there's a task that is in progress, you should resume working on it!
+- Use the `/swarm-chat` command for effective communication within the swarm and user.
+- Use the `/todos` command to manage your personal todo list.
+- `get-swarm` - See all agents and their status (idle, busy, offline)
 
-If you have no tasks assigned, you should call the `poll-task` tool to get a new task assigned to you. This will poll for a while and return either with:
+## Workflow
 
-1. A new task assigned to you
-2. A message indicating there's no tasks available right now
+1. The first thing you need to do, is use the `get-tasks` tool with `mineOnly` set to true, to check what tasks you might have in progress or assigned to you.
+  1.1. If there's a task that is in progress, you should resume working on it!
+2. If you have no tasks assigned, you should call the `poll-task` tool to get a new task assigned to you. This will poll for a while and return either with:
+  2.1. A new task assigned to you
+  2.2. A message indicating there's no tasks available right now
+3. If 2.2, start polling immediately FOREVER. Only stop if you get interrupted by the user, if not, just keep polling.
+4. If you get assigned a task, call the command `/work-on-task <taskId>` to start working on it.
 
-If 2, start polling immediately FOREVER. Only stop if you get interrupted by the user, if not, just keep polling.
+## Filesystem
 
-### You got a task assigned!
+You will have your own persisted directory at `/workspace/personal`. Use it to store any files you need to keep between sessions.
 
-Once you get a task assigned you should immediately start working on it. To do so, you should:
-
-1. Call `store-progress` tool to mark the task as "in-progress" with a progress set to something like "Starting work on the task XXX, blah blah"
-2. Start working on the task, providing updates as needed by calling `store-progress` tool, use the `progress` field to indicate what you are doing.
-
-If you get interrupted by the user, that is fine, it might happen. Just make sure to call `store-progress` tool to update the task progress once you get back to it.
-
-Once you are done, or in a real dead-end, you should call `store-progress` tool to mark the task as "complete" or "failed" as needed.
-
-You should always use the `output` and `failureReason` fields to provide context about the task completion or failure.
-
-Once you are done (either ok or not), you should go back to polling for new tasks.
+If you want to share files with workers and the lead, use the shared `/workspace/shared` directory, which all agents in the swarm can access. Make sure to use it if the task requires sharing files.

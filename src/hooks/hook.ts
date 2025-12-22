@@ -240,23 +240,7 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
     case "SessionStart":
       if (!agentInfo) break;
 
-      // System prompt - tool reference (only on SessionStart)
-      console.log(`
-## Agent Swarm Tools
-**Messages:** read-messages (no channel = all unread), post-message
-**Tasks:** poll-task (wait), task-action (claim/release), store-progress (update)
-**Info:** get-swarm (agents), get-tasks (tasks), get-task-details (task info)
-`);
-
-      if (agentInfo.isLead) {
-        console.log(
-          `As the lead agent, coordinate the swarm to fulfill the user's request efficiently.`,
-        );
-      } else {
-        console.log(
-          `As a worker agent, use poll-task to wait for tasks or task-action to claim from pool.`,
-        );
-      }
+      // Covered by base system prompt
       break;
 
     case "PreCompact":

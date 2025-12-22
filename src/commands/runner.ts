@@ -40,8 +40,6 @@ export interface RunnerConfig {
   systemPromptEnvVar: string;
   /** Environment variable name for system prompt file path, e.g., "WORKER_SYSTEM_PROMPT_FILE" */
   systemPromptFileEnvVar: string;
-  /** Environment variable name for agent name, e.g., "AGENT_NAME" */
-  nameEnvVar: string;
   /** Environment variable name for swarm URL, e.g., "SWARM_URL" */
   swarmUrlEnvVar: string;
 }
@@ -200,7 +198,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     metadataType,
     systemPromptEnvVar,
     systemPromptFileEnvVar,
-    nameEnvVar,
     swarmUrlEnvVar,
   } = config;
 
@@ -218,11 +215,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
   // Get agent identity and swarm URL for base prompt
   const agentId = process.env.AGENT_ID || "unknown";
-  const agentName = process.env[nameEnvVar] || "agent";
   const swarmUrl = process.env[swarmUrlEnvVar] || "localhost";
 
   // Generate base prompt that's always included
-  const basePrompt = getBasePrompt({ role, name: agentName, agentId, swarmUrl });
+  const basePrompt = getBasePrompt({ role, agentId, swarmUrl });
 
   // Resolve additional system prompt: CLI flag > env var
   let additionalSystemPrompt: string | undefined;
@@ -263,7 +259,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   console.log(`[${role}] Log directory: ${logDir}`);
   console.log(`[${role}] YOLO mode: ${isYolo ? "enabled" : "disabled"}`);
   console.log(`[${role}] Prompt: ${prompt}`);
-  console.log(`[${role}] Agent name: ${agentName}`);
   console.log(`[${role}] Swarm URL: ${swarmUrl}`);
   console.log(`[${role}] Base prompt: included (${basePrompt.length} chars)`);
   console.log(

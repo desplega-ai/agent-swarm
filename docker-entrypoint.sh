@@ -237,6 +237,39 @@ else
     echo "Skipping startup script execution"
 fi
 
+echo ""
+echo "=== Workspace Initialization ==="
+
+PERSONAL_DIR="/workspace/personal"
+mkdir -p "$PERSONAL_DIR"
+
+if [ ! -f "$PERSONAL_DIR/todos.md" ]; then
+    echo "Creating personal todos.md..."
+    cat > "$PERSONAL_DIR/todos.md" << EOF
+# My TODOs
+
+## Current
+- [ ] <task here>
+EOF
+else
+    echo "Personal todo.md already exists, skipping creation"
+fi
+
+SHARED_DIR="/workspace/shared/thoughts"
+
+# Create shared thoughts directories
+if [ -n "$AGENT_ID" ]; then
+    AGENT_THOUGHTS_DIR="$SHARED_DIR/$AGENT_ID"
+    echo "Creating shared thoughts directories for agent ID $AGENT_ID..."
+    mkdir -p "$AGENT_THOUGHTS_DIR/plans"
+    mkdir -p "$AGENT_THOUGHTS_DIR/research"
+fi
+
+# shared always
+echo "Creating shared thoughts directories..."
+mkdir -p "$SHARED_DIR/shared/plans"
+mkdir -p "$SHARED_DIR/shared/research"
+
 echo "==============================="
 echo ""
 
