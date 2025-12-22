@@ -58,7 +58,6 @@ bun run dev:http # HTTP
 Debug and test MCP tools interactively:
 
 ```bash
-bun run inspector      # STDIO transport
 bun run inspector:http # HTTP transport
 ```
 
@@ -161,7 +160,6 @@ agent-swarm/
 ├── src/
 │   ├── cli.tsx          # CLI entry point (Ink/React)
 │   ├── http.ts          # HTTP server entry
-│   ├── stdio.ts         # STDIO server entry
 │   ├── server.ts        # MCP server setup & tool registration
 │   ├── tools/           # MCP tool implementations
 │   │   ├── join-swarm.ts

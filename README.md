@@ -56,7 +56,7 @@ cp .env.example .env
 ```
 
 Required in `.env`:
-- `API_KEY` - Secret key for API authentication
+- `API_KEY` - Secret key for API authentication (can be left empty, e.g. for local-only setups)
 
 **For Docker workers:**
 
@@ -83,10 +83,16 @@ The MCP server runs at `http://localhost:3013`.
 In a new terminal:
 
 ```bash
+bun run docker:build:worker
+mkdir -p ./logs ./work/shared ./work/worker-1
 bun run docker:run:worker
 ```
 
 The worker joins the swarm and waits for tasks.
+
+#### Note
+
+We automatically build a Docker image for Claude Code workers: `ghcr.io/desplega-ai/agent-swarm-worker:latest`.
 
 ### 5. Connect Claude Code as Lead
 
@@ -96,11 +102,25 @@ In your project directory:
 bunx @desplega.ai/agent-swarm setup
 ```
 
-This configures Claude Code to connect to the swarm. Then start Claude Code normally - you'll be the lead agent and can assign tasks to workers.
+This configures Claude Code to connect to the swarm. Then start Claude Code normally and mention the following:
+
+```
+Register yourself as the lead agent in the agent-swarm MCP.
+```
+
+This will be a one-time setup, to make sure you are registered as the lead agent in the swarm, using the provided API key and agent ID (optional).
+
+#### Notes
+
+- The `setup` command will automatically back-up the updated files, in case you want to revert later (using `--restore`). 
+- Use `--dry-run` to preview changes without applying them.
 
 ---
 
 ## CLI Commands
+
+> We will be publishing the package to npm as `@desplega.ai/agent-swarm` on each new tag bump of the [`package.json`](./package.json).
+
 
 | Command | Description |
 |---------|-------------|
@@ -117,13 +137,13 @@ This configures Claude Code to connect to the swarm. Then start Claude Code norm
 # Setup wizard
 bunx @desplega.ai/agent-swarm setup
 
-# Start MCP server on custom port
+# Start MCP & API server on custom port
 bunx @desplega.ai/agent-swarm mcp --port 8080 --key my-api-key
 
-# Run worker with custom system prompt
+# Run worker with custom system prompt (not in docker!!! beware)
 bunx @desplega.ai/agent-swarm worker --system-prompt "You are a Python specialist"
 
-# Run lead agent
+# Run lead agent in the background (without human-in-the-loop mode via MCP client)
 bunx @desplega.ai/agent-swarm lead
 ```
 
