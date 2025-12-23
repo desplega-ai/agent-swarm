@@ -28,9 +28,8 @@ services:
       - "3013:3013"
 
     volumes:
-      - swarm_api:/app
-
-    restart: unless-stopped
+      # For the database and persistent data
+      - swarm_api:/app/data
 
   lead:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
@@ -63,8 +62,6 @@ services:
       - swarm_shared:/workspace/shared
       - swarm_lead:/workspace/personal
 
-    restart: unless-stopped
-
   worker-1:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
     pull_policy: always
@@ -94,8 +91,6 @@ services:
       - swarm_shared:/workspace/shared
       - swarm_worker_1:/workspace/personal
 
-    restart: unless-stopped
-
   worker-2:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
     pull_policy: always
@@ -124,8 +119,6 @@ services:
       - swarm_logs:/logs
       - swarm_shared:/workspace/shared
       - swarm_worker_2:/workspace/personal
-
-    restart: unless-stopped
 
 volumes:
   swarm_api:
