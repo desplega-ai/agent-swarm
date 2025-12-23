@@ -6,6 +6,12 @@
 
 https://github.com/user-attachments/assets/bd308567-d21e-44a5-87ec-d25aeb1de3d3
 
+<p align="center">
+  <a href="https://discord.gg/3XtmPdXm">
+    <img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join Discord">
+  </a>
+</p>
+
 > Agent orchestration layer MCP for Claude Code, Codex, Gemini CLI, and more!
 
 ## Table of Contents
