@@ -41,6 +41,8 @@ RUN mkdir -p /app/data
 ENV PORT=3013
 ENV DATABASE_PATH=/app/data/agent-swarm-db.sqlite
 
+VOLUME /app/data
+
 EXPOSE 3013
 
 # Health check
