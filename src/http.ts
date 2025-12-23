@@ -12,6 +12,7 @@ import {
   closeDb,
   createAgent,
   createSessionLogs,
+  createTaskExtended,
   getAgentById,
   getAgentWithTasks,
   getAllAgents,
@@ -542,6 +543,50 @@ const httpServer = createHttpServer(async (req, res) => {
     });
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ tasks }));
+    return;
+  }
+
+  // POST /api/tasks - Create a new task
+  if (
+    req.method === "POST" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "tasks" &&
+    !pathSegments[2]
+  ) {
+    // Parse request body
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    // Validate required fields
+    if (!body.task || typeof body.task !== "string") {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing or invalid 'task' field" }));
+      return;
+    }
+
+    try {
+      // Create task with provided options
+      const task = createTaskExtended(body.task, {
+        agentId: body.agentId || undefined,
+        creatorAgentId: myAgentId || undefined,
+        taskType: body.taskType || undefined,
+        tags: body.tags || undefined,
+        priority: body.priority || 50,
+        dependsOn: body.dependsOn || undefined,
+        offeredTo: body.offeredTo || undefined,
+        source: body.source || "api",
+      });
+
+      res.writeHead(201, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(task));
+    } catch (error) {
+      console.error("[HTTP] Failed to create task:", error);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Failed to create task" }));
+    }
     return;
   }
 
