@@ -24,6 +24,8 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   }
 
   db = new Database(dbPath, { create: true });
+  console.log(`Database initialized at ${dbPath}`);
+
   db.run("PRAGMA journal_mode = WAL;");
   db.run("PRAGMA foreign_keys = ON;");
 
@@ -333,9 +335,9 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   return db;
 }
 
-export function getDb(): Database {
+export function getDb(path?: string): Database {
   if (!db) {
-    return initDb();
+    return initDb(path ?? process.env.DATABASE_PATH);
   }
   return db;
 }
@@ -403,7 +405,7 @@ export function createAgent(
   if (!row) throw new Error("Failed to create agent");
   try {
     createLogEntry({ eventType: "agent_joined", agentId: id, newValue: agent.status });
-  } catch {}
+  } catch { }
   return rowToAgent(row);
 }
 
@@ -427,7 +429,7 @@ export function updateAgentStatus(id: string, status: AgentStatus): Agent | null
         oldValue: oldAgent.status,
         newValue: status,
       });
-    } catch {}
+    } catch { }
   }
   return row ? rowToAgent(row) : null;
 }
@@ -437,7 +439,7 @@ export function deleteAgent(id: string): boolean {
   if (agent) {
     try {
       createLogEntry({ eventType: "agent_left", agentId: id, oldValue: agent.status });
-    } catch {}
+    } catch { }
   }
   const result = getDb().run("DELETE FROM agents WHERE id = ?", [id]);
   return result.changes > 0;
@@ -593,7 +595,7 @@ export function createTask(
       newValue: "pending",
       metadata: { source },
     });
-  } catch {}
+  } catch { }
   return rowToAgentTask(row);
 }
 
@@ -623,7 +625,7 @@ export function startTask(taskId: string): AgentTask | null {
         oldValue: oldTask.status,
         newValue: "in_progress",
       });
-    } catch {}
+    } catch { }
   }
   return row ? rowToAgentTask(row) : null;
 }
@@ -809,7 +811,7 @@ export function completeTask(id: string, output?: string): AgentTask | null {
         oldValue: oldTask.status,
         newValue: "completed",
       });
-    } catch {}
+    } catch { }
   }
 
   return row ? rowToAgentTask(row) : null;
@@ -829,7 +831,7 @@ export function failTask(id: string, reason: string): AgentTask | null {
         newValue: "failed",
         metadata: { reason },
       });
-    } catch {}
+    } catch { }
   }
   return row ? rowToAgentTask(row) : null;
 }
@@ -849,7 +851,7 @@ export function updateTaskProgress(id: string, progress: string): AgentTask | nu
         agentId: row.agentId ?? undefined,
         newValue: progress,
       });
-    } catch {}
+    } catch { }
   }
   return row ? rowToAgentTask(row) : null;
 }
@@ -1061,7 +1063,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       newValue: status,
       metadata: { source: options?.source ?? "mcp" },
     });
-  } catch {}
+  } catch { }
 
   return rowToAgentTask(row);
 }
@@ -1088,7 +1090,7 @@ export function claimTask(taskId: string, agentId: string): AgentTask | null {
         oldValue: "unassigned",
         newValue: "pending",
       });
-    } catch {}
+    } catch { }
   }
 
   return row ? rowToAgentTask(row) : null;
@@ -1116,7 +1118,7 @@ export function releaseTask(taskId: string): AgentTask | null {
         oldValue: "pending",
         newValue: "unassigned",
       });
-    } catch {}
+    } catch { }
   }
 
   return row ? rowToAgentTask(row) : null;
@@ -1144,7 +1146,7 @@ export function acceptTask(taskId: string, agentId: string): AgentTask | null {
         oldValue: "offered",
         newValue: "pending",
       });
-    } catch {}
+    } catch { }
   }
 
   return row ? rowToAgentTask(row) : null;
@@ -1175,7 +1177,7 @@ export function rejectTask(taskId: string, agentId: string, reason?: string): Ag
         newValue: "unassigned",
         metadata: reason ? { reason } : undefined,
       });
-    } catch {}
+    } catch { }
   }
 
   return row ? rowToAgentTask(row) : null;
@@ -1412,7 +1414,7 @@ export function postMessage(
       agentId: agentId ?? undefined,
       metadata: { channelId, messageId: id },
     });
-  } catch {}
+  } catch { }
 
   // Determine which agents should receive task notifications
   let targetMentions = options?.mentions ?? [];
@@ -1798,7 +1800,7 @@ export function createService(
       newValue: name,
       metadata: { serviceId: id, port: options?.port ?? 3000 },
     });
-  } catch {}
+  } catch { }
 
   return rowToService(row);
 }
@@ -1882,7 +1884,7 @@ export function updateServiceStatus(id: string, status: ServiceStatus): Service 
         newValue: status,
         metadata: { serviceId: id, serviceName: oldService.name },
       });
-    } catch {}
+    } catch { }
   }
 
   return row ? rowToService(row) : null;
@@ -1898,7 +1900,7 @@ export function deleteService(id: string): boolean {
         oldValue: service.name,
         metadata: { serviceId: id },
       });
-    } catch {}
+    } catch { }
   }
 
   const result = getDb().run("DELETE FROM services WHERE id = ?", [id]);
@@ -1957,7 +1959,7 @@ export function deleteServicesByAgentId(agentId: string): number {
         oldValue: service.name,
         metadata: { serviceId: service.id },
       });
-    } catch {}
+    } catch { }
   }
 
   const result = getDb().run("DELETE FROM services WHERE agentId = ?", [agentId]);
