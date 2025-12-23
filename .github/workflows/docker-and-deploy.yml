@@ -93,25 +93,25 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           no-cache: true
 
-  deploy:
-    name: Deploy
-    runs-on: ubuntu-latest
-
-    needs:
-      - build-and-push-server
-      - build-and-push-worker
-
-    steps:
-      - name: Checkout
-        id: checkout
-        uses: actions/checkout@v4
-
-      - name: Deploy Agent Swarm
-        uses: tarasyarema/dokploy-deploy-action@main
-        with:
-          application_id: h4or-knfw2HWkTzjLmrn8
-          application_name: agent-swarm-nrz8v0
-          dokploy_url: https://app.dokploy.com
-          auth_token: ${{ secrets.DOKPLOY_TOKEN }}
-          wait_for_completion: true
-          restart: true
+  # deploy:
+  #   name: Deploy
+  #   runs-on: ubuntu-latest
+  #
+  #   needs:
+  #     - build-and-push-server
+  #     - build-and-push-worker
+  #
+  #   steps:
+  #     - name: Checkout
+  #       id: checkout
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Deploy Agent Swarm
+  #       uses: tarasyarema/dokploy-deploy-action@main
+  #       with:
+  #         application_id: h4or-knfw2HWkTzjLmrn8
+  #         application_name: agent-swarm-nrz8v0
+  #         dokploy_url: https://app.dokploy.com
+  #         auth_token: ${{ secrets.DOKPLOY_TOKEN }}
+  #         wait_for_completion: true
+  #         restart: true

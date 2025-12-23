@@ -35,10 +35,11 @@ RUN chmod +x /usr/local/bin/agent-swarm-api
 # Copy package.json for version info
 COPY package.json ./
 
-# Database will be created in /app (mount /app for persistence)
-VOLUME /app
+# Create data directory for SQLite (WAL mode needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
+RUN mkdir -p /app/data
 
 ENV PORT=3013
+ENV DATABASE_PATH=/app/data/agent-swarm-db.sqlite
 
 EXPOSE 3013
 
@@ -49,6 +50,6 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 # Print version on startup and run the server
 CMD echo "=== Agent Swarm API v$(cat /app/package.json | grep '\"version\"' | cut -d'"' -f4) ===" && \
     echo "Port: $PORT" && \
-    echo "Database: /app/agent-swarm-db.sqlite" && \
+    echo "Database: $DATABASE_PATH" && \
     echo "==============================" && \
     exec /usr/local/bin/agent-swarm-api

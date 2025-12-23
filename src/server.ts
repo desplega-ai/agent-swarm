@@ -41,7 +41,8 @@ export function getEnabledCapabilities(): string[] {
 
 export function createServer() {
   // Initialize database with WAL mode
-  initDb();
+  // Uses DATABASE_PATH env var for Docker volume compatibility (WAL needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
+  initDb(process.env.DATABASE_PATH);
 
   const server = new McpServer(
     {
