@@ -4,6 +4,12 @@
   <img src="assets/agent-swarm.png" alt="Agent Swarm" width="800">
 </p>
 
+<p align="center">
+  <a href="assets/agent-swarm.mp4">
+    <img src="https://img.shields.io/badge/Watch%20Demo-Video-blue?style=for-the-badge&logo=youtube" alt="Watch Demo Video">
+  </a>
+</p>
+
 > Agent orchestration layer MCP for Claude Code, Codex, Gemini CLI, and more!
 
 ## Table of Contents
