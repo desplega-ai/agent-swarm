@@ -1,0 +1,9 @@
+# Minimal pyproject.toml to satisfy GitHub Actions setup-python cache requirement
+# This file is a workaround for: https://github.com/actions/setup-python/issues/XXX
+# The dokploy-deploy-action uses setup-python with pip caching, which requires
+# a pyproject.toml or requirements.txt even though this is a Node.js/TypeScript project.
+
+[project]
+name = "agent-swarm-deploy-workaround"
+version = "0.0.0"
+description = "Workaround file for GitHub Actions deployment"
