@@ -61,7 +61,7 @@
     "docs:mcp": "bun scripts/generate-mcp-docs.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.3.9",
+    "@biomejs/biome": "^2.3.10",
     "@types/bun": "latest"
   },
   "peerDependencies": {
