@@ -71,6 +71,21 @@ export interface AgentLog {
   createdAt: string;
 }
 
+export interface SessionLog {
+  id: string;
+  taskId?: string;
+  sessionId: string;
+  iteration: number;
+  cli: string;
+  content: string;
+  lineNumber: number;
+  createdAt: string;
+}
+
+export interface SessionLogsResponse {
+  logs: SessionLog[];
+}
+
 export interface Channel {
   id: string;
   name: string;

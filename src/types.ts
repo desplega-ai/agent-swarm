@@ -171,3 +171,17 @@ export const AgentLogSchema = z.object({
 
 export type AgentLogEventType = z.infer<typeof AgentLogEventTypeSchema>;
 export type AgentLog = z.infer<typeof AgentLogSchema>;
+
+// Session Log Types (raw CLI output)
+export const SessionLogSchema = z.object({
+  id: z.uuid(),
+  taskId: z.uuid().optional(),
+  sessionId: z.string(),
+  iteration: z.number().int().min(1),
+  cli: z.string().default("claude"),
+  content: z.string(), // Raw JSON line
+  lineNumber: z.number().int().min(0),
+  createdAt: z.iso.datetime(),
+});
+
+export type SessionLog = z.infer<typeof SessionLogSchema>;

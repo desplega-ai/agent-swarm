@@ -10,9 +10,10 @@ import Tab from "@mui/joy/Tab";
 import TabPanel from "@mui/joy/TabPanel";
 import Chip from "@mui/joy/Chip";
 import { useColorScheme } from "@mui/joy/styles";
-import { useTask, useAgents } from "../hooks/queries";
+import { useTask, useAgents, useTaskSessionLogs } from "../hooks/queries";
 import { formatRelativeTime } from "../lib/utils";
 import StatusBadge from "./StatusBadge";
+import SessionLogPanel from "./SessionLogPanel";
 
 interface TaskDetailPanelProps {
   taskId: string;
@@ -29,9 +30,12 @@ export default function TaskDetailPanel({
 }: TaskDetailPanelProps) {
   const { data: task, isLoading: taskLoading } = useTask(taskId);
   const { data: agents } = useAgents();
+  const { data: sessionLogs } = useTaskSessionLogs(taskId);
   const { mode } = useColorScheme();
   const isDark = mode === "dark";
   const [outputTab, setOutputTab] = useState<"output" | "error">("output");
+  const [mainTab, setMainTab] = useState<"details" | "session">("details");
+  const [outcomesTab, setOutcomesTab] = useState<"output" | "error" | "session">("output");
   const [copiedField, setCopiedField] = useState<"output" | "error" | null>(null);
 
   const handleCopy = useCallback(async (content: string, field: "output" | "error") => {
@@ -484,9 +488,10 @@ export default function TaskDetailPanel({
     borderBottom: "1px solid",
     borderColor: "neutral.outlinedBorder",
     borderTop: hasBorderTop ? "1px solid" : "none",
-    px: 2,
-    pt: 1,
+    px: 1,
+    pt: 0.5,
     flexShrink: 0,
+    minHeight: 32,
     "& .MuiTab-root": {
       fontFamily: "code",
       fontSize: "0.75rem",
@@ -497,8 +502,6 @@ export default function TaskDetailPanel({
       border: "1px solid transparent",
       borderBottom: "none",
       borderRadius: "6px 6px 0 0",
-      px: 2,
-      py: 0.75,
       minHeight: "auto",
       transition: "all 0.2s ease",
       "&:hover": {
@@ -510,72 +513,9 @@ export default function TaskDetailPanel({
         bgcolor: "background.surface",
         borderColor: "neutral.outlinedBorder",
         borderBottomColor: "background.surface",
-        marginBottom: "-1px",
       },
     },
   });
-
-  // Output/Error section for expanded view (with tabs if both present)
-  const OutputSection = () => {
-    if (hasBothOutputAndError) {
-      return (
-        <Tabs
-          value={outputTab}
-          onChange={(_, value) => setOutputTab(value as "output" | "error")}
-          sx={{ display: "flex", flexDirection: "column", height: "100%" }}
-        >
-          <TabList sx={getTabListStyles(outputTab === "error" ? colors.rust : colors.gold)}>
-            <Tab value="output">OUTPUT</Tab>
-            <Tab value="error">ERROR</Tab>
-          </TabList>
-          <TabPanel value="output" sx={{ p: 0, flex: 1, overflow: "hidden" }}>
-            <OutputContent />
-          </TabPanel>
-          <TabPanel value="error" sx={{ p: 0, flex: 1, overflow: "hidden" }}>
-            <ErrorContent />
-          </TabPanel>
-        </Tabs>
-      );
-    }
-
-    if (hasError) {
-      return (
-        <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
-          <Box sx={{ px: 2, py: 1.5, bgcolor: "background.level1", flexShrink: 0 }}>
-            <Typography
-              sx={{
-                fontFamily: "code",
-                fontSize: "0.7rem",
-                color: colors.rust,
-                letterSpacing: "0.05em",
-              }}
-            >
-              ERROR
-            </Typography>
-          </Box>
-          <ErrorContent />
-        </Box>
-      );
-    }
-
-    return (
-      <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
-        <Box sx={{ px: 2, py: 1.5, bgcolor: "background.level1", flexShrink: 0 }}>
-          <Typography
-            sx={{
-              fontFamily: "code",
-              fontSize: "0.7rem",
-              color: "text.tertiary",
-              letterSpacing: "0.05em",
-            }}
-          >
-            OUTPUT
-          </Typography>
-        </Box>
-        <OutputContent />
-      </Box>
-    );
-  };
 
   // Collapsed output section
   const CollapsedOutputSection = () => {
@@ -752,7 +692,7 @@ export default function TaskDetailPanel({
           flex: 1,
           overflow: "hidden",
           display: "flex",
-          flexDirection: expanded ? "row" : "column",
+          flexDirection: expanded ? { xs: "column", md: "row" } : "column",
         }}
       >
         {expanded ? (
@@ -760,11 +700,13 @@ export default function TaskDetailPanel({
             {/* Column 1: Details */}
             <Box
               sx={{
-                width: 350,
+                width: { xs: "100%", md: 300, lg: 350 },
                 flexShrink: 0,
-                borderRight: "1px solid",
+                borderRight: { xs: "none", md: "1px solid" },
+                borderBottom: { xs: "1px solid", md: "none" },
                 borderColor: "neutral.outlinedBorder",
                 overflow: "auto",
+                maxHeight: { xs: "40vh", md: "none" },
               }}
             >
               <DetailsSection showProgress={false} />
@@ -772,33 +714,111 @@ export default function TaskDetailPanel({
             {/* Column 2: Progress */}
             <Box
               sx={{
-                width: 350,
+                width: { xs: "100%", md: 280, lg: 350 },
                 flexShrink: 0,
-                borderRight: "1px solid",
+                borderRight: { xs: "none", md: "1px solid" },
+                borderBottom: { xs: "1px solid", md: "none" },
                 borderColor: "neutral.outlinedBorder",
                 overflow: "hidden",
                 display: "flex",
                 flexDirection: "column",
+                maxHeight: { xs: "30vh", md: "none" },
               }}
             >
               <ProgressSection />
             </Box>
-            {/* Column 3: Output/Error */}
+            {/* Column 3: Outcomes (Output/Error/Session Log) */}
             <Box
               sx={{
                 flex: 1,
+                minWidth: 0,
                 display: "flex",
                 flexDirection: "column",
                 overflow: "hidden",
               }}
             >
-              <OutputSection />
+              <Tabs
+                value={outcomesTab}
+                onChange={(_, value) => setOutcomesTab(value as "output" | "error" | "session")}
+                sx={{ display: "flex", flexDirection: "column", height: "100%" }}
+              >
+                <TabList sx={getTabListStyles(
+                  outcomesTab === "error" ? colors.rust :
+                    outcomesTab === "session" ? colors.blue : colors.gold
+                )}>
+                  <Tab value="output">OUTPUT</Tab>
+                  {hasError && <Tab value="error">ERROR</Tab>}
+                  <Tab value="session">
+                    SESSION
+                    {sessionLogs && sessionLogs.length > 0 && (
+                      <Chip
+                        size="sm"
+                        sx={{
+                          ml: 0.5,
+                          fontFamily: "code",
+                          fontSize: "0.55rem",
+                          minHeight: "auto",
+                          height: 14,
+                          bgcolor: colors.goldSoftBg,
+                          color: colors.gold,
+                        }}
+                      >
+                        {sessionLogs.length}
+                      </Chip>
+                    )}
+                  </Tab>
+                </TabList>
+                <TabPanel value="output" sx={{ p: 0, flex: 1, overflow: "hidden" }}>
+                  <OutputContent />
+                </TabPanel>
+                {hasError && (
+                  <TabPanel value="error" sx={{ p: 0, flex: 1, overflow: "hidden" }}>
+                    <ErrorContent />
+                  </TabPanel>
+                )}
+                <TabPanel value="session" sx={{ p: 0, flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                  <SessionLogPanel sessionLogs={sessionLogs} />
+                </TabPanel>
+              </Tabs>
             </Box>
           </>
         ) : (
-          <Box sx={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
-            <DetailsSection showProgress={true} />
-            <CollapsedOutputSection />
+          <Box sx={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+            <Tabs
+              value={mainTab}
+              onChange={(_, value) => setMainTab(value as "details" | "session")}
+              sx={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}
+            >
+              <TabList sx={getTabListStyles(colors.gold)}>
+                <Tab value="details">DETAILS</Tab>
+                <Tab value="session">
+                  SESSION LOG
+                  {sessionLogs && sessionLogs.length > 0 && (
+                    <Chip
+                      size="sm"
+                      sx={{
+                        ml: 0.5,
+                        fontFamily: "code",
+                        fontSize: "0.55rem",
+                        minHeight: "auto",
+                        height: 14,
+                        bgcolor: colors.goldSoftBg,
+                        color: colors.gold,
+                      }}
+                    >
+                      {sessionLogs.length}
+                    </Chip>
+                  )}
+                </Tab>
+              </TabList>
+              <TabPanel value="details" sx={{ p: 0, flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
+                <DetailsSection showProgress={true} />
+                <CollapsedOutputSection />
+              </TabPanel>
+              <TabPanel value="session" sx={{ p: 0, flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                <SessionLogPanel sessionLogs={sessionLogs} />
+              </TabPanel>
+            </Tabs>
           </Box>
         )}
       </Box>

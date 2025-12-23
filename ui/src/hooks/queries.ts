@@ -40,6 +40,15 @@ export function useTask(id: string) {
   });
 }
 
+export function useTaskSessionLogs(taskId: string) {
+  return useQuery({
+    queryKey: ["task", taskId, "session-logs"],
+    queryFn: () => api.fetchTaskSessionLogs(taskId),
+    enabled: !!taskId,
+    refetchInterval: 5000, // Refresh every 5 seconds for live updates
+  });
+}
+
 export function useLogs(limit = 50, agentId?: string) {
   return useQuery({
     queryKey: ["logs", limit, agentId],

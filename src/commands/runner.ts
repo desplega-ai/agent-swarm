@@ -53,6 +53,71 @@ interface RunClaudeIterationOptions {
   systemPrompt?: string;
   additionalArgs?: string[];
   role: string;
+  // New fields for log streaming
+  apiUrl?: string;
+  apiKey?: string;
+  agentId?: string;
+  sessionId?: string;
+  iteration?: number;
+  taskId?: string;
+}
+
+/** Buffer for session logs */
+interface LogBuffer {
+  lines: string[];
+  lastFlush: number;
+}
+
+/** Configuration for log streaming */
+const LOG_BUFFER_SIZE = 50; // Flush after this many lines
+const LOG_FLUSH_INTERVAL_MS = 5000; // Flush every 5 seconds
+
+/** Push buffered logs to the API */
+async function flushLogBuffer(
+  buffer: LogBuffer,
+  opts: {
+    apiUrl: string;
+    apiKey: string;
+    agentId: string;
+    sessionId: string;
+    iteration: number;
+    taskId?: string;
+    cli?: string;
+  },
+): Promise<void> {
+  if (buffer.lines.length === 0) return;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-Agent-ID": opts.agentId,
+  };
+  if (opts.apiKey) {
+    headers.Authorization = `Bearer ${opts.apiKey}`;
+  }
+
+  try {
+    const response = await fetch(`${opts.apiUrl}/api/session-logs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        sessionId: opts.sessionId,
+        iteration: opts.iteration,
+        taskId: opts.taskId,
+        cli: opts.cli || "claude",
+        lines: buffer.lines,
+      }),
+    });
+
+    if (!response.ok) {
+      console.warn(`[runner] Failed to push logs: ${response.status}`);
+    }
+  } catch (error) {
+    console.warn(`[runner] Error pushing logs: ${error}`);
+  }
+
+  // Clear buffer after flush
+  buffer.lines = [];
+  buffer.lastFlush = Date.now();
 }
 
 /** Trigger types returned by the poll API */
@@ -206,6 +271,10 @@ async function runClaudeIteration(opts: RunClaudeIterationOptions): Promise<numb
 
   const stdoutPromise = (async () => {
     if (proc.stdout) {
+      // Initialize log buffer for API streaming
+      const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now() };
+      const shouldStream = opts.apiUrl && opts.sessionId && opts.iteration;
+
       for await (const chunk of proc.stdout) {
         stdoutChunks++;
         const text = new TextDecoder().decode(chunk);
@@ -214,7 +283,42 @@ async function runClaudeIteration(opts: RunClaudeIterationOptions): Promise<numb
         const lines = text.split("\n");
         for (const line of lines) {
           prettyPrintLine(line, role);
+
+          // Buffer non-empty lines for API streaming
+          if (shouldStream && line.trim()) {
+            logBuffer.lines.push(line.trim());
+
+            // Check if we should flush (buffer full or time elapsed)
+            const shouldFlush =
+              logBuffer.lines.length >= LOG_BUFFER_SIZE ||
+              Date.now() - logBuffer.lastFlush >= LOG_FLUSH_INTERVAL_MS;
+
+            if (shouldFlush) {
+              await flushLogBuffer(logBuffer, {
+                apiUrl: opts.apiUrl!,
+                apiKey: opts.apiKey || "",
+                agentId: opts.agentId || "",
+                sessionId: opts.sessionId!,
+                iteration: opts.iteration!,
+                taskId: opts.taskId,
+                cli: "claude",
+              });
+            }
+          }
         }
+      }
+
+      // Final flush for remaining buffered logs
+      if (shouldStream && logBuffer.lines.length > 0) {
+        await flushLogBuffer(logBuffer, {
+          apiUrl: opts.apiUrl!,
+          apiKey: opts.apiKey || "",
+          agentId: opts.agentId || "",
+          sessionId: opts.sessionId!,
+          iteration: opts.iteration!,
+          taskId: opts.taskId,
+          cli: "claude",
+        });
       }
     }
   })();
@@ -398,6 +502,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         systemPrompt: resolvedSystemPrompt,
         additionalArgs: opts.additionalArgs,
         role,
+        // Add streaming options
+        apiUrl,
+        apiKey,
+        agentId,
+        sessionId,
+        iteration,
+        taskId: trigger.taskId,
       });
 
       if (exitCode !== 0) {

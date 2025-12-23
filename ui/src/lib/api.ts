@@ -6,6 +6,8 @@ import type {
   ChannelsResponse,
   MessagesResponse,
   ServicesResponse,
+  SessionLog,
+  SessionLogsResponse,
   ChannelMessage,
   Stats,
   AgentWithTasks,
@@ -65,6 +67,14 @@ class ApiClient {
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch task: ${res.status}`);
     return res.json();
+  }
+
+  async fetchTaskSessionLogs(taskId: string): Promise<SessionLog[]> {
+    const url = `${this.getBaseUrl()}/api/tasks/${taskId}/session-logs`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch session logs: ${res.status}`);
+    const data = (await res.json()) as SessionLogsResponse;
+    return data.logs;
   }
 
   async fetchLogs(limit = 100, agentId?: string): Promise<LogsResponse> {

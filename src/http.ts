@@ -11,6 +11,7 @@ import { createServer } from "@/server";
 import {
   closeDb,
   createAgent,
+  createSessionLogs,
   getAgentById,
   getAgentWithTasks,
   getAllAgents,
@@ -28,6 +29,7 @@ import {
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
   getServicesByAgentId,
+  getSessionLogsByTaskId,
   getTaskById,
   getUnassignedTasksCount,
   postMessage,
@@ -351,6 +353,76 @@ const httpServer = createHttpServer(async (req, res) => {
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(result));
+    return;
+  }
+
+  // POST /api/session-logs - Store session logs (batch)
+  if (req.method === "POST" && pathSegments[0] === "api" && pathSegments[1] === "session-logs") {
+    // Parse request body
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    // Validate required fields
+    if (!body.sessionId || typeof body.sessionId !== "string") {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing or invalid 'sessionId' field" }));
+      return;
+    }
+
+    if (typeof body.iteration !== "number" || body.iteration < 1) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing or invalid 'iteration' field" }));
+      return;
+    }
+
+    if (!Array.isArray(body.lines) || body.lines.length === 0) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing or invalid 'lines' array" }));
+      return;
+    }
+
+    try {
+      createSessionLogs({
+        taskId: body.taskId || undefined,
+        sessionId: body.sessionId,
+        iteration: body.iteration,
+        cli: body.cli || "claude",
+        lines: body.lines,
+      });
+
+      res.writeHead(201, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ success: true, count: body.lines.length }));
+    } catch (error) {
+      console.error("[HTTP] Failed to create session logs:", error);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Failed to store session logs" }));
+    }
+    return;
+  }
+
+  // GET /api/tasks/:id/session-logs - Get session logs for a task
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "tasks" &&
+    pathSegments[2] &&
+    pathSegments[3] === "session-logs"
+  ) {
+    const taskId = pathSegments[2];
+    const task = getTaskById(taskId);
+
+    if (!task) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Task not found" }));
+      return;
+    }
+
+    const logs = getSessionLogsByTaskId(taskId);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ logs }));
     return;
   }
 

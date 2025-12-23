@@ -13,6 +13,7 @@ import type {
   ChannelType,
   Service,
   ServiceStatus,
+  SessionLog,
 } from "../types";
 
 let db: Database | null = null;
@@ -149,6 +150,21 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
 
     CREATE INDEX IF NOT EXISTS idx_services_agentId ON services(agentId);
     CREATE INDEX IF NOT EXISTS idx_services_status ON services(status);
+
+    -- Session logs table (raw CLI output from runner)
+    CREATE TABLE IF NOT EXISTS session_logs (
+      id TEXT PRIMARY KEY,
+      taskId TEXT,
+      sessionId TEXT NOT NULL,
+      iteration INTEGER NOT NULL,
+      cli TEXT NOT NULL DEFAULT 'claude',
+      content TEXT NOT NULL,
+      lineNumber INTEGER NOT NULL,
+      createdAt TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_session_logs_taskId ON session_logs(taskId);
+    CREATE INDEX IF NOT EXISTS idx_session_logs_sessionId ON session_logs(sessionId);
   `);
 
   // Seed default general channel if it doesn't exist
@@ -1918,4 +1934,89 @@ export function deleteServicesByAgentId(agentId: string): number {
 
   const result = getDb().run("DELETE FROM services WHERE agentId = ?", [agentId]);
   return result.changes;
+}
+
+// ============================================================================
+// Session Log Operations (raw CLI output)
+// ============================================================================
+
+type SessionLogRow = {
+  id: string;
+  taskId: string | null;
+  sessionId: string;
+  iteration: number;
+  cli: string;
+  content: string;
+  lineNumber: number;
+  createdAt: string;
+};
+
+function rowToSessionLog(row: SessionLogRow): SessionLog {
+  return {
+    id: row.id,
+    taskId: row.taskId ?? undefined,
+    sessionId: row.sessionId,
+    iteration: row.iteration,
+    cli: row.cli,
+    content: row.content,
+    lineNumber: row.lineNumber,
+    createdAt: row.createdAt,
+  };
+}
+
+export const sessionLogQueries = {
+  insert: () =>
+    getDb().prepare<SessionLogRow, [string, string | null, string, number, string, string, number]>(
+      `INSERT INTO session_logs (id, taskId, sessionId, iteration, cli, content, lineNumber, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
+    ),
+
+  insertBatch: () =>
+    getDb().prepare<null, [string, string | null, string, number, string, string, number]>(
+      `INSERT INTO session_logs (id, taskId, sessionId, iteration, cli, content, lineNumber, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+    ),
+
+  getByTaskId: () =>
+    getDb().prepare<SessionLogRow, [string]>(
+      "SELECT * FROM session_logs WHERE taskId = ? ORDER BY iteration ASC, lineNumber ASC",
+    ),
+
+  getBySessionId: () =>
+    getDb().prepare<SessionLogRow, [string, number]>(
+      "SELECT * FROM session_logs WHERE sessionId = ? AND iteration = ? ORDER BY lineNumber ASC",
+    ),
+};
+
+export function createSessionLogs(logs: {
+  taskId?: string;
+  sessionId: string;
+  iteration: number;
+  cli: string;
+  lines: string[];
+}): void {
+  const stmt = sessionLogQueries.insertBatch();
+  getDb().transaction(() => {
+    for (let i = 0; i < logs.lines.length; i++) {
+      const line = logs.lines[i];
+      if (line === undefined) continue;
+      stmt.run(
+        crypto.randomUUID(),
+        logs.taskId ?? null,
+        logs.sessionId,
+        logs.iteration,
+        logs.cli,
+        line,
+        i,
+      );
+    }
+  })();
+}
+
+export function getSessionLogsByTaskId(taskId: string): SessionLog[] {
+  return sessionLogQueries.getByTaskId().all(taskId).map(rowToSessionLog);
+}
+
+export function getSessionLogsBySession(sessionId: string, iteration: number): SessionLog[] {
+  return sessionLogQueries.getBySessionId().all(sessionId, iteration).map(rowToSessionLog);
 }
