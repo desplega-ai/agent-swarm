@@ -241,7 +241,7 @@ describe("REST API Endpoints", () => {
       const response = await fetch(`${baseUrl}/me`);
 
       expect(response.status).toBe(400);
-      const data = await response.json() as any;
+      const data = (await response.json()) as any;
       expect(data.error).toContain("X-Agent-ID");
     });
 
@@ -253,7 +253,7 @@ describe("REST API Endpoints", () => {
       });
 
       expect(response.status).toBe(404);
-      const data = await response.json() as any;
+      const data = (await response.json()) as any;
       expect(data.error).toContain("not found");
     });
 
@@ -273,7 +273,7 @@ describe("REST API Endpoints", () => {
       });
 
       expect(response.status).toBe(200);
-      const data = await response.json() as any;
+      const data = (await response.json()) as any;
       expect(data.id).toBe(agentId);
       expect(data.name).toBe("Test Agent Me");
       expect(data.status).toBe("idle");
@@ -287,7 +287,7 @@ describe("REST API Endpoints", () => {
       });
 
       expect(response.status).toBe(400);
-      const data = await response.json() as any;
+      const data = (await response.json()) as any;
       expect(data.error).toContain("X-Agent-ID");
     });
 
@@ -356,7 +356,7 @@ describe("REST API Endpoints", () => {
       });
 
       expect(response.status).toBe(400);
-      const data = await response.json() as any;
+      const data = (await response.json()) as any;
       expect(data.error).toContain("X-Agent-ID");
     });
 
@@ -400,7 +400,7 @@ describe("REST API Endpoints", () => {
       const response = await fetch(`${baseUrl}/api/agents/non-existent-agent`);
 
       expect(response.status).toBe(404);
-      const data = await response.json() as any;
+      const data = (await response.json()) as any;
       expect(data.error).toContain("not found");
     });
 
@@ -416,7 +416,7 @@ describe("REST API Endpoints", () => {
       const response = await fetch(`${baseUrl}/api/agents/${agentId}`);
 
       expect(response.status).toBe(200);
-      const data = await response.json() as any;
+      const data = (await response.json()) as any;
       expect(data.id).toBe(agentId);
       expect(data.name).toBe("Test Agent Get");
       expect(data.isLead).toBe(true);
@@ -445,7 +445,7 @@ describe("REST API Endpoints", () => {
       const response = await fetch(`${baseUrl}/api/agents/${agentId}`);
 
       expect(response.status).toBe(200);
-      const data = await response.json() as any;
+      const data = (await response.json()) as any;
       expect(data.id).toBe(agentId);
       expect(data.description).toBe("Test description");
       expect(data.role).toBe("Test role");
@@ -458,7 +458,7 @@ describe("REST API Endpoints", () => {
       const response = await fetch(`${baseUrl}/api/tasks/non-existent-task`);
 
       expect(response.status).toBe(404);
-      const data = await response.json() as any;
+      const data = (await response.json()) as any;
       expect(data.error).toContain("not found");
     });
 
@@ -470,7 +470,7 @@ describe("REST API Endpoints", () => {
       const response = await fetch(`${baseUrl}/api/tasks/${task.id}`);
 
       expect(response.status).toBe(200);
-      const data = await response.json() as any;
+      const data = (await response.json()) as any;
       expect(data.id).toBe(task.id);
       expect(data.task).toBe("Test task for GET endpoint");
       expect(data.status).toBe("unassigned");
@@ -513,7 +513,7 @@ describe("REST API Endpoints", () => {
       const response = await fetch(`${baseUrl}/api/stats`);
 
       expect(response.status).toBe(200);
-      const data = await response.json() as any;
+      const data = (await response.json()) as any;
 
       expect(data.agents).toBeDefined();
       expect(data.agents.total).toBeGreaterThanOrEqual(3);
@@ -538,7 +538,7 @@ describe("REST API Endpoints", () => {
       const response = await fetch(`${baseUrl}/api/stats`);
 
       expect(response.status).toBe(200);
-      const data = await response.json() as any;
+      const data = (await response.json()) as any;
 
       expect(data.agents.total).toBe(0);
       expect(data.agents.idle).toBe(0);
