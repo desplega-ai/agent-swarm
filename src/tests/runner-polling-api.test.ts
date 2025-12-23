@@ -225,7 +225,7 @@ describe("Runner-Level Polling API", () => {
       });
 
       expect(response.status).toBe(201);
-      const data = await response.json();
+      const data = (await response.json()) as any;
       expect(data.id).toBe(agentId);
       expect(data.name).toBe("Test Agent 1");
       expect(data.status).toBe("idle");
@@ -243,7 +243,7 @@ describe("Runner-Level Polling API", () => {
       });
 
       expect(response.status).toBe(200); // Not 201 since it exists
-      const data = await response.json();
+      const data = (await response.json()) as any;
       expect(data.id).toBe(agentId);
       expect(data.name).toBe("Test Agent 1"); // Original name preserved
     });
@@ -258,7 +258,7 @@ describe("Runner-Level Polling API", () => {
       });
 
       expect(response.status).toBe(201);
-      const data = await response.json();
+      const data = (await response.json()) as any;
       expect(data.id).toBeDefined();
       expect(data.id.length).toBe(36); // UUID format
       expect(data.name).toBe("Auto-ID Agent");
@@ -275,7 +275,7 @@ describe("Runner-Level Polling API", () => {
       });
 
       expect(response.status).toBe(400);
-      const data = await response.json();
+      const data = (await response.json()) as any;
       expect(data.error).toContain("name");
     });
 
@@ -291,7 +291,7 @@ describe("Runner-Level Polling API", () => {
       });
 
       expect(response.status).toBe(201);
-      const data = await response.json();
+      const data = (await response.json()) as any;
       expect(data.id).toBe(agentId);
       expect(data.isLead).toBe(true);
     });
@@ -302,7 +302,7 @@ describe("Runner-Level Polling API", () => {
       const response = await fetch(`${baseUrl}/api/poll`);
 
       expect(response.status).toBe(400);
-      const data = await response.json();
+      const data = (await response.json()) as any;
       expect(data.error).toContain("X-Agent-ID");
     });
 
@@ -314,7 +314,7 @@ describe("Runner-Level Polling API", () => {
       });
 
       expect(response.status).toBe(404);
-      const data = await response.json();
+      const data = (await response.json()) as any;
       expect(data.error).toContain("not found");
     });
 
@@ -326,7 +326,7 @@ describe("Runner-Level Polling API", () => {
       });
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = (await response.json()) as any;
       expect(data.trigger).toBeNull();
     });
 
@@ -356,7 +356,7 @@ describe("Runner-Level Polling API", () => {
       });
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = (await response.json()) as any;
       expect(data.trigger).not.toBeNull();
       expect(data.trigger.type).toBe("task_assigned");
       expect(data.trigger.taskId).toBe(task.id);
@@ -388,7 +388,7 @@ describe("Runner-Level Polling API", () => {
       });
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = (await response.json()) as any;
       expect(data.trigger).not.toBeNull();
       expect(data.trigger.type).toBe("task_offered");
       expect(data.trigger.taskId).toBe(task.id);
@@ -420,7 +420,7 @@ describe("Runner-Level Polling API", () => {
       });
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = (await response.json()) as any;
       expect(data.trigger).not.toBeNull();
       expect(data.trigger.type).toBe("pool_tasks_available");
       expect(data.trigger.count).toBeGreaterThan(0);
@@ -448,7 +448,7 @@ describe("Runner-Level Polling API", () => {
       });
 
       expect(response.status).toBe(200);
-      const data = await response.json();
+      const data = (await response.json()) as any;
       // Worker should NOT see pool tasks
       expect(data.trigger).toBeNull();
     });
