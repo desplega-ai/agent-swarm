@@ -4,13 +4,10 @@ import { createServer as createHttpServer, type Server } from "node:http";
 import {
   closeDb,
   createAgent,
-  createChannel,
-  createService,
   createTaskExtended,
   getAgentById,
   getDb,
   initDb,
-  postMessage,
   updateAgentStatus,
 } from "../be/db";
 
@@ -24,7 +21,7 @@ function getPathSegments(url: string): string[] {
   return path.split("/").filter(Boolean);
 }
 
-function parseQueryParams(url: string): URLSearchParams {
+function _parseQueryParams(url: string): URLSearchParams {
   const queryIndex = url.indexOf("?");
   if (queryIndex === -1) return new URLSearchParams();
   return new URLSearchParams(url.slice(queryIndex + 1));
@@ -33,10 +30,9 @@ function parseQueryParams(url: string): URLSearchParams {
 // Minimal HTTP handler for REST API endpoints
 async function handleRequest(
   req: { method: string; url: string; headers: { get: (key: string) => string | null } },
-  body: string,
+  _body: string,
 ): Promise<{ status: number; body: unknown }> {
   const pathSegments = getPathSegments(req.url || "");
-  const queryParams = parseQueryParams(req.url || "");
   const myAgentId = req.headers.get("x-agent-id");
 
   // GET /me - Get current agent info
@@ -135,9 +131,7 @@ async function handleRequest(
     !pathSegments[3]
   ) {
     const taskId = pathSegments[2];
-    const task = getDb()
-      .query("SELECT * FROM agent_tasks WHERE id = ?")
-      .get(taskId) as unknown;
+    const task = getDb().query("SELECT * FROM agent_tasks WHERE id = ?").get(taskId) as unknown;
 
     if (!task) {
       return { status: 404, body: { error: "Task not found" } };
@@ -441,10 +435,12 @@ describe("REST API Endpoints", () => {
       });
 
       // Update profile fields via SQL since createAgent doesn't accept them
-      getDb().run(
-        "UPDATE agents SET description = ?, role = ?, capabilities = ? WHERE id = ?",
-        ["Test description", "Test role", JSON.stringify(["test-cap-1", "test-cap-2"]), agentId],
-      );
+      getDb().run("UPDATE agents SET description = ?, role = ?, capabilities = ? WHERE id = ?", [
+        "Test description",
+        "Test role",
+        JSON.stringify(["test-cap-1", "test-cap-2"]),
+        agentId,
+      ]);
 
       const response = await fetch(`${baseUrl}/api/agents/${agentId}`);
 
