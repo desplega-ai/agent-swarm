@@ -30,7 +30,7 @@ RUN apt-get update && apt-get install -y \
     # Python
     python3 python3-pip python3-venv \
     # Common utilities
-    jq tree htop unzip zip tar gzip \
+    jq tree htop unzip zip tar gzip sqlite3 \
     # Network tools
     openssh-client \
     # sudo for package installation

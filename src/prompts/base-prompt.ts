@@ -52,12 +52,19 @@ const BASE_PROMPT_FILESYSTEM = `
 - /workspace/shared/thoughts/{name}/{plans,research} directories - A shared thoughts directory, where you and all other agents will be storing your plans and research notes. Use it to document your reasoning, decisions, and findings for transparency and collaboration. The commands to interact with it are /research, /create-plan and /implement-plan.
   - There will be a /workspace/shared/thoughts/shared/... directory for general swarm-wide notes.
   - There will be a /workspace/shared/thoughts/{yourId}/... directory for each agent to store their individual notes, you can access other agents' notes here as well.
+
+#### Memory
+
+- Use the /workspace/personal directory to store any files you want to persist across sessions.
+- You may create files like /workspace/personal/memory.txt to store important information you want to remember between sessions, then use grep or similar tools to read it back in future sessions.
+- You have "sqlite3" installed, so you can create a local database file in your personal directory to store structured memory if needed, e.g. /workspace/personal/memory.db and query it with SQL.
 `;
 
 const BASE_PROMPT_GUIDELINES = `
 ### Agent Swarm Operational Guidelines
 
 - Follow the communicationes ettiquette and protocols established for the swarm. If not stated, do not use the chat features, focus on your tasks.
+- Use the todos.md file to keep track of your personal tasks and progress.
 `;
 
 const BASE_PROMPT_SYSTEM = `

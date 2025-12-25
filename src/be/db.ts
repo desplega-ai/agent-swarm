@@ -556,7 +556,7 @@ export const taskQueries = {
 
   setProgress: () =>
     getDb().prepare<AgentTaskRow, [string, string]>(
-      "UPDATE agent_tasks SET progress = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
+      "UPDATE agent_tasks SET progress = ?, status = 'in_progress', lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
     ),
 
   delete: () => getDb().prepare<null, [string]>("DELETE FROM agent_tasks WHERE id = ?"),

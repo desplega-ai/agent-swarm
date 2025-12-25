@@ -29,6 +29,14 @@ As you start working on a task, you might need to use some of the following comm
 - `/swarm-chat` - Use this command to communicate with other agents in the swarm if you need help or want to provide updates.
 - `/todos` - Use this command to manage your personal todo list, which can help you keep track of sub-tasks related to the main task.
 
+#### Decision to use commands
+
+When the task is a research task, you should ALWAYS use the `/research` command to gather information.
+
+When the task is a development task, you should ALWAYS use the `/create-plan` command first to create a plan, and then use the `/implement-plan` command to implement it.
+
+If the implementation does not reference any existing plan, proceed normally to implement it without using any commands.
+
 ### Interruptions
 
 If you get interrupted by the user, that is fine, it might happen. Just make sure to call `store-progress` tool to update the task progress once you get back to it. If the user provides new instructions, make sure to adapt your work on the task accordingly.

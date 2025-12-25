@@ -281,15 +281,15 @@ function buildPromptForTrigger(trigger: Trigger, defaultPrompt: string): string 
   switch (trigger.type) {
     case "task_assigned":
       // Use the work-on-task command with task ID
-      return `/work-on-task ${trigger.taskId}`;
+      return `/work-on-task Start working on task with ID ${trigger.taskId}`;
 
     case "task_offered":
       // Use the review-offered-task command to accept/reject
-      return `/review-offered-task ${trigger.taskId}`;
+      return `/review-offered-task Review task with ID ${trigger.taskId} and either accept or reject it.`;
 
     case "unread_mentions":
       // Check messages
-      return "/swarm-chat";
+      return "You have unread messages in the chat. Use /swarm-chat to review them, respond to them if applicable and start working on any new tasks if needed based on the messages (you might need to create new tasks).";
 
     case "pool_tasks_available":
       // Worker: claim a task from the pool
@@ -306,8 +306,10 @@ function buildPromptForTrigger(trigger: Trigger, defaultPrompt: string): string 
             return `- ${agentName} ${status} task "${t.task?.slice(0, 50)}..." (ID: ${t.id})`;
           })
           .join("\n");
+
         return `Workers have finished ${trigger.count} task(s):\n${taskSummaries}\n\nReview these results and decide if any follow-up actions are needed.`;
       }
+
       return `Workers have finished ${trigger.count} task(s). Use get-tasks with status "completed" or "failed" to review them.`;
 
     default:

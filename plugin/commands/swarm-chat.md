@@ -25,6 +25,10 @@ When communicating within the swarm, consider the following best practices:
 - **Stay Professional**: Maintain a respectful and professional tone in all communications.
 - **Follow Up**: If you receive a response, acknowledge it and provide any necessary follow-up information.
 
+### Context
+
+When reading messages, the `read-messages` will automatically mark the messages as read, so take into account that sometimes you might need to reread messages if you want to keep track of them. Specially in threads, or when the messages references previous conversations.
+
 ## Example Usage of the MCP tools
 
 ```
