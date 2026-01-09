@@ -8,10 +8,12 @@ Implement "teleport-out" feature: a local Claude Code session can transfer its c
 
 The Agent Swarm MCP currently provides:
 - HTTP server with REST API and MCP transport (`src/http.ts`)
-- SQLite database with `agents`, `agent_tasks`, and `agent_log` tables (`src/be/db.ts`)
-- 8 MCP tools for agent coordination (`src/tools/*.ts`)
+- SQLite database with `agents`, `agent_tasks`, `agent_log`, `channels`, `services`, `session_logs` tables (`src/be/db.ts`)
+- MCP tools for agent coordination (`src/tools/*.ts`)
 - CLI runners for lead/worker agents (`src/commands/*.ts`)
 - Hook system for session lifecycle events (`src/hooks/hook.ts`)
+- Capability-based feature flags (`src/server.ts:27-36`)
+- Runner-level polling endpoint (`GET /api/poll` in `src/http.ts:282-379`)
 
 **What's Missing:**
 - No mechanism for local sessions to export context
@@ -22,23 +24,28 @@ The Agent Swarm MCP currently provides:
 ### Key Discoveries:
 - Tasks flow through `send-task` tool with simple string payload (`src/tools/send-task.ts`)
 - Workers poll for tasks via `poll-task` with 60-second timeout (`src/tools/poll-task.ts`)
-- Hook system can provide guidance to workers on session start (`src/hooks/hook.ts:44-76`)
+- Tools return dual `content`/`structuredContent` format (`src/tools/poll-task.ts:131-148`)
+- Tools use `createToolRegistrar()` helper with `title` property (`src/tools/utils.ts:86-115`)
+- Hook system can provide guidance to workers on session start (`src/hooks/hook.ts`)
 - Database uses transactions for atomic operations (`src/be/db.ts`)
+- HTTP server uses Node.js http patterns, not Bun.serve (`src/http.ts`)
 
 ## Desired End State
 
 After implementation:
 1. Local Claude Code session calls `teleport-out` with summary and context
 2. Teleport request is stored in database with rich context package
-3. Worker polls for teleports via `poll-teleport` and claims one atomically
+3. Worker polls for teleports via `/api/poll` or `poll-teleport` MCP tool and claims one atomically
 4. Worker continues the work with full context understanding
 5. Teleport lifecycle is tracked (pending → claimed → started → completed/failed)
+6. Log events track teleport lifecycle for auditing
 
 ### Verification:
 - Local session can call `teleport-out` and receive teleport ID
-- Worker receives rich context package via `poll-teleport`
+- Worker receives rich context package via `poll-teleport` or `/api/poll`
 - Teleport status visible in dashboard/API
 - Worker completes task with proper tracking
+- Log events appear in `/api/logs`
 
 ## What We're NOT Doing
 
@@ -48,10 +55,11 @@ After implementation:
 - **Multi-teleport fan-out** - One teleport goes to one worker
 - **Teleport cancellation UI** - Can be added later
 - **File content sync** - Workers must have access to the same repo/codebase
+- **Dashboard UI for teleports** - Can be added in future iteration
 
 ## Implementation Approach
 
-Add a new `teleport_requests` table with rich context schema. Create 5 new MCP tools for the teleport lifecycle. Workers check for teleports before regular tasks. Context is provided as initial prompt material.
+Add a new `teleport_requests` table with rich context schema. Create 5 new MCP tools for the teleport lifecycle. Add `teleport` capability flag. Integrate with runner-level `/api/poll` endpoint. Workers check for teleports before regular tasks. Context is provided as initial prompt material.
 
 ---
 
@@ -64,7 +72,7 @@ Add teleport request storage and tracking.
 
 #### 1. Types (`src/types.ts`)
 
-Add teleport request schema after line 66 (after AgentLogSchema):
+Add teleport request schema and log event types. Add after `SessionLogSchema` (around line 187):
 
 ```typescript
 // Teleport Request Types
@@ -113,11 +121,64 @@ export const TeleportRequestSchema = z.object({
 export type TeleportRequest = z.infer<typeof TeleportRequestSchema>;
 ```
 
+Also update `AgentLogEventTypeSchema` to add teleport events (around line 141):
+
+```typescript
+export const AgentLogEventTypeSchema = z.enum([
+  // ... existing events
+  "agent_joined",
+  "agent_status_change",
+  "agent_left",
+  "task_created",
+  "task_status_change",
+  "task_progress",
+  "task_offered",
+  "task_accepted",
+  "task_rejected",
+  "task_claimed",
+  "task_released",
+  "channel_message",
+  "service_registered",
+  "service_unregistered",
+  "service_status_change",
+  // NEW teleport events
+  "teleport_created",
+  "teleport_claimed",
+  "teleport_started",
+  "teleport_completed",
+  "teleport_failed",
+]);
+```
+
 #### 2. Database Schema (`src/be/db.ts`)
 
-Add table creation after `agent_log` table (around line 60):
+Add type imports at top of file:
+
+```typescript
+import type {
+  Agent,
+  AgentLog,
+  AgentLogEventType,
+  AgentStatus,
+  AgentTask,
+  AgentTaskSource,
+  AgentTaskStatus,
+  AgentWithTasks,
+  Channel,
+  ChannelMessage,
+  ChannelType,
+  Service,
+  ServiceStatus,
+  SessionLog,
+  TeleportRequest,
+  TeleportRequestStatus,  // ADD THIS
+} from "../types";
+```
+
+Add table creation after `session_logs` table (around line 170):
 
 ```sql
+-- Teleport requests table
 CREATE TABLE IF NOT EXISTS teleport_requests (
   id TEXT PRIMARY KEY,
   sourceAgentId TEXT,
@@ -157,10 +218,13 @@ CREATE INDEX IF NOT EXISTS idx_teleport_requests_claimedBy ON teleport_requests(
 
 #### 3. Database Functions (`src/be/db.ts`)
 
-Add type and CRUD functions after existing task functions:
+Add type and CRUD functions at end of file (after session log functions):
 
 ```typescript
-// --- Teleport Request Types ---
+// ============================================================================
+// Teleport Request Operations
+// ============================================================================
+
 type TeleportRequestRow = {
   id: string;
   sourceAgentId: string | null;
@@ -205,7 +269,6 @@ function rowToTeleportRequest(row: TeleportRequestRow): TeleportRequest {
   };
 }
 
-// --- Teleport Request CRUD ---
 export function createTeleportRequest(data: {
   summary: string;
   currentGoal?: string;
@@ -218,7 +281,7 @@ export function createTeleportRequest(data: {
 }): TeleportRequest {
   const id = crypto.randomUUID();
   const row = getDb()
-    .prepare<TeleportRequestRow, [string, string | null, string | null, string, string, string | null, string | null, string | null, string | null, string | null]>(
+    .prepare<TeleportRequestRow, [string, string | null, string | null, string, string | null, string | null, string | null, string | null, string | null]>(
       `INSERT INTO teleport_requests
        (id, sourceAgentId, targetAgentId, status, summary, currentGoal, relevantFiles, contextNotes, workingDirectory, projectPath, createdAt)
        VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -236,6 +299,15 @@ export function createTeleportRequest(data: {
       data.projectPath ?? null
     );
   if (!row) throw new Error("Failed to create teleport request");
+
+  try {
+    createLogEntry({
+      eventType: "teleport_created",
+      agentId: data.sourceAgentId,
+      metadata: { teleportId: id, targetAgentId: data.targetAgentId },
+    });
+  } catch {}
+
   return rowToTeleportRequest(row);
 }
 
@@ -269,10 +341,22 @@ export function claimTeleportRequest(teleportId: string, agentId: string): Telep
        RETURNING *`
     )
     .get(agentId, teleportId);
+
+  if (row) {
+    try {
+      createLogEntry({
+        eventType: "teleport_claimed",
+        agentId,
+        metadata: { teleportId },
+      });
+    } catch {}
+  }
+
   return row ? rowToTeleportRequest(row) : null;
 }
 
 export function startTeleportRequest(teleportId: string, taskId?: string): TeleportRequest | null {
+  const teleport = getTeleportRequestById(teleportId);
   const row = getDb()
     .prepare<TeleportRequestRow, [string | null, string]>(
       `UPDATE teleport_requests
@@ -281,10 +365,22 @@ export function startTeleportRequest(teleportId: string, taskId?: string): Telep
        RETURNING *`
     )
     .get(taskId ?? null, teleportId);
+
+  if (row) {
+    try {
+      createLogEntry({
+        eventType: "teleport_started",
+        agentId: teleport?.claimedBy,
+        metadata: { teleportId, taskId },
+      });
+    } catch {}
+  }
+
   return row ? rowToTeleportRequest(row) : null;
 }
 
 export function completeTeleportRequest(teleportId: string, output?: string): TeleportRequest | null {
+  const teleport = getTeleportRequestById(teleportId);
   const row = getDb()
     .prepare<TeleportRequestRow, [string | null, string]>(
       `UPDATE teleport_requests
@@ -293,10 +389,22 @@ export function completeTeleportRequest(teleportId: string, output?: string): Te
        RETURNING *`
     )
     .get(output ?? null, teleportId);
+
+  if (row) {
+    try {
+      createLogEntry({
+        eventType: "teleport_completed",
+        agentId: teleport?.claimedBy,
+        metadata: { teleportId },
+      });
+    } catch {}
+  }
+
   return row ? rowToTeleportRequest(row) : null;
 }
 
 export function failTeleportRequest(teleportId: string, failureReason: string): TeleportRequest | null {
+  const teleport = getTeleportRequestById(teleportId);
   const row = getDb()
     .prepare<TeleportRequestRow, [string, string]>(
       `UPDATE teleport_requests
@@ -305,6 +413,17 @@ export function failTeleportRequest(teleportId: string, failureReason: string): 
        RETURNING *`
     )
     .get(failureReason, teleportId);
+
+  if (row) {
+    try {
+      createLogEntry({
+        eventType: "teleport_failed",
+        agentId: teleport?.claimedBy,
+        metadata: { teleportId, failureReason },
+      });
+    } catch {}
+  }
+
   return row ? rowToTeleportRequest(row) : null;
 }
 
@@ -321,6 +440,15 @@ export function getAllTeleportRequests(options?: { status?: TeleportRequestStatu
     .prepare<TeleportRequestRow, []>("SELECT * FROM teleport_requests ORDER BY createdAt DESC")
     .all()
     .map(rowToTeleportRequest);
+}
+
+export function getPendingTeleportCount(): number {
+  const result = getDb()
+    .prepare<{ count: number }, []>(
+      "SELECT COUNT(*) as count FROM teleport_requests WHERE status = 'pending'"
+    )
+    .get();
+  return result?.count ?? 0;
 }
 ```
 
@@ -350,15 +478,15 @@ Add 5 new MCP tools for teleport lifecycle management.
 **File**: `src/tools/teleport-out.ts` (NEW)
 
 ```typescript
-import { z } from "zod/v4";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { createToolRegistrar, type RequestInfo } from "./utils";
+import * as z from "zod";
 import {
   createTeleportRequest,
   getAgentById,
   getAllAgents,
-} from "../be/db";
-import { RelevantFileSchema } from "../types";
+} from "@/be/db";
+import { createToolRegistrar, type RequestInfo } from "@/tools/utils";
+import { RelevantFileSchema } from "@/types";
 
 const inputSchema = z.object({
   summary: z.string().min(1).describe("AI-generated summary of current session and work accomplished"),
@@ -371,6 +499,7 @@ const inputSchema = z.object({
 });
 
 const outputSchema = z.object({
+  yourAgentId: z.string().optional(),
   success: z.boolean(),
   teleportId: z.string().uuid().optional(),
   message: z.string(),
@@ -381,10 +510,11 @@ const outputSchema = z.object({
   }).optional(),
 });
 
-export function registerTeleportOut(server: McpServer): void {
+export const registerTeleportOutTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "teleport-out",
     {
+      title: "Teleport session to worker",
       description: "Transfer current session context to a worker agent to continue the work",
       inputSchema,
       outputSchema,
@@ -395,20 +525,32 @@ export function registerTeleportOut(server: McpServer): void {
         const targetAgent = getAgentById(args.targetAgentId);
         if (!targetAgent) {
           return {
-            success: false,
-            message: `Target agent ${args.targetAgentId} not found`,
+            content: [{ type: "text", text: `Target agent ${args.targetAgentId} not found` }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: `Target agent ${args.targetAgentId} not found`,
+            },
           };
         }
         if (targetAgent.isLead) {
           return {
-            success: false,
-            message: "Cannot teleport to lead agent. Choose a worker agent.",
+            content: [{ type: "text", text: "Cannot teleport to lead agent. Choose a worker agent." }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: "Cannot teleport to lead agent. Choose a worker agent.",
+            },
           };
         }
         if (targetAgent.status === "offline") {
           return {
-            success: false,
-            message: `Target agent "${targetAgent.name}" is offline`,
+            content: [{ type: "text", text: `Target agent "${targetAgent.name}" is offline` }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: `Target agent "${targetAgent.name}" is offline`,
+            },
           };
         }
       } else {
@@ -416,8 +558,12 @@ export function registerTeleportOut(server: McpServer): void {
         const workers = getAllAgents().filter(a => !a.isLead && a.status !== "offline");
         if (workers.length === 0) {
           return {
-            success: false,
-            message: "No worker agents available to receive teleport",
+            content: [{ type: "text", text: "No worker agents available to receive teleport" }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: "No worker agents available to receive teleport",
+            },
           };
         }
       }
@@ -443,19 +589,25 @@ export function registerTeleportOut(server: McpServer): void {
         ? getAgentById(args.targetAgentId)
         : undefined;
 
+      const message = args.targetAgentId
+        ? `Session teleported to ${targetAgent?.name}. Teleport ID: ${teleport.id}`
+        : `Session teleported to swarm. Any available worker will pick it up. Teleport ID: ${teleport.id}`;
+
       return {
-        success: true,
-        teleportId: teleport.id,
-        message: args.targetAgentId
-          ? `Session teleported to ${targetAgent?.name}. Teleport ID: ${teleport.id}`
-          : `Session teleported to swarm. Any available worker will pick it up. Teleport ID: ${teleport.id}`,
-        targetAgent: targetAgent
-          ? { id: targetAgent.id, name: targetAgent.name, status: targetAgent.status }
-          : undefined,
+        content: [{ type: "text", text: message }],
+        structuredContent: {
+          yourAgentId: requestInfo.agentId,
+          success: true,
+          teleportId: teleport.id,
+          message,
+          targetAgent: targetAgent
+            ? { id: targetAgent.id, name: targetAgent.name, status: targetAgent.status }
+            : undefined,
+        },
       };
     }
   );
-}
+};
 ```
 
 #### 2. poll-teleport Tool (`src/tools/poll-teleport.ts`)
@@ -463,20 +615,22 @@ export function registerTeleportOut(server: McpServer): void {
 **File**: `src/tools/poll-teleport.ts` (NEW)
 
 ```typescript
-import { z } from "zod/v4";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { createToolRegistrar, type RequestInfo } from "./utils";
+import * as z from "zod";
 import {
   getPendingTeleportForAgent,
   claimTeleportRequest,
   getAgentById,
   updateAgentStatus,
-} from "../be/db";
-import { TeleportRequestSchema } from "../types";
+  getDb,
+} from "@/be/db";
+import { createToolRegistrar, type RequestInfo } from "@/tools/utils";
+import { TeleportRequestSchema } from "@/types";
 
 const inputSchema = z.object({});
 
 const outputSchema = z.object({
+  yourAgentId: z.string().optional(),
   success: z.boolean(),
   message: z.string(),
   teleport: TeleportRequestSchema.optional(),
@@ -486,10 +640,11 @@ const outputSchema = z.object({
 const POLL_TIMEOUT_MS = 30_000; // 30 seconds (shorter than poll-task)
 const POLL_INTERVAL_MS = 2_000; // 2 seconds
 
-export function registerPollTeleport(server: McpServer): void {
+export const registerPollTeleportTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "poll-teleport",
     {
+      title: "Poll for teleport requests",
       description: "Poll for pending teleport requests to continue another session's work",
       inputSchema,
       outputSchema,
@@ -498,26 +653,38 @@ export function registerPollTeleport(server: McpServer): void {
       const agentId = requestInfo.agentId;
       if (!agentId) {
         return {
-          success: false,
-          message: "Agent ID required. Set X-Agent-ID header.",
-          waitedForSeconds: 0,
+          content: [{ type: "text", text: "Agent ID required. Set X-Agent-ID header." }],
+          structuredContent: {
+            yourAgentId: undefined,
+            success: false,
+            message: "Agent ID required. Set X-Agent-ID header.",
+            waitedForSeconds: 0,
+          },
         };
       }
 
       const agent = getAgentById(agentId);
       if (!agent) {
         return {
-          success: false,
-          message: `Agent ${agentId} not found`,
-          waitedForSeconds: 0,
+          content: [{ type: "text", text: `Agent ${agentId} not found` }],
+          structuredContent: {
+            yourAgentId: agentId,
+            success: false,
+            message: `Agent ${agentId} not found`,
+            waitedForSeconds: 0,
+          },
         };
       }
 
       if (agent.isLead) {
         return {
-          success: false,
-          message: "Lead agents cannot poll for teleports",
-          waitedForSeconds: 0,
+          content: [{ type: "text", text: "Lead agents cannot poll for teleports" }],
+          structuredContent: {
+            yourAgentId: agentId,
+            success: false,
+            message: "Lead agents cannot poll for teleports",
+            waitedForSeconds: 0,
+          },
         };
       }
 
@@ -525,23 +692,30 @@ export function registerPollTeleport(server: McpServer): void {
       let elapsedMs = 0;
 
       while (elapsedMs < POLL_TIMEOUT_MS) {
-        // Try to claim a pending teleport atomically
-        const pending = getPendingTeleportForAgent(agentId);
+        // Try to claim a pending teleport atomically using transaction
+        const result = getDb().transaction(() => {
+          const pending = getPendingTeleportForAgent(agentId);
+          if (!pending) return null;
 
-        if (pending) {
           const claimed = claimTeleportRequest(pending.id, agentId);
+          return claimed;
+        })();
 
-          if (claimed) {
-            // Update agent status to busy
-            updateAgentStatus(agentId, "busy");
+        if (result) {
+          // Update agent status to busy
+          updateAgentStatus(agentId, "busy");
 
-            return {
+          const message = `Claimed teleport ${result.id}. Context follows.`;
+          return {
+            content: [{ type: "text", text: message }],
+            structuredContent: {
+              yourAgentId: agentId,
               success: true,
-              message: `Claimed teleport ${claimed.id}. Context follows.`,
-              teleport: claimed,
+              message,
+              teleport: result,
               waitedForSeconds: Math.round(elapsedMs / 1000),
-            };
-          }
+            },
+          };
         }
 
         // Wait before next poll
@@ -550,13 +724,17 @@ export function registerPollTeleport(server: McpServer): void {
       }
 
       return {
-        success: false,
-        message: "No teleport requests available. Try poll-task for regular tasks.",
-        waitedForSeconds: Math.round(POLL_TIMEOUT_MS / 1000),
+        content: [{ type: "text", text: "No teleport requests available. Try poll-task for regular tasks." }],
+        structuredContent: {
+          yourAgentId: agentId,
+          success: false,
+          message: "No teleport requests available. Try poll-task for regular tasks.",
+          waitedForSeconds: Math.round(POLL_TIMEOUT_MS / 1000),
+        },
       };
     }
   );
-}
+};
 ```
 
 #### 3. start-teleport Tool (`src/tools/start-teleport.ts`)
@@ -564,30 +742,32 @@ export function registerPollTeleport(server: McpServer): void {
 **File**: `src/tools/start-teleport.ts` (NEW)
 
 ```typescript
-import { z } from "zod/v4";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { createToolRegistrar, type RequestInfo } from "./utils";
+import * as z from "zod";
 import {
   startTeleportRequest,
   getTeleportRequestById,
   createTask,
-} from "../be/db";
+} from "@/be/db";
+import { createToolRegistrar, type RequestInfo } from "@/tools/utils";
 
 const inputSchema = z.object({
   teleportId: z.string().uuid().describe("The teleport request ID to start working on"),
 });
 
 const outputSchema = z.object({
+  yourAgentId: z.string().optional(),
   success: z.boolean(),
   message: z.string(),
   taskId: z.string().uuid().optional(),
 });
 
-export function registerStartTeleport(server: McpServer): void {
+export const registerStartTeleportTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "start-teleport",
     {
-      description: "Mark a teleport request as started and optionally create a tracking task",
+      title: "Start teleport work",
+      description: "Mark a teleport request as started and create a tracking task",
       inputSchema,
       outputSchema,
     },
@@ -595,30 +775,46 @@ export function registerStartTeleport(server: McpServer): void {
       const agentId = requestInfo.agentId;
       if (!agentId) {
         return {
-          success: false,
-          message: "Agent ID required",
+          content: [{ type: "text", text: "Agent ID required" }],
+          structuredContent: {
+            yourAgentId: undefined,
+            success: false,
+            message: "Agent ID required",
+          },
         };
       }
 
       const teleport = getTeleportRequestById(args.teleportId);
       if (!teleport) {
         return {
-          success: false,
-          message: `Teleport ${args.teleportId} not found`,
+          content: [{ type: "text", text: `Teleport ${args.teleportId} not found` }],
+          structuredContent: {
+            yourAgentId: agentId,
+            success: false,
+            message: `Teleport ${args.teleportId} not found`,
+          },
         };
       }
 
       if (teleport.claimedBy !== agentId) {
         return {
-          success: false,
-          message: "You did not claim this teleport",
+          content: [{ type: "text", text: "You did not claim this teleport" }],
+          structuredContent: {
+            yourAgentId: agentId,
+            success: false,
+            message: "You did not claim this teleport",
+          },
         };
       }
 
       if (teleport.status !== "claimed") {
         return {
-          success: false,
-          message: `Teleport is ${teleport.status}, not claimed`,
+          content: [{ type: "text", text: `Teleport is ${teleport.status}, not claimed` }],
+          structuredContent: {
+            yourAgentId: agentId,
+            success: false,
+            message: `Teleport is ${teleport.status}, not claimed`,
+          },
         };
       }
 
@@ -636,19 +832,28 @@ export function registerStartTeleport(server: McpServer): void {
 
       if (!started) {
         return {
-          success: false,
-          message: "Failed to start teleport",
+          content: [{ type: "text", text: "Failed to start teleport" }],
+          structuredContent: {
+            yourAgentId: agentId,
+            success: false,
+            message: "Failed to start teleport",
+          },
         };
       }
 
+      const message = `Teleport started. Task ${task.id} created for tracking.`;
       return {
-        success: true,
-        message: `Teleport started. Task ${task.id} created for tracking.`,
-        taskId: task.id,
+        content: [{ type: "text", text: message }],
+        structuredContent: {
+          yourAgentId: agentId,
+          success: true,
+          message,
+          taskId: task.id,
+        },
       };
     }
   );
-}
+};
 ```
 
 #### 4. complete-teleport Tool (`src/tools/complete-teleport.ts`)
@@ -656,9 +861,8 @@ export function registerStartTeleport(server: McpServer): void {
 **File**: `src/tools/complete-teleport.ts` (NEW)
 
 ```typescript
-import { z } from "zod/v4";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { createToolRegistrar, type RequestInfo } from "./utils";
+import * as z from "zod";
 import {
   completeTeleportRequest,
   failTeleportRequest,
@@ -666,7 +870,8 @@ import {
   updateAgentStatus,
   completeTask,
   failTask,
-} from "../be/db";
+} from "@/be/db";
+import { createToolRegistrar, type RequestInfo } from "@/tools/utils";
 
 const inputSchema = z.object({
   teleportId: z.string().uuid().describe("The teleport request ID"),
@@ -676,14 +881,16 @@ const inputSchema = z.object({
 });
 
 const outputSchema = z.object({
+  yourAgentId: z.string().optional(),
   success: z.boolean(),
   message: z.string(),
 });
 
-export function registerCompleteTeleport(server: McpServer): void {
+export const registerCompleteTeleportTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "complete-teleport",
     {
+      title: "Complete teleport work",
       description: "Mark a teleport request as completed or failed",
       inputSchema,
       outputSchema,
@@ -692,23 +899,35 @@ export function registerCompleteTeleport(server: McpServer): void {
       const agentId = requestInfo.agentId;
       if (!agentId) {
         return {
-          success: false,
-          message: "Agent ID required",
+          content: [{ type: "text", text: "Agent ID required" }],
+          structuredContent: {
+            yourAgentId: undefined,
+            success: false,
+            message: "Agent ID required",
+          },
         };
       }
 
       const teleport = getTeleportRequestById(args.teleportId);
       if (!teleport) {
         return {
-          success: false,
-          message: `Teleport ${args.teleportId} not found`,
+          content: [{ type: "text", text: `Teleport ${args.teleportId} not found` }],
+          structuredContent: {
+            yourAgentId: agentId,
+            success: false,
+            message: `Teleport ${args.teleportId} not found`,
+          },
         };
       }
 
       if (teleport.claimedBy !== agentId) {
         return {
-          success: false,
-          message: "You did not claim this teleport",
+          content: [{ type: "text", text: "You did not claim this teleport" }],
+          structuredContent: {
+            yourAgentId: agentId,
+            success: false,
+            message: "You did not claim this teleport",
+          },
         };
       }
 
@@ -728,21 +947,30 @@ export function registerCompleteTeleport(server: McpServer): void {
 
       if (!result) {
         return {
-          success: false,
-          message: "Failed to update teleport status",
+          content: [{ type: "text", text: "Failed to update teleport status" }],
+          structuredContent: {
+            yourAgentId: agentId,
+            success: false,
+            message: "Failed to update teleport status",
+          },
         };
       }
 
       // Set agent back to idle
       updateAgentStatus(agentId, "idle");
 
+      const message = `Teleport ${args.status}`;
       return {
-        success: true,
-        message: `Teleport ${args.status}`,
+        content: [{ type: "text", text: message }],
+        structuredContent: {
+          yourAgentId: agentId,
+          success: true,
+          message,
+        },
       };
     }
   );
-}
+};
 ```
 
 #### 5. get-teleport-details Tool (`src/tools/get-teleport-details.ts`)
@@ -750,17 +978,18 @@ export function registerCompleteTeleport(server: McpServer): void {
 **File**: `src/tools/get-teleport-details.ts` (NEW)
 
 ```typescript
-import { z } from "zod/v4";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { createToolRegistrar, type RequestInfo } from "./utils";
-import { getTeleportRequestById, getAgentById } from "../be/db";
-import { TeleportRequestSchema } from "../types";
+import * as z from "zod";
+import { getTeleportRequestById, getAgentById } from "@/be/db";
+import { createToolRegistrar, type RequestInfo } from "@/tools/utils";
+import { TeleportRequestSchema } from "@/types";
 
 const inputSchema = z.object({
   teleportId: z.string().uuid().describe("The teleport request ID to get details for"),
 });
 
 const outputSchema = z.object({
+  yourAgentId: z.string().optional(),
   success: z.boolean(),
   message: z.string(),
   teleport: TeleportRequestSchema.optional(),
@@ -774,10 +1003,11 @@ const outputSchema = z.object({
   }).optional(),
 });
 
-export function registerGetTeleportDetails(server: McpServer): void {
+export const registerGetTeleportDetailsTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "get-teleport-details",
     {
+      title: "Get teleport details",
       description: "Get details of a teleport request",
       inputSchema,
       outputSchema,
@@ -787,8 +1017,12 @@ export function registerGetTeleportDetails(server: McpServer): void {
 
       if (!teleport) {
         return {
-          success: false,
-          message: `Teleport ${args.teleportId} not found`,
+          content: [{ type: "text", text: `Teleport ${args.teleportId} not found` }],
+          structuredContent: {
+            yourAgentId: requestInfo.agentId,
+            success: false,
+            message: `Teleport ${args.teleportId} not found`,
+          },
         };
       }
 
@@ -800,20 +1034,25 @@ export function registerGetTeleportDetails(server: McpServer): void {
         ? getAgentById(teleport.claimedBy)
         : undefined;
 
+      const message = `Teleport ${teleport.id} is ${teleport.status}`;
       return {
-        success: true,
-        message: `Teleport ${teleport.id} is ${teleport.status}`,
-        teleport,
-        sourceAgent: sourceAgent
-          ? { id: sourceAgent.id, name: sourceAgent.name }
-          : undefined,
-        claimedByAgent: claimedByAgent
-          ? { id: claimedByAgent.id, name: claimedByAgent.name }
-          : undefined,
+        content: [{ type: "text", text: message }],
+        structuredContent: {
+          yourAgentId: requestInfo.agentId,
+          success: true,
+          message,
+          teleport,
+          sourceAgent: sourceAgent
+            ? { id: sourceAgent.id, name: sourceAgent.name }
+            : undefined,
+          claimedByAgent: claimedByAgent
+            ? { id: claimedByAgent.id, name: claimedByAgent.name }
+            : undefined,
+        },
       };
     }
   );
-}
+};
 ```
 
 ### Success Criteria:
@@ -835,28 +1074,38 @@ export function registerGetTeleportDetails(server: McpServer): void {
 ## Phase 3: Register Tools in Server
 
 ### Overview
-Wire up the new teleport tools in the MCP server.
+Wire up the new teleport tools in the MCP server with capability flag.
 
 ### Changes Required:
 
 #### 1. Update Server (`src/server.ts`)
 
-Add imports and registrations:
+Add imports after existing tool imports:
 
 ```typescript
-// Add imports after line 10
-import { registerTeleportOut } from "./tools/teleport-out";
-import { registerPollTeleport } from "./tools/poll-teleport";
-import { registerStartTeleport } from "./tools/start-teleport";
-import { registerCompleteTeleport } from "./tools/complete-teleport";
-import { registerGetTeleportDetails } from "./tools/get-teleport-details";
+import { registerTeleportOutTool } from "./tools/teleport-out";
+import { registerPollTeleportTool } from "./tools/poll-teleport";
+import { registerStartTeleportTool } from "./tools/start-teleport";
+import { registerCompleteTeleportTool } from "./tools/complete-teleport";
+import { registerGetTeleportDetailsTool } from "./tools/get-teleport-details";
+```
 
-// Add registrations after line 33 (after existing tool registrations)
-registerTeleportOut(server);
-registerPollTeleport(server);
-registerStartTeleport(server);
-registerCompleteTeleport(server);
-registerGetTeleportDetails(server);
+Update DEFAULT_CAPABILITIES (line 27):
+
+```typescript
+const DEFAULT_CAPABILITIES = "core,task-pool,messaging,profiles,services,teleport";
+```
+
+Add capability-gated registration after existing capability blocks (around line 94):
+
+```typescript
+if (hasCapability("teleport")) {
+  registerTeleportOutTool(server);
+  registerPollTeleportTool(server);
+  registerStartTeleportTool(server);
+  registerCompleteTeleportTool(server);
+  registerGetTeleportDetailsTool(server);
+}
 ```
 
 ### Success Criteria:
@@ -866,41 +1115,59 @@ registerGetTeleportDetails(server);
 - [ ] Server starts and lists teleport tools
 
 #### Manual Verification:
-- [ ] Tools appear in MCP tool list
+- [ ] Tools appear in MCP tool list when capability enabled
+- [ ] Tools do NOT appear when capability disabled
 
 ---
 
-## Phase 4: Worker Integration
+## Phase 4: Runner-Level Polling Integration
 
 ### Overview
-Update worker hooks to check for teleports before regular tasks.
+Add teleport detection to the runner-level `/api/poll` endpoint so runners can detect teleports without using MCP tools.
 
 ### Changes Required:
 
-#### 1. Update Hook Messages (`src/hooks/hook.ts`)
+#### 1. Update HTTP Server (`src/http.ts`)
 
-Modify the SessionStart case for workers (around line 60):
+Add import at top:
 
 ```typescript
-} else {
-  console.log(
-    `${agentInfo.name} is registered as a WORKER agent (status: ${agentInfo.status}) as of ${new Date().toISOString()}.`
-  );
-  console.log(
-    `As a worker agent, FIRST check for teleport requests using the poll-teleport tool.
-Teleport requests contain rich context from sessions that need continuation - summary, goal, relevant files, and notes.
-If no teleport requests are pending, fall back to poll-task for regular task assignments.
+import { getPendingTeleportForAgent } from "./be/db";
+```
 
-Priority:
-1. poll-teleport - Check for session continuations with rich context
-2. poll-task - Check for regular task assignments
+Update `GET /api/poll` handler (around line 294) to check for teleports FIRST:
 
-When you receive a teleport:
-- Read the summary and context carefully
-- Call start-teleport to begin tracking
-- Continue the work as described
-- Call complete-teleport when done`
-  );
+```typescript
+// GET /api/poll - Poll for triggers (tasks, mentions, etc.)
+if (req.method === "GET" && pathSegments[0] === "api" && pathSegments[1] === "poll") {
+  // ... existing agent validation ...
+
+  // Use transaction for consistent reads across all trigger checks
+  const result = getDb().transaction(() => {
+    const agent = getAgentById(myAgentId);
+    if (!agent) {
+      return { error: "Agent not found", status: 404 };
+    }
+
+    // === TELEPORT CHECK (highest priority for workers) ===
+    if (!agent.isLead) {
+      const pendingTeleport = getPendingTeleportForAgent(myAgentId);
+      if (pendingTeleport) {
+        return {
+          trigger: {
+            type: "teleport_pending",
+            teleportId: pendingTeleport.id,
+            teleport: pendingTeleport,
+          },
+        };
+      }
+    }
+
+    // Check for offered tasks (existing code)
+    const offeredTasks = getOfferedTasksForAgent(myAgentId);
+    // ... rest of existing code ...
+  })();
+  // ... rest of handler ...
 }
 ```
 
@@ -908,14 +1175,71 @@ When you receive a teleport:
 
 #### Automated Verification:
 - [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Hook message includes teleport guidance
+- [ ] Server starts without errors
 
 #### Manual Verification:
-- [ ] Worker receives teleport-first guidance on session start
+- [ ] `/api/poll` returns `teleport_pending` trigger when teleport exists
+- [ ] Teleport trigger has higher priority than offered tasks for workers
 
 ---
 
-## Phase 5: HTTP API Endpoints
+## Phase 5: Worker Hook Integration
+
+### Overview
+Update worker hooks to inform about teleport availability.
+
+### Changes Required:
+
+#### 1. Update Hook Messages (`src/hooks/hook.ts`)
+
+Add teleport info to `InboxSummary` type and `getInboxSummary()` in db.ts first, then update hook.
+
+In `src/be/db.ts`, update `InboxSummary` interface (around line 1609):
+
+```typescript
+export interface InboxSummary {
+  unreadCount: number;
+  mentionsCount: number;
+  offeredTasksCount: number;
+  poolTasksCount: number;
+  inProgressCount: number;
+  pendingTeleportsCount: number;  // ADD THIS
+  recentMentions: MentionPreview[];
+}
+```
+
+Update `getInboxSummary()` function to include teleport count:
+
+```typescript
+// Add after poolResult (around line 1659)
+const teleportResult = db
+  .prepare<{ count: number }, [string]>(
+    "SELECT COUNT(*) as count FROM teleport_requests WHERE status = 'pending' AND (targetAgentId = ? OR targetAgentId IS NULL)"
+  )
+  .get(agentId);
+
+// Include in return object
+return {
+  // ... existing fields ...
+  pendingTeleportsCount: teleportResult?.count ?? 0,
+  // ...
+};
+```
+
+Update `formatSystemTray()` in `src/hooks/hook.ts` to show teleport count in status display.
+
+### Success Criteria:
+
+#### Automated Verification:
+- [ ] TypeScript compiles: `bun run tsc:check`
+- [ ] Hook message includes teleport info
+
+#### Manual Verification:
+- [ ] Worker sees teleport count in system tray on session start
+
+---
+
+## Phase 6: HTTP API Endpoints
 
 ### Overview
 Add REST endpoints for dashboard visibility.
@@ -924,24 +1248,49 @@ Add REST endpoints for dashboard visibility.
 
 #### 1. Update HTTP Server (`src/http.ts`)
 
-Add teleport endpoints after existing API routes:
+Add imports:
+
+```typescript
+import {
+  // ... existing imports ...
+  getAllTeleportRequests,
+  getTeleportRequestById,
+  getPendingTeleportCount,
+} from "./be/db";
+import type { TeleportRequestStatus } from "./types";
+```
+
+Add teleport endpoints after existing API routes (around line 675):
 
 ```typescript
 // GET /api/teleports - List teleport requests
-if (req.method === "GET" && url.pathname === "/api/teleports") {
-  const statusFilter = url.searchParams.get("status") as TeleportRequestStatus | null;
-  const teleports = getAllTeleportRequests(
-    statusFilter ? { status: statusFilter } : undefined
-  );
-  return Response.json({ teleports });
+if (
+  req.method === "GET" &&
+  pathSegments[0] === "api" &&
+  pathSegments[1] === "teleports" &&
+  !pathSegments[2]
+) {
+  const status = queryParams.get("status") as TeleportRequestStatus | null;
+  const teleports = getAllTeleportRequests(status ? { status } : undefined);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ teleports }));
+  return;
 }
 
 // GET /api/teleports/:id - Get teleport details
-if (req.method === "GET" && url.pathname.match(/^\/api\/teleports\/[a-f0-9-]+$/)) {
-  const teleportId = url.pathname.split("/").pop()!;
+if (
+  req.method === "GET" &&
+  pathSegments[0] === "api" &&
+  pathSegments[1] === "teleports" &&
+  pathSegments[2]
+) {
+  const teleportId = pathSegments[2];
   const teleport = getTeleportRequestById(teleportId);
+
   if (!teleport) {
-    return Response.json({ error: "Teleport not found" }, { status: 404 });
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Teleport not found" }));
+    return;
   }
 
   const sourceAgent = teleport.sourceAgentId
@@ -951,32 +1300,53 @@ if (req.method === "GET" && url.pathname.match(/^\/api\/teleports\/[a-f0-9-]+$/)
     ? getAgentById(teleport.claimedBy)
     : undefined;
 
-  return Response.json({
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({
     teleport,
     sourceAgent,
     claimedByAgent,
-  });
+  }));
+  return;
 }
 ```
 
-Update `/api/stats` to include teleport counts:
+Update `/api/stats` endpoint to include teleport counts (around line 631):
 
 ```typescript
-// Add to stats response
-const teleportCounts = {
-  pending: getAllTeleportRequests({ status: "pending" }).length,
-  claimed: getAllTeleportRequests({ status: "claimed" }).length,
-  started: getAllTeleportRequests({ status: "started" }).length,
-  completed: getAllTeleportRequests({ status: "completed" }).length,
-  failed: getAllTeleportRequests({ status: "failed" }).length,
-};
+// GET /api/stats - Dashboard summary stats
+if (req.method === "GET" && pathSegments[0] === "api" && pathSegments[1] === "stats") {
+  const agents = getAllAgents();
+  const tasks = getAllTasks();
+  const teleports = getAllTeleportRequests();
 
-// Include in response
-return Response.json({
-  agents: { ... },
-  tasks: { ... },
-  teleports: teleportCounts,  // Add this
-});
+  const stats = {
+    agents: {
+      total: agents.length,
+      idle: agents.filter((a) => a.status === "idle").length,
+      busy: agents.filter((a) => a.status === "busy").length,
+      offline: agents.filter((a) => a.status === "offline").length,
+    },
+    tasks: {
+      total: tasks.length,
+      pending: tasks.filter((t) => t.status === "pending").length,
+      in_progress: tasks.filter((t) => t.status === "in_progress").length,
+      completed: tasks.filter((t) => t.status === "completed").length,
+      failed: tasks.filter((t) => t.status === "failed").length,
+    },
+    teleports: {
+      total: teleports.length,
+      pending: teleports.filter((t) => t.status === "pending").length,
+      claimed: teleports.filter((t) => t.status === "claimed").length,
+      started: teleports.filter((t) => t.status === "started").length,
+      completed: teleports.filter((t) => t.status === "completed").length,
+      failed: teleports.filter((t) => t.status === "failed").length,
+    },
+  };
+
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(stats));
+  return;
+}
 ```
 
 ### Success Criteria:
@@ -1019,7 +1389,7 @@ Claude: Session teleported! Teleport ID: abc-12345
 ### Receiving (Worker)
 
 ```
-[Worker calls poll-teleport, receives:]
+[Worker calls poll-teleport OR runner detects via /api/poll, receives:]
 
 {
   "success": true,
@@ -1102,7 +1472,7 @@ Manual testing checklist:
 
 2. **Teleport Claiming**
    - Start a worker
-   - Worker calls `poll-teleport`
+   - Worker calls `poll-teleport` OR runner detects via `/api/poll`
    - Verify teleport status changes to "claimed"
 
 3. **Teleport Completion**
@@ -1121,16 +1491,16 @@ Manual testing checklist:
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `src/types.ts` | Edit | Add TeleportRequest types |
-| `src/be/db.ts` | Edit | Add teleport_requests table + CRUD |
+| `src/types.ts` | Edit | Add TeleportRequest types + log events |
+| `src/be/db.ts` | Edit | Add teleport_requests table + CRUD + inbox update |
 | `src/tools/teleport-out.ts` | Create | Send context to swarm |
 | `src/tools/poll-teleport.ts` | Create | Worker claims teleport |
 | `src/tools/start-teleport.ts` | Create | Worker starts work |
 | `src/tools/complete-teleport.ts` | Create | Worker completes |
 | `src/tools/get-teleport-details.ts` | Create | View status |
-| `src/server.ts` | Edit | Register new tools |
+| `src/server.ts` | Edit | Register tools + capability flag |
 | `src/hooks/hook.ts` | Edit | Worker teleport awareness |
-| `src/http.ts` | Edit | REST API endpoints |
+| `src/http.ts` | Edit | REST API endpoints + /api/poll integration |
 
 ---
 
@@ -1139,4 +1509,8 @@ Manual testing checklist:
 - Claude Code Web teleport: `claude --teleport <session_id>`
 - Session storage: `~/.claude/projects/`
 - Existing task flow: `src/tools/send-task.ts`, `src/tools/poll-task.ts`
+- Tool patterns: `src/tools/poll-task.ts:131-148` (return shape)
 - Hook system: `src/hooks/hook.ts`
+- Capability system: `src/server.ts:27-36`
+- Runner polling: `src/http.ts:282-379`
+- Research: `thoughts/shared/research/2025-01-09-inverse-teleport-plan-review.md`
