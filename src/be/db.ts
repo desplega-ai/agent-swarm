@@ -26,15 +26,18 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   db = new Database(dbPath, { create: true });
   console.log(`Database initialized at ${dbPath}`);
 
-  db.run("PRAGMA journal_mode = WAL;");
-  db.run("PRAGMA foreign_keys = ON;");
+  // Capture in local const for TypeScript (db is guaranteed non-null here)
+  const database = db;
+
+  database.run("PRAGMA journal_mode = WAL;");
+  database.run("PRAGMA foreign_keys = ON;");
 
   // Schema initialization - wrapped in transaction for atomicity
   // Individual statements ensure compatibility with older Bun versions (< 1.0.26)
   // that don't support multi-statement queries
-  const initSchema = db.transaction(() => {
+  const initSchema = database.transaction(() => {
     // Tables
-    db.run(`
+    database.run(`
       CREATE TABLE IF NOT EXISTS agents (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -48,7 +51,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       )
     `);
 
-    db.run(`
+    database.run(`
       CREATE TABLE IF NOT EXISTS agent_tasks (
         id TEXT PRIMARY KEY,
         agentId TEXT,
@@ -76,7 +79,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       )
     `);
 
-    db.run(`
+    database.run(`
       CREATE TABLE IF NOT EXISTS agent_log (
         id TEXT PRIMARY KEY,
         eventType TEXT NOT NULL,
@@ -89,7 +92,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       )
     `);
 
-    db.run(`
+    database.run(`
       CREATE TABLE IF NOT EXISTS channels (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
@@ -102,7 +105,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       )
     `);
 
-    db.run(`
+    database.run(`
       CREATE TABLE IF NOT EXISTS channel_messages (
         id TEXT PRIMARY KEY,
         channelId TEXT NOT NULL,
@@ -117,7 +120,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       )
     `);
 
-    db.run(`
+    database.run(`
       CREATE TABLE IF NOT EXISTS channel_read_state (
         agentId TEXT NOT NULL,
         channelId TEXT NOT NULL,
@@ -128,7 +131,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       )
     `);
 
-    db.run(`
+    database.run(`
       CREATE TABLE IF NOT EXISTS services (
         id TEXT PRIMARY KEY,
         agentId TEXT NOT NULL,
@@ -151,7 +154,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       )
     `);
 
-    db.run(`
+    database.run(`
       CREATE TABLE IF NOT EXISTS session_logs (
         id TEXT PRIMARY KEY,
         taskId TEXT,
@@ -165,19 +168,27 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     `);
 
     // Indexes
-    db.run(`CREATE INDEX IF NOT EXISTS idx_agent_tasks_agentId ON agent_tasks(agentId)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_agent_log_agentId ON agent_log(agentId)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_agent_log_taskId ON agent_log(taskId)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_agent_log_eventType ON agent_log(eventType)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_agent_log_createdAt ON agent_log(createdAt)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_channel_messages_channelId ON channel_messages(channelId)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_channel_messages_agentId ON channel_messages(agentId)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_channel_messages_createdAt ON channel_messages(createdAt)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_services_agentId ON services(agentId)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_services_status ON services(status)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_session_logs_taskId ON session_logs(taskId)`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_session_logs_sessionId ON session_logs(sessionId)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_agent_tasks_agentId ON agent_tasks(agentId)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_agent_log_agentId ON agent_log(agentId)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_agent_log_taskId ON agent_log(taskId)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_agent_log_eventType ON agent_log(eventType)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_agent_log_createdAt ON agent_log(createdAt)`);
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_channel_messages_channelId ON channel_messages(channelId)`,
+    );
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_channel_messages_agentId ON channel_messages(agentId)`,
+    );
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_channel_messages_createdAt ON channel_messages(createdAt)`,
+    );
+    database.run(`CREATE INDEX IF NOT EXISTS idx_services_agentId ON services(agentId)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_services_status ON services(status)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_session_logs_taskId ON session_logs(taskId)`);
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_session_logs_sessionId ON session_logs(sessionId)`,
+    );
   });
 
   initSchema();
