@@ -67,6 +67,9 @@
   "peerDependencies": {
     "typescript": "^5"
   },
+  "engines": {
+    "bun": ">=1.0.26"
+  },
   "dependencies": {
     "@inkjs/ui": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.25.1",

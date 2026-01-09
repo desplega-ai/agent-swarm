@@ -26,148 +26,172 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   db = new Database(dbPath, { create: true });
   console.log(`Database initialized at ${dbPath}`);
 
-  db.run("PRAGMA journal_mode = WAL;");
-  db.run("PRAGMA foreign_keys = ON;");
+  // Capture in local const for TypeScript (db is guaranteed non-null here)
+  const database = db;
 
-  db.run(`
-    CREATE TABLE IF NOT EXISTS agents (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      isLead INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL CHECK(status IN ('idle', 'busy', 'offline')),
-      description TEXT,
-      role TEXT,
-      capabilities TEXT DEFAULT '[]',
-      createdAt TEXT NOT NULL,
-      lastUpdatedAt TEXT NOT NULL
+  database.run("PRAGMA journal_mode = WAL;");
+  database.run("PRAGMA foreign_keys = ON;");
+
+  // Schema initialization - wrapped in transaction for atomicity
+  // Individual statements ensure compatibility with older Bun versions (< 1.0.26)
+  // that don't support multi-statement queries
+  const initSchema = database.transaction(() => {
+    // Tables
+    database.run(`
+      CREATE TABLE IF NOT EXISTS agents (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        isLead INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL CHECK(status IN ('idle', 'busy', 'offline')),
+        description TEXT,
+        role TEXT,
+        capabilities TEXT DEFAULT '[]',
+        createdAt TEXT NOT NULL,
+        lastUpdatedAt TEXT NOT NULL
+      )
+    `);
+
+    database.run(`
+      CREATE TABLE IF NOT EXISTS agent_tasks (
+        id TEXT PRIMARY KEY,
+        agentId TEXT,
+        creatorAgentId TEXT,
+        task TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        source TEXT NOT NULL DEFAULT 'mcp',
+        taskType TEXT,
+        tags TEXT DEFAULT '[]',
+        priority INTEGER DEFAULT 50,
+        dependsOn TEXT DEFAULT '[]',
+        offeredTo TEXT,
+        offeredAt TEXT,
+        acceptedAt TEXT,
+        rejectionReason TEXT,
+        slackChannelId TEXT,
+        slackThreadTs TEXT,
+        slackUserId TEXT,
+        createdAt TEXT NOT NULL,
+        lastUpdatedAt TEXT NOT NULL,
+        finishedAt TEXT,
+        failureReason TEXT,
+        output TEXT,
+        progress TEXT
+      )
+    `);
+
+    database.run(`
+      CREATE TABLE IF NOT EXISTS agent_log (
+        id TEXT PRIMARY KEY,
+        eventType TEXT NOT NULL,
+        agentId TEXT,
+        taskId TEXT,
+        oldValue TEXT,
+        newValue TEXT,
+        metadata TEXT,
+        createdAt TEXT NOT NULL
+      )
+    `);
+
+    database.run(`
+      CREATE TABLE IF NOT EXISTS channels (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        type TEXT NOT NULL DEFAULT 'public' CHECK(type IN ('public', 'dm')),
+        createdBy TEXT,
+        participants TEXT DEFAULT '[]',
+        createdAt TEXT NOT NULL,
+        FOREIGN KEY (createdBy) REFERENCES agents(id) ON DELETE SET NULL
+      )
+    `);
+
+    database.run(`
+      CREATE TABLE IF NOT EXISTS channel_messages (
+        id TEXT PRIMARY KEY,
+        channelId TEXT NOT NULL,
+        agentId TEXT,
+        content TEXT NOT NULL,
+        replyToId TEXT,
+        mentions TEXT DEFAULT '[]',
+        createdAt TEXT NOT NULL,
+        FOREIGN KEY (channelId) REFERENCES channels(id) ON DELETE CASCADE,
+        FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE,
+        FOREIGN KEY (replyToId) REFERENCES channel_messages(id) ON DELETE SET NULL
+      )
+    `);
+
+    database.run(`
+      CREATE TABLE IF NOT EXISTS channel_read_state (
+        agentId TEXT NOT NULL,
+        channelId TEXT NOT NULL,
+        lastReadAt TEXT NOT NULL,
+        PRIMARY KEY (agentId, channelId),
+        FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE,
+        FOREIGN KEY (channelId) REFERENCES channels(id) ON DELETE CASCADE
+      )
+    `);
+
+    database.run(`
+      CREATE TABLE IF NOT EXISTS services (
+        id TEXT PRIMARY KEY,
+        agentId TEXT NOT NULL,
+        name TEXT NOT NULL,
+        port INTEGER NOT NULL DEFAULT 3000,
+        description TEXT,
+        url TEXT,
+        healthCheckPath TEXT DEFAULT '/health',
+        status TEXT NOT NULL DEFAULT 'starting' CHECK(status IN ('starting', 'healthy', 'unhealthy', 'stopped')),
+        script TEXT NOT NULL DEFAULT '',
+        cwd TEXT,
+        interpreter TEXT,
+        args TEXT,
+        env TEXT,
+        metadata TEXT DEFAULT '{}',
+        createdAt TEXT NOT NULL,
+        lastUpdatedAt TEXT NOT NULL,
+        FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE,
+        UNIQUE(agentId, name)
+      )
+    `);
+
+    database.run(`
+      CREATE TABLE IF NOT EXISTS session_logs (
+        id TEXT PRIMARY KEY,
+        taskId TEXT,
+        sessionId TEXT NOT NULL,
+        iteration INTEGER NOT NULL,
+        cli TEXT NOT NULL DEFAULT 'claude',
+        content TEXT NOT NULL,
+        lineNumber INTEGER NOT NULL,
+        createdAt TEXT NOT NULL
+      )
+    `);
+
+    // Indexes
+    database.run(`CREATE INDEX IF NOT EXISTS idx_agent_tasks_agentId ON agent_tasks(agentId)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_agent_log_agentId ON agent_log(agentId)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_agent_log_taskId ON agent_log(taskId)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_agent_log_eventType ON agent_log(eventType)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_agent_log_createdAt ON agent_log(createdAt)`);
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_channel_messages_channelId ON channel_messages(channelId)`,
     );
-
-    CREATE TABLE IF NOT EXISTS agent_tasks (
-      id TEXT PRIMARY KEY,
-      agentId TEXT,
-      creatorAgentId TEXT,
-      task TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      source TEXT NOT NULL DEFAULT 'mcp',
-      taskType TEXT,
-      tags TEXT DEFAULT '[]',
-      priority INTEGER DEFAULT 50,
-      dependsOn TEXT DEFAULT '[]',
-      offeredTo TEXT,
-      offeredAt TEXT,
-      acceptedAt TEXT,
-      rejectionReason TEXT,
-      slackChannelId TEXT,
-      slackThreadTs TEXT,
-      slackUserId TEXT,
-      createdAt TEXT NOT NULL,
-      lastUpdatedAt TEXT NOT NULL,
-      finishedAt TEXT,
-      failureReason TEXT,
-      output TEXT,
-      progress TEXT
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_channel_messages_agentId ON channel_messages(agentId)`,
     );
-
-    CREATE INDEX IF NOT EXISTS idx_agent_tasks_agentId ON agent_tasks(agentId);
-    CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status);
-
-    CREATE TABLE IF NOT EXISTS agent_log (
-      id TEXT PRIMARY KEY,
-      eventType TEXT NOT NULL,
-      agentId TEXT,
-      taskId TEXT,
-      oldValue TEXT,
-      newValue TEXT,
-      metadata TEXT,
-      createdAt TEXT NOT NULL
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_channel_messages_createdAt ON channel_messages(createdAt)`,
     );
-
-    CREATE INDEX IF NOT EXISTS idx_agent_log_agentId ON agent_log(agentId);
-    CREATE INDEX IF NOT EXISTS idx_agent_log_taskId ON agent_log(taskId);
-    CREATE INDEX IF NOT EXISTS idx_agent_log_eventType ON agent_log(eventType);
-    CREATE INDEX IF NOT EXISTS idx_agent_log_createdAt ON agent_log(createdAt);
-
-    -- Channels table
-    CREATE TABLE IF NOT EXISTS channels (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL UNIQUE,
-      description TEXT,
-      type TEXT NOT NULL DEFAULT 'public' CHECK(type IN ('public', 'dm')),
-      createdBy TEXT,
-      participants TEXT DEFAULT '[]',
-      createdAt TEXT NOT NULL,
-      FOREIGN KEY (createdBy) REFERENCES agents(id) ON DELETE SET NULL
+    database.run(`CREATE INDEX IF NOT EXISTS idx_services_agentId ON services(agentId)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_services_status ON services(status)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_session_logs_taskId ON session_logs(taskId)`);
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_session_logs_sessionId ON session_logs(sessionId)`,
     );
+  });
 
-    -- Channel messages table
-    CREATE TABLE IF NOT EXISTS channel_messages (
-      id TEXT PRIMARY KEY,
-      channelId TEXT NOT NULL,
-      agentId TEXT,
-      content TEXT NOT NULL,
-      replyToId TEXT,
-      mentions TEXT DEFAULT '[]',
-      createdAt TEXT NOT NULL,
-      FOREIGN KEY (channelId) REFERENCES channels(id) ON DELETE CASCADE,
-      FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE,
-      FOREIGN KEY (replyToId) REFERENCES channel_messages(id) ON DELETE SET NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_channel_messages_channelId ON channel_messages(channelId);
-    CREATE INDEX IF NOT EXISTS idx_channel_messages_agentId ON channel_messages(agentId);
-    CREATE INDEX IF NOT EXISTS idx_channel_messages_createdAt ON channel_messages(createdAt);
-
-    -- Channel read state table
-    CREATE TABLE IF NOT EXISTS channel_read_state (
-      agentId TEXT NOT NULL,
-      channelId TEXT NOT NULL,
-      lastReadAt TEXT NOT NULL,
-      PRIMARY KEY (agentId, channelId),
-      FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE,
-      FOREIGN KEY (channelId) REFERENCES channels(id) ON DELETE CASCADE
-    );
-
-    -- Services table (for PM2/background services)
-    CREATE TABLE IF NOT EXISTS services (
-      id TEXT PRIMARY KEY,
-      agentId TEXT NOT NULL,
-      name TEXT NOT NULL,
-      port INTEGER NOT NULL DEFAULT 3000,
-      description TEXT,
-      url TEXT,
-      healthCheckPath TEXT DEFAULT '/health',
-      status TEXT NOT NULL DEFAULT 'starting' CHECK(status IN ('starting', 'healthy', 'unhealthy', 'stopped')),
-      -- PM2 configuration for ecosystem-based restart
-      script TEXT NOT NULL DEFAULT '',
-      cwd TEXT,
-      interpreter TEXT,
-      args TEXT, -- JSON array
-      env TEXT,  -- JSON object
-      metadata TEXT DEFAULT '{}',
-      createdAt TEXT NOT NULL,
-      lastUpdatedAt TEXT NOT NULL,
-      FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE,
-      UNIQUE(agentId, name)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_services_agentId ON services(agentId);
-    CREATE INDEX IF NOT EXISTS idx_services_status ON services(status);
-
-    -- Session logs table (raw CLI output from runner)
-    CREATE TABLE IF NOT EXISTS session_logs (
-      id TEXT PRIMARY KEY,
-      taskId TEXT,
-      sessionId TEXT NOT NULL,
-      iteration INTEGER NOT NULL,
-      cli TEXT NOT NULL DEFAULT 'claude',
-      content TEXT NOT NULL,
-      lineNumber INTEGER NOT NULL,
-      createdAt TEXT NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_session_logs_taskId ON session_logs(taskId);
-    CREATE INDEX IF NOT EXISTS idx_session_logs_sessionId ON session_logs(sessionId);
-  `);
+  initSchema();
 
   // Seed default general channel if it doesn't exist
   // Use a stable UUID for the general channel so it's consistent across restarts
