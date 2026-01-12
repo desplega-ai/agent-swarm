@@ -1,0 +1,4 @@
+{
+  "autoTmux": true,
+  "setupScript": ".wts-setup.ts"
+}
