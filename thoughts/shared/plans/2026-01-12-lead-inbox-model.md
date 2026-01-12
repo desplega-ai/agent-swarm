@@ -259,12 +259,12 @@ export function markInboxMessageDelegated(id: string, taskId: string): InboxMess
 ### Success Criteria
 
 #### Automated Verification
-- [ ] `bun test` passes (no regressions)
-- [ ] Server starts without errors: `bun run src/http.ts`
-- [ ] Table is created in SQLite database
+- [x] `bun test` passes (no regressions)
+- [x] Server starts without errors: `bun run src/http.ts`
+- [x] Table is created in SQLite database
 
 #### Manual Verification
-- [ ] Can manually insert/query inbox_messages via SQLite CLI
+- [x] Can manually insert/query inbox_messages via SQLite CLI
 
 ---
 
@@ -328,8 +328,8 @@ for (const match of matches) {
 ### Success Criteria
 
 #### Automated Verification
-- [ ] `bun test` passes
-- [ ] TypeScript compiles without errors
+- [x] `bun test` passes
+- [x] TypeScript compiles without errors
 
 #### Manual Verification
 - [ ] Send `@agent-swarm help` in Slack (routes to lead)
@@ -407,8 +407,8 @@ Review each message and decide the appropriate action.`;
 ### Success Criteria
 
 #### Automated Verification
-- [ ] `bun test` passes
-- [ ] TypeScript compiles without errors
+- [x] `bun test` passes
+- [x] TypeScript compiles without errors
 
 #### Manual Verification
 - [ ] Poll as lead agent via HTTP API
@@ -571,8 +571,8 @@ export const registerSlackReplyTool = (server: McpServer) => {
 ### Success Criteria
 
 #### Automated Verification
-- [ ] TypeScript compiles without errors
-- [ ] `bun test` passes
+- [x] TypeScript compiles without errors
+- [x] `bun test` passes
 
 #### Manual Verification
 - [ ] Lead can use `slack-reply` with inboxMessageId
@@ -709,8 +709,8 @@ export const registerInboxDelegateTool = (server: McpServer) => {
 ### Success Criteria
 
 #### Automated Verification
-- [ ] TypeScript compiles without errors
-- [ ] `bun test` passes
+- [x] TypeScript compiles without errors
+- [x] `bun test` passes
 
 #### Manual Verification
 - [ ] Lead can use `inbox-delegate` to create task for worker
@@ -781,9 +781,9 @@ When Slack messages are routed to you, they appear as "inbox messages" - NOT tas
 ### Success Criteria
 
 #### Automated Verification
-- [ ] `bun test` passes
-- [ ] TypeScript compiles without errors
-- [ ] Server starts: `bun run src/http.ts`
+- [x] `bun test` passes
+- [x] TypeScript compiles without errors
+- [x] Server starts: `bun run src/http.ts`
 
 #### Manual Verification
 - [ ] Lead agent receives updated prompt with inbox instructions
@@ -828,7 +828,7 @@ if (agent?.isLead) {
 ### Success Criteria
 
 #### Automated Verification
-- [ ] `bun test` passes
+- [x] `bun test` passes
 
 #### Manual Verification
 - [ ] Lead calling `poll-task` gets helpful error message

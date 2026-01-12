@@ -11,6 +11,8 @@ import type {
   Channel,
   ChannelMessage,
   ChannelType,
+  InboxMessage,
+  InboxMessageStatus,
   Service,
   ServiceStatus,
   SessionLog,
@@ -167,6 +169,26 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       )
     `);
 
+    database.run(`
+      CREATE TABLE IF NOT EXISTS inbox_messages (
+        id TEXT PRIMARY KEY,
+        agentId TEXT NOT NULL,
+        content TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'slack',
+        status TEXT NOT NULL DEFAULT 'unread' CHECK(status IN ('unread', 'read', 'responded', 'delegated')),
+        slackChannelId TEXT,
+        slackThreadTs TEXT,
+        slackUserId TEXT,
+        matchedText TEXT,
+        delegatedToTaskId TEXT,
+        responseText TEXT,
+        createdAt TEXT NOT NULL,
+        lastUpdatedAt TEXT NOT NULL,
+        FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE,
+        FOREIGN KEY (delegatedToTaskId) REFERENCES agent_tasks(id) ON DELETE SET NULL
+      )
+    `);
+
     // Indexes
     database.run(`CREATE INDEX IF NOT EXISTS idx_agent_tasks_agentId ON agent_tasks(agentId)`);
     database.run(`CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status)`);
@@ -189,6 +211,10 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     database.run(
       `CREATE INDEX IF NOT EXISTS idx_session_logs_sessionId ON session_logs(sessionId)`,
     );
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_inbox_messages_agentId ON inbox_messages(agentId)`,
+    );
+    database.run(`CREATE INDEX IF NOT EXISTS idx_inbox_messages_status ON inbox_messages(status)`);
   });
 
   initSchema();
@@ -2073,4 +2099,126 @@ export function getSessionLogsByTaskId(taskId: string): SessionLog[] {
 
 export function getSessionLogsBySession(sessionId: string, iteration: number): SessionLog[] {
   return sessionLogQueries.getBySessionId().all(sessionId, iteration).map(rowToSessionLog);
+}
+
+// ============================================================================
+// Inbox Message Operations
+// ============================================================================
+
+type InboxMessageRow = {
+  id: string;
+  agentId: string;
+  content: string;
+  source: string;
+  status: InboxMessageStatus;
+  slackChannelId: string | null;
+  slackThreadTs: string | null;
+  slackUserId: string | null;
+  matchedText: string | null;
+  delegatedToTaskId: string | null;
+  responseText: string | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+};
+
+function rowToInboxMessage(row: InboxMessageRow): InboxMessage {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    content: row.content,
+    source: row.source as "slack",
+    status: row.status,
+    slackChannelId: row.slackChannelId ?? undefined,
+    slackThreadTs: row.slackThreadTs ?? undefined,
+    slackUserId: row.slackUserId ?? undefined,
+    matchedText: row.matchedText ?? undefined,
+    delegatedToTaskId: row.delegatedToTaskId ?? undefined,
+    responseText: row.responseText ?? undefined,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+export interface CreateInboxMessageOptions {
+  source?: "slack";
+  slackChannelId?: string;
+  slackThreadTs?: string;
+  slackUserId?: string;
+  matchedText?: string;
+}
+
+export function createInboxMessage(
+  agentId: string,
+  content: string,
+  options?: CreateInboxMessageOptions,
+): InboxMessage {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  const row = getDb()
+    .prepare<InboxMessageRow, (string | null)[]>(
+      `INSERT INTO inbox_messages (id, agentId, content, source, status, slackChannelId, slackThreadTs, slackUserId, matchedText, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, 'unread', ?, ?, ?, ?, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      agentId,
+      content,
+      options?.source ?? "slack",
+      options?.slackChannelId ?? null,
+      options?.slackThreadTs ?? null,
+      options?.slackUserId ?? null,
+      options?.matchedText ?? null,
+      now,
+      now,
+    );
+
+  if (!row) throw new Error("Failed to create inbox message");
+  return rowToInboxMessage(row);
+}
+
+export function getInboxMessageById(id: string): InboxMessage | null {
+  const row = getDb()
+    .prepare<InboxMessageRow, [string]>("SELECT * FROM inbox_messages WHERE id = ?")
+    .get(id);
+  return row ? rowToInboxMessage(row) : null;
+}
+
+export function getUnreadInboxMessages(agentId: string): InboxMessage[] {
+  return getDb()
+    .prepare<InboxMessageRow, [string]>(
+      "SELECT * FROM inbox_messages WHERE agentId = ? AND status = 'unread' ORDER BY createdAt ASC",
+    )
+    .all(agentId)
+    .map(rowToInboxMessage);
+}
+
+export function markInboxMessageRead(id: string): InboxMessage | null {
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<InboxMessageRow, [string, string]>(
+      "UPDATE inbox_messages SET status = 'read', lastUpdatedAt = ? WHERE id = ? RETURNING *",
+    )
+    .get(now, id);
+  return row ? rowToInboxMessage(row) : null;
+}
+
+export function markInboxMessageResponded(id: string, responseText: string): InboxMessage | null {
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<InboxMessageRow, [string, string, string]>(
+      "UPDATE inbox_messages SET status = 'responded', responseText = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *",
+    )
+    .get(responseText, now, id);
+  return row ? rowToInboxMessage(row) : null;
+}
+
+export function markInboxMessageDelegated(id: string, taskId: string): InboxMessage | null {
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<InboxMessageRow, [string, string, string]>(
+      "UPDATE inbox_messages SET status = 'delegated', delegatedToTaskId = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *",
+    )
+    .get(taskId, now, id);
+  return row ? rowToInboxMessage(row) : null;
 }
