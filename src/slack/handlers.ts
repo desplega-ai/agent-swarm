@@ -1,6 +1,6 @@
 import type { App } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
-import { createTask, getAgentById, getTasksByAgentId } from "../be/db";
+import { createInboxMessage, createTask, getAgentById, getTasksByAgentId } from "../be/db";
 import { extractTaskFromMessage, routeMessage } from "./router";
 
 interface MessageEvent {
@@ -228,6 +228,20 @@ export function registerMessageHandler(app: App): void {
       }
 
       try {
+        // Lead agents receive inbox messages, not tasks
+        if (agent.isLead) {
+          createInboxMessage(agent.id, fullTaskDescription, {
+            source: "slack",
+            slackChannelId: msg.channel,
+            slackThreadTs: threadTs,
+            slackUserId: msg.user,
+            matchedText: match.matchedText,
+          });
+          results.assigned.push(`*${agent.name}* (inbox)`);
+          continue;
+        }
+
+        // Workers receive tasks as before
         const task = createTask(agent.id, fullTaskDescription, {
           source: "slack",
           slackChannelId: msg.channel,

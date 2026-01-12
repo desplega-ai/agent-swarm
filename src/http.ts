@@ -34,6 +34,7 @@ import {
   getSessionLogsByTaskId,
   getTaskById,
   getUnassignedTasksCount,
+  getUnreadInboxMessages,
   postMessage,
   updateAgentStatus,
 } from "./be/db";
@@ -325,7 +326,19 @@ const httpServer = createHttpServer(async (req, res) => {
       if (agent.isLead) {
         // === LEAD-SPECIFIC TRIGGERS ===
 
-        // Check for unread mentions
+        // Check for unread Slack inbox messages (highest priority for lead)
+        const unreadInbox = getUnreadInboxMessages(myAgentId);
+        if (unreadInbox.length > 0) {
+          return {
+            trigger: {
+              type: "slack_inbox_message",
+              count: unreadInbox.length,
+              messages: unreadInbox.slice(0, 5), // Return up to 5 most recent
+            },
+          };
+        }
+
+        // Check for unread mentions (internal chat)
         const inbox = getInboxSummary(myAgentId);
         if (inbox.mentionsCount > 0) {
           return {
