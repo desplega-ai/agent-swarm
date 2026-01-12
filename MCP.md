@@ -14,6 +14,8 @@
   - [get-task-details](#get-task-details)
   - [store-progress](#store-progress)
   - [my-agent-info](#my-agent-info)
+  - [slack-reply](#slack-reply)
+  - [inbox-delegate](#inbox-delegate)
 - [Task Pool Tools](#task-pool-tools)
   - [task-action](#task-action)
 - [Messaging Tools](#messaging-tools)
@@ -120,6 +122,27 @@ Stores the progress of a specific task. Can also mark task as completed or faile
 Returns your agent ID based on the X-Agent-ID header.
 
 *No parameters*
+
+### slack-reply
+
+**Reply to Slack thread**
+
+Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId for task-related threads.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `message` | `string` | Yes | - | The message to send to the Slack thread. |
+
+### inbox-delegate
+
+**Delegate inbox message to worker**
+
+Delegate an inbox message to a worker agent by creating a task. The task inherits Slack context for replies.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `inboxMessageId` | `uuid` | Yes | - | The inbox message ID to delegate. |
+| `agentId` | `uuid` | Yes | - | The worker agent to delegate to. |
 
 ## Task Pool Tools
 
