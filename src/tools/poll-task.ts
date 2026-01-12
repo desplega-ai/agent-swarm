@@ -80,6 +80,26 @@ export const registerPollTaskTool = (server: McpServer) => {
         };
       }
 
+      // Lead agents should not poll for tasks - they use inbox tools instead
+      if (agent.isLead) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Lead agents should not poll for tasks. Use inbox tools to respond to Slack messages, or get-tasks to monitor workers.",
+            },
+          ],
+          structuredContent: {
+            yourAgentId: requestInfo.agentId,
+            success: false,
+            message: "Lead agents use inbox and delegation tools instead of polling for tasks.",
+            offeredTasks: [],
+            availableCount: 0,
+            waitedForSeconds: 0,
+          },
+        };
+      }
+
       // Check for offered tasks first - these need immediate attention
       const offeredTasks = getOfferedTasksForAgent(agentId);
       const availableCount = getUnassignedTasksCount();

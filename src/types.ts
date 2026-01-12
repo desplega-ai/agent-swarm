@@ -10,6 +10,39 @@ export const AgentTaskStatusSchema = z.enum([
   "failed",
 ]);
 
+// ============================================================================
+// Lead Inbox Types
+// ============================================================================
+
+export const InboxMessageStatusSchema = z.enum(["unread", "read", "responded", "delegated"]);
+
+export const InboxMessageSchema = z.object({
+  id: z.uuid(),
+  agentId: z.uuid(), // Lead agent who received this
+  content: z.string().min(1), // The message content
+  source: z.enum(["slack"]).default("slack"),
+  status: InboxMessageStatusSchema.default("unread"),
+
+  // Slack context (for replying)
+  slackChannelId: z.string().optional(),
+  slackThreadTs: z.string().optional(),
+  slackUserId: z.string().optional(),
+
+  // Routing info
+  matchedText: z.string().optional(), // Why it was routed here
+
+  // Delegation tracking
+  delegatedToTaskId: z.uuid().optional(), // If delegated, which task
+  responseText: z.string().optional(), // If responded directly
+
+  // Timestamps
+  createdAt: z.iso.datetime(),
+  lastUpdatedAt: z.iso.datetime(),
+});
+
+export type InboxMessageStatus = z.infer<typeof InboxMessageStatusSchema>;
+export type InboxMessage = z.infer<typeof InboxMessageSchema>;
+
 export const AgentTaskSourceSchema = z.enum(["mcp", "slack", "api"]);
 export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 

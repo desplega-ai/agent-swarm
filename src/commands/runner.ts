@@ -177,7 +177,8 @@ interface Trigger {
     | "task_offered"
     | "unread_mentions"
     | "pool_tasks_available"
-    | "tasks_finished";
+    | "tasks_finished"
+    | "slack_inbox_message";
   taskId?: string;
   task?: unknown;
   mentionsCount?: number;
@@ -187,6 +188,10 @@ interface Trigger {
     agentId?: string;
     task: string;
     status: string;
+  }>;
+  messages?: Array<{
+    id: string;
+    content: string;
   }>;
 }
 
@@ -311,6 +316,22 @@ function buildPromptForTrigger(trigger: Trigger, defaultPrompt: string): string 
       }
 
       return `Workers have finished ${trigger.count} task(s). Use get-tasks with status "completed" or "failed" to review them.`;
+
+    case "slack_inbox_message": {
+      // Lead: Slack inbox messages from users
+      const inboxSummaries = (trigger.messages || [])
+        .map((m: { id: string; content: string }) => {
+          const preview = m.content.length > 100 ? `${m.content.slice(0, 100)}...` : m.content;
+          return `- "${preview}" (ID: ${m.id.slice(0, 8)})`;
+        })
+        .join("\n");
+
+      return `You have ${trigger.count} inbox message(s) from Slack:\n${inboxSummaries}\n\nFor each message, you can either:
+- Use \`slack-reply\` with the inboxMessageId to respond directly to the user
+- Use \`inbox-delegate\` to assign the request to a worker agent
+
+Review each message and decide the appropriate action.`;
+    }
 
     default:
       return defaultPrompt;

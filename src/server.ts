@@ -5,6 +5,8 @@ import { registerCreateChannelTool } from "./tools/create-channel";
 import { registerGetSwarmTool } from "./tools/get-swarm";
 import { registerGetTaskDetailsTool } from "./tools/get-task-details";
 import { registerGetTasksTool } from "./tools/get-tasks";
+// Lead inbox tools
+import { registerInboxDelegateTool } from "./tools/inbox-delegate";
 import { registerJoinSwarmTool } from "./tools/join-swarm";
 // Messaging capability
 import { registerListChannelsTool } from "./tools/list-channels";
@@ -16,6 +18,7 @@ import { registerReadMessagesTool } from "./tools/read-messages";
 // Services capability
 import { registerRegisterServiceTool } from "./tools/register-service";
 import { registerSendTaskTool } from "./tools/send-task";
+import { registerSlackReplyTool } from "./tools/slack-reply";
 import { registerStoreProgressTool } from "./tools/store-progress";
 // Task pool capability
 import { registerTaskActionTool } from "./tools/task-action";
@@ -66,6 +69,10 @@ export function createServer() {
   registerGetTaskDetailsTool(server);
   registerStoreProgressTool(server);
   registerMyAgentInfoTool(server);
+
+  // Slack integration tools (always registered, will no-op if Slack not configured)
+  registerSlackReplyTool(server);
+  registerInboxDelegateTool(server);
 
   // Task pool capability - task pool operations (create unassigned, claim, release, accept, reject)
   if (hasCapability("task-pool")) {
