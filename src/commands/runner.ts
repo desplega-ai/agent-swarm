@@ -322,7 +322,7 @@ function buildPromptForTrigger(trigger: Trigger, defaultPrompt: string): string 
       const inboxSummaries = (trigger.messages || [])
         .map((m: { id: string; content: string }) => {
           const preview = m.content.length > 100 ? `${m.content.slice(0, 100)}...` : m.content;
-          return `- "${preview}" (ID: ${m.id.slice(0, 8)})`;
+          return `- "${preview}" (inboxMessageId: ${m.id})`;
         })
         .join("\n");
 
