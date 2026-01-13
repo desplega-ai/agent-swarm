@@ -141,6 +141,25 @@ else
 fi
 echo "=============================="
 
+# Install the desplega-ai marketplace
+echo ""
+echo "=== Marketplace Installation ==="
+if command -v claude >/dev/null 2>&1; then
+    echo "Installing desplega-ai/ai-toolbox marketplace..."
+    claude plugin marketplace add desplega-ai/ai-toolbox || echo "Marketplace add failed, continuing..."
+
+    echo "Installing plugins from desplega-ai-toolbox..."
+    claude plugin install desplega@desplega-ai-toolbox --scope user || echo "Plugin install failed, continuing..."
+    claude plugin install agent-swarm@desplega-ai-toolbox --scope user || echo "Plugin install failed, continuing..."
+    claude plugin install wts@desplega-ai-toolbox --scope user || echo "Plugin install failed, continuing..."
+
+    echo "Marketplace installation completed"
+else
+    echo "WARNING: claude CLI not found, skipping marketplace installation"
+fi
+echo "==============================="
+
+
 # Execute startup script if found
 STARTUP_SCRIPT_STRICT="${STARTUP_SCRIPT_STRICT:-true}"
 echo ""

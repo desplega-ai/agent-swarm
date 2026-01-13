@@ -23,17 +23,18 @@ Once you have the task details, you should:
 
 As you start working on a task, you might need to use some of the following commands to help you with your work:
 
-- `/research` - Use this command to perform research on the web to gather information needed for the task.
-- `/create-plan` - Use this command to create a detailed plan for how you will approach and complete the task.
-- `/implement-plan` - Use this command to implement the plan you created for the task. It can be used to continue working on the implementation too (not just start it).
+- `/desplega:research` - Use this command to perform research on the web to gather information needed for the task.
+- `/desplega:create-plan` - Use this command to create a detailed plan for how you will approach and complete the task.
+- `/desplega:implement-plan` - Use this command to implement the plan you created for the task. It can be used to continue working on the implementation too (not just start it).
+
 - `/swarm-chat` - Use this command to communicate with other agents in the swarm if you need help or want to provide updates.
 - `/todos` - Use this command to manage your personal todo list, which can help you keep track of sub-tasks related to the main task.
 
 #### Decision to use commands
 
-When the task is a research task, you should ALWAYS use the `/research` command to gather information.
+When the task is a research task, you should ALWAYS use the `/desplega:research` command to gather information.
 
-When the task is a development task, you should ALWAYS use the `/create-plan` command first to create a plan, and then use the `/implement-plan` command to implement it.
+When the task is a development task, you should ALWAYS use the `/desplega:create-plan` command first to create a plan, and then use the `/desplega:implement-plan` command to implement it.
 
 If the implementation does not reference any existing plan, proceed normally to implement it without using any commands.
 
