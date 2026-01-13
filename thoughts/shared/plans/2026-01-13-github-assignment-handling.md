@@ -22,17 +22,29 @@ Extend the GitHub integration to handle PR/issue assignment events. When @desple
 
 ## Desired End State
 
-1. When @desplega-bot is assigned to a PR or issue (without needing @mention):
+1. When @desplega-bot is **assigned** to a PR or issue (without needing @mention):
    - A task is created for the lead agent (same flow as @mention)
    - An "eyes" reaction is added to acknowledge
+   - Use case: "Bot, you're responsible for this"
 
-2. When @desplega-bot is unassigned from a PR or issue:
+2. When @desplega-bot is **unassigned** from a PR or issue:
    - The related task is found by `githubRepo` + `githubNumber`
    - The task is cancelled with reason "Unassigned from GitHub"
+
+3. When @desplega-bot is **requested as a reviewer** on a PR (PR-only):
+   - A task is created for the lead agent (same flow as assignment)
+   - An "eyes" reaction is added to acknowledge
+   - Use case: "Bot, please review this PR"
+
+4. When the **review request is removed** from @desplega-bot on a PR:
+   - The related task is found by `githubRepo` + `githubNumber`
+   - The task is cancelled with reason "Review request removed from GitHub"
 
 ### Verification:
 - Assign @desplega-bot to an issue -> Task appears in dashboard
 - Unassign @desplega-bot from that issue -> Task status becomes "failed" with cancellation reason
+- Request review from @desplega-bot on a PR -> Task appears in dashboard
+- Remove review request from @desplega-bot -> Task status becomes "failed" with cancellation reason
 
 ## What We're NOT Doing
 
@@ -479,6 +491,138 @@ describe("isBotAssignee", () => {
 
 ---
 
+## Phase 6: Review Request Handler
+
+### Overview
+Handle PR review request events to create/cancel tasks when the bot is requested as a reviewer. This is different from assignment - review requests are PR-only and use different GitHub actions.
+
+### Key Differences:
+- **Assignee** (`assigned`/`unassigned`): Person responsible for working on PR/issue
+- **Reviewer** (`review_requested`/`review_request_removed`): Person requested to review PR (PR-only)
+
+### Changes Required:
+
+#### 1. Update Event Types
+**File**: `src/github/types.ts`
+**Changes**: Add `requested_reviewer` field to `PullRequestEvent`
+
+```typescript
+export interface PullRequestEvent extends GitHubWebhookEvent {
+  pull_request: {
+    number: number;
+    title: string;
+    body: string | null;
+    html_url: string;
+    user: { login: string };
+    head: { ref: string };
+    base: { ref: string };
+  };
+  requested_reviewer?: { login: string; id: number };  // Added for review request events
+}
+```
+
+The `requested_reviewer` field is sent by GitHub when `action` is `"review_requested"` or `"review_request_removed"`.
+
+#### 2. Update handlePullRequest() for Review Requests
+**File**: `src/github/handlers.ts`
+**Changes**: Handle `review_requested` action
+
+```typescript
+// Add after the "unassigned" handling block:
+
+  // Handle review_requested action - bot was requested to review PR
+  if (action === "review_requested") {
+    const { requested_reviewer } = event;
+
+    // Check if bot was requested as reviewer
+    if (!isBotAssignee(requested_reviewer?.login)) {
+      return { created: false };
+    }
+
+    // Deduplicate using review-specific key
+    const eventKey = `pr-review-requested:${repository.full_name}:${pr.number}`;
+    if (isDuplicate(eventKey)) {
+      return { created: false };
+    }
+
+    // Create review task
+    const lead = findLeadAgent();
+    const suggestions = getCommandSuggestions("github-pr");
+    const taskDescription = `[GitHub PR #${pr.number}] ${pr.title}\n\nReview requested from: @${GITHUB_BOT_NAME}\nFrom: ${sender.login}\nRepo: ${repository.full_name}\nBranch: ${pr.head.ref} → ${pr.base.ref}\nURL: ${pr.html_url}\n\nContext:\n${pr.body || pr.title}\n\n---\n${DELEGATION_INSTRUCTION}\n${suggestions}`;
+
+    const task = createTaskExtended(taskDescription, {
+      agentId: lead?.id ?? "",
+      source: "github",
+      taskType: "github-pr",
+      githubRepo: repository.full_name,
+      githubEventType: "pull_request",
+      githubNumber: pr.number,
+      githubAuthor: sender.login,
+      githubUrl: pr.html_url,
+    });
+
+    if (lead) {
+      console.log(`[GitHub] Created task ${task.id} for PR #${pr.number} (review requested) -> ${lead.name}`);
+    } else {
+      console.log(`[GitHub] Created unassigned task ${task.id} for PR #${pr.number} (review requested, no lead available)`);
+    }
+
+    if (installation?.id) {
+      addIssueReaction(repository.full_name, pr.number, "eyes", installation.id);
+    }
+
+    return { created: true, taskId: task.id };
+  }
+```
+
+#### 3. Update handlePullRequest() for Review Request Removal
+**File**: `src/github/handlers.ts`
+**Changes**: Handle `review_request_removed` action
+
+```typescript
+// Add after the "review_requested" handling block:
+
+  // Handle review_request_removed action - bot review request was cancelled
+  if (action === "review_request_removed") {
+    const { requested_reviewer } = event;
+
+    // Check if bot's review request was removed
+    if (!isBotAssignee(requested_reviewer?.login)) {
+      return { created: false };
+    }
+
+    // Find the related task
+    const task = findTaskByGitHub(repository.full_name, pr.number);
+    if (!task) {
+      console.log(`[GitHub] No active task found for PR #${pr.number} to cancel`);
+      return { created: false };
+    }
+
+    // Cancel the task
+    const cancelledTask = failTask(task.id, `Review request removed from GitHub PR #${pr.number}`);
+    if (cancelledTask) {
+      console.log(`[GitHub] Cancelled task ${task.id} for PR #${pr.number} (review request removed)`);
+      return { created: false, taskId: task.id };
+    }
+
+    return { created: false };
+  }
+```
+
+### Success Criteria:
+
+#### Automated Verification:
+- [x] TypeScript compiles: `bun tsc --noEmit`
+- [x] Tests pass: `bun test`
+
+#### Manual Verification:
+- [ ] Request review from @desplega-bot on a PR -> Task created
+- [ ] "eyes" reaction added to acknowledge review request
+- [ ] Remove review request from @desplega-bot -> Task cancelled with reason
+- [ ] Task status shows "failed" with appropriate failure reason in dashboard
+
+---
+
 ## Testing Strategy
 
 ### Unit Tests:
@@ -503,10 +647,21 @@ describe("isBotAssignee", () => {
    - Verify task status becomes "failed"
    - Verify failure reason mentions "Unassigned from GitHub"
 
-4. **Edge Cases**
+4. **Test Review Request Handling** (Phase 6)
+   - Request review from @desplega-bot on a PR
+   - Verify task appears in dashboard
+   - Verify "eyes" reaction added
+   - Remove review request from @desplega-bot
+   - Verify task status becomes "failed"
+   - Verify failure reason mentions "Review request removed"
+
+5. **Edge Cases**
    - Assign then quickly unassign (test deduplication)
    - Unassign when no task exists (should be no-op)
    - Mix assignment with @mentions (both should work)
+   - Request review then quickly remove (test deduplication)
+   - Remove review request when no task exists (should be no-op)
+   - Mix review request with assignment (both should work independently)
 
 ## Performance Considerations
 
