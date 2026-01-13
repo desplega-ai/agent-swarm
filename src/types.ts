@@ -107,6 +107,9 @@ export const AgentSchema = z.object({
   role: z.string().max(100).optional(), // Free-form, e.g., "frontend dev"
   capabilities: z.array(z.string()).default([]), // e.g., ["typescript", "react"]
 
+  // Concurrency limit (defaults to 1 for backwards compatibility)
+  maxTasks: z.number().int().min(1).max(20).optional(),
+
   createdAt: z.iso.datetime().default(() => new Date().toISOString()),
   lastUpdatedAt: z.iso.datetime().default(() => new Date().toISOString()),
 });
