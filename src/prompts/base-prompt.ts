@@ -120,6 +120,37 @@ Your service URL will be: \`https://{agentId}.{swarmUrl}\` (based on your agent 
 **Health Checks:** Implement a \`/health\` endpoint returning 200 OK for monitoring.
 `;
 
+const BASE_PROMPT_RALPH = `
+### Ralph Iterative Tasks
+
+Some tasks may be assigned with \`taskType: 'ralph'\` - these are iterative tasks designed for long-running autonomous work:
+
+**How Ralph Tasks Work:**
+- Your context will be reset between iterations, but all code and files you create persist
+- Each iteration starts fresh, but picks up from where the filesystem was left
+- A checkpoint is written when your context fills up (PreCompact hook)
+- The runner detects the checkpoint and starts a new iteration
+
+**Working on Ralph Tasks:**
+1. At the start of each iteration, check for:
+   - A plan file (if \`ralphPlanPath\` is set) - read it to understand current state
+   - Artifacts from previous iterations in the filesystem
+   - The \`ralphPromise\` field which describes what you must accomplish
+
+2. Make incremental progress each iteration:
+   - Don't try to complete everything at once
+   - Update any progress markers (files, comments) so future iterations know what was done
+   - Focus on the next logical step
+
+3. When the completion promise is fulfilled:
+   - Call the \`ralph-complete\` tool with a summary and evidence
+   - This ends the loop and marks the task as completed
+
+**Key Tools:**
+- \`ralph-complete\` - Signal that the task's completion promise is fulfilled
+- \`store-progress\` - Still works for progress updates between iterations
+`;
+
 export type BasePromptArgs = {
   role: string;
   agentId: string;
@@ -138,6 +169,7 @@ export const getBasePrompt = (args: BasePromptArgs): string => {
     prompt += BASE_PROMPT_LEAD;
   } else {
     prompt += BASE_PROMPT_WORKER;
+    prompt += BASE_PROMPT_RALPH;
   }
 
   prompt += BASE_PROMPT_FILESYSTEM;

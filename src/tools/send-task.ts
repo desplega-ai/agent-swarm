@@ -25,7 +25,7 @@ export const registerSendTaskTool = (server: McpServer) => {
           .string()
           .max(50)
           .optional()
-          .describe("Task type (e.g., 'bug', 'feature', 'review')."),
+          .describe("Task type (e.g., 'bug', 'feature', 'review', 'ralph' for iterative tasks)."),
         tags: z
           .array(z.string())
           .optional()
@@ -38,6 +38,22 @@ export const registerSendTaskTool = (server: McpServer) => {
           .optional()
           .describe("Priority 0-100 (default: 50)."),
         dependsOn: z.array(z.uuid()).optional().describe("Task IDs this task depends on."),
+        // Ralph iterative task options
+        ralphPromise: z
+          .string()
+          .optional()
+          .describe("For Ralph tasks: the completion promise that must be fulfilled."),
+        ralphMaxIterations: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .optional()
+          .describe("For Ralph tasks: max iterations before stopping (default: 50)."),
+        ralphPlanPath: z
+          .string()
+          .optional()
+          .describe("For Ralph tasks: path to a plan file the agent should follow."),
       }),
       outputSchema: z.object({
         success: z.boolean(),
@@ -46,7 +62,7 @@ export const registerSendTaskTool = (server: McpServer) => {
       }),
     },
     async (
-      { agentId, task, offerMode, taskType, tags, priority, dependsOn },
+      { agentId, task, offerMode, taskType, tags, priority, dependsOn, ralphPromise, ralphMaxIterations, ralphPlanPath },
       requestInfo,
       _meta,
     ) => {
@@ -91,6 +107,9 @@ export const registerSendTaskTool = (server: McpServer) => {
             tags,
             priority,
             dependsOn,
+            ralphPromise,
+            ralphMaxIterations,
+            ralphPlanPath,
           });
 
           return {
@@ -134,6 +153,9 @@ export const registerSendTaskTool = (server: McpServer) => {
             tags,
             priority,
             dependsOn,
+            ralphPromise,
+            ralphMaxIterations,
+            ralphPlanPath,
           });
 
           return {
@@ -151,6 +173,9 @@ export const registerSendTaskTool = (server: McpServer) => {
           tags,
           priority,
           dependsOn,
+          ralphPromise,
+          ralphMaxIterations,
+          ralphPlanPath,
         });
 
         return {

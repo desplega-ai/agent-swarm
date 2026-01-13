@@ -423,6 +423,33 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     /* exists */
   }
 
+  // Migration: Add Ralph loop metadata columns
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN ralphPromise TEXT`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN ralphIterations INTEGER DEFAULT 0`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN ralphMaxIterations INTEGER DEFAULT 50`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN ralphLastCheckpoint TEXT`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN ralphPlanPath TEXT`);
+  } catch {
+    /* exists */
+  }
+
   // Migration: Update inbox_messages CHECK constraint to include 'processing' status
   // SQLite doesn't support ALTER TABLE MODIFY COLUMN, so we need to recreate the table
   try {
@@ -711,6 +738,12 @@ type AgentTaskRow = {
   failureReason: string | null;
   output: string | null;
   progress: string | null;
+  // Ralph loop metadata
+  ralphPromise: string | null;
+  ralphIterations: number | null;
+  ralphMaxIterations: number | null;
+  ralphLastCheckpoint: string | null;
+  ralphPlanPath: string | null;
 };
 
 function rowToAgentTask(row: AgentTaskRow): AgentTask {
@@ -747,6 +780,12 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     failureReason: row.failureReason ?? undefined,
     output: row.output ?? undefined,
     progress: row.progress ?? undefined,
+    // Ralph loop metadata
+    ralphPromise: row.ralphPromise ?? undefined,
+    ralphIterations: row.ralphIterations ?? 0,
+    ralphMaxIterations: row.ralphMaxIterations ?? 50,
+    ralphLastCheckpoint: row.ralphLastCheckpoint ?? undefined,
+    ralphPlanPath: row.ralphPlanPath ?? undefined,
   };
 }
 
@@ -1146,6 +1185,69 @@ export function updateTaskProgress(id: string, progress: string): AgentTask | nu
   return row ? rowToAgentTask(row) : null;
 }
 
+/**
+ * Update Ralph loop state for a task.
+ * Used to track iteration count and checkpoint timestamps.
+ */
+export function updateRalphState(
+  taskId: string,
+  updates: { iterations?: number; lastCheckpoint?: string; promise?: string },
+): AgentTask | null {
+  const task = getTaskById(taskId);
+  if (!task) return null;
+
+  // Build the SET clause dynamically based on provided updates
+  const setClauses: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (updates.iterations !== undefined) {
+    setClauses.push("ralphIterations = ?");
+    params.push(updates.iterations);
+  }
+
+  if (updates.lastCheckpoint !== undefined) {
+    setClauses.push("ralphLastCheckpoint = ?");
+    params.push(updates.lastCheckpoint);
+  }
+
+  if (updates.promise !== undefined) {
+    setClauses.push("ralphPromise = ?");
+    params.push(updates.promise);
+  }
+
+  if (setClauses.length === 0) return task;
+
+  setClauses.push("lastUpdatedAt = ?");
+  params.push(new Date().toISOString());
+  params.push(taskId);
+
+  const row = getDb()
+    .prepare<AgentTaskRow, (string | number)[]>(
+      `UPDATE agent_tasks SET ${setClauses.join(", ")} WHERE id = ? RETURNING *`,
+    )
+    .get(...params);
+
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Get a Ralph task that is currently in progress for an agent.
+ */
+export function getRalphTaskForAgent(agentId: string): AgentTask | null {
+  const row = getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks
+       WHERE agentId = ?
+       AND taskType = 'ralph'
+       AND status = 'in_progress'
+       ORDER BY lastUpdatedAt DESC
+       LIMIT 1`,
+    )
+    .get(agentId);
+
+  return row ? rowToAgentTask(row) : null;
+}
+
 // ============================================================================
 // Combined Queries (Agent with Tasks)
 // ============================================================================
@@ -1307,6 +1409,10 @@ export interface CreateTaskOptions {
   githubUrl?: string;
   mentionMessageId?: string;
   mentionChannelId?: string;
+  // Ralph loop metadata
+  ralphPromise?: string;
+  ralphMaxIterations?: number;
+  ralphPlanPath?: string;
 }
 
 export function createTaskExtended(task: string, options?: CreateTaskOptions): AgentTask {
@@ -1325,8 +1431,10 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         taskType, tags, priority, dependsOn, offeredTo, offeredAt,
         slackChannelId, slackThreadTs, slackUserId,
         githubRepo, githubEventType, githubNumber, githubCommentId, githubAuthor, githubUrl,
-        mentionMessageId, mentionChannelId, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        mentionMessageId, mentionChannelId,
+        ralphPromise, ralphIterations, ralphMaxIterations, ralphPlanPath,
+        createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -1352,6 +1460,10 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.githubUrl ?? null,
       options?.mentionMessageId ?? null,
       options?.mentionChannelId ?? null,
+      options?.ralphPromise ?? null,
+      0, // ralphIterations starts at 0
+      options?.ralphMaxIterations ?? 50,
+      options?.ralphPlanPath ?? null,
       now,
       now,
     );

@@ -1,5 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { getBasePrompt } from "../prompts/base-prompt.ts";
+import { readCheckpoint, clearCheckpoint } from "../ralph/state.ts";
+import type { AgentTask } from "../types.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 
 /** Save PM2 process list for persistence across container restarts */
@@ -226,7 +228,7 @@ interface Trigger {
     | "tasks_finished"
     | "slack_inbox_message";
   taskId?: string;
-  task?: unknown;
+  task?: AgentTask;
   mentionsCount?: number;
   count?: number;
   tasks?: Array<{
@@ -681,6 +683,245 @@ function spawnClaudeProcess(
   };
 }
 
+/**
+ * Check if a task is a Ralph (iterative) task.
+ */
+function isRalphTask(task: AgentTask | undefined): boolean {
+  return task?.taskType === "ralph";
+}
+
+/**
+ * Fetch task details from the API.
+ */
+async function fetchTaskDetails(
+  apiUrl: string,
+  apiKey: string,
+  agentId: string,
+  taskId: string,
+): Promise<AgentTask | null> {
+  const headers: Record<string, string> = {
+    "X-Agent-ID": agentId,
+  };
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
+  try {
+    const response = await fetch(`${apiUrl}/api/tasks/${taskId}`, {
+      method: "GET",
+      headers,
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = (await response.json()) as { task: AgentTask };
+    return data.task;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Update Ralph state (increment iteration, update checkpoint timestamp).
+ */
+async function updateRalphIteration(
+  apiUrl: string,
+  apiKey: string,
+  agentId: string,
+  taskId: string,
+  iteration: number,
+): Promise<void> {
+  const headers: Record<string, string> = {
+    "X-Agent-ID": agentId,
+    "Content-Type": "application/json",
+  };
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
+  try {
+    await fetch(`${apiUrl}/api/tasks/${taskId}/ralph-state`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({
+        iterations: iteration,
+        lastCheckpoint: new Date().toISOString(),
+      }),
+    });
+  } catch {
+    // Log but don't fail on error
+    console.warn(`[ralph] Failed to update Ralph state for task ${taskId}`);
+  }
+}
+
+/**
+ * Ralph loop handler for iterative task processing.
+ * Runs a task in a loop until completion or max iterations reached.
+ */
+async function handleRalphTask(opts: {
+  task: AgentTask;
+  apiUrl: string;
+  apiKey: string;
+  agentId: string;
+  logDir: string;
+  systemPrompt: string;
+  additionalArgs?: string[];
+  role: string;
+  sessionId: string;
+  metadataType: string;
+  isYolo: boolean;
+}): Promise<void> {
+  const {
+    task,
+    apiUrl,
+    apiKey,
+    agentId,
+    logDir,
+    systemPrompt,
+    additionalArgs,
+    role,
+    sessionId,
+    metadataType,
+    isYolo,
+  } = opts;
+
+  const maxIterations = task.ralphMaxIterations ?? 50;
+  let currentIteration = (task.ralphIterations ?? 0) + 1;
+
+  console.log(`[ralph] Starting Ralph loop for task ${task.id}`);
+  console.log(`[ralph] Promise: ${task.ralphPromise ?? "Not specified"}`);
+  console.log(`[ralph] Plan path: ${task.ralphPlanPath ?? "Not specified"}`);
+  console.log(`[ralph] Max iterations: ${maxIterations}`);
+  console.log(`[ralph] Starting at iteration: ${currentIteration}`);
+
+  // Clear any existing checkpoint before starting
+  await clearCheckpoint(task.id);
+
+  while (currentIteration <= maxIterations) {
+    console.log(`\n[ralph] === Iteration ${currentIteration}/${maxIterations} ===`);
+
+    // Update iteration count in the database
+    await updateRalphIteration(apiUrl, apiKey, agentId, task.id, currentIteration);
+
+    // Build the Ralph-specific prompt
+    const ralphPrompt = buildRalphPrompt(task, currentIteration);
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const logFile = `${logDir}/${timestamp}-ralph-${task.id.slice(0, 8)}-iter${currentIteration}.jsonl`;
+
+    const metadata = {
+      type: metadataType,
+      sessionId,
+      iteration: currentIteration,
+      timestamp: new Date().toISOString(),
+      prompt: ralphPrompt,
+      trigger: "ralph_iteration",
+      taskId: task.id,
+      yolo: isYolo,
+    };
+    await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
+
+    // Run Claude synchronously for this iteration
+    const exitCode = await runClaudeIteration({
+      prompt: ralphPrompt,
+      logFile,
+      systemPrompt,
+      additionalArgs,
+      role,
+    });
+
+    console.log(`[ralph] Iteration ${currentIteration} completed with exit code ${exitCode}`);
+
+    // Check for checkpoint (indicates context filled up without completion)
+    const checkpoint = await readCheckpoint(task.id);
+
+    // Refetch task to check if it was completed
+    const updatedTask = await fetchTaskDetails(apiUrl, apiKey, agentId, task.id);
+
+    if (updatedTask?.status === "completed") {
+      console.log(`[ralph] Task ${task.id} completed successfully!`);
+      await clearCheckpoint(task.id);
+      return;
+    }
+
+    if (updatedTask?.status === "failed") {
+      console.log(`[ralph] Task ${task.id} failed.`);
+      await clearCheckpoint(task.id);
+      return;
+    }
+
+    if (checkpoint) {
+      console.log(`[ralph] Checkpoint detected - context filled at iteration ${currentIteration}`);
+      console.log(`[ralph] Reason: ${checkpoint.checkpointReason}`);
+      // Clear checkpoint and continue to next iteration
+      await clearCheckpoint(task.id);
+    }
+
+    // Move to next iteration
+    currentIteration++;
+
+    // Brief pause between iterations
+    await Bun.sleep(2000);
+  }
+
+  console.log(`[ralph] Max iterations (${maxIterations}) reached for task ${task.id}`);
+  console.log(`[ralph] Task will remain in_progress for manual review.`);
+}
+
+/**
+ * Build the prompt for a Ralph iteration.
+ */
+function buildRalphPrompt(task: AgentTask, iteration: number): string {
+  const parts: string[] = [];
+
+  parts.push(`[RALPH TASK - Iteration ${iteration}/${task.ralphMaxIterations ?? 50}]`);
+  parts.push("");
+
+  if (iteration === 1) {
+    parts.push("You are starting a new iterative task. Your context will be reset between iterations,");
+    parts.push("but all code and files you create will persist.");
+    parts.push("");
+    parts.push("## Task Description");
+    parts.push(task.task);
+    parts.push("");
+  } else {
+    parts.push(`This is iteration ${iteration}. Previous iterations made progress but did not complete.`);
+    parts.push("Your context has been reset, but all code and files from previous iterations persist.");
+    parts.push("");
+    parts.push("## Original Task Description");
+    parts.push(task.task);
+    parts.push("");
+  }
+
+  if (task.ralphPromise) {
+    parts.push("## Completion Promise");
+    parts.push(`You must fulfill this promise: ${task.ralphPromise}`);
+    parts.push("");
+    parts.push("When the promise is fulfilled, use the `ralph-complete` tool with evidence.");
+    parts.push("");
+  }
+
+  if (task.ralphPlanPath) {
+    parts.push("## Plan File");
+    parts.push(`A detailed plan exists at: ${task.ralphPlanPath}`);
+    parts.push("Read this file to understand what has been done and what remains.");
+    parts.push("");
+  }
+
+  parts.push("## Instructions");
+  parts.push("1. If a plan file exists, read it to understand the current state.");
+  parts.push("2. Check the filesystem for any artifacts from previous iterations.");
+  parts.push("3. Continue working towards fulfilling the completion promise.");
+  parts.push("4. When the promise is fulfilled, call `ralph-complete` with summary and evidence.");
+  parts.push("5. If you cannot complete in this iteration, make as much progress as possible.");
+  parts.push("");
+  parts.push("Your work will be saved even if your context fills up. The next iteration will continue where you left off.");
+
+  return parts.join("\n");
+}
+
 /** Check for completed processes and remove them from active tasks */
 async function checkCompletedProcesses(state: RunnerState, role: string): Promise<void> {
   const completedTasks: string[] = [];
@@ -853,6 +1094,36 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
           console.log(`[${role}] Trigger received: ${trigger.type}`);
 
+          // Check if this is a Ralph task and handle it specially
+          if (trigger.type === "task_assigned" && trigger.taskId && isRalphTask(trigger.task)) {
+            console.log(`[${role}] Ralph task detected - starting iterative loop`);
+
+            // For Ralph tasks, we need to get the full task details
+            const ralphTask = trigger.task || (await fetchTaskDetails(apiUrl, apiKey, agentId, trigger.taskId));
+
+            if (ralphTask && isRalphTask(ralphTask)) {
+              // Handle Ralph task in a blocking loop (takes over this slot until complete)
+              await handleRalphTask({
+                task: ralphTask,
+                apiUrl,
+                apiKey,
+                agentId,
+                logDir,
+                systemPrompt: resolvedSystemPrompt,
+                additionalArgs: opts.additionalArgs,
+                role,
+                sessionId,
+                metadataType,
+                isYolo,
+              });
+
+              // After Ralph task completes, continue polling
+              console.log(`[${role}] Ralph loop complete, resuming normal polling`);
+              continue;
+            }
+          }
+
+          // Normal (non-Ralph) task handling
           // Build prompt based on trigger
           const triggerPrompt = buildPromptForTrigger(trigger, prompt);
 

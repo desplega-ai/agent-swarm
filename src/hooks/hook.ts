@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 
 import pkg from "../../package.json";
-import type { Agent } from "../types";
+import type { Agent, AgentTask } from "../types";
+import { writeCheckpoint } from "../ralph/state";
 
 const SERVER_NAME = pkg.config?.name ?? "agent-swarm";
 
@@ -138,6 +139,37 @@ export async function handleHook(): Promise<void> {
     return;
   };
 
+  /**
+   * Get the active Ralph task for this agent (if any).
+   * Returns undefined if no Ralph task is in progress.
+   */
+  const getRalphTaskForAgent = async (): Promise<AgentTask | undefined> => {
+    if (!mcpConfig) return;
+
+    const agentId = mcpConfig.headers["X-Agent-ID"];
+    if (!agentId) return;
+
+    try {
+      // Query for in_progress Ralph task assigned to this agent
+      const resp = await fetch(
+        `${getBaseUrl()}/api/tasks?agentId=${agentId}&status=in_progress&taskType=ralph&limit=1`,
+        {
+          method: "GET",
+          headers: mcpConfig.headers,
+        },
+      );
+
+      if (!resp.ok) return;
+
+      const data = (await resp.json()) as { tasks: AgentTask[] };
+      return data.tasks?.[0];
+    } catch {
+      // Silently fail
+    }
+
+    return;
+  };
+
   const formatSystemTray = (inbox: InboxSummary): string | null => {
     const {
       unreadCount,
@@ -243,9 +275,28 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
       // Covered by base system prompt
       break;
 
-    case "PreCompact":
-      // Covered by SessionStart hook
+    case "PreCompact": {
+      // Check if this agent is working on a Ralph task
+      const ralphTask = await getRalphTaskForAgent();
+      if (ralphTask) {
+        // Write checkpoint to signal context is filling up
+        await writeCheckpoint({
+          taskId: ralphTask.id,
+          iteration: ralphTask.ralphIterations ?? 0,
+          contextFull: true,
+          timestamp: new Date().toISOString(),
+          checkpointReason: "precompact",
+        });
+        console.log(`[RALPH] Context 80% full for task ${ralphTask.id}. Checkpoint written.`);
+        console.log(
+          `If the completion promise is met, call ralph-complete before the session ends.`,
+        );
+        console.log(
+          `Promise to fulfill: ${ralphTask.ralphPromise ?? "Not specified"}`,
+        );
+      }
       break;
+    }
 
     case "PreToolUse":
       // Nothing to do here for now
@@ -273,7 +324,20 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
       // Nothing specific for now
       break;
 
-    case "Stop":
+    case "Stop": {
+      // Check if this agent is working on a Ralph task - write final checkpoint
+      const ralphTaskOnStop = await getRalphTaskForAgent();
+      if (ralphTaskOnStop) {
+        await writeCheckpoint({
+          taskId: ralphTaskOnStop.id,
+          iteration: ralphTaskOnStop.ralphIterations ?? 0,
+          contextFull: true,
+          timestamp: new Date().toISOString(),
+          checkpointReason: "stop",
+        });
+        console.log(`[RALPH] Session stopping for task ${ralphTaskOnStop.id}. Checkpoint written.`);
+      }
+
       // Save PM2 processes before shutdown (for container restart persistence)
       try {
         await Bun.$`pm2 save`.quiet();
@@ -283,6 +347,7 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
       // Mark the agent as offline
       await close();
       break;
+    }
 
     default:
       break;

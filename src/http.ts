@@ -558,6 +558,105 @@ const httpServer = createHttpServer(async (req, res) => {
     return;
   }
 
+  // PATCH /api/tasks/:id/ralph-state - Update Ralph task iteration state
+  if (
+    req.method === "PATCH" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "tasks" &&
+    pathSegments[2] &&
+    pathSegments[3] === "ralph-state"
+  ) {
+    const taskId = pathSegments[2];
+    const task = getTaskById(taskId);
+
+    if (!task) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Task not found" }));
+      return;
+    }
+
+    if (task.taskType !== "ralph") {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Task is not a Ralph task" }));
+      return;
+    }
+
+    // Parse request body
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    // Import updateRalphState dynamically to avoid circular dependency
+    const { updateRalphState } = await import("./be/db");
+
+    const updatedTask = updateRalphState(taskId, {
+      iterations: body.iterations,
+      lastCheckpoint: body.lastCheckpoint,
+      promise: body.promise,
+    });
+
+    if (!updatedTask) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Failed to update Ralph state" }));
+      return;
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ success: true, task: updatedTask }));
+    return;
+  }
+
+  // GET /api/tasks/:id - Get a single task by ID
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "tasks" &&
+    pathSegments[2] &&
+    !pathSegments[3]
+  ) {
+    const taskId = pathSegments[2];
+    const task = getTaskById(taskId);
+
+    if (!task) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Task not found" }));
+      return;
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ task }));
+    return;
+  }
+
+  // GET /api/tasks - Get tasks with filters (for Ralph task detection in hooks)
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "tasks" &&
+    !pathSegments[2]
+  ) {
+    const query = parseQueryParams(req.url || "");
+    const filters: {
+      agentId?: string;
+      status?: string;
+      taskType?: string;
+      limit?: number;
+    } = {};
+
+    if (query.get("agentId")) filters.agentId = query.get("agentId")!;
+    if (query.get("status")) filters.status = query.get("status")!;
+    if (query.get("taskType")) filters.taskType = query.get("taskType")!;
+    if (query.get("limit")) filters.limit = parseInt(query.get("limit")!, 10);
+
+    const tasks = getAllTasks(filters as import("./be/db").TaskFilters);
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ tasks }));
+    return;
+  }
+
   // GET /ecosystem - Generate PM2 ecosystem config for agent's services
   if (req.method === "GET" && req.url === "/ecosystem") {
     if (!myAgentId) {
