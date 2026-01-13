@@ -1,5 +1,5 @@
-import { createTaskExtended, getAllAgents } from "../be/db";
-import { detectMention, extractMentionContext } from "./mentions";
+import { createTaskExtended, getAllAgents, failTask, findTaskByGitHub } from "../be/db";
+import { detectMention, extractMentionContext, isBotAssignee, GITHUB_BOT_NAME } from "./mentions";
 import { addIssueReaction, addReaction } from "./reactions";
 import type { CommentEvent, IssueEvent, PullRequestEvent } from "./types";
 
@@ -66,9 +66,75 @@ function findLeadAgent() {
 export async function handlePullRequest(
   event: PullRequestEvent,
 ): Promise<{ created: boolean; taskId?: string }> {
-  const { action, pull_request: pr, repository, sender, installation } = event;
+  const { action, pull_request: pr, repository, sender, installation, assignee } = event;
 
-  // Only handle opened/edited actions
+  // Handle assigned action - bot was assigned to PR
+  if (action === "assigned") {
+    // Check if bot was assigned
+    if (!isBotAssignee(assignee?.login)) {
+      return { created: false };
+    }
+
+    // Deduplicate using assignment-specific key
+    const eventKey = `pr-assigned:${repository.full_name}:${pr.number}`;
+    if (isDuplicate(eventKey)) {
+      return { created: false };
+    }
+
+    // Same task creation flow as mention-based handling
+    const lead = findLeadAgent();
+    const suggestions = getCommandSuggestions("github-pr");
+    const taskDescription = `[GitHub PR #${pr.number}] ${pr.title}\n\nAssigned to: @${GITHUB_BOT_NAME}\nFrom: ${sender.login}\nRepo: ${repository.full_name}\nBranch: ${pr.head.ref} → ${pr.base.ref}\nURL: ${pr.html_url}\n\nContext:\n${pr.body || pr.title}\n\n---\n${DELEGATION_INSTRUCTION}\n${suggestions}`;
+
+    const task = createTaskExtended(taskDescription, {
+      agentId: lead?.id ?? "",
+      source: "github",
+      taskType: "github-pr",
+      githubRepo: repository.full_name,
+      githubEventType: "pull_request",
+      githubNumber: pr.number,
+      githubAuthor: sender.login,
+      githubUrl: pr.html_url,
+    });
+
+    if (lead) {
+      console.log(`[GitHub] Created task ${task.id} for PR #${pr.number} (assigned) -> ${lead.name}`);
+    } else {
+      console.log(`[GitHub] Created unassigned task ${task.id} for PR #${pr.number} (assigned, no lead available)`);
+    }
+
+    if (installation?.id) {
+      addIssueReaction(repository.full_name, pr.number, "eyes", installation.id);
+    }
+
+    return { created: true, taskId: task.id };
+  }
+
+  // Handle unassigned action - bot was removed from PR
+  if (action === "unassigned") {
+    // Check if bot was unassigned
+    if (!isBotAssignee(assignee?.login)) {
+      return { created: false };
+    }
+
+    // Find the related task
+    const task = findTaskByGitHub(repository.full_name, pr.number);
+    if (!task) {
+      console.log(`[GitHub] No active task found for PR #${pr.number} to cancel`);
+      return { created: false };
+    }
+
+    // Cancel the task
+    const cancelledTask = failTask(task.id, `Unassigned from GitHub PR #${pr.number}`);
+    if (cancelledTask) {
+      console.log(`[GitHub] Cancelled task ${task.id} for PR #${pr.number} (unassigned)`);
+      return { created: false, taskId: task.id };
+    }
+
+    return { created: false };
+  }
+
+  // Only handle opened/edited actions for mention-based flow
   if (action !== "opened" && action !== "edited") {
     return { created: false };
   }
@@ -127,9 +193,75 @@ export async function handlePullRequest(
 export async function handleIssue(
   event: IssueEvent,
 ): Promise<{ created: boolean; taskId?: string }> {
-  const { action, issue, repository, sender, installation } = event;
+  const { action, issue, repository, sender, installation, assignee } = event;
 
-  // Only handle opened/edited actions
+  // Handle assigned action - bot was assigned to issue
+  if (action === "assigned") {
+    // Check if bot was assigned
+    if (!isBotAssignee(assignee?.login)) {
+      return { created: false };
+    }
+
+    // Deduplicate using assignment-specific key
+    const eventKey = `issue-assigned:${repository.full_name}:${issue.number}`;
+    if (isDuplicate(eventKey)) {
+      return { created: false };
+    }
+
+    // Same task creation flow as mention-based handling
+    const lead = findLeadAgent();
+    const suggestions = getCommandSuggestions("github-issue");
+    const taskDescription = `[GitHub Issue #${issue.number}] ${issue.title}\n\nAssigned to: @${GITHUB_BOT_NAME}\nFrom: ${sender.login}\nRepo: ${repository.full_name}\nURL: ${issue.html_url}\n\nContext:\n${issue.body || issue.title}\n\n---\n${DELEGATION_INSTRUCTION}\n${suggestions}`;
+
+    const task = createTaskExtended(taskDescription, {
+      agentId: lead?.id ?? "",
+      source: "github",
+      taskType: "github-issue",
+      githubRepo: repository.full_name,
+      githubEventType: "issues",
+      githubNumber: issue.number,
+      githubAuthor: sender.login,
+      githubUrl: issue.html_url,
+    });
+
+    if (lead) {
+      console.log(`[GitHub] Created task ${task.id} for issue #${issue.number} (assigned) -> ${lead.name}`);
+    } else {
+      console.log(`[GitHub] Created unassigned task ${task.id} for issue #${issue.number} (assigned, no lead available)`);
+    }
+
+    if (installation?.id) {
+      addIssueReaction(repository.full_name, issue.number, "eyes", installation.id);
+    }
+
+    return { created: true, taskId: task.id };
+  }
+
+  // Handle unassigned action - bot was removed from issue
+  if (action === "unassigned") {
+    // Check if bot was unassigned
+    if (!isBotAssignee(assignee?.login)) {
+      return { created: false };
+    }
+
+    // Find the related task
+    const task = findTaskByGitHub(repository.full_name, issue.number);
+    if (!task) {
+      console.log(`[GitHub] No active task found for issue #${issue.number} to cancel`);
+      return { created: false };
+    }
+
+    // Cancel the task
+    const cancelledTask = failTask(task.id, `Unassigned from GitHub issue #${issue.number}`);
+    if (cancelledTask) {
+      console.log(`[GitHub] Cancelled task ${task.id} for issue #${issue.number} (unassigned)`);
+      return { created: false, taskId: task.id };
+    }
+
+    return { created: false };
+  }
+
+  // Only handle opened/edited actions for mention-based flow
   if (action !== "opened" && action !== "edited") {
     return { created: false };
   }
