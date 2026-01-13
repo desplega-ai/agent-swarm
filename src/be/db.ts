@@ -811,6 +811,26 @@ export function getTasksByStatus(status: AgentTaskStatus): AgentTask[] {
   return taskQueries.getByStatus().all(status).map(rowToAgentTask);
 }
 
+/**
+ * Find a task by GitHub repo and issue/PR number
+ * Returns the most recent non-completed/failed task for this GitHub entity
+ */
+export function findTaskByGitHub(
+  githubRepo: string,
+  githubNumber: number,
+): AgentTask | null {
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, number]>(
+      `SELECT * FROM agent_tasks
+       WHERE githubRepo = ? AND githubNumber = ?
+       AND status NOT IN ('completed', 'failed')
+       ORDER BY createdAt DESC
+       LIMIT 1`,
+    )
+    .get(githubRepo, githubNumber);
+  return row ? rowToAgentTask(row) : null;
+}
+
 export interface TaskFilters {
   status?: AgentTaskStatus;
   agentId?: string;

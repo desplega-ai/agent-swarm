@@ -20,3 +20,11 @@ export function extractMentionContext(text: string | null | undefined): string {
   if (!text) return "";
   return text.replace(MENTION_PATTERN, "").trim();
 }
+
+/**
+ * Check if the assignee matches our bot name (case-insensitive)
+ */
+export function isBotAssignee(assigneeLogin: string | undefined): boolean {
+  if (!assigneeLogin) return false;
+  return assigneeLogin.toLowerCase() === GITHUB_BOT_NAME.toLowerCase();
+}

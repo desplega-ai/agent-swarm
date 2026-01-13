@@ -106,8 +106,8 @@ The `assignee` field is sent by GitHub when `action` is `"assigned"` or `"unassi
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun tsc --noEmit`
-- [ ] Tests pass: `bun test`
+- [x] TypeScript compiles: `bun tsc --noEmit`
+- [x] Tests pass: `bun test`
 
 ---
 
@@ -151,8 +151,8 @@ export function findTaskByGitHub(
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun tsc --noEmit`
-- [ ] Tests pass: `bun test`
+- [x] TypeScript compiles: `bun tsc --noEmit`
+- [x] Tests pass: `bun test`
 
 #### Manual Verification:
 - [ ] Create a test task with GitHub metadata, verify `findTaskByGitHub()` returns it
@@ -324,8 +324,8 @@ export { detectMention, extractMentionContext, isBotAssignee, GITHUB_BOT_NAME } 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun tsc --noEmit`
-- [ ] Tests pass: `bun test`
+- [x] TypeScript compiles: `bun tsc --noEmit`
+- [x] Tests pass: `bun test`
 
 #### Manual Verification:
 - [ ] Assign @desplega-bot to an issue -> Task created
@@ -419,8 +419,8 @@ import { createTaskExtended, getAllAgents, failTask, findTaskByGitHub } from "..
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun tsc --noEmit`
-- [ ] Tests pass: `bun test`
+- [x] TypeScript compiles: `bun tsc --noEmit`
+- [x] Tests pass: `bun test`
 
 #### Manual Verification:
 - [ ] Unassign @desplega-bot from an issue -> Task cancelled with reason
@@ -474,8 +474,8 @@ describe("isBotAssignee", () => {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] All tests pass: `bun test src/github/mentions.test.ts`
-- [ ] Full test suite passes: `bun test`
+- [x] All tests pass: `bun test src/github/mentions.test.ts`
+- [x] Full test suite passes: `bun test`
 
 ---
 

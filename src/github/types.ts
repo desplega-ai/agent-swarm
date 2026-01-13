@@ -3,6 +3,7 @@ export interface GitHubWebhookEvent {
   sender: { login: string };
   repository: { full_name: string; html_url: string };
   installation?: { id: number };
+  assignee?: { login: string; id: number };  // Added for assigned/unassigned events
 }
 
 export interface PullRequestEvent extends GitHubWebhookEvent {

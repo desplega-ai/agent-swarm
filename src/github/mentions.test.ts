@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { detectMention, extractMentionContext, GITHUB_BOT_NAME } from "./mentions";
+import { detectMention, extractMentionContext, isBotAssignee, GITHUB_BOT_NAME } from "./mentions";
 
 describe("detectMention", () => {
   test("returns true for @bot mention", () => {
@@ -76,5 +76,29 @@ describe("extractMentionContext", () => {
 
   test("preserves text without mention", () => {
     expect(extractMentionContext("no mention here")).toBe("no mention here");
+  });
+});
+
+describe("isBotAssignee", () => {
+  test("returns true for exact match", () => {
+    expect(isBotAssignee(GITHUB_BOT_NAME)).toBe(true);
+  });
+
+  test("is case-insensitive", () => {
+    expect(isBotAssignee(GITHUB_BOT_NAME.toUpperCase())).toBe(true);
+    expect(isBotAssignee(GITHUB_BOT_NAME.toLowerCase())).toBe(true);
+  });
+
+  test("returns false for different username", () => {
+    expect(isBotAssignee("some-other-user")).toBe(false);
+  });
+
+  test("returns false for undefined", () => {
+    expect(isBotAssignee(undefined)).toBe(false);
+  });
+
+  test("returns false for partial match", () => {
+    expect(isBotAssignee(GITHUB_BOT_NAME + "-extra")).toBe(false);
+    expect(isBotAssignee("prefix-" + GITHUB_BOT_NAME)).toBe(false);
   });
 });
