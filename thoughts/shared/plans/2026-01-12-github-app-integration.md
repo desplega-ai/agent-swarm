@@ -2,7 +2,7 @@
 
 ## Overview
 
-Implement GitHub App integration for agent-swarm to enable webhook handling for PRs, issues, and comments, with `@agent-swarm` mention detection to create tasks for the lead agent to triage.
+Implement GitHub App integration for agent-swarm to enable webhook handling for PRs, issues, and comments, with `@agent-swarm-bot` mention detection (configurable via `GITHUB_BOT_NAME` env var) to create tasks for the lead agent to triage.
 
 ## Current State Analysis
 
@@ -83,9 +83,9 @@ Update `AgentTaskRow`, `rowToAgentTask`, `CreateTaskOptions`, and `createTaskExt
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun tsc --noEmit`
-- [ ] Database initializes: `bun run src/http.ts` starts without errors
-- [ ] Tests pass: `bun test`
+- [x] TypeScript compiles: `bun tsc --noEmit`
+- [x] Database initializes: `bun run src/http.ts` starts without errors
+- [x] Tests pass: `bun test`
 
 #### Manual Verification:
 - [ ] New columns visible: `sqlite3 agent-swarm-db.sqlite ".schema agent_tasks"`
@@ -179,13 +179,13 @@ Add `initGitHub()` call in server startup after `startSlackApp()`.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun tsc --noEmit`
-- [ ] Server starts: `bun run src/http.ts`
-- [ ] Tests pass: `bun test`
+- [x] TypeScript compiles: `bun tsc --noEmit`
+- [x] Server starts: `bun run src/http.ts`
+- [x] Tests pass: `bun test`
 
 #### Manual Verification:
-- [ ] Without GITHUB_WEBHOOK_SECRET, endpoint returns 503
-- [ ] With secret set, ping webhook accepted
+- [x] Without GITHUB_WEBHOOK_SECRET, endpoint returns 503
+- [x] With secret set, ping webhook accepted
 
 **Implementation Note**: After completing this phase, pause for manual webhook testing before proceeding.
 
@@ -223,10 +223,18 @@ Add Claude Code slash commands for common GitHub operations.
 - Formulate response
 - Post with `gh issue comment` or `gh pr comment`
 
+#### 5. `/implement-issue` Command
+**File**: `plugin/commands/implement-issue.md`
+- Fetch issue details and understand requirements
+- Clone repo to `/workspace/personal/<repo>`
+- Create feature branch
+- Implement changes based on issue
+- Create PR with `Fixes #<issue-number>`
+
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Command files exist in `plugin/commands/`
+- [x] Command files exist in `plugin/commands/`
 
 #### Manual Verification:
 - [ ] `/review-pr 123` fetches and analyzes PR
@@ -248,6 +256,7 @@ Document required env vars and create GitHub App setup guide.
 # GitHub App Integration (optional)
 # GITHUB_DISABLE=true  # Set to skip GitHub integration
 GITHUB_WEBHOOK_SECRET=  # Webhook secret from GitHub App settings
+GITHUB_BOT_NAME=agent-swarm-bot  # Bot name for @mentions (default: agent-swarm-bot)
 ```
 
 #### 2. Add Unit Tests
@@ -258,11 +267,83 @@ GITHUB_WEBHOOK_SECRET=  # Webhook secret from GitHub App settings
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] .env.example updated
-- [ ] Unit tests pass: `bun test src/github/mentions.test.ts`
+- [x] .env.example updated
+- [x] Unit tests pass: `bun test src/github/mentions.test.ts`
 
 #### Manual Verification:
 - [ ] End-to-end: Create GitHub App, install on repo, mention @agent-swarm, verify task created
+
+---
+
+## Phase 5: Bot Reactions & Acknowledgments
+
+### Overview
+Enable the bot to react to comments and post acknowledgments, appearing as `agent-swarm-bot[bot]` using GitHub App installation tokens.
+
+### Changes Required:
+
+#### 1. Add GitHub App Credentials
+**File**: `.env.example`
+```bash
+GITHUB_APP_ID=              # GitHub App ID (from app settings)
+GITHUB_APP_PRIVATE_KEY=     # Private key (PEM format, newlines as \n)
+```
+
+#### 2. Add Installation Token Generation
+**File**: `src/github/app.ts`
+- Add `generateInstallationToken(installationId)` function
+- Uses JWT signed with private key to authenticate as the app
+- Calls `POST /app/installations/{id}/access_tokens` to get temporary token
+- Cache tokens until expiry (typically 1 hour)
+
+```typescript
+async function generateInstallationToken(installationId: number): Promise<string | null>
+```
+
+#### 3. Add Reaction & Comment Functions
+**File**: `src/github/reactions.ts`
+```typescript
+// Add a reaction to a comment (e.g., 👀 eyes, 🤖 robot)
+export async function addReaction(
+  repo: string,
+  commentId: number,
+  reaction: "eyes" | "+1" | "rocket" | "heart",
+  installationId: number
+): Promise<boolean>
+
+// Post a comment on an issue/PR
+export async function postComment(
+  repo: string,
+  issueNumber: number,
+  body: string,
+  installationId: number
+): Promise<boolean>
+```
+
+#### 4. Update Handlers to React
+**File**: `src/github/handlers.ts`
+- After creating a task, call `addReaction()` with 👀 to acknowledge
+- Optionally post a brief comment: "I've received your request and created a task."
+
+### Environment Setup:
+1. Go to GitHub App settings → General → Private keys
+2. Click "Generate a private key" (downloads `.pem` file)
+3. Convert to single line: `awk 'NF {sub(/\r/, ""); printf "%s\\n",$0;}' your-key.pem`
+4. Add to `.env`:
+   ```bash
+   GITHUB_APP_ID=2645773
+   GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
+   ```
+
+### Success Criteria:
+
+#### Automated Verification:
+- [x] TypeScript compiles: `bun tsc --noEmit`
+- [x] Tests pass: `bun test`
+
+#### Manual Verification:
+- [x] Comment with `@agent-swarm-bot` receives 👀 reaction from bot
+- [x] Reaction appears as `agent-swarm-bot[bot]`, not a personal account
 
 ---
 

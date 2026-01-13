@@ -38,6 +38,15 @@ import {
   postMessage,
   updateAgentStatus,
 } from "./be/db";
+import type { CommentEvent, IssueEvent, PullRequestEvent } from "./github";
+import {
+  handleComment,
+  handleIssue,
+  handlePullRequest,
+  initGitHub,
+  isGitHubEnabled,
+  verifyWebhookSignature,
+} from "./github";
 import { startSlackApp, stopSlackApp } from "./slack";
 import type { AgentLog, AgentStatus } from "./types";
 
@@ -79,6 +88,32 @@ function getPathSegments(url: string): string[] {
 }
 
 const httpServer = createHttpServer(async (req, res) => {
+  const startTime = performance.now();
+  let statusCode = 200;
+
+  // Wrap writeHead to capture status code
+  const originalWriteHead = res.writeHead.bind(res);
+  res.writeHead = (code: number, ...args: unknown[]) => {
+    statusCode = code;
+    // @ts-expect-error - writeHead has multiple overloads
+    return originalWriteHead(code, ...args);
+  };
+
+  // Log request completion
+  const logRequest = () => {
+    const elapsed = (performance.now() - startTime).toFixed(1);
+    const statusEmoji = statusCode >= 400 ? "⚠️" : "✓";
+    console.log(`[HTTP] ${statusEmoji} ${req.method} ${req.url} → ${statusCode} (${elapsed}ms)`);
+  };
+
+  // Ensure we log on response finish
+  res.on("finish", logRequest);
+
+  // Log errors
+  res.on("error", (err) => {
+    console.error(`[HTTP] ❌ ${req.method} ${req.url} → Error: ${err.message}`);
+  });
+
   setCorsHeaders(res);
 
   // Handle preflight
@@ -90,10 +125,6 @@ const httpServer = createHttpServer(async (req, res) => {
 
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
   const myAgentId = req.headers["x-agent-id"] as string | undefined;
-
-  console.log(
-    `[HTTP] ${req.method} ${req.url} (sessionId=${sessionId || ""}, agentId=${myAgentId || ""})`,
-  );
 
   if (req.url === "/health") {
     // Read version from package.json
@@ -111,7 +142,9 @@ const httpServer = createHttpServer(async (req, res) => {
   }
 
   // API key authentication (if API_KEY is configured)
-  if (apiKey) {
+  // Skip auth for GitHub webhook (it has its own signature verification)
+  const isGitHubWebhook = req.url?.startsWith("/api/github/webhook");
+  if (apiKey && !isGitHubWebhook) {
     const authHeader = req.headers.authorization;
     const providedKey = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
@@ -494,6 +527,99 @@ const httpServer = createHttpServer(async (req, res) => {
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(ecosystem));
+    return;
+  }
+
+  // ============================================================================
+  // GitHub Webhook Endpoint
+  // ============================================================================
+
+  // POST /api/github/webhook - Handle GitHub webhook events
+  if (
+    req.method === "POST" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "github" &&
+    pathSegments[2] === "webhook"
+  ) {
+    // Check if GitHub integration is enabled
+    if (!isGitHubEnabled()) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "GitHub integration not configured" }));
+      return;
+    }
+
+    // Get event type and signature
+    const eventType = req.headers["x-github-event"] as string | undefined;
+    const signature = req.headers["x-hub-signature-256"] as string | undefined;
+
+    // Parse request body
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const rawBody = Buffer.concat(chunks).toString();
+
+    // Verify webhook signature
+    const isValid = await verifyWebhookSignature(rawBody, signature ?? null);
+    if (!isValid) {
+      console.log("[GitHub] Invalid webhook signature");
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid signature" }));
+      return;
+    }
+
+    // Handle ping event (webhook setup verification)
+    if (eventType === "ping") {
+      console.log("[GitHub] Received ping event - webhook configured successfully");
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ message: "pong" }));
+      return;
+    }
+
+    // Parse JSON body
+    let body: unknown;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid JSON body" }));
+      return;
+    }
+
+    console.log(`[GitHub] Received ${eventType} event`);
+
+    // Route to appropriate handler
+    let result: { created: boolean; taskId?: string } = { created: false };
+
+    try {
+      switch (eventType) {
+        case "pull_request":
+          result = await handlePullRequest(body as PullRequestEvent);
+          break;
+        case "issues":
+          result = await handleIssue(body as IssueEvent);
+          break;
+        case "issue_comment":
+          result = await handleComment(body as CommentEvent, "issue_comment");
+          break;
+        case "pull_request_review_comment":
+          result = await handleComment(body as CommentEvent, "pull_request_review_comment");
+          break;
+        default:
+          console.log(`[GitHub] Ignoring unsupported event type: ${eventType}`);
+      }
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(result));
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error(`[GitHub] ❌ Error handling ${eventType} event: ${errorMessage}`);
+      if (err instanceof Error && err.stack) {
+        console.error(err.stack);
+      }
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Internal server error", message: errorMessage }));
+    }
     return;
   }
 
@@ -915,6 +1041,9 @@ httpServer
 
     // Start Slack bot (if configured)
     await startSlackApp();
+
+    // Initialize GitHub webhook handler (if configured)
+    initGitHub();
   })
   .on("error", (err) => {
     console.error("HTTP Server Error:", err);

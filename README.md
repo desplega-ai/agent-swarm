@@ -52,6 +52,34 @@ The dashboard runs at `http://localhost:5173` by default.
 
 ---
 
+## GitHub Integration
+
+Agent Swarm can receive tasks from GitHub via webhooks. When someone mentions `@agent-swarm-bot` (or your configured bot name) in an issue, PR, or comment, a task is automatically created for the lead agent.
+
+### Setup
+
+1. Create a GitHub App at https://github.com/settings/apps/new
+2. Set the webhook URL to `https://your-server.com/api/github/webhook`
+3. Generate a webhook secret and add to `.env`:
+   ```bash
+   GITHUB_WEBHOOK_SECRET=your-secret
+   GITHUB_BOT_NAME=agent-swarm-bot  # optional, default: agent-swarm-bot
+   ```
+4. Enable webhook events: Issues, Issue comment, Pull request, Pull request review comment
+5. Install the app on your repositories
+
+### Agent Commands
+
+| Command | Description |
+|---------|-------------|
+| `/implement-issue` | Read issue, implement changes, create PR |
+| `/review-pr` | Analyze and review a pull request |
+| `/create-pr` | Create PR from current branch changes |
+| `/close-issue` | Close issue with summary comment |
+| `/respond-github` | Comment on an issue or PR |
+
+---
+
 ## Quick Start
 
 The recommended setup: run the API locally, run a Docker worker, and connect Claude Code as the lead agent.

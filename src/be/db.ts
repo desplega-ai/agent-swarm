@@ -326,6 +326,37 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   } catch {
     /* exists */
   }
+  // GitHub-specific columns
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN githubRepo TEXT`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN githubEventType TEXT`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN githubNumber INTEGER`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN githubCommentId INTEGER`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN githubAuthor TEXT`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN githubUrl TEXT`);
+  } catch {
+    /* exists */
+  }
   // Agent profile columns
   try {
     db.run(`ALTER TABLE agents ADD COLUMN description TEXT`);
@@ -517,6 +548,12 @@ type AgentTaskRow = {
   slackChannelId: string | null;
   slackThreadTs: string | null;
   slackUserId: string | null;
+  githubRepo: string | null;
+  githubEventType: string | null;
+  githubNumber: number | null;
+  githubCommentId: number | null;
+  githubAuthor: string | null;
+  githubUrl: string | null;
   mentionMessageId: string | null;
   mentionChannelId: string | null;
   createdAt: string;
@@ -546,6 +583,12 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     slackChannelId: row.slackChannelId ?? undefined,
     slackThreadTs: row.slackThreadTs ?? undefined,
     slackUserId: row.slackUserId ?? undefined,
+    githubRepo: row.githubRepo ?? undefined,
+    githubEventType: row.githubEventType ?? undefined,
+    githubNumber: row.githubNumber ?? undefined,
+    githubCommentId: row.githubCommentId ?? undefined,
+    githubAuthor: row.githubAuthor ?? undefined,
+    githubUrl: row.githubUrl ?? undefined,
     mentionMessageId: row.mentionMessageId ?? undefined,
     mentionChannelId: row.mentionChannelId ?? undefined,
     createdAt: row.createdAt,
@@ -1076,6 +1119,12 @@ export interface CreateTaskOptions {
   slackChannelId?: string;
   slackThreadTs?: string;
   slackUserId?: string;
+  githubRepo?: string;
+  githubEventType?: string;
+  githubNumber?: number;
+  githubCommentId?: number;
+  githubAuthor?: string;
+  githubUrl?: string;
   mentionMessageId?: string;
   mentionChannelId?: string;
 }
@@ -1095,8 +1144,9 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         id, agentId, creatorAgentId, task, status, source,
         taskType, tags, priority, dependsOn, offeredTo, offeredAt,
         slackChannelId, slackThreadTs, slackUserId,
+        githubRepo, githubEventType, githubNumber, githubCommentId, githubAuthor, githubUrl,
         mentionMessageId, mentionChannelId, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -1114,6 +1164,12 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.slackChannelId ?? null,
       options?.slackThreadTs ?? null,
       options?.slackUserId ?? null,
+      options?.githubRepo ?? null,
+      options?.githubEventType ?? null,
+      options?.githubNumber ?? null,
+      options?.githubCommentId ?? null,
+      options?.githubAuthor ?? null,
+      options?.githubUrl ?? null,
       options?.mentionMessageId ?? null,
       options?.mentionChannelId ?? null,
       now,

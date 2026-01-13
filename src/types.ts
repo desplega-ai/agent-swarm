@@ -43,7 +43,7 @@ export const InboxMessageSchema = z.object({
 export type InboxMessageStatus = z.infer<typeof InboxMessageStatusSchema>;
 export type InboxMessage = z.infer<typeof InboxMessageSchema>;
 
-export const AgentTaskSourceSchema = z.enum(["mcp", "slack", "api"]);
+export const AgentTaskSourceSchema = z.enum(["mcp", "slack", "api", "github"]);
 export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 
 export const AgentTaskSchema = z.object({
@@ -80,6 +80,14 @@ export const AgentTaskSchema = z.object({
   slackChannelId: z.string().optional(),
   slackThreadTs: z.string().optional(),
   slackUserId: z.string().optional(),
+
+  // GitHub-specific metadata (optional)
+  githubRepo: z.string().optional(),
+  githubEventType: z.string().optional(),
+  githubNumber: z.number().int().optional(),
+  githubCommentId: z.number().int().optional(),
+  githubAuthor: z.string().optional(),
+  githubUrl: z.string().optional(),
 
   // Mention-to-task metadata (optional)
   mentionMessageId: z.uuid().optional(),
