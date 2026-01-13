@@ -38,6 +38,26 @@ export const registerSendTaskTool = (server: McpServer) => {
           .optional()
           .describe("Priority 0-100 (default: 50)."),
         dependsOn: z.array(z.uuid()).optional().describe("Task IDs this task depends on."),
+        // Ralph task fields
+        ralphPromise: z
+          .string()
+          .optional()
+          .describe(
+            "For Ralph tasks (taskType='ralph'): the completion promise/criteria that must be met.",
+          ),
+        ralphMaxIterations: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .optional()
+          .describe(
+            "For Ralph tasks: maximum number of iterations before auto-failure (default: 50).",
+          ),
+        ralphPlanPath: z
+          .string()
+          .optional()
+          .describe("For Ralph tasks: path to plan file in thoughts/ directory."),
       }),
       outputSchema: z.object({
         success: z.boolean(),
@@ -46,7 +66,18 @@ export const registerSendTaskTool = (server: McpServer) => {
       }),
     },
     async (
-      { agentId, task, offerMode, taskType, tags, priority, dependsOn },
+      {
+        agentId,
+        task,
+        offerMode,
+        taskType,
+        tags,
+        priority,
+        dependsOn,
+        ralphPromise,
+        ralphMaxIterations,
+        ralphPlanPath,
+      },
       requestInfo,
       _meta,
     ) => {
@@ -82,6 +113,24 @@ export const registerSendTaskTool = (server: McpServer) => {
         };
       }
 
+      // Validate Ralph task requirements
+      if (taskType === "ralph" && !ralphPromise) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Ralph tasks require a 'ralphPromise' field describing the completion criteria.",
+            },
+          ],
+          structuredContent: {
+            yourAgentId: requestInfo.agentId,
+            success: false,
+            message:
+              "Ralph tasks require a 'ralphPromise' field describing the completion criteria.",
+          },
+        };
+      }
+
       const txn = getDb().transaction(() => {
         // If no agentId, create an unassigned task for the pool
         if (!agentId) {
@@ -91,6 +140,9 @@ export const registerSendTaskTool = (server: McpServer) => {
             tags,
             priority,
             dependsOn,
+            ralphPromise,
+            ralphMaxIterations,
+            ralphPlanPath,
           });
 
           return {
@@ -133,6 +185,9 @@ export const registerSendTaskTool = (server: McpServer) => {
             tags,
             priority,
             dependsOn,
+            ralphPromise,
+            ralphMaxIterations,
+            ralphPlanPath,
           });
 
           return {
@@ -150,6 +205,9 @@ export const registerSendTaskTool = (server: McpServer) => {
           tags,
           priority,
           dependsOn,
+          ralphPromise,
+          ralphMaxIterations,
+          ralphPlanPath,
         });
 
         return {

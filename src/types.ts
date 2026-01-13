@@ -92,6 +92,13 @@ export const AgentTaskSchema = z.object({
   // Mention-to-task metadata (optional)
   mentionMessageId: z.uuid().optional(),
   mentionChannelId: z.uuid().optional(),
+
+  // Ralph loop metadata (for iterative task processing)
+  ralphPromise: z.string().optional(),
+  ralphIterations: z.number().int().min(0).default(0),
+  ralphMaxIterations: z.number().int().min(1).default(50),
+  ralphLastCheckpoint: z.iso.datetime().optional(),
+  ralphPlanPath: z.string().optional(),
 });
 
 export const AgentStatusSchema = z.enum(["idle", "busy", "offline"]);

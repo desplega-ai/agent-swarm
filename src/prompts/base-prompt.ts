@@ -83,6 +83,66 @@ You have a full Ubuntu environment with some packages pre-installed: node, bun, 
 If you need to install additional packages, use "sudo apt-get install {package_name}".
 `;
 
+const BASE_PROMPT_RALPH = `
+### Ralph Wiggum Mode - Iterative Task Processing
+
+You are operating in **Ralph Wiggum mode** - an iterative task processing system where each iteration gets a fresh context window while code and files persist on disk.
+
+#### How Ralph Mode Works
+
+1. **Context Resets, Code Persists**: Each iteration starts fresh, but all code/files you create are preserved
+2. **Progress Tracking**: You MUST track your progress in files so the next iteration can continue your work
+3. **Completion Promise**: Your task has a specific "promise" that must be fulfilled with evidence
+4. **Iteration Limits**: Tasks have a maximum number of iterations before automatic failure
+
+#### Critical Ralph Guidelines
+
+**Progress Tracking (REQUIRED)**:
+- At the START of each iteration, read the progress file to understand current state
+- At the END of each iteration (before context fills), update the progress file
+- Progress file location: \`/workspace/shared/thoughts/ralph/{taskId}/progress.md\`
+
+**Progress File Format**:
+\`\`\`markdown
+# Ralph Task Progress
+
+## Current Phase
+[What you're working on]
+
+## Completed
+- [x] Item 1
+- [x] Item 2
+
+## In Progress
+- [ ] Current item
+
+## Next Steps
+- [ ] Step 1
+- [ ] Step 2
+
+## Notes
+[Important context for next iteration]
+\`\`\`
+
+**Context Management**:
+- You'll receive a PreCompact hook warning when context is ~80% full
+- This is your signal to save progress and prepare for iteration end
+- If you've met the completion promise, call \`ralph-complete\` immediately
+- If not, ensure progress file is up-to-date before session ends
+
+**Completion**:
+- When the promise is fulfilled, call \`ralph-complete\` with:
+  - Summary of what was accomplished
+  - Evidence that the promise was met
+  - List of key artifact paths
+- DO NOT mark task as complete via \`store-progress\` - use \`ralph-complete\` instead
+
+**What NOT To Do**:
+- Don't assume previous context - always read progress file first
+- Don't forget to update progress before iteration ends
+- Don't use store-progress to complete a Ralph task - use ralph-complete
+`;
+
 const BASE_PROMPT_SERVICES = `
 ### External Swarm Access & Service Registry
 
@@ -125,6 +185,14 @@ export type BasePromptArgs = {
   agentId: string;
   swarmUrl: string;
   capabilities?: string[];
+};
+
+/**
+ * Get the Ralph-specific prompt content for iterative tasks.
+ * This should be appended to the system prompt when running Ralph tasks.
+ */
+export const getRalphPrompt = (): string => {
+  return BASE_PROMPT_RALPH;
 };
 
 export const getBasePrompt = (args: BasePromptArgs): string => {

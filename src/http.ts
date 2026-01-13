@@ -10,9 +10,11 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createServer } from "@/server";
 import {
   closeDb,
+  completeTask,
   createAgent,
   createSessionLogs,
   createTaskExtended,
+  failTask,
   getAgentById,
   getAgentWithTasks,
   getAllAgents,
@@ -37,6 +39,7 @@ import {
   getUnreadInboxMessages,
   postMessage,
   updateAgentStatus,
+  updateRalphState,
 } from "./be/db";
 import type { CommentEvent, IssueEvent, PullRequestEvent } from "./github";
 import {
@@ -706,6 +709,13 @@ const httpServer = createHttpServer(async (req, res) => {
       return;
     }
 
+    // Validate Ralph task requirements
+    if (body.taskType === "ralph" && !body.ralphPromise) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Ralph tasks require 'ralphPromise' field" }));
+      return;
+    }
+
     try {
       // Create task with provided options
       const task = createTaskExtended(body.task, {
@@ -717,6 +727,10 @@ const httpServer = createHttpServer(async (req, res) => {
         dependsOn: body.dependsOn || undefined,
         offeredTo: body.offeredTo || undefined,
         source: body.source || "api",
+        // Ralph fields
+        ralphPromise: body.ralphPromise || undefined,
+        ralphMaxIterations: body.ralphMaxIterations || undefined,
+        ralphPlanPath: body.ralphPlanPath || undefined,
       });
 
       res.writeHead(201, { "Content-Type": "application/json" });
@@ -734,7 +748,8 @@ const httpServer = createHttpServer(async (req, res) => {
     req.method === "GET" &&
     pathSegments[0] === "api" &&
     pathSegments[1] === "tasks" &&
-    pathSegments[2]
+    pathSegments[2] &&
+    !pathSegments[3]
   ) {
     const taskId = pathSegments[2];
     const task = getTaskById(taskId);
@@ -747,7 +762,101 @@ const httpServer = createHttpServer(async (req, res) => {
 
     const logs = getLogsByTaskId(taskId);
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ...task, logs }));
+    res.end(JSON.stringify({ task: { ...task, logs } }));
+    return;
+  }
+
+  // PATCH /api/tasks/:id/ralph-state - Update Ralph-specific state for a task
+  if (
+    req.method === "PATCH" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "tasks" &&
+    pathSegments[2] &&
+    pathSegments[3] === "ralph-state"
+  ) {
+    const taskId = pathSegments[2];
+    const task = getTaskById(taskId);
+
+    if (!task) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Task not found" }));
+      return;
+    }
+
+    if (task.taskType !== "ralph") {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Task is not a Ralph task" }));
+      return;
+    }
+
+    // Parse request body
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    const updatedTask = updateRalphState(taskId, {
+      iterations: body.iterations,
+      lastCheckpoint: body.lastCheckpoint,
+      promise: body.promise,
+    });
+
+    if (!updatedTask) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Failed to update Ralph state" }));
+      return;
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ task: updatedTask }));
+    return;
+  }
+
+  // PATCH /api/tasks/:id/status - Update task status (for Ralph max iteration failure)
+  if (
+    req.method === "PATCH" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "tasks" &&
+    pathSegments[2] &&
+    pathSegments[3] === "status"
+  ) {
+    const taskId = pathSegments[2];
+    const task = getTaskById(taskId);
+
+    if (!task) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Task not found" }));
+      return;
+    }
+
+    // Parse request body
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    let updatedTask = null;
+    if (body.status === "completed") {
+      updatedTask = completeTask(taskId, body.output);
+    } else if (body.status === "failed") {
+      updatedTask = failTask(taskId, body.failureReason || "Unknown error");
+    }
+
+    if (!updatedTask) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Failed to update task status" }));
+      return;
+    }
+
+    // Set agent back to idle if task had an assigned agent
+    if (task.agentId) {
+      updateAgentStatus(task.agentId, "idle");
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ task: updatedTask }));
     return;
   }
 

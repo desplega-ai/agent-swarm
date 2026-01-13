@@ -107,9 +107,9 @@ export function updateRalphState(
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun tsc --noEmit`
-- [ ] Database initializes without errors
-- [ ] Tests pass: `bun test`
+- [x] TypeScript compiles: `bun tsc --noEmit`
+- [x] Database initializes without errors
+- [x] Tests pass: `bun test`
 
 #### Manual Verification:
 - [ ] New columns visible in SQLite schema
@@ -168,8 +168,8 @@ export async function clearCheckpoint(taskId: string): Promise<void> {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles
-- [ ] Unit tests pass for checkpoint operations
+- [x] TypeScript compiles
+- [x] Unit tests pass for checkpoint operations
 
 ---
 
@@ -208,9 +208,9 @@ registerRalphCompleteTool(server);
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Tool appears in MCP tool list
-- [ ] TypeScript compiles
-- [ ] Tool validates Ralph task type before allowing completion
+- [x] Tool appears in MCP tool list
+- [x] TypeScript compiles
+- [x] Tool validates Ralph task type before allowing completion
 
 ---
 
@@ -262,9 +262,9 @@ Update `Stop` case to also write checkpoint for Ralph tasks.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] PreCompact hook writes checkpoint file for Ralph tasks
-- [ ] Stop hook writes final checkpoint
-- [ ] Checkpoint files created in `/tmp/ralph-state/`
+- [x] PreCompact hook writes checkpoint file for Ralph tasks
+- [x] Stop hook writes final checkpoint
+- [x] Checkpoint files created in `/tmp/ralph-state/`
 
 ---
 
@@ -338,10 +338,10 @@ if (trigger.type === "task_assigned" && trigger.task) {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Ralph tasks detected by `taskType === 'ralph'`
-- [ ] Special prompt built for each iteration
-- [ ] Loop continues until `ralph-complete` or max iterations
-- [ ] Checkpoint detection triggers new iteration
+- [x] Ralph tasks detected by `taskType === 'ralph'`
+- [x] Special prompt built for each iteration
+- [x] Loop continues until `ralph-complete` or max iterations
+- [x] Checkpoint detection triggers new iteration
 
 #### Manual Verification:
 - [ ] Create Ralph task, assign to agent, observe loop behavior
@@ -372,8 +372,8 @@ Update `getBasePrompt()` to include Ralph prompt when task is Ralph type.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Ralph system prompt included when processing Ralph task
-- [ ] TypeScript compiles
+- [x] Ralph system prompt included when processing Ralph task
+- [x] TypeScript compiles
 
 ---
 
@@ -405,9 +405,9 @@ ralphPlanPath: z.string().optional().describe("Path to plan file in thoughts/"),
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] POST /api/tasks accepts Ralph fields
-- [ ] send-task tool supports Ralph creation
-- [ ] Validation rejects Ralph tasks without promise
+- [x] POST /api/tasks accepts Ralph fields
+- [x] send-task tool supports Ralph creation
+- [x] Validation rejects Ralph tasks without promise
 
 ---
 
