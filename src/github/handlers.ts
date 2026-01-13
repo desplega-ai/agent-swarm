@@ -66,7 +66,7 @@ function findLeadAgent() {
 export async function handlePullRequest(
   event: PullRequestEvent,
 ): Promise<{ created: boolean; taskId?: string }> {
-  const { action, pull_request: pr, repository, sender, installation, assignee } = event;
+  const { action, pull_request: pr, repository, sender, installation, assignee, requested_reviewer } = event;
 
   // Handle assigned action - bot was assigned to PR
   if (action === "assigned") {
@@ -128,6 +128,72 @@ export async function handlePullRequest(
     const cancelledTask = failTask(task.id, `Unassigned from GitHub PR #${pr.number}`);
     if (cancelledTask) {
       console.log(`[GitHub] Cancelled task ${task.id} for PR #${pr.number} (unassigned)`);
+      return { created: false, taskId: task.id };
+    }
+
+    return { created: false };
+  }
+
+  // Handle review_requested action - bot was requested to review PR
+  if (action === "review_requested") {
+    // Check if bot was requested as reviewer
+    if (!isBotAssignee(requested_reviewer?.login)) {
+      return { created: false };
+    }
+
+    // Deduplicate using review-specific key
+    const eventKey = `pr-review-requested:${repository.full_name}:${pr.number}`;
+    if (isDuplicate(eventKey)) {
+      return { created: false };
+    }
+
+    // Create review task
+    const lead = findLeadAgent();
+    const suggestions = getCommandSuggestions("github-pr");
+    const taskDescription = `[GitHub PR #${pr.number}] ${pr.title}\n\nReview requested from: @${GITHUB_BOT_NAME}\nFrom: ${sender.login}\nRepo: ${repository.full_name}\nBranch: ${pr.head.ref} → ${pr.base.ref}\nURL: ${pr.html_url}\n\nContext:\n${pr.body || pr.title}\n\n---\n${DELEGATION_INSTRUCTION}\n${suggestions}`;
+
+    const task = createTaskExtended(taskDescription, {
+      agentId: lead?.id ?? "",
+      source: "github",
+      taskType: "github-pr",
+      githubRepo: repository.full_name,
+      githubEventType: "pull_request",
+      githubNumber: pr.number,
+      githubAuthor: sender.login,
+      githubUrl: pr.html_url,
+    });
+
+    if (lead) {
+      console.log(`[GitHub] Created task ${task.id} for PR #${pr.number} (review requested) -> ${lead.name}`);
+    } else {
+      console.log(`[GitHub] Created unassigned task ${task.id} for PR #${pr.number} (review requested, no lead available)`);
+    }
+
+    if (installation?.id) {
+      addIssueReaction(repository.full_name, pr.number, "eyes", installation.id);
+    }
+
+    return { created: true, taskId: task.id };
+  }
+
+  // Handle review_request_removed action - bot review request was cancelled
+  if (action === "review_request_removed") {
+    // Check if bot's review request was removed
+    if (!isBotAssignee(requested_reviewer?.login)) {
+      return { created: false };
+    }
+
+    // Find the related task
+    const task = findTaskByGitHub(repository.full_name, pr.number);
+    if (!task) {
+      console.log(`[GitHub] No active task found for PR #${pr.number} to cancel`);
+      return { created: false };
+    }
+
+    // Cancel the task
+    const cancelledTask = failTask(task.id, `Review request removed from GitHub PR #${pr.number}`);
+    if (cancelledTask) {
+      console.log(`[GitHub] Cancelled task ${task.id} for PR #${pr.number} (review request removed)`);
       return { created: false, taskId: task.id };
     }
 

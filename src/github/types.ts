@@ -16,6 +16,7 @@ export interface PullRequestEvent extends GitHubWebhookEvent {
     head: { ref: string };
     base: { ref: string };
   };
+  requested_reviewer?: { login: string; id: number };  // Added for review_requested/review_request_removed events
 }
 
 export interface IssueEvent extends GitHubWebhookEvent {
