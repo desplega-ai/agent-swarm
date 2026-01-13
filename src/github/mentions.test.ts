@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { detectMention, extractMentionContext, isBotAssignee, GITHUB_BOT_NAME } from "./mentions";
+import { detectMention, extractMentionContext, GITHUB_BOT_NAME, isBotAssignee } from "./mentions";
 
 describe("detectMention", () => {
   test("returns true for @bot mention", () => {
@@ -98,7 +98,7 @@ describe("isBotAssignee", () => {
   });
 
   test("returns false for partial match", () => {
-    expect(isBotAssignee(GITHUB_BOT_NAME + "-extra")).toBe(false);
-    expect(isBotAssignee("prefix-" + GITHUB_BOT_NAME)).toBe(false);
+    expect(isBotAssignee(`${GITHUB_BOT_NAME}-extra`)).toBe(false);
+    expect(isBotAssignee(`prefix-${GITHUB_BOT_NAME}`)).toBe(false);
   });
 });

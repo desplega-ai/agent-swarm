@@ -4,6 +4,7 @@ import * as z from "zod";
 export const AgentTaskStatusSchema = z.enum([
   "unassigned", // Task pool - no owner yet
   "offered", // Offered to agent, awaiting accept/reject
+  "reviewing", // Agent is reviewing an offered task
   "pending", // Assigned/accepted, waiting to start
   "in_progress",
   "completed",
@@ -14,7 +15,13 @@ export const AgentTaskStatusSchema = z.enum([
 // Lead Inbox Types
 // ============================================================================
 
-export const InboxMessageStatusSchema = z.enum(["unread", "read", "responded", "delegated"]);
+export const InboxMessageStatusSchema = z.enum([
+  "unread",
+  "processing",
+  "read",
+  "responded",
+  "delegated",
+]);
 
 export const InboxMessageSchema = z.object({
   id: z.uuid(),
@@ -70,6 +77,7 @@ export const AgentTaskSchema = z.object({
   createdAt: z.iso.datetime().default(() => new Date().toISOString()),
   lastUpdatedAt: z.iso.datetime().default(() => new Date().toISOString()),
   finishedAt: z.iso.datetime().optional(),
+  notifiedAt: z.iso.datetime().optional(),
 
   // Completion data
   failureReason: z.string().optional(),

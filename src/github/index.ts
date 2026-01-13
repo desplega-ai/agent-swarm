@@ -8,7 +8,7 @@ export {
   verifyWebhookSignature,
 } from "./app";
 export { handleComment, handleIssue, handlePullRequest } from "./handlers";
-export { detectMention, extractMentionContext, isBotAssignee, GITHUB_BOT_NAME } from "./mentions";
+export { detectMention, extractMentionContext, GITHUB_BOT_NAME, isBotAssignee } from "./mentions";
 export type { ReactionType } from "./reactions";
 export { addIssueReaction, addReaction, postComment } from "./reactions";
 export type { CommentEvent, GitHubWebhookEvent, IssueEvent, PullRequestEvent } from "./types";

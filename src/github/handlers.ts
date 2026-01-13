@@ -1,5 +1,5 @@
-import { createTaskExtended, getAllAgents, failTask, findTaskByGitHub } from "../be/db";
-import { detectMention, extractMentionContext, isBotAssignee, GITHUB_BOT_NAME } from "./mentions";
+import { createTaskExtended, failTask, findTaskByGitHub, getAllAgents } from "../be/db";
+import { detectMention, extractMentionContext, GITHUB_BOT_NAME, isBotAssignee } from "./mentions";
 import { addIssueReaction, addReaction } from "./reactions";
 import type { CommentEvent, IssueEvent, PullRequestEvent } from "./types";
 
@@ -66,7 +66,15 @@ function findLeadAgent() {
 export async function handlePullRequest(
   event: PullRequestEvent,
 ): Promise<{ created: boolean; taskId?: string }> {
-  const { action, pull_request: pr, repository, sender, installation, assignee, requested_reviewer } = event;
+  const {
+    action,
+    pull_request: pr,
+    repository,
+    sender,
+    installation,
+    assignee,
+    requested_reviewer,
+  } = event;
 
   // Handle assigned action - bot was assigned to PR
   if (action === "assigned") {
@@ -98,9 +106,13 @@ export async function handlePullRequest(
     });
 
     if (lead) {
-      console.log(`[GitHub] Created task ${task.id} for PR #${pr.number} (assigned) -> ${lead.name}`);
+      console.log(
+        `[GitHub] Created task ${task.id} for PR #${pr.number} (assigned) -> ${lead.name}`,
+      );
     } else {
-      console.log(`[GitHub] Created unassigned task ${task.id} for PR #${pr.number} (assigned, no lead available)`);
+      console.log(
+        `[GitHub] Created unassigned task ${task.id} for PR #${pr.number} (assigned, no lead available)`,
+      );
     }
 
     if (installation?.id) {
@@ -164,9 +176,13 @@ export async function handlePullRequest(
     });
 
     if (lead) {
-      console.log(`[GitHub] Created task ${task.id} for PR #${pr.number} (review requested) -> ${lead.name}`);
+      console.log(
+        `[GitHub] Created task ${task.id} for PR #${pr.number} (review requested) -> ${lead.name}`,
+      );
     } else {
-      console.log(`[GitHub] Created unassigned task ${task.id} for PR #${pr.number} (review requested, no lead available)`);
+      console.log(
+        `[GitHub] Created unassigned task ${task.id} for PR #${pr.number} (review requested, no lead available)`,
+      );
     }
 
     if (installation?.id) {
@@ -193,7 +209,9 @@ export async function handlePullRequest(
     // Cancel the task
     const cancelledTask = failTask(task.id, `Review request removed from GitHub PR #${pr.number}`);
     if (cancelledTask) {
-      console.log(`[GitHub] Cancelled task ${task.id} for PR #${pr.number} (review request removed)`);
+      console.log(
+        `[GitHub] Cancelled task ${task.id} for PR #${pr.number} (review request removed)`,
+      );
       return { created: false, taskId: task.id };
     }
 
@@ -291,9 +309,13 @@ export async function handleIssue(
     });
 
     if (lead) {
-      console.log(`[GitHub] Created task ${task.id} for issue #${issue.number} (assigned) -> ${lead.name}`);
+      console.log(
+        `[GitHub] Created task ${task.id} for issue #${issue.number} (assigned) -> ${lead.name}`,
+      );
     } else {
-      console.log(`[GitHub] Created unassigned task ${task.id} for issue #${issue.number} (assigned, no lead available)`);
+      console.log(
+        `[GitHub] Created unassigned task ${task.id} for issue #${issue.number} (assigned, no lead available)`,
+      );
     }
 
     if (installation?.id) {

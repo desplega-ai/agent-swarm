@@ -77,7 +77,8 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
         finishedAt TEXT,
         failureReason TEXT,
         output TEXT,
-        progress TEXT
+        progress TEXT,
+        notifiedAt TEXT
       )
     `);
 
@@ -127,6 +128,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
         agentId TEXT NOT NULL,
         channelId TEXT NOT NULL,
         lastReadAt TEXT NOT NULL,
+        processing_since TEXT,
         PRIMARY KEY (agentId, channelId),
         FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE,
         FOREIGN KEY (channelId) REFERENCES channels(id) ON DELETE CASCADE
@@ -175,7 +177,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
         agentId TEXT NOT NULL,
         content TEXT NOT NULL,
         source TEXT NOT NULL DEFAULT 'slack',
-        status TEXT NOT NULL DEFAULT 'unread' CHECK(status IN ('unread', 'read', 'responded', 'delegated')),
+        status TEXT NOT NULL DEFAULT 'unread' CHECK(status IN ('unread', 'processing', 'read', 'responded', 'delegated')),
         slackChannelId TEXT,
         slackThreadTs TEXT,
         slackUserId TEXT,
@@ -407,6 +409,70 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     /* exists */
   }
 
+  // Migration: Add processing_since column to channel_read_state for Phase 3
+  try {
+    db.run(`ALTER TABLE channel_read_state ADD COLUMN processing_since TEXT`);
+  } catch {
+    /* exists */
+  }
+
+  // Migration: Add notifiedAt column to agent_tasks for Phase 4
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN notifiedAt TEXT`);
+  } catch {
+    /* exists */
+  }
+
+  // Migration: Update inbox_messages CHECK constraint to include 'processing' status
+  // SQLite doesn't support ALTER TABLE MODIFY COLUMN, so we need to recreate the table
+  try {
+    // Check if the table has the old constraint by attempting to insert a 'processing' status
+    const _testRow = db
+      .prepare<{ count: number }, []>(
+        "SELECT COUNT(*) as count FROM inbox_messages WHERE status = 'processing'",
+      )
+      .get();
+    // If query succeeds, table already has the new constraint
+  } catch {
+    // Table needs migration - recreate with new constraint
+    try {
+      db.run("PRAGMA foreign_keys=off");
+
+      db.run(`
+        CREATE TABLE inbox_messages_new (
+          id TEXT PRIMARY KEY,
+          agentId TEXT NOT NULL,
+          content TEXT NOT NULL,
+          source TEXT NOT NULL DEFAULT 'slack',
+          status TEXT NOT NULL DEFAULT 'unread' CHECK(status IN ('unread', 'processing', 'read', 'responded', 'delegated')),
+          slackChannelId TEXT,
+          slackThreadTs TEXT,
+          slackUserId TEXT,
+          matchedText TEXT,
+          delegatedToTaskId TEXT,
+          responseText TEXT,
+          createdAt TEXT NOT NULL,
+          lastUpdatedAt TEXT NOT NULL,
+          FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE,
+          FOREIGN KEY (delegatedToTaskId) REFERENCES agent_tasks(id) ON DELETE SET NULL
+        )
+      `);
+
+      db.run("INSERT INTO inbox_messages_new SELECT * FROM inbox_messages");
+      db.run("DROP TABLE inbox_messages");
+      db.run("ALTER TABLE inbox_messages_new RENAME TO inbox_messages");
+
+      // Recreate indexes
+      db.run("CREATE INDEX IF NOT EXISTS idx_inbox_messages_agentId ON inbox_messages(agentId)");
+      db.run("CREATE INDEX IF NOT EXISTS idx_inbox_messages_status ON inbox_messages(status)");
+
+      db.run("PRAGMA foreign_keys=on");
+    } catch (e) {
+      db.run("PRAGMA foreign_keys=on");
+      throw e;
+    }
+  }
+
   // Create indexes on new columns (after migrations add them)
   try {
     db.run(`CREATE INDEX IF NOT EXISTS idx_agent_tasks_offeredTo ON agent_tasks(offeredTo)`);
@@ -634,6 +700,7 @@ type AgentTaskRow = {
   createdAt: string;
   lastUpdatedAt: string;
   finishedAt: string | null;
+  notifiedAt: string | null;
   failureReason: string | null;
   output: string | null;
   progress: string | null;
@@ -669,6 +736,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     finishedAt: row.finishedAt ?? undefined,
+    notifiedAt: row.notifiedAt ?? undefined,
     failureReason: row.failureReason ?? undefined,
     output: row.output ?? undefined,
     progress: row.progress ?? undefined,
@@ -815,10 +883,7 @@ export function getTasksByStatus(status: AgentTaskStatus): AgentTask[] {
  * Find a task by GitHub repo and issue/PR number
  * Returns the most recent non-completed/failed task for this GitHub entity
  */
-export function findTaskByGitHub(
-  githubRepo: string,
-  githubNumber: number,
-): AgentTask | null {
+export function findTaskByGitHub(githubRepo: string, githubNumber: number): AgentTask | null {
   const row = getDb()
     .prepare<AgentTaskRow, [string, number]>(
       `SELECT * FROM agent_tasks
@@ -924,28 +989,39 @@ export function getCompletedSlackTasks(): AgentTask[] {
  * Get tasks that were recently finished (completed/failed) by workers (non-lead agents).
  * Used by leads to know when workers complete tasks.
  */
-export function getRecentlyFinishedWorkerTasks(since?: string): AgentTask[] {
-  const query = since
-    ? `SELECT t.* FROM agent_tasks t
-       LEFT JOIN agents a ON t.agentId = a.id
-       WHERE t.status IN ('completed', 'failed')
-       AND t.finishedAt > ?
-       AND (a.isLead = 0 OR a.isLead IS NULL)
-       ORDER BY t.finishedAt DESC
-       LIMIT 50`
-    : `SELECT t.* FROM agent_tasks t
+export function getRecentlyFinishedWorkerTasks(): AgentTask[] {
+  // Query for finished tasks that haven't been notified yet
+  return getDb()
+    .prepare<AgentTaskRow, []>(
+      `SELECT t.* FROM agent_tasks t
        LEFT JOIN agents a ON t.agentId = a.id
        WHERE t.status IN ('completed', 'failed')
        AND t.finishedAt IS NOT NULL
+       AND t.notifiedAt IS NULL
        AND (a.isLead = 0 OR a.isLead IS NULL)
-       ORDER BY t.finishedAt DESC
-       LIMIT 10`;
+       ORDER BY t.finishedAt DESC LIMIT 50`,
+    )
+    .all()
+    .map(rowToAgentTask);
+}
 
-  if (since) {
-    return getDb().prepare<AgentTaskRow, [string]>(query).all(since).map(rowToAgentTask);
-  }
+/**
+ * Atomically mark finished tasks as notified.
+ * Sets notifiedAt timestamp to prevent returning them in future polls.
+ */
+export function markTasksNotified(taskIds: string[]): number {
+  if (taskIds.length === 0) return 0;
 
-  return getDb().prepare<AgentTaskRow, []>(query).all().map(rowToAgentTask);
+  const now = new Date().toISOString();
+  const placeholders = taskIds.map(() => "?").join(",");
+
+  const result = getDb().run(
+    `UPDATE agent_tasks SET notifiedAt = ?
+     WHERE id IN (${placeholders}) AND notifiedAt IS NULL`,
+    [now, ...taskIds],
+  );
+
+  return result.changes;
 }
 
 export function getInProgressSlackTasks(): AgentTask[] {
@@ -1347,13 +1423,15 @@ export function releaseTask(taskId: string): AgentTask | null {
 export function acceptTask(taskId: string, agentId: string): AgentTask | null {
   const task = getTaskById(taskId);
   if (!task) return null;
-  if (task.status !== "offered" || task.offeredTo !== agentId) return null;
+  // Accept both 'offered' and 'reviewing' statuses
+  if (!(task.status === "offered" || task.status === "reviewing") || task.offeredTo !== agentId)
+    return null;
 
   const now = new Date().toISOString();
   const row = getDb()
     .prepare<AgentTaskRow, [string, string, string, string]>(
       `UPDATE agent_tasks SET agentId = ?, status = 'pending', acceptedAt = ?, lastUpdatedAt = ?
-       WHERE id = ? AND status = 'offered' RETURNING *`,
+       WHERE id = ? AND status IN ('offered', 'reviewing') RETURNING *`,
     )
     .get(agentId, now, now, taskId);
 
@@ -1363,7 +1441,7 @@ export function acceptTask(taskId: string, agentId: string): AgentTask | null {
         eventType: "task_accepted",
         agentId,
         taskId,
-        oldValue: "offered",
+        oldValue: task.status,
         newValue: "pending",
       });
     } catch {}
@@ -1375,7 +1453,9 @@ export function acceptTask(taskId: string, agentId: string): AgentTask | null {
 export function rejectTask(taskId: string, agentId: string, reason?: string): AgentTask | null {
   const task = getTaskById(taskId);
   if (!task) return null;
-  if (task.status !== "offered" || task.offeredTo !== agentId) return null;
+  // Reject both 'offered' and 'reviewing' statuses
+  if (!(task.status === "offered" || task.status === "reviewing") || task.offeredTo !== agentId)
+    return null;
 
   const now = new Date().toISOString();
   const row = getDb()
@@ -1383,7 +1463,7 @@ export function rejectTask(taskId: string, agentId: string, reason?: string): Ag
       `UPDATE agent_tasks SET
         status = 'unassigned', offeredTo = NULL, offeredAt = NULL,
         rejectionReason = ?, lastUpdatedAt = ?
-       WHERE id = ? AND status = 'offered' RETURNING *`,
+       WHERE id = ? AND status IN ('offered', 'reviewing') RETURNING *`,
     )
     .get(reason ?? null, now, taskId);
 
@@ -1393,7 +1473,7 @@ export function rejectTask(taskId: string, agentId: string, reason?: string): Ag
         eventType: "task_rejected",
         agentId,
         taskId,
-        oldValue: "offered",
+        oldValue: task.status,
         newValue: "unassigned",
         metadata: reason ? { reason } : undefined,
       });
@@ -1403,6 +1483,23 @@ export function rejectTask(taskId: string, agentId: string, reason?: string): Ag
   return row ? rowToAgentTask(row) : null;
 }
 
+/**
+ * Release tasks that have been in 'reviewing' status for too long.
+ * Returns them to 'offered' status for retry.
+ */
+export function releaseStaleReviewingTasks(timeoutMinutes: number = 30): number {
+  const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
+  const now = new Date().toISOString();
+
+  const result = getDb().run(
+    `UPDATE agent_tasks SET status = 'offered', lastUpdatedAt = ?
+     WHERE status = 'reviewing' AND lastUpdatedAt < ?`,
+    [now, cutoffTime],
+  );
+
+  return result.changes;
+}
+
 export function getOfferedTasksForAgent(agentId: string): AgentTask[] {
   return getDb()
     .prepare<AgentTaskRow, [string]>(
@@ -1410,6 +1507,40 @@ export function getOfferedTasksForAgent(agentId: string): AgentTask[] {
     )
     .all(agentId)
     .map(rowToAgentTask);
+}
+
+/**
+ * Atomically claim an offered task for review.
+ * Marks it as 'reviewing' to prevent duplicate polling.
+ * Returns null if task is not offered to this agent or already claimed.
+ */
+export function claimOfferedTask(taskId: string, agentId: string): AgentTask | null {
+  const task = getTaskById(taskId);
+  if (!task) return null;
+  if (task.status !== "offered" || task.offeredTo !== agentId) return null;
+
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      `UPDATE agent_tasks SET status = 'reviewing', lastUpdatedAt = ?
+       WHERE id = ? AND status = 'offered' RETURNING *`,
+    )
+    .get(now, taskId);
+
+  if (row) {
+    try {
+      createLogEntry({
+        eventType: "task_status_change",
+        taskId,
+        agentId,
+        oldValue: "offered",
+        newValue: "reviewing",
+      });
+    } catch {
+      // Log creation is best-effort
+    }
+  }
+  return row ? rowToAgentTask(row) : null;
 }
 
 export function getUnassignedTasksCount(): number {
@@ -1862,7 +1993,20 @@ export function getInboxSummary(agentId: string): InboxSummary {
   let mentionsCount = 0;
 
   for (const channel of channels) {
-    const lastReadAt = getLastReadAt(agentId, channel.id);
+    // Check if this channel is already being processed
+    const readState = db
+      .prepare<{ lastReadAt: string; processing_since: string | null }, [string, string]>(
+        "SELECT lastReadAt, processing_since FROM channel_read_state WHERE agentId = ? AND channelId = ?",
+      )
+      .get(agentId, channel.id);
+
+    const lastReadAt = readState?.lastReadAt ?? null;
+    const isProcessing =
+      readState?.processing_since !== null && readState?.processing_since !== undefined;
+
+    // Skip channels that are already being processed
+    if (isProcessing) continue;
+
     const baseCondition = lastReadAt ? `AND m.createdAt > '${lastReadAt}'` : "";
 
     // Count unread (excluding own messages)
@@ -1938,6 +2082,95 @@ export function getInboxSummary(agentId: string): InboxSummary {
     inProgressCount: inProgressResult?.count ?? 0,
     recentMentions,
   };
+}
+
+/**
+ * Atomically claim unread mentions for an agent.
+ * Sets processing_since to prevent duplicate polling.
+ * Returns channels with unread mentions, or empty array if none/already claimed.
+ */
+export function claimMentions(agentId: string): { channelId: string; lastReadAt: string | null }[] {
+  const now = new Date().toISOString();
+  const channels = getAllChannels();
+  const claimedChannels: { channelId: string; lastReadAt: string | null }[] = [];
+
+  for (const channel of channels) {
+    // Check if this channel is already being processed
+    const readState = getDb()
+      .prepare<{ lastReadAt: string | null; processing_since: string | null }, [string, string]>(
+        "SELECT lastReadAt, processing_since FROM channel_read_state WHERE agentId = ? AND channelId = ?",
+      )
+      .get(agentId, channel.id);
+
+    const lastReadAt = readState?.lastReadAt ?? null;
+    const isProcessing =
+      readState?.processing_since !== null && readState?.processing_since !== undefined;
+
+    // Skip channels that are already being processed
+    if (isProcessing) continue;
+
+    const baseCondition = lastReadAt ? `AND m.createdAt > '${lastReadAt}'` : "";
+
+    // Check if there are unread mentions
+    const mentionCountRow = getDb()
+      .prepare<{ count: number }, [string, string]>(
+        `SELECT COUNT(*) as count FROM channel_messages m
+         WHERE m.channelId = ? AND m.mentions LIKE ? ${baseCondition}`,
+      )
+      .get(channel.id, `%"${agentId}"%`);
+
+    if (mentionCountRow && mentionCountRow.count > 0) {
+      // Atomically claim mentions for this channel
+      const result = getDb().run(
+        `INSERT INTO channel_read_state (agentId, channelId, lastReadAt, processing_since)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(agentId, channelId) DO UPDATE SET
+           processing_since = CASE
+             WHEN processing_since IS NULL THEN ?
+             ELSE processing_since
+           END
+         WHERE processing_since IS NULL`,
+        [agentId, channel.id, lastReadAt || new Date(0).toISOString(), now, now],
+      );
+
+      // Only add to claimed list if we actually claimed it (not already processing)
+      if (result.changes > 0) {
+        claimedChannels.push({ channelId: channel.id, lastReadAt });
+      }
+    }
+  }
+
+  return claimedChannels;
+}
+
+/**
+ * Release mention processing for specific channels.
+ * Clears processing_since to allow future polling.
+ */
+export function releaseMentionProcessing(agentId: string, channelIds: string[]): void {
+  if (channelIds.length === 0) return;
+
+  const placeholders = channelIds.map(() => "?").join(",");
+  getDb().run(
+    `UPDATE channel_read_state SET processing_since = NULL
+     WHERE agentId = ? AND channelId IN (${placeholders})`,
+    [agentId, ...channelIds],
+  );
+}
+
+/**
+ * Auto-release stale mention processing (for crashed Claude processes).
+ */
+export function releaseStaleMentionProcessing(timeoutMinutes: number = 30): number {
+  const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
+
+  const result = getDb().run(
+    `UPDATE channel_read_state SET processing_since = NULL
+     WHERE processing_since IS NOT NULL AND processing_since < ?`,
+    [cutoffTime],
+  );
+
+  return result.changes;
 }
 
 // ============================================================================
@@ -2383,6 +2616,38 @@ export function getUnreadInboxMessages(agentId: string): InboxMessage[] {
     .map(rowToInboxMessage);
 }
 
+/**
+ * Atomically claim up to N unread inbox messages for processing.
+ * Marks them as 'processing' to prevent duplicate polling.
+ * Returns empty array if no unread messages available.
+ */
+export function claimInboxMessages(agentId: string, limit: number = 5): InboxMessage[] {
+  const now = new Date().toISOString();
+
+  // Get IDs of unread messages to claim
+  const unreadIds = getDb()
+    .prepare<{ id: string }, [string, number]>(
+      "SELECT id FROM inbox_messages WHERE agentId = ? AND status = 'unread' ORDER BY createdAt ASC LIMIT ?",
+    )
+    .all(agentId, limit)
+    .map((row) => row.id);
+
+  if (unreadIds.length === 0) {
+    return [];
+  }
+
+  // Atomically update status to 'processing' for these specific IDs
+  const placeholders = unreadIds.map(() => "?").join(",");
+  const rows = getDb()
+    .prepare<InboxMessageRow, (string | number)[]>(
+      `UPDATE inbox_messages SET status = 'processing', lastUpdatedAt = ?
+       WHERE id IN (${placeholders}) AND status = 'unread' RETURNING *`,
+    )
+    .all(now, ...unreadIds);
+
+  return rows.map(rowToInboxMessage);
+}
+
 export function markInboxMessageRead(id: string): InboxMessage | null {
   const now = new Date().toISOString();
   const row = getDb()
@@ -2397,7 +2662,7 @@ export function markInboxMessageResponded(id: string, responseText: string): Inb
   const now = new Date().toISOString();
   const row = getDb()
     .prepare<InboxMessageRow, [string, string, string]>(
-      "UPDATE inbox_messages SET status = 'responded', responseText = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *",
+      "UPDATE inbox_messages SET status = 'responded', responseText = ?, lastUpdatedAt = ? WHERE id = ? AND status IN ('unread', 'processing') RETURNING *",
     )
     .get(responseText, now, id);
   return row ? rowToInboxMessage(row) : null;
@@ -2407,8 +2672,26 @@ export function markInboxMessageDelegated(id: string, taskId: string): InboxMess
   const now = new Date().toISOString();
   const row = getDb()
     .prepare<InboxMessageRow, [string, string, string]>(
-      "UPDATE inbox_messages SET status = 'delegated', delegatedToTaskId = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *",
+      "UPDATE inbox_messages SET status = 'delegated', delegatedToTaskId = ?, lastUpdatedAt = ? WHERE id = ? AND status IN ('unread', 'processing') RETURNING *",
     )
     .get(taskId, now, id);
   return row ? rowToInboxMessage(row) : null;
+}
+
+/**
+ * Release inbox messages that have been in 'processing' status for too long.
+ * This handles cases where Claude process crashes or fails to respond/delegate.
+ * Call this periodically from the runner or add a database trigger.
+ */
+export function releaseStaleProcessingInbox(timeoutMinutes: number = 30): number {
+  const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
+  const now = new Date().toISOString();
+
+  const result = getDb().run(
+    `UPDATE inbox_messages SET status = 'unread', lastUpdatedAt = ?
+     WHERE status = 'processing' AND lastUpdatedAt < ?`,
+    [now, cutoffTime],
+  );
+
+  return result.changes;
 }

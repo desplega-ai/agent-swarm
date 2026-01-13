@@ -9,6 +9,9 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createServer } from "@/server";
 import {
+  claimInboxMessages,
+  claimMentions,
+  claimOfferedTask,
   closeDb,
   createAgent,
   createSessionLogs,
@@ -35,8 +38,8 @@ import {
   getSessionLogsByTaskId,
   getTaskById,
   getUnassignedTasksCount,
-  getUnreadInboxMessages,
   hasCapacity,
+  markTasksNotified,
   postMessage,
   startTask,
   updateAgentMaxTasks,
@@ -349,10 +352,6 @@ const httpServer = createHttpServer(async (req, res) => {
       return;
     }
 
-    // Get optional 'since' parameter for finished tasks
-    const queryParams = parseQueryParams(req.url || "");
-    const since = queryParams.get("since") || undefined;
-
     // Use transaction for consistent reads across all trigger checks
     const result = getDb().transaction(() => {
       const agent = getAgentById(myAgentId);
@@ -361,16 +360,20 @@ const httpServer = createHttpServer(async (req, res) => {
       }
 
       // Check for offered tasks first (highest priority for both workers and leads)
+      // Atomically claim the task for review to prevent duplicate processing
       const offeredTasks = getOfferedTasksForAgent(myAgentId);
       const firstOfferedTask = offeredTasks[0];
       if (firstOfferedTask) {
-        return {
-          trigger: {
-            type: "task_offered",
-            taskId: firstOfferedTask.id,
-            task: firstOfferedTask,
-          },
-        };
+        const claimedTask = claimOfferedTask(firstOfferedTask.id, myAgentId);
+        if (claimedTask) {
+          return {
+            trigger: {
+              type: "task_offered",
+              taskId: claimedTask.id,
+              task: claimedTask,
+            },
+          };
+        }
       }
 
       // Check for pending tasks (assigned directly to this agent)
@@ -394,31 +397,39 @@ const httpServer = createHttpServer(async (req, res) => {
         // === LEAD-SPECIFIC TRIGGERS ===
 
         // Check for unread Slack inbox messages (highest priority for lead)
-        const unreadInbox = getUnreadInboxMessages(myAgentId);
-        if (unreadInbox.length > 0) {
+        // Atomically claim messages to prevent duplicate processing
+        const claimedInbox = claimInboxMessages(myAgentId, 5);
+        if (claimedInbox.length > 0) {
           return {
             trigger: {
               type: "slack_inbox_message",
-              count: unreadInbox.length,
-              messages: unreadInbox.slice(0, 5), // Return up to 5 most recent
+              count: claimedInbox.length,
+              messages: claimedInbox,
             },
           };
         }
 
-        // Check for unread mentions (internal chat)
-        const inbox = getInboxSummary(myAgentId);
-        if (inbox.mentionsCount > 0) {
+        // Check for unread mentions (internal chat) - atomically claim them
+        const claimedChannels = claimMentions(myAgentId);
+        if (claimedChannels.length > 0) {
+          // Recalculate inbox summary now that we've claimed
+          const inbox = getInboxSummary(myAgentId);
           return {
             trigger: {
               type: "unread_mentions",
               mentionsCount: inbox.mentionsCount,
+              claimedChannels: claimedChannels.map((c) => c.channelId), // Include for tracking
             },
           };
         }
 
         // Check for recently finished worker tasks
-        const finishedTasks = getRecentlyFinishedWorkerTasks(since);
+        const finishedTasks = getRecentlyFinishedWorkerTasks();
         if (finishedTasks.length > 0) {
+          // Atomically mark as notified within this transaction
+          const taskIds = finishedTasks.map((t) => t.id);
+          markTasksNotified(taskIds);
+
           return {
             trigger: {
               type: "tasks_finished",
@@ -431,6 +442,10 @@ const httpServer = createHttpServer(async (req, res) => {
         // === WORKER-SPECIFIC TRIGGERS ===
 
         // Check for unassigned tasks in pool (workers can claim)
+        // NOTE: This trigger is intentionally unprotected from duplicate processing.
+        // Multiple workers should all receive this notification so they can compete
+        // to claim tasks. The actual claiming happens via task-action tool with
+        // atomic SQL guards in claimTask().
         const unassignedCount = getUnassignedTasksCount();
         if (unassignedCount > 0) {
           return {

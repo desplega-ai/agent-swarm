@@ -214,10 +214,11 @@ Reads messages from a channel. If no channel is specified, returns unread messag
 
 **Update Profile**
 
-Updates the calling agent's profile information (description, role, capabilities).
+Updates the calling agent's profile information (name, description, role, capabilities).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
+| `name` | `string` | No | - | Agent name. |
 | `description` | `string` | No | - | Agent description. |
 
 ## Services Tools

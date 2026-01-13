@@ -7,6 +7,7 @@ import {
   getChannelMessages,
   getMentionsForAgent,
   getUnreadMessages,
+  releaseMentionProcessing,
   updateReadState,
 } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
@@ -84,6 +85,7 @@ export const registerReadMessagesTool = (server: McpServer) => {
             // Update read state if requested
             if (markAsRead && unreadMessages.length > 0) {
               updateReadState(requestInfo.agentId, ch.id);
+              releaseMentionProcessing(requestInfo.agentId, [ch.id]); // Release processing claim
             }
           }
 
@@ -154,6 +156,7 @@ export const registerReadMessagesTool = (server: McpServer) => {
         // Update read state if requested
         if (markAsRead && messages.length > 0) {
           updateReadState(requestInfo.agentId, targetChannel.id);
+          releaseMentionProcessing(requestInfo.agentId, [targetChannel.id]); // Release processing claim
         }
 
         // Get unread count for context
