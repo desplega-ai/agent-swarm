@@ -473,6 +473,33 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     }
   }
 
+  // Ralph Wiggum iterative task processing columns
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN ralphPromise TEXT`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN ralphIterations INTEGER DEFAULT 0`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN ralphMaxIterations INTEGER DEFAULT 50`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN ralphLastCheckpoint TEXT`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN ralphPlanPath TEXT`);
+  } catch {
+    /* exists */
+  }
+
   // Create indexes on new columns (after migrations add them)
   try {
     db.run(`CREATE INDEX IF NOT EXISTS idx_agent_tasks_offeredTo ON agent_tasks(offeredTo)`);
@@ -704,6 +731,12 @@ type AgentTaskRow = {
   failureReason: string | null;
   output: string | null;
   progress: string | null;
+  // Ralph loop metadata
+  ralphPromise: string | null;
+  ralphIterations: number;
+  ralphMaxIterations: number;
+  ralphLastCheckpoint: string | null;
+  ralphPlanPath: string | null;
 };
 
 function rowToAgentTask(row: AgentTaskRow): AgentTask {
@@ -740,6 +773,12 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     failureReason: row.failureReason ?? undefined,
     output: row.output ?? undefined,
     progress: row.progress ?? undefined,
+    // Ralph loop metadata
+    ralphPromise: row.ralphPromise ?? undefined,
+    ralphIterations: row.ralphIterations ?? 0,
+    ralphMaxIterations: row.ralphMaxIterations ?? 50,
+    ralphLastCheckpoint: row.ralphLastCheckpoint ?? undefined,
+    ralphPlanPath: row.ralphPlanPath ?? undefined,
   };
 }
 
@@ -1139,6 +1178,38 @@ export function updateTaskProgress(id: string, progress: string): AgentTask | nu
   return row ? rowToAgentTask(row) : null;
 }
 
+export function updateRalphState(
+  taskId: string,
+  updates: {
+    iterations?: number;
+    lastCheckpoint?: string;
+    promise?: string;
+  },
+): AgentTask | null {
+  const task = getTaskById(taskId);
+  if (!task) return null;
+
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<AgentTaskRow, (string | number | null)[]>(
+      `UPDATE agent_tasks SET
+        ralphIterations = COALESCE(?, ralphIterations),
+        ralphLastCheckpoint = COALESCE(?, ralphLastCheckpoint),
+        ralphPromise = COALESCE(?, ralphPromise),
+        lastUpdatedAt = ?
+       WHERE id = ? RETURNING *`,
+    )
+    .get(
+      updates.iterations ?? null,
+      updates.lastCheckpoint ?? null,
+      updates.promise ?? null,
+      now,
+      taskId,
+    );
+
+  return row ? rowToAgentTask(row) : null;
+}
+
 // ============================================================================
 // Combined Queries (Agent with Tasks)
 // ============================================================================
@@ -1300,6 +1371,10 @@ export interface CreateTaskOptions {
   githubUrl?: string;
   mentionMessageId?: string;
   mentionChannelId?: string;
+  // Ralph loop options
+  ralphPromise?: string;
+  ralphMaxIterations?: number;
+  ralphPlanPath?: string;
 }
 
 export function createTaskExtended(task: string, options?: CreateTaskOptions): AgentTask {
@@ -1318,8 +1393,10 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         taskType, tags, priority, dependsOn, offeredTo, offeredAt,
         slackChannelId, slackThreadTs, slackUserId,
         githubRepo, githubEventType, githubNumber, githubCommentId, githubAuthor, githubUrl,
-        mentionMessageId, mentionChannelId, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        mentionMessageId, mentionChannelId,
+        ralphPromise, ralphIterations, ralphMaxIterations, ralphPlanPath,
+        createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -1345,6 +1422,10 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.githubUrl ?? null,
       options?.mentionMessageId ?? null,
       options?.mentionChannelId ?? null,
+      options?.ralphPromise ?? null,
+      0, // ralphIterations - initial count
+      options?.ralphMaxIterations ?? 50,
+      options?.ralphPlanPath ?? null,
       now,
       now,
     );

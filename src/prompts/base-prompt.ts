@@ -120,11 +120,42 @@ Your service URL will be: \`https://{agentId}.{swarmUrl}\` (based on your agent 
 **Health Checks:** Implement a \`/health\` endpoint returning 200 OK for monitoring.
 `;
 
+const BASE_PROMPT_RALPH = `
+### Ralph Iterative Task Processing
+
+You are working on a **Ralph task** - a long-running iterative task where:
+
+1. **Context Resets**: Your conversation context will reset between iterations, but all files and code persist
+2. **Progress Files**: Use \`thoughts/shared/ralph/{taskId}/progress.md\` to track your progress across iterations
+3. **Context Warning**: When you see "Context 80% full" message, wrap up your current work
+4. **Completion**: When the completion promise is met, call \`ralph-complete\` tool with evidence
+
+#### How Ralph Works:
+
+1. Each iteration starts fresh - you won't remember previous conversations
+2. Read progress files at the start of each iteration to understand state
+3. Update progress files before context fills up
+4. When finished, call \`ralph-complete\` with:
+   - summary: What was accomplished overall
+   - promiseEvidence: How you verified the completion promise was met
+   - artifactPaths: Key files created/modified
+
+#### Best Practices:
+
+- **Always** read progress file first in each iteration
+- **Always** update progress file before session ends
+- Keep progress file concise but complete
+- Test incrementally and document results
+- Call \`ralph-complete\` as soon as the promise is verified
+`;
+
 export type BasePromptArgs = {
   role: string;
   agentId: string;
   swarmUrl: string;
   capabilities?: string[];
+  isRalphTask?: boolean;
+  ralphPromise?: string;
 };
 
 export const getBasePrompt = (args: BasePromptArgs): string => {
@@ -154,6 +185,14 @@ export const getBasePrompt = (args: BasePromptArgs): string => {
 
 - ${args.capabilities.join("\n- ")}
 `;
+  }
+
+  // Add Ralph-specific prompt if this is a Ralph task
+  if (args.isRalphTask) {
+    prompt += BASE_PROMPT_RALPH;
+    if (args.ralphPromise) {
+      prompt += `\n**Your Completion Promise**: ${args.ralphPromise}\n`;
+    }
   }
 
   return prompt;

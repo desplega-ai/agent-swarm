@@ -14,6 +14,8 @@ import { registerListServicesTool } from "./tools/list-services";
 import { registerMyAgentInfoTool } from "./tools/my-agent-info";
 import { registerPollTaskTool } from "./tools/poll-task";
 import { registerPostMessageTool } from "./tools/post-message";
+// Ralph iterative task processing
+import { registerRalphCompleteTool } from "./tools/ralph-complete";
 import { registerReadMessagesTool } from "./tools/read-messages";
 // Services capability
 import { registerRegisterServiceTool } from "./tools/register-service";
@@ -69,6 +71,9 @@ export function createServer() {
   registerGetTaskDetailsTool(server);
   registerStoreProgressTool(server);
   registerMyAgentInfoTool(server);
+
+  // Ralph iterative task processing tool
+  registerRalphCompleteTool(server);
 
   // Slack integration tools (always registered, will no-op if Slack not configured)
   registerSlackReplyTool(server);

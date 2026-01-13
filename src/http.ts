@@ -806,8 +806,17 @@ const httpServer = createHttpServer(async (req, res) => {
       return;
     }
 
+    // Validate Ralph tasks must have a promise
+    if (body.taskType === "ralph" && !body.ralphPromise) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({ error: "Ralph tasks require a ralphPromise (completion criteria)" }),
+      );
+      return;
+    }
+
     try {
-      // Create task with provided options
+      // Create task with provided options (including Ralph fields)
       const task = createTaskExtended(body.task, {
         agentId: body.agentId || undefined,
         creatorAgentId: myAgentId || undefined,
@@ -817,6 +826,9 @@ const httpServer = createHttpServer(async (req, res) => {
         dependsOn: body.dependsOn || undefined,
         offeredTo: body.offeredTo || undefined,
         source: body.source || "api",
+        ralphPromise: body.ralphPromise || undefined,
+        ralphMaxIterations: body.ralphMaxIterations || undefined,
+        ralphPlanPath: body.ralphPlanPath || undefined,
       });
 
       res.writeHead(201, { "Content-Type": "application/json" });

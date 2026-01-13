@@ -84,6 +84,13 @@ export const AgentTaskSchema = z.object({
   output: z.string().optional(),
   progress: z.string().optional(),
 
+  // Ralph loop metadata (for iterative task processing)
+  ralphPromise: z.string().optional(),
+  ralphIterations: z.number().int().min(0).default(0),
+  ralphMaxIterations: z.number().int().min(1).default(50),
+  ralphLastCheckpoint: z.iso.datetime().optional(),
+  ralphPlanPath: z.string().optional(),
+
   // Slack-specific metadata (optional)
   slackChannelId: z.string().optional(),
   slackThreadTs: z.string().optional(),
