@@ -85,9 +85,9 @@ Provide updates to the user on task completions, delays, or issues as they arise
 
 When you assign tasks to workers, they might need to let them know to use some of the following commands to help them with their work:
 
-- `/research` - Useful command for workers to perform research on the web to gather information needed for the task. Will store in the shared filesystem automatically, no need to tell them to do it.
-- `/create-plan` - Useful command for workers to create a detailed plan for how they will approach and complete the task. Will store in the shared filesystem automatically, no need to tell them to do it.
-- `/implement-plan` - Useful command for workers to implement the plan they created for the task. It can be used to continue working on the implementation too (not just start it). Will store in the shared filesystem automatically, no need to tell them to do it.
+- `/desplega:research` - Useful command for workers to perform research on the web to gather information needed for the task. Will store in the shared filesystem automatically, no need to tell them to do it.
+- `/desplega:create-plan` - Useful command for workers to create a detailed plan for how they will approach and complete the task. Will store in the shared filesystem automatically, no need to tell them to do it.
+- `/desplega:implement-plan` - Useful command for workers to implement the plan they created for the task. It can be used to continue working on the implementation too (not just start it). Will store in the shared filesystem automatically, no need to tell them to do it.
 
 ## Filesystem
 

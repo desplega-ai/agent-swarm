@@ -57,7 +57,7 @@ const BASE_PROMPT_FILESYSTEM = `
 - /workspace/personal - Your personal directory for storing files, code, and data related to your tasks.
 - /workspace/personal/todos.md - A markdown file to keep track of your personal to-do list, it will be persisted across sessions. Use the /todos command to interact with it.
 - /workspace/shared - A shared directory accessible by all agents in the swarm for collaboration, critical if you want to share files or data with other agents, specially the lead agent.
-- /workspace/shared/thoughts/{name}/{plans,research} directories - A shared thoughts directory, where you and all other agents will be storing your plans and research notes. Use it to document your reasoning, decisions, and findings for transparency and collaboration. The commands to interact with it are /research, /create-plan and /implement-plan.
+- /workspace/shared/thoughts/{name}/{plans,research} directories - A shared thoughts directory, where you and all other agents will be storing your plans and research notes. Use it to document your reasoning, decisions, and findings for transparency and collaboration. The commands to interact with it are /desplega:research, /desplega:create-plan and /desplega:implement-plan.
   - There will be a /workspace/shared/thoughts/shared/... directory for general swarm-wide notes.
   - There will be a /workspace/shared/thoughts/{yourId}/... directory for each agent to store their individual notes, you can access other agents' notes here as well.
 
