@@ -1461,15 +1461,10 @@ export function updateAgentProfile(
   return row ? rowToAgent(row) : null;
 }
 
-export function updateAgentName(
-  id: string,
-  newName: string,
-): Agent | null {
+export function updateAgentName(id: string, newName: string): Agent | null {
   // Check if another agent already has this name
   const existingAgent = getDb()
-    .prepare<AgentRow, [string, string]>(
-      "SELECT * FROM agents WHERE name = ? AND id != ?",
-    )
+    .prepare<AgentRow, [string, string]>("SELECT * FROM agents WHERE name = ? AND id != ?")
     .get(newName, id);
 
   if (existingAgent) {
