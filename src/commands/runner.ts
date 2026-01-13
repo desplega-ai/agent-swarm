@@ -342,6 +342,8 @@ async function runClaudeIteration(opts: RunClaudeIterationOptions): Promise<numb
   const { role } = opts;
   const Cmd = [
     "claude",
+    "--model",
+    "opus",
     "--verbose",
     "--output-format",
     "stream-json",
