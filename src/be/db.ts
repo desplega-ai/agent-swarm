@@ -822,11 +822,13 @@ export function getInProgressSlackTasks(): AgentTask[] {
 }
 
 /**
- * Find an agent that has an active task (in_progress or pending) in a specific Slack thread.
+ * Find an agent that has an active task or inbox message in a specific Slack thread.
  * Used for routing thread follow-up messages to the same agent.
+ * Checks both tasks (for workers) and inbox_messages (for leads).
  */
 export function getAgentWorkingOnThread(channelId: string, threadTs: string): Agent | null {
-  const row = getDb()
+  // First check tasks (for workers)
+  const taskRow = getDb()
     .prepare<AgentTaskRow, [string, string]>(
       `SELECT * FROM agent_tasks
        WHERE source = 'slack'
@@ -838,8 +840,23 @@ export function getAgentWorkingOnThread(channelId: string, threadTs: string): Ag
     )
     .get(channelId, threadTs);
 
-  if (!row || !row.agentId) return null;
-  return getAgentById(row.agentId);
+  if (taskRow?.agentId) return getAgentById(taskRow.agentId);
+
+  // Then check inbox_messages (for leads)
+  const inboxRow = getDb()
+    .prepare<{ agentId: string }, [string, string]>(
+      `SELECT agentId FROM inbox_messages
+       WHERE source = 'slack'
+       AND slackChannelId = ?
+       AND slackThreadTs = ?
+       ORDER BY createdAt DESC
+       LIMIT 1`,
+    )
+    .get(channelId, threadTs);
+
+  if (inboxRow?.agentId) return getAgentById(inboxRow.agentId);
+
+  return null;
 }
 
 export function completeTask(id: string, output?: string): AgentTask | null {
