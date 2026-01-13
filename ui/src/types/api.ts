@@ -12,6 +12,12 @@ export interface Agent {
   description?: string;
   role?: string;
   capabilities?: string[];
+  maxTasks?: number;
+  capacity?: {
+    current: number;
+    max: number;
+    available: number;
+  };
   createdAt: string;
   lastUpdatedAt: string;
 }

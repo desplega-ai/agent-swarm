@@ -34,7 +34,6 @@ export default function TaskDetailPanel({
   const { mode } = useColorScheme();
   const isDark = mode === "dark";
   const [outputTab, setOutputTab] = useState<"output" | "error">("output");
-  const [mainTab, setMainTab] = useState<"details" | "session">("details");
   const [outcomesTab, setOutcomesTab] = useState<"output" | "error" | "session">("output");
   const [copiedField, setCopiedField] = useState<"output" | "error" | null>(null);
 
@@ -138,7 +137,14 @@ export default function TaskDetailPanel({
 
   // Details section - task info
   const DetailsSection = ({ showProgress = true }: { showProgress?: boolean }) => (
-    <Box sx={{ p: { xs: 1.5, md: 2 }, display: "flex", flexDirection: "column", ...(showProgress ? {} : { height: "100%" }) }}>
+    <Box sx={{
+      p: { xs: 1.5, md: 2 },
+      display: "flex",
+      flexDirection: "column",
+      flex: showProgress ? "0 0 auto" : "1 1 auto",
+      overflow: showProgress ? "visible" : "auto",
+      minHeight: 0,
+    }}>
       {/* Info fields first */}
       <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, flexShrink: 0, mb: 2 }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -783,42 +789,9 @@ export default function TaskDetailPanel({
             </Box>
           </>
         ) : (
-          <Box sx={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-            <Tabs
-              value={mainTab}
-              onChange={(_, value) => setMainTab(value as "details" | "session")}
-              sx={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}
-            >
-              <TabList sx={getTabListStyles(colors.gold)}>
-                <Tab value="details">DETAILS</Tab>
-                <Tab value="session">
-                  SESSION LOG
-                  {sessionLogs && sessionLogs.length > 0 && (
-                    <Chip
-                      size="sm"
-                      sx={{
-                        ml: 0.5,
-                        fontFamily: "code",
-                        fontSize: "0.55rem",
-                        minHeight: "auto",
-                        height: 14,
-                        bgcolor: colors.goldSoftBg,
-                        color: colors.gold,
-                      }}
-                    >
-                      {sessionLogs.length}
-                    </Chip>
-                  )}
-                </Tab>
-              </TabList>
-              <TabPanel value="details" sx={{ p: 0, flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
-                <DetailsSection showProgress={true} />
-                <CollapsedOutputSection />
-              </TabPanel>
-              <TabPanel value="session" sx={{ p: 0, flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-                <SessionLogPanel sessionLogs={sessionLogs} />
-              </TabPanel>
-            </Tabs>
+          <Box sx={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
+            <DetailsSection showProgress={true} />
+            <CollapsedOutputSection />
           </Box>
         )}
       </Box>

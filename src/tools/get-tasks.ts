@@ -41,13 +41,20 @@ export const registerGetTasksTool = (server: McpServer) => {
         taskType: z.string().optional().describe("Filter by task type (e.g., 'bug', 'feature')."),
         tags: z.array(z.string()).optional().describe("Filter by any matching tag."),
         search: z.string().optional().describe("Search in task description."),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .optional()
+          .describe("Max tasks to return (default: 25, max: 100)."),
       }),
       outputSchema: z.object({
         tasks: z.array(TaskSummarySchema),
       }),
     },
     async (
-      { status, mineOnly, unassigned, offeredToMe, readyOnly, taskType, tags, search },
+      { status, mineOnly, unassigned, offeredToMe, readyOnly, taskType, tags, search, limit },
       requestInfo,
       _meta,
     ) => {
@@ -63,6 +70,7 @@ export const registerGetTasksTool = (server: McpServer) => {
         taskType,
         tags,
         search,
+        limit,
       });
 
       const taskSummaries = tasks.map((t) => ({

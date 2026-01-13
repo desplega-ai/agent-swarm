@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { updateAgentProfile } from "@/be/db";
+import { updateAgentName, updateAgentProfile } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import { AgentSchema } from "@/types";
 
@@ -10,8 +10,9 @@ export const registerUpdateProfileTool = (server: McpServer) => {
     {
       title: "Update Profile",
       description:
-        "Updates the calling agent's profile information (description, role, capabilities).",
+        "Updates the calling agent's profile information (name, description, role, capabilities).",
       inputSchema: z.object({
+        name: z.string().min(1).optional().describe("Agent name."),
         description: z.string().optional().describe("Agent description."),
         role: z
           .string()
@@ -29,7 +30,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         agent: AgentSchema.optional(),
       }),
     },
-    async ({ description, role, capabilities }, requestInfo, _meta) => {
+    async ({ name, description, role, capabilities }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         return {
           content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
@@ -41,24 +42,42 @@ export const registerUpdateProfileTool = (server: McpServer) => {
       }
 
       // At least one field must be provided
-      if (description === undefined && role === undefined && capabilities === undefined) {
+      if (name === undefined && description === undefined && role === undefined && capabilities === undefined) {
         return {
           content: [
             {
               type: "text",
-              text: "At least one field (description, role, or capabilities) must be provided.",
+              text: "At least one field (name, description, role, or capabilities) must be provided.",
             },
           ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: false,
-            message: "At least one field (description, role, or capabilities) must be provided.",
+            message: "At least one field (name, description, role, or capabilities) must be provided.",
           },
         };
       }
 
       try {
-        const agent = updateAgentProfile(requestInfo.agentId, {
+        let agent;
+
+        // Update name if provided
+        if (name !== undefined) {
+          agent = updateAgentName(requestInfo.agentId, name);
+          if (!agent) {
+            return {
+              content: [{ type: "text", text: "Agent not found." }],
+              structuredContent: {
+                yourAgentId: requestInfo.agentId,
+                success: false,
+                message: "Agent not found.",
+              },
+            };
+          }
+        }
+
+        // Update profile fields if provided
+        agent = updateAgentProfile(requestInfo.agentId, {
           description,
           role,
           capabilities,
@@ -76,6 +95,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         }
 
         const updatedFields: string[] = [];
+        if (name !== undefined) updatedFields.push("name");
         if (description !== undefined) updatedFields.push("description");
         if (role !== undefined) updatedFields.push("role");
         if (capabilities !== undefined) updatedFields.push("capabilities");

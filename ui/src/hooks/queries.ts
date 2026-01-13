@@ -18,6 +18,18 @@ export function useAgent(id: string) {
   });
 }
 
+export function useUpdateAgentName() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => api.updateAgentName(id, name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      queryClient.invalidateQueries({ queryKey: ["agent"] });
+    },
+  });
+}
+
 export interface TaskFilters {
   status?: string;
   agentId?: string;

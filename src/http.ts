@@ -40,6 +40,7 @@ import {
   postMessage,
   startTask,
   updateAgentMaxTasks,
+  updateAgentName,
   updateAgentStatus,
 } from "./be/db";
 import type { CommentEvent, IssueEvent, PullRequestEvent } from "./github";
@@ -671,8 +672,58 @@ const httpServer = createHttpServer(async (req, res) => {
   ) {
     const includeTasks = queryParams.get("include") === "tasks";
     const agents = includeTasks ? getAllAgentsWithTasks() : getAllAgents();
+    const agentsWithCapacity = agents.map(agentWithCapacity);
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ agents }));
+    res.end(JSON.stringify({ agents: agentsWithCapacity }));
+    return;
+  }
+
+  // PUT /api/agents/:id/name - Update agent name (check before GET to avoid conflict)
+  if (
+    req.method === "PUT" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "agents" &&
+    pathSegments[2] &&
+    pathSegments[3] === "name"
+  ) {
+    const agentId = pathSegments[2];
+
+    // Parse request body
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk as Buffer);
+    }
+    const bodyText = Buffer.concat(chunks).toString();
+
+    let body: { name?: string };
+    try {
+      body = JSON.parse(bodyText);
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid JSON" }));
+      return;
+    }
+
+    if (!body.name || typeof body.name !== "string" || !body.name.trim()) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid name" }));
+      return;
+    }
+
+    try {
+      const agent = updateAgentName(agentId, body.name.trim());
+      if (!agent) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Agent not found" }));
+        return;
+      }
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(agentWithCapacity(agent)));
+    } catch (error) {
+      res.writeHead(409, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: (error as Error).message }));
+    }
     return;
   }
 
@@ -681,7 +732,8 @@ const httpServer = createHttpServer(async (req, res) => {
     req.method === "GET" &&
     pathSegments[0] === "api" &&
     pathSegments[1] === "agents" &&
-    pathSegments[2]
+    pathSegments[2] &&
+    !pathSegments[3]
   ) {
     const agentId = pathSegments[2];
     const includeTasks = queryParams.get("include") === "tasks";
@@ -694,7 +746,7 @@ const httpServer = createHttpServer(async (req, res) => {
     }
 
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(agent));
+    res.end(JSON.stringify(agentWithCapacity(agent)));
     return;
   }
 

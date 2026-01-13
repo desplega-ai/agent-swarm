@@ -6,8 +6,9 @@ import Table from "@mui/joy/Table";
 import Input from "@mui/joy/Input";
 import Select from "@mui/joy/Select";
 import Option from "@mui/joy/Option";
+import IconButton from "@mui/joy/IconButton";
 import { useColorScheme } from "@mui/joy/styles";
-import { useAgents } from "../hooks/queries";
+import { useAgents, useUpdateAgentName } from "../hooks/queries";
 import StatusBadge from "./StatusBadge";
 import type { AgentWithTasks, AgentStatus } from "../types/api";
 
@@ -40,6 +41,11 @@ interface AgentsRowProps {
 }
 
 function AgentRow({ agent, selected, onClick, isDark }: AgentsRowProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState(agent.name);
+  const [error, setError] = useState<string | null>(null);
+  const updateNameMutation = useUpdateAgentName();
+
   const activeTasks = agent.tasks.filter(
     (t) => t.status === "pending" || t.status === "in_progress"
   ).length;
@@ -57,6 +63,27 @@ function AgentRow({ agent, selected, onClick, isDark }: AgentsRowProps) {
     amberTextShadow: isDark ? "0 0 10px rgba(245, 166, 35, 0.5)" : "none",
   };
 
+  const handleSave = async () => {
+    if (editName.trim() === agent.name) {
+      setIsEditing(false);
+      return;
+    }
+
+    try {
+      await updateNameMutation.mutateAsync({ id: agent.id, name: editName.trim() });
+      setIsEditing(false);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const handleCancel = () => {
+    setEditName(agent.name);
+    setIsEditing(false);
+    setError(null);
+  };
+
   return (
     <tr
       onClick={onClick}
@@ -67,28 +94,83 @@ function AgentRow({ agent, selected, onClick, isDark }: AgentsRowProps) {
       className="row-hover"
     >
       <td>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-          {/* Agent status dot */}
-          <Box
-            sx={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              bgcolor: isActive ? colors.amber : agent.status === "idle" ? colors.gold : colors.dormant,
-              boxShadow: isActive ? colors.amberGlow : "none",
-              animation: isActive ? "pulse-amber 2s ease-in-out infinite" : undefined,
-            }}
-          />
-          <Typography
-            sx={{
-              fontFamily: "code",
-              fontWeight: 600,
-              color: agent.isLead ? colors.amber : "text.primary",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {agent.name}
-          </Typography>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+            {/* Agent status dot */}
+            <Box
+              sx={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                bgcolor: isActive ? colors.amber : agent.status === "idle" ? colors.gold : colors.dormant,
+                boxShadow: isActive ? colors.amberGlow : "none",
+                animation: isActive ? "pulse-amber 2s ease-in-out infinite" : undefined,
+              }}
+            />
+            {isEditing ? (
+            <Input
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.stopPropagation();
+                  handleSave();
+                }
+                if (e.key === "Escape") {
+                  e.stopPropagation();
+                  handleCancel();
+                }
+              }}
+              onBlur={handleSave}
+              onClick={(e) => e.stopPropagation()}
+              autoFocus
+              size="sm"
+              sx={{
+                fontFamily: "code",
+                fontSize: "0.875rem",
+                fontWeight: 600,
+                maxWidth: 150,
+                bgcolor: "background.surface",
+                borderColor: colors.amber,
+                color: "text.primary",
+                "&:focus-within": {
+                  borderColor: colors.amber,
+                  boxShadow: colors.amberGlow,
+                },
+              }}
+            />
+          ) : (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+              <Typography
+                sx={{
+                  fontFamily: "code",
+                  fontWeight: 600,
+                  color: agent.isLead ? colors.amber : "text.primary",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {agent.name}
+              </Typography>
+              <IconButton
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsEditing(true);
+                }}
+                sx={{
+                  opacity: 0,
+                  ".row-hover:hover &": { opacity: 0.6 },
+                  "&:hover": { opacity: 1, bgcolor: isDark ? "rgba(245, 166, 35, 0.1)" : "rgba(212, 136, 6, 0.15)" },
+                  minHeight: 20,
+                  minWidth: 20,
+                  padding: 0.25,
+                  color: "text.secondary",
+                }}
+              >
+                ✎
+              </IconButton>
+            </Box>
+          )}
           {agent.isLead && (
             <Typography
               sx={{
@@ -104,6 +186,19 @@ function AgentRow({ agent, selected, onClick, isDark }: AgentsRowProps) {
               }}
             >
               LEAD
+            </Typography>
+          )}
+          </Box>
+          {error && (
+            <Typography
+              sx={{
+                fontFamily: "code",
+                fontSize: "0.65rem",
+                color: "#d32f2f",
+                pl: 3.5,
+              }}
+            >
+              {error}
             </Typography>
           )}
         </Box>
@@ -131,11 +226,15 @@ function AgentRow({ agent, selected, onClick, isDark }: AgentsRowProps) {
           sx={{
             fontFamily: "code",
             fontSize: "0.8rem",
-            color: activeTasks > 0 ? colors.amber : "text.tertiary",
+            color: agent.capacity ?
+              (agent.capacity.current > 0 ? colors.amber : "text.tertiary") :
+              (activeTasks > 0 ? colors.amber : "text.tertiary"),
             whiteSpace: "nowrap",
           }}
         >
-          {activeTasks}/{agent.tasks.length}
+          {agent.capacity ?
+            `${agent.capacity.current}/${agent.capacity.max}` :
+            `${activeTasks}/${agent.tasks.length}`}
         </Typography>
       </td>
       <td>
@@ -162,6 +261,11 @@ interface AgentCardProps {
 }
 
 function AgentCard({ agent, selected, onClick, isDark }: AgentCardProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState(agent.name);
+  const [error, setError] = useState<string | null>(null);
+  const updateNameMutation = useUpdateAgentName();
+
   const activeTasks = agent.tasks.filter(
     (t) => t.status === "pending" || t.status === "in_progress"
   ).length;
@@ -177,6 +281,27 @@ function AgentCard({ agent, selected, onClick, isDark }: AgentCardProps) {
     amberSoftBg: isDark ? "rgba(245, 166, 35, 0.1)" : "rgba(212, 136, 6, 0.1)",
     amberBorder: isDark ? "rgba(245, 166, 35, 0.3)" : "rgba(212, 136, 6, 0.3)",
     amberTextShadow: isDark ? "0 0 10px rgba(245, 166, 35, 0.5)" : "none",
+  };
+
+  const handleSave = async () => {
+    if (editName.trim() === agent.name) {
+      setIsEditing(false);
+      return;
+    }
+
+    try {
+      await updateNameMutation.mutateAsync({ id: agent.id, name: editName.trim() });
+      setIsEditing(false);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const handleCancel = () => {
+    setEditName(agent.name);
+    setIsEditing(false);
+    setError(null);
   };
 
   return (
@@ -208,18 +333,71 @@ function AgentCard({ agent, selected, onClick, isDark }: AgentCardProps) {
               flexShrink: 0,
             }}
           />
-          <Typography
-            sx={{
-              fontFamily: "code",
-              fontWeight: 600,
-              color: agent.isLead ? colors.amber : "text.primary",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {agent.name}
-          </Typography>
+          {isEditing ? (
+            <Input
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.stopPropagation();
+                  handleSave();
+                }
+                if (e.key === "Escape") {
+                  e.stopPropagation();
+                  handleCancel();
+                }
+              }}
+              onBlur={handleSave}
+              onClick={(e) => e.stopPropagation()}
+              autoFocus
+              size="sm"
+              sx={{
+                fontFamily: "code",
+                fontSize: "0.875rem",
+                fontWeight: 600,
+                maxWidth: 150,
+                bgcolor: "background.surface",
+                borderColor: colors.amber,
+                color: "text.primary",
+                "&:focus-within": {
+                  borderColor: colors.amber,
+                  boxShadow: colors.amberGlow,
+                },
+              }}
+            />
+          ) : (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, flex: 1, minWidth: 0 }}>
+              <Typography
+                sx={{
+                  fontFamily: "code",
+                  fontWeight: 600,
+                  color: agent.isLead ? colors.amber : "text.primary",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {agent.name}
+              </Typography>
+              <IconButton
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsEditing(true);
+                }}
+                sx={{
+                  flexShrink: 0,
+                  minHeight: 20,
+                  minWidth: 20,
+                  padding: 0.25,
+                  color: "text.secondary",
+                  "&:hover": { bgcolor: isDark ? "rgba(245, 166, 35, 0.1)" : "rgba(212, 136, 6, 0.15)" },
+                }}
+              >
+                ✎
+              </IconButton>
+            </Box>
+          )}
           {agent.isLead && (
             <Typography
               sx={{
@@ -241,6 +419,18 @@ function AgentCard({ agent, selected, onClick, isDark }: AgentCardProps) {
         </Box>
         <StatusBadge status={agent.status} />
       </Box>
+      {error && (
+        <Typography
+          sx={{
+            fontFamily: "code",
+            fontSize: "0.65rem",
+            color: "#d32f2f",
+            mb: 1,
+          }}
+        >
+          {error}
+        </Typography>
+      )}
       <Typography
         sx={{
           fontFamily: "code",
@@ -248,7 +438,9 @@ function AgentCard({ agent, selected, onClick, isDark }: AgentCardProps) {
           color: "text.tertiary",
         }}
       >
-        {agent.role || "No role"} · {activeTasks}/{agent.tasks.length} tasks
+        {agent.role || "No role"} · {agent.capacity ?
+          `${agent.capacity.current}/${agent.capacity.max}` :
+          `${activeTasks}/${agent.tasks.length}`} tasks
       </Typography>
     </Box>
   );
@@ -511,7 +703,7 @@ export default function AgentsPanel({
                     <th>NAME</th>
                     <th style={{ width: "130px" }}>ROLE</th>
                     <th style={{ width: "90px" }}>STATUS</th>
-                    <th style={{ width: "70px" }}>TASKS</th>
+                    <th style={{ width: "100px" }}>CAPACITY</th>
                     <th style={{ width: "100px" }}>UPDATED</th>
                   </tr>
                 </thead>

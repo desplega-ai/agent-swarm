@@ -821,6 +821,7 @@ export interface TaskFilters {
   readyOnly?: boolean;
   taskType?: string;
   tags?: string[];
+  limit?: number;
 }
 
 export function getAllTasks(filters?: TaskFilters): AgentTask[] {
@@ -867,7 +868,8 @@ export function getAllTasks(filters?: TaskFilters): AgentTask[] {
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const query = `SELECT * FROM agent_tasks ${whereClause} ORDER BY lastUpdatedAt DESC, priority DESC`;
+  const limit = filters?.limit ?? 25;
+  const query = `SELECT * FROM agent_tasks ${whereClause} ORDER BY lastUpdatedAt DESC, priority DESC LIMIT ${limit}`;
 
   let tasks = getDb()
     .prepare<AgentTaskRow, (string | AgentTaskStatus)[]>(query)
@@ -1455,6 +1457,31 @@ export function updateAgentProfile(
       now,
       id,
     );
+
+  return row ? rowToAgent(row) : null;
+}
+
+export function updateAgentName(
+  id: string,
+  newName: string,
+): Agent | null {
+  // Check if another agent already has this name
+  const existingAgent = getDb()
+    .prepare<AgentRow, [string, string]>(
+      "SELECT * FROM agents WHERE name = ? AND id != ?",
+    )
+    .get(newName, id);
+
+  if (existingAgent) {
+    throw new Error("Agent name already exists");
+  }
+
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<AgentRow, [string, string, string]>(
+      "UPDATE agents SET name = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *",
+    )
+    .get(newName, now, id);
 
   return row ? rowToAgent(row) : null;
 }

@@ -1,10 +1,14 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState, useCallback } from "react";
 import Box from "@mui/joy/Box";
 import Typography from "@mui/joy/Typography";
 import Chip from "@mui/joy/Chip";
+import IconButton from "@mui/joy/IconButton";
+import Tooltip from "@mui/joy/Tooltip";
 import { useColorScheme } from "@mui/joy/styles";
 import { formatRelativeTime } from "../lib/utils";
 import { useAutoScroll } from "../hooks/useAutoScroll";
+import { generatePreview } from "../lib/contentPreview";
+import JsonViewer from "./JsonViewer";
 import type { SessionLog } from "../types/api";
 
 interface SessionLogPanelProps {
@@ -12,11 +16,14 @@ interface SessionLogPanelProps {
 }
 
 interface FormattedBlock {
-  blockType: "text" | "tool" | "thinking" | "tool_result" | "summary";
+  blockType: "text" | "tool" | "thinking" | "tool_result" | "summary" | "json";
   icon: string;
   label?: string;
   content: string;
+  fullContent?: string; // Full content for expandable blocks
+  isExpandable?: boolean;
   isError?: boolean;
+  extraInfo?: string; // Additional info like "+5 more fields"
 }
 
 interface FormattedLog {
@@ -30,13 +37,44 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
   const isDark = mode === "dark";
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // State for tracking which blocks are expanded
+  const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
+  const [copiedBlock, setCopiedBlock] = useState<string | null>(null);
+
+  const toggleBlock = useCallback((blockId: string) => {
+    setExpandedBlocks(prev => {
+      const next = new Set(prev);
+      if (next.has(blockId)) {
+        next.delete(blockId);
+      } else {
+        next.add(blockId);
+      }
+      return next;
+    });
+  }, []);
+
+  const copyBlock = useCallback(async (content: string, blockId: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedBlock(blockId);
+      setTimeout(() => setCopiedBlock(null), 2000);
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
+  }, []);
+
   const colors = {
-    amber: isDark ? "#F5A623" : "#D48806",
+    amber: isDark ? "#F5A623" : "#CC7A00",
     gold: isDark ? "#D4A574" : "#8B6914",
-    rust: isDark ? "#A85454" : "#B54242",
-    blue: "#3B82F6",
-    purple: isDark ? "#9370DB" : "#6B5B95",
-    tertiary: isDark ? "#8B7355" : "#6B5344",
+    rust: isDark ? "#A85454" : "#C41E3A",
+    blue: isDark ? "#3B82F6" : "#1E40AF",
+    purple: isDark ? "#9370DB" : "#6B46C1",
+    tertiary: isDark ? "#8B7355" : "#44332B",
+    text: {
+      primary: isDark ? "inherit" : "#1A1A1A",
+      secondary: isDark ? "inherit" : "#2D2D2D",
+      tertiary: isDark ? "inherit" : "#4A4A4A",
+    },
   };
 
   // Sort logs by createdAt ascending (oldest first), then by lineNumber
@@ -117,7 +155,13 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
             return {
               type: "assistant",
               color: colors.gold,
-              blocks: [{ blockType: "text", icon: "◆", content: JSON.stringify(json, null, 2) }],
+              blocks: [{
+                blockType: "json",
+                icon: "◆",
+                content: "Unrecognized message format",
+                fullContent: JSON.stringify(json, null, 2),
+                isExpandable: true,
+              }],
             };
           }
 
@@ -126,7 +170,13 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
             return {
               type: "assistant",
               color: colors.gold,
-              blocks: [{ blockType: "text", icon: "◆", content: JSON.stringify(json, null, 2) }],
+              blocks: [{
+                blockType: "json",
+                icon: "◆",
+                content: "Unrecognized message format",
+                fullContent: JSON.stringify(json, null, 2),
+                isExpandable: true,
+              }],
             };
           }
 
@@ -142,17 +192,29 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
             } else if (block.type === "tool_use") {
               const toolName = formatToolName((block.name as string) || "unknown");
               const input = (block.input as Record<string, unknown>) || {};
+              const formattedInput = formatToolInput(input);
+              const fullInput = JSON.stringify(input, null, 2);
+              const hasMultipleParams = Object.keys(input).length > 0;
+
               blocks.push({
                 blockType: "tool",
                 icon: "▶",
                 label: toolName,
-                content: formatToolInput(input),
+                content: formattedInput,
+                fullContent: fullInput,
+                isExpandable: hasMultipleParams,
               });
             } else if (block.type === "thinking") {
+              const thinkingText = (block.thinking as string) || "Thinking...";
+              const preview = generatePreview(thinkingText, 200);
+
               blocks.push({
                 blockType: "thinking",
                 icon: "💭",
-                content: truncate((block.thinking as string) || "Thinking...", 300),
+                content: preview.preview,
+                fullContent: thinkingText,
+                isExpandable: preview.isTruncated,
+                extraInfo: preview.extraInfo,
               });
             }
           }
@@ -160,7 +222,13 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
           return {
             type: "assistant",
             color: colors.gold,
-            blocks: blocks.length > 0 ? blocks : [{ blockType: "text", icon: "◆", content: JSON.stringify(json, null, 2) }],
+            blocks: blocks.length > 0 ? blocks : [{
+              blockType: "json",
+              icon: "◆",
+              content: "Unrecognized message format",
+              fullContent: JSON.stringify(json, null, 2),
+              isExpandable: true,
+            }],
           };
         }
 
@@ -172,11 +240,16 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
           if (rawToolResult) {
             const toolResult = typeof rawToolResult === "string" ? rawToolResult : JSON.stringify(rawToolResult);
             const isError = toolResult.includes("Error") || toolResult.includes("error");
+            const preview = isError ? { preview: toolResult, isTruncated: false } : generatePreview(toolResult, 300);
+
             blocks.push({
               blockType: "tool_result",
               icon: isError ? "✗" : "✓",
-              content: truncate(toolResult, 500),
+              content: preview.preview,
+              fullContent: toolResult,
+              isExpandable: preview.isTruncated || toolResult.length > 300,
               isError,
+              extraInfo: preview.extraInfo,
             });
           } else if (message) {
             const contentBlocks = message.content as Array<Record<string, unknown>>;
@@ -186,11 +259,16 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
                   const rawResult = block.content;
                   const result = typeof rawResult === "string" ? rawResult : rawResult ? JSON.stringify(rawResult) : "";
                   const isError = block.is_error as boolean;
+                  const preview = isError ? { preview: result, isTruncated: false } : generatePreview(result, 300);
+
                   blocks.push({
                     blockType: "tool_result",
                     icon: isError ? "✗" : "✓",
-                    content: truncate(result, 500),
+                    content: preview.preview,
+                    fullContent: result,
+                    isExpandable: preview.isTruncated || result.length > 300,
                     isError,
+                    extraInfo: preview.extraInfo,
                   });
                 }
               }
@@ -200,7 +278,13 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
           return {
             type: "tool_result",
             color: colors.purple,
-            blocks: blocks.length > 0 ? blocks : [{ blockType: "text", icon: "←", content: JSON.stringify(json, null, 2) }],
+            blocks: blocks.length > 0 ? blocks : [{
+              blockType: "json",
+              icon: "←",
+              content: "Unrecognized tool result format",
+              fullContent: JSON.stringify(json, null, 2),
+              isExpandable: true,
+            }],
           };
         }
 
@@ -252,7 +336,13 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
           return {
             type: json.type || "unknown",
             color: colors.tertiary,
-            blocks: [{ blockType: "text", icon: "?", content: JSON.stringify(json, null, 2) }],
+            blocks: [{
+              blockType: "json",
+              icon: "?",
+              content: "Unknown message type",
+              fullContent: JSON.stringify(json, null, 2),
+              isExpandable: true,
+            }],
           };
       }
     } catch {
@@ -283,15 +373,21 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
       case "tool_result":
         return {
           bgcolor: block.isError
-            ? (isDark ? "rgba(168, 84, 84, 0.1)" : "rgba(181, 66, 66, 0.08)")
+            ? (isDark ? "rgba(168, 84, 84, 0.15)" : "rgba(181, 66, 66, 0.12)")
             : (isDark ? "rgba(76, 175, 80, 0.1)" : "rgba(56, 142, 60, 0.08)"),
-          borderLeft: `2px solid ${block.isError ? colors.rust : colors.amber}`,
+          borderLeft: block.isError ? `3px solid ${colors.rust}` : `2px solid ${colors.amber}`,
           pl: 1,
         };
       case "summary":
         return {
           fontWeight: 600,
           color: block.isError ? colors.rust : colors.amber,
+        };
+      case "json":
+        return {
+          bgcolor: isDark ? "rgba(100, 100, 100, 0.1)" : "rgba(150, 150, 150, 0.08)",
+          borderLeft: `2px solid ${colors.tertiary}`,
+          pl: 1,
         };
       default:
         return {
@@ -303,7 +399,7 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
   if (!sessionLogs || sessionLogs.length === 0) {
     return (
       <Box sx={{ p: 2, height: "100%", overflow: "auto" }}>
-        <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
+        <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: colors.text.tertiary }}>
           No session logs available
         </Typography>
       </Box>
@@ -316,11 +412,13 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
       sx={{
         flex: 1,
         overflow: "auto",
-        p: 2,
-        height: "100%",
+        p: 1.5,
+        display: "flex",
+        flexDirection: "column",
+        minHeight: 0,
       }}
     >
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
         {sortedLogs.map((log) => {
           const formatted = formatLogLine(log.content);
           return (
@@ -328,19 +426,19 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
               key={log.id}
               sx={{
                 bgcolor: "background.level1",
-                p: 1.5,
+                p: 2,
                 borderRadius: 1,
                 border: "1px solid",
                 borderColor: "neutral.outlinedBorder",
               }}
             >
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
                 <Chip
                   size="sm"
                   variant="soft"
                   sx={{
                     fontFamily: "code",
-                    fontSize: "0.6rem",
+                    fontSize: "0.65rem",
                     color: formatted.color,
                     bgcolor: isDark ? "rgba(100, 100, 100, 0.15)" : "rgba(150, 150, 150, 0.12)",
                     textTransform: "uppercase",
@@ -348,81 +446,205 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
                 >
                   {formatted.type}
                 </Chip>
-                <Typography sx={{ fontFamily: "code", fontSize: "0.6rem", color: "text.tertiary" }}>
-                  {formatRelativeTime(log.createdAt)}
-                </Typography>
+                <Tooltip title={new Date(log.createdAt).toLocaleString()} placement="top">
+                  <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: colors.text.tertiary }}>
+                    {formatRelativeTime(log.createdAt)}
+                  </Typography>
+                </Tooltip>
               </Box>
-              <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
-                {formatted.blocks.map((block, idx) => (
-                  <Box
-                    key={idx}
-                    sx={{
-                      display: "flex",
-                      alignItems: "flex-start",
-                      fontFamily: "code",
-                      fontSize: "0.7rem",
-                      borderRadius: 0.5,
-                      py: 0.5,
-                      ...getBlockStyles(block, formatted.color),
-                    }}
-                  >
-                    {block.icon && (
-                      <Typography
-                        component="span"
-                        sx={{
-                          mr: 0.75,
-                          fontFamily: "code",
-                          fontSize: "0.7rem",
-                          color: block.isError ? colors.rust : formatted.color,
-                          flexShrink: 0,
-                        }}
-                      >
-                        {block.icon}
-                      </Typography>
-                    )}
-                    {block.blockType === "tool" ? (
-                      <Box sx={{ display: "flex", flexWrap: "wrap", alignItems: "baseline" }}>
-                        <Typography
-                          component="span"
-                          sx={{
-                            fontFamily: "code",
-                            fontSize: "0.7rem",
-                            color: colors.purple,
-                            fontWeight: 600,
-                          }}
-                        >
-                          {block.label}
-                        </Typography>
-                        {block.content && (
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                {formatted.blocks.map((block, idx) => {
+                  const blockId = `${log.id}-${block.blockType}-${idx}`;
+                  const isExpanded = expandedBlocks.has(blockId);
+                  const isCopied = copiedBlock === blockId;
+
+                  return (
+                    <Box
+                      key={idx}
+                      sx={{
+                        display: "flex",
+                        flexDirection: "column",
+                        fontFamily: "code",
+                        fontSize: "0.75rem",
+                        borderRadius: 0.5,
+                        py: 0.5,
+                        ...getBlockStyles(block, formatted.color),
+                      }}
+                    >
+                      <Box sx={{ display: "flex", alignItems: "flex-start", gap: 0.5 }}>
+                        {block.icon && (
                           <Typography
                             component="span"
                             sx={{
+                              mr: 0.5,
                               fontFamily: "code",
-                              fontSize: "0.65rem",
-                              color: "text.tertiary",
-                              ml: 0.5,
+                              fontSize: block.isError ? "0.8rem" : "0.75rem",
+                              color: block.isError ? colors.rust : formatted.color,
+                              flexShrink: 0,
                             }}
                           >
-                            {block.content}
+                            {block.icon}
                           </Typography>
                         )}
+
+                        {block.blockType === "tool" ? (
+                          <Box sx={{ flex: 1 }}>
+                            <Box sx={{ display: "flex", alignItems: "baseline", gap: 0.5, flexWrap: "wrap" }}>
+                              <Typography
+                                component="span"
+                                sx={{
+                                  fontFamily: "code",
+                                  fontSize: "0.75rem",
+                                  color: colors.purple,
+                                  fontWeight: 600,
+                                }}
+                              >
+                                {block.label}
+                              </Typography>
+                              {!isExpanded && block.content && (
+                                <Typography
+                                  component="span"
+                                  sx={{
+                                    fontFamily: "code",
+                                    fontSize: "0.7rem",
+                                    color: colors.text.tertiary,
+                                  }}
+                                >
+                                  {block.content}
+                                </Typography>
+                              )}
+                              {block.isExpandable && (
+                                <IconButton
+                                  size="sm"
+                                  variant="plain"
+                                  onClick={() => toggleBlock(blockId)}
+                                  sx={{
+                                    fontSize: "0.65rem",
+                                    minWidth: "auto",
+                                    minHeight: "auto",
+                                    ml: 0.5,
+                                    color: colors.purple,
+                                  }}
+                                >
+                                  {isExpanded ? "▼" : "▶"}
+                                </IconButton>
+                              )}
+                            </Box>
+                            {isExpanded && block.fullContent && (
+                              <Box sx={{ mt: 1 }}>
+                                <JsonViewer content={block.fullContent} maxHeight="300px" />
+                              </Box>
+                            )}
+                          </Box>
+                        ) : block.blockType === "json" ? (
+                          <Box sx={{ flex: 1 }}>
+                            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                              <Typography
+                                component="span"
+                                sx={{
+                                  fontFamily: "code",
+                                  fontSize: "0.75rem",
+                                  color: colors.text.tertiary,
+                                  fontStyle: "italic",
+                                }}
+                              >
+                                {block.content}
+                              </Typography>
+                              <IconButton
+                                size="sm"
+                                variant="plain"
+                                onClick={() => toggleBlock(blockId)}
+                                sx={{
+                                  fontSize: "0.65rem",
+                                  minWidth: "auto",
+                                  minHeight: "auto",
+                                  color: "text.tertiary",
+                                }}
+                              >
+                                {isExpanded ? "▼" : "▶"}
+                              </IconButton>
+                            </Box>
+                            {isExpanded && block.fullContent && (
+                              <Box sx={{ mt: 1 }}>
+                                <JsonViewer content={block.fullContent} maxHeight="400px" />
+                              </Box>
+                            )}
+                          </Box>
+                        ) : (
+                          <Box sx={{ flex: 1 }}>
+                            <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 1 }}>
+                              <Typography
+                                component="div"
+                                sx={{
+                                  fontFamily: "code",
+                                  fontSize: block.isError ? "0.8rem" : "0.75rem",
+                                  color: block.isError ? colors.rust : (block.blockType === "thinking" ? colors.text.tertiary : colors.text.secondary),
+                                  whiteSpace: "pre-wrap",
+                                  wordBreak: "break-word",
+                                  flex: 1,
+                                }}
+                              >
+                                {isExpanded && block.fullContent ? block.fullContent : block.content}
+                                {block.isExpandable && !isExpanded && block.extraInfo && (
+                                  <Typography
+                                    component="span"
+                                    sx={{
+                                      fontFamily: "code",
+                                      fontSize: "0.65rem",
+                                      color: colors.text.tertiary,
+                                      fontStyle: "italic",
+                                      ml: 0.5,
+                                    }}
+                                  >
+                                    {` (${block.extraInfo})`}
+                                  </Typography>
+                                )}
+                              </Typography>
+                              <Box sx={{ display: "flex", gap: 0.25, flexShrink: 0 }}>
+                                {block.isExpandable && (
+                                  <Tooltip title={isExpanded ? "Collapse" : "Expand"} placement="top">
+                                    <IconButton
+                                      size="sm"
+                                      variant="plain"
+                                      onClick={() => toggleBlock(blockId)}
+                                      sx={{
+                                        fontSize: "0.65rem",
+                                        minWidth: "auto",
+                                        minHeight: "auto",
+                                        color: "text.tertiary",
+                                        "&:hover": { color: "text.primary" },
+                                      }}
+                                    >
+                                      {isExpanded ? "▼" : "▶"}
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
+                                {(block.fullContent || block.content) && (
+                                  <Tooltip title={isCopied ? "Copied!" : "Copy"} placement="top">
+                                    <IconButton
+                                      size="sm"
+                                      variant="plain"
+                                      onClick={() => copyBlock(block.fullContent || block.content, blockId)}
+                                      sx={{
+                                        fontSize: "0.65rem",
+                                        minWidth: "auto",
+                                        minHeight: "auto",
+                                        color: isCopied ? colors.amber : "text.tertiary",
+                                        "&:hover": { color: "text.primary" },
+                                      }}
+                                    >
+                                      {isCopied ? "✓" : "⧉"}
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
+                              </Box>
+                            </Box>
+                          </Box>
+                        )}
                       </Box>
-                    ) : (
-                      <Typography
-                        component="span"
-                        sx={{
-                          fontFamily: "code",
-                          fontSize: "0.7rem",
-                          color: block.isError ? colors.rust : (block.blockType === "thinking" ? "text.tertiary" : "text.secondary"),
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-word",
-                        }}
-                      >
-                        {block.content}
-                      </Typography>
-                    )}
-                  </Box>
-                ))}
+                    </Box>
+                  );
+                })}
               </Box>
             </Box>
           );

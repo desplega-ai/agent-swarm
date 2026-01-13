@@ -50,6 +50,20 @@ class ApiClient {
     return res.json();
   }
 
+  async updateAgentName(id: string, name: string): Promise<AgentWithTasks> {
+    const url = `${this.getBaseUrl()}/api/agents/${id}/name`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to update name" }));
+      throw new Error(error.error || `Failed to update name: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async fetchTasks(filters?: { status?: string; agentId?: string; search?: string }): Promise<TasksResponse> {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);

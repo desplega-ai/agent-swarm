@@ -66,11 +66,11 @@ interface TaskCardProps {
   task: AgentTask;
   selected: boolean;
   onClick: () => void;
-  agentName?: string;
+  agent?: import("../types/api").Agent;
   isDark: boolean;
 }
 
-function TaskCard({ task, selected, onClick, agentName, isDark }: TaskCardProps) {
+function TaskCard({ task, selected, onClick, agent, isDark }: TaskCardProps) {
   const colors = {
     amber: isDark ? "#F5A623" : "#D48806",
     gold: isDark ? "#D4A574" : "#8B6914",
@@ -119,9 +119,11 @@ function TaskCard({ task, selected, onClick, agentName, isDark }: TaskCardProps)
         </Typography>
       </Box>
       {task.agentId && (
-        <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: colors.amber, mt: 0.5 }}>
-          Agent: {agentName || task.agentId.slice(0, 8)}
-        </Typography>
+        <Box sx={{ display: "flex", gap: 0.5, alignItems: "center", mt: 0.5 }}>
+          <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: colors.amber }}>
+            Agent: {agent?.name || task.agentId.slice(0, 8)}
+          </Typography>
+        </Box>
       )}
       {task.tags && task.tags.length > 0 && (
         <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap", mt: 1 }}>
@@ -188,8 +190,8 @@ export default function TasksPanel({
 
   // Create agent lookup
   const agentMap = useMemo(() => {
-    const map = new Map<string, string>();
-    agents?.forEach((a) => map.set(a.id, a.name));
+    const map = new Map();
+    agents?.forEach((a) => map.set(a.id, a));
     return map;
   }, [agents]);
 
@@ -428,18 +430,30 @@ export default function TasksPanel({
                         </Typography>
                       </td>
                       <td>
-                        <Typography
-                          sx={{
-                            fontFamily: "code",
-                            fontSize: "0.75rem",
-                            color: task.agentId ? colors.amber : "text.tertiary",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {task.agentId ? (agentMap.get(task.agentId) || task.agentId.slice(0, 8)) : "—"}
-                        </Typography>
+                        {task.agentId ? (
+                          <Typography
+                            sx={{
+                              fontFamily: "code",
+                              fontSize: "0.75rem",
+                              color: colors.amber,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {agentMap.get(task.agentId)?.name || task.agentId.slice(0, 8)}
+                          </Typography>
+                        ) : (
+                          <Typography
+                            sx={{
+                              fontFamily: "code",
+                              fontSize: "0.75rem",
+                              color: "text.tertiary",
+                            }}
+                          >
+                            —
+                          </Typography>
+                        )}
                       </td>
                       <td>
                         <Typography
@@ -539,7 +553,7 @@ export default function TasksPanel({
                   task={task}
                   selected={selectedTaskId === task.id}
                   onClick={() => onSelectTask(selectedTaskId === task.id ? null : task.id)}
-                  agentName={task.agentId ? agentMap.get(task.agentId) : undefined}
+                  agent={task.agentId ? agentMap.get(task.agentId) : undefined}
                   isDark={isDark}
                 />
               ))}
