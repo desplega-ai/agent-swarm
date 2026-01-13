@@ -4,8 +4,11 @@ import {
   acceptTask,
   claimTask,
   createTaskExtended,
+  getActiveTaskCount,
+  getAgentById,
   getDb,
   getTaskById,
+  hasCapacity,
   rejectTask,
   releaseTask,
 } from "@/be/db";
@@ -92,6 +95,15 @@ export const registerTaskActionTool = (server: McpServer) => {
           case "claim": {
             if (!taskId) {
               return { success: false, message: "Task ID is required for 'claim' action." };
+            }
+            // Check capacity before claiming
+            if (!hasCapacity(agentId)) {
+              const activeCount = getActiveTaskCount(agentId);
+              const agent = getAgentById(agentId);
+              return {
+                success: false,
+                message: `You have no capacity (${activeCount}/${agent?.maxTasks ?? 1} tasks). Complete a task first.`,
+              };
             }
             const existingTask = getTaskById(taskId);
             if (!existingTask) {

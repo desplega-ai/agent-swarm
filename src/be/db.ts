@@ -373,6 +373,12 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   } catch {
     /* exists */
   }
+  // Concurrency limit column
+  try {
+    db.run(`ALTER TABLE agents ADD COLUMN maxTasks INTEGER DEFAULT 1`);
+  } catch {
+    /* exists */
+  }
 
   // Service PM2 columns migration
   try {
@@ -442,6 +448,7 @@ type AgentRow = {
   description: string | null;
   role: string | null;
   capabilities: string | null;
+  maxTasks: number | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -455,6 +462,7 @@ function rowToAgent(row: AgentRow): Agent {
     description: row.description ?? undefined,
     role: row.role ?? undefined,
     capabilities: row.capabilities ? JSON.parse(row.capabilities) : [],
+    maxTasks: row.maxTasks ?? 1,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -462,8 +470,8 @@ function rowToAgent(row: AgentRow): Agent {
 
 export const agentQueries = {
   insert: () =>
-    getDb().prepare<AgentRow, [string, string, number, AgentStatus]>(
-      "INSERT INTO agents (id, name, isLead, status, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *",
+    getDb().prepare<AgentRow, [string, string, number, AgentStatus, number]>(
+      "INSERT INTO agents (id, name, isLead, status, maxTasks, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *",
     ),
 
   getById: () => getDb().prepare<AgentRow, [string]>("SELECT * FROM agents WHERE id = ?"),
@@ -482,7 +490,10 @@ export function createAgent(
   agent: Omit<Agent, "id" | "createdAt" | "lastUpdatedAt"> & { id?: string },
 ): Agent {
   const id = agent.id ?? crypto.randomUUID();
-  const row = agentQueries.insert().get(id, agent.name, agent.isLead ? 1 : 0, agent.status);
+  const maxTasks = agent.maxTasks ?? 1;
+  const row = agentQueries
+    .insert()
+    .get(id, agent.name, agent.isLead ? 1 : 0, agent.status, maxTasks);
   if (!row) throw new Error("Failed to create agent");
   try {
     createLogEntry({ eventType: "agent_joined", agentId: id, newValue: agent.status });
@@ -515,6 +526,16 @@ export function updateAgentStatus(id: string, status: AgentStatus): Agent | null
   return row ? rowToAgent(row) : null;
 }
 
+export function updateAgentMaxTasks(id: string, maxTasks: number): Agent | null {
+  const row = getDb()
+    .prepare<AgentRow, [number, string]>(
+      `UPDATE agents SET maxTasks = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? RETURNING *`,
+    )
+    .get(maxTasks, id);
+  return row ? rowToAgent(row) : null;
+}
+
 export function deleteAgent(id: string): boolean {
   const agent = getAgentById(id);
   if (agent) {
@@ -524,6 +545,60 @@ export function deleteAgent(id: string): boolean {
   }
   const result = getDb().run("DELETE FROM agents WHERE id = ?", [id]);
   return result.changes > 0;
+}
+
+// ============================================================================
+// Agent Capacity Functions
+// ============================================================================
+
+/**
+ * Get the count of active (in_progress) tasks for an agent.
+ * Used to determine current capacity usage.
+ */
+export function getActiveTaskCount(agentId: string): number {
+  const result = getDb()
+    .prepare<{ count: number }, [string]>(
+      "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status = 'in_progress'",
+    )
+    .get(agentId);
+  return result?.count ?? 0;
+}
+
+/**
+ * Check if an agent has capacity to accept more tasks.
+ */
+export function hasCapacity(agentId: string): boolean {
+  const agent = getAgentById(agentId);
+  if (!agent) return false;
+  const activeCount = getActiveTaskCount(agentId);
+  return activeCount < (agent.maxTasks ?? 1);
+}
+
+/**
+ * Get remaining capacity (available task slots) for an agent.
+ */
+export function getRemainingCapacity(agentId: string): number {
+  const agent = getAgentById(agentId);
+  if (!agent) return 0;
+  const activeCount = getActiveTaskCount(agentId);
+  return Math.max(0, (agent.maxTasks ?? 1) - activeCount);
+}
+
+/**
+ * Update agent status based on current capacity.
+ * Agent is 'busy' when any tasks are in progress, 'idle' when none.
+ * Does not modify 'offline' status.
+ */
+export function updateAgentStatusFromCapacity(agentId: string): void {
+  const agent = getAgentById(agentId);
+  if (!agent || agent.status === "offline") return;
+
+  const activeCount = getActiveTaskCount(agentId);
+  const newStatus = activeCount > 0 ? "busy" : "idle";
+
+  if (agent.status !== newStatus) {
+    updateAgentStatus(agentId, newStatus);
+  }
 }
 
 // ============================================================================

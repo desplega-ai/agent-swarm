@@ -13,6 +13,7 @@ import {
   createAgent,
   createSessionLogs,
   createTaskExtended,
+  getActiveTaskCount,
   getAgentById,
   getAgentWithTasks,
   getAllAgents,
@@ -35,7 +36,10 @@ import {
   getTaskById,
   getUnassignedTasksCount,
   getUnreadInboxMessages,
+  hasCapacity,
   postMessage,
+  startTask,
+  updateAgentMaxTasks,
   updateAgentStatus,
 } from "./be/db";
 import type { CommentEvent, IssueEvent, PullRequestEvent } from "./github";
@@ -85,6 +89,22 @@ function getPathSegments(url: string): string[] {
   const pathEnd = url.indexOf("?");
   const path = pathEnd === -1 ? url : url.slice(0, pathEnd);
   return path.split("/").filter(Boolean);
+}
+
+/** Add capacity info to agent response */
+function agentWithCapacity<T extends { id: string; maxTasks?: number }>(
+  agent: T,
+): T & { capacity: { current: number; max: number; available: number } } {
+  const activeCount = getActiveTaskCount(agent.id);
+  const max = agent.maxTasks ?? 1;
+  return {
+    ...agent,
+    capacity: {
+      current: activeCount,
+      max,
+      available: Math.max(0, max - activeCount),
+    },
+  };
 }
 
 const httpServer = createHttpServer(async (req, res) => {
@@ -173,15 +193,18 @@ const httpServer = createHttpServer(async (req, res) => {
     // Check for ?include=inbox query param
     const includeInbox = parseQueryParams(req.url || "").get("include") === "inbox";
 
+    // Add capacity info to agent response
+    const agentResponse = agentWithCapacity(agent);
+
     if (includeInbox) {
       const inbox = getInboxSummary(myAgentId);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ...agent, inbox }));
+      res.end(JSON.stringify({ ...agentResponse, inbox }));
       return;
     }
 
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(agent));
+    res.end(JSON.stringify(agentResponse));
     return;
   }
 
@@ -290,6 +313,10 @@ const httpServer = createHttpServer(async (req, res) => {
         if (existingAgent.status === "offline") {
           updateAgentStatus(existingAgent.id, "idle");
         }
+        // Update maxTasks if provided (allows runner to sync its MAX_CONCURRENT_TASKS)
+        if (body.maxTasks !== undefined && body.maxTasks !== existingAgent.maxTasks) {
+          updateAgentMaxTasks(existingAgent.id, body.maxTasks);
+        }
         return { agent: getAgentById(agentId), created: false };
       }
 
@@ -302,6 +329,7 @@ const httpServer = createHttpServer(async (req, res) => {
         description: body.description,
         role: body.role,
         capabilities: body.capabilities,
+        maxTasks: body.maxTasks ?? 1,
       });
 
       return { agent, created: true };
@@ -345,15 +373,20 @@ const httpServer = createHttpServer(async (req, res) => {
       }
 
       // Check for pending tasks (assigned directly to this agent)
-      const pendingTask = getPendingTaskForAgent(myAgentId);
-      if (pendingTask) {
-        return {
-          trigger: {
-            type: "task_assigned",
-            taskId: pendingTask.id,
-            task: pendingTask,
-          },
-        };
+      // Only return a task if agent has capacity (server-side enforcement)
+      if (hasCapacity(myAgentId)) {
+        const pendingTask = getPendingTaskForAgent(myAgentId);
+        if (pendingTask) {
+          // Mark task as in_progress immediately to prevent duplicate polling
+          startTask(pendingTask.id);
+          return {
+            trigger: {
+              type: "task_assigned",
+              taskId: pendingTask.id,
+              task: { ...pendingTask, status: "in_progress" },
+            },
+          };
+        }
       }
 
       if (agent.isLead) {

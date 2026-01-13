@@ -61,9 +61,40 @@ async function closeAgent(config: ApiConfig, role: string): Promise<void> {
 }
 
 /** Setup signal handlers for graceful shutdown */
-function setupShutdownHandlers(role: string, apiConfig?: ApiConfig): void {
+function setupShutdownHandlers(
+  role: string,
+  apiConfig?: ApiConfig,
+  getRunnerState?: () => RunnerState | undefined,
+): void {
   const shutdown = async (signal: string) => {
     console.log(`\n[${role}] Received ${signal}, shutting down...`);
+
+    // Wait for active tasks with timeout
+    const state = getRunnerState?.();
+    if (state && state.activeTasks.size > 0) {
+      const shutdownTimeout = parseInt(process.env.SHUTDOWN_TIMEOUT || "30000", 10);
+      console.log(
+        `[${role}] Waiting for ${state.activeTasks.size} active tasks to complete (${shutdownTimeout / 1000}s timeout)...`,
+      );
+      const deadline = Date.now() + shutdownTimeout;
+
+      while (state.activeTasks.size > 0 && Date.now() < deadline) {
+        await checkCompletedProcesses(state, role);
+        if (state.activeTasks.size > 0) {
+          await Bun.sleep(500);
+        }
+      }
+
+      // Force kill remaining tasks
+      if (state.activeTasks.size > 0) {
+        console.log(`[${role}] Force stopping ${state.activeTasks.size} remaining task(s)...`);
+        for (const [taskId, task] of state.activeTasks) {
+          console.log(`[${role}] Force stopping task ${taskId.slice(0, 8)}`);
+          task.process.kill("SIGTERM");
+        }
+      }
+    }
+
     if (apiConfig) {
       await closeAgent(apiConfig, role);
     }
@@ -110,6 +141,21 @@ interface RunClaudeIterationOptions {
   sessionId?: string;
   iteration?: number;
   taskId?: string;
+}
+
+/** Running task state for parallel execution */
+interface RunningTask {
+  taskId: string;
+  process: ReturnType<typeof Bun.spawn>;
+  logFile: string;
+  startTime: Date;
+  promise: Promise<number>;
+}
+
+/** Runner state for tracking concurrent tasks */
+interface RunnerState {
+  activeTasks: Map<string, RunningTask>;
+  maxConcurrent: number;
 }
 
 /** Buffer for session logs */
@@ -213,6 +259,7 @@ async function registerAgent(opts: {
   name: string;
   isLead: boolean;
   capabilities?: string[];
+  maxTasks?: number;
 }): Promise<void> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -229,6 +276,7 @@ async function registerAgent(opts: {
       name: opts.name,
       isLead: opts.isLead,
       capabilities: opts.capabilities,
+      maxTasks: opts.maxTasks,
     }),
   });
 
@@ -460,6 +508,199 @@ async function runClaudeIteration(opts: RunClaudeIterationOptions): Promise<numb
   return exitCode ?? 1;
 }
 
+/** Spawn a Claude process without blocking - returns immediately with tracking info */
+function spawnClaudeProcess(
+  opts: RunClaudeIterationOptions,
+  logDir: string,
+  _metadataType: string,
+  _sessionId: string,
+  isYolo: boolean,
+): RunningTask {
+  const { role, taskId } = opts;
+  const Cmd = [
+    "claude",
+    "--model",
+    "opus",
+    "--verbose",
+    "--output-format",
+    "stream-json",
+    "--dangerously-skip-permissions",
+    "--allow-dangerously-skip-permissions",
+    "--permission-mode",
+    "bypassPermissions",
+    "-p",
+    opts.prompt,
+  ];
+
+  if (opts.additionalArgs && opts.additionalArgs.length > 0) {
+    Cmd.push(...opts.additionalArgs);
+  }
+
+  if (opts.systemPrompt) {
+    Cmd.push("--append-system-prompt", opts.systemPrompt);
+  }
+
+  const effectiveTaskId = taskId || crypto.randomUUID();
+
+  console.log(
+    `\x1b[2m[${role}]\x1b[0m \x1b[36m▸\x1b[0m Spawning Claude for task ${effectiveTaskId.slice(0, 8)}`,
+  );
+
+  const logFileHandle = Bun.file(opts.logFile).writer();
+
+  const proc = Bun.spawn(Cmd, {
+    env: process.env,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  // Create promise that resolves when process completes
+  const promise = (async () => {
+    let stderrOutput = "";
+    let stdoutChunks = 0;
+    let stderrChunks = 0;
+
+    // Initialize log buffer for API streaming
+    const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now() };
+    const shouldStream = opts.apiUrl && opts.sessionId && opts.iteration;
+
+    const stdoutPromise = (async () => {
+      if (proc.stdout) {
+        for await (const chunk of proc.stdout) {
+          stdoutChunks++;
+          const text = new TextDecoder().decode(chunk);
+          logFileHandle.write(text);
+
+          const lines = text.split("\n");
+          for (const line of lines) {
+            prettyPrintLine(line, role);
+
+            // Buffer non-empty lines for API streaming
+            if (shouldStream && line.trim()) {
+              logBuffer.lines.push(line.trim());
+
+              const shouldFlush =
+                logBuffer.lines.length >= LOG_BUFFER_SIZE ||
+                Date.now() - logBuffer.lastFlush >= LOG_FLUSH_INTERVAL_MS;
+
+              if (shouldFlush) {
+                await flushLogBuffer(logBuffer, {
+                  apiUrl: opts.apiUrl!,
+                  apiKey: opts.apiKey || "",
+                  agentId: opts.agentId || "",
+                  sessionId: opts.sessionId!,
+                  iteration: opts.iteration!,
+                  taskId: opts.taskId,
+                  cli: "claude",
+                });
+              }
+            }
+          }
+        }
+
+        // Final flush for remaining buffered logs
+        if (shouldStream && logBuffer.lines.length > 0) {
+          await flushLogBuffer(logBuffer, {
+            apiUrl: opts.apiUrl!,
+            apiKey: opts.apiKey || "",
+            agentId: opts.agentId || "",
+            sessionId: opts.sessionId!,
+            iteration: opts.iteration!,
+            taskId: opts.taskId,
+            cli: "claude",
+          });
+        }
+      }
+    })();
+
+    const stderrPromise = (async () => {
+      if (proc.stderr) {
+        for await (const chunk of proc.stderr) {
+          stderrChunks++;
+          const text = new TextDecoder().decode(chunk);
+          stderrOutput += text;
+          prettyPrintStderr(text, role);
+          logFileHandle.write(
+            `${JSON.stringify({ type: "stderr", content: text, timestamp: new Date().toISOString() })}\n`,
+          );
+        }
+      }
+    })();
+
+    await Promise.all([stdoutPromise, stderrPromise]);
+    await logFileHandle.end();
+    const exitCode = await proc.exited;
+
+    if (exitCode !== 0 && stderrOutput) {
+      console.error(
+        `\x1b[31m[${role}] Full stderr for task ${effectiveTaskId.slice(0, 8)}:\x1b[0m\n${stderrOutput}`,
+      );
+    }
+
+    if (stdoutChunks === 0 && stderrChunks === 0) {
+      console.warn(
+        `\x1b[33m[${role}] WARNING: No output from Claude for task ${effectiveTaskId.slice(0, 8)} - check auth/startup\x1b[0m`,
+      );
+    }
+
+    // Log errors if non-zero exit code
+    if (exitCode !== 0) {
+      const errorLog = {
+        timestamp: new Date().toISOString(),
+        iteration: opts.iteration,
+        exitCode,
+        taskId: effectiveTaskId,
+        error: true,
+      };
+
+      const errorsFile = `${logDir}/errors.jsonl`;
+      const errorsFileRef = Bun.file(errorsFile);
+      const existingErrors = (await errorsFileRef.exists()) ? await errorsFileRef.text() : "";
+      await Bun.write(errorsFile, `${existingErrors}${JSON.stringify(errorLog)}\n`);
+
+      if (!isYolo) {
+        console.error(
+          `[${role}] Task ${effectiveTaskId.slice(0, 8)} exited with code ${exitCode}.`,
+        );
+      } else {
+        console.warn(
+          `[${role}] Task ${effectiveTaskId.slice(0, 8)} exited with code ${exitCode}. YOLO mode - continuing...`,
+        );
+      }
+    }
+
+    return exitCode ?? 1;
+  })();
+
+  return {
+    taskId: effectiveTaskId,
+    process: proc,
+    logFile: opts.logFile,
+    startTime: new Date(),
+    promise,
+  };
+}
+
+/** Check for completed processes and remove them from active tasks */
+async function checkCompletedProcesses(state: RunnerState, role: string): Promise<void> {
+  const completedTasks: string[] = [];
+
+  for (const [taskId, task] of state.activeTasks) {
+    // Check if the Bun subprocess has exited (non-blocking)
+    if (task.process.exitCode !== null) {
+      console.log(
+        `[${role}] Task ${taskId.slice(0, 8)} completed with exit code ${task.process.exitCode}`,
+      );
+      completedTasks.push(taskId);
+    }
+  }
+
+  // Remove completed tasks from the map
+  for (const taskId of completedTasks) {
+    state.activeTasks.delete(taskId);
+  }
+}
+
 export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   const { role, defaultPrompt, metadataType } = config;
 
@@ -541,14 +782,22 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let iteration = 0;
 
   if (!isAiLoop) {
-    // NEW: Runner-level polling mode
+    // Runner-level polling mode with parallel execution support
+    const maxConcurrent = parseInt(process.env.MAX_CONCURRENT_TASKS || "1", 10);
     console.log(`[${role}] Mode: runner-level polling (use --ai-loop for AI-based polling)`);
+    console.log(`[${role}] Max concurrent tasks: ${maxConcurrent}`);
+
+    // Initialize runner state for parallel execution
+    const state: RunnerState = {
+      activeTasks: new Map(),
+      maxConcurrent,
+    };
 
     // Create API config for ping/close
     const apiConfig: ApiConfig = { apiUrl, apiKey, agentId };
 
-    // Setup graceful shutdown handlers with API config for close on exit
-    setupShutdownHandlers(role, apiConfig);
+    // Setup graceful shutdown handlers with API config and runner state access
+    setupShutdownHandlers(role, apiConfig, () => state);
 
     // Register agent before starting
     const agentName = process.env.AGENT_NAME || `${role}-${agentId.slice(0, 8)}`;
@@ -560,6 +809,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         name: agentName,
         isLead: role === "lead",
         capabilities: config.capabilities,
+        maxTasks: maxConcurrent,
       });
       console.log(`[${role}] Registered as "${agentName}" (ID: ${agentId})`);
     } catch (error) {
@@ -574,90 +824,90 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       // Ping server on each iteration to keep status updated
       await pingServer(apiConfig, role);
 
-      console.log(`\n[${role}] Polling for triggers...`);
+      // Check for completed processes first
+      await checkCompletedProcesses(state, role);
 
-      const trigger = await pollForTrigger({
-        apiUrl,
-        apiKey,
-        agentId,
-        pollInterval: PollIntervalMs,
-        pollTimeout: PollTimeoutMs,
-        since: lastFinishedTaskCheck,
-      });
+      // Only poll if we have capacity
+      if (state.activeTasks.size < state.maxConcurrent) {
+        console.log(
+          `[${role}] Polling for triggers (${state.activeTasks.size}/${state.maxConcurrent} active)...`,
+        );
 
-      if (!trigger) {
-        console.log(`[${role}] No trigger found, polling again...`);
-        continue;
-      }
+        // Use shorter timeout if tasks are running (to check completion more often)
+        const effectiveTimeout = state.activeTasks.size > 0 ? 5000 : PollTimeoutMs;
 
-      // After getting a tasks_finished trigger, update the timestamp
-      if (trigger.type === "tasks_finished") {
-        lastFinishedTaskCheck = new Date().toISOString();
-      }
+        const trigger = await pollForTrigger({
+          apiUrl,
+          apiKey,
+          agentId,
+          pollInterval: PollIntervalMs,
+          pollTimeout: effectiveTimeout,
+          since: lastFinishedTaskCheck,
+        });
 
-      console.log(`[${role}] Trigger received: ${trigger.type}`);
+        if (trigger) {
+          // After getting a tasks_finished trigger, update the timestamp
+          if (trigger.type === "tasks_finished") {
+            lastFinishedTaskCheck = new Date().toISOString();
+          }
 
-      // Build prompt based on trigger
-      const triggerPrompt = buildPromptForTrigger(trigger, prompt);
+          console.log(`[${role}] Trigger received: ${trigger.type}`);
 
-      iteration++;
-      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const logFile = `${logDir}/${timestamp}.jsonl`;
+          // Build prompt based on trigger
+          const triggerPrompt = buildPromptForTrigger(trigger, prompt);
 
-      console.log(`\n[${role}] === Iteration ${iteration} ===`);
-      console.log(`[${role}] Logging to: ${logFile}`);
-      console.log(`[${role}] Prompt: ${triggerPrompt}`);
+          iteration++;
+          const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+          const taskIdSlice = trigger.taskId?.slice(0, 8) || "notask";
+          const logFile = `${logDir}/${timestamp}-${taskIdSlice}.jsonl`;
 
-      const metadata = {
-        type: metadataType,
-        sessionId,
-        iteration,
-        timestamp: new Date().toISOString(),
-        prompt: triggerPrompt,
-        trigger: trigger.type,
-        yolo: isYolo,
-      };
-      await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
+          console.log(`\n[${role}] === Iteration ${iteration} ===`);
+          console.log(`[${role}] Logging to: ${logFile}`);
+          console.log(`[${role}] Prompt: ${triggerPrompt.slice(0, 100)}...`);
 
-      const exitCode = await runClaudeIteration({
-        prompt: triggerPrompt,
-        logFile,
-        systemPrompt: resolvedSystemPrompt,
-        additionalArgs: opts.additionalArgs,
-        role,
-        // Add streaming options
-        apiUrl,
-        apiKey,
-        agentId,
-        sessionId,
-        iteration,
-        taskId: trigger.taskId,
-      });
+          const metadata = {
+            type: metadataType,
+            sessionId,
+            iteration,
+            timestamp: new Date().toISOString(),
+            prompt: triggerPrompt,
+            trigger: trigger.type,
+            yolo: isYolo,
+          };
+          await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
 
-      if (exitCode !== 0) {
-        const errorLog = {
-          timestamp: new Date().toISOString(),
-          iteration,
-          exitCode,
-          trigger: trigger.type,
-          error: true,
-        };
+          // Spawn without blocking
+          const runningTask = spawnClaudeProcess(
+            {
+              prompt: triggerPrompt,
+              logFile,
+              systemPrompt: resolvedSystemPrompt,
+              additionalArgs: opts.additionalArgs,
+              role,
+              apiUrl,
+              apiKey,
+              agentId,
+              sessionId,
+              iteration,
+              taskId: trigger.taskId,
+            },
+            logDir,
+            metadataType,
+            sessionId,
+            isYolo,
+          );
 
-        const errorsFile = `${logDir}/errors.jsonl`;
-        const errorsFileRef = Bun.file(errorsFile);
-        const existingErrors = (await errorsFileRef.exists()) ? await errorsFileRef.text() : "";
-        await Bun.write(errorsFile, `${existingErrors}${JSON.stringify(errorLog)}\n`);
-
-        if (!isYolo) {
-          console.error(`[${role}] Claude exited with code ${exitCode}. Stopping.`);
-          console.error(`[${role}] Error logged to: ${errorsFile}`);
-          process.exit(exitCode);
+          state.activeTasks.set(runningTask.taskId, runningTask);
+          console.log(
+            `[${role}] Started task ${runningTask.taskId.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active)`,
+          );
         }
-
-        console.warn(`[${role}] Claude exited with code ${exitCode}. YOLO mode - continuing...`);
+      } else {
+        console.log(
+          `[${role}] At capacity (${state.activeTasks.size}/${state.maxConcurrent}), waiting for completion...`,
+        );
+        await Bun.sleep(1000);
       }
-
-      console.log(`[${role}] Iteration ${iteration} complete. Polling for next trigger...`);
     }
   } else {
     // Original AI-loop mode (existing behavior)

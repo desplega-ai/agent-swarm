@@ -6,7 +6,7 @@ import {
   getAgentById,
   getDb,
   getTaskById,
-  updateAgentStatus,
+  updateAgentStatusFromCapacity,
   updateTaskProgress,
 } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
@@ -88,7 +88,8 @@ export const registerStoreProgressTool = (server: McpServer) => {
           if (result) {
             updatedTask = result;
             if (existingTask.agentId) {
-              updateAgentStatus(existingTask.agentId, "idle");
+              // Derive status from capacity instead of always setting idle
+              updateAgentStatusFromCapacity(existingTask.agentId);
             }
           }
         } else if (status === "failed") {
@@ -96,13 +97,14 @@ export const registerStoreProgressTool = (server: McpServer) => {
           if (result) {
             updatedTask = result;
             if (existingTask.agentId) {
-              updateAgentStatus(existingTask.agentId, "idle");
+              // Derive status from capacity instead of always setting idle
+              updateAgentStatusFromCapacity(existingTask.agentId);
             }
           }
         } else {
-          // Keep it busy if just updating progress
+          // Progress update - ensure status reflects current load
           if (existingTask.agentId) {
-            updateAgentStatus(existingTask.agentId, "busy");
+            updateAgentStatusFromCapacity(existingTask.agentId);
           }
         }
 

@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { createTaskExtended, getAgentById, getDb } from "@/be/db";
+import { createTaskExtended, getActiveTaskCount, getAgentById, getDb, hasCapacity } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import { AgentTaskSchema } from "@/types";
 
@@ -116,11 +116,12 @@ export const registerSendTaskTool = (server: McpServer) => {
           };
         }
 
-        // For direct assignment (not offer), check if agent is idle
-        if (!offerMode && agent.status !== "idle") {
+        // For direct assignment (not offer), check if agent has capacity
+        if (!offerMode && !hasCapacity(agentId)) {
+          const activeCount = getActiveTaskCount(agentId);
           return {
             success: false,
-            message: `Agent "${agent.name}" is not idle (status: ${agent.status}). Cannot assign task directly. Use offerMode: true to offer the task instead.`,
+            message: `Agent "${agent.name}" is at capacity (${activeCount}/${agent.maxTasks ?? 1} tasks). Use offerMode: true to offer the task instead, or wait for a task to complete.`,
           };
         }
 
