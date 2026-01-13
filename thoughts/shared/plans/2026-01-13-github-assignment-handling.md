@@ -626,10 +626,17 @@ The `requested_reviewer` field is sent by GitHub when `action` is `"review_reque
 ## Testing Strategy
 
 ### Unit Tests:
-- `src/github/mentions.test.ts`: Test `isBotAssignee()` with various inputs
+- `src/github/mentions.test.ts`: Test `isBotAssignee()` with various inputs (5 tests added)
+  - Tests cover: exact match, case-insensitivity, different username, undefined, partial matches
 
 ### Integration Tests:
-- No new integration tests required (assignment handling follows existing patterns)
+- No new integration tests required for any phase
+  - Assignment handling (Phase 3-4) follows existing patterns
+  - Review request handling (Phase 6) follows identical patterns
+  - Core helper function `isBotAssignee()` is fully unit tested
+  - Database functions used by handlers are tested elsewhere
+  - Handler logic is straightforward conditional branching with no complex logic
+  - Manual testing will verify end-to-end webhook integration
 
 ### Manual Testing Steps:
 1. **Verify GitHub App Configuration** (Phase 0)
