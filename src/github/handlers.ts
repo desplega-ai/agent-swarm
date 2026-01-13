@@ -7,6 +7,10 @@ import type { CommentEvent, IssueEvent, PullRequestEvent } from "./types";
 const processedEvents = new Map<string, number>();
 const EVENT_TTL = 60_000;
 
+// Delegation instruction for lead agents receiving GitHub tasks
+const DELEGATION_INSTRUCTION =
+  "⚠️ As lead, DELEGATE this task to a worker agent - do not tackle it yourself.";
+
 /**
  * Get suggested commands based on task type
  */
@@ -87,7 +91,7 @@ export async function handlePullRequest(
   // Build task description
   const context = extractMentionContext(pr.body) || pr.title;
   const suggestions = getCommandSuggestions("github-pr");
-  const taskDescription = `[GitHub PR #${pr.number}] ${pr.title}\n\nFrom: ${sender.login}\nRepo: ${repository.full_name}\nBranch: ${pr.head.ref} → ${pr.base.ref}\nURL: ${pr.html_url}\n\nContext:\n${context}\n\n---\n${suggestions}`;
+  const taskDescription = `[GitHub PR #${pr.number}] ${pr.title}\n\nFrom: ${sender.login}\nRepo: ${repository.full_name}\nBranch: ${pr.head.ref} → ${pr.base.ref}\nURL: ${pr.html_url}\n\nContext:\n${context}\n\n---\n${DELEGATION_INSTRUCTION}\n${suggestions}`;
 
   // Create task (assigned to lead if available, otherwise unassigned)
   const task = createTaskExtended(taskDescription, {
@@ -148,7 +152,7 @@ export async function handleIssue(
   // Build task description
   const context = extractMentionContext(issue.body) || issue.title;
   const suggestions = getCommandSuggestions("github-issue");
-  const taskDescription = `[GitHub Issue #${issue.number}] ${issue.title}\n\nFrom: ${sender.login}\nRepo: ${repository.full_name}\nURL: ${issue.html_url}\n\nContext:\n${context}\n\n---\n${suggestions}`;
+  const taskDescription = `[GitHub Issue #${issue.number}] ${issue.title}\n\nFrom: ${sender.login}\nRepo: ${repository.full_name}\nURL: ${issue.html_url}\n\nContext:\n${context}\n\n---\n${DELEGATION_INSTRUCTION}\n${suggestions}`;
 
   // Create task (assigned to lead if available, otherwise unassigned)
   const task = createTaskExtended(taskDescription, {
@@ -216,7 +220,7 @@ export async function handleComment(
   // Build task description
   const context = extractMentionContext(comment.body);
   const suggestions = getCommandSuggestions("github-comment", targetType);
-  const taskDescription = `[GitHub ${targetType} #${targetNumber} Comment] ${targetTitle}\n\nFrom: ${sender.login}\nRepo: ${repository.full_name}\nURL: ${comment.html_url}\n\nComment:\n${context}\n\n---\n${suggestions}`;
+  const taskDescription = `[GitHub ${targetType} #${targetNumber} Comment] ${targetTitle}\n\nFrom: ${sender.login}\nRepo: ${repository.full_name}\nURL: ${comment.html_url}\n\nComment:\n${context}\n\n---\n${DELEGATION_INSTRUCTION}\n${suggestions}`;
 
   // Create task (assigned to lead if available, otherwise unassigned)
   const task = createTaskExtended(taskDescription, {
