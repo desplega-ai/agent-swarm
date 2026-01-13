@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
 import pkg from "../../package.json";
-import type { Agent, AgentTask } from "../types";
 import { writeCheckpoint } from "../ralph/state";
+import type { Agent, AgentTask } from "../types";
 
 const SERVER_NAME = pkg.config?.name ?? "agent-swarm";
 

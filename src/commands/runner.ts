@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { getBasePrompt, getRalphPrompt } from "../prompts/base-prompt.ts";
-import { readCheckpoint, clearCheckpoint } from "../ralph/state.ts";
+import { clearCheckpoint, readCheckpoint } from "../ralph/state.ts";
 import type { AgentTask } from "../types.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 
