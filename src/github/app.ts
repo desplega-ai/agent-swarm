@@ -43,8 +43,13 @@ export function initGitHub(): boolean {
   const rawPrivateKey = process.env.GITHUB_APP_PRIVATE_KEY ?? null;
 
   if (appId && rawPrivateKey) {
-    // Convert \n escape sequences to actual newlines
-    privateKey = rawPrivateKey.replace(/\\n/g, "\n");
+    if (rawPrivateKey.startsWith("-----BEGIN")) {
+      // Raw PEM format - convert \n escape sequences to actual newlines
+      privateKey = rawPrivateKey.replace(/\\n/g, "\n");
+    } else {
+      // Base64 encoded - decode it
+      privateKey = Buffer.from(rawPrivateKey, "base64").toString("utf-8");
+    }
     console.log("[GitHub] App credentials loaded for bot reactions");
   } else {
     console.log("[GitHub] No App credentials, bot reactions disabled");
