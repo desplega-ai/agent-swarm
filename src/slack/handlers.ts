@@ -15,6 +15,8 @@ interface MessageEvent {
 
 interface ThreadMessage {
   user?: string;
+  bot_id?: string;
+  subtype?: string;
   text?: string;
   ts: string;
 }
@@ -66,7 +68,11 @@ async function getThreadContext(
     // Format messages with user names or [Agent] for bot messages
     const formattedMessages: string[] = [];
     for (const m of previousMessages) {
-      if (m.user === botUserId) {
+      // Check if this is a bot/agent message (multiple ways to identify)
+      const isBotMessage =
+        m.user === botUserId || m.bot_id !== undefined || m.subtype === "bot_message";
+
+      if (isBotMessage) {
         // Bot/agent message - truncate if too long
         const truncatedText = m.text && m.text.length > 500 ? `${m.text.slice(0, 500)}...` : m.text;
         formattedMessages.push(`[Agent]: ${truncatedText}`);
