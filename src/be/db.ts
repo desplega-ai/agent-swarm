@@ -436,7 +436,9 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     const needsMigration = schemaInfo?.sql && !schemaInfo.sql.includes("'processing'");
 
     if (needsMigration) {
-      console.log("[Migration] Updating inbox_messages CHECK constraint to include 'processing' status");
+      console.log(
+        "[Migration] Updating inbox_messages CHECK constraint to include 'processing' status",
+      );
       db.run("PRAGMA foreign_keys=off");
 
       db.run(`

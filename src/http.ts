@@ -353,7 +353,9 @@ const httpServer = createHttpServer(async (req, res) => {
     }
 
     // Use transaction for consistent reads across all trigger checks
-    let result;
+    let result:
+      | { error: string; status: number }
+      | { trigger: { type: string; [key: string]: unknown } | null };
     try {
       result = getDb().transaction(() => {
         const agent = getAgentById(myAgentId);
