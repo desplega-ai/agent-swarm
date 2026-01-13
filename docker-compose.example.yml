@@ -30,11 +30,22 @@ services:
     volumes:
       - swarm_api:/app
 
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3013/health || wget -q --spider http://localhost:3013/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
     restart: unless-stopped
 
   lead:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
     pull_policy: always
+
+    depends_on:
+      api:
+        condition: service_healthy
 
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
@@ -69,6 +80,10 @@ services:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
     pull_policy: always
 
+    depends_on:
+      api:
+        condition: service_healthy
+
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
@@ -99,6 +114,10 @@ services:
   worker-2:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
     pull_policy: always
+
+    depends_on:
+      api:
+        condition: service_healthy
 
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}

@@ -426,16 +426,17 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   // Migration: Update inbox_messages CHECK constraint to include 'processing' status
   // SQLite doesn't support ALTER TABLE MODIFY COLUMN, so we need to recreate the table
   try {
-    // Check if the table has the old constraint by attempting to insert a 'processing' status
-    const _testRow = db
-      .prepare<{ count: number }, []>(
-        "SELECT COUNT(*) as count FROM inbox_messages WHERE status = 'processing'",
+    // Check if the table schema already includes 'processing' in the CHECK constraint
+    const schemaInfo = db
+      .prepare<{ sql: string | null }, []>(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'inbox_messages'",
       )
       .get();
-    // If query succeeds, table already has the new constraint
-  } catch {
-    // Table needs migration - recreate with new constraint
-    try {
+
+    const needsMigration = schemaInfo?.sql && !schemaInfo.sql.includes("'processing'");
+
+    if (needsMigration) {
+      console.log("[Migration] Updating inbox_messages CHECK constraint to include 'processing' status");
       db.run("PRAGMA foreign_keys=off");
 
       db.run(`
@@ -467,10 +468,14 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       db.run("CREATE INDEX IF NOT EXISTS idx_inbox_messages_status ON inbox_messages(status)");
 
       db.run("PRAGMA foreign_keys=on");
-    } catch (e) {
-      db.run("PRAGMA foreign_keys=on");
-      throw e;
+      console.log("[Migration] Successfully updated inbox_messages table");
     }
+  } catch (e) {
+    console.error("[Migration] Failed to update inbox_messages CHECK constraint:", e);
+    try {
+      db.run("PRAGMA foreign_keys=on");
+    } catch {}
+    throw e;
   }
 
   // Create indexes on new columns (after migrations add them)
