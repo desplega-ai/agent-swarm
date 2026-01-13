@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { updateAgentName, updateAgentProfile } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
-import { AgentSchema } from "@/types";
+import { type Agent, AgentSchema } from "@/types";
 
 export const registerUpdateProfileTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -42,7 +42,12 @@ export const registerUpdateProfileTool = (server: McpServer) => {
       }
 
       // At least one field must be provided
-      if (name === undefined && description === undefined && role === undefined && capabilities === undefined) {
+      if (
+        name === undefined &&
+        description === undefined &&
+        role === undefined &&
+        capabilities === undefined
+      ) {
         return {
           content: [
             {
@@ -53,13 +58,14 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: false,
-            message: "At least one field (name, description, role, or capabilities) must be provided.",
+            message:
+              "At least one field (name, description, role, or capabilities) must be provided.",
           },
         };
       }
 
       try {
-        let agent;
+        let agent: Agent | null = null;
 
         // Update name if provided
         if (name !== undefined) {
