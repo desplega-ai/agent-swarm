@@ -30,19 +30,17 @@ RUN apt-get update && apt-get install -y \
     # Python
     python3 python3-pip python3-venv \
     # Common utilities
-    jq tree htop unzip zip tar gzip sqlite3 \
+    jq tree htop unzip zip tar gzip xz-utils sqlite3 \
     # Network tools
     openssh-client \
     # sudo for package installation
     sudo \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 22.x (LTS) with npm using official NodeSource method
-# Note: On Ubuntu 24.04, the setup script may fail silently, so we install npm explicitly
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y nodejs npm \
-    && rm -rf /var/lib/apt/lists/* \
-    # Install PM2 globally for process management
+# Install Node.js 22.x (LTS) directly from official NodeJS binaries
+# This is more reliable than NodeSource apt repo on Ubuntu 24.04
+RUN NODE_VERSION=22.13.1 \
+    && curl -fsSL https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz | tar -xJ -C /usr/local --strip-components=1 \
     && npm install -g pm2
 
 # Install GitHub CLI
