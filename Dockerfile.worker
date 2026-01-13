@@ -37,13 +37,13 @@ RUN apt-get update && apt-get install -y \
     sudo \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 22.x (LTS)
+# Install Node.js 22.x (LTS) with npm using official NodeSource method
+# Note: On Ubuntu 24.04, the setup script may fail silently, so we install npm explicitly
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install PM2 globally for process management
-RUN npm install -g pm2
+    && apt-get install -y nodejs npm \
+    && rm -rf /var/lib/apt/lists/* \
+    # Install PM2 globally for process management
+    && npm install -g pm2
 
 # Install GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
