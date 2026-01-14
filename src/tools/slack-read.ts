@@ -20,10 +20,7 @@ export const registerSlackReadTool = (server: McpServer) => {
       description:
         "Read messages from a Slack thread or channel. Use inboxMessageId or taskId to read from a thread you have context for, or provide channelId directly for channel history (leads only).",
       inputSchema: z.object({
-        inboxMessageId: z
-          .uuid()
-          .optional()
-          .describe("Read thread history for an inbox message."),
+        inboxMessageId: z.uuid().optional().describe("Read thread history for an inbox message."),
         taskId: z.uuid().optional().describe("Read thread history for a task."),
         channelId: z
           .string()
@@ -74,13 +71,21 @@ export const registerSlackReadTool = (server: McpServer) => {
         if (!inboxMsg) {
           return {
             content: [{ type: "text", text: "Inbox message not found." }],
-            structuredContent: { success: false, message: "Inbox message not found.", messages: [] },
+            structuredContent: {
+              success: false,
+              message: "Inbox message not found.",
+              messages: [],
+            },
           };
         }
         if (inboxMsg.agentId !== requestInfo.agentId) {
           return {
             content: [{ type: "text", text: "This inbox message is not yours." }],
-            structuredContent: { success: false, message: "This inbox message is not yours.", messages: [] },
+            structuredContent: {
+              success: false,
+              message: "This inbox message is not yours.",
+              messages: [],
+            },
           };
         }
         slackChannelId = inboxMsg.slackChannelId;
@@ -97,7 +102,11 @@ export const registerSlackReadTool = (server: McpServer) => {
         if (task.agentId !== requestInfo.agentId && task.creatorAgentId !== requestInfo.agentId) {
           return {
             content: [{ type: "text", text: "You don't have context for this task." }],
-            structuredContent: { success: false, message: "You don't have context for this task.", messages: [] },
+            structuredContent: {
+              success: false,
+              message: "You don't have context for this task.",
+              messages: [],
+            },
           };
         }
         slackChannelId = task.slackChannelId;
@@ -130,7 +139,11 @@ export const registerSlackReadTool = (server: McpServer) => {
       if (!slackChannelId) {
         return {
           content: [{ type: "text", text: "No Slack channel context available." }],
-          structuredContent: { success: false, message: "No Slack channel context available.", messages: [] },
+          structuredContent: {
+            success: false,
+            message: "No Slack channel context available.",
+            messages: [],
+          },
         };
       }
 
@@ -206,7 +219,8 @@ export const registerSlackReadTool = (server: McpServer) => {
         for (const m of rawMessages) {
           if (!m.text) continue;
 
-          const isBot = m.user === botUserId || m.bot_id !== undefined || m.subtype === "bot_message";
+          const isBot =
+            m.user === botUserId || m.bot_id !== undefined || m.subtype === "bot_message";
           let username: string | undefined;
 
           if (isBot) {
@@ -225,7 +239,9 @@ export const registerSlackReadTool = (server: McpServer) => {
         }
 
         // Format for text output
-        const textOutput = messages.map((m) => `[${m.username || m.user || "Unknown"}]: ${m.text}`).join("\n\n");
+        const textOutput = messages
+          .map((m) => `[${m.username || m.user || "Unknown"}]: ${m.text}`)
+          .join("\n\n");
 
         return {
           content: [
@@ -246,7 +262,11 @@ export const registerSlackReadTool = (server: McpServer) => {
         const errorMsg = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: "text", text: `Failed to read Slack messages: ${errorMsg}` }],
-          structuredContent: { success: false, message: `Failed to read Slack messages: ${errorMsg}`, messages: [] },
+          structuredContent: {
+            success: false,
+            message: `Failed to read Slack messages: ${errorMsg}`,
+            messages: [],
+          },
         };
       }
     },

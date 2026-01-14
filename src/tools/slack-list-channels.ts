@@ -115,7 +115,8 @@ export const registerSlackListChannelsTool = (server: McpServer) => {
             // Try to get user name for DMs
             try {
               const userInfo = await client.users.info({ user: channel.user });
-              name = userInfo.user?.profile?.display_name || userInfo.user?.real_name || channel.user;
+              name =
+                userInfo.user?.profile?.display_name || userInfo.user?.real_name || channel.user;
             } catch {
               name = channel.user;
             }
@@ -155,7 +156,11 @@ export const registerSlackListChannelsTool = (server: McpServer) => {
         const errorMsg = error instanceof Error ? error.message : String(error);
         return {
           content: [{ type: "text", text: `Failed to list Slack channels: ${errorMsg}` }],
-          structuredContent: { success: false, message: `Failed to list Slack channels: ${errorMsg}`, channels: [] },
+          structuredContent: {
+            success: false,
+            message: `Failed to list Slack channels: ${errorMsg}`,
+            channels: [],
+          },
         };
       }
     },
