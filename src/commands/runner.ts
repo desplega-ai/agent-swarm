@@ -234,6 +234,9 @@ interface Trigger {
     agentId?: string;
     task: string;
     status: string;
+    output?: string;
+    failureReason?: string;
+    slackChannelId?: string;
   }>;
   messages?: Array<{
     id: string;
@@ -332,38 +335,94 @@ async function pollForTrigger(opts: PollOptions): Promise<Trigger | null> {
 /** Build prompt based on trigger type */
 function buildPromptForTrigger(trigger: Trigger, defaultPrompt: string): string {
   switch (trigger.type) {
-    case "task_assigned":
-      // Use the work-on-task command with task ID
-      return `/work-on-task Start working on task with ID ${trigger.taskId}`;
+    case "task_assigned": {
+      // Use the work-on-task command with task ID and description
+      const taskDesc =
+        trigger.task && typeof trigger.task === "object" && "task" in trigger.task
+          ? (trigger.task as { task: string }).task
+          : null;
+      let prompt = `/work-on-task ${trigger.taskId}`;
+      if (taskDesc) {
+        prompt += `\n\nTask: "${taskDesc}"`;
+      }
+      prompt += `\n\nWhen done, use \`store-progress\` with status: "completed" and include your output.`;
+      return prompt;
+    }
 
-    case "task_offered":
-      // Use the review-offered-task command to accept/reject
-      return `/review-offered-task Review task with ID ${trigger.taskId} and either accept or reject it.`;
+    case "task_offered": {
+      // Use the review-offered-task command with context
+      const taskDesc =
+        trigger.task && typeof trigger.task === "object" && "task" in trigger.task
+          ? (trigger.task as { task: string }).task
+          : null;
+      let prompt = `/review-offered-task ${trigger.taskId}`;
+      if (taskDesc) {
+        prompt += `\n\nA task has been offered to you:\n"${taskDesc}"`;
+      }
+      prompt += `\n\nAccept if you have capacity and skills. Reject with a reason if you cannot handle it.`;
+      return prompt;
+    }
 
     case "unread_mentions":
-      // Check messages
-      return "You have unread messages in the chat. Use /swarm-chat to review them, respond to them if applicable and start working on any new tasks if needed based on the messages (you might need to create new tasks).";
+      // Check messages - numbered steps for clarity
+      return `You have ${trigger.count || "unread"} mention(s) in chat channels.
+
+1. Use \`read-messages\` with unreadOnly: true to see them
+2. Respond to questions or requests directed at you
+3. If a message requires work, create a task using \`send-task\``;
 
     case "pool_tasks_available":
-      // Worker: claim a task from the pool
-      // Include the count so worker knows there are tasks available
-      return `There are ${trigger.count} unassigned task(s) available in the pool. Use get-tasks with unassigned: true to see them, then use task-action with action: "claim" to claim one. The claim is first-come-first-serve, so if your claim fails, try another task.`;
+      // Worker: claim a task from the pool - numbered steps for clarity
+      return `${trigger.count} task(s) available in the pool.
 
-    case "tasks_finished":
-      // Lead: simple notification about finished tasks
+1. Run \`get-tasks\` with unassigned: true to browse
+2. Pick one matching your skills
+3. Run \`task-action\` with action: "claim" and taskId: "<id>"
+
+Note: Claims are first-come-first-serve. If claim fails, pick another.`;
+
+    case "tasks_finished": {
+      // Lead: notification about finished tasks with inline details
       if (trigger.tasks && Array.isArray(trigger.tasks) && trigger.tasks.length > 0) {
-        const taskSummaries = trigger.tasks
-          .map((t) => {
-            const status = t.status === "completed" ? "completed" : "failed";
-            const agentName = t.agentId ? `Agent ${t.agentId.slice(0, 8)}` : "Unknown agent";
-            return `- ${agentName} ${status} task "${t.task?.slice(0, 50)}..." (ID: ${t.id})`;
-          })
-          .join("\n");
+        const completed = trigger.tasks.filter((t) => t.status === "completed");
+        const failed = trigger.tasks.filter((t) => t.status === "failed");
 
-        return `Workers have finished ${trigger.count} task(s):\n${taskSummaries}\n\nReview these results and decide if any follow-up actions are needed.`;
+        let prompt = `${trigger.count} task(s) finished:\n`;
+
+        if (completed.length > 0) {
+          prompt += "\n### Completed:\n";
+          for (const t of completed) {
+            const agentName = t.agentId ? `Agent ${t.agentId.slice(0, 8)}` : "Unknown";
+            const output = t.output ? t.output.slice(0, 200) : "(no output)";
+            const hasSlack = t.slackChannelId ? " [Slack - user expects reply]" : "";
+            prompt += `- **Task ${t.id.slice(0, 8)}** by ${agentName}${hasSlack}\n`;
+            prompt += `  Description: "${t.task?.slice(0, 100)}"\n`;
+            prompt += `  Output: ${output}${t.output && t.output.length > 200 ? "..." : ""}\n`;
+          }
+        }
+
+        if (failed.length > 0) {
+          prompt += "\n### Failed:\n";
+          for (const t of failed) {
+            const agentName = t.agentId ? `Agent ${t.agentId.slice(0, 8)}` : "Unknown";
+            const reason = t.failureReason || "(no reason given)";
+            const hasSlack = t.slackChannelId ? " [Slack - user expects reply]" : "";
+            prompt += `- **Task ${t.id.slice(0, 8)}** by ${agentName}${hasSlack}\n`;
+            prompt += `  Description: "${t.task?.slice(0, 100)}"\n`;
+            prompt += `  Reason: ${reason}\n`;
+          }
+        }
+
+        prompt += `\nFor each task:
+1. Completed: Verify output meets requirements
+2. Failed: Reassign to another worker, or handle the issue
+3. If Slack context: Use \`slack-reply\` with taskId to update the user`;
+
+        return prompt;
       }
 
-      return `Workers have finished ${trigger.count} task(s). Use get-tasks with status "completed" or "failed" to review them.`;
+      return `Workers have finished ${trigger.count} task(s). Use \`get-tasks\` with status: "completed" or "failed" to review them.`;
+    }
 
     case "slack_inbox_message": {
       // Lead: Slack inbox messages from users
@@ -389,11 +448,11 @@ function buildPromptForTrigger(trigger: Trigger, defaultPrompt: string): string 
         })
         .join("\n---\n\n");
 
-      return `You have ${trigger.count} inbox message(s) from Slack:\n\n${inboxDetails}\n\nFor each message, you can either:
-- Use \`slack-reply\` with the inboxMessageId to respond directly to the user
-- Use \`inbox-delegate\` to assign the request to a worker agent
+      return `${trigger.count} Slack inbox message(s):\n\n${inboxDetails}\n\nFor each message, choose one:
+- **Reply directly**: Use \`slack-reply\` with inboxMessageId if you can answer immediately
+- **Delegate to worker**: Use \`inbox-delegate\` with inboxMessageId and agentId if it requires work
 
-Review each message and decide the appropriate action.`;
+Do not leave messages unanswered.`;
     }
 
     default:
