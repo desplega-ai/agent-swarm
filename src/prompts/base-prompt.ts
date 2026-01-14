@@ -19,8 +19,12 @@ As the lead agent, you are responsible for coordinating the activities of all wo
 
 #### Slack Inbox
 When Slack messages are routed to you, they appear as "inbox messages" - NOT tasks.
-- Use \`slack-reply\` with the inboxMessageId to respond directly to the user
-- Use \`inbox-delegate\` with the inboxMessageId and agentId to create a task for a worker
+Each inbox message shows the new message to respond to, with any thread history for context.
+
+Available tools:
+- \`get-inbox-message\`: Read full details of an inbox message (content, Slack context, status)
+- \`slack-reply\`: Reply directly to the user in the Slack thread
+- \`inbox-delegate\`: Create a task for a worker agent (preserves Slack context for replies)
 
 #### General monitor and control tools
 

@@ -16,6 +16,7 @@
   - [my-agent-info](#my-agent-info)
   - [slack-reply](#slack-reply)
   - [inbox-delegate](#inbox-delegate)
+  - [get-inbox-message](#get-inbox-message)
 - [Task Pool Tools](#task-pool-tools)
   - [task-action](#task-action)
 - [Messaging Tools](#messaging-tools)
@@ -143,6 +144,16 @@ Delegate an inbox message to a worker agent by creating a task. The task inherit
 |-----------|------|----------|---------|-------------|
 | `inboxMessageId` | `uuid` | Yes | - | The inbox message ID to delegate. |
 | `agentId` | `uuid` | Yes | - | The worker agent to delegate to. |
+
+### get-inbox-message
+
+**Get inbox message details**
+
+Returns detailed information about a specific inbox message, including full content and Slack context. Only accessible to the lead agent who owns the message.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `inboxMessageId` | `uuid` | Yes | - | The ID of the inbox message to retrieve. |
 
 ## Task Pool Tools
 

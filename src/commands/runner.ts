@@ -367,14 +367,29 @@ function buildPromptForTrigger(trigger: Trigger, defaultPrompt: string): string 
 
     case "slack_inbox_message": {
       // Lead: Slack inbox messages from users
-      const inboxSummaries = (trigger.messages || [])
-        .map((m: { id: string; content: string }) => {
-          const preview = m.content.length > 100 ? `${m.content.slice(0, 100)}...` : m.content;
-          return `- "${preview}" (inboxMessageId: ${m.id})`;
-        })
-        .join("\n");
+      const inboxDetails = (trigger.messages || [])
+        .map((m: { id: string; content: string }, index: number) => {
+          // Parse structured content if present
+          const newMessageMatch = m.content.match(/<new_message>\n([\s\S]*?)\n<\/new_message>/);
+          const threadHistoryMatch = m.content.match(
+            /<thread_history>\n([\s\S]*?)\n<\/thread_history>/,
+          );
 
-      return `You have ${trigger.count} inbox message(s) from Slack:\n${inboxSummaries}\n\nFor each message, you can either:
+          const newMessage = newMessageMatch ? newMessageMatch[1] : m.content;
+          const threadHistory = threadHistoryMatch ? threadHistoryMatch[1] : null;
+
+          let formatted = `### Message ${index + 1} (inboxMessageId: ${m.id})\n`;
+          formatted += `**New Message:**\n${newMessage}\n`;
+
+          if (threadHistory) {
+            formatted += `\n**Thread History:**\n${threadHistory}\n`;
+          }
+
+          return formatted;
+        })
+        .join("\n---\n\n");
+
+      return `You have ${trigger.count} inbox message(s) from Slack:\n\n${inboxDetails}\n\nFor each message, you can either:
 - Use \`slack-reply\` with the inboxMessageId to respond directly to the user
 - Use \`inbox-delegate\` to assign the request to a worker agent
 

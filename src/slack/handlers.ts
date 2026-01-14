@@ -82,7 +82,7 @@ async function getThreadContext(
       }
     }
 
-    return `<thread_context>\n${formattedMessages.join("\n")}\n</thread_context>\n\n`;
+    return formattedMessages.join("\n");
   } catch (error) {
     console.error("[Slack] Failed to fetch thread context:", error);
     return "";
@@ -218,7 +218,14 @@ export function registerMessageHandler(app: App): void {
       msg.ts,
       botUserId,
     );
-    const fullTaskDescription = threadContext + taskDescription;
+    // Structure content with clear separation for inbox messages
+    const structuredContent = threadContext
+      ? `<new_message>\n${taskDescription}\n</new_message>\n\n<thread_history>\n${threadContext}\n</thread_history>`
+      : taskDescription;
+    // For workers (tasks), keep using the old format for backwards compatibility
+    const fullTaskDescription = threadContext
+      ? `<thread_context>\n${threadContext}\n</thread_context>\n\n${taskDescription}`
+      : taskDescription;
     const results: { assigned: string[]; queued: string[]; failed: string[] } = {
       assigned: [],
       queued: [],
@@ -236,7 +243,7 @@ export function registerMessageHandler(app: App): void {
       try {
         // Lead agents receive inbox messages, not tasks
         if (agent.isLead) {
-          createInboxMessage(agent.id, fullTaskDescription, {
+          createInboxMessage(agent.id, structuredContent, {
             source: "slack",
             slackChannelId: msg.channel,
             slackThreadTs: threadTs,

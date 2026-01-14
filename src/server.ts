@@ -2,10 +2,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import pkg from "../package.json";
 import { initDb } from "./be/db";
 import { registerCreateChannelTool } from "./tools/create-channel";
+// Lead inbox tools
+import { registerGetInboxMessageTool } from "./tools/get-inbox-message";
 import { registerGetSwarmTool } from "./tools/get-swarm";
 import { registerGetTaskDetailsTool } from "./tools/get-task-details";
 import { registerGetTasksTool } from "./tools/get-tasks";
-// Lead inbox tools
 import { registerInboxDelegateTool } from "./tools/inbox-delegate";
 import { registerJoinSwarmTool } from "./tools/join-swarm";
 // Messaging capability
@@ -73,6 +74,7 @@ export function createServer() {
   // Slack integration tools (always registered, will no-op if Slack not configured)
   registerSlackReplyTool(server);
   registerInboxDelegateTool(server);
+  registerGetInboxMessageTool(server);
 
   // Task pool capability - task pool operations (create unassigned, claim, release, accept, reject)
   if (hasCapability("task-pool")) {
