@@ -15,6 +15,8 @@
   - [store-progress](#store-progress)
   - [my-agent-info](#my-agent-info)
   - [slack-reply](#slack-reply)
+  - [slack-read](#slack-read)
+  - [slack-list-channels](#slack-list-channels)
   - [inbox-delegate](#inbox-delegate)
   - [get-inbox-message](#get-inbox-message)
 - [Task Pool Tools](#task-pool-tools)
@@ -133,6 +135,24 @@ Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `message` | `string` | Yes | - | The message to send to the Slack thread. |
+
+### slack-read
+
+**Read Slack thread/channel history**
+
+Read messages from a Slack thread or channel. Use inboxMessageId or taskId to read from a thread you have context for, or provide channelId directly for channel history (leads only).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `taskId` | `uuid` | No | - | Read thread history for a task. |
+
+### slack-list-channels
+
+**List Slack channels**
+
+List Slack channels the bot is a member of. Use this to discover available channels for reading messages.
+
+*No parameters*
 
 ### inbox-delegate
 
