@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getInboxMessageById, getTaskById, markInboxMessageResponded } from "@/be/db";
 import { getSlackApp } from "@/slack/app";
+import { markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerSlackReplyTool = (server: McpServer) => {
@@ -107,12 +108,23 @@ export const registerSlackReplyTool = (server: McpServer) => {
       }
 
       try {
+        const slackMessage = markdownToSlack(message);
+
         await app.client.chat.postMessage({
           channel: slackChannelId,
           thread_ts: slackThreadTs,
-          text: message,
+          text: slackMessage, // Fallback for notifications
           username: agent.name,
           icon_emoji: agent.isLead ? ":crown:" : ":robot_face:",
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: slackMessage,
+              },
+            },
+          ],
         });
 
         return {

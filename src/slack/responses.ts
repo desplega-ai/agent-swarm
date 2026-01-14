@@ -8,14 +8,22 @@ const appUrl = process.env.APP_URL || "";
 
 /**
  * Convert GitHub-flavored markdown to Slack mrkdwn format.
+ *
+ * Key differences:
+ * - GitHub: **bold**, *italic*, ~~strike~~, [text](url)
+ * - Slack:  *bold*,  _italic_, ~strike~,   <url|text>
  */
-function markdownToSlack(text: string): string {
+export function markdownToSlack(text: string): string {
   return (
     text
       // Headers to bold (# Header -> *Header*)
       .replace(/^#{1,6}\s+(.+)$/gm, "*$1*")
-      // Bold **text** -> *text*
+      // Bold **text** -> *text* (must be before italic)
       .replace(/\*\*(.+?)\*\*/g, "*$1*")
+      // Italic *text* -> _text_ (single asterisks, after bold is converted)
+      .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "_$1_")
+      // Strikethrough ~~text~~ -> ~text~
+      .replace(/~~(.+?)~~/g, "~$1~")
       // Links [text](url) -> <url|text>
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<$2|$1>")
       // Inline code already works the same

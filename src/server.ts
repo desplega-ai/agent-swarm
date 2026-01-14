@@ -19,6 +19,8 @@ import { registerReadMessagesTool } from "./tools/read-messages";
 // Services capability
 import { registerRegisterServiceTool } from "./tools/register-service";
 import { registerSendTaskTool } from "./tools/send-task";
+import { registerSlackListChannelsTool } from "./tools/slack-list-channels";
+import { registerSlackReadTool } from "./tools/slack-read";
 import { registerSlackReplyTool } from "./tools/slack-reply";
 import { registerStoreProgressTool } from "./tools/store-progress";
 // Task pool capability
@@ -73,6 +75,8 @@ export function createServer() {
 
   // Slack integration tools (always registered, will no-op if Slack not configured)
   registerSlackReplyTool(server);
+  registerSlackReadTool(server);
+  registerSlackListChannelsTool(server);
   registerInboxDelegateTool(server);
   registerGetInboxMessageTool(server);
 
