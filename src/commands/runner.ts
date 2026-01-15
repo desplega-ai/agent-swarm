@@ -1,6 +1,34 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { getBasePrompt } from "../prompts/base-prompt.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
+
+/** Task file data written to /tmp for hook to read */
+interface TaskFileData {
+  taskId: string;
+  agentId: string;
+  startedAt: string;
+}
+
+/** Get the task file path for a given PID */
+function getTaskFilePath(pid: number): string {
+  return `/tmp/agent-swarm-task-${pid}.json`;
+}
+
+/** Write task file before spawning Claude process */
+async function writeTaskFile(pid: number, data: TaskFileData): Promise<string> {
+  const filePath = getTaskFilePath(pid);
+  await writeFile(filePath, JSON.stringify(data, null, 2));
+  return filePath;
+}
+
+/** Clean up task file after process exits */
+async function cleanupTaskFile(pid: number): Promise<void> {
+  try {
+    await unlink(getTaskFilePath(pid));
+  } catch {
+    // File might already be deleted or never created - ignore
+  }
+}
 
 /** Save PM2 process list for persistence across container restarts */
 async function savePm2State(role: string): Promise<void> {
@@ -583,13 +611,13 @@ async function runClaudeIteration(opts: RunClaudeIterationOptions): Promise<numb
 }
 
 /** Spawn a Claude process without blocking - returns immediately with tracking info */
-function spawnClaudeProcess(
+async function spawnClaudeProcess(
   opts: RunClaudeIterationOptions,
   logDir: string,
   _metadataType: string,
   _sessionId: string,
   isYolo: boolean,
-): RunningTask {
+): Promise<RunningTask> {
   const { role, taskId } = opts;
   const Cmd = [
     "claude",
@@ -622,8 +650,22 @@ function spawnClaudeProcess(
 
   const logFileHandle = Bun.file(opts.logFile).writer();
 
+  // Write task file before spawning so hook can read the current taskId
+  // We use the parent process PID since we need to write before spawn
+  const taskFilePid = process.pid;
+  const taskFilePath = await writeTaskFile(taskFilePid, {
+    taskId: effectiveTaskId,
+    agentId: opts.agentId || "",
+    startedAt: new Date().toISOString(),
+  });
+
+  console.log(`\x1b[2m[${role}]\x1b[0m Task file written: ${taskFilePath}`);
+
   const proc = Bun.spawn(Cmd, {
-    env: process.env,
+    env: {
+      ...process.env,
+      TASK_FILE: taskFilePath,
+    },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -742,6 +784,10 @@ function spawnClaudeProcess(
         );
       }
     }
+
+    // Clean up task file after process exits
+    await cleanupTaskFile(taskFilePid);
+    console.log(`\x1b[2m[${role}]\x1b[0m Task file cleaned up: ${taskFilePath}`);
 
     return exitCode ?? 1;
   })();
@@ -950,8 +996,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           };
           await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
 
-          // Spawn without blocking
-          const runningTask = spawnClaudeProcess(
+          // Spawn without blocking (await to write task file, but process runs async)
+          const runningTask = await spawnClaudeProcess(
             {
               prompt: triggerPrompt,
               logFile,

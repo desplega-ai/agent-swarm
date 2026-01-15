@@ -9,6 +9,7 @@ export const AgentTaskStatusSchema = z.enum([
   "in_progress",
   "completed",
   "failed",
+  "cancelled", // Task was cancelled by lead or creator
 ]);
 
 // ============================================================================
