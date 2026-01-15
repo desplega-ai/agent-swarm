@@ -501,14 +501,256 @@ swarm-secrets run production/webapp -- npm start
 
 ---
 
+## Alternative Approach: Bitwarden Secrets Manager
+
+> *Added 2026-01-15 in response to reviewer feedback from @tarasyarema suggesting Bitwarden vault + CLI as an alternative.*
+
+### Overview
+
+**Bitwarden Secrets Manager** is a viable, production-ready alternative to building a custom Age-based secrets CLI. It offers a managed solution with official TypeScript SDK, built-in environment injection, and a generous free tier.
+
+Bitwarden offers **two distinct products** for secrets:
+
+| Product | CLI | Purpose | Best For |
+|---------|-----|---------|----------|
+| **Password Manager** | `bw` | Personal/team password storage | Human users, interactive workflows |
+| **Secrets Manager** | `bws` | Infrastructure secrets, automation | **Agent swarms, CI/CD, programmatic access** |
+
+**Key insight**: The **Secrets Manager** (`bws` CLI) is the appropriate choice for agent swarm systems.
+
+### Key Features for Agent Swarms
+
+#### Machine Accounts
+
+Bitwarden Secrets Manager uses **Machine Accounts** for non-human authentication:
+
+- Each agent/agent-group can have its own machine account
+- Access tokens never stored in Bitwarden databases (zero-knowledge)
+- Granular permissions: read-only or read/write per project
+- Full audit trail of secret access
+
+#### Native Environment Variable Injection
+
+```bash
+# Inject secrets as env vars and run application
+bws run -- ./my-agent
+
+# Limit to specific project
+bws run --project-id <PROJECT_ID> -- ./my-agent
+
+# Clean environment (security best practice)
+bws run --no-inherit-env -- ./my-agent
+```
+
+#### TypeScript SDK
+
+Official `@bitwarden/sdk-napi` package for programmatic access:
+
+```typescript
+import { BitwardenClient, ClientSettings, DeviceType, LogLevel } from "@bitwarden/sdk-napi";
+
+const settings: ClientSettings = {
+  apiUrl: "https://api.bitwarden.com",
+  identityUrl: "https://identity.bitwarden.com",
+  userAgent: "AgentSwarm/1.0",
+  deviceType: DeviceType.SDK,
+};
+
+const client = new BitwardenClient(settings, LogLevel.Info);
+await client.auth().loginAccessToken(process.env.BWS_ACCESS_TOKEN!, "/tmp/state");
+
+// Get secrets
+const secrets = await client.secrets().list();
+const apiKey = await client.secrets().get("secret-uuid");
+console.log(apiKey.value);
+```
+
+### Pricing Analysis
+
+| Plan | Cost | Machine Accounts | Best For |
+|------|------|------------------|----------|
+| **Free** | $0 | 3 | Development, small swarms |
+| **Teams** | $6/user/month | 20 (+$1/extra) | Medium swarms (10-50 agents) |
+| **Enterprise** | $12/user/month | 50 (+$1/extra) | Large swarms, self-hosting requirement |
+
+### Comparison: Bitwarden vs Custom Age CLI
+
+| Aspect | Bitwarden Secrets Manager | Custom Age CLI (This Proposal) |
+|--------|---------------------------|--------------------------------|
+| **Setup time** | Minutes | Weeks (development) |
+| **Maintenance** | Managed by Bitwarden | Self-maintained |
+| **TypeScript SDK** | Official, supported | Must build |
+| **Env injection** | Built-in (`bws run`) | Must build |
+| **Encryption** | X25519, ChaCha20-Poly1305 | X25519, ChaCha20-Poly1305 (Age) |
+| **Partial encryption** | No (full value encryption) | Yes (SOPS-style) |
+| **Git-friendly diffs** | No | Yes |
+| **Self-hosting** | Enterprise only ($12/user) | Yes (free) |
+| **External dependency** | Yes (Bitwarden service) | No |
+| **Cost** | Free tier available | Free |
+| **Access control** | Project-based, built-in | Must build |
+| **Audit logs** | Built-in (Teams+) | Must build |
+
+### Pros and Cons of Bitwarden Approach
+
+#### Pros
+
+1. **Zero development required** - Ready to use immediately
+2. **Official TypeScript SDK** - Native integration with agent swarm
+3. **Built-in `bws run`** - Environment injection without custom code
+4. **Free tier** - 3 machine accounts at no cost
+5. **Open source** - Full auditability of security
+6. **End-to-end encrypted** - Same security model as Age
+7. **Audit logging** (Teams+) - Track agent secret access
+8. **Self-hosting available** (Enterprise) - Full control if needed
+
+#### Cons
+
+1. **External dependency** - Relies on Bitwarden service (unless self-hosted)
+2. **Machine account limits** - Free tier limited to 3
+3. **No partial encryption** - Unlike SOPS, entire values are encrypted (no git diffs of keys)
+4. **No automatic rotation** - Must implement rotation manually
+5. **Rate limiting** - May need state files for high-frequency access
+6. **Enterprise required for self-hosting** - $12/user/month
+
+### Integration Pattern for Agent Swarm
+
+```typescript
+// src/secrets/bitwarden-provider.ts
+import { BitwardenClient, ClientSettings, DeviceType, LogLevel } from "@bitwarden/sdk-napi";
+
+export class BitwardenSecretsProvider {
+  private client: BitwardenClient;
+  private initialized = false;
+
+  constructor(apiUrl?: string, identityUrl?: string) {
+    const settings: ClientSettings = {
+      apiUrl: apiUrl || "https://api.bitwarden.com",
+      identityUrl: identityUrl || "https://identity.bitwarden.com",
+      userAgent: "AgentSwarm/1.0",
+      deviceType: DeviceType.SDK,
+    };
+    this.client = new BitwardenClient(settings, LogLevel.Warn);
+  }
+
+  async initialize(): Promise<void> {
+    const token = process.env.BWS_ACCESS_TOKEN;
+    if (!token) throw new Error("BWS_ACCESS_TOKEN not set");
+    await this.client.auth().loginAccessToken(token, "/tmp/bws-state");
+    this.initialized = true;
+  }
+
+  async getSecret(secretId: string): Promise<string> {
+    if (!this.initialized) await this.initialize();
+    const secret = await this.client.secrets().get(secretId);
+    return secret.value;
+  }
+
+  async getSecretByKey(key: string): Promise<string | undefined> {
+    if (!this.initialized) await this.initialize();
+    const secrets = await this.client.secrets().list();
+    const match = secrets.data.find(s => s.key === key);
+    return match ? (await this.client.secrets().get(match.id)).value : undefined;
+  }
+}
+```
+
+### Recommended Architecture for Bitwarden
+
+```
+Bitwarden Organization
+├── Project: "swarm-core-secrets"
+│   ├── Secret: OPENAI_API_KEY
+│   ├── Secret: DATABASE_URL
+│   └── Secret: REDIS_PASSWORD
+│
+├── Project: "swarm-agent-specific"
+│   ├── Secret: AGENT_001_TOKEN
+│   └── Secret: AGENT_002_TOKEN
+│
+└── Machine Accounts
+    ├── "swarm-lead" (read/write: all projects)
+    ├── "swarm-workers" (read: swarm-core-secrets)
+    └── "swarm-deployer" (read: all projects)
+```
+
+### When to Use Each Approach
+
+#### Use Bitwarden Secrets Manager When:
+
+1. **Quick setup needed** - Start managing secrets in minutes, not weeks
+2. **Small-to-medium swarms** - Free tier covers development; Teams tier handles production
+3. **Prefer managed service** - Don't want to maintain custom secrets tooling
+4. **Need audit logging** - Built-in access tracking (Teams+)
+5. **TypeScript-native** - Direct SDK integration with agent swarm
+
+#### Use Custom Age CLI When:
+
+1. **Zero external dependencies** - Fully self-contained solution
+2. **Git-friendly workflows** - SOPS-style partial encryption enables meaningful diffs
+3. **Cost-sensitive at scale** - No per-account charges
+4. **Full control required** - Custom access patterns, unique requirements
+5. **Offline operation** - No network calls to external services
+
+### Hybrid Approach Recommendation
+
+Consider offering **both options** in the agent swarm:
+
+```typescript
+// src/secrets/index.ts
+export type SecretsProvider = 'bitwarden' | 'age-cli' | 'env';
+
+export function createSecretsProvider(type: SecretsProvider) {
+  switch (type) {
+    case 'bitwarden':
+      return new BitwardenSecretsProvider();
+    case 'age-cli':
+      return new AgeSecretsProvider();
+    case 'env':
+      return new EnvSecretsProvider();
+  }
+}
+```
+
+This gives users the flexibility to choose based on their specific needs - Bitwarden for quick setup and managed infrastructure, or custom Age-based CLI for full control and zero external dependencies.
+
+### Bitwarden Resources
+
+- [Bitwarden Secrets Manager Overview](https://bitwarden.com/help/secrets-manager-overview/)
+- [Bitwarden Secrets Manager CLI](https://bitwarden.com/help/secrets-manager-cli/)
+- [Bitwarden Secrets Manager SDK](https://bitwarden.com/help/secrets-manager-sdk/)
+- [@bitwarden/sdk-napi on npm](https://www.npmjs.com/package/@bitwarden/sdk-napi)
+- [Bitwarden SDK GitHub](https://github.com/bitwarden/sdk-sm)
+
+---
+
 ## Conclusion
 
-The recommended approach for an agent swarm secrets management CLI combines:
+For agent swarm secrets management, **two viable approaches** are recommended:
+
+### Option A: Bitwarden Secrets Manager (Recommended for Quick Start)
+
+For teams wanting a production-ready solution with minimal development effort:
+
+1. **Official `bws` CLI** with built-in `bws run` for environment injection
+2. **TypeScript SDK** (`@bitwarden/sdk-napi`) for programmatic integration
+3. **Free tier with 3 machine accounts** - sufficient for development and small swarms
+4. **Built-in audit logging** and access control (Teams tier)
+
+### Option B: Custom Age-Based CLI (Recommended for Full Control)
+
+For teams requiring zero external dependencies and git-friendly workflows:
 
 1. **Age encryption** for modern, simple, secure cryptography
 2. **SOPS-style partial encryption** for git-friendly secret files
 3. **Vault-style path organization** for intuitive secret hierarchy
-4. **1Password/Doppler-style `run` command** for seamless env injection
+4. **Custom `run` command** for environment injection
 5. **TypeScript SDK** for programmatic agent integration
 
-This architecture provides a balance of security, usability, and developer experience suitable for multi-agent environments where secrets need to be shared, versioned, and easily converted to .env files for application consumption.
+### Recommendation
+
+Both approaches are valid and address different needs. Consider offering **both options** in the agent swarm implementation, allowing users to choose based on their specific requirements:
+
+- **Bitwarden** for quick setup, managed infrastructure, and built-in audit logging
+- **Custom Age CLI** for full control, offline operation, and zero external dependencies
+
+This architecture provides flexibility while maintaining security, usability, and developer experience suitable for multi-agent environments where secrets need to be shared, versioned, and easily converted to .env files for application consumption.
