@@ -1,489 +1,376 @@
-# Research: Integrating ai-tracker into Agent-Swarm Workers
-
-**Date**: 2026-01-15
-**Researcher**: Agent 16990304-76e4-4017-b991-f3e37b34cf73 (Researcher)
-**Task ID**: e53f61b4-68df-448b-ba9e-821c39dbf41f
-
 ---
+date: 2026-01-15T13:15:00Z
+topic: "ai-tracker Integration for Agent-Swarm Workers"
+researcher: "Agent 16990304-76e4-4017-b991-f3e37b34cf73 (Researcher)"
+status: "complete"
+---
+
+# Research: Integrating ai-tracker into Agent-Swarm Workers
 
 ## Executive Summary
 
-This research investigates integrating `ai-tracker` from the `desplega-ai/ai-toolbox` repository into agent-swarm workers for automatic usage tracking. The key finding is that **ai-tracker currently uses a fixed SQLite storage path** (`~/.config/ai-tracker/tracker.db`), which will require modifications to support per-agent databases in a shared location.
+This research investigates integrating `ai-tracker` from the `desplega-ai/ai-toolbox` repository into agent-swarm workers. Agent-swarm workers are Docker containers running Claude Code CLI in headless mode, which means ai-tracker's Claude Code hooks are directly applicable. The key requirement is adding environment variable support to ai-tracker for configurable database paths to enable per-agent tracking in a shared location.
 
 ---
 
-## 1. ai-tracker Architecture and Capabilities
+## 1. ai-tracker Overview
 
-### 1.1 Overview
+### 1.1 What is ai-tracker?
 
 **Source**: [desplega-ai/ai-toolbox/ai-tracker](https://github.com/desplega-ai/ai-toolbox/tree/main/ai-tracker)
 **Package Name**: `cc-ai-tracker` (PyPI)
 **License**: MIT
 **Python Support**: 3.11, 3.12, 3.13
 
-**Purpose**: Track the percentage of code changes in git repositories that are AI-generated (via Claude Code) versus human-made.
+**Purpose**: Track what percentage of code changes in git repos are AI-generated (via Claude Code) versus human-made.
 
-### 1.2 Core Components
+### 1.2 Installation Methods
 
-The system operates through three integrated components:
+```bash
+# Option 1: uvx (no install needed)
+uvx cc-ai-tracker install
+
+# Option 2: Local install with uv
+uv tool install cc-ai-tracker
+ai-tracker install
+```
+
+### 1.3 How It Works
+
+ai-tracker operates through three integrated components:
 
 | Component | Function |
 |-----------|----------|
-| **Claude Code Hooks (PostToolUse)** | Captures Edit/Write operations with line-level counts when Claude Code modifies files |
-| **Git Post-commit Hook** | Attributes committed changes to either AI or human sources based on the edit log |
-| **CLI Statistics** | Queries the SQLite database and displays formatted results using Rich formatting |
+| **Claude Code Hooks** | PreToolUse/PostToolUse hooks capture Edit/Write operations with line counts |
+| **Git Post-commit Hook** | Attributes committed changes to AI or human based on the edit log |
+| **CLI Statistics** | Queries SQLite database and displays formatted results |
 
-### 1.3 Data Flow
-
+**Data Flow:**
 ```
-┌─────────────────────┐    ┌──────────────────┐    ┌───────────────┐
-│   Claude Code       │───▶│  PostToolUse     │───▶│   SQLite DB   │
-│   (Edit/Write)      │    │  Hook            │    │   (edits)     │
-└─────────────────────┘    └──────────────────┘    └───────────────┘
-                                                          │
-                                                          ▼
-┌─────────────────────┐    ┌──────────────────┐    ┌───────────────┐
-│   Git Commit        │───▶│  Post-commit     │───▶│   SQLite DB   │
-│                     │    │  Hook            │    │   (commits)   │
-└─────────────────────┘    └──────────────────┘    └───────────────┘
+Claude Code Edit/Write → PostToolUse Hook → SQLite (edits table)
+                                               ↓
+Git Commit → Post-commit Hook → SQLite (commits table with AI/human attribution)
 ```
 
-### 1.4 Current Storage Configuration
+### 1.4 Database and Configuration
 
-| Setting | Value |
-|---------|-------|
-| **Database Location** | `~/.config/ai-tracker/tracker.db` (FIXED) |
-| **Database Mode** | SQLite with WAL (Write-Ahead Logging) |
-| **Config Directory** | `~/.config/ai-tracker/` |
-| **Git Hooks Directory** | `~/.config/ai-tracker/git-hooks/` |
-| **Cache Directory** | `~/.config/ai-tracker/cache/` |
+| Setting | Current Value |
+|---------|---------------|
+| **Database** | `~/.config/ai-tracker/tracker.db` (SQLite with WAL) |
+| **Config Dir** | `~/.config/ai-tracker/` |
+| **Git Hooks** | `~/.config/ai-tracker/git-hooks/` |
+| **Claude Settings** | `~/.claude/settings.json` |
 
-### 1.5 Database Schema
+### 1.5 Claude Code Hooks (from setup.py)
 
-**Table: `edits`**
-- timestamp, session_id, tool_type (Edit/Write)
-- file_path, lines_added, lines_removed
-- working_directory, committed (boolean)
+The `install` command adds these hooks to `~/.claude/settings.json`:
 
-**Table: `commits`**
-- commit_sha, repository_path
-- ai_lines_added, ai_lines_removed
-- human_lines_added, human_lines_removed
-- timestamp
-
-**Table: `commit_files`**
-- commit_id (FK to commits)
-- file_path
-- ai_lines, human_lines
+```json
+{
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "Edit|Write",
+      "hooks": [{"type": "command", "command": "ai-tracker hook-post-tool"}]
+    }],
+    "PreToolUse": [{
+      "matcher": "Write",
+      "hooks": [{"type": "command", "command": "ai-tracker hook-pre-tool"}]
+    }]
+  }
+}
+```
 
 ### 1.6 CLI Commands
 
 ```bash
-ai-tracker install     # Install Claude Code + git hooks
-ai-tracker uninstall   # Remove all hooks
-ai-tracker stats       # Show all-time statistics
-ai-tracker stats --graph --days 14  # Custom period chart
+ai-tracker install       # Install Claude Code + git hooks
+ai-tracker uninstall     # Remove all hooks
+ai-tracker stats         # Show all-time statistics
+ai-tracker stats --graph # Stats + chart for last 7 days
 ai-tracker stats --repo my-project  # Filter by repository
 ```
-
-### 1.7 Dependencies
-
-- **rich** >= 13.0.0 (terminal formatting)
-- **plotext** >= 5.0.0 (terminal charts)
-- **click** >= 8.0.0 (CLI framework)
 
 ---
 
 ## 2. Agent-Swarm Worker Architecture
 
-### 2.1 Worker Location and Structure
+### 2.1 Overview
 
-**Location**: `/workspace/shared/desplega.ai/be/worker/`
+Agent-swarm workers are **Docker containers running Claude Code CLI in headless loop mode**. Each worker:
+- Runs as a non-root `worker` user
+- Has Claude Code CLI installed via official installer
+- Uses MCP (Model Context Protocol) to communicate with the swarm server
+- Has hooks configured in `~/.claude/settings.json`
+
+### 2.2 Key Files in agent-swarm
 
 | File | Purpose |
 |------|---------|
-| `__init__.py` | Worker singleton initialization with Hatchet SDK |
-| `healthcheck.py` | Healthcheck task definition |
-| `utils.py` | Worker utilities (region-based worker selection) |
-| `affinity.py` | Worker affinity/labeling system |
-| `main_worker.py` | Main worker entry point (50+ workflows) |
+| `Dockerfile.worker` | Worker container build (Ubuntu 24.04 base) |
+| `docker-entrypoint.sh` | Container startup script |
+| `src/cli.tsx` | Compiled agent-swarm binary |
+| `plugin/` | Claude Code commands, agents, and skills |
 
-### 2.2 Worker Initialization
+### 2.3 Current Worker Hooks Configuration (Dockerfile.worker:89-101)
 
-```python
-# /workspace/shared/desplega.ai/be/worker/__init__.py
-class Worker:
-    _instance = None
-    _initialized = False
-
-    def __init__(self):
-        if self._initialized:
-            return
-        self.hatchet = Hatchet(
-            debug=os.getenv("HATCHET_DEBUG", "false").lower() == "true",
-        )
-        self._initialized = True
-
-worker = Worker()
-hatchet = worker.hatchet
+```json
+{
+  "permissions": { "allow": ["mcp__agent-swarm__*"] },
+  "hooks": {
+    "SessionStart": [{"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]}],
+    "UserPromptSubmit": [{"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]}],
+    "PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]}],
+    "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]}]
+  }
+}
 ```
 
-### 2.3 Worker Configuration
-
-```python
-# /workspace/shared/desplega.ai/be/main_worker.py
-worker = hatchet.worker(
-    f"desplega-worker-{worker_name}",
-    labels={
-        "name": worker_name,
-        "org_id": org_id,
-        "version": config.VERSION,
-        "region": region,
-    },
-    slots=1000 if region == "auto" else 100,
-    lifespan=lifespan,
-    workflows=[...],  # 50+ registered workflows
-)
-```
-
-### 2.4 Environment Variables
+### 2.4 Worker Environment Variables
 
 | Variable | Purpose |
 |----------|---------|
-| `WORKER_NAME` | Worker instance name (default: "default") |
-| `WORKER_ORG_ID` | Organization ID to process (default: "all") |
-| `WORKER_REGION` | Region affinity (default: "auto") |
-| `HATCHET_DEBUG` | Enable debug mode |
-| `IN_WORKER` | Flag indicating running in worker context |
+| `AGENT_ID` | UUID identifying the agent |
+| `AGENT_ROLE` | "worker" or "lead" |
+| `MCP_BASE_URL` | URL to MCP server |
+| `API_KEY` | Authentication for MCP |
+| `GITHUB_TOKEN` | Git operations authentication |
 
-### 2.5 Existing Telemetry Integration
+### 2.5 Container Initialization (docker-entrypoint.sh)
 
-The agent-swarm workers already have **comprehensive OpenTelemetry instrumentation**:
-
-```python
-# /workspace/shared/desplega.ai/be/config/__init__.py
-if self.ENV == "production":
-    AsyncioInstrumentor().instrument()
-
-    if os.getenv("IN_WORKER", "false").lower() == "true":
-        from hatchet_sdk.opentelemetry.instrumentor import HatchetInstrumentor
-        HatchetInstrumentor(
-            tracer_provider=get_tracer_provider(),
-            config=ClientConfig(otel=OpenTelemetryConfig()),
-        ).instrument()
-```
-
-**Instrumented Libraries** (30+ packages):
-- AsyncIO, FastAPI, ASGI, Starlette
-- Asyncpg, SQLAlchemy, Psycopg, SQLite3
-- HTTPx, Requests, AIOHTTP
-- Celery, Boto3 SQS, Redis, gRPC
-
-### 2.6 Lifecycle Hooks
-
-```python
-# /workspace/shared/desplega.ai/be/main_worker.py
-async def lifespan() -> AsyncGenerator[Lifespan, None]:
-    with acx.use():
-        yield Lifespan()
-
-    # Cleanup: dispose database engine on shutdown
-    try:
-        from db.async_db import engine
-        await engine.dispose()
-    except Exception as e:
-        logging.error(f"Error disposing database engine: {e}")
-```
+The entrypoint script:
+1. Validates required env vars (CLAUDE_CODE_OAUTH_TOKEN, API_KEY)
+2. Starts PM2 for background service management
+3. Creates `/workspace/.mcp.json` for MCP configuration
+4. Sets up git authentication if GITHUB_TOKEN provided
+5. Installs plugins from desplega-ai marketplace
+6. Executes optional `/workspace/start-up.*` script
+7. Runs `/usr/local/bin/agent-swarm <role>` to start Claude Code
 
 ---
 
-## 3. Integration Points in Agent-Swarm Workers
+## 3. Integration Plan
 
-### 3.1 Potential Integration Points
+### 3.1 Required Changes to ai-tracker
 
-| Integration Point | Location | Description |
-|-------------------|----------|-------------|
-| **Worker Initialization** | `worker/__init__.py` | Initialize ai-tracker with agent-specific DB path |
-| **Lifespan Hook** | `main_worker.py:lifespan()` | Flush tracking data on shutdown |
-| **OpenTelemetry** | `config/__init__.py` | Add ai-tracker as a custom span processor |
-| **Context Manager** | `ctx/ctx.py:acx` | Propagate tracking context across async operations |
-| **Healthcheck** | `worker/healthcheck.py` | Include tracking stats in health responses |
-
-### 3.2 Recommended Integration Approach
-
-**Option A: Hook-Based Integration (Recommended)**
-- Inject ai-tracker hooks at worker startup
-- Configure per-agent DB path via environment variable
-- Minimal changes to existing worker code
-
-**Option B: Middleware/Decorator Integration**
-- Create a tracking decorator for workflow tasks
-- Wrap each workflow function with tracking logic
-- More invasive but provides finer control
-
-**Option C: OpenTelemetry Exporter**
-- Create custom OTEL exporter that writes to ai-tracker DB
-- Leverages existing instrumentation
-- Most elegant but requires OTEL knowledge
-
----
-
-## 4. Configuration Strategy for Shared Storage
-
-### 4.1 Current Limitation
-
-ai-tracker currently has a **hardcoded storage path**:
+**Issue**: ai-tracker has a **hardcoded database path** in `config.py`:
 ```python
-DB_PATH = Path.home() / ".config" / "ai-tracker" / "tracker.db"
+def get_db_path() -> Path:
+    return get_config_dir() / "tracker.db"  # Fixed to ~/.config/ai-tracker/
+
+def get_config_dir() -> Path:
+    config_dir = Path.home() / ".config" / "ai-tracker"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir
 ```
 
-This must be modified to support configurable paths.
-
-### 4.2 Proposed Configuration Model
-
+**Proposed Fix**: Add environment variable support:
 ```python
-# Environment variable approach
-TRACKER_DB_PATH = os.environ.get(
-    "AI_TRACKER_DB_PATH",
-    f"/workspace/shared/tracking/{agent_id}.db"
-)
+def get_db_path() -> Path:
+    if custom_path := os.environ.get("AI_TRACKER_DB_PATH"):
+        path = Path(custom_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+    return get_config_dir() / "tracker.db"
+
+def get_config_dir() -> Path:
+    if custom_dir := os.environ.get("AI_TRACKER_CONFIG_DIR"):
+        config_dir = Path(custom_dir)
+    else:
+        config_dir = Path.home() / ".config" / "ai-tracker"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir
 ```
 
-### 4.3 Per-Agent Database Structure
+**GitHub Issue Required**: Create issue in `desplega-ai/ai-toolbox` repo requesting this feature.
+
+### 3.2 Docker Integration
+
+**Step 1: Install ai-tracker in Dockerfile.worker**
+
+Add after the Claude CLI installation (around line 80):
+```dockerfile
+# Install uv for Python package management
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/home/worker/.local/bin:$PATH"
+
+# Install ai-tracker
+RUN uv tool install cc-ai-tracker
+```
+
+**Step 2: Add hooks to settings.json template**
+
+Modify the settings.json in Dockerfile.worker to include ai-tracker hooks:
+```json
+{
+  "permissions": { "allow": ["mcp__agent-swarm__*"] },
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]},
+      {"matcher": "Write", "hooks": [{"type": "command", "command": "ai-tracker hook-pre-tool"}]}
+    ],
+    "PostToolUse": [
+      {"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]},
+      {"matcher": "Edit|Write", "hooks": [{"type": "command", "command": "ai-tracker hook-post-tool"}]}
+    ]
+  }
+}
+```
+
+**Step 3: Configure per-agent database in docker-entrypoint.sh**
+
+Add after the workspace initialization section:
+```bash
+# Configure ai-tracker for per-agent database
+echo ""
+echo "=== AI Tracker Configuration ==="
+if [ -n "$AGENT_ID" ]; then
+    TRACKER_DIR="/workspace/shared/tracking"
+    mkdir -p "$TRACKER_DIR"
+    export AI_TRACKER_DB_PATH="${TRACKER_DIR}/${AGENT_ID}.db"
+    echo "AI Tracker DB: $AI_TRACKER_DB_PATH"
+
+    # Install git hooks for this agent
+    ai-tracker git-install --global 2>/dev/null || true
+else
+    echo "AGENT_ID not set, using default ai-tracker path"
+fi
+echo "================================"
+```
+
+### 3.3 Per-Agent Database Structure
 
 ```
 /workspace/shared/tracking/
-├── 16990304-76e4-4017-b991-f3e37b34cf73.db   # Agent 1
-├── d454d1a5-4df9-49bd-8a89-e58d6a657dc3.db   # Agent 2 (Lead)
-├── 38d36438-58a0-45b5-8602-a5d52b07c2f1.db   # Agent 3
-└── aggregated/
-    └── combined_stats.db                       # Optional: aggregated view
+├── 16990304-76e4-4017-b991-f3e37b34cf73.db   # Worker 1
+├── d454d1a5-4df9-49bd-8a89-e58d6a657dc3.db   # Lead Agent
+├── 38d36438-58a0-45b5-8602-a5d52b07c2f1.db   # Worker 2
+└── .gitkeep
 ```
 
-### 4.4 Implementation Approach
-
-**Step 1: Fork/Modify ai-tracker**
-```python
-# ai_tracker/config.py
-import os
-
-def get_db_path(agent_id: str | None = None) -> Path:
-    """Get database path, supporting per-agent configuration."""
-    if custom_path := os.environ.get("AI_TRACKER_DB_PATH"):
-        return Path(custom_path)
-
-    if agent_id:
-        base_dir = os.environ.get(
-            "AI_TRACKER_SHARED_DIR",
-            "/workspace/shared/tracking"
-        )
-        return Path(base_dir) / f"{agent_id}.db"
-
-    # Default fallback
-    return Path.home() / ".config" / "ai-tracker" / "tracker.db"
-```
-
-**Step 2: Worker Integration**
-```python
-# worker/__init__.py
-import os
-from ai_tracker import configure_tracker
-
-class Worker:
-    def __init__(self):
-        if self._initialized:
-            return
-
-        # Configure ai-tracker with agent-specific path
-        agent_id = os.environ.get("AGENT_ID")
-        configure_tracker(
-            db_path=f"/workspace/shared/tracking/{agent_id}.db"
-        )
-
-        self.hatchet = Hatchet(...)
-        self._initialized = True
-```
-
-**Step 3: Lifespan Hook Integration**
-```python
-# main_worker.py
-async def lifespan() -> AsyncGenerator[Lifespan, None]:
-    from ai_tracker import tracker
-
-    with acx.use():
-        yield Lifespan()
-
-    # Flush tracker before shutdown
-    try:
-        await tracker.flush()
-    except Exception as e:
-        logging.error(f"Error flushing tracker: {e}")
-
-    # Existing cleanup...
-```
+Benefits:
+- Each agent has isolated tracking data
+- Shared volume allows aggregation/analysis
+- No SQLite concurrency issues between agents
 
 ---
 
-## 5. Challenges and Considerations
+## 4. Implementation Steps
 
-### 5.1 Technical Challenges
+### 4.1 Phase 1: ai-tracker Enhancement
 
-| Challenge | Impact | Mitigation |
-|-----------|--------|------------|
-| **Fixed DB Path** | High | Fork ai-tracker and add configurable paths |
-| **SQLite Concurrency** | Medium | WAL mode already enabled; consider connection pooling |
-| **Claude Code Hooks** | High | Agent workers may not run Claude Code directly |
-| **Git Hook Integration** | Medium | Workers may not perform git commits |
+1. **Create GitHub Issue** in `desplega-ai/ai-toolbox`:
+   - Title: "Add environment variable support for configurable database path"
+   - Request: `AI_TRACKER_DB_PATH` and `AI_TRACKER_CONFIG_DIR` env vars
+   - Use case: Multi-agent environments where each agent needs its own database
 
-### 5.2 Architecture Considerations
+2. **Implement the change** (or wait for issue to be addressed):
+   - Modify `config.py` to check environment variables
+   - Update README with new configuration options
 
-1. **What to Track in Agent-Swarm Context?**
-   - Original ai-tracker tracks Claude Code Edit/Write operations
-   - Agent-swarm workers may not use Claude Code directly
-   - **Consider**: Track task completions, API calls, tool usage instead
+### 4.2 Phase 2: Dockerfile.worker Updates
 
-2. **Alternative Tracking Scope**
-   - Track MCP tool invocations
-   - Track Hatchet workflow executions
-   - Track file modifications via any tool
-   - Track API request/response metrics
+1. Add `uv` installation for Python tool management
+2. Install `cc-ai-tracker` via `uv tool install`
+3. Update `settings.json` template with ai-tracker hooks
 
-3. **Data Aggregation**
-   - Per-agent DBs are good for isolation
-   - May need aggregation service for cross-agent analytics
-   - Consider using existing OTEL infrastructure instead
+### 4.3 Phase 3: docker-entrypoint.sh Updates
 
-### 5.3 Potential Blockers
+1. Add tracking directory creation
+2. Set `AI_TRACKER_DB_PATH` environment variable
+3. Run `ai-tracker git-install` at startup
 
-1. **ai-tracker is Claude Code Specific**
-   - The hooks are designed for PostToolUse in Claude Code
-   - Agent-swarm workers use Hatchet SDK, not Claude Code directly
-   - **Recommendation**: Either modify ai-tracker significantly or create a new tracking component
+### 4.4 Phase 4: Testing
 
-2. **Different Data Model Needed**
-   - ai-tracker tracks code changes (lines added/removed)
-   - Agent-swarm needs to track task execution, tool calls, API usage
-   - The schemas don't align well
+1. Build updated worker image
+2. Start multiple workers with different AGENT_IDs
+3. Verify each worker creates its own database
+4. Run some Edit/Write operations and git commits
+5. Check `ai-tracker stats` shows correct data per agent
+
+---
+
+## 5. Alternative Approaches
+
+### 5.1 Use uvx at Runtime (No Install Required)
+
+Instead of installing ai-tracker in the image, use uvx in hooks:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "Edit|Write",
+      "hooks": [{"type": "command", "command": "AI_TRACKER_DB_PATH=/workspace/shared/tracking/${AGENT_ID}.db uvx cc-ai-tracker hook-post-tool"}]
+    }]
+  }
+}
+```
+
+**Pros**: No image rebuild needed
+**Cons**: Slower (uvx fetches package each time), env var interpolation may not work in JSON
+
+### 5.2 Shared Single Database
+
+Instead of per-agent databases, use a single shared database with agent_id column:
+
+**Pros**: Easier aggregation
+**Cons**: SQLite concurrency issues, needs schema changes in ai-tracker
+
+### 5.3 External Tracking Service
+
+Send tracking data to a centralized service instead of local SQLite:
+
+**Pros**: Real-time aggregation, no storage management
+**Cons**: Requires new service, network dependency
 
 ---
 
 ## 6. Recommendations
 
-### 6.1 Short-Term (Quick Win)
+### 6.1 Recommended Approach
 
-If the goal is to track Claude Code usage within worker containers:
-1. Fork `cc-ai-tracker` and add `AI_TRACKER_DB_PATH` environment variable support
-2. Install the modified package in worker Docker image
-3. Configure per-agent paths via Docker environment
+**Use per-agent databases with environment variable configuration:**
 
-### 6.2 Medium-Term (Better Integration)
+1. Create issue in ai-toolbox for env var support
+2. Update Dockerfile.worker to install ai-tracker
+3. Update docker-entrypoint.sh to set per-agent paths
+4. Update settings.json to include ai-tracker hooks
 
-Create a new tracking component inspired by ai-tracker but designed for agent-swarm:
-1. Use the same SQLite + WAL approach
-2. New schema for task/tool tracking instead of code changes
-3. Integrate with OpenTelemetry for span correlation
-4. Per-agent DBs in shared location
+This approach:
+- Works with ai-tracker's existing architecture
+- Minimal changes required
+- Maintains agent isolation
+- Allows easy aggregation later
 
-### 6.3 Long-Term (Production Ready)
+### 6.2 Action Items
 
-Leverage existing OpenTelemetry infrastructure:
-1. Create custom OTEL exporter for tracking data
-2. Store in TimescaleDB/ClickHouse for analytics
-3. Use OTEL spans for correlation
-4. Grafana dashboards for visualization
-
----
-
-## 7. Proposed New Schema (If Building Custom Tracker)
-
-```sql
--- Agent activity tracking
-CREATE TABLE agent_sessions (
-    id TEXT PRIMARY KEY,
-    agent_id TEXT NOT NULL,
-    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    ended_at TIMESTAMP,
-    task_count INTEGER DEFAULT 0,
-    tool_calls INTEGER DEFAULT 0
-);
-
--- Task execution tracking
-CREATE TABLE task_executions (
-    id TEXT PRIMARY KEY,
-    session_id TEXT REFERENCES agent_sessions(id),
-    task_id TEXT NOT NULL,
-    task_type TEXT,
-    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    completed_at TIMESTAMP,
-    status TEXT,  -- 'completed', 'failed', 'cancelled'
-    duration_ms INTEGER
-);
-
--- Tool/API call tracking
-CREATE TABLE tool_calls (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    task_execution_id TEXT REFERENCES task_executions(id),
-    tool_name TEXT NOT NULL,
-    called_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    duration_ms INTEGER,
-    input_tokens INTEGER,
-    output_tokens INTEGER,
-    success BOOLEAN
-);
-
--- File modification tracking (similar to original ai-tracker)
-CREATE TABLE file_modifications (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    task_execution_id TEXT REFERENCES task_executions(id),
-    file_path TEXT NOT NULL,
-    modification_type TEXT,  -- 'create', 'edit', 'delete'
-    lines_added INTEGER DEFAULT 0,
-    lines_removed INTEGER DEFAULT 0,
-    modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
+| Priority | Action | Owner |
+|----------|--------|-------|
+| 1 | Create GitHub issue in ai-toolbox | Swarm Lead |
+| 2 | Implement env var support in ai-tracker | ai-toolbox maintainer |
+| 3 | Update Dockerfile.worker | agent-swarm PR |
+| 4 | Update docker-entrypoint.sh | agent-swarm PR |
+| 5 | Test multi-agent tracking | QA |
 
 ---
 
-## 8. Conclusion
+## 7. Appendix
 
-### Key Findings
-
-1. **ai-tracker** is a well-designed tool for tracking Claude Code usage, but it has:
-   - Fixed storage path requiring modification
-   - Schema designed for code changes, not task execution
-   - Hooks specific to Claude Code PostToolUse
-
-2. **Agent-swarm workers** have:
-   - Comprehensive OpenTelemetry instrumentation already
-   - Clear lifecycle hooks for integration
-   - Environment-based configuration patterns
-
-3. **Integration Options**:
-   - **Minimal**: Fork ai-tracker, add configurable paths
-   - **Moderate**: Create agent-swarm specific tracker
-   - **Comprehensive**: Extend OTEL infrastructure
-
-### Next Steps
-
-1. Decide on tracking scope (code changes vs task execution vs both)
-2. Fork ai-tracker to add configurable DB path support
-3. Create integration PR for worker initialization
-4. Consider building agent-swarm specific tracking component long-term
-
----
-
-## Appendix: File Paths Referenced
+### 7.1 ai-tracker Source Files Reviewed
 
 | File | Purpose |
 |------|---------|
-| `/workspace/shared/desplega.ai/be/worker/__init__.py` | Worker singleton |
-| `/workspace/shared/desplega.ai/be/main_worker.py` | Main entry point |
-| `/workspace/shared/desplega.ai/be/config/__init__.py` | OTEL configuration |
-| `/workspace/shared/desplega.ai/be/ctx/ctx.py` | Context management |
-| `/workspace/shared/desplega.ai/be/worker/healthcheck.py` | Health checks |
-| `/workspace/shared/desplega.ai/be/worker/affinity.py` | Worker affinity |
+| `src/ai_tracker/config.py` | Path configuration (needs env var support) |
+| `src/ai_tracker/setup.py` | Claude Code hook installation |
+| `src/ai_tracker/cli.py` | CLI commands (install, stats, etc.) |
+| `src/ai_tracker/git/install.py` | Git hook installation |
+| `src/ai_tracker/hooks/log_claude_edit.py` | PostToolUse hook handler |
+| `src/ai_tracker/hooks/capture_before_write.py` | PreToolUse hook handler |
 
----
+### 7.2 agent-swarm Files Reviewed
 
-*Research completed: 2026-01-15*
+| File | Purpose |
+|------|---------|
+| `Dockerfile.worker` | Worker container build |
+| `docker-entrypoint.sh` | Container startup script |
+| `DEPLOYMENT.md` | Deployment documentation |
