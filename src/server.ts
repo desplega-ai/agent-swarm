@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import pkg from "../package.json";
 import { initDb } from "./be/db";
+import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerCreateChannelTool } from "./tools/create-channel";
 // Lead inbox tools
 import { registerGetInboxMessageTool } from "./tools/get-inbox-message";
@@ -72,6 +73,7 @@ export function createServer() {
   registerGetTaskDetailsTool(server);
   registerStoreProgressTool(server);
   registerMyAgentInfoTool(server);
+  registerCancelTaskTool(server);
 
   // Slack integration tools (always registered, will no-op if Slack not configured)
   registerSlackReplyTool(server);

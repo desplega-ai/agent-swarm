@@ -797,6 +797,12 @@ export const taskQueries = {
        WHERE id = ? RETURNING *`,
     ),
 
+  setCancelled: () =>
+    getDb().prepare<AgentTaskRow, [string, string, string]>(
+      `UPDATE agent_tasks SET status = 'cancelled', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? RETURNING *`,
+    ),
+
   setProgress: () =>
     getDb().prepare<AgentTaskRow, [string, string]>(
       "UPDATE agent_tasks SET progress = ?, status = 'in_progress', lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
@@ -1123,6 +1129,35 @@ export function failTask(id: string, reason: string): AgentTask | null {
       });
     } catch {}
   }
+  return row ? rowToAgentTask(row) : null;
+}
+
+export function cancelTask(id: string, reason?: string): AgentTask | null {
+  const oldTask = getTaskById(id);
+  if (!oldTask) return null;
+
+  // Only cancel tasks that are in progress or pending
+  if (!["pending", "in_progress"].includes(oldTask.status)) {
+    return null;
+  }
+
+  const finishedAt = new Date().toISOString();
+  const cancelReason = reason ?? "Cancelled by user";
+  const row = taskQueries.setCancelled().get(cancelReason, finishedAt, id);
+
+  if (row && oldTask) {
+    try {
+      createLogEntry({
+        eventType: "task_status_change",
+        taskId: id,
+        agentId: row.agentId ?? undefined,
+        oldValue: oldTask.status,
+        newValue: "cancelled",
+        metadata: reason ? { reason } : undefined,
+      });
+    } catch {}
+  }
+
   return row ? rowToAgentTask(row) : null;
 }
 
