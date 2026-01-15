@@ -980,6 +980,61 @@ export function getAllTasks(filters?: TaskFilters): AgentTask[] {
 }
 
 /**
+ * Get total count of tasks matching the given filters (ignoring limit).
+ * Used alongside getAllTasks to display accurate total counts in UI.
+ */
+export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">): number {
+  const conditions: string[] = [];
+  const params: (string | AgentTaskStatus)[] = [];
+
+  if (filters?.status) {
+    conditions.push("status = ?");
+    params.push(filters.status);
+  }
+
+  if (filters?.agentId) {
+    conditions.push("agentId = ?");
+    params.push(filters.agentId);
+  }
+
+  if (filters?.search) {
+    conditions.push("task LIKE ?");
+    params.push(`%${filters.search}%`);
+  }
+
+  if (filters?.unassigned) {
+    conditions.push("(agentId IS NULL OR status = 'unassigned')");
+  }
+
+  if (filters?.offeredTo) {
+    conditions.push("offeredTo = ?");
+    params.push(filters.offeredTo);
+  }
+
+  if (filters?.taskType) {
+    conditions.push("taskType = ?");
+    params.push(filters.taskType);
+  }
+
+  if (filters?.tags && filters.tags.length > 0) {
+    const tagConditions = filters.tags.map(() => "tags LIKE ?");
+    conditions.push(`(${tagConditions.join(" OR ")})`);
+    for (const tag of filters.tags) {
+      params.push(`%"${tag}"%`);
+    }
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const query = `SELECT COUNT(*) as count FROM agent_tasks ${whereClause}`;
+
+  const result = getDb()
+    .prepare<{ count: number }, (string | AgentTaskStatus)[]>(query)
+    .get(...params);
+
+  return result?.count ?? 0;
+}
+
+/**
  * Get task statistics (counts by status) without any limit.
  * This is more efficient than fetching all tasks for stats purposes.
  */
