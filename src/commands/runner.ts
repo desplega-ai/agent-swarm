@@ -60,6 +60,72 @@ async function closeAgent(config: ApiConfig, role: string): Promise<void> {
   }
 }
 
+/**
+ * Ensure task is marked as completed or failed via the API.
+ * This is called when a Claude process exits to ensure task status is updated,
+ * regardless of whether the agent explicitly called store-progress.
+ *
+ * The API is idempotent - if the agent already marked the task as completed/failed,
+ * this call will succeed without changing anything.
+ */
+async function ensureTaskFinished(
+  config: ApiConfig,
+  role: string,
+  taskId: string,
+  exitCode: number,
+): Promise<void> {
+  const headers: Record<string, string> = {
+    "X-Agent-ID": config.agentId,
+    "Content-Type": "application/json",
+  };
+  if (config.apiKey) {
+    headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+
+  // Determine status and reason based on exit code
+  // Exit code 0 = success, non-zero = failure
+  const status = exitCode === 0 ? "completed" : "failed";
+  const body: Record<string, string> = { status };
+
+  if (status === "failed") {
+    body.failureReason = `Claude process exited with code ${exitCode}`;
+  } else {
+    body.output =
+      "Process completed (runner wrapper fallback - agent may have provided explicit output)";
+  }
+
+  try {
+    const response = await fetch(`${config.apiUrl}/api/tasks/${taskId}/finish`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    if (response.ok) {
+      const result = (await response.json()) as {
+        alreadyFinished?: boolean;
+        task?: { status?: string };
+      };
+      if (result.alreadyFinished) {
+        console.log(
+          `[${role}] Task ${taskId.slice(0, 8)} was already marked as ${result.task?.status || "finished"}`,
+        );
+      } else {
+        console.log(
+          `[${role}] Runner marked task ${taskId.slice(0, 8)} as ${status} (exit code: ${exitCode})`,
+        );
+      }
+    } else {
+      const error = await response.text();
+      console.warn(
+        `[${role}] Failed to finish task ${taskId.slice(0, 8)}: ${response.status} ${error}`,
+      );
+    }
+  } catch (err) {
+    console.warn(`[${role}] Error finishing task ${taskId.slice(0, 8)}: ${err}`);
+  }
+}
+
 /** Setup signal handlers for graceful shutdown */
 function setupShutdownHandlers(
   role: string,
@@ -79,18 +145,22 @@ function setupShutdownHandlers(
       const deadline = Date.now() + shutdownTimeout;
 
       while (state.activeTasks.size > 0 && Date.now() < deadline) {
-        await checkCompletedProcesses(state, role);
+        await checkCompletedProcesses(state, role, apiConfig);
         if (state.activeTasks.size > 0) {
           await Bun.sleep(500);
         }
       }
 
-      // Force kill remaining tasks
+      // Force kill remaining tasks and mark them as failed
       if (state.activeTasks.size > 0) {
         console.log(`[${role}] Force stopping ${state.activeTasks.size} remaining task(s)...`);
         for (const [taskId, task] of state.activeTasks) {
           console.log(`[${role}] Force stopping task ${taskId.slice(0, 8)}`);
           task.process.kill("SIGTERM");
+          // Mark as failed due to forced shutdown
+          if (apiConfig) {
+            await ensureTaskFinished(apiConfig, role, taskId, 1); // Use exit code 1 for forced shutdown
+          }
         }
       }
     }
@@ -756,8 +826,12 @@ function spawnClaudeProcess(
 }
 
 /** Check for completed processes and remove them from active tasks */
-async function checkCompletedProcesses(state: RunnerState, role: string): Promise<void> {
-  const completedTasks: string[] = [];
+async function checkCompletedProcesses(
+  state: RunnerState,
+  role: string,
+  apiConfig?: ApiConfig,
+): Promise<void> {
+  const completedTasks: Array<{ taskId: string; exitCode: number }> = [];
 
   for (const [taskId, task] of state.activeTasks) {
     // Check if the Bun subprocess has exited (non-blocking)
@@ -765,13 +839,19 @@ async function checkCompletedProcesses(state: RunnerState, role: string): Promis
       console.log(
         `[${role}] Task ${taskId.slice(0, 8)} completed with exit code ${task.process.exitCode}`,
       );
-      completedTasks.push(taskId);
+      completedTasks.push({ taskId, exitCode: task.process.exitCode });
     }
   }
 
-  // Remove completed tasks from the map
-  for (const taskId of completedTasks) {
+  // Remove completed tasks from the map and ensure they're marked as finished
+  for (const { taskId, exitCode } of completedTasks) {
     state.activeTasks.delete(taskId);
+
+    // Call the finish API to ensure task status is updated
+    // This is idempotent - if the agent already marked it, this is a no-op
+    if (apiConfig) {
+      await ensureTaskFinished(apiConfig, role, taskId, exitCode);
+    }
   }
 }
 
@@ -898,8 +978,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       // Ping server on each iteration to keep status updated
       await pingServer(apiConfig, role);
 
-      // Check for completed processes first
-      await checkCompletedProcesses(state, role);
+      // Check for completed processes first and ensure tasks are marked as finished
+      await checkCompletedProcesses(state, role, apiConfig);
 
       // Only poll if we have capacity
       if (state.activeTasks.size < state.maxConcurrent) {

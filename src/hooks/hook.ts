@@ -282,6 +282,14 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
       }
       // Mark the agent as offline
       await close();
+      // NOTE: Task completion is NOT handled here intentionally.
+      // The runner wrapper (src/commands/runner.ts) handles ensuring tasks are
+      // marked as completed/failed when a Claude process exits. This approach is
+      // more reliable because:
+      // 1. It happens outside the Claude Code loop, so it runs even if Claude crashes
+      // 2. The runner knows the process exit code to determine success/failure
+      // 3. The API is idempotent - if the agent already called store-progress, no change
+      // See: ensureTaskFinished() in runner.ts and POST /api/tasks/:id/finish
       break;
 
     default:

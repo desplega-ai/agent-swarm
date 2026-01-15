@@ -13,9 +13,11 @@ import {
   claimMentions,
   claimOfferedTask,
   closeDb,
+  completeTask,
   createAgent,
   createSessionLogs,
   createTaskExtended,
+  failTask,
   getActiveTaskCount,
   getAgentById,
   getAgentWithTasks,
@@ -47,6 +49,7 @@ import {
   updateAgentMaxTasks,
   updateAgentName,
   updateAgentStatus,
+  updateAgentStatusFromCapacity,
 } from "./be/db";
 import type {
   CheckRunEvent,
@@ -891,6 +894,105 @@ const httpServer = createHttpServer(async (req, res) => {
     const logs = getLogsByTaskId(taskId);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ...task, logs }));
+    return;
+  }
+
+  // POST /api/tasks/:id/finish - Mark task as completed or failed (runner wrapper endpoint)
+  // This endpoint is called by the runner when a Claude process exits to ensure task status is updated
+  if (
+    req.method === "POST" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "tasks" &&
+    pathSegments[2] &&
+    pathSegments[3] === "finish"
+  ) {
+    if (!myAgentId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
+      return;
+    }
+
+    const taskId = pathSegments[2];
+
+    // Parse request body
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    // Validate status field
+    if (!body.status || !["completed", "failed"].includes(body.status)) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: "Missing or invalid 'status' field (must be 'completed' or 'failed')",
+        }),
+      );
+      return;
+    }
+
+    const result = getDb().transaction(() => {
+      const task = getTaskById(taskId);
+
+      if (!task) {
+        return { error: "Task not found", status: 404 };
+      }
+
+      // Only allow the assigned agent (or task creator if unassigned) to finish the task
+      if (task.agentId && task.agentId !== myAgentId) {
+        return { error: "Task is assigned to another agent", status: 403 };
+      }
+
+      // Only finish tasks that are in_progress (prevent double-finishing)
+      if (task.status !== "in_progress") {
+        // Task already finished or not started - return success with current state
+        return { task, alreadyFinished: true };
+      }
+
+      let updatedTask: typeof task;
+      if (body.status === "completed") {
+        const result = completeTask(
+          taskId,
+          body.output || "Completed by runner wrapper (no explicit output)",
+        );
+        if (!result) {
+          return { error: "Failed to complete task", status: 500 };
+        }
+        updatedTask = result;
+      } else {
+        const result = failTask(
+          taskId,
+          body.failureReason || "Process exited without explicit completion",
+        );
+        if (!result) {
+          return { error: "Failed to mark task as failed", status: 500 };
+        }
+        updatedTask = result;
+      }
+
+      // Update agent status based on remaining capacity
+      if (task.agentId) {
+        updateAgentStatusFromCapacity(task.agentId);
+      }
+
+      return { task: updatedTask };
+    })();
+
+    if ("error" in result) {
+      res.writeHead(result.status ?? 500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: result.error }));
+      return;
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        success: true,
+        alreadyFinished: result.alreadyFinished ?? false,
+        task: result.task,
+      }),
+    );
     return;
   }
 
