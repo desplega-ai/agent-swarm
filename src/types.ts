@@ -238,3 +238,23 @@ export const SessionLogSchema = z.object({
 });
 
 export type SessionLog = z.infer<typeof SessionLogSchema>;
+
+// Session Cost Types (aggregated cost data per session)
+export const SessionCostSchema = z.object({
+  id: z.uuid(),
+  sessionId: z.string(),
+  taskId: z.uuid().optional(),
+  agentId: z.uuid(),
+  totalCostUsd: z.number().min(0),
+  inputTokens: z.number().int().min(0).default(0),
+  outputTokens: z.number().int().min(0).default(0),
+  cacheReadTokens: z.number().int().min(0).default(0),
+  cacheWriteTokens: z.number().int().min(0).default(0),
+  durationMs: z.number().int().min(0),
+  numTurns: z.number().int().min(1),
+  model: z.string(),
+  isError: z.boolean().default(false),
+  createdAt: z.iso.datetime(),
+});
+
+export type SessionCost = z.infer<typeof SessionCostSchema>;

@@ -15,6 +15,7 @@ import {
   closeDb,
   completeTask,
   createAgent,
+  createSessionCost,
   createSessionLogs,
   createTaskExtended,
   failTask,
@@ -26,6 +27,7 @@ import {
   getAllChannels,
   getAllLogs,
   getAllServices,
+  getAllSessionCosts,
   getAllTasks,
   getChannelById,
   getChannelMessages,
@@ -38,6 +40,8 @@ import {
   getRecentlyCancelledTasksForAgent,
   getRecentlyFinishedWorkerTasks,
   getServicesByAgentId,
+  getSessionCostsByAgentId,
+  getSessionCostsByTaskId,
   getSessionLogsByTaskId,
   getTaskById,
   getTaskStats,
@@ -627,6 +631,86 @@ const httpServer = createHttpServer(async (req, res) => {
     const logs = getSessionLogsByTaskId(taskId);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ logs }));
+    return;
+  }
+
+  // POST /api/session-costs - Store session cost record
+  if (req.method === "POST" && pathSegments[0] === "api" && pathSegments[1] === "session-costs") {
+    // Parse request body
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    // Validate required fields
+    if (!body.sessionId || typeof body.sessionId !== "string") {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing or invalid 'sessionId' field" }));
+      return;
+    }
+
+    if (!body.agentId || typeof body.agentId !== "string") {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing or invalid 'agentId' field" }));
+      return;
+    }
+
+    if (typeof body.totalCostUsd !== "number") {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing or invalid 'totalCostUsd' field" }));
+      return;
+    }
+
+    try {
+      const cost = createSessionCost({
+        sessionId: body.sessionId,
+        taskId: body.taskId || undefined,
+        agentId: body.agentId,
+        totalCostUsd: body.totalCostUsd,
+        inputTokens: body.inputTokens ?? 0,
+        outputTokens: body.outputTokens ?? 0,
+        cacheReadTokens: body.cacheReadTokens ?? 0,
+        cacheWriteTokens: body.cacheWriteTokens ?? 0,
+        durationMs: body.durationMs ?? 0,
+        numTurns: body.numTurns ?? 1,
+        model: body.model || "opus",
+        isError: body.isError ?? false,
+      });
+
+      res.writeHead(201, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ success: true, cost }));
+    } catch (error) {
+      console.error("[HTTP] Failed to create session cost:", error);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Failed to store session cost" }));
+    }
+    return;
+  }
+
+  // GET /api/session-costs - Query session costs with filters
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "session-costs" &&
+    !pathSegments[2]
+  ) {
+    const agentId = queryParams.get("agentId");
+    const taskId = queryParams.get("taskId");
+    const limitParam = queryParams.get("limit");
+    const limit = limitParam ? parseInt(limitParam, 10) : 100;
+
+    let costs;
+    if (taskId) {
+      costs = getSessionCostsByTaskId(taskId);
+    } else if (agentId) {
+      costs = getSessionCostsByAgentId(agentId, limit);
+    } else {
+      costs = getAllSessionCosts(limit);
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ costs }));
     return;
   }
 
