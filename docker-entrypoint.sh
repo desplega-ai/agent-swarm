@@ -176,6 +176,12 @@ if command -v ai-tracker >/dev/null 2>&1; then
         echo "AI Tracker DB Path: $AI_TRACKER_DB_PATH (default, AGENT_ID not set)"
     fi
 
+    # Persist AI_TRACKER_DB_PATH to .bashrc for git hooks and new shell sessions
+    # Git hooks spawn fresh shells that don't inherit the exported env var
+    if ! grep -q "AI_TRACKER_DB_PATH" ~/.bashrc 2>/dev/null; then
+        echo "export AI_TRACKER_DB_PATH=\"${AI_TRACKER_DB_PATH}\"" >> ~/.bashrc
+    fi
+
     # Install ai-tracker hooks (Claude Code PostToolUse hook + git post-commit hook)
     echo "Installing ai-tracker hooks..."
     ai-tracker install || echo "AI Tracker install failed, continuing..."
