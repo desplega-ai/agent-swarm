@@ -327,11 +327,7 @@ interface CostData {
 }
 
 /** Save session cost data to the API */
-async function saveCostData(
-  cost: CostData,
-  apiUrl: string,
-  apiKey: string,
-): Promise<void> {
+async function saveCostData(cost: CostData, apiUrl: string, apiKey: string): Promise<void> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "X-Agent-ID": cost.agentId,

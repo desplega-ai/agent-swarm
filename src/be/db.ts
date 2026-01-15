@@ -2823,21 +2823,23 @@ export interface CreateSessionCostInput {
 
 export function createSessionCost(input: CreateSessionCostInput): SessionCost {
   const id = crypto.randomUUID();
-  sessionCostQueries.insert().run(
-    id,
-    input.sessionId,
-    input.taskId ?? null,
-    input.agentId,
-    input.totalCostUsd,
-    input.inputTokens ?? 0,
-    input.outputTokens ?? 0,
-    input.cacheReadTokens ?? 0,
-    input.cacheWriteTokens ?? 0,
-    input.durationMs,
-    input.numTurns,
-    input.model,
-    input.isError ? 1 : 0,
-  );
+  sessionCostQueries
+    .insert()
+    .run(
+      id,
+      input.sessionId,
+      input.taskId ?? null,
+      input.agentId,
+      input.totalCostUsd,
+      input.inputTokens ?? 0,
+      input.outputTokens ?? 0,
+      input.cacheReadTokens ?? 0,
+      input.cacheWriteTokens ?? 0,
+      input.durationMs,
+      input.numTurns,
+      input.model,
+      input.isError ? 1 : 0,
+    );
 
   return {
     id,

@@ -78,7 +78,7 @@ import {
   verifyWebhookSignature,
 } from "./github";
 import { startSlackApp, stopSlackApp } from "./slack";
-import type { AgentLog, AgentStatus } from "./types";
+import type { AgentLog, AgentStatus, SessionCost } from "./types";
 
 const port = parseInt(process.env.PORT || process.argv[2] || "3013", 10);
 const apiKey = process.env.API_KEY || "";
@@ -695,12 +695,13 @@ const httpServer = createHttpServer(async (req, res) => {
     pathSegments[1] === "session-costs" &&
     !pathSegments[2]
   ) {
-    const agentId = queryParams.get("agentId");
-    const taskId = queryParams.get("taskId");
-    const limitParam = queryParams.get("limit");
+    const costsQueryParams = parseQueryParams(req.url || "");
+    const agentId = costsQueryParams.get("agentId");
+    const taskId = costsQueryParams.get("taskId");
+    const limitParam = costsQueryParams.get("limit");
     const limit = limitParam ? parseInt(limitParam, 10) : 100;
 
-    let costs;
+    let costs: SessionCost[];
     if (taskId) {
       costs = getSessionCostsByTaskId(taskId);
     } else if (agentId) {
