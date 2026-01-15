@@ -557,6 +557,116 @@ done
 
 **Implementation**: Simply document the sidecar pattern (see Section 3.4) and provide example docker-compose.yml snippets for common services. No code changes required.
 
+#### 5.0.1 Service Auto-Discovery
+
+For agents to discover available sidecar services, there are several approaches:
+
+1. **Environment Variables (Recommended)**: Services are exposed to agents via standard environment variables injected by Docker Compose:
+   ```yaml
+   services:
+     worker:
+       environment:
+         DATABASE_URL: postgresql://postgres:password@postgres:5432/worker_${WORKER_ID}
+         REDIS_URL: redis://redis:6379
+         # Service availability flags
+         HAS_POSTGRES: "true"
+         HAS_REDIS: "true"
+   ```
+   Agents can check for `HAS_*` environment variables or attempt connection to `DATABASE_URL`/`REDIS_URL` to discover what's available.
+
+2. **Service Registry (For Complex Deployments)**: The agent-swarm already has a service registry (`register-service`, `list-services` MCP tools). Sidecar services can be registered at startup via an init container or startup script:
+   ```yaml
+   services:
+     service-registrar:
+       image: alpine
+       command: |
+         # Register postgres service to agent-swarm registry
+         curl -X POST "$SWARM_API/services" -d '{"name":"postgres","url":"postgres:5432"}'
+       depends_on:
+         - postgres
+   ```
+
+3. **DNS-Based Discovery**: Docker Compose creates a network where services are discoverable by their service name. Agents can simply try to connect to well-known hostnames (`postgres`, `redis`, `mysql`) and use what's available.
+
+#### 5.0.2 Database Isolation per Worker
+
+**Critical point: Each worker MUST have its own isolated database to prevent data conflicts and ensure security.**
+
+There are two main strategies:
+
+**Strategy A: Dedicated Database Instance per Worker (Recommended for full isolation)**
+```yaml
+services:
+  worker-1:
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres-worker-1:5432/worker
+    depends_on:
+      - postgres-worker-1
+
+  postgres-worker-1:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: worker
+    volumes:
+      - postgres-worker-1-data:/var/lib/postgresql/data
+
+  worker-2:
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres-worker-2:5432/worker
+    depends_on:
+      - postgres-worker-2
+
+  postgres-worker-2:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: worker
+    volumes:
+      - postgres-worker-2-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-worker-1-data:
+  postgres-worker-2-data:
+```
+
+**Strategy B: Shared Database Instance with Separate Databases/Schemas (More resource-efficient)**
+```yaml
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: password
+    volumes:
+      - ./init-worker-dbs.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres-data:/var/lib/postgresql/data
+
+  worker-1:
+    environment:
+      DATABASE_URL: postgresql://worker1:password@postgres:5432/worker1_db
+
+  worker-2:
+    environment:
+      DATABASE_URL: postgresql://worker2:password@postgres:5432/worker2_db
+
+# init-worker-dbs.sql:
+# CREATE DATABASE worker1_db;
+# CREATE USER worker1 WITH PASSWORD 'password';
+# GRANT ALL PRIVILEGES ON DATABASE worker1_db TO worker1;
+# CREATE DATABASE worker2_db;
+# CREATE USER worker2 WITH PASSWORD 'password';
+# GRANT ALL PRIVILEGES ON DATABASE worker2_db TO worker2;
+```
+
+**Why isolation matters:**
+- **Data integrity**: Workers may run arbitrary code that could corrupt shared data
+- **Security**: Workers should not be able to access other workers' data
+- **Debugging**: Isolated databases make it easier to trace issues to specific workers
+- **Cleanup**: When a worker is removed, its data can be cleanly deleted
+
+**For Redis**, similar isolation can be achieved using:
+- Separate Redis instances per worker (full isolation)
+- Redis databases (`SELECT 0`, `SELECT 1`, etc.) for logical separation
+- Key prefixing (`worker-1:*`, `worker-2:*`) for namespace isolation
+
 ### 5.1 Alternative: Short-Term (Minimal Changes)
 
 If embedded services are required, **use PM2 ecosystem files** already available in workers:
