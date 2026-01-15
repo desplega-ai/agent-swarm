@@ -40,7 +40,7 @@ export function useTasks(filters?: TaskFilters) {
   return useQuery({
     queryKey: ["tasks", filters],
     queryFn: () => api.fetchTasks(filters),
-    select: (data) => data.tasks,
+    select: (data) => ({ tasks: data.tasks, total: data.total }),
   });
 }
 

@@ -979,6 +979,116 @@ export function getAllTasks(filters?: TaskFilters): AgentTask[] {
   return tasks;
 }
 
+/**
+ * Get total count of tasks matching the given filters (ignoring limit).
+ * Used alongside getAllTasks to display accurate total counts in UI.
+ */
+export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">): number {
+  const conditions: string[] = [];
+  const params: (string | AgentTaskStatus)[] = [];
+
+  if (filters?.status) {
+    conditions.push("status = ?");
+    params.push(filters.status);
+  }
+
+  if (filters?.agentId) {
+    conditions.push("agentId = ?");
+    params.push(filters.agentId);
+  }
+
+  if (filters?.search) {
+    conditions.push("task LIKE ?");
+    params.push(`%${filters.search}%`);
+  }
+
+  if (filters?.unassigned) {
+    conditions.push("(agentId IS NULL OR status = 'unassigned')");
+  }
+
+  if (filters?.offeredTo) {
+    conditions.push("offeredTo = ?");
+    params.push(filters.offeredTo);
+  }
+
+  if (filters?.taskType) {
+    conditions.push("taskType = ?");
+    params.push(filters.taskType);
+  }
+
+  if (filters?.tags && filters.tags.length > 0) {
+    const tagConditions = filters.tags.map(() => "tags LIKE ?");
+    conditions.push(`(${tagConditions.join(" OR ")})`);
+    for (const tag of filters.tags) {
+      params.push(`%"${tag}"%`);
+    }
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const query = `SELECT COUNT(*) as count FROM agent_tasks ${whereClause}`;
+
+  const result = getDb()
+    .prepare<{ count: number }, (string | AgentTaskStatus)[]>(query)
+    .get(...params);
+
+  return result?.count ?? 0;
+}
+
+/**
+ * Get task statistics (counts by status) without any limit.
+ * This is more efficient than fetching all tasks for stats purposes.
+ */
+export function getTaskStats(): {
+  total: number;
+  unassigned: number;
+  offered: number;
+  reviewing: number;
+  pending: number;
+  in_progress: number;
+  completed: number;
+  failed: number;
+} {
+  const row = getDb()
+    .prepare<
+      {
+        total: number;
+        unassigned: number;
+        offered: number;
+        reviewing: number;
+        pending: number;
+        in_progress: number;
+        completed: number;
+        failed: number;
+      },
+      []
+    >(
+      `SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'unassigned' THEN 1 ELSE 0 END) as unassigned,
+        SUM(CASE WHEN status = 'offered' THEN 1 ELSE 0 END) as offered,
+        SUM(CASE WHEN status = 'reviewing' THEN 1 ELSE 0 END) as reviewing,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+      FROM agent_tasks`,
+    )
+    .get();
+
+  return (
+    row ?? {
+      total: 0,
+      unassigned: 0,
+      offered: 0,
+      reviewing: 0,
+      pending: 0,
+      in_progress: 0,
+      completed: 0,
+      failed: 0,
+    }
+  );
+}
+
 export function getCompletedSlackTasks(): AgentTask[] {
   return getDb()
     .prepare<AgentTaskRow, []>(

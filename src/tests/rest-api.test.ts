@@ -154,6 +154,9 @@ async function handleRequest(
       },
       tasks: {
         total: tasks.length,
+        unassigned: tasks.filter((t) => t.status === "unassigned").length,
+        offered: tasks.filter((t) => t.status === "offered").length,
+        reviewing: tasks.filter((t) => t.status === "reviewing").length,
         pending: tasks.filter((t) => t.status === "pending").length,
         in_progress: tasks.filter((t) => t.status === "in_progress").length,
         completed: tasks.filter((t) => t.status === "completed").length,
@@ -590,7 +593,7 @@ describe("REST API Endpoints", () => {
       expect(data.tasks).toBeDefined();
       expect(data.tasks.total).toBeGreaterThanOrEqual(2);
       expect(data.tasks.pending).toBeGreaterThanOrEqual(1);
-      expect(data.tasks.unassigned).toBeUndefined(); // Check that invalid status isn't counted
+      expect(data.tasks.unassigned).toBeGreaterThanOrEqual(1); // One task was created without agentId
     });
 
     test("should return empty stats for empty database", async () => {
@@ -618,6 +621,9 @@ describe("REST API Endpoints", () => {
       expect(data.agents.offline).toBe(0);
 
       expect(data.tasks.total).toBe(0);
+      expect(data.tasks.unassigned).toBe(0);
+      expect(data.tasks.offered).toBe(0);
+      expect(data.tasks.reviewing).toBe(0);
       expect(data.tasks.pending).toBe(0);
       expect(data.tasks.in_progress).toBe(0);
       expect(data.tasks.completed).toBe(0);
