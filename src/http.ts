@@ -46,11 +46,23 @@ import {
   updateAgentName,
   updateAgentStatus,
 } from "./be/db";
-import type { CommentEvent, IssueEvent, PullRequestEvent } from "./github";
+import type {
+  CheckRunEvent,
+  CheckSuiteEvent,
+  CommentEvent,
+  IssueEvent,
+  PullRequestEvent,
+  PullRequestReviewEvent,
+  WorkflowRunEvent,
+} from "./github";
 import {
+  handleCheckRun,
+  handleCheckSuite,
   handleComment,
   handleIssue,
   handlePullRequest,
+  handlePullRequestReview,
+  handleWorkflowRun,
   initGitHub,
   isGitHubEnabled,
   verifyWebhookSignature,
@@ -668,6 +680,18 @@ const httpServer = createHttpServer(async (req, res) => {
           break;
         case "pull_request_review_comment":
           result = await handleComment(body as CommentEvent, "pull_request_review_comment");
+          break;
+        case "pull_request_review":
+          result = await handlePullRequestReview(body as PullRequestReviewEvent);
+          break;
+        case "check_run":
+          result = await handleCheckRun(body as CheckRunEvent);
+          break;
+        case "check_suite":
+          result = await handleCheckSuite(body as CheckSuiteEvent);
+          break;
+        case "workflow_run":
+          result = await handleWorkflowRun(body as WorkflowRunEvent);
           break;
         default:
           console.log(`[GitHub] Ignoring unsupported event type: ${eventType}`);
