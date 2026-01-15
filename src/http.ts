@@ -7,7 +7,7 @@ import {
 } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import { createServer } from "@/server";
+import { createServer, hasCapability } from "@/server";
 import {
   claimInboxMessages,
   claimMentions,
@@ -1398,6 +1398,12 @@ globalState.__transports = transports;
 async function shutdown() {
   console.log("Shutting down HTTP server...");
 
+  // Stop scheduler (if enabled)
+  if (hasCapability("scheduling")) {
+    const { stopScheduler } = await import("./scheduler");
+    stopScheduler();
+  }
+
   // Stop Slack bot
   await stopSlackApp();
 
@@ -1432,6 +1438,13 @@ httpServer
 
     // Initialize GitHub webhook handler (if configured)
     initGitHub();
+
+    // Start scheduler (if enabled)
+    if (hasCapability("scheduling")) {
+      const { startScheduler } = await import("./scheduler");
+      const intervalMs = Number(process.env.SCHEDULER_INTERVAL_MS) || 10000;
+      startScheduler(intervalMs);
+    }
   })
   .on("error", (err) => {
     console.error("HTTP Server Error:", err);

@@ -19,6 +19,14 @@ import { registerPostMessageTool } from "./tools/post-message";
 import { registerReadMessagesTool } from "./tools/read-messages";
 // Services capability
 import { registerRegisterServiceTool } from "./tools/register-service";
+// Scheduling capability
+import {
+  registerCreateScheduleTool,
+  registerDeleteScheduleTool,
+  registerListSchedulesTool,
+  registerRunScheduleNowTool,
+  registerUpdateScheduleTool,
+} from "./tools/schedules";
 import { registerSendTaskTool } from "./tools/send-task";
 import { registerSlackListChannelsTool } from "./tools/slack-list-channels";
 import { registerSlackPostTool } from "./tools/slack-post";
@@ -34,7 +42,7 @@ import { registerUpdateServiceStatusTool } from "./tools/update-service-status";
 
 // Capability-based feature flags
 // Default: all capabilities enabled
-const DEFAULT_CAPABILITIES = "core,task-pool,messaging,profiles,services";
+const DEFAULT_CAPABILITIES = "core,task-pool,messaging,profiles,services,scheduling";
 const CAPABILITIES = new Set(
   (process.env.CAPABILITIES || DEFAULT_CAPABILITIES).split(",").map((s) => s.trim()),
 );
@@ -108,6 +116,15 @@ export function createServer() {
     registerUnregisterServiceTool(server);
     registerListServicesTool(server);
     registerUpdateServiceStatusTool(server);
+  }
+
+  // Scheduling capability - scheduled task management
+  if (hasCapability("scheduling")) {
+    registerListSchedulesTool(server);
+    registerCreateScheduleTool(server);
+    registerUpdateScheduleTool(server);
+    registerDeleteScheduleTool(server);
+    registerRunScheduleNowTool(server);
   }
 
   return server;
