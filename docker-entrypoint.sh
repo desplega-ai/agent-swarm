@@ -262,6 +262,18 @@ fi
 echo ""
 echo "=== Workspace Initialization ==="
 
+# Configure wts for agent use (no tmux, no auto-Claude)
+echo "Configuring wts for agent mode..."
+mkdir -p /home/worker/.wts
+cat > /home/worker/.wts/config.json << EOF
+{
+  "defaults": {
+    "autoTmux": false,
+    "autoClaude": false
+  }
+}
+EOF
+
 PERSONAL_DIR="/workspace/personal"
 mkdir -p "$PERSONAL_DIR"
 
