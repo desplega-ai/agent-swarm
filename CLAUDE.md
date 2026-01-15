@@ -2,6 +2,10 @@
 
 Multi-agent orchestration layer for Claude Code, Codex, Gemini CLI. Enables task distribution, agent communication, and service discovery.
 
+**Getting Started**: See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup. Run `bun run start:http` to start the server.
+
+**Database**: Uses `bun:sqlite` (SQLite with WAL mode). DB file at `./agent-swarm-db.sqlite` (auto-created). Schema defined in `src/be/db.ts`.
+
 ## Quick Reference
 
 ```bash
@@ -37,7 +41,8 @@ ui/             # Dashboard (separate React app)
 
 ## Code Style
 
-- Run `bun run lint:fix` before committing
+- Run `bun run lint:fix` before committing (lint + format)
+- Run `bun run format` for formatting only
 - Use Bun APIs, not Node.js equivalents
 - Prefer `Bun.$` over execa for shell commands
 
