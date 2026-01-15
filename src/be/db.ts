@@ -979,6 +979,61 @@ export function getAllTasks(filters?: TaskFilters): AgentTask[] {
   return tasks;
 }
 
+/**
+ * Get task statistics (counts by status) without any limit.
+ * This is more efficient than fetching all tasks for stats purposes.
+ */
+export function getTaskStats(): {
+  total: number;
+  unassigned: number;
+  offered: number;
+  reviewing: number;
+  pending: number;
+  in_progress: number;
+  completed: number;
+  failed: number;
+} {
+  const row = getDb()
+    .prepare<
+      {
+        total: number;
+        unassigned: number;
+        offered: number;
+        reviewing: number;
+        pending: number;
+        in_progress: number;
+        completed: number;
+        failed: number;
+      },
+      []
+    >(
+      `SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'unassigned' THEN 1 ELSE 0 END) as unassigned,
+        SUM(CASE WHEN status = 'offered' THEN 1 ELSE 0 END) as offered,
+        SUM(CASE WHEN status = 'reviewing' THEN 1 ELSE 0 END) as reviewing,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+      FROM agent_tasks`,
+    )
+    .get();
+
+  return (
+    row ?? {
+      total: 0,
+      unassigned: 0,
+      offered: 0,
+      reviewing: 0,
+      pending: 0,
+      in_progress: 0,
+      completed: 0,
+      failed: 0,
+    }
+  );
+}
+
 export function getCompletedSlackTasks(): AgentTask[] {
   return getDb()
     .prepare<AgentTaskRow, []>(
