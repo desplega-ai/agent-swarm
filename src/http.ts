@@ -37,6 +37,8 @@ import {
   getServicesByAgentId,
   getSessionLogsByTaskId,
   getTaskById,
+  getTaskStats,
+  getTasksCount,
   getUnassignedTasksCount,
   hasCapacity,
   markTasksNotified,
@@ -814,13 +816,15 @@ const httpServer = createHttpServer(async (req, res) => {
     const status = queryParams.get("status") as import("./types").AgentTaskStatus | null;
     const agentId = queryParams.get("agentId");
     const search = queryParams.get("search");
-    const tasks = getAllTasks({
+    const filters = {
       status: status || undefined,
       agentId: agentId || undefined,
       search: search || undefined,
-    });
+    };
+    const tasks = getAllTasks(filters);
+    const total = getTasksCount(filters);
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ tasks }));
+    res.end(JSON.stringify({ tasks, total }));
     return;
   }
 
@@ -909,7 +913,7 @@ const httpServer = createHttpServer(async (req, res) => {
   // GET /api/stats - Dashboard summary stats
   if (req.method === "GET" && pathSegments[0] === "api" && pathSegments[1] === "stats") {
     const agents = getAllAgents();
-    const tasks = getAllTasks();
+    const taskStats = getTaskStats();
 
     const stats = {
       agents: {
@@ -919,11 +923,14 @@ const httpServer = createHttpServer(async (req, res) => {
         offline: agents.filter((a) => a.status === "offline").length,
       },
       tasks: {
-        total: tasks.length,
-        pending: tasks.filter((t) => t.status === "pending").length,
-        in_progress: tasks.filter((t) => t.status === "in_progress").length,
-        completed: tasks.filter((t) => t.status === "completed").length,
-        failed: tasks.filter((t) => t.status === "failed").length,
+        total: taskStats.total,
+        unassigned: taskStats.unassigned,
+        offered: taskStats.offered,
+        reviewing: taskStats.reviewing,
+        pending: taskStats.pending,
+        in_progress: taskStats.in_progress,
+        completed: taskStats.completed,
+        failed: taskStats.failed,
       },
     };
 

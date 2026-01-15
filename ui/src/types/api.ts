@@ -140,6 +140,7 @@ export interface AgentsResponse {
 
 export interface TasksResponse {
   tasks: AgentTask[];
+  total: number;
 }
 
 export interface LogsResponse {
