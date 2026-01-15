@@ -39,6 +39,115 @@ Available Slack tools:
 - \`send-task\`: Assign a new task to a specific worker or to the general pool
 - \`inbox-delegate\`: Delegate an inbox message to a worker (creates task with Slack context)
 - \`store-progress\`: Track coordination notes or update task status
+
+#### Task Templates
+
+When delegating tasks, use the appropriate template based on task type. Workers should use the corresponding \`/desplega:\` commands which auto-save outputs to the shared filesystem.
+
+---
+
+**RESEARCH TASK** - For gathering information, analyzing existing code, or exploring topics:
+
+\`\`\`
+Task Type: Research
+Topic: {what to research}
+
+Instructions:
+1. Use \`/desplega:research\` command to perform the research
+2. Focus on: {specific questions or areas}
+3. Output will be saved to /workspace/shared/thoughts/{agentId}/research/
+
+Expected output: {what findings you need}
+\`\`\`
+
+---
+
+**PLANNING TASK** - For designing implementation approach before coding:
+
+\`\`\`
+Task Type: Planning
+Goal: {what needs to be planned}
+
+Context:
+- Repository: {repo URL or path}
+- Related files: {key files to consider}
+
+Instructions:
+1. Use \`/desplega:create-plan\` command
+2. Consider: {constraints, patterns to follow, etc.}
+3. Plan will be saved to /workspace/shared/thoughts/{agentId}/plans/
+
+Expected output: Detailed implementation plan with steps
+\`\`\`
+
+---
+
+**IMPLEMENTATION TASK** - For coding tasks with a repository:
+
+\`\`\`
+Task Type: Implementation
+Goal: {what to implement}
+
+Repository: {repo URL, e.g. https://github.com/org/repo}
+
+Workflow:
+1. Clone repo if needed: git clone {repo_url} /workspace/{repo_name}
+2. Ensure main is current: cd /workspace/{repo_name} && git checkout main && git pull
+3. Setup wts: wts init -y
+4. Create worktree: wts create {branch-name} --new-branch
+5. Use \`/desplega:implement-plan\` if there's a plan, otherwise implement directly
+6. Test changes
+7. Commit with clear message
+8. Create PR: wts pr --title "..." --body "..."
+
+Notes:
+- Use \`slack-reply\` with taskId for progress updates
+- Call \`store-progress\` periodically and when done
+\`\`\`
+
+---
+
+**QUICK FIX TASK** - For bug fixes, small changes, or well-defined code edits (no plan needed):
+
+\`\`\`
+Task Type: Quick Fix
+Goal: {what to fix/change}
+
+Repository: {repo URL, e.g. https://github.com/org/repo}
+Target files: {specific files to modify, if known}
+
+Workflow:
+1. Clone repo if needed: git clone {repo_url} /workspace/{repo_name}
+2. Ensure main is current: cd /workspace/{repo_name} && git checkout main && git pull
+3. Setup wts: wts init -y
+4. Create worktree: wts create {branch-name} --new-branch
+5. Make the fix/change
+6. Test changes
+7. Commit with clear message
+8. Create PR: wts pr --title "..." --body "..."
+
+Notes:
+- Use \`slack-reply\` with taskId for progress updates
+- Call \`store-progress\` when done
+\`\`\`
+
+---
+
+**GENERAL TASK** - For non-code tasks, questions, or quick actions:
+
+\`\`\`
+Task: {describe what needs to be done}
+
+{Any additional context or constraints}
+\`\`\`
+
+---
+
+**Decision guide:**
+- Research/exploration/analysis → Use RESEARCH template
+- Complex feature/major refactor → Use PLANNING first, then IMPLEMENTATION
+- Bug fix/small code change → Use QUICK FIX template
+- Non-code task/question → Use GENERAL template
 `;
 
 const BASE_PROMPT_WORKER = `
