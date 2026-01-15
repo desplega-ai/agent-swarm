@@ -1,7 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { cancelTask, getAgentById, getTaskById, updateAgentStatusFromCapacity } from "@/be/db";
+import {
+  cancelTask,
+  getAgentById,
+  getDb,
+  getTaskById,
+  updateAgentStatusFromCapacity,
+} from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
+import type { AgentTask } from "@/types";
 import { AgentTaskSchema } from "@/types";
 
 export const registerCancelTaskTool = (server: McpServer) => {
@@ -35,74 +42,67 @@ export const registerCancelTaskTool = (server: McpServer) => {
       }
 
       const agentId = requestInfo.agentId;
-      const callerAgent = getAgentById(agentId);
 
-      if (!callerAgent) {
-        return {
-          content: [{ type: "text", text: "Caller agent not found." }],
-          structuredContent: {
+      const txn = getDb().transaction(() => {
+        const callerAgent = getAgentById(agentId);
+
+        if (!callerAgent) {
+          return {
             success: false,
             message: "Caller agent not found.",
-          },
-        };
-      }
+          };
+        }
 
-      const existingTask = getTaskById(taskId);
+        const existingTask = getTaskById(taskId);
 
-      if (!existingTask) {
-        return {
-          content: [{ type: "text", text: `Task "${taskId}" not found.` }],
-          structuredContent: {
-            yourAgentId: agentId,
+        if (!existingTask) {
+          return {
             success: false,
             message: `Task "${taskId}" not found.`,
-          },
-        };
-      }
+          };
+        }
 
-      // Verify the requester has permission (lead or task creator)
-      const canCancel = callerAgent.isLead || existingTask.creatorAgentId === agentId;
-      if (!canCancel) {
-        return {
-          content: [{ type: "text", text: "Only the lead or task creator can cancel tasks." }],
-          structuredContent: {
-            yourAgentId: agentId,
+        // Verify the requester has permission (lead or task creator)
+        const canCancel = callerAgent.isLead || existingTask.creatorAgentId === agentId;
+        if (!canCancel) {
+          return {
             success: false,
             message: "Only the lead or task creator can cancel tasks.",
-          },
-        };
-      }
+          };
+        }
 
-      const cancelled = cancelTask(taskId, reason);
+        const cancelled = cancelTask(taskId, reason);
 
-      if (!cancelled) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Cannot cancel task in status "${existingTask.status}". Only pending/in_progress tasks can be cancelled.`,
-            },
-          ],
-          structuredContent: {
-            yourAgentId: agentId,
+        if (!cancelled) {
+          return {
             success: false,
             message: `Cannot cancel task in status "${existingTask.status}". Only pending/in_progress tasks can be cancelled.`,
-          },
-        };
-      }
+          };
+        }
 
-      // Update agent status based on capacity
-      if (cancelled.agentId) {
-        updateAgentStatusFromCapacity(cancelled.agentId);
-      }
+        // Update agent status based on capacity
+        if (cancelled.agentId) {
+          updateAgentStatusFromCapacity(cancelled.agentId);
+        }
 
-      return {
-        content: [{ type: "text", text: `Task "${taskId}" has been cancelled.` }],
-        structuredContent: {
-          yourAgentId: agentId,
+        return {
           success: true,
           message: `Task "${taskId}" has been cancelled.`,
           task: cancelled,
+        };
+      });
+
+      const result = txn() as {
+        success: boolean;
+        message: string;
+        task?: AgentTask;
+      };
+
+      return {
+        content: [{ type: "text", text: result.message }],
+        structuredContent: {
+          yourAgentId: agentId,
+          ...result,
         },
       };
     },
