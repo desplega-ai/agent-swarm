@@ -38,6 +38,7 @@ import {
   getSessionLogsByTaskId,
   getTaskById,
   getTaskStats,
+  getTasksCount,
   getUnassignedTasksCount,
   hasCapacity,
   markTasksNotified,
@@ -815,13 +816,15 @@ const httpServer = createHttpServer(async (req, res) => {
     const status = queryParams.get("status") as import("./types").AgentTaskStatus | null;
     const agentId = queryParams.get("agentId");
     const search = queryParams.get("search");
-    const tasks = getAllTasks({
+    const filters = {
       status: status || undefined,
       agentId: agentId || undefined,
       search: search || undefined,
-    });
+    };
+    const tasks = getAllTasks(filters);
+    const total = getTasksCount(filters);
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ tasks }));
+    res.end(JSON.stringify({ tasks, total }));
     return;
   }
 

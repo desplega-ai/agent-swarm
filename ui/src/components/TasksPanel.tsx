@@ -186,7 +186,9 @@ export default function TasksPanel({
     return Object.keys(f).length > 0 ? f : undefined;
   }, [statusFilter, agentFilter, searchQuery]);
 
-  const { data: tasks, isLoading } = useTasks(filters);
+  const { data: tasksData, isLoading } = useTasks(filters);
+  const tasks = tasksData?.tasks;
+  const totalCount = tasksData?.total ?? 0;
 
   // Create agent lookup
   const agentMap = useMemo(() => {
@@ -254,7 +256,7 @@ export default function TasksPanel({
               color: "text.tertiary",
             }}
           >
-            ({tasks?.length || 0})
+            ({totalCount})
           </Typography>
         </Box>
 
@@ -563,7 +565,7 @@ export default function TasksPanel({
       </Box>
 
       {/* Footer */}
-      {tasks && tasks.length > 50 && (
+      {tasks && totalCount > tasks.length && (
         <Box
           sx={{
             p: 1.5,
@@ -580,7 +582,7 @@ export default function TasksPanel({
               color: "text.tertiary",
             }}
           >
-            Showing 50 of {tasks.length} tasks
+            Showing {Math.min(50, tasks.length)} of {totalCount} tasks
           </Typography>
         </Box>
       )}
