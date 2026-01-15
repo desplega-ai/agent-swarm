@@ -226,7 +226,11 @@ const httpServer = createHttpServer(async (req, res) => {
   }
 
   // GET /cancelled-tasks - Check for recently cancelled tasks (for hook cancellation detection)
-  if (req.method === "GET" && req.url === "/cancelled-tasks") {
+  // Supports optional ?taskId= query param for checking specific task cancellation
+  if (
+    req.method === "GET" &&
+    (req.url === "/cancelled-tasks" || req.url?.startsWith("/cancelled-tasks?"))
+  ) {
     if (!myAgentId) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
@@ -240,6 +244,35 @@ const httpServer = createHttpServer(async (req, res) => {
       return;
     }
 
+    // Check for specific taskId query param
+    const queryParams = parseQueryParams(req.url || "");
+    const taskId = queryParams.get("taskId");
+
+    if (taskId) {
+      // Check if specific task is cancelled
+      const task = getTaskById(taskId);
+      if (task && task.status === "cancelled") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            cancelled: [
+              {
+                id: task.id,
+                task: task.task,
+                failureReason: task.failureReason,
+              },
+            ],
+          }),
+        );
+        return;
+      }
+      // Task not found or not cancelled
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ cancelled: [] }));
+      return;
+    }
+
+    // No taskId - return all recently cancelled tasks for this agent
     const cancelledTasks = getRecentlyCancelledTasksForAgent(myAgentId);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ cancelled: cancelledTasks }));

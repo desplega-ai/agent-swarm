@@ -259,6 +259,48 @@ export async function handleHook(): Promise<void> {
     console.log(JSON.stringify(response));
   };
 
+  /**
+   * Check for task cancellation and output a block response if cancelled.
+   * Used by both PreToolUse and UserPromptSubmit hooks.
+   * @param includeTaskFileWarning Whether to include a warning about missing TASK_FILE (for PreToolUse)
+   * @returns true if task is cancelled (and response was output), false otherwise
+   */
+  const checkAndBlockIfCancelled = async (includeTaskFileWarning: boolean): Promise<boolean> => {
+    // Use task file approach for precise cancellation detection
+    const taskFileData = await readTaskFile();
+    if (taskFileData) {
+      // Task file exists - check if this specific task is cancelled
+      const { cancelled, reason } = await isTaskCancelled(taskFileData.taskId);
+      if (cancelled) {
+        const cancelReason = reason || "Task cancelled by lead or creator";
+        outputBlockResponse(
+          `🛑 TASK CANCELLED: Your current task (${taskFileData.taskId.slice(0, 8)}) has been cancelled. Reason: "${cancelReason}". ` +
+            `Stop working on this task immediately. Do NOT continue making tool calls. ` +
+            `Use store-progress to acknowledge the cancellation and mark the task as failed, then wait for new tasks.`,
+        );
+        return true;
+      }
+    } else {
+      // No task file - fallback to general check for backwards compatibility
+      // This also serves as a safety net when TASK_FILE env var is not set
+      const cancelledTasks = await getCancelledTasks();
+      const firstCancelledTask = cancelledTasks[0];
+      if (firstCancelledTask) {
+        const cancelReason =
+          firstCancelledTask.failureReason || "Task cancelled by lead or creator";
+        const taskFileNote = includeTaskFileWarning
+          ? ` Note: TASK_FILE not found - consider restarting if this persists.`
+          : "";
+        outputBlockResponse(
+          `🛑 TASK CANCELLED: A task has been cancelled. Reason: "${cancelReason}". ` +
+            `Stop working and verify your current task status with store-progress.${taskFileNote}`,
+        );
+        return true;
+      }
+    }
+    return false;
+  };
+
   const formatSystemTray = (inbox: InboxSummary): string | null => {
     const {
       unreadCount,
@@ -372,35 +414,8 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
       // For worker agents, check if their task has been cancelled
       // If so, block the tool call and tell Claude to stop
       if (agentInfo && !agentInfo.isLead && agentInfo.status === "busy") {
-        // Use task file approach for precise cancellation detection
-        const taskFileData = await readTaskFile();
-        if (taskFileData) {
-          // Task file exists - check if this specific task is cancelled
-          const { cancelled, reason } = await isTaskCancelled(taskFileData.taskId);
-          if (cancelled) {
-            const cancelReason = reason || "Task cancelled by lead or creator";
-            outputBlockResponse(
-              `🛑 TASK CANCELLED: Your current task (${taskFileData.taskId.slice(0, 8)}) has been cancelled. Reason: "${cancelReason}". ` +
-                `Stop working on this task immediately. Do NOT continue making tool calls. ` +
-                `Use store-progress to acknowledge the cancellation and mark the task as failed, then wait for new tasks.`,
-            );
-            return; // Exit early - don't process other hooks
-          }
-        } else {
-          // No task file - fallback to general check for backwards compatibility
-          // This also serves as a safety net when TASK_FILE env var is not set
-          const cancelledTasks = await getCancelledTasks();
-          const firstCancelledTask = cancelledTasks[0];
-          if (firstCancelledTask) {
-            const cancelReason =
-              firstCancelledTask.failureReason || "Task cancelled by lead or creator";
-            outputBlockResponse(
-              `🛑 TASK CANCELLED: A task has been cancelled. Reason: "${cancelReason}". ` +
-                `Stop working and verify your current task status with store-progress. ` +
-                `Note: TASK_FILE not found - consider restarting if this persists.`,
-            );
-            return; // Exit early - don't process other hooks
-          }
+        if (await checkAndBlockIfCancelled(true)) {
+          return; // Exit early - don't process other hooks
         }
       }
       break;
@@ -428,34 +443,8 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
       // For worker agents, check if their task has been cancelled
       // This catches cancellations at the start of a new iteration
       if (agentInfo && !agentInfo.isLead && agentInfo.status === "busy") {
-        // Use task file approach for precise cancellation detection
-        const taskFileData = await readTaskFile();
-        if (taskFileData) {
-          // Task file exists - check if this specific task is cancelled
-          const { cancelled, reason } = await isTaskCancelled(taskFileData.taskId);
-          if (cancelled) {
-            const cancelReason = reason || "Task cancelled by lead or creator";
-            outputBlockResponse(
-              `🛑 TASK CANCELLED: Your current task (${taskFileData.taskId.slice(0, 8)}) has been cancelled. Reason: "${cancelReason}". ` +
-                `Stop working on this task immediately. ` +
-                `Acknowledge this cancellation and wait for new tasks.`,
-            );
-            return; // Exit early
-          }
-        } else {
-          // No task file - fallback to general check for backwards compatibility
-          const cancelledTasks = await getCancelledTasks();
-          const firstCancelledTask = cancelledTasks[0];
-          if (firstCancelledTask) {
-            const cancelReason =
-              firstCancelledTask.failureReason || "Task cancelled by lead or creator";
-            outputBlockResponse(
-              `🛑 TASK CANCELLED: A task has been cancelled. Reason: "${cancelReason}". ` +
-                `Stop working and verify your current task status. ` +
-                `Note: TASK_FILE not found - consider restarting if this persists.`,
-            );
-            return; // Exit early
-          }
+        if (await checkAndBlockIfCancelled(true)) {
+          return; // Exit early
         }
       }
       break;
