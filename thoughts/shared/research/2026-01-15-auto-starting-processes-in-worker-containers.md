@@ -225,6 +225,7 @@ module.exports = {
 | Multi-process with dependencies | **s6-overlay** |
 | Node.js multi-process | PM2 (already available) |
 | Legacy/simple multi-process | supervisord (with caveats) |
+| **Flexible team deployments** | **Docker Compose sidecar services** (Recommended) |
 
 ---
 
@@ -298,6 +299,85 @@ module.exports = {
 ```
 
 **Note**: PM2 works best with Node.js; for system services like PostgreSQL, s6-overlay is more appropriate.
+
+### 3.4 Option D: Docker Compose Sidecar Services (Recommended for Flexibility)
+
+**Best for**: Teams deploying the swarm who want maximum flexibility and control over their infrastructure.
+
+Instead of embedding services within worker containers, teams can add services as sidecar containers in their Docker Compose configuration. This is the most flexible approach as it allows each deployment to choose exactly which services they need without modifying the base worker image.
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  # Worker agent container
+  worker:
+    image: desplega/agent-swarm-worker:latest
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/worker
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - worker-network
+
+  # PostgreSQL sidecar
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: worker
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - worker-network
+
+  # Redis sidecar
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - worker-network
+
+volumes:
+  postgres-data:
+  redis-data:
+
+networks:
+  worker-network:
+    driver: bridge
+```
+
+**Pros**:
+- **Maximum flexibility**: Each team decides which services they need
+- **Clean separation**: Services run in isolated containers with their own resources
+- **Standard Docker patterns**: Leverages well-understood Docker Compose conventions
+- **Easy scaling**: Services can be scaled independently
+- **No image modification**: Base worker image stays lean and generic
+- **Health checks built-in**: Docker Compose handles service health and dependencies
+- **Official images**: Use maintained official images for PostgreSQL, Redis, etc.
+
+**Cons**:
+- Requires Docker Compose for orchestration
+- Slightly higher network latency vs embedded services
+- Each deployment needs to manage their own compose file
+
+**When to use**: This is the **recommended approach** for most deployments. It provides the best balance of flexibility, maintainability, and separation of concerns. Teams can easily add, remove, or swap services without any changes to the core agent-swarm infrastructure.
 
 ---
 
@@ -464,9 +544,22 @@ done
 
 ## 5. Recommended Implementation Approach
 
-### 5.1 Short-Term (Minimal Changes)
+### 5.0 Recommended: Docker Compose Sidecar Services
 
-**Use PM2 ecosystem files** already available in workers:
+**For most deployments, the sidecar approach is recommended.** Instead of embedding services in worker containers, let each team deploying the swarm choose which services to add to their docker-compose.yml as sidecar services.
+
+**Why this is preferred:**
+- Zero changes needed to the base worker image
+- Teams have full control over their infrastructure
+- Standard Docker Compose patterns that everyone understands
+- Easy to add/remove services per deployment needs
+- Official images with security updates managed upstream
+
+**Implementation**: Simply document the sidecar pattern (see Section 3.4) and provide example docker-compose.yml snippets for common services. No code changes required.
+
+### 5.1 Alternative: Short-Term (Minimal Changes)
+
+If embedded services are required, **use PM2 ecosystem files** already available in workers:
 
 1. Create service scripts in worker container
 2. Register services via existing PM2 infrastructure
