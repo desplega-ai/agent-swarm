@@ -797,6 +797,12 @@ export const taskQueries = {
        WHERE id = ? RETURNING *`,
     ),
 
+  setCancelled: () =>
+    getDb().prepare<AgentTaskRow, [string, string, string]>(
+      `UPDATE agent_tasks SET status = 'cancelled', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? RETURNING *`,
+    ),
+
   setProgress: () =>
     getDb().prepare<AgentTaskRow, [string, string]>(
       "UPDATE agent_tasks SET progress = ?, status = 'in_progress', lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
@@ -1234,6 +1240,54 @@ export function failTask(id: string, reason: string): AgentTask | null {
     } catch {}
   }
   return row ? rowToAgentTask(row) : null;
+}
+
+export function cancelTask(id: string, reason?: string): AgentTask | null {
+  const oldTask = getTaskById(id);
+  if (!oldTask) return null;
+
+  // Only cancel tasks that are in progress or pending
+  if (!["pending", "in_progress"].includes(oldTask.status)) {
+    return null;
+  }
+
+  const finishedAt = new Date().toISOString();
+  const cancelReason = reason ?? "Cancelled by user";
+  const row = taskQueries.setCancelled().get(cancelReason, finishedAt, id);
+
+  if (row && oldTask) {
+    try {
+      createLogEntry({
+        eventType: "task_status_change",
+        taskId: id,
+        agentId: row.agentId ?? undefined,
+        oldValue: oldTask.status,
+        newValue: "cancelled",
+        metadata: reason ? { reason } : undefined,
+      });
+    } catch {}
+  }
+
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Get recently cancelled tasks for an agent.
+ * Used by hooks to detect task cancellation and stop the worker loop.
+ * Returns tasks cancelled within the last 5 minutes.
+ */
+export function getRecentlyCancelledTasksForAgent(agentId: string): AgentTask[] {
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const rows = getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      `SELECT * FROM agent_tasks
+       WHERE agentId = ?
+       AND status = 'cancelled'
+       AND finishedAt > ?
+       ORDER BY finishedAt DESC`,
+    )
+    .all(agentId, fiveMinutesAgo);
+  return rows.map(rowToAgentTask);
 }
 
 export function deleteTask(id: string): boolean {

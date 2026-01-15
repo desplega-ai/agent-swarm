@@ -50,6 +50,55 @@ interface AgentWithInbox extends Agent {
   inbox?: InboxSummary;
 }
 
+interface CancelledTask {
+  id: string;
+  task: string;
+  failureReason?: string;
+}
+
+interface CancelledTasksResponse {
+  cancelled: CancelledTask[];
+}
+
+/**
+ * Hook response for blocking actions
+ * See: https://code.claude.com/docs/en/hooks
+ */
+interface HookBlockResponse {
+  decision: "block";
+  reason: string;
+}
+
+/**
+ * Task file data written by runner to /tmp for hook to read
+ */
+interface TaskFileData {
+  taskId: string;
+  agentId: string;
+  startedAt: string;
+}
+
+/**
+ * Read task file from TASK_FILE env var.
+ * Returns null if file doesn't exist or can't be read.
+ */
+async function readTaskFile(): Promise<TaskFileData | null> {
+  const taskFilePath = process.env.TASK_FILE;
+  if (!taskFilePath) {
+    return null;
+  }
+
+  try {
+    const file = Bun.file(taskFilePath);
+    if (!(await file.exists())) {
+      return null;
+    }
+    return (await file.json()) as TaskFileData;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Main hook handler - processes Claude Code hook events
  */
@@ -136,6 +185,120 @@ export async function handleHook(): Promise<void> {
     }
 
     return;
+  };
+
+  /**
+   * Check for recently cancelled tasks for this agent.
+   * Used to detect task cancellation and stop the worker loop.
+   * @deprecated Use isTaskCancelled with specific taskId from task file instead
+   */
+  const getCancelledTasks = async (): Promise<CancelledTask[]> => {
+    if (!mcpConfig) return [];
+
+    try {
+      const resp = await fetch(`${getBaseUrl()}/cancelled-tasks`, {
+        method: "GET",
+        headers: mcpConfig.headers,
+      });
+
+      if (!resp.ok) {
+        return [];
+      }
+
+      const data = (await resp.json()) as CancelledTasksResponse;
+      return data.cancelled || [];
+    } catch {
+      // Silently fail
+      return [];
+    }
+  };
+
+  /**
+   * Check if a specific task has been cancelled.
+   * Uses task file approach for precise cancellation detection.
+   */
+  const isTaskCancelled = async (
+    taskId: string,
+  ): Promise<{ cancelled: boolean; reason?: string }> => {
+    if (!mcpConfig) return { cancelled: false };
+
+    try {
+      const resp = await fetch(
+        `${getBaseUrl()}/cancelled-tasks?taskId=${encodeURIComponent(taskId)}`,
+        {
+          method: "GET",
+          headers: mcpConfig.headers,
+        },
+      );
+
+      if (!resp.ok) {
+        return { cancelled: false };
+      }
+
+      const data = (await resp.json()) as CancelledTasksResponse;
+      const cancelledTask = data.cancelled?.find((t) => t.id === taskId);
+      if (cancelledTask) {
+        return { cancelled: true, reason: cancelledTask.failureReason };
+      }
+      return { cancelled: false };
+    } catch {
+      // Silently fail
+      return { cancelled: false };
+    }
+  };
+
+  /**
+   * Output a blocking response to stop Claude from continuing.
+   * This is used when a task has been cancelled.
+   */
+  const outputBlockResponse = (reason: string): void => {
+    const response: HookBlockResponse = {
+      decision: "block",
+      reason,
+    };
+    console.log(JSON.stringify(response));
+  };
+
+  /**
+   * Check for task cancellation and output a block response if cancelled.
+   * Used by both PreToolUse and UserPromptSubmit hooks.
+   * @param includeTaskFileWarning Whether to include a warning about missing TASK_FILE (for PreToolUse)
+   * @returns true if task is cancelled (and response was output), false otherwise
+   */
+  const checkAndBlockIfCancelled = async (includeTaskFileWarning: boolean): Promise<boolean> => {
+    // Use task file approach for precise cancellation detection
+    const taskFileData = await readTaskFile();
+    if (taskFileData) {
+      // Task file exists - check if this specific task is cancelled
+      const { cancelled, reason } = await isTaskCancelled(taskFileData.taskId);
+      if (cancelled) {
+        const cancelReason = reason || "Task cancelled by lead or creator";
+        outputBlockResponse(
+          `🛑 TASK CANCELLED: Your current task (${taskFileData.taskId.slice(0, 8)}) has been cancelled. Reason: "${cancelReason}". ` +
+            `Stop working on this task immediately. Do NOT continue making tool calls. ` +
+            `Use store-progress to acknowledge the cancellation and mark the task as failed, then wait for new tasks.`,
+        );
+        return true;
+      }
+    } else {
+      // No task file - fallback to general check for backwards compatibility
+      // This also serves as a safety net when TASK_FILE env var is not set
+      const cancelledTasks = await getCancelledTasks();
+      const firstCancelledTask = cancelledTasks[0];
+      if (firstCancelledTask) {
+        const cancelReason =
+          firstCancelledTask.failureReason || "Task cancelled by lead or creator";
+        const taskFileNote = includeTaskFileWarning
+          ? ` Note: TASK_FILE not found - consider restarting if this persists.`
+          : "";
+        outputBlockResponse(
+          `🛑 TASK CANCELLED: A task has been cancelled. Reason: "${cancelReason}". ` +
+            `Stop working and verify your current task status with store-progress.${taskFileNote}`,
+        );
+        return true;
+      }
+    }
+    return false;
   };
 
   const formatSystemTray = (inbox: InboxSummary): string | null => {
@@ -247,9 +410,16 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
       // Covered by SessionStart hook
       break;
 
-    case "PreToolUse":
-      // Nothing to do here for now
+    case "PreToolUse": {
+      // For worker agents, check if their task has been cancelled
+      // If so, block the tool call and tell Claude to stop
+      if (agentInfo && !agentInfo.isLead && agentInfo.status === "busy") {
+        if (await checkAndBlockIfCancelled(true)) {
+          return; // Exit early - don't process other hooks
+        }
+      }
       break;
+    }
 
     case "PostToolUse":
       if (agentInfo) {
@@ -269,9 +439,16 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
       }
       break;
 
-    case "UserPromptSubmit":
-      // Nothing specific for now
+    case "UserPromptSubmit": {
+      // For worker agents, check if their task has been cancelled
+      // This catches cancellations at the start of a new iteration
+      if (agentInfo && !agentInfo.isLead && agentInfo.status === "busy") {
+        if (await checkAndBlockIfCancelled(true)) {
+          return; // Exit early
+        }
+      }
       break;
+    }
 
     case "Stop":
       // Save PM2 processes before shutdown (for container restart persistence)
