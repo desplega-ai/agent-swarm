@@ -53,6 +53,13 @@ const statusConfig: Record<AgentStatus | TaskStatus, StatusConfig> = {
     textColor: { dark: "#9370DB", light: "#6B5B95" },
     glowColor: { dark: "rgba(147, 112, 219, 0.4)", light: "rgba(128, 90, 213, 0.2)" },
   },
+  reviewing: {
+    color: "warning",
+    label: "REVIEWING",
+    bgColor: { dark: "rgba(100, 149, 237, 0.15)", light: "rgba(70, 130, 180, 0.12)" },
+    textColor: { dark: "#6495ED", light: "#4682B4" },
+    glowColor: { dark: "rgba(100, 149, 237, 0.4)", light: "rgba(70, 130, 180, 0.2)" },
+  },
   pending: {
     color: "neutral",
     label: "PENDING",
@@ -80,6 +87,13 @@ const statusConfig: Record<AgentStatus | TaskStatus, StatusConfig> = {
     bgColor: { dark: "rgba(168, 84, 84, 0.15)", light: "rgba(181, 66, 66, 0.12)" },
     textColor: { dark: "#A85454", light: "#B54242" },
     glowColor: { dark: "rgba(168, 84, 84, 0.4)", light: "rgba(181, 66, 66, 0.2)" },
+  },
+  cancelled: {
+    color: "neutral",
+    label: "CANCELLED",
+    bgColor: { dark: "rgba(128, 128, 128, 0.15)", light: "rgba(169, 169, 169, 0.12)" },
+    textColor: { dark: "#808080", light: "#696969" },
+    glowColor: { dark: "rgba(128, 128, 128, 0.3)", light: "rgba(169, 169, 169, 0.15)" },
   },
 };
 
