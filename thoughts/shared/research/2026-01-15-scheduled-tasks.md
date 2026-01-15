@@ -1,3 +1,11 @@
+---
+date: 2026-01-15
+topic: "Scheduled Tasks for the Agent Swarm"
+researcher: "Claude"
+status: "complete"
+tags: [scheduling, cron, sqlite, task-automation]
+---
+
 # Research: Scheduled Tasks for the Agent Swarm
 
 **Date**: 2026-01-15

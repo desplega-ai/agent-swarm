@@ -1,3 +1,11 @@
+---
+date: 2026-01-15
+author: Claude
+status: ready
+tags: [scheduling, cron, sqlite, task-automation, implementation]
+related_research: thoughts/shared/research/2026-01-15-scheduled-tasks.md
+---
+
 # Scheduled Tasks Feature - Implementation Plan
 
 **Date**: 2026-01-15
@@ -550,7 +558,7 @@ Add brief mention of scheduling capability in features section.
 
 ## References
 
-- Research document: `docs/research/scheduled-tasks.md`
+- Research document: `thoughts/shared/research/2026-01-15-scheduled-tasks.md`
 - Existing polling pattern: `src/slack/watcher.ts`
 - Task creation: `src/be/db.ts`
 - Tool registration: `src/tools/utils.ts`
