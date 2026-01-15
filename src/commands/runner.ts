@@ -314,6 +314,43 @@ async function flushLogBuffer(
   buffer.lastFlush = Date.now();
 }
 
+/** Data for session cost tracking */
+interface CostData {
+  sessionId: string;
+  taskId?: string;
+  agentId: string;
+  totalCostUsd: number;
+  durationMs: number;
+  numTurns: number;
+  model: string;
+  isError: boolean;
+}
+
+/** Save session cost data to the API */
+async function saveCostData(cost: CostData, apiUrl: string, apiKey: string): Promise<void> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-Agent-ID": cost.agentId,
+  };
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
+  try {
+    const response = await fetch(`${apiUrl}/api/session-costs`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(cost),
+    });
+
+    if (!response.ok) {
+      console.warn(`[runner] Failed to save cost data: ${response.status}`);
+    }
+  } catch (error) {
+    console.warn(`[runner] Error saving cost data: ${error}`);
+  }
+}
+
 /** Trigger types returned by the poll API */
 interface Trigger {
   type:
@@ -761,8 +798,32 @@ async function spawnClaudeProcess(
           for (const line of lines) {
             prettyPrintLine(line, role);
 
-            // Buffer non-empty lines for API streaming
+            // Extract cost data from result messages
             if (shouldStream && line.trim()) {
+              try {
+                const json = JSON.parse(line.trim());
+                if (json.type === "result" && json.total_cost_usd !== undefined) {
+                  // Fire and forget - don't block the stream
+                  saveCostData(
+                    {
+                      sessionId: opts.sessionId!,
+                      taskId: opts.taskId,
+                      agentId: opts.agentId || "",
+                      totalCostUsd: json.total_cost_usd || 0,
+                      durationMs: json.duration_ms || 0,
+                      numTurns: json.num_turns || 1,
+                      model: "opus",
+                      isError: json.is_error || false,
+                    },
+                    opts.apiUrl!,
+                    opts.apiKey || "",
+                  ).catch((err) => console.warn(`[runner] Failed to save cost: ${err}`));
+                }
+              } catch {
+                // Ignore parse errors - not all lines are JSON
+              }
+
+              // Buffer for log streaming
               logBuffer.lines.push(line.trim());
 
               const shouldFlush =

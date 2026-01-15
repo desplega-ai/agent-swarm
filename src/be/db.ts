@@ -15,6 +15,7 @@ import type {
   InboxMessageStatus,
   Service,
   ServiceStatus,
+  SessionCost,
   SessionLog,
 } from "../types";
 
@@ -172,6 +173,27 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     `);
 
     database.run(`
+      CREATE TABLE IF NOT EXISTS session_costs (
+        id TEXT PRIMARY KEY,
+        sessionId TEXT NOT NULL,
+        taskId TEXT,
+        agentId TEXT NOT NULL,
+        totalCostUsd REAL NOT NULL,
+        inputTokens INTEGER NOT NULL DEFAULT 0,
+        outputTokens INTEGER NOT NULL DEFAULT 0,
+        cacheReadTokens INTEGER NOT NULL DEFAULT 0,
+        cacheWriteTokens INTEGER NOT NULL DEFAULT 0,
+        durationMs INTEGER NOT NULL,
+        numTurns INTEGER NOT NULL,
+        model TEXT NOT NULL,
+        isError INTEGER NOT NULL DEFAULT 0,
+        createdAt TEXT NOT NULL,
+        FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE,
+        FOREIGN KEY (taskId) REFERENCES agent_tasks(id) ON DELETE SET NULL
+      )
+    `);
+
+    database.run(`
       CREATE TABLE IF NOT EXISTS inbox_messages (
         id TEXT PRIMARY KEY,
         agentId TEXT NOT NULL,
@@ -212,6 +234,15 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     database.run(`CREATE INDEX IF NOT EXISTS idx_session_logs_taskId ON session_logs(taskId)`);
     database.run(
       `CREATE INDEX IF NOT EXISTS idx_session_logs_sessionId ON session_logs(sessionId)`,
+    );
+    // Session costs indexes for timeseries queries
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_session_costs_createdAt ON session_costs(createdAt)`,
+    );
+    database.run(`CREATE INDEX IF NOT EXISTS idx_session_costs_taskId ON session_costs(taskId)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_session_costs_agentId ON session_costs(agentId)`);
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_session_costs_agent_createdAt ON session_costs(agentId, createdAt)`,
     );
     database.run(
       `CREATE INDEX IF NOT EXISTS idx_inbox_messages_agentId ON inbox_messages(agentId)`,
@@ -2693,6 +2724,151 @@ export function getSessionLogsByTaskId(taskId: string): SessionLog[] {
 
 export function getSessionLogsBySession(sessionId: string, iteration: number): SessionLog[] {
   return sessionLogQueries.getBySessionId().all(sessionId, iteration).map(rowToSessionLog);
+}
+
+// ============================================================================
+// Session Costs (aggregated cost data per session)
+// ============================================================================
+
+type SessionCostRow = {
+  id: string;
+  sessionId: string;
+  taskId: string | null;
+  agentId: string;
+  totalCostUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  durationMs: number;
+  numTurns: number;
+  model: string;
+  isError: number;
+  createdAt: string;
+};
+
+function rowToSessionCost(row: SessionCostRow): SessionCost {
+  return {
+    id: row.id,
+    sessionId: row.sessionId,
+    taskId: row.taskId ?? undefined,
+    agentId: row.agentId,
+    totalCostUsd: row.totalCostUsd,
+    inputTokens: row.inputTokens,
+    outputTokens: row.outputTokens,
+    cacheReadTokens: row.cacheReadTokens,
+    cacheWriteTokens: row.cacheWriteTokens,
+    durationMs: row.durationMs,
+    numTurns: row.numTurns,
+    model: row.model,
+    isError: row.isError === 1,
+    createdAt: row.createdAt,
+  };
+}
+
+const sessionCostQueries = {
+  insert: () =>
+    getDb().prepare<
+      null,
+      [
+        string,
+        string,
+        string | null,
+        string,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        string,
+        number,
+      ]
+    >(
+      `INSERT INTO session_costs (id, sessionId, taskId, agentId, totalCostUsd, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, durationMs, numTurns, model, isError, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+    ),
+
+  getByTaskId: () =>
+    getDb().prepare<SessionCostRow, [string]>(
+      "SELECT * FROM session_costs WHERE taskId = ? ORDER BY createdAt DESC",
+    ),
+
+  getByAgentId: () =>
+    getDb().prepare<SessionCostRow, [string, number]>(
+      "SELECT * FROM session_costs WHERE agentId = ? ORDER BY createdAt DESC LIMIT ?",
+    ),
+
+  getAll: () =>
+    getDb().prepare<SessionCostRow, [number]>(
+      "SELECT * FROM session_costs ORDER BY createdAt DESC LIMIT ?",
+    ),
+};
+
+export interface CreateSessionCostInput {
+  sessionId: string;
+  taskId?: string;
+  agentId: string;
+  totalCostUsd: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  durationMs: number;
+  numTurns: number;
+  model: string;
+  isError?: boolean;
+}
+
+export function createSessionCost(input: CreateSessionCostInput): SessionCost {
+  const id = crypto.randomUUID();
+  sessionCostQueries
+    .insert()
+    .run(
+      id,
+      input.sessionId,
+      input.taskId ?? null,
+      input.agentId,
+      input.totalCostUsd,
+      input.inputTokens ?? 0,
+      input.outputTokens ?? 0,
+      input.cacheReadTokens ?? 0,
+      input.cacheWriteTokens ?? 0,
+      input.durationMs,
+      input.numTurns,
+      input.model,
+      input.isError ? 1 : 0,
+    );
+
+  return {
+    id,
+    sessionId: input.sessionId,
+    taskId: input.taskId,
+    agentId: input.agentId,
+    totalCostUsd: input.totalCostUsd,
+    inputTokens: input.inputTokens ?? 0,
+    outputTokens: input.outputTokens ?? 0,
+    cacheReadTokens: input.cacheReadTokens ?? 0,
+    cacheWriteTokens: input.cacheWriteTokens ?? 0,
+    durationMs: input.durationMs,
+    numTurns: input.numTurns,
+    model: input.model,
+    isError: input.isError ?? false,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+export function getSessionCostsByTaskId(taskId: string): SessionCost[] {
+  return sessionCostQueries.getByTaskId().all(taskId).map(rowToSessionCost);
+}
+
+export function getSessionCostsByAgentId(agentId: string, limit = 100): SessionCost[] {
+  return sessionCostQueries.getByAgentId().all(agentId, limit).map(rowToSessionCost);
+}
+
+export function getAllSessionCosts(limit = 100): SessionCost[] {
+  return sessionCostQueries.getAll().all(limit).map(rowToSessionCost);
 }
 
 // ============================================================================
