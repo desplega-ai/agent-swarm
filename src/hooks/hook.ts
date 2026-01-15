@@ -50,6 +50,25 @@ interface AgentWithInbox extends Agent {
   inbox?: InboxSummary;
 }
 
+interface CancelledTask {
+  id: string;
+  task: string;
+  failureReason?: string;
+}
+
+interface CancelledTasksResponse {
+  cancelled: CancelledTask[];
+}
+
+/**
+ * Hook response for blocking actions
+ * See: https://code.claude.com/docs/en/hooks
+ */
+interface HookBlockResponse {
+  decision: "block";
+  reason: string;
+}
+
 /**
  * Main hook handler - processes Claude Code hook events
  */
@@ -136,6 +155,43 @@ export async function handleHook(): Promise<void> {
     }
 
     return;
+  };
+
+  /**
+   * Check for recently cancelled tasks for this agent.
+   * Used to detect task cancellation and stop the worker loop.
+   */
+  const getCancelledTasks = async (): Promise<CancelledTask[]> => {
+    if (!mcpConfig) return [];
+
+    try {
+      const resp = await fetch(`${getBaseUrl()}/cancelled-tasks`, {
+        method: "GET",
+        headers: mcpConfig.headers,
+      });
+
+      if (!resp.ok) {
+        return [];
+      }
+
+      const data = (await resp.json()) as CancelledTasksResponse;
+      return data.cancelled || [];
+    } catch {
+      // Silently fail
+      return [];
+    }
+  };
+
+  /**
+   * Output a blocking response to stop Claude from continuing.
+   * This is used when a task has been cancelled.
+   */
+  const outputBlockResponse = (reason: string): void => {
+    const response: HookBlockResponse = {
+      decision: "block",
+      reason,
+    };
+    console.log(JSON.stringify(response));
   };
 
   const formatSystemTray = (inbox: InboxSummary): string | null => {
@@ -247,9 +303,24 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
       // Covered by SessionStart hook
       break;
 
-    case "PreToolUse":
-      // Nothing to do here for now
+    case "PreToolUse": {
+      // For worker agents, check if their task has been cancelled
+      // If so, block the tool call and tell Claude to stop
+      if (agentInfo && !agentInfo.isLead && agentInfo.status === "busy") {
+        const cancelledTasks = await getCancelledTasks();
+        const firstCancelledTask = cancelledTasks[0];
+        if (firstCancelledTask) {
+          const reason = firstCancelledTask.failureReason || "Task cancelled by lead or creator";
+          outputBlockResponse(
+            `🛑 TASK CANCELLED: Your current task has been cancelled. Reason: "${reason}". ` +
+              `Stop working on this task immediately. Do NOT continue making tool calls. ` +
+              `Use store-progress to acknowledge the cancellation and mark the task as failed, then wait for new tasks.`,
+          );
+          return; // Exit early - don't process other hooks
+        }
+      }
       break;
+    }
 
     case "PostToolUse":
       if (agentInfo) {
@@ -269,9 +340,24 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
       }
       break;
 
-    case "UserPromptSubmit":
-      // Nothing specific for now
+    case "UserPromptSubmit": {
+      // For worker agents, check if their task has been cancelled
+      // This catches cancellations at the start of a new iteration
+      if (agentInfo && !agentInfo.isLead && agentInfo.status === "busy") {
+        const cancelledTasks = await getCancelledTasks();
+        const firstCancelledTask = cancelledTasks[0];
+        if (firstCancelledTask) {
+          const reason = firstCancelledTask.failureReason || "Task cancelled by lead or creator";
+          outputBlockResponse(
+            `🛑 TASK CANCELLED: Your current task has been cancelled. Reason: "${reason}". ` +
+              `Stop working on this task immediately. ` +
+              `Acknowledge this cancellation and wait for new tasks.`,
+          );
+          return; // Exit early
+        }
+      }
       break;
+    }
 
     case "Stop":
       // Save PM2 processes before shutdown (for container restart persistence)

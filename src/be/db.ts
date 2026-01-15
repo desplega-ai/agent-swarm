@@ -1161,6 +1161,25 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
   return row ? rowToAgentTask(row) : null;
 }
 
+/**
+ * Get recently cancelled tasks for an agent.
+ * Used by hooks to detect task cancellation and stop the worker loop.
+ * Returns tasks cancelled within the last 5 minutes.
+ */
+export function getRecentlyCancelledTasksForAgent(agentId: string): AgentTask[] {
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const rows = getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      `SELECT * FROM agent_tasks
+       WHERE agentId = ?
+       AND status = 'cancelled'
+       AND finishedAt > ?
+       ORDER BY finishedAt DESC`,
+    )
+    .all(agentId, fiveMinutesAgo);
+  return rows.map(rowToAgentTask);
+}
+
 export function deleteTask(id: string): boolean {
   const result = getDb().run("DELETE FROM agent_tasks WHERE id = ?", [id]);
   return result.changes > 0;

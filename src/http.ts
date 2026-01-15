@@ -33,6 +33,7 @@ import {
   getLogsByTaskId,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
+  getRecentlyCancelledTasksForAgent,
   getRecentlyFinishedWorkerTasks,
   getServicesByAgentId,
   getSessionLogsByTaskId,
@@ -221,6 +222,27 @@ const httpServer = createHttpServer(async (req, res) => {
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(agentResponse));
+    return;
+  }
+
+  // GET /cancelled-tasks - Check for recently cancelled tasks (for hook cancellation detection)
+  if (req.method === "GET" && req.url === "/cancelled-tasks") {
+    if (!myAgentId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
+      return;
+    }
+
+    const agent = getAgentById(myAgentId);
+    if (!agent) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Agent not found" }));
+      return;
+    }
+
+    const cancelledTasks = getRecentlyCancelledTasksForAgent(myAgentId);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ cancelled: cancelledTasks }));
     return;
   }
 
