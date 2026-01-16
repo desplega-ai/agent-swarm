@@ -137,10 +137,50 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
     return `{${keys.join(', ')}${suffix}}`;
   };
 
+  /** Try to unwrap double/triple escaped JSON strings */
+  const unwrapEscapedJson = (content: string): string => {
+    let current = content;
+    let iterations = 0;
+    const maxIterations = 3; // Prevent infinite loops
+
+    while (iterations < maxIterations) {
+      iterations++;
+      if (typeof current === 'string') {
+        const trimmed = current.trim();
+        // Check if it's a JSON string that was escaped (starts and ends with quotes)
+        if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+          try {
+            const unescaped = JSON.parse(trimmed);
+            if (typeof unescaped === 'string') {
+              current = unescaped;
+              continue;
+            }
+          } catch {
+            break;
+          }
+        }
+        // Try parsing as JSON object/array to validate
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+          try {
+            JSON.parse(trimmed);
+            return current; // It's valid JSON, return as-is
+          } catch {
+            break;
+          }
+        }
+      }
+      break;
+    }
+    return current;
+  };
+
   /** Try to parse and extract meaningful content from tool result */
   const parseToolResultContent = (content: string): { display: string; fullContent: string; isJson: boolean; summary?: string } => {
+    // First, try to unwrap any escaped JSON
+    const unwrapped = unwrapEscapedJson(content);
+
     try {
-      const parsed = JSON.parse(content);
+      const parsed = JSON.parse(unwrapped);
 
       // Handle Bash tool results: {"stdout":"...","stderr":"...","interrupted":...}
       if (typeof parsed === 'object' && parsed !== null) {
@@ -149,11 +189,12 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
           const stderr = parsed.stderr as string || '';
           const interrupted = parsed.interrupted as boolean;
 
-          // Try to parse stdout as JSON (double-encoded JSON)
+          // Try to parse stdout as JSON (may be double-encoded)
           let displayStdout = stdout;
           let innerParsed: Record<string, unknown> | null = null;
           try {
-            innerParsed = JSON.parse(stdout);
+            const unwrappedStdout = unwrapEscapedJson(stdout);
+            innerParsed = JSON.parse(unwrappedStdout);
             displayStdout = JSON.stringify(innerParsed, null, 2);
           } catch {
             // stdout is not JSON, keep as-is
@@ -193,9 +234,10 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
         };
       }
 
-      return { display: content, fullContent: content, isJson: false };
+      return { display: unwrapped, fullContent: unwrapped, isJson: false };
     } catch {
-      return { display: content, fullContent: content, isJson: false };
+      // Not valid JSON even after unwrapping
+      return { display: unwrapped, fullContent: unwrapped, isJson: false };
     }
   };
 
@@ -471,21 +513,29 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
       }
     } catch {
       // Check if content might still be parseable JSON that failed for other reasons
-      if (isJsonContent(content)) {
-        return {
-          type: "data",
-          color: colors.tertiary,
-          blocks: [{
-            blockType: "json",
-            icon: "◇",
-            content: "JSON data",
-            fullContent: content,
-            isExpandable: true,
-          }],
-        };
+      if (isJsonContent(actualContent)) {
+        try {
+          const parsedData = JSON.parse(actualContent);
+          // Generate a nice summary instead of just "JSON data"
+          const summary = generateJsonSummary(parsedData);
+          return {
+            type: "data",
+            color: colors.tertiary,
+            blocks: [{
+              blockType: "json",
+              icon: "◇",
+              content: summary,
+              fullContent: JSON.stringify(parsedData, null, 2),
+              isExpandable: true,
+            }],
+          };
+        } catch {
+          // Fall through to partial JSON handling
+        }
       }
+
       // For non-JSON content, check if it looks like truncated/partial JSON
-      const trimmed = content.trim();
+      const trimmed = actualContent.trim();
       const looksLikeJson = trimmed.includes('"') && (
         trimmed.includes(':') ||
         trimmed.includes('{') ||
@@ -493,15 +543,33 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
       );
 
       if (looksLikeJson) {
-        // It's partial/malformed JSON - display as code with expand
+        // Try to extract something meaningful from partial JSON
+        // Look for common patterns like tool results or messages
+        let summary = truncate(actualContent, 100);
+
+        // Try to find and extract key information
+        const toolResultMatch = actualContent.match(/"tool_use_id":\s*"([^"]+)"/);
+        const messageMatch = actualContent.match(/"message":\s*"([^"]{0,50})/);
+        const successMatch = actualContent.match(/"success":\s*(true|false)/);
+        const yourAgentMatch = actualContent.match(/"yourAgentId":\s*"([^"]+)"/);
+
+        if (yourAgentMatch && successMatch) {
+          const status = successMatch[1] === 'true' ? '✓' : '✗';
+          summary = `${status} Agent response (${yourAgentMatch[1].slice(0, 8)}...)`;
+        } else if (toolResultMatch) {
+          summary = `Tool result for ${toolResultMatch[1].slice(0, 20)}...`;
+        } else if (messageMatch) {
+          summary = `Message: ${messageMatch[1]}...`;
+        }
+
         return {
           type: "log",
           color: colors.tertiary,
           blocks: [{
             blockType: "json",
             icon: "◇",
-            content: truncate(content, 100),
-            fullContent: content,
+            content: summary,
+            fullContent: actualContent,
             isExpandable: true,
           }],
         };
@@ -514,9 +582,9 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
         blocks: [{
           blockType: "text",
           icon: "•",
-          content: content.length > 500 ? content.slice(0, 500) + "..." : content,
-          fullContent: content.length > 500 ? content : undefined,
-          isExpandable: content.length > 500,
+          content: actualContent.length > 500 ? actualContent.slice(0, 500) + "..." : actualContent,
+          fullContent: actualContent.length > 500 ? actualContent : undefined,
+          isExpandable: actualContent.length > 500,
         }],
       };
     }
