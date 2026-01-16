@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import Box from "@mui/joy/Box";
 import Typography from "@mui/joy/Typography";
 import IconButton from "@mui/joy/IconButton";
@@ -35,8 +35,21 @@ export default function TaskDetailPanel({
   const { mode } = useColorScheme();
   const isDark = mode === "dark";
   const [outputTab, setOutputTab] = useState<"output" | "error">("output");
-  const [outcomesTab, setOutcomesTab] = useState<"output" | "error" | "session">("output");
+  const [outcomesTab, setOutcomesTab] = useState<"output" | "error" | "session">("session");
   const [copiedField, setCopiedField] = useState<"output" | "error" | null>(null);
+
+  // Track whether we've set the initial tab for this task
+  const initialTabSetRef = useRef<string | null>(null);
+
+  // Set initial tab based on task status
+  useEffect(() => {
+    if (!task || initialTabSetRef.current === taskId) return;
+
+    // Finished tasks → output tab, in-progress tasks → session/logs tab
+    const isFinished = task.status === "completed" || task.status === "failed";
+    setOutcomesTab(isFinished ? "output" : "session");
+    initialTabSetRef.current = taskId;
+  }, [task, taskId]);
 
   const handleCopy = useCallback(async (content: string, field: "output" | "error") => {
     try {

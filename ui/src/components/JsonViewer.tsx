@@ -112,11 +112,12 @@ export default function JsonViewer({ content, maxHeight, defaultCollapsed = fals
         bgcolor: colors.bg,
         border: `1px solid ${colors.border}`,
         borderRadius: 1,
-        p: 1.5,
+        p: 1,
         position: "relative",
         maxHeight: maxHeight || "none",
         overflow: "auto",
         maxWidth: "100%",
+        mx: 0, // Ensure no horizontal margin
       }}
     >
       <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1 }}>

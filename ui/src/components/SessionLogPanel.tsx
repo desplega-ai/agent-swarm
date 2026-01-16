@@ -4,6 +4,7 @@ import Typography from "@mui/joy/Typography";
 import Chip from "@mui/joy/Chip";
 import IconButton from "@mui/joy/IconButton";
 import Tooltip from "@mui/joy/Tooltip";
+import Button from "@mui/joy/Button";
 import { useColorScheme } from "@mui/joy/styles";
 import { formatRelativeTime } from "../lib/utils";
 import { useAutoScroll } from "../hooks/useAutoScroll";
@@ -31,6 +32,21 @@ interface FormattedLog {
   color: string;
   blocks: FormattedBlock[];
 }
+
+/** Check if content is likely JSON */
+const isJsonContent = (content: string): boolean => {
+  const trimmed = content.trim();
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+      (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+    try {
+      JSON.parse(trimmed);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+};
 
 export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
   const { mode } = useColorScheme();
@@ -87,12 +103,174 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
     : [], [sessionLogs]);
 
   // Auto-scroll when new logs arrive (respects user scroll position)
-  useAutoScroll(scrollRef.current, [sortedLogs.length]);
+  const { isFollowing, scrollToBottom } = useAutoScroll(scrollRef.current, [sortedLogs.length]);
 
   /** Truncate string with ellipsis */
   const truncate = (str: string, maxLen: number): string => {
     if (str.length <= maxLen) return str;
     return `${str.slice(0, maxLen - 3)}...`;
+  };
+
+  /** Generate a human-readable summary from a JSON object */
+  const generateJsonSummary = (obj: Record<string, unknown>, maxLen = 100): string => {
+    // Check for common patterns and generate nice summaries
+    if ('success' in obj && 'message' in obj) {
+      // API response pattern
+      const status = obj.success ? '✓' : '✗';
+      return `${status} ${truncate(String(obj.message), maxLen - 2)}`;
+    }
+    if ('yourAgentId' in obj) {
+      // Agent swarm response
+      const status = obj.success ? '✓' : '✗';
+      const msg = obj.message ? String(obj.message) : 'Agent operation';
+      return `${status} ${truncate(msg, maxLen - 2)}`;
+    }
+    if ('oldTodos' in obj || 'todos' in obj) {
+      // TodoWrite result
+      const count = Array.isArray(obj.todos) ? obj.todos.length : (Array.isArray(obj.oldTodos) ? obj.oldTodos.length : 0);
+      return `Todo list updated (${count} items)`;
+    }
+
+    // Generic object: list top-level keys
+    const keys = Object.keys(obj).slice(0, 4);
+    const suffix = Object.keys(obj).length > 4 ? `, +${Object.keys(obj).length - 4} more` : '';
+    return `{${keys.join(', ')}${suffix}}`;
+  };
+
+  /**
+   * Recursively unwrap escaped JSON strings.
+   * Handles patterns like:
+   * - {"key":"value"} - regular JSON (returned as-is)
+   * - {\"key\":\"value\"} - single-escaped JSON (unescaped once)
+   * - {\\\"key\\\":\\\"value\\\"} - double-escaped JSON (unescaped twice)
+   * - "{"key":"value"}" - JSON string wrapped in quotes (unwrapped and parsed)
+   */
+  const unwrapEscapedJson = (content: string): string => {
+    if (typeof content !== 'string' || !content.trim()) {
+      return content;
+    }
+
+    let current = content;
+    let iterations = 0;
+    const maxIterations = 5; // Allow more iterations for deeply nested escaping
+
+    while (iterations < maxIterations) {
+      iterations++;
+      const trimmed = current.trim();
+
+      // First, try to parse as-is - if it works, it's valid JSON
+      try {
+        const parsed = JSON.parse(trimmed);
+        // If it parses to a string that looks like JSON, unwrap it
+        if (typeof parsed === 'string') {
+          const parsedTrimmed = parsed.trim();
+          if (parsedTrimmed.startsWith('{') || parsedTrimmed.startsWith('[')) {
+            current = parsed;
+            continue; // Try to unwrap further
+          }
+        }
+        // It's valid JSON object/array, return the current string
+        return current;
+      } catch {
+        // Not valid JSON as-is, try unescaping
+      }
+
+      // Check for escaped quotes pattern: {\"key\":\"value\"}
+      // This is common when JSON is stored as an escaped string in a database
+      if (trimmed.includes('\\"') || trimmed.includes("\\'")) {
+        // Unescape one level: \" -> " and \\ -> \
+        const unescaped = trimmed
+          .replace(/\\"/g, '"')
+          .replace(/\\'/g, "'")
+          .replace(/\\\\/g, '\\');
+
+        // Check if unescaping made a difference
+        if (unescaped !== current) {
+          try {
+            JSON.parse(unescaped);
+            current = unescaped;
+            continue; // Successfully unescaped, try again for deeper levels
+          } catch {
+            // Still not valid JSON, but try using unescaped anyway
+            // and continue loop to try more unescaping
+            current = unescaped;
+            continue;
+          }
+        }
+      }
+
+      // No more transformations possible
+      break;
+    }
+
+    return current;
+  };
+
+  /** Try to parse and extract meaningful content from tool result */
+  const parseToolResultContent = (content: string): { display: string; fullContent: string; isJson: boolean; summary?: string } => {
+    // First, try to unwrap any escaped JSON
+    const unwrapped = unwrapEscapedJson(content);
+
+    try {
+      const parsed = JSON.parse(unwrapped);
+
+      // Handle Bash tool results: {"stdout":"...","stderr":"...","interrupted":...}
+      if (typeof parsed === 'object' && parsed !== null) {
+        if ('stdout' in parsed || 'stderr' in parsed) {
+          const stdout = parsed.stdout as string || '';
+          const stderr = parsed.stderr as string || '';
+          const interrupted = parsed.interrupted as boolean;
+
+          // Try to parse stdout as JSON (may be double-encoded)
+          let displayStdout = stdout;
+          let innerParsed: Record<string, unknown> | null = null;
+          try {
+            const unwrappedStdout = unwrapEscapedJson(stdout);
+            innerParsed = JSON.parse(unwrappedStdout);
+            displayStdout = JSON.stringify(innerParsed, null, 2);
+          } catch {
+            // stdout is not JSON, keep as-is
+          }
+
+          let display = '';
+          if (displayStdout) {
+            display = displayStdout;
+          }
+          if (stderr) {
+            display += (display ? '\n\nSTDERR:\n' : '') + stderr;
+          }
+          if (interrupted) {
+            display += (display ? '\n' : '') + '[interrupted]';
+          }
+
+          // Generate summary for JSON stdout
+          const summary = innerParsed
+            ? generateJsonSummary(innerParsed)
+            : (stdout ? truncate(stdout.replace(/\n/g, ' '), 100) : '(empty output)');
+
+          return {
+            display: display || '(empty output)',
+            fullContent: display || content,
+            isJson: isJsonContent(displayStdout),
+            summary,
+          };
+        }
+
+        // For other JSON objects, create summary and pretty-print
+        const summary = generateJsonSummary(parsed);
+        return {
+          display: JSON.stringify(parsed, null, 2),
+          fullContent: JSON.stringify(parsed, null, 2),
+          isJson: true,
+          summary,
+        };
+      }
+
+      return { display: unwrapped, fullContent: unwrapped, isJson: false };
+    } catch {
+      // Not valid JSON even after unwrapping
+      return { display: unwrapped, fullContent: unwrapped, isJson: false };
+    }
   };
 
   /** Format a tool name nicely - shorten MCP tool names */
@@ -122,8 +300,11 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
   };
 
   const formatLogLine = (content: string): FormattedLog => {
+    // First, try to unwrap any escaped JSON (handles {\"key\":...} patterns)
+    const actualContent = unwrapEscapedJson(content);
+
     try {
-      const json = JSON.parse(content);
+      const json = JSON.parse(actualContent);
 
       switch (json.type) {
         case "system": {
@@ -239,17 +420,18 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
           const rawToolResult = json.tool_use_result;
           if (rawToolResult) {
             const toolResult = typeof rawToolResult === "string" ? rawToolResult : JSON.stringify(rawToolResult);
+            const parsed = parseToolResultContent(toolResult);
             const isError = toolResult.includes("Error") || toolResult.includes("error");
-            const preview = isError ? { preview: toolResult, isTruncated: false } : generatePreview(toolResult, 300);
+            // Use summary if available, otherwise truncate the display
+            const displayContent = parsed.summary || truncate(parsed.display, 300);
 
             blocks.push({
               blockType: "tool_result",
               icon: isError ? "✗" : "✓",
-              content: preview.preview,
-              fullContent: toolResult,
-              isExpandable: preview.isTruncated || toolResult.length > 300,
+              content: displayContent,
+              fullContent: parsed.fullContent,
+              isExpandable: parsed.isJson || parsed.display.length > 100,
               isError,
-              extraInfo: preview.extraInfo,
             });
           } else if (message) {
             const contentBlocks = message.content as Array<Record<string, unknown>>;
@@ -258,17 +440,18 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
                 if (block.type === "tool_result") {
                   const rawResult = block.content;
                   const result = typeof rawResult === "string" ? rawResult : rawResult ? JSON.stringify(rawResult) : "";
+                  const parsed = parseToolResultContent(result);
                   const isError = block.is_error as boolean;
-                  const preview = isError ? { preview: result, isTruncated: false } : generatePreview(result, 300);
+                  // Use summary if available, otherwise truncate the display
+                  const displayContent = parsed.summary || truncate(parsed.display, 300);
 
                   blocks.push({
                     blockType: "tool_result",
                     icon: isError ? "✗" : "✓",
-                    content: preview.preview,
-                    fullContent: result,
-                    isExpandable: preview.isTruncated || result.length > 300,
+                    content: displayContent,
+                    fullContent: parsed.fullContent,
+                    isExpandable: parsed.isJson || parsed.display.length > 100,
                     isError,
-                    extraInfo: preview.extraInfo,
                   });
                 }
               }
@@ -346,10 +529,109 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
           };
       }
     } catch {
+      // Check if content might still be parseable JSON that failed for other reasons
+      if (isJsonContent(actualContent)) {
+        try {
+          const parsedData = JSON.parse(actualContent);
+          // Generate a nice summary instead of just "JSON data"
+          const summary = generateJsonSummary(parsedData);
+          return {
+            type: "data",
+            color: colors.tertiary,
+            blocks: [{
+              blockType: "json",
+              icon: "◇",
+              content: summary,
+              fullContent: JSON.stringify(parsedData, null, 2),
+              isExpandable: true,
+            }],
+          };
+        } catch {
+          // Fall through to partial JSON handling
+        }
+      }
+
+      // For non-JSON content, check if it looks like truncated/partial JSON
+      const trimmed = actualContent.trim();
+      const looksLikeJson = trimmed.includes('"') && (
+        trimmed.includes(':') ||
+        trimmed.includes('{') ||
+        trimmed.includes('[')
+      );
+
+      if (looksLikeJson) {
+        // Try to unwrap escaped JSON first (handles {\"key\":\"value\"} patterns)
+        const unescapedContent = unwrapEscapedJson(actualContent);
+
+        // Try parsing the unescaped content
+        try {
+          const parsed = JSON.parse(unescapedContent);
+          if (typeof parsed === 'object' && parsed !== null) {
+            const summary = generateJsonSummary(parsed);
+            return {
+              type: parsed.type || "data",
+              color: colors.tertiary,
+              blocks: [{
+                blockType: "json",
+                icon: "◇",
+                content: summary,
+                fullContent: JSON.stringify(parsed, null, 2),
+                isExpandable: true,
+              }],
+            };
+          }
+        } catch {
+          // Not valid JSON even after unescaping
+        }
+
+        // Try to extract something meaningful from partial JSON
+        // Look for common patterns like tool results or messages
+        let summary = truncate(unescapedContent.replace(/\n/g, ' '), 100);
+
+        // Try to find and extract key information (use unescaped content for cleaner matches)
+        const toolResultMatch = unescapedContent.match(/"tool_use_id":\s*"([^"]+)"/);
+        const messageMatch = unescapedContent.match(/"message":\s*"([^"]{0,50})/);
+        const successMatch = unescapedContent.match(/"success":\s*(true|false)/);
+        const yourAgentMatch = unescapedContent.match(/"yourAgentId":\s*"([^"]+)"/);
+        const progressMatch = unescapedContent.match(/"progress":\s*"([^"]{0,80})/);
+
+        if (yourAgentMatch?.[1] && successMatch?.[1]) {
+          const status = successMatch[1] === 'true' ? '✓' : '✗';
+          const progressText = progressMatch?.[1] ? `: ${truncate(progressMatch[1], 60)}` : '';
+          summary = `${status} Agent response${progressText}`;
+        } else if (toolResultMatch?.[1]) {
+          summary = `Tool result for ${toolResultMatch[1].slice(0, 20)}...`;
+        } else if (messageMatch?.[1]) {
+          summary = `Message: ${messageMatch[1]}...`;
+        } else if (progressMatch?.[1]) {
+          summary = `Progress: ${truncate(progressMatch[1], 80)}`;
+        }
+
+        return {
+          type: "log",
+          color: colors.tertiary,
+          blocks: [{
+            blockType: "json",
+            icon: "◇",
+            content: summary,
+            // Store the unescaped content for expansion
+            fullContent: unescapedContent !== actualContent ? unescapedContent : actualContent,
+            isExpandable: true,
+          }],
+        };
+      }
+
+      // Regular text content
       return {
-        type: "raw",
+        type: "log",
         color: colors.tertiary,
-        blocks: [{ blockType: "text", icon: "", content }],
+        blocks: [{
+          blockType: "text",
+          icon: "•",
+          content: actualContent.length > 500 ? actualContent.slice(0, 500) + "..." : actualContent,
+          fullContent: actualContent.length > 500 ? actualContent : undefined,
+          isExpandable: actualContent.length > 500,
+        }],
       };
     }
   };
@@ -398,60 +680,145 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
 
   if (!sessionLogs || sessionLogs.length === 0) {
     return (
-      <Box sx={{ p: 2, height: "100%", overflow: "auto" }}>
-        <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: colors.text.tertiary }}>
-          No session logs available
-        </Typography>
+      <Box sx={{
+        p: 3,
+        height: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}>
+        <Box sx={{
+          textAlign: "center",
+          p: 4,
+          bgcolor: isDark ? "rgba(100, 100, 100, 0.08)" : "rgba(150, 150, 150, 0.06)",
+          borderRadius: 2,
+          border: "1px dashed",
+          borderColor: isDark ? "rgba(100, 100, 100, 0.2)" : "rgba(150, 150, 150, 0.2)",
+        }}>
+          <Typography sx={{
+            fontFamily: "code",
+            fontSize: "0.8rem",
+            color: colors.text.tertiary,
+            mb: 0.5,
+          }}>
+            No session logs yet
+          </Typography>
+          <Typography sx={{
+            fontFamily: "code",
+            fontSize: "0.7rem",
+            color: colors.text.tertiary,
+            opacity: 0.7,
+          }}>
+            Logs will appear here when the task starts running
+          </Typography>
+        </Box>
       </Box>
     );
   }
 
   return (
-    <Box
-      ref={scrollRef}
-      sx={{
-        flex: 1,
-        overflow: "auto",
-        p: 1.5,
-        display: "flex",
-        flexDirection: "column",
-        minHeight: 0,
-      }}
-    >
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-        {sortedLogs.map((log) => {
-          const formatted = formatLogLine(log.content);
-          return (
-            <Box
-              key={log.id}
-              sx={{
-                bgcolor: "background.level1",
-                p: 2,
-                borderRadius: 1,
-                border: "1px solid",
-                borderColor: "neutral.outlinedBorder",
-              }}
-            >
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
-                <Chip
-                  size="sm"
-                  variant="soft"
-                  sx={{
-                    fontFamily: "code",
-                    fontSize: "0.65rem",
-                    color: formatted.color,
-                    bgcolor: isDark ? "rgba(100, 100, 100, 0.15)" : "rgba(150, 150, 150, 0.12)",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  {formatted.type}
-                </Chip>
-                <Tooltip title={new Date(log.createdAt).toLocaleString()} placement="top">
-                  <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: colors.text.tertiary }}>
-                    {formatRelativeTime(log.createdAt)}
-                  </Typography>
-                </Tooltip>
-              </Box>
+    <Box sx={{ position: "relative", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+      {/* Follow button - shown when user scrolls up */}
+      {!isFollowing && (
+        <Box
+          sx={{
+            position: "absolute",
+            bottom: 16,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 10,
+          }}
+        >
+          <Button
+            variant="solid"
+            size="sm"
+            onClick={scrollToBottom}
+            sx={{
+              fontFamily: "code",
+              fontSize: "0.7rem",
+              fontWeight: 600,
+              letterSpacing: "0.03em",
+              // Fully opaque solid background
+              bgcolor: isDark ? "#1e4068" : "#2563eb",
+              color: "#ffffff",
+              border: "2px solid",
+              borderColor: isDark ? "#3b82f6" : "#1e40af",
+              boxShadow: isDark
+                ? "0 4px 16px rgba(0, 0, 0, 0.8), 0 2px 4px rgba(0, 0, 0, 0.4)"
+                : "0 4px 16px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.2)",
+              "&:hover": {
+                bgcolor: isDark ? "#2563eb" : "#1d4ed8",
+                borderColor: isDark ? "#60a5fa" : "#1e3a8a",
+              },
+              gap: 0.5,
+              px: 2,
+              py: 0.75,
+            }}
+          >
+            <span style={{ fontSize: "0.8rem" }}>↓</span>
+            Follow
+          </Button>
+        </Box>
+      )}
+
+      <Box
+        ref={scrollRef}
+        sx={{
+          flex: 1,
+          overflow: "auto",
+          p: 1.5,
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
+        }}
+      >
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          {sortedLogs.map((log) => {
+            const formatted = formatLogLine(log.content);
+            return (
+              <Box
+                key={log.id}
+                sx={{
+                  bgcolor: isDark ? "rgba(30, 30, 35, 0.6)" : "rgba(255, 255, 255, 0.8)",
+                  p: 1.5,
+                  borderRadius: 1,
+                  border: "1px solid",
+                  borderColor: isDark ? "rgba(100, 100, 100, 0.15)" : "rgba(200, 200, 200, 0.3)",
+                  transition: "border-color 0.15s ease",
+                  "&:hover": {
+                    borderColor: isDark ? "rgba(100, 100, 100, 0.25)" : "rgba(180, 180, 180, 0.4)",
+                  },
+                }}
+              >
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
+                  <Chip
+                    size="sm"
+                    variant="soft"
+                    sx={{
+                      fontFamily: "code",
+                      fontSize: "0.6rem",
+                      fontWeight: 600,
+                      color: formatted.color,
+                      bgcolor: isDark ? "rgba(100, 100, 100, 0.12)" : "rgba(150, 150, 150, 0.1)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.04em",
+                      height: 18,
+                      minHeight: 18,
+                    }}
+                  >
+                    {formatted.type}
+                  </Chip>
+                  <Tooltip title={new Date(log.createdAt).toLocaleString()} placement="top">
+                    <Typography sx={{
+                      fontFamily: "code",
+                      fontSize: "0.65rem",
+                      color: colors.text.tertiary,
+                      opacity: 0.8,
+                    }}>
+                      {formatRelativeTime(log.createdAt)}
+                    </Typography>
+                  </Tooltip>
+                </Box>
               <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                 {formatted.blocks.map((block, idx) => {
                   const blockId = `${log.id}-${block.blockType}-${idx}`;
@@ -531,7 +898,7 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
                               )}
                             </Box>
                             {isExpanded && block.fullContent && (
-                              <Box sx={{ mt: 1 }}>
+                              <Box sx={{ mt: 1, mx: 0 }}>
                                 <JsonViewer content={block.fullContent} maxHeight="300px" />
                               </Box>
                             )}
@@ -565,8 +932,107 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
                               </IconButton>
                             </Box>
                             {isExpanded && block.fullContent && (
-                              <Box sx={{ mt: 1 }}>
+                              <Box sx={{ mt: 1, mx: 0 }}>
                                 <JsonViewer content={block.fullContent} maxHeight="400px" />
+                              </Box>
+                            )}
+                          </Box>
+                        ) : block.blockType === "tool_result" ? (
+                          <Box sx={{ flex: 1 }}>
+                            <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 1 }}>
+                              {!isExpanded ? (
+                                <Typography
+                                  component="div"
+                                  sx={{
+                                    fontFamily: "code",
+                                    fontSize: block.isError ? "0.8rem" : "0.75rem",
+                                    color: block.isError ? colors.rust : colors.text.secondary,
+                                    whiteSpace: "pre-wrap",
+                                    wordBreak: "break-word",
+                                    flex: 1,
+                                  }}
+                                >
+                                  {block.content}
+                                  {block.isExpandable && block.extraInfo && (
+                                    <Typography
+                                      component="span"
+                                      sx={{
+                                        fontFamily: "code",
+                                        fontSize: "0.65rem",
+                                        color: colors.text.tertiary,
+                                        fontStyle: "italic",
+                                        ml: 0.5,
+                                      }}
+                                    >
+                                      {` (${block.extraInfo})`}
+                                    </Typography>
+                                  )}
+                                </Typography>
+                              ) : (
+                                <Box sx={{ flex: 1 }} />
+                              )}
+                              <Box sx={{ display: "flex", gap: 0.25, flexShrink: 0 }}>
+                                {block.isExpandable && (
+                                  <Tooltip title={isExpanded ? "Collapse" : "Expand"} placement="top">
+                                    <IconButton
+                                      size="sm"
+                                      variant="plain"
+                                      onClick={() => toggleBlock(blockId)}
+                                      sx={{
+                                        fontSize: "0.65rem",
+                                        minWidth: "auto",
+                                        minHeight: "auto",
+                                        color: "text.tertiary",
+                                        "&:hover": { color: "text.primary" },
+                                      }}
+                                    >
+                                      {isExpanded ? "▼" : "▶"}
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
+                                {(block.fullContent || block.content) && (
+                                  <Tooltip title={isCopied ? "Copied!" : "Copy"} placement="top">
+                                    <IconButton
+                                      size="sm"
+                                      variant="plain"
+                                      onClick={() => copyBlock(block.fullContent || block.content, blockId)}
+                                      sx={{
+                                        fontSize: "0.65rem",
+                                        minWidth: "auto",
+                                        minHeight: "auto",
+                                        color: isCopied ? colors.amber : "text.tertiary",
+                                        "&:hover": { color: "text.primary" },
+                                      }}
+                                    >
+                                      {isCopied ? "✓" : "⧉"}
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
+                              </Box>
+                            </Box>
+                            {isExpanded && block.fullContent && (
+                              <Box sx={{ mt: 1, mx: 0 }}>
+                                {isJsonContent(block.fullContent) ? (
+                                  <JsonViewer content={block.fullContent} maxHeight="400px" />
+                                ) : (
+                                  <Typography
+                                    component="div"
+                                    sx={{
+                                      fontFamily: "code",
+                                      fontSize: "0.75rem",
+                                      color: block.isError ? colors.rust : colors.text.secondary,
+                                      whiteSpace: "pre-wrap",
+                                      wordBreak: "break-word",
+                                      p: 1,
+                                      bgcolor: isDark ? "rgba(30, 30, 30, 0.5)" : "rgba(250, 250, 250, 0.95)",
+                                      border: "1px solid",
+                                      borderColor: isDark ? "rgba(100, 100, 100, 0.3)" : "rgba(120, 120, 120, 0.5)",
+                                      borderRadius: 1,
+                                    }}
+                                  >
+                                    {block.fullContent}
+                                  </Typography>
+                                )}
                               </Box>
                             )}
                           </Box>
@@ -649,6 +1115,7 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
             </Box>
           );
         })}
+        </Box>
       </Box>
     </Box>
   );
