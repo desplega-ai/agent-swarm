@@ -111,6 +111,59 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
     return `${str.slice(0, maxLen - 3)}...`;
   };
 
+  /** Try to parse and extract meaningful content from tool result */
+  const parseToolResultContent = (content: string): { display: string; fullContent: string; isJson: boolean } => {
+    try {
+      const parsed = JSON.parse(content);
+
+      // Handle Bash tool results: {"stdout":"...","stderr":"...","interrupted":...}
+      if (typeof parsed === 'object' && parsed !== null) {
+        if ('stdout' in parsed || 'stderr' in parsed) {
+          const stdout = parsed.stdout as string || '';
+          const stderr = parsed.stderr as string || '';
+          const interrupted = parsed.interrupted as boolean;
+
+          // Try to parse stdout as JSON (double-encoded JSON)
+          let displayStdout = stdout;
+          try {
+            const innerJson = JSON.parse(stdout);
+            displayStdout = JSON.stringify(innerJson, null, 2);
+          } catch {
+            // stdout is not JSON, keep as-is
+          }
+
+          let display = '';
+          if (displayStdout) {
+            display = displayStdout;
+          }
+          if (stderr) {
+            display += (display ? '\n\nSTDERR:\n' : '') + stderr;
+          }
+          if (interrupted) {
+            display += (display ? '\n' : '') + '[interrupted]';
+          }
+
+          return {
+            display: display || '(empty output)',
+            fullContent: display || content,
+            isJson: isJsonContent(displayStdout),
+          };
+        }
+
+        // For other JSON objects, pretty-print them
+        return {
+          display: JSON.stringify(parsed, null, 2),
+          fullContent: JSON.stringify(parsed, null, 2),
+          isJson: true,
+        };
+      }
+
+      return { display: content, fullContent: content, isJson: false };
+    } catch {
+      return { display: content, fullContent: content, isJson: false };
+    }
+  };
+
   /** Format a tool name nicely - shorten MCP tool names */
   const formatToolName = (name: string): string => {
     if (name.startsWith("mcp__")) {
@@ -138,8 +191,26 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
   };
 
   const formatLogLine = (content: string): FormattedLog => {
+    // Try to unwrap potentially double-encoded JSON
+    let actualContent = content;
     try {
-      const json = JSON.parse(content);
+      const parsed = JSON.parse(content);
+      // If the parsed content is a string that looks like JSON, try parsing it again
+      if (typeof parsed === 'string' && (parsed.trim().startsWith('{') || parsed.trim().startsWith('['))) {
+        try {
+          JSON.parse(parsed); // Validate it's valid JSON
+          // Successfully unwrapped double-encoded JSON
+          actualContent = parsed;
+        } catch {
+          // Not double-encoded, continue with original
+        }
+      }
+    } catch {
+      // Original content is not JSON, continue
+    }
+
+    try {
+      const json = JSON.parse(actualContent);
 
       switch (json.type) {
         case "system": {
@@ -255,17 +326,18 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
           const rawToolResult = json.tool_use_result;
           if (rawToolResult) {
             const toolResult = typeof rawToolResult === "string" ? rawToolResult : JSON.stringify(rawToolResult);
+            const parsed = parseToolResultContent(toolResult);
             const isError = toolResult.includes("Error") || toolResult.includes("error");
-            const preview = isError ? { preview: toolResult, isTruncated: false } : generatePreview(toolResult, 300);
+            const displayContent = truncate(parsed.display, 300);
 
             blocks.push({
               blockType: "tool_result",
               icon: isError ? "✗" : "✓",
-              content: preview.preview,
-              fullContent: toolResult,
-              isExpandable: preview.isTruncated || toolResult.length > 300,
+              content: displayContent,
+              fullContent: parsed.fullContent,
+              isExpandable: parsed.display.length > 300,
               isError,
-              extraInfo: preview.extraInfo,
+              extraInfo: parsed.display.length > 300 ? `+${parsed.display.length - 300} chars` : undefined,
             });
           } else if (message) {
             const contentBlocks = message.content as Array<Record<string, unknown>>;
@@ -274,17 +346,18 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
                 if (block.type === "tool_result") {
                   const rawResult = block.content;
                   const result = typeof rawResult === "string" ? rawResult : rawResult ? JSON.stringify(rawResult) : "";
+                  const parsed = parseToolResultContent(result);
                   const isError = block.is_error as boolean;
-                  const preview = isError ? { preview: result, isTruncated: false } : generatePreview(result, 300);
+                  const displayContent = truncate(parsed.display, 300);
 
                   blocks.push({
                     blockType: "tool_result",
                     icon: isError ? "✗" : "✓",
-                    content: preview.preview,
-                    fullContent: result,
-                    isExpandable: preview.isTruncated || result.length > 300,
+                    content: displayContent,
+                    fullContent: parsed.fullContent,
+                    isExpandable: parsed.display.length > 300,
                     isError,
-                    extraInfo: preview.extraInfo,
+                    extraInfo: parsed.display.length > 300 ? `+${parsed.display.length - 300} chars` : undefined,
                   });
                 }
               }
@@ -506,6 +579,9 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
               gap: 0.5,
               px: 2,
               py: 0.75,
+              // Ensure fully opaque background
+              opacity: 1,
+              backdropFilter: "none",
             }}
           >
             <span style={{ fontSize: "0.8rem" }}>↓</span>
@@ -651,7 +727,7 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
                               )}
                             </Box>
                             {isExpanded && block.fullContent && (
-                              <Box sx={{ mt: 1, mx: -1 }}>
+                              <Box sx={{ mt: 1, mx: 0 }}>
                                 <JsonViewer content={block.fullContent} maxHeight="300px" />
                               </Box>
                             )}
@@ -685,7 +761,7 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
                               </IconButton>
                             </Box>
                             {isExpanded && block.fullContent && (
-                              <Box sx={{ mt: 1, mx: -1 }}>
+                              <Box sx={{ mt: 1, mx: 0 }}>
                                 <JsonViewer content={block.fullContent} maxHeight="400px" />
                               </Box>
                             )}
@@ -764,7 +840,7 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
                               </Box>
                             </Box>
                             {isExpanded && block.fullContent && (
-                              <Box sx={{ mt: 1, mx: -1 }}>
+                              <Box sx={{ mt: 1, mx: 0 }}>
                                 {isJsonContent(block.fullContent) ? (
                                   <JsonViewer content={block.fullContent} maxHeight="400px" />
                                 ) : (
