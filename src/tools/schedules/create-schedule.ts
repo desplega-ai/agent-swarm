@@ -1,5 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { parseExpression } from "cron-parser";
+import { CronExpressionParser } from "cron-parser";
 import * as z from "zod";
 import { createScheduledTask, getAgentById, getScheduledTaskByName } from "@/be/db";
 import { calculateNextRun } from "@/scheduler";
@@ -128,7 +128,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
       // Validate cron expression syntax
       if (cronExpression) {
         try {
-          parseExpression(cronExpression, { tz: timezone || "UTC" });
+          CronExpressionParser.parse(cronExpression, { tz: timezone || "UTC" });
         } catch (err) {
           const message = err instanceof Error ? err.message : "Invalid cron expression";
           return {

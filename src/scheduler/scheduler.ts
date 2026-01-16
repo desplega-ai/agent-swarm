@@ -1,4 +1,4 @@
-import { parseExpression } from "cron-parser";
+import { CronExpressionParser } from "cron-parser";
 import {
   createTaskExtended,
   getDueScheduledTasks,
@@ -18,7 +18,7 @@ let isProcessing = false;
  */
 export function calculateNextRun(schedule: ScheduledTask, fromTime: Date = new Date()): string {
   if (schedule.cronExpression) {
-    const interval = parseExpression(schedule.cronExpression, {
+    const interval = CronExpressionParser.parse(schedule.cronExpression, {
       currentDate: fromTime,
       tz: schedule.timezone || "UTC",
     });
