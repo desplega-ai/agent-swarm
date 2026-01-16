@@ -102,6 +102,9 @@ export const AgentTaskSchema = z.object({
   // Mention-to-task metadata (optional)
   mentionMessageId: z.uuid().optional(),
   mentionChannelId: z.uuid().optional(),
+
+  // Epic association (optional)
+  epicId: z.uuid().optional(),
 });
 
 export const AgentStatusSchema = z.enum(["idle", "busy", "offline"]);
@@ -289,3 +292,57 @@ export const ScheduledTaskSchema = z
   });
 
 export type ScheduledTask = z.infer<typeof ScheduledTaskSchema>;
+
+// ============================================================================
+// Epic Types
+// ============================================================================
+
+export const EpicStatusSchema = z.enum([
+  "draft", // Epic is being defined
+  "active", // Epic is in progress
+  "paused", // Epic is temporarily paused
+  "completed", // All tasks completed
+  "cancelled", // Epic was cancelled
+]);
+
+export const EpicSchema = z.object({
+  id: z.uuid(),
+  name: z.string().min(1).max(200),
+  description: z.string().optional(),
+  goal: z.string().min(1),
+  prd: z.string().optional(), // Product Requirements Document
+  plan: z.string().optional(), // Implementation plan
+  status: EpicStatusSchema.default("draft"),
+  priority: z.number().int().min(0).max(100).default(50),
+  tags: z.array(z.string()).default([]),
+  createdByAgentId: z.uuid().optional(),
+  leadAgentId: z.uuid().optional(),
+  channelId: z.uuid().optional(), // Internal messaging channel for this epic
+  researchDocPath: z.string().optional(),
+  planDocPath: z.string().optional(),
+  slackChannelId: z.string().optional(),
+  slackThreadTs: z.string().optional(),
+  githubRepo: z.string().optional(),
+  githubMilestone: z.string().optional(),
+  createdAt: z.iso.datetime(),
+  lastUpdatedAt: z.iso.datetime(),
+  startedAt: z.iso.datetime().optional(),
+  completedAt: z.iso.datetime().optional(),
+});
+
+export type EpicStatus = z.infer<typeof EpicStatusSchema>;
+export type Epic = z.infer<typeof EpicSchema>;
+
+// Epic with computed progress
+export const EpicWithProgressSchema = EpicSchema.extend({
+  taskStats: z.object({
+    total: z.number(),
+    completed: z.number(),
+    failed: z.number(),
+    inProgress: z.number(),
+    pending: z.number(),
+  }),
+  progress: z.number().min(0).max(100), // Percentage
+});
+
+export type EpicWithProgress = z.infer<typeof EpicWithProgressSchema>;

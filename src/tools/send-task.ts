@@ -1,6 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { createTaskExtended, getActiveTaskCount, getAgentById, getDb, hasCapacity } from "@/be/db";
+import {
+  createTaskExtended,
+  getActiveTaskCount,
+  getAgentById,
+  getDb,
+  getEpicById,
+  hasCapacity,
+} from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import { AgentTaskSchema } from "@/types";
 
@@ -38,6 +45,7 @@ export const registerSendTaskTool = (server: McpServer) => {
           .optional()
           .describe("Priority 0-100 (default: 50)."),
         dependsOn: z.array(z.uuid()).optional().describe("Task IDs this task depends on."),
+        epicId: z.string().uuid().optional().describe("Epic to associate this task with."),
       }),
       outputSchema: z.object({
         success: z.boolean(),
@@ -46,7 +54,7 @@ export const registerSendTaskTool = (server: McpServer) => {
       }),
     },
     async (
-      { agentId, task, offerMode, taskType, tags, priority, dependsOn },
+      { agentId, task, offerMode, taskType, tags, priority, dependsOn, epicId },
       requestInfo,
       _meta,
     ) => {
@@ -82,15 +90,34 @@ export const registerSendTaskTool = (server: McpServer) => {
         };
       }
 
+      // Validate epicId if provided
+      if (epicId) {
+        const epic = getEpicById(epicId);
+        if (!epic) {
+          return {
+            content: [{ type: "text", text: `Epic not found: ${epicId}` }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: `Epic not found: ${epicId}`,
+            },
+          };
+        }
+      }
+
       const txn = getDb().transaction(() => {
+        // Build tags with epic tag if epicId is provided
+        const finalTags = epicId ? [...(tags || []), `epic:${getEpicById(epicId)?.name}`] : tags;
+
         // If no agentId, create an unassigned task for the pool
         if (!agentId) {
           const newTask = createTaskExtended(task, {
             creatorAgentId: requestInfo.agentId,
             taskType,
-            tags,
+            tags: finalTags,
             priority,
             dependsOn,
+            epicId,
           });
 
           return {
@@ -131,9 +158,10 @@ export const registerSendTaskTool = (server: McpServer) => {
             offeredTo: agentId,
             creatorAgentId: requestInfo.agentId,
             taskType,
-            tags,
+            tags: finalTags,
             priority,
             dependsOn,
+            epicId,
           });
 
           return {
@@ -148,9 +176,10 @@ export const registerSendTaskTool = (server: McpServer) => {
           agentId,
           creatorAgentId: requestInfo.agentId,
           taskType,
-          tags,
+          tags: finalTags,
           priority,
           dependsOn,
+          epicId,
         });
 
         return {

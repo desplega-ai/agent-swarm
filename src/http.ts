@@ -9,15 +9,18 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createServer, hasCapability } from "@/server";
 import {
+  assignTaskToEpic,
   claimInboxMessages,
   claimMentions,
   claimOfferedTask,
   closeDb,
   completeTask,
   createAgent,
+  createEpic,
   createSessionCost,
   createSessionLogs,
   createTaskExtended,
+  deleteEpic,
   failTask,
   getActiveTaskCount,
   getAgentById,
@@ -32,6 +35,10 @@ import {
   getChannelById,
   getChannelMessages,
   getDb,
+  getEpicById,
+  getEpics,
+  getEpicsWithProgressUpdates,
+  getEpicWithProgress,
   getInboxSummary,
   getLogsByAgentId,
   getLogsByTaskId,
@@ -47,9 +54,11 @@ import {
   getSessionLogsByTaskId,
   getTaskById,
   getTaskStats,
+  getTasksByEpicId,
   getTasksCount,
   getUnassignedTasksCount,
   hasCapacity,
+  markEpicsProgressNotified,
   markTasksNotified,
   pauseTask,
   postMessage,
@@ -60,6 +69,7 @@ import {
   updateAgentProfile,
   updateAgentStatus,
   updateAgentStatusFromCapacity,
+  updateEpic,
 } from "./be/db";
 import type {
   CheckRunEvent,
@@ -83,7 +93,7 @@ import {
   verifyWebhookSignature,
 } from "./github";
 import { startSlackApp, stopSlackApp } from "./slack";
-import type { AgentLog, AgentStatus, SessionCost } from "./types";
+import type { AgentLog, AgentStatus, EpicStatus, SessionCost } from "./types";
 
 const port = parseInt(process.env.PORT || process.argv[2] || "3013", 10);
 const apiKey = process.env.API_KEY || "";
@@ -520,6 +530,23 @@ const httpServer = createHttpServer(async (req, res) => {
                 type: "tasks_finished",
                 count: finishedTasks.length,
                 tasks: finishedTasks,
+              },
+            };
+          }
+
+          // Check for epic progress updates (tasks completed/failed for active epics)
+          // This trigger helps lead plan next steps for epics - similar to ralph loop
+          const epicsWithUpdates = getEpicsWithProgressUpdates();
+          if (epicsWithUpdates.length > 0) {
+            // Atomically mark as notified within this transaction
+            const epicIds = epicsWithUpdates.map((e) => e.epic.id);
+            markEpicsProgressNotified(epicIds);
+
+            return {
+              trigger: {
+                type: "epic_progress_changed",
+                count: epicsWithUpdates.length,
+                epics: epicsWithUpdates,
               },
             };
           }
@@ -1404,6 +1431,195 @@ const httpServer = createHttpServer(async (req, res) => {
     });
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ scheduledTasks }));
+    return;
+  }
+
+  // ============================================================================
+  // Epic Endpoints
+  // ============================================================================
+
+  // GET /api/epics - List all epics
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "epics" &&
+    !pathSegments[2]
+  ) {
+    const status = queryParams.get("status") as EpicStatus | null;
+    const search = queryParams.get("search");
+    const leadAgentId = queryParams.get("leadAgentId");
+    const epics = getEpics({
+      status: status || undefined,
+      search: search || undefined,
+      leadAgentId: leadAgentId || undefined,
+    });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ epics, total: epics.length }));
+    return;
+  }
+
+  // POST /api/epics - Create a new epic
+  if (
+    req.method === "POST" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "epics" &&
+    !pathSegments[2]
+  ) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    if (!body.name || !body.goal) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing required fields: name, goal" }));
+      return;
+    }
+
+    try {
+      const epic = createEpic({
+        ...body,
+        createdByAgentId: myAgentId || undefined,
+      });
+      res.writeHead(201, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(epic));
+    } catch (_error) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Failed to create epic" }));
+    }
+    return;
+  }
+
+  // GET /api/epics/:id - Get single epic with progress and tasks
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "epics" &&
+    pathSegments[2] &&
+    !pathSegments[3]
+  ) {
+    const epicId = pathSegments[2];
+    const epic = getEpicWithProgress(epicId);
+
+    if (!epic) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Epic not found" }));
+      return;
+    }
+
+    const tasks = getTasksByEpicId(epicId);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ...epic, tasks }));
+    return;
+  }
+
+  // PUT /api/epics/:id - Update an epic
+  if (
+    req.method === "PUT" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "epics" &&
+    pathSegments[2] &&
+    !pathSegments[3]
+  ) {
+    const epicId = pathSegments[2];
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    const epic = updateEpic(epicId, body);
+    if (!epic) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Epic not found" }));
+      return;
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(epic));
+    return;
+  }
+
+  // DELETE /api/epics/:id - Delete an epic
+  if (
+    req.method === "DELETE" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "epics" &&
+    pathSegments[2] &&
+    !pathSegments[3]
+  ) {
+    const epicId = pathSegments[2];
+    const deleted = deleteEpic(epicId);
+
+    if (!deleted) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Epic not found" }));
+      return;
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ success: true }));
+    return;
+  }
+
+  // POST /api/epics/:id/tasks - Add task to epic (create new or assign existing)
+  if (
+    req.method === "POST" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "epics" &&
+    pathSegments[2] &&
+    pathSegments[3] === "tasks"
+  ) {
+    const epicId = pathSegments[2];
+    const epic = getEpicById(epicId);
+
+    if (!epic) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Epic not found" }));
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    // If taskId provided, assign existing task
+    if (body.taskId) {
+      const task = assignTaskToEpic(body.taskId, epicId);
+      if (!task) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Task not found" }));
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(task));
+      return;
+    }
+
+    // Otherwise create new task in this epic
+    if (!body.task) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing task description or taskId" }));
+      return;
+    }
+
+    try {
+      const task = createTaskExtended(body.task, {
+        ...body,
+        epicId,
+        creatorAgentId: myAgentId || undefined,
+        tags: [...(body.tags || []), `epic:${epic.name}`],
+        source: "api",
+      });
+      res.writeHead(201, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(task));
+    } catch (_error) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Failed to create task" }));
+    }
     return;
   }
 

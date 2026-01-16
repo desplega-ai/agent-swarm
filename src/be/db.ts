@@ -11,6 +11,9 @@ import type {
   Channel,
   ChannelMessage,
   ChannelType,
+  Epic,
+  EpicStatus,
+  EpicWithProgress,
   InboxMessage,
   InboxMessageStatus,
   ScheduledTask,
@@ -281,6 +284,44 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     database.run(
       `CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_nextRunAt ON scheduled_tasks(nextRunAt)`,
     );
+
+    // Epics table - project-level task organization
+    database.run(`
+      CREATE TABLE IF NOT EXISTS epics (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        goal TEXT NOT NULL,
+        prd TEXT,
+        plan TEXT,
+        status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft', 'active', 'paused', 'completed', 'cancelled')),
+        priority INTEGER DEFAULT 50,
+        tags TEXT DEFAULT '[]',
+        createdByAgentId TEXT,
+        leadAgentId TEXT,
+        channelId TEXT,
+        researchDocPath TEXT,
+        planDocPath TEXT,
+        slackChannelId TEXT,
+        slackThreadTs TEXT,
+        githubRepo TEXT,
+        githubMilestone TEXT,
+        createdAt TEXT NOT NULL,
+        lastUpdatedAt TEXT NOT NULL,
+        startedAt TEXT,
+        completedAt TEXT,
+        FOREIGN KEY (createdByAgentId) REFERENCES agents(id) ON DELETE SET NULL,
+        FOREIGN KEY (leadAgentId) REFERENCES agents(id) ON DELETE SET NULL,
+        FOREIGN KEY (channelId) REFERENCES channels(id) ON DELETE SET NULL
+      )
+    `);
+
+    // Epics indexes
+    database.run(`CREATE INDEX IF NOT EXISTS idx_epics_status ON epics(status)`);
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_epics_createdByAgentId ON epics(createdByAgentId)`,
+    );
+    database.run(`CREATE INDEX IF NOT EXISTS idx_epics_leadAgentId ON epics(leadAgentId)`);
   });
 
   initSchema();
@@ -556,6 +597,36 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     /* exists or column missing */
   }
 
+  // Epic feature migration: Add epicId to agent_tasks
+  try {
+    db.run(
+      `ALTER TABLE agent_tasks ADD COLUMN epicId TEXT REFERENCES epics(id) ON DELETE SET NULL`,
+    );
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`CREATE INDEX IF NOT EXISTS idx_agent_tasks_epicId ON agent_tasks(epicId)`);
+  } catch {
+    /* exists */
+  }
+
+  // Epic progress trigger migration: Add progressNotifiedAt to epics
+  try {
+    db.run(`ALTER TABLE epics ADD COLUMN progressNotifiedAt TEXT`);
+  } catch {
+    /* exists */
+  }
+
+  // Epic channel migration: Add channelId to epics
+  try {
+    db.run(
+      `ALTER TABLE epics ADD COLUMN channelId TEXT REFERENCES channels(id) ON DELETE SET NULL`,
+    );
+  } catch {
+    /* exists */
+  }
+
   return db;
 }
 
@@ -768,6 +839,7 @@ type AgentTaskRow = {
   githubUrl: string | null;
   mentionMessageId: string | null;
   mentionChannelId: string | null;
+  epicId: string | null;
   createdAt: string;
   lastUpdatedAt: string;
   finishedAt: string | null;
@@ -804,6 +876,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     githubUrl: row.githubUrl ?? undefined,
     mentionMessageId: row.mentionMessageId ?? undefined,
     mentionChannelId: row.mentionChannelId ?? undefined,
+    epicId: row.epicId ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     finishedAt: row.finishedAt ?? undefined,
@@ -1629,6 +1702,7 @@ export interface CreateTaskOptions {
   githubUrl?: string;
   mentionMessageId?: string;
   mentionChannelId?: string;
+  epicId?: string;
 }
 
 export function createTaskExtended(task: string, options?: CreateTaskOptions): AgentTask {
@@ -1647,8 +1721,8 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         taskType, tags, priority, dependsOn, offeredTo, offeredAt,
         slackChannelId, slackThreadTs, slackUserId,
         githubRepo, githubEventType, githubNumber, githubCommentId, githubAuthor, githubUrl,
-        mentionMessageId, mentionChannelId, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        mentionMessageId, mentionChannelId, epicId, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -1674,6 +1748,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.githubUrl ?? null,
       options?.mentionMessageId ?? null,
       options?.mentionChannelId ?? null,
+      options?.epicId ?? null,
       now,
       now,
     );
@@ -3422,4 +3497,495 @@ export function getDueScheduledTasks(): ScheduledTask[] {
     )
     .all(now)
     .map(rowToScheduledTask);
+}
+
+// ============================================================================
+// Epic Functions
+// ============================================================================
+
+type EpicRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  goal: string;
+  prd: string | null;
+  plan: string | null;
+  status: EpicStatus;
+  priority: number;
+  tags: string | null;
+  createdByAgentId: string | null;
+  leadAgentId: string | null;
+  channelId: string | null;
+  researchDocPath: string | null;
+  planDocPath: string | null;
+  slackChannelId: string | null;
+  slackThreadTs: string | null;
+  githubRepo: string | null;
+  githubMilestone: string | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  progressNotifiedAt: string | null;
+};
+
+function rowToEpic(row: EpicRow): Epic {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description ?? undefined,
+    goal: row.goal,
+    prd: row.prd ?? undefined,
+    plan: row.plan ?? undefined,
+    status: row.status,
+    priority: row.priority,
+    tags: row.tags ? JSON.parse(row.tags) : [],
+    createdByAgentId: row.createdByAgentId ?? undefined,
+    leadAgentId: row.leadAgentId ?? undefined,
+    channelId: row.channelId ?? undefined,
+    researchDocPath: row.researchDocPath ?? undefined,
+    planDocPath: row.planDocPath ?? undefined,
+    slackChannelId: row.slackChannelId ?? undefined,
+    slackThreadTs: row.slackThreadTs ?? undefined,
+    githubRepo: row.githubRepo ?? undefined,
+    githubMilestone: row.githubMilestone ?? undefined,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+    startedAt: row.startedAt ?? undefined,
+    completedAt: row.completedAt ?? undefined,
+  };
+}
+
+export interface EpicFilters {
+  status?: EpicStatus;
+  createdByAgentId?: string;
+  leadAgentId?: string;
+  search?: string;
+  limit?: number;
+}
+
+export function getEpics(filters?: EpicFilters): Epic[] {
+  let query = "SELECT * FROM epics WHERE 1=1";
+  const params: (string | number)[] = [];
+
+  if (filters?.status) {
+    query += " AND status = ?";
+    params.push(filters.status);
+  }
+  if (filters?.createdByAgentId) {
+    query += " AND createdByAgentId = ?";
+    params.push(filters.createdByAgentId);
+  }
+  if (filters?.leadAgentId) {
+    query += " AND leadAgentId = ?";
+    params.push(filters.leadAgentId);
+  }
+  if (filters?.search) {
+    query += " AND (name LIKE ? OR description LIKE ? OR goal LIKE ?)";
+    const searchTerm = `%${filters.search}%`;
+    params.push(searchTerm, searchTerm, searchTerm);
+  }
+
+  query += " ORDER BY priority DESC, createdAt DESC";
+
+  if (filters?.limit) {
+    query += " LIMIT ?";
+    params.push(filters.limit);
+  }
+
+  return getDb()
+    .prepare<EpicRow, (string | number)[]>(query)
+    .all(...params)
+    .map(rowToEpic);
+}
+
+export function getEpicById(id: string): Epic | null {
+  const row = getDb().prepare<EpicRow, [string]>("SELECT * FROM epics WHERE id = ?").get(id);
+  return row ? rowToEpic(row) : null;
+}
+
+export function getEpicByName(name: string): Epic | null {
+  const row = getDb().prepare<EpicRow, [string]>("SELECT * FROM epics WHERE name = ?").get(name);
+  return row ? rowToEpic(row) : null;
+}
+
+export interface CreateEpicData {
+  name: string;
+  goal: string;
+  description?: string;
+  prd?: string;
+  plan?: string;
+  priority?: number;
+  tags?: string[];
+  createdByAgentId?: string;
+  leadAgentId?: string;
+  // channelId is auto-generated during epic creation
+  researchDocPath?: string;
+  planDocPath?: string;
+  slackChannelId?: string;
+  slackThreadTs?: string;
+  githubRepo?: string;
+  githubMilestone?: string;
+}
+
+export function createEpic(data: CreateEpicData): Epic {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  // Auto-create a channel for this epic to log progress, learnings, etc.
+  const channelName = `epic-${data.name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")}`;
+  const channel = createChannel(channelName, {
+    description: `Channel for epic: ${data.name}`,
+    type: "public",
+    createdBy: data.createdByAgentId,
+  });
+
+  const row = getDb()
+    .prepare<EpicRow, (string | number | null)[]>(
+      `INSERT INTO epics (
+        id, name, description, goal, prd, plan, status, priority, tags,
+        createdByAgentId, leadAgentId, channelId, researchDocPath, planDocPath,
+        slackChannelId, slackThreadTs, githubRepo, githubMilestone,
+        createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      data.name,
+      data.description ?? null,
+      data.goal,
+      data.prd ?? null,
+      data.plan ?? null,
+      data.priority ?? 50,
+      JSON.stringify(data.tags ?? []),
+      data.createdByAgentId ?? null,
+      data.leadAgentId ?? null,
+      channel.id,
+      data.researchDocPath ?? null,
+      data.planDocPath ?? null,
+      data.slackChannelId ?? null,
+      data.slackThreadTs ?? null,
+      data.githubRepo ?? null,
+      data.githubMilestone ?? null,
+      now,
+      now,
+    );
+
+  if (!row) {
+    throw new Error("Failed to create epic");
+  }
+
+  // Create log entry
+  try {
+    createLogEntry({
+      eventType: "task_created", // Reuse existing event type
+      agentId: data.createdByAgentId,
+      taskId: id,
+      newValue: "draft",
+      metadata: { type: "epic", name: data.name },
+    });
+  } catch {
+    /* ignore log errors */
+  }
+
+  return rowToEpic(row);
+}
+
+export interface UpdateEpicData {
+  name?: string;
+  description?: string;
+  goal?: string;
+  prd?: string;
+  plan?: string;
+  status?: EpicStatus;
+  priority?: number;
+  tags?: string[];
+  leadAgentId?: string | null;
+  researchDocPath?: string;
+  planDocPath?: string;
+  slackChannelId?: string;
+  slackThreadTs?: string;
+  githubRepo?: string;
+  githubMilestone?: string;
+}
+
+export function updateEpic(id: string, data: UpdateEpicData): Epic | null {
+  const epic = getEpicById(id);
+  if (!epic) return null;
+
+  const now = new Date().toISOString();
+  const updates: string[] = ["lastUpdatedAt = ?"];
+  const params: (string | number | null)[] = [now];
+
+  if (data.name !== undefined) {
+    updates.push("name = ?");
+    params.push(data.name);
+  }
+  if (data.description !== undefined) {
+    updates.push("description = ?");
+    params.push(data.description);
+  }
+  if (data.goal !== undefined) {
+    updates.push("goal = ?");
+    params.push(data.goal);
+  }
+  if (data.prd !== undefined) {
+    updates.push("prd = ?");
+    params.push(data.prd);
+  }
+  if (data.plan !== undefined) {
+    updates.push("plan = ?");
+    params.push(data.plan);
+  }
+  if (data.status !== undefined) {
+    updates.push("status = ?");
+    params.push(data.status);
+
+    // Set startedAt when transitioning to active
+    if (data.status === "active" && !epic.startedAt) {
+      updates.push("startedAt = ?");
+      params.push(now);
+    }
+    // Set completedAt when completing
+    if (data.status === "completed" && !epic.completedAt) {
+      updates.push("completedAt = ?");
+      params.push(now);
+    }
+  }
+  if (data.priority !== undefined) {
+    updates.push("priority = ?");
+    params.push(data.priority);
+  }
+  if (data.tags !== undefined) {
+    updates.push("tags = ?");
+    params.push(JSON.stringify(data.tags));
+  }
+  if (data.leadAgentId !== undefined) {
+    updates.push("leadAgentId = ?");
+    params.push(data.leadAgentId);
+  }
+  if (data.researchDocPath !== undefined) {
+    updates.push("researchDocPath = ?");
+    params.push(data.researchDocPath);
+  }
+  if (data.planDocPath !== undefined) {
+    updates.push("planDocPath = ?");
+    params.push(data.planDocPath);
+  }
+  if (data.slackChannelId !== undefined) {
+    updates.push("slackChannelId = ?");
+    params.push(data.slackChannelId);
+  }
+  if (data.slackThreadTs !== undefined) {
+    updates.push("slackThreadTs = ?");
+    params.push(data.slackThreadTs);
+  }
+  if (data.githubRepo !== undefined) {
+    updates.push("githubRepo = ?");
+    params.push(data.githubRepo);
+  }
+  if (data.githubMilestone !== undefined) {
+    updates.push("githubMilestone = ?");
+    params.push(data.githubMilestone);
+  }
+
+  params.push(id);
+
+  const row = getDb()
+    .prepare<EpicRow, (string | number | null)[]>(
+      `UPDATE epics SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
+    )
+    .get(...params);
+
+  return row ? rowToEpic(row) : null;
+}
+
+export function deleteEpic(id: string): boolean {
+  // First unassign all tasks from this epic
+  getDb().prepare("UPDATE agent_tasks SET epicId = NULL WHERE epicId = ?").run(id);
+
+  const result = getDb().prepare("DELETE FROM epics WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
+// Get task statistics for an epic
+export function getEpicTaskStats(epicId: string): {
+  total: number;
+  completed: number;
+  failed: number;
+  inProgress: number;
+  pending: number;
+  unassigned: number;
+} {
+  const row = getDb()
+    .prepare<
+      {
+        total: number;
+        completed: number;
+        failed: number;
+        in_progress: number;
+        pending: number;
+        unassigned: number;
+      },
+      [string]
+    >(
+      `SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN status = 'unassigned' THEN 1 ELSE 0 END) as unassigned
+      FROM agent_tasks WHERE epicId = ?`,
+    )
+    .get(epicId);
+
+  return {
+    total: row?.total ?? 0,
+    completed: row?.completed ?? 0,
+    failed: row?.failed ?? 0,
+    inProgress: row?.in_progress ?? 0,
+    pending: row?.pending ?? 0,
+    unassigned: row?.unassigned ?? 0,
+  };
+}
+
+// Get epic with progress calculation
+export function getEpicWithProgress(id: string): EpicWithProgress | null {
+  const epic = getEpicById(id);
+  if (!epic) return null;
+
+  const stats = getEpicTaskStats(id);
+  const progress = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
+
+  return {
+    ...epic,
+    taskStats: stats,
+    progress,
+  };
+}
+
+// Get tasks for an epic
+export function getTasksByEpicId(epicId: string): AgentTask[] {
+  return getDb()
+    .prepare<AgentTaskRow, [string]>(
+      "SELECT * FROM agent_tasks WHERE epicId = ? ORDER BY priority DESC, createdAt ASC",
+    )
+    .all(epicId)
+    .map(rowToAgentTask);
+}
+
+// Assign task to epic
+export function assignTaskToEpic(taskId: string, epicId: string): AgentTask | null {
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string, string]>(
+      "UPDATE agent_tasks SET epicId = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *",
+    )
+    .get(epicId, now, taskId);
+  return row ? rowToAgentTask(row) : null;
+}
+
+// Unassign task from epic
+export function unassignTaskFromEpic(taskId: string): AgentTask | null {
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      "UPDATE agent_tasks SET epicId = NULL, lastUpdatedAt = ? WHERE id = ? RETURNING *",
+    )
+    .get(now, taskId);
+  return row ? rowToAgentTask(row) : null;
+}
+
+// ============================================================================
+// Epic Progress Trigger Functions (Lead-only iterative epic processing)
+// ============================================================================
+
+/**
+ * Get active epics that have progress updates (task completions/failures)
+ * since the last notification. Used to trigger lead to plan next steps.
+ * Returns epics with their progress stats and recently finished tasks.
+ */
+export function getEpicsWithProgressUpdates(): Array<{
+  epic: EpicWithProgress;
+  finishedTasks: AgentTask[];
+}> {
+  // Find active epics that have tasks finished since last notification
+  const rows = getDb()
+    .prepare<EpicRow, []>(
+      `SELECT e.* FROM epics e
+       WHERE e.status = 'active'
+       AND EXISTS (
+         SELECT 1 FROM agent_tasks t
+         WHERE t.epicId = e.id
+         AND t.status IN ('completed', 'failed')
+         AND t.finishedAt IS NOT NULL
+         AND (e.progressNotifiedAt IS NULL OR t.finishedAt > e.progressNotifiedAt)
+       )
+       ORDER BY e.priority DESC, e.lastUpdatedAt DESC`,
+    )
+    .all();
+
+  return rows
+    .map((row) => {
+      const epic = getEpicWithProgress(row.id);
+      if (!epic) return null;
+
+      // Get tasks that finished since last notification
+      const progressNotifiedAt = row.progressNotifiedAt;
+      const finishedTasks = getDb()
+        .prepare<AgentTaskRow, [string] | [string, string]>(
+          progressNotifiedAt
+            ? `SELECT * FROM agent_tasks
+               WHERE epicId = ?
+               AND status IN ('completed', 'failed')
+               AND finishedAt > ?
+               ORDER BY finishedAt DESC`
+            : `SELECT * FROM agent_tasks
+               WHERE epicId = ?
+               AND status IN ('completed', 'failed')
+               ORDER BY finishedAt DESC`,
+        )
+        .all(...(progressNotifiedAt ? [row.id, progressNotifiedAt] : [row.id]))
+        .map(rowToAgentTask);
+
+      return { epic, finishedTasks };
+    })
+    .filter((result): result is NonNullable<typeof result> => result !== null);
+}
+
+/**
+ * Mark an epic's progress as notified.
+ * Prevents returning the same progress updates in future polls.
+ */
+export function markEpicProgressNotified(epicId: string): Epic | null {
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<EpicRow, [string, string, string]>(
+      `UPDATE epics SET progressNotifiedAt = ?, lastUpdatedAt = ?
+       WHERE id = ? RETURNING *`,
+    )
+    .get(now, now, epicId);
+  return row ? rowToEpic(row) : null;
+}
+
+/**
+ * Mark multiple epics' progress as notified atomically.
+ */
+export function markEpicsProgressNotified(epicIds: string[]): number {
+  if (epicIds.length === 0) return 0;
+
+  const now = new Date().toISOString();
+  const placeholders = epicIds.map(() => "?").join(",");
+
+  const result = getDb().run(
+    `UPDATE epics SET progressNotifiedAt = ?, lastUpdatedAt = ?
+     WHERE id IN (${placeholders}) AND progressNotifiedAt IS NULL OR progressNotifiedAt < ?`,
+    [now, now, ...epicIds, now],
+  );
+
+  return result.changes;
 }

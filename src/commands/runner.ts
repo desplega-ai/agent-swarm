@@ -489,7 +489,8 @@ interface Trigger {
     | "unread_mentions"
     | "pool_tasks_available"
     | "tasks_finished"
-    | "slack_inbox_message";
+    | "slack_inbox_message"
+    | "epic_progress_changed";
   taskId?: string;
   task?: unknown;
   mentionsCount?: number;
@@ -507,6 +508,7 @@ interface Trigger {
     id: string;
     content: string;
   }>;
+  epics?: unknown; // Epic progress updates for lead
 }
 
 /** Options for polling */
@@ -687,6 +689,95 @@ Note: Claims are first-come-first-serve. If claim fails, pick another.`;
       }
 
       return `Workers have finished ${trigger.count} task(s). Use \`get-tasks\` with status: "completed" or "failed" to review them.`;
+    }
+
+    case "epic_progress_changed": {
+      // Lead: Epic progress updated - tasks completed or failed for an active epic
+      // This is similar to ralph loop - keep the epic progressing until done
+      const epics = trigger.epics as Array<{
+        epic: {
+          id: string;
+          name: string;
+          goal: string;
+          status: string;
+          progress: number;
+          taskStats: {
+            total: number;
+            completed: number;
+            failed: number;
+            inProgress: number;
+            pending: number;
+          };
+        };
+        finishedTasks: Array<{
+          id: string;
+          task: string;
+          status: string;
+          output?: string;
+          failureReason?: string;
+          agentId?: string;
+        }>;
+      }>;
+
+      if (!epics || epics.length === 0) {
+        return "Epic progress was updated but no details available. Use `list-epics` to check status.";
+      }
+
+      let prompt = `## Epic Progress Update\n\n${trigger.count} epic(s) have progress updates:\n\n`;
+
+      for (const { epic, finishedTasks } of epics) {
+        prompt += `### Epic: "${epic.name}" (${epic.id.slice(0, 8)})\n`;
+        prompt += `**Goal:** ${epic.goal}\n`;
+        prompt += `**Progress:** ${epic.progress}% complete (${epic.taskStats.completed}/${epic.taskStats.total} tasks)\n`;
+        prompt += `**Status:** ${epic.status}\n\n`;
+
+        // Show finished tasks
+        const completed = finishedTasks.filter((t) => t.status === "completed");
+        const failed = finishedTasks.filter((t) => t.status === "failed");
+
+        if (completed.length > 0) {
+          prompt += "**Recently Completed:**\n";
+          for (const t of completed) {
+            const agentName = t.agentId ? `Agent ${t.agentId.slice(0, 8)}` : "Unknown";
+            const output = t.output ? t.output.slice(0, 150) : "(no output)";
+            prompt += `- Task ${t.id.slice(0, 8)} by ${agentName}: "${t.task.slice(0, 80)}"\n`;
+            prompt += `  Output: ${output}${t.output && t.output.length > 150 ? "..." : ""}\n`;
+          }
+        }
+
+        if (failed.length > 0) {
+          prompt += "\n**Recently Failed:**\n";
+          for (const t of failed) {
+            const agentName = t.agentId ? `Agent ${t.agentId.slice(0, 8)}` : "Unknown";
+            prompt += `- Task ${t.id.slice(0, 8)} by ${agentName}: "${t.task.slice(0, 80)}"\n`;
+            prompt += `  Reason: ${t.failureReason || "(no reason)"}\n`;
+          }
+        }
+
+        // Show remaining work
+        const { inProgress, pending } = epic.taskStats;
+        if (inProgress > 0 || pending > 0) {
+          prompt += `\n**Remaining:** ${inProgress} in progress, ${pending} pending\n`;
+        }
+
+        prompt += "\n---\n\n";
+      }
+
+      prompt += `## Your Task: Plan Next Steps
+
+For each epic:
+1. **Review** the completed work and any failures
+2. **Determine** if the epic goal is met (progress = 100% and all tasks succeeded)
+3. **If complete:** Use \`update-epic\` to mark status as "completed"
+4. **If not complete:**
+   - Retry failed tasks with \`send-task\` (reassign or modify)
+   - Create new tasks for remaining work with \`send-task\` (include epicId)
+   - Keep the epic progressing until the goal is achieved
+
+This is an iterative process - you'll be notified again when more tasks finish.
+The epic should keep progressing until 100% complete and the goal is achieved.`;
+
+      return prompt;
     }
 
     case "slack_inbox_message": {

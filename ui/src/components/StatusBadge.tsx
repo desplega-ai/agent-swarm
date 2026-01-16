@@ -1,9 +1,9 @@
 import Chip from "@mui/joy/Chip";
 import { useColorScheme } from "@mui/joy/styles";
-import type { AgentStatus, TaskStatus } from "../types/api";
+import type { AgentStatus, TaskStatus, EpicStatus } from "../types/api";
 
 interface StatusBadgeProps {
-  status: AgentStatus | TaskStatus;
+  status: AgentStatus | TaskStatus | EpicStatus;
   size?: "sm" | "md" | "lg";
 }
 
@@ -15,7 +15,7 @@ interface StatusConfig {
   glowColor: { dark: string; light: string };
 }
 
-const statusConfig: Record<AgentStatus | TaskStatus, StatusConfig> = {
+const statusConfig: Record<AgentStatus | TaskStatus | EpicStatus, StatusConfig> = {
   // Agent statuses
   idle: {
     color: "success",
@@ -102,13 +102,28 @@ const statusConfig: Record<AgentStatus | TaskStatus, StatusConfig> = {
     textColor: { dark: "#808080", light: "#696969" },
     glowColor: { dark: "rgba(128, 128, 128, 0.3)", light: "rgba(169, 169, 169, 0.15)" },
   },
+  // Epic statuses
+  draft: {
+    color: "neutral",
+    label: "DRAFT",
+    bgColor: { dark: "rgba(100, 100, 100, 0.15)", light: "rgba(150, 150, 150, 0.15)" },
+    textColor: { dark: "#888888", light: "#666666" },
+    glowColor: { dark: "rgba(100, 100, 100, 0.3)", light: "rgba(150, 150, 150, 0.15)" },
+  },
+  active: {
+    color: "warning",
+    label: "ACTIVE",
+    bgColor: { dark: "rgba(245, 166, 35, 0.15)", light: "rgba(212, 136, 6, 0.12)" },
+    textColor: { dark: "#F5A623", light: "#D48806" },
+    glowColor: { dark: "rgba(245, 166, 35, 0.5)", light: "rgba(212, 136, 6, 0.25)" },
+  },
 };
 
 export default function StatusBadge({ status, size = "sm" }: StatusBadgeProps) {
   const { mode } = useColorScheme();
   const isDark = mode === "dark";
   const config = statusConfig[status];
-  const isActive = status === "busy" || status === "in_progress" || status === "offered";
+  const isActive = status === "busy" || status === "in_progress" || status === "offered" || status === "active";
 
   const bgColor = isDark ? config.bgColor.dark : config.bgColor.light;
   const textColor = isDark ? config.textColor.dark : config.textColor.light;
