@@ -35,22 +35,18 @@ export default function TaskDetailPanel({
   const { mode } = useColorScheme();
   const isDark = mode === "dark";
   const [outputTab, setOutputTab] = useState<"output" | "error">("output");
-  const [outcomesTab, setOutcomesTab] = useState<"output" | "error" | "session">("output");
+  const [outcomesTab, setOutcomesTab] = useState<"output" | "error" | "session">("session");
   const [copiedField, setCopiedField] = useState<"output" | "error" | null>(null);
 
   // Track whether we've set the initial tab for this task
   const initialTabSetRef = useRef<string | null>(null);
 
-  // Smart tab selection based on task status:
-  // - In-progress/pending tasks: default to "session" (logs) tab
-  // - Completed/failed tasks: default to "output" tab
+  // Reset to session tab when opening a different task
   useEffect(() => {
     if (!task || initialTabSetRef.current === taskId) return;
 
-    const isTaskFinished = task.status === "completed" || task.status === "failed";
-    const defaultTab = isTaskFinished ? "output" : "session";
-
-    setOutcomesTab(defaultTab);
+    // Always default to session (logs) tab
+    setOutcomesTab("session");
     initialTabSetRef.current = taskId;
   }, [task, taskId]);
 

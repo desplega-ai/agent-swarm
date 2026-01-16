@@ -33,6 +33,21 @@ interface FormattedLog {
   blocks: FormattedBlock[];
 }
 
+/** Check if content is likely JSON */
+const isJsonContent = (content: string): boolean => {
+  const trimmed = content.trim();
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+      (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+    try {
+      JSON.parse(trimmed);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+};
+
 export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
   const { mode } = useColorScheme();
   const isDark = mode === "dark";
@@ -347,10 +362,31 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
           };
       }
     } catch {
+      // Check if content might still be parseable JSON that failed for other reasons
+      if (isJsonContent(content)) {
+        return {
+          type: "data",
+          color: colors.tertiary,
+          blocks: [{
+            blockType: "json",
+            icon: "◇",
+            content: "JSON data",
+            fullContent: content,
+            isExpandable: true,
+          }],
+        };
+      }
+      // For non-JSON content, show it nicely formatted
       return {
-        type: "raw",
+        type: "log",
         color: colors.tertiary,
-        blocks: [{ blockType: "text", icon: "", content }],
+        blocks: [{
+          blockType: "text",
+          icon: "•",
+          content: content.length > 500 ? content.slice(0, 500) + "..." : content,
+          fullContent: content.length > 500 ? content : undefined,
+          isExpandable: content.length > 500,
+        }],
       };
     }
   };
@@ -457,15 +493,15 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
               fontSize: "0.7rem",
               fontWeight: 600,
               letterSpacing: "0.03em",
-              bgcolor: isDark ? "rgba(59, 130, 246, 0.2)" : "rgba(59, 130, 246, 0.15)",
-              color: colors.blue,
+              bgcolor: isDark ? "#1e3a5f" : "#dbeafe",
+              color: isDark ? "#93c5fd" : "#1d4ed8",
               border: "1px solid",
-              borderColor: isDark ? "rgba(59, 130, 246, 0.3)" : "rgba(59, 130, 246, 0.25)",
+              borderColor: isDark ? "#3b82f6" : "#93c5fd",
               boxShadow: isDark
-                ? "0 4px 12px rgba(0, 0, 0, 0.4)"
-                : "0 4px 12px rgba(0, 0, 0, 0.15)",
+                ? "0 4px 12px rgba(0, 0, 0, 0.5)"
+                : "0 4px 12px rgba(0, 0, 0, 0.2)",
               "&:hover": {
-                bgcolor: isDark ? "rgba(59, 130, 246, 0.3)" : "rgba(59, 130, 246, 0.2)",
+                bgcolor: isDark ? "#1e4068" : "#bfdbfe",
               },
               gap: 0.5,
               px: 2,
@@ -615,7 +651,7 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
                               )}
                             </Box>
                             {isExpanded && block.fullContent && (
-                              <Box sx={{ mt: 1 }}>
+                              <Box sx={{ mt: 1, mx: -1 }}>
                                 <JsonViewer content={block.fullContent} maxHeight="300px" />
                               </Box>
                             )}
@@ -649,8 +685,107 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
                               </IconButton>
                             </Box>
                             {isExpanded && block.fullContent && (
-                              <Box sx={{ mt: 1 }}>
+                              <Box sx={{ mt: 1, mx: -1 }}>
                                 <JsonViewer content={block.fullContent} maxHeight="400px" />
+                              </Box>
+                            )}
+                          </Box>
+                        ) : block.blockType === "tool_result" ? (
+                          <Box sx={{ flex: 1 }}>
+                            <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 1 }}>
+                              {!isExpanded ? (
+                                <Typography
+                                  component="div"
+                                  sx={{
+                                    fontFamily: "code",
+                                    fontSize: block.isError ? "0.8rem" : "0.75rem",
+                                    color: block.isError ? colors.rust : colors.text.secondary,
+                                    whiteSpace: "pre-wrap",
+                                    wordBreak: "break-word",
+                                    flex: 1,
+                                  }}
+                                >
+                                  {block.content}
+                                  {block.isExpandable && block.extraInfo && (
+                                    <Typography
+                                      component="span"
+                                      sx={{
+                                        fontFamily: "code",
+                                        fontSize: "0.65rem",
+                                        color: colors.text.tertiary,
+                                        fontStyle: "italic",
+                                        ml: 0.5,
+                                      }}
+                                    >
+                                      {` (${block.extraInfo})`}
+                                    </Typography>
+                                  )}
+                                </Typography>
+                              ) : (
+                                <Box sx={{ flex: 1 }} />
+                              )}
+                              <Box sx={{ display: "flex", gap: 0.25, flexShrink: 0 }}>
+                                {block.isExpandable && (
+                                  <Tooltip title={isExpanded ? "Collapse" : "Expand"} placement="top">
+                                    <IconButton
+                                      size="sm"
+                                      variant="plain"
+                                      onClick={() => toggleBlock(blockId)}
+                                      sx={{
+                                        fontSize: "0.65rem",
+                                        minWidth: "auto",
+                                        minHeight: "auto",
+                                        color: "text.tertiary",
+                                        "&:hover": { color: "text.primary" },
+                                      }}
+                                    >
+                                      {isExpanded ? "▼" : "▶"}
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
+                                {(block.fullContent || block.content) && (
+                                  <Tooltip title={isCopied ? "Copied!" : "Copy"} placement="top">
+                                    <IconButton
+                                      size="sm"
+                                      variant="plain"
+                                      onClick={() => copyBlock(block.fullContent || block.content, blockId)}
+                                      sx={{
+                                        fontSize: "0.65rem",
+                                        minWidth: "auto",
+                                        minHeight: "auto",
+                                        color: isCopied ? colors.amber : "text.tertiary",
+                                        "&:hover": { color: "text.primary" },
+                                      }}
+                                    >
+                                      {isCopied ? "✓" : "⧉"}
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
+                              </Box>
+                            </Box>
+                            {isExpanded && block.fullContent && (
+                              <Box sx={{ mt: 1, mx: -1 }}>
+                                {isJsonContent(block.fullContent) ? (
+                                  <JsonViewer content={block.fullContent} maxHeight="400px" />
+                                ) : (
+                                  <Typography
+                                    component="div"
+                                    sx={{
+                                      fontFamily: "code",
+                                      fontSize: "0.75rem",
+                                      color: block.isError ? colors.rust : colors.text.secondary,
+                                      whiteSpace: "pre-wrap",
+                                      wordBreak: "break-word",
+                                      p: 1,
+                                      bgcolor: isDark ? "rgba(30, 30, 30, 0.5)" : "rgba(250, 250, 250, 0.95)",
+                                      border: "1px solid",
+                                      borderColor: isDark ? "rgba(100, 100, 100, 0.3)" : "rgba(120, 120, 120, 0.5)",
+                                      borderRadius: 1,
+                                    }}
+                                  >
+                                    {block.fullContent}
+                                  </Typography>
+                                )}
                               </Box>
                             )}
                           </Box>
