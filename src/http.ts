@@ -7,7 +7,7 @@ import {
 } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import { createServer } from "@/server";
+import { createServer, hasCapability } from "@/server";
 import {
   claimInboxMessages,
   claimMentions,
@@ -15,6 +15,7 @@ import {
   closeDb,
   completeTask,
   createAgent,
+  createSessionCost,
   createSessionLogs,
   createTaskExtended,
   failTask,
@@ -26,6 +27,7 @@ import {
   getAllChannels,
   getAllLogs,
   getAllServices,
+  getAllSessionCosts,
   getAllTasks,
   getChannelById,
   getChannelMessages,
@@ -37,7 +39,10 @@ import {
   getPendingTaskForAgent,
   getRecentlyCancelledTasksForAgent,
   getRecentlyFinishedWorkerTasks,
+  getScheduledTasks,
   getServicesByAgentId,
+  getSessionCostsByAgentId,
+  getSessionCostsByTaskId,
   getSessionLogsByTaskId,
   getTaskById,
   getTaskStats,
@@ -74,7 +79,7 @@ import {
   verifyWebhookSignature,
 } from "./github";
 import { startSlackApp, stopSlackApp } from "./slack";
-import type { AgentLog, AgentStatus } from "./types";
+import type { AgentLog, AgentStatus, SessionCost } from "./types";
 
 const port = parseInt(process.env.PORT || process.argv[2] || "3013", 10);
 const apiKey = process.env.API_KEY || "";
@@ -630,6 +635,87 @@ const httpServer = createHttpServer(async (req, res) => {
     return;
   }
 
+  // POST /api/session-costs - Store session cost record
+  if (req.method === "POST" && pathSegments[0] === "api" && pathSegments[1] === "session-costs") {
+    // Parse request body
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    // Validate required fields
+    if (!body.sessionId || typeof body.sessionId !== "string") {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing or invalid 'sessionId' field" }));
+      return;
+    }
+
+    if (!body.agentId || typeof body.agentId !== "string") {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing or invalid 'agentId' field" }));
+      return;
+    }
+
+    if (typeof body.totalCostUsd !== "number") {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing or invalid 'totalCostUsd' field" }));
+      return;
+    }
+
+    try {
+      const cost = createSessionCost({
+        sessionId: body.sessionId,
+        taskId: body.taskId || undefined,
+        agentId: body.agentId,
+        totalCostUsd: body.totalCostUsd,
+        inputTokens: body.inputTokens ?? 0,
+        outputTokens: body.outputTokens ?? 0,
+        cacheReadTokens: body.cacheReadTokens ?? 0,
+        cacheWriteTokens: body.cacheWriteTokens ?? 0,
+        durationMs: body.durationMs ?? 0,
+        numTurns: body.numTurns ?? 1,
+        model: body.model || "opus",
+        isError: body.isError ?? false,
+      });
+
+      res.writeHead(201, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ success: true, cost }));
+    } catch (error) {
+      console.error("[HTTP] Failed to create session cost:", error);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Failed to store session cost" }));
+    }
+    return;
+  }
+
+  // GET /api/session-costs - Query session costs with filters
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "session-costs" &&
+    !pathSegments[2]
+  ) {
+    const costsQueryParams = parseQueryParams(req.url || "");
+    const agentId = costsQueryParams.get("agentId");
+    const taskId = costsQueryParams.get("taskId");
+    const limitParam = costsQueryParams.get("limit");
+    const limit = limitParam ? parseInt(limitParam, 10) : 100;
+
+    let costs: SessionCost[];
+    if (taskId) {
+      costs = getSessionCostsByTaskId(taskId);
+    } else if (agentId) {
+      costs = getSessionCostsByAgentId(agentId, limit);
+    } else {
+      costs = getAllSessionCosts(limit);
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ costs }));
+    return;
+  }
+
   // GET /ecosystem - Generate PM2 ecosystem config for agent's services
   if (req.method === "GET" && req.url === "/ecosystem") {
     if (!myAgentId) {
@@ -1116,6 +1202,24 @@ const httpServer = createHttpServer(async (req, res) => {
     return;
   }
 
+  // GET /api/scheduled-tasks - List all scheduled tasks (with optional filters: enabled, name)
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "scheduled-tasks" &&
+    !pathSegments[2]
+  ) {
+    const enabledParam = queryParams.get("enabled");
+    const name = queryParams.get("name");
+    const scheduledTasks = getScheduledTasks({
+      enabled: enabledParam !== null ? enabledParam === "true" : undefined,
+      name: name || undefined,
+    });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ scheduledTasks }));
+    return;
+  }
+
   // GET /api/channels - List all channels
   if (
     req.method === "GET" &&
@@ -1313,6 +1417,12 @@ globalState.__transports = transports;
 async function shutdown() {
   console.log("Shutting down HTTP server...");
 
+  // Stop scheduler (if enabled)
+  if (hasCapability("scheduling")) {
+    const { stopScheduler } = await import("./scheduler");
+    stopScheduler();
+  }
+
   // Stop Slack bot
   await stopSlackApp();
 
@@ -1347,6 +1457,13 @@ httpServer
 
     // Initialize GitHub webhook handler (if configured)
     initGitHub();
+
+    // Start scheduler (if enabled)
+    if (hasCapability("scheduling")) {
+      const { startScheduler } = await import("./scheduler");
+      const intervalMs = Number(process.env.SCHEDULER_INTERVAL_MS) || 10000;
+      startScheduler(intervalMs);
+    }
   })
   .on("error", (err) => {
     console.error("HTTP Server Error:", err);

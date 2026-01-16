@@ -13,8 +13,10 @@ import type {
   ChannelType,
   InboxMessage,
   InboxMessageStatus,
+  ScheduledTask,
   Service,
   ServiceStatus,
+  SessionCost,
   SessionLog,
 } from "../types";
 
@@ -172,6 +174,27 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     `);
 
     database.run(`
+      CREATE TABLE IF NOT EXISTS session_costs (
+        id TEXT PRIMARY KEY,
+        sessionId TEXT NOT NULL,
+        taskId TEXT,
+        agentId TEXT NOT NULL,
+        totalCostUsd REAL NOT NULL,
+        inputTokens INTEGER NOT NULL DEFAULT 0,
+        outputTokens INTEGER NOT NULL DEFAULT 0,
+        cacheReadTokens INTEGER NOT NULL DEFAULT 0,
+        cacheWriteTokens INTEGER NOT NULL DEFAULT 0,
+        durationMs INTEGER NOT NULL,
+        numTurns INTEGER NOT NULL,
+        model TEXT NOT NULL,
+        isError INTEGER NOT NULL DEFAULT 0,
+        createdAt TEXT NOT NULL,
+        FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE,
+        FOREIGN KEY (taskId) REFERENCES agent_tasks(id) ON DELETE SET NULL
+      )
+    `);
+
+    database.run(`
       CREATE TABLE IF NOT EXISTS inbox_messages (
         id TEXT PRIMARY KEY,
         agentId TEXT NOT NULL,
@@ -213,10 +236,51 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     database.run(
       `CREATE INDEX IF NOT EXISTS idx_session_logs_sessionId ON session_logs(sessionId)`,
     );
+    // Session costs indexes for timeseries queries
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_session_costs_createdAt ON session_costs(createdAt)`,
+    );
+    database.run(`CREATE INDEX IF NOT EXISTS idx_session_costs_taskId ON session_costs(taskId)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_session_costs_agentId ON session_costs(agentId)`);
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_session_costs_agent_createdAt ON session_costs(agentId, createdAt)`,
+    );
     database.run(
       `CREATE INDEX IF NOT EXISTS idx_inbox_messages_agentId ON inbox_messages(agentId)`,
     );
     database.run(`CREATE INDEX IF NOT EXISTS idx_inbox_messages_status ON inbox_messages(status)`);
+
+    // Scheduled tasks table
+    database.run(`
+      CREATE TABLE IF NOT EXISTS scheduled_tasks (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        cronExpression TEXT,
+        intervalMs INTEGER,
+        taskTemplate TEXT NOT NULL,
+        taskType TEXT,
+        tags TEXT DEFAULT '[]',
+        priority INTEGER DEFAULT 50,
+        targetAgentId TEXT,
+        enabled INTEGER DEFAULT 1,
+        lastRunAt TEXT,
+        nextRunAt TEXT,
+        createdByAgentId TEXT,
+        timezone TEXT DEFAULT 'UTC',
+        createdAt TEXT NOT NULL,
+        lastUpdatedAt TEXT NOT NULL,
+        CHECK (cronExpression IS NOT NULL OR intervalMs IS NOT NULL)
+      )
+    `);
+
+    // Scheduled tasks indexes
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_enabled ON scheduled_tasks(enabled)`,
+    );
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_nextRunAt ON scheduled_tasks(nextRunAt)`,
+    );
   });
 
   initSchema();
@@ -2696,6 +2760,151 @@ export function getSessionLogsBySession(sessionId: string, iteration: number): S
 }
 
 // ============================================================================
+// Session Costs (aggregated cost data per session)
+// ============================================================================
+
+type SessionCostRow = {
+  id: string;
+  sessionId: string;
+  taskId: string | null;
+  agentId: string;
+  totalCostUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  durationMs: number;
+  numTurns: number;
+  model: string;
+  isError: number;
+  createdAt: string;
+};
+
+function rowToSessionCost(row: SessionCostRow): SessionCost {
+  return {
+    id: row.id,
+    sessionId: row.sessionId,
+    taskId: row.taskId ?? undefined,
+    agentId: row.agentId,
+    totalCostUsd: row.totalCostUsd,
+    inputTokens: row.inputTokens,
+    outputTokens: row.outputTokens,
+    cacheReadTokens: row.cacheReadTokens,
+    cacheWriteTokens: row.cacheWriteTokens,
+    durationMs: row.durationMs,
+    numTurns: row.numTurns,
+    model: row.model,
+    isError: row.isError === 1,
+    createdAt: row.createdAt,
+  };
+}
+
+const sessionCostQueries = {
+  insert: () =>
+    getDb().prepare<
+      null,
+      [
+        string,
+        string,
+        string | null,
+        string,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        number,
+        string,
+        number,
+      ]
+    >(
+      `INSERT INTO session_costs (id, sessionId, taskId, agentId, totalCostUsd, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, durationMs, numTurns, model, isError, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+    ),
+
+  getByTaskId: () =>
+    getDb().prepare<SessionCostRow, [string]>(
+      "SELECT * FROM session_costs WHERE taskId = ? ORDER BY createdAt DESC",
+    ),
+
+  getByAgentId: () =>
+    getDb().prepare<SessionCostRow, [string, number]>(
+      "SELECT * FROM session_costs WHERE agentId = ? ORDER BY createdAt DESC LIMIT ?",
+    ),
+
+  getAll: () =>
+    getDb().prepare<SessionCostRow, [number]>(
+      "SELECT * FROM session_costs ORDER BY createdAt DESC LIMIT ?",
+    ),
+};
+
+export interface CreateSessionCostInput {
+  sessionId: string;
+  taskId?: string;
+  agentId: string;
+  totalCostUsd: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  durationMs: number;
+  numTurns: number;
+  model: string;
+  isError?: boolean;
+}
+
+export function createSessionCost(input: CreateSessionCostInput): SessionCost {
+  const id = crypto.randomUUID();
+  sessionCostQueries
+    .insert()
+    .run(
+      id,
+      input.sessionId,
+      input.taskId ?? null,
+      input.agentId,
+      input.totalCostUsd,
+      input.inputTokens ?? 0,
+      input.outputTokens ?? 0,
+      input.cacheReadTokens ?? 0,
+      input.cacheWriteTokens ?? 0,
+      input.durationMs,
+      input.numTurns,
+      input.model,
+      input.isError ? 1 : 0,
+    );
+
+  return {
+    id,
+    sessionId: input.sessionId,
+    taskId: input.taskId,
+    agentId: input.agentId,
+    totalCostUsd: input.totalCostUsd,
+    inputTokens: input.inputTokens ?? 0,
+    outputTokens: input.outputTokens ?? 0,
+    cacheReadTokens: input.cacheReadTokens ?? 0,
+    cacheWriteTokens: input.cacheWriteTokens ?? 0,
+    durationMs: input.durationMs,
+    numTurns: input.numTurns,
+    model: input.model,
+    isError: input.isError ?? false,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+export function getSessionCostsByTaskId(taskId: string): SessionCost[] {
+  return sessionCostQueries.getByTaskId().all(taskId).map(rowToSessionCost);
+}
+
+export function getSessionCostsByAgentId(agentId: string, limit = 100): SessionCost[] {
+  return sessionCostQueries.getByAgentId().all(agentId, limit).map(rowToSessionCost);
+}
+
+export function getAllSessionCosts(limit = 100): SessionCost[] {
+  return sessionCostQueries.getAll().all(limit).map(rowToSessionCost);
+}
+
+// ============================================================================
 // Inbox Message Operations
 // ============================================================================
 
@@ -2865,4 +3074,258 @@ export function releaseStaleProcessingInbox(timeoutMinutes: number = 30): number
   );
 
   return result.changes;
+}
+
+// ============================================================================
+// Scheduled Task Queries
+// ============================================================================
+
+type ScheduledTaskRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  cronExpression: string | null;
+  intervalMs: number | null;
+  taskTemplate: string;
+  taskType: string | null;
+  tags: string | null;
+  priority: number;
+  targetAgentId: string | null;
+  enabled: number;
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+  createdByAgentId: string | null;
+  timezone: string;
+  createdAt: string;
+  lastUpdatedAt: string;
+};
+
+function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description ?? undefined,
+    cronExpression: row.cronExpression ?? undefined,
+    intervalMs: row.intervalMs ?? undefined,
+    taskTemplate: row.taskTemplate,
+    taskType: row.taskType ?? undefined,
+    tags: row.tags ? JSON.parse(row.tags) : [],
+    priority: row.priority,
+    targetAgentId: row.targetAgentId ?? undefined,
+    enabled: row.enabled === 1,
+    lastRunAt: row.lastRunAt ?? undefined,
+    nextRunAt: row.nextRunAt ?? undefined,
+    createdByAgentId: row.createdByAgentId ?? undefined,
+    timezone: row.timezone,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+export interface ScheduledTaskFilters {
+  enabled?: boolean;
+  name?: string;
+}
+
+export function getScheduledTasks(filters?: ScheduledTaskFilters): ScheduledTask[] {
+  let query = "SELECT * FROM scheduled_tasks WHERE 1=1";
+  const params: (string | number)[] = [];
+
+  if (filters?.enabled !== undefined) {
+    query += " AND enabled = ?";
+    params.push(filters.enabled ? 1 : 0);
+  }
+
+  if (filters?.name) {
+    query += " AND name LIKE ?";
+    params.push(`%${filters.name}%`);
+  }
+
+  query += " ORDER BY name ASC";
+
+  return getDb()
+    .prepare<ScheduledTaskRow, (string | number)[]>(query)
+    .all(...params)
+    .map(rowToScheduledTask);
+}
+
+export function getScheduledTaskById(id: string): ScheduledTask | null {
+  const row = getDb()
+    .prepare<ScheduledTaskRow, [string]>("SELECT * FROM scheduled_tasks WHERE id = ?")
+    .get(id);
+  return row ? rowToScheduledTask(row) : null;
+}
+
+export function getScheduledTaskByName(name: string): ScheduledTask | null {
+  const row = getDb()
+    .prepare<ScheduledTaskRow, [string]>("SELECT * FROM scheduled_tasks WHERE name = ?")
+    .get(name);
+  return row ? rowToScheduledTask(row) : null;
+}
+
+export interface CreateScheduledTaskData {
+  name: string;
+  description?: string;
+  cronExpression?: string;
+  intervalMs?: number;
+  taskTemplate: string;
+  taskType?: string;
+  tags?: string[];
+  priority?: number;
+  targetAgentId?: string;
+  enabled?: boolean;
+  nextRunAt?: string;
+  createdByAgentId?: string;
+  timezone?: string;
+}
+
+export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTask {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  const row = getDb()
+    .prepare<ScheduledTaskRow, (string | number | null)[]>(
+      `INSERT INTO scheduled_tasks (
+        id, name, description, cronExpression, intervalMs, taskTemplate,
+        taskType, tags, priority, targetAgentId, enabled, nextRunAt,
+        createdByAgentId, timezone, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      data.name,
+      data.description ?? null,
+      data.cronExpression ?? null,
+      data.intervalMs ?? null,
+      data.taskTemplate,
+      data.taskType ?? null,
+      JSON.stringify(data.tags ?? []),
+      data.priority ?? 50,
+      data.targetAgentId ?? null,
+      data.enabled !== false ? 1 : 0,
+      data.nextRunAt ?? null,
+      data.createdByAgentId ?? null,
+      data.timezone ?? "UTC",
+      now,
+      now,
+    );
+
+  if (!row) throw new Error("Failed to create scheduled task");
+  return rowToScheduledTask(row);
+}
+
+export interface UpdateScheduledTaskData {
+  name?: string;
+  description?: string;
+  cronExpression?: string;
+  intervalMs?: number;
+  taskTemplate?: string;
+  taskType?: string;
+  tags?: string[];
+  priority?: number;
+  targetAgentId?: string | null;
+  enabled?: boolean;
+  lastRunAt?: string;
+  nextRunAt?: string;
+  timezone?: string;
+  lastUpdatedAt?: string;
+}
+
+export function updateScheduledTask(
+  id: string,
+  data: UpdateScheduledTaskData,
+): ScheduledTask | null {
+  const updates: string[] = [];
+  const params: (string | number | null)[] = [];
+
+  if (data.name !== undefined) {
+    updates.push("name = ?");
+    params.push(data.name);
+  }
+  if (data.description !== undefined) {
+    updates.push("description = ?");
+    params.push(data.description);
+  }
+  if (data.cronExpression !== undefined) {
+    updates.push("cronExpression = ?");
+    params.push(data.cronExpression);
+  }
+  if (data.intervalMs !== undefined) {
+    updates.push("intervalMs = ?");
+    params.push(data.intervalMs);
+  }
+  if (data.taskTemplate !== undefined) {
+    updates.push("taskTemplate = ?");
+    params.push(data.taskTemplate);
+  }
+  if (data.taskType !== undefined) {
+    updates.push("taskType = ?");
+    params.push(data.taskType);
+  }
+  if (data.tags !== undefined) {
+    updates.push("tags = ?");
+    params.push(JSON.stringify(data.tags));
+  }
+  if (data.priority !== undefined) {
+    updates.push("priority = ?");
+    params.push(data.priority);
+  }
+  if (data.targetAgentId !== undefined) {
+    updates.push("targetAgentId = ?");
+    params.push(data.targetAgentId);
+  }
+  if (data.enabled !== undefined) {
+    updates.push("enabled = ?");
+    params.push(data.enabled ? 1 : 0);
+  }
+  if (data.lastRunAt !== undefined) {
+    updates.push("lastRunAt = ?");
+    params.push(data.lastRunAt);
+  }
+  if (data.nextRunAt !== undefined) {
+    updates.push("nextRunAt = ?");
+    params.push(data.nextRunAt);
+  }
+  if (data.timezone !== undefined) {
+    updates.push("timezone = ?");
+    params.push(data.timezone);
+  }
+
+  if (updates.length === 0) {
+    return getScheduledTaskById(id);
+  }
+
+  updates.push("lastUpdatedAt = ?");
+  params.push(data.lastUpdatedAt ?? new Date().toISOString());
+
+  params.push(id);
+
+  const row = getDb()
+    .prepare<ScheduledTaskRow, (string | number | null)[]>(
+      `UPDATE scheduled_tasks SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
+    )
+    .get(...params);
+
+  return row ? rowToScheduledTask(row) : null;
+}
+
+export function deleteScheduledTask(id: string): boolean {
+  const result = getDb().run("DELETE FROM scheduled_tasks WHERE id = ?", [id]);
+  return result.changes > 0;
+}
+
+/**
+ * Get all enabled scheduled tasks that are due for execution.
+ * A task is due when its nextRunAt time is <= now.
+ */
+export function getDueScheduledTasks(): ScheduledTask[] {
+  const now = new Date().toISOString();
+  return getDb()
+    .prepare<ScheduledTaskRow, [string]>(
+      `SELECT * FROM scheduled_tasks
+       WHERE enabled = 1 AND nextRunAt IS NOT NULL AND nextRunAt <= ?
+       ORDER BY nextRunAt ASC`,
+    )
+    .all(now)
+    .map(rowToScheduledTask);
 }

@@ -238,3 +238,53 @@ export const SessionLogSchema = z.object({
 });
 
 export type SessionLog = z.infer<typeof SessionLogSchema>;
+
+// Session Cost Types (aggregated cost data per session)
+export const SessionCostSchema = z.object({
+  id: z.uuid(),
+  sessionId: z.string(),
+  taskId: z.uuid().optional(),
+  agentId: z.uuid(),
+  totalCostUsd: z.number().min(0),
+  inputTokens: z.number().int().min(0).default(0),
+  outputTokens: z.number().int().min(0).default(0),
+  cacheReadTokens: z.number().int().min(0).default(0),
+  cacheWriteTokens: z.number().int().min(0).default(0),
+  durationMs: z.number().int().min(0),
+  numTurns: z.number().int().min(1),
+  model: z.string(),
+  isError: z.boolean().default(false),
+  createdAt: z.iso.datetime(),
+});
+
+export type SessionCost = z.infer<typeof SessionCostSchema>;
+
+// ============================================================================
+// Scheduled Task Types
+// ============================================================================
+
+export const ScheduledTaskSchema = z
+  .object({
+    id: z.uuid(),
+    name: z.string().min(1).max(100),
+    description: z.string().optional(),
+    cronExpression: z.string().optional(),
+    intervalMs: z.number().int().positive().optional(),
+    taskTemplate: z.string().min(1),
+    taskType: z.string().max(50).optional(),
+    tags: z.array(z.string()).default([]),
+    priority: z.number().int().min(0).max(100).default(50),
+    targetAgentId: z.uuid().optional(),
+    enabled: z.boolean().default(true),
+    lastRunAt: z.iso.datetime().optional(),
+    nextRunAt: z.iso.datetime().optional(),
+    createdByAgentId: z.uuid().optional(),
+    timezone: z.string().default("UTC"),
+    createdAt: z.iso.datetime(),
+    lastUpdatedAt: z.iso.datetime(),
+  })
+  .refine((data) => data.cronExpression || data.intervalMs, {
+    message: "Either cronExpression or intervalMs must be provided",
+  });
+
+export type ScheduledTask = z.infer<typeof ScheduledTaskSchema>;

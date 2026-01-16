@@ -94,15 +94,15 @@ async function discoverCategories(): Promise<ToolCategory[]> {
 }
 
 /**
- * Discover all tool files in the tools directory
+ * Discover all tool files in the tools directory (including subdirectories)
  */
 async function discoverToolFiles(): Promise<string[]> {
-  const glob = new Glob("*.ts");
+  const glob = new Glob("**/*.ts");
   const files: string[] = [];
 
   for await (const file of glob.scan(TOOLS_DIR)) {
-    // Skip utility files
-    if (file === "utils.ts" || file === "index.ts") continue;
+    // Skip utility files and index files
+    if (file === "utils.ts" || file.endsWith("index.ts")) continue;
     files.push(file.replace(".ts", ""));
   }
 
