@@ -233,3 +233,11 @@ body {
   pointer-events: none;
   z-index: 0;
 }
+
+/* Honeycomb grid layout fix - override Joy UI generated styles */
+@media (min-width: 900px) {
+  .css-1wql94r {
+    margin-top: -20px;
+    margin-left: 88px;
+  }
+}
