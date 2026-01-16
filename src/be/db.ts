@@ -299,6 +299,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
         tags TEXT DEFAULT '[]',
         createdByAgentId TEXT,
         leadAgentId TEXT,
+        channelId TEXT,
         researchDocPath TEXT,
         planDocPath TEXT,
         slackChannelId TEXT,
@@ -310,7 +311,8 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
         startedAt TEXT,
         completedAt TEXT,
         FOREIGN KEY (createdByAgentId) REFERENCES agents(id) ON DELETE SET NULL,
-        FOREIGN KEY (leadAgentId) REFERENCES agents(id) ON DELETE SET NULL
+        FOREIGN KEY (leadAgentId) REFERENCES agents(id) ON DELETE SET NULL,
+        FOREIGN KEY (channelId) REFERENCES channels(id) ON DELETE SET NULL
       )
     `);
 
@@ -612,6 +614,15 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   // Epic progress trigger migration: Add progressNotifiedAt to epics
   try {
     db.run(`ALTER TABLE epics ADD COLUMN progressNotifiedAt TEXT`);
+  } catch {
+    /* exists */
+  }
+
+  // Epic channel migration: Add channelId to epics
+  try {
+    db.run(
+      `ALTER TABLE epics ADD COLUMN channelId TEXT REFERENCES channels(id) ON DELETE SET NULL`,
+    );
   } catch {
     /* exists */
   }
@@ -3504,6 +3515,7 @@ type EpicRow = {
   tags: string | null;
   createdByAgentId: string | null;
   leadAgentId: string | null;
+  channelId: string | null;
   researchDocPath: string | null;
   planDocPath: string | null;
   slackChannelId: string | null;
@@ -3530,6 +3542,7 @@ function rowToEpic(row: EpicRow): Epic {
     tags: row.tags ? JSON.parse(row.tags) : [],
     createdByAgentId: row.createdByAgentId ?? undefined,
     leadAgentId: row.leadAgentId ?? undefined,
+    channelId: row.channelId ?? undefined,
     researchDocPath: row.researchDocPath ?? undefined,
     planDocPath: row.planDocPath ?? undefined,
     slackChannelId: row.slackChannelId ?? undefined,
@@ -3606,6 +3619,7 @@ export interface CreateEpicData {
   tags?: string[];
   createdByAgentId?: string;
   leadAgentId?: string;
+  // channelId is auto-generated during epic creation
   researchDocPath?: string;
   planDocPath?: string;
   slackChannelId?: string;
@@ -3618,14 +3632,25 @@ export function createEpic(data: CreateEpicData): Epic {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
+  // Auto-create a channel for this epic to log progress, learnings, etc.
+  const channelName = `epic-${data.name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")}`;
+  const channel = createChannel(channelName, {
+    description: `Channel for epic: ${data.name}`,
+    type: "public",
+    createdBy: data.createdByAgentId,
+  });
+
   const row = getDb()
     .prepare<EpicRow, (string | number | null)[]>(
       `INSERT INTO epics (
         id, name, description, goal, prd, plan, status, priority, tags,
-        createdByAgentId, leadAgentId, researchDocPath, planDocPath,
+        createdByAgentId, leadAgentId, channelId, researchDocPath, planDocPath,
         slackChannelId, slackThreadTs, githubRepo, githubMilestone,
         createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -3638,6 +3663,7 @@ export function createEpic(data: CreateEpicData): Epic {
       JSON.stringify(data.tags ?? []),
       data.createdByAgentId ?? null,
       data.leadAgentId ?? null,
+      channel.id,
       data.researchDocPath ?? null,
       data.planDocPath ?? null,
       data.slackChannelId ?? null,

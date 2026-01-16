@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { createEpic, getAgentById, getEpicByName } from "@/be/db";
+import { createEpic, getAgentById, getChannelById, getEpicByName } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerCreateEpicTool = (server: McpServer) => {
@@ -30,6 +30,7 @@ export const registerCreateEpicTool = (server: McpServer) => {
         success: z.boolean(),
         message: z.string(),
         epic: z.any().optional(),
+        channel: z.any().optional(),
       }),
     },
     async (args, requestInfo, _meta) => {
@@ -61,18 +62,28 @@ export const registerCreateEpicTool = (server: McpServer) => {
       }
 
       try {
+        // createEpic automatically creates a messaging channel for the epic
         const epic = createEpic({
           ...args,
           createdByAgentId: requestInfo.agentId,
         });
 
+        // Get the auto-created channel for the response
+        const channel = epic.channelId ? getChannelById(epic.channelId) : null;
+
         return {
-          content: [{ type: "text", text: `Created epic "${epic.name}" (${epic.id})` }],
+          content: [
+            {
+              type: "text",
+              text: `Created epic "${epic.name}" (${epic.id}) with channel #${channel?.name ?? "unknown"}`,
+            },
+          ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: true,
-            message: `Created epic "${epic.name}".`,
+            message: `Created epic "${epic.name}" with channel #${channel?.name ?? "unknown"}.`,
             epic,
+            channel,
           },
         };
       } catch (error) {

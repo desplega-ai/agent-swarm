@@ -317,6 +317,7 @@ export const EpicSchema = z.object({
   tags: z.array(z.string()).default([]),
   createdByAgentId: z.uuid().optional(),
   leadAgentId: z.uuid().optional(),
+  channelId: z.uuid().optional(), // Internal messaging channel for this epic
   researchDocPath: z.string().optional(),
   planDocPath: z.string().optional(),
   slackChannelId: z.string().optional(),

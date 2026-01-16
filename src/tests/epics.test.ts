@@ -7,6 +7,7 @@ import {
   createEpic,
   createTaskExtended,
   deleteEpic,
+  getChannelById,
   getEpicById,
   getEpicByName,
   getEpics,
@@ -107,6 +108,28 @@ describe("Epics Integration", () => {
       expect(epic.leadAgentId).toBe(leadAgent.id);
       expect(epic.researchDocPath).toBe("/thoughts/research/test.md");
       expect(epic.githubRepo).toBe("desplega-ai/agent-swarm");
+    });
+
+    test("should auto-create a channel when creating an epic", () => {
+      // Create epic - channel should be auto-created
+      const epic = createEpic({
+        name: "test-epic-auto-channel",
+        goal: "Test epic with auto-created channel",
+        createdByAgentId: testAgent.id,
+      });
+
+      expect(epic.id).toBeDefined();
+      expect(epic.channelId).toBeDefined();
+
+      // Verify the auto-created channel exists
+      const channel = getChannelById(epic.channelId!);
+      expect(channel).not.toBeNull();
+      expect(channel?.name).toBe("epic-test-epic-auto-channel");
+      expect(channel?.description).toBe("Channel for epic: test-epic-auto-channel");
+
+      // Verify epic can be retrieved with channelId
+      const retrieved = getEpicById(epic.id);
+      expect(retrieved?.channelId).toBe(epic.channelId);
     });
 
     test("should retrieve epic by ID", () => {
