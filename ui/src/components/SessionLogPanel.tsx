@@ -559,23 +559,51 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
       );
 
       if (looksLikeJson) {
+        // Try to unwrap escaped JSON first (handles {\"key\":\"value\"} patterns)
+        const unescapedContent = unwrapEscapedJson(actualContent);
+
+        // Try parsing the unescaped content
+        try {
+          const parsed = JSON.parse(unescapedContent);
+          if (typeof parsed === 'object' && parsed !== null) {
+            const summary = generateJsonSummary(parsed);
+            return {
+              type: parsed.type || "data",
+              color: colors.tertiary,
+              blocks: [{
+                blockType: "json",
+                icon: "◇",
+                content: summary,
+                fullContent: JSON.stringify(parsed, null, 2),
+                isExpandable: true,
+              }],
+            };
+          }
+        } catch {
+          // Not valid JSON even after unescaping
+        }
+
         // Try to extract something meaningful from partial JSON
         // Look for common patterns like tool results or messages
-        let summary = truncate(actualContent, 100);
+        let summary = truncate(unescapedContent.replace(/\n/g, ' '), 100);
 
-        // Try to find and extract key information
-        const toolResultMatch = actualContent.match(/"tool_use_id":\s*"([^"]+)"/);
-        const messageMatch = actualContent.match(/"message":\s*"([^"]{0,50})/);
-        const successMatch = actualContent.match(/"success":\s*(true|false)/);
-        const yourAgentMatch = actualContent.match(/"yourAgentId":\s*"([^"]+)"/);
+        // Try to find and extract key information (use unescaped content for cleaner matches)
+        const toolResultMatch = unescapedContent.match(/"tool_use_id":\s*"([^"]+)"/);
+        const messageMatch = unescapedContent.match(/"message":\s*"([^"]{0,50})/);
+        const successMatch = unescapedContent.match(/"success":\s*(true|false)/);
+        const yourAgentMatch = unescapedContent.match(/"yourAgentId":\s*"([^"]+)"/);
+        const progressMatch = unescapedContent.match(/"progress":\s*"([^"]{0,80})/);
 
         if (yourAgentMatch?.[1] && successMatch?.[1]) {
           const status = successMatch[1] === 'true' ? '✓' : '✗';
-          summary = `${status} Agent response (${yourAgentMatch[1].slice(0, 8)}...)`;
+          const progressText = progressMatch?.[1] ? `: ${truncate(progressMatch[1], 60)}` : '';
+          summary = `${status} Agent response${progressText}`;
         } else if (toolResultMatch?.[1]) {
           summary = `Tool result for ${toolResultMatch[1].slice(0, 20)}...`;
         } else if (messageMatch?.[1]) {
           summary = `Message: ${messageMatch[1]}...`;
+        } else if (progressMatch?.[1]) {
+          summary = `Progress: ${truncate(progressMatch[1], 80)}`;
         }
 
         return {
@@ -585,7 +613,8 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
             blockType: "json",
             icon: "◇",
             content: summary,
-            fullContent: actualContent,
+            // Store the unescaped content for expansion
+            fullContent: unescapedContent !== actualContent ? unescapedContent : actualContent,
             isExpandable: true,
           }],
         };
