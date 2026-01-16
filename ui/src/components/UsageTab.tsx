@@ -115,29 +115,55 @@ export default function UsageTab() {
   );
 
   return (
-    <Box sx={{ height: "100%", overflow: "auto", display: "flex", flexDirection: "column", gap: 3 }}>
+    <Card
+      variant="outlined"
+      className="card-hover"
+      sx={{
+        p: 0,
+        overflow: "hidden",
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        bgcolor: "background.surface",
+        borderColor: "neutral.outlinedBorder",
+      }}
+    >
       {/* Header with time range selector */}
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 2 }}>
+      <Box
+        sx={{
+          display: "flex",
+          flexDirection: { xs: "column", sm: "row" },
+          alignItems: { xs: "stretch", sm: "center" },
+          justifyContent: "space-between",
+          px: { xs: 1.5, md: 2 },
+          py: 1.5,
+          borderBottom: "1px solid",
+          borderColor: "neutral.outlinedBorder",
+          bgcolor: "background.level1",
+          gap: 1.5,
+        }}
+      >
         <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <Box
             sx={{
-              width: 10,
-              height: 12,
+              width: 8,
+              height: 10,
               clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
               bgcolor: colors.amber,
               boxShadow: colors.amberGlow,
             }}
           />
           <Typography
+            level="title-md"
             sx={{
               fontFamily: "display",
               fontWeight: 600,
               color: colors.amber,
               letterSpacing: "0.03em",
-              fontSize: { xs: "1rem", md: "1.2rem" },
+              fontSize: { xs: "0.9rem", md: "1rem" },
             }}
           >
-            USAGE DASHBOARD
+            USAGE
           </Typography>
         </Box>
 
@@ -159,8 +185,10 @@ export default function UsageTab() {
         </Select>
       </Box>
 
-      {/* Summary Stats */}
-      <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+      {/* Scrollable content area */}
+      <Box sx={{ flex: 1, overflow: "auto", p: { xs: 1.5, md: 2 }, display: "flex", flexDirection: "column", gap: 3 }}>
+        {/* Summary Stats */}
+        <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
         <StatCard
           title="TOTAL COST"
           value={formatCurrency(summaryStats.totalCost)}
@@ -337,6 +365,7 @@ export default function UsageTab() {
           )}
         </Card>
       </Box>
-    </Box>
+      </Box>
+    </Card>
   );
 }

@@ -224,29 +224,46 @@ export default function StatsBar({ onFilterAgents, onNavigateToTasks }: StatsBar
         WebkitOverflowScrolling: "touch",
       }}
     >
-      {/* Desktop: Horizontal honeycomb layout */}
+      {/* Desktop: Two-row honeycomb layout */}
       <Box
         sx={{
           display: { xs: "none", md: "flex" },
-          flexDirection: "row",
+          flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
           gap: 0.5,
-          flexWrap: "wrap",
         }}
       >
-        {[...topRow, ...bottomRow, ...usageRow].map((stat) => (
-          <HexStat
-            key={stat.label}
-            label={stat.label}
-            value={stat.value}
-            color={stat.color}
-            glowColor={stat.glowColor}
-            isActive={"isActive" in stat ? stat.isActive : undefined}
-            isDark={isDark}
-            onClick={"onClick" in stat ? stat.onClick : undefined}
-          />
-        ))}
+        {/* Top row: Agents stats + Usage */}
+        <Box sx={{ display: "flex", gap: 0.5 }}>
+          {[...topRow, ...usageRow].map((stat) => (
+            <HexStat
+              key={stat.label}
+              label={stat.label}
+              value={stat.value}
+              color={stat.color}
+              glowColor={stat.glowColor}
+              isActive={"isActive" in stat ? stat.isActive : undefined}
+              isDark={isDark}
+              onClick={"onClick" in stat ? stat.onClick : undefined}
+            />
+          ))}
+        </Box>
+        {/* Bottom row: Tasks stats (offset for honeycomb effect) */}
+        <Box sx={{ display: "flex", gap: 0.5, mt: -1 }}>
+          {bottomRow.map((stat) => (
+            <HexStat
+              key={stat.label}
+              label={stat.label}
+              value={stat.value}
+              color={stat.color}
+              glowColor={stat.glowColor}
+              isActive={stat.isActive}
+              isDark={isDark}
+              onClick={stat.onClick}
+            />
+          ))}
+        </Box>
       </Box>
 
       {/* Mobile: Single row horizontal scroll */}
