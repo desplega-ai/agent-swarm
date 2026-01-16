@@ -1,6 +1,7 @@
 import { CronExpressionParser } from "cron-parser";
 import {
   createTaskExtended,
+  getDb,
   getDueScheduledTasks,
   getScheduledTaskById,
   updateScheduledTask,
@@ -22,7 +23,12 @@ export function calculateNextRun(schedule: ScheduledTask, fromTime: Date = new D
       currentDate: fromTime,
       tz: schedule.timezone || "UTC",
     });
-    return interval.next().toISOString();
+    const nextDate = interval.next();
+    const isoString = nextDate.toISOString();
+    if (!isoString) {
+      throw new Error("Failed to calculate next run time from cron expression");
+    }
+    return isoString;
   }
 
   if (schedule.intervalMs) {
@@ -36,25 +42,31 @@ export function calculateNextRun(schedule: ScheduledTask, fromTime: Date = new D
  * Execute a single scheduled task by creating an agent task.
  */
 async function executeSchedule(schedule: ScheduledTask): Promise<void> {
-  const now = new Date().toISOString();
+  // Wrap in transaction to ensure atomicity of task creation and schedule update
+  const tx = getDb().transaction(() => {
+    const now = new Date().toISOString();
 
-  // Create the actual task
-  createTaskExtended(schedule.taskTemplate, {
-    creatorAgentId: schedule.createdByAgentId,
-    taskType: schedule.taskType,
-    tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`],
-    priority: schedule.priority,
-    agentId: schedule.targetAgentId, // null goes to pool
+    // Create the actual task
+    createTaskExtended(schedule.taskTemplate, {
+      creatorAgentId: schedule.createdByAgentId,
+      taskType: schedule.taskType,
+      tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`],
+      priority: schedule.priority,
+      agentId: schedule.targetAgentId, // null goes to pool
+    });
+
+    // Update lastRunAt and nextRunAt
+    const nextRun = calculateNextRun(schedule, new Date());
+    updateScheduledTask(schedule.id, {
+      lastRunAt: now,
+      nextRunAt: nextRun,
+      lastUpdatedAt: now,
+    });
+
+    return nextRun;
   });
 
-  // Update lastRunAt and nextRunAt
-  const nextRun = calculateNextRun(schedule, new Date());
-  updateScheduledTask(schedule.id, {
-    lastRunAt: now,
-    nextRunAt: nextRun,
-    lastUpdatedAt: now,
-  });
-
+  const nextRun = tx();
   console.log(`[Scheduler] Executed schedule "${schedule.name}", next run: ${nextRun}`);
 }
 
@@ -126,22 +138,27 @@ export async function runScheduleNow(scheduleId: string): Promise<void> {
     throw new Error(`Schedule is disabled: ${schedule.name}`);
   }
 
-  const now = new Date().toISOString();
+  // Wrap in transaction to ensure atomicity of task creation and schedule update
+  const tx = getDb().transaction(() => {
+    const now = new Date().toISOString();
 
-  // Create the actual task
-  createTaskExtended(schedule.taskTemplate, {
-    creatorAgentId: schedule.createdByAgentId,
-    taskType: schedule.taskType,
-    tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, "manual-run"],
-    priority: schedule.priority,
-    agentId: schedule.targetAgentId,
+    // Create the actual task
+    createTaskExtended(schedule.taskTemplate, {
+      creatorAgentId: schedule.createdByAgentId,
+      taskType: schedule.taskType,
+      tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, "manual-run"],
+      priority: schedule.priority,
+      agentId: schedule.targetAgentId,
+    });
+
+    // Only update lastRunAt, not nextRunAt (to not affect regular schedule)
+    updateScheduledTask(schedule.id, {
+      lastRunAt: now,
+      lastUpdatedAt: now,
+    });
   });
 
-  // Only update lastRunAt, not nextRunAt (to not affect regular schedule)
-  updateScheduledTask(schedule.id, {
-    lastRunAt: now,
-    lastUpdatedAt: now,
-  });
+  tx();
 
   console.log(`[Scheduler] Manually executed schedule "${schedule.name}"`);
 }
