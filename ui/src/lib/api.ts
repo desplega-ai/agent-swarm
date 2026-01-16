@@ -9,6 +9,7 @@ import type {
   SessionLog,
   SessionLogsResponse,
   SessionCostsResponse,
+  ScheduledTasksResponse,
   ChannelMessage,
   Stats,
   AgentWithTasks,
@@ -195,6 +196,20 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/session-costs${queryString ? `?${queryString}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch session costs: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchScheduledTasks(filters?: {
+    enabled?: boolean;
+    name?: string;
+  }): Promise<ScheduledTasksResponse> {
+    const params = new URLSearchParams();
+    if (filters?.enabled !== undefined) params.set("enabled", String(filters.enabled));
+    if (filters?.name) params.set("name", filters.name);
+    const queryString = params.toString();
+    const url = `${this.getBaseUrl()}/api/scheduled-tasks${queryString ? `?${queryString}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch scheduled tasks: ${res.status}`);
     return res.json();
   }
 }

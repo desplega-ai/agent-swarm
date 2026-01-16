@@ -10,6 +10,8 @@ import StatsBar from "./StatsBar";
 import AgentsPanel from "./AgentsPanel";
 import TasksPanel from "./TasksPanel";
 import ServicesPanel from "./ServicesPanel";
+import ScheduledTasksPanel from "./ScheduledTasksPanel";
+import ScheduledTaskDetailPanel from "./ScheduledTaskDetailPanel";
 import ActivityFeed from "./ActivityFeed";
 import AgentDetailPanel from "./AgentDetailPanel";
 import TaskDetailPanel from "./TaskDetailPanel";
@@ -24,9 +26,10 @@ interface DashboardProps {
 function getUrlParams() {
   const params = new URLSearchParams(window.location.search);
   return {
-    tab: params.get("tab") as "agents" | "tasks" | "chat" | "services" | "usage" | null,
+    tab: params.get("tab") as "agents" | "tasks" | "chat" | "services" | "schedules" | "usage" | null,
     agent: params.get("agent"),
     task: params.get("task"),
+    schedule: params.get("schedule"),
     channel: params.get("channel"),
     thread: params.get("thread"),
     agentStatus: params.get("agentStatus") as "all" | "busy" | "idle" | "offline" | null,
@@ -39,6 +42,7 @@ function updateUrl(params: {
   tab?: string;
   agent?: string | null;
   task?: string | null;
+  schedule?: string | null;
   channel?: string | null;
   thread?: string | null;
   agentStatus?: string | null;
@@ -62,8 +66,18 @@ function updateUrl(params: {
   if (params.task) {
     url.searchParams.set("task", params.task);
     url.searchParams.delete("agent");
+    url.searchParams.delete("schedule");
   } else if (params.task === null) {
     url.searchParams.delete("task");
+    url.searchParams.delete("expand");
+  }
+
+  if (params.schedule) {
+    url.searchParams.set("schedule", params.schedule);
+    url.searchParams.delete("agent");
+    url.searchParams.delete("task");
+  } else if (params.schedule === null) {
+    url.searchParams.delete("schedule");
     url.searchParams.delete("expand");
   }
 
@@ -102,9 +116,10 @@ function updateUrl(params: {
 }
 
 export default function Dashboard({ onSettingsClick }: DashboardProps) {
-  const [activeTab, setActiveTab] = useState<"agents" | "tasks" | "chat" | "services" | "usage">("agents");
+  const [activeTab, setActiveTab] = useState<"agents" | "tasks" | "chat" | "services" | "schedules" | "usage">("agents");
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null);
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [preFilterAgentId, setPreFilterAgentId] = useState<string | undefined>(undefined);
@@ -141,6 +156,11 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
       }
     } else if (params.tab === "services") {
       setActiveTab("services");
+    } else if (params.tab === "schedules") {
+      setActiveTab("schedules");
+      if (params.schedule) {
+        setSelectedScheduleId(params.schedule);
+      }
     } else if (params.tab === "usage") {
       setActiveTab("usage");
     } else {
@@ -173,6 +193,14 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
     updateUrl({ tab: "tasks", task: taskId, expand: false });
   }, []);
 
+  // Update URL when schedule selection changes
+  const handleSelectSchedule = useCallback((scheduleId: string | null) => {
+    setSelectedScheduleId(scheduleId);
+    // Reset expand when selecting a new schedule or deselecting
+    setExpandDetail(false);
+    updateUrl({ tab: "schedules", schedule: scheduleId, expand: false });
+  }, []);
+
   // Toggle expand state
   const handleToggleExpand = useCallback(() => {
     setExpandDetail((prev) => {
@@ -193,33 +221,36 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
   };
 
   const handleTabChange = (_: unknown, value: string | number | null) => {
-    const tab = value as "agents" | "tasks" | "chat" | "services" | "usage";
+    const tab = value as "agents" | "tasks" | "chat" | "services" | "schedules" | "usage";
     setActiveTab(tab);
     // Clear selections, filters, and expand when switching tabs
     setExpandDetail(false);
     if (tab === "agents") {
       setSelectedTaskId(null);
+      setSelectedScheduleId(null);
       setSelectedChannelId(null);
       setSelectedThreadId(null);
       setPreFilterAgentId(undefined);
       setTaskStatusFilter("all");
-      updateUrl({ tab: "agents", task: null, channel: null, taskStatus: null, expand: false });
+      updateUrl({ tab: "agents", task: null, schedule: null, channel: null, taskStatus: null, expand: false });
     } else if (tab === "tasks") {
       setSelectedAgentId(null);
+      setSelectedScheduleId(null);
       setSelectedChannelId(null);
       setSelectedThreadId(null);
       setAgentStatusFilter("all");
-      updateUrl({ tab: "tasks", agent: null, channel: null, agentStatus: null, expand: false });
+      updateUrl({ tab: "tasks", agent: null, schedule: null, channel: null, agentStatus: null, expand: false });
     } else if (tab === "services") {
       setSelectedAgentId(null);
       setSelectedTaskId(null);
+      setSelectedScheduleId(null);
       setSelectedChannelId(null);
       setSelectedThreadId(null);
       setPreFilterAgentId(undefined);
       setAgentStatusFilter("all");
       setTaskStatusFilter("all");
-      updateUrl({ tab: "services", agent: null, task: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
-    } else if (tab === "usage") {
+      updateUrl({ tab: "services", agent: null, task: null, schedule: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
+    } else if (tab === "schedules") {
       setSelectedAgentId(null);
       setSelectedTaskId(null);
       setSelectedChannelId(null);
@@ -227,15 +258,26 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
       setPreFilterAgentId(undefined);
       setAgentStatusFilter("all");
       setTaskStatusFilter("all");
-      updateUrl({ tab: "usage", agent: null, task: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
+      updateUrl({ tab: "schedules", agent: null, task: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
+    } else if (tab === "usage") {
+      setSelectedAgentId(null);
+      setSelectedTaskId(null);
+      setSelectedScheduleId(null);
+      setSelectedChannelId(null);
+      setSelectedThreadId(null);
+      setPreFilterAgentId(undefined);
+      setAgentStatusFilter("all");
+      setTaskStatusFilter("all");
+      updateUrl({ tab: "usage", agent: null, task: null, schedule: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
     } else {
       // chat tab
       setSelectedAgentId(null);
       setSelectedTaskId(null);
+      setSelectedScheduleId(null);
       setPreFilterAgentId(undefined);
       setAgentStatusFilter("all");
       setTaskStatusFilter("all");
-      updateUrl({ tab: "chat", agent: null, task: null, agentStatus: null, taskStatus: null, expand: false });
+      updateUrl({ tab: "chat", agent: null, task: null, schedule: null, agentStatus: null, taskStatus: null, expand: false });
     }
   };
 
@@ -371,6 +413,7 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
             <Tab value="tasks">TASKS</Tab>
             <Tab value="chat">CHAT</Tab>
             <Tab value="services">SERVICES</Tab>
+            <Tab value="schedules">SCHEDULES</Tab>
             <Tab value="usage">USAGE</Tab>
           </TabList>
 
@@ -539,6 +582,58 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
             }}
           >
             <ServicesPanel />
+          </TabPanel>
+
+          {/* Schedules Tab */}
+          <TabPanel
+            value="schedules"
+            sx={{
+              p: 0,
+              pt: 2,
+              flex: 1,
+              minHeight: 0,
+              "&[hidden]": {
+                display: "none",
+              },
+            }}
+          >
+            <Box
+              sx={{
+                height: "100%",
+                display: "flex",
+                flexDirection: { xs: "column", lg: "row" },
+                gap: { xs: 2, md: 3 },
+              }}
+            >
+              {/* Schedules Panel - hidden when expanded or when detail selected on mobile */}
+              {!(selectedScheduleId && expandDetail) && (
+                <Box
+                  sx={{
+                    flex: 1,
+                    minWidth: 0,
+                    display: {
+                      xs: selectedScheduleId ? "none" : "block",
+                      md: "block",
+                    },
+                  }}
+                >
+                  <ScheduledTasksPanel
+                    selectedScheduleId={selectedScheduleId}
+                    onSelectSchedule={handleSelectSchedule}
+                  />
+                </Box>
+              )}
+
+              {/* Schedule Detail Panel */}
+              {selectedScheduleId && (
+                <ScheduledTaskDetailPanel
+                  scheduleId={selectedScheduleId}
+                  onClose={() => handleSelectSchedule(null)}
+                  expanded={expandDetail}
+                  onToggleExpand={handleToggleExpand}
+                />
+              )}
+            </Box>
           </TabPanel>
 
           {/* Usage Tab */}

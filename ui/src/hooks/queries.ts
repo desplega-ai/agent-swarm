@@ -294,3 +294,17 @@ export function useTaskUsage(taskId: string) {
     enabled: !!taskId,
   });
 }
+
+// Scheduled Tasks hooks
+export interface ScheduledTaskFilters {
+  enabled?: boolean;
+  name?: string;
+}
+
+export function useScheduledTasks(filters?: ScheduledTaskFilters) {
+  return useQuery({
+    queryKey: ["scheduled-tasks", filters],
+    queryFn: () => api.fetchScheduledTasks(filters),
+    select: (data) => data.scheduledTasks,
+  });
+}
