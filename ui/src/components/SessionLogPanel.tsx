@@ -114,21 +114,71 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
   /** Generate a human-readable summary from a JSON object */
   const generateJsonSummary = (obj: Record<string, unknown>, maxLen = 100): string => {
     // Check for common patterns and generate nice summaries
-    if ('success' in obj && 'message' in obj) {
-      // API response pattern
-      const status = obj.success ? '✓' : '✗';
-      return `${status} ${truncate(String(obj.message), maxLen - 2)}`;
-    }
+
+    // Agent swarm response (check this first as it's most specific)
     if ('yourAgentId' in obj) {
-      // Agent swarm response
       const status = obj.success ? '✓' : '✗';
       const msg = obj.message ? String(obj.message) : 'Agent operation';
       return `${status} ${truncate(msg, maxLen - 2)}`;
     }
+
+    // Task-related responses
+    if ('task' in obj && typeof obj.task === 'object' && obj.task !== null) {
+      const task = obj.task as Record<string, unknown>;
+      const status = obj.success ? '✓' : '✗';
+      const taskStatus = task.status ? ` (${task.status})` : '';
+      const msg = obj.message ? String(obj.message) : `Task${taskStatus}`;
+      return `${status} ${truncate(msg, maxLen - 2)}`;
+    }
+
+    // API response pattern with success/message
+    if ('success' in obj && 'message' in obj) {
+      const status = obj.success ? '✓' : '✗';
+      return `${status} ${truncate(String(obj.message), maxLen - 2)}`;
+    }
+
+    // File operation results (Read, Write, Edit tools)
+    if ('content' in obj && typeof obj.content === 'string' && obj.content.length > 100) {
+      const lineCount = (obj.content as string).split('\n').length;
+      return `File content (${lineCount} lines)`;
+    }
+
+    // Search/Grep results
+    if ('matches' in obj && Array.isArray(obj.matches)) {
+      return `Found ${obj.matches.length} matches`;
+    }
+    if ('files' in obj && Array.isArray(obj.files)) {
+      return `Found ${obj.files.length} files`;
+    }
+
+    // TodoWrite result
     if ('oldTodos' in obj || 'todos' in obj) {
-      // TodoWrite result
       const count = Array.isArray(obj.todos) ? obj.todos.length : (Array.isArray(obj.oldTodos) ? obj.oldTodos.length : 0);
       return `Todo list updated (${count} items)`;
+    }
+
+    // Bash tool stdout/stderr
+    if ('stdout' in obj || 'stderr' in obj) {
+      const stdout = String(obj.stdout || '');
+      const stderr = String(obj.stderr || '');
+      if (stderr && !stdout) return `Error: ${truncate(stderr, maxLen - 7)}`;
+      if (stdout) return truncate(stdout.replace(/\n/g, ' '), maxLen);
+      return '(empty output)';
+    }
+
+    // Error responses
+    if ('error' in obj) {
+      return `✗ ${truncate(String(obj.error), maxLen - 2)}`;
+    }
+
+    // Agents list
+    if ('agents' in obj && Array.isArray(obj.agents)) {
+      return `${obj.agents.length} agents in swarm`;
+    }
+
+    // Tasks list
+    if ('tasks' in obj && Array.isArray(obj.tasks)) {
+      return `${obj.tasks.length} tasks`;
     }
 
     // Generic object: list top-level keys
@@ -152,54 +202,97 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
 
     let current = content;
     let iterations = 0;
-    const maxIterations = 5; // Allow more iterations for deeply nested escaping
+    const maxIterations = 5; // Prevent infinite loops
 
     while (iterations < maxIterations) {
       iterations++;
+      if (typeof current !== 'string') break;
+
       const trimmed = current.trim();
 
-      // First, try to parse as-is - if it works, it's valid JSON
-      try {
-        const parsed = JSON.parse(trimmed);
-        // If it parses to a string that looks like JSON, unwrap it
-        if (typeof parsed === 'string') {
-          const parsedTrimmed = parsed.trim();
-          if (parsedTrimmed.startsWith('{') || parsedTrimmed.startsWith('[')) {
-            current = parsed;
-            continue; // Try to unwrap further
-          }
-        }
-        // It's valid JSON object/array, return the current string
-        return current;
-      } catch {
-        // Not valid JSON as-is, try unescaping
-      }
-
-      // Check for escaped quotes pattern: {\"key\":\"value\"}
-      // This is common when JSON is stored as an escaped string in a database
-      if (trimmed.includes('\\"') || trimmed.includes("\\'")) {
-        // Unescape one level: \" -> " and \\ -> \
-        const unescaped = trimmed
-          .replace(/\\"/g, '"')
-          .replace(/\\'/g, "'")
-          .replace(/\\\\/g, '\\');
-
-        // Check if unescaping made a difference
-        if (unescaped !== current) {
-          try {
-            JSON.parse(unescaped);
+      // Check if it's a JSON string that was escaped (starts and ends with quotes)
+      if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+        try {
+          const unescaped = JSON.parse(trimmed);
+          if (typeof unescaped === 'string') {
             current = unescaped;
             continue; // Successfully unescaped, try again for deeper levels
-          } catch {
-            // Still not valid JSON, but try using unescaped anyway
-            // and continue loop to try more unescaping
-            current = unescaped;
-            continue;
           }
+        } catch {
+          // Not valid JSON-encoded string
         }
       }
 
-      // No more transformations possible
+      // Check if it's valid JSON that happens to contain a stringified object inside
+      // e.g., the content might already be valid but we want to parse the inner value
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          // Check if any top-level string values are themselves JSON
+          if (typeof parsed === 'object' && parsed !== null) {
+            let modified = false;
+            const processValue = (val: unknown): unknown => {
+              if (typeof val === 'string' && val.trim().startsWith('{')) {
+                try {
+                  const inner = JSON.parse(val);
+                  modified = true;
+                  return inner;
+                } catch {
+                  return val;
+                }
+              }
+              return val;
+            };
+
+            if (Array.isArray(parsed)) {
+              const newArr = parsed.map(processValue);
+              if (modified) {
+                current = JSON.stringify(newArr);
+                continue;
+              }
+            } else {
+              const newObj: Record<string, unknown> = {};
+              for (const [key, val] of Object.entries(parsed)) {
+                newObj[key] = processValue(val);
+              }
+              if (modified) {
+                current = JSON.stringify(newObj);
+                continue;
+              }
+            }
+          }
+          return current; // It's valid JSON, return as-is
+        } catch {
+          // Not valid JSON, try unescaping
+        }
+      }
+
+      // Check for inline escaped quotes like {\"key\":\"value\"}
+      // This happens when JSON was stringified without outer quotes
+      if (trimmed.includes('\\"') && (trimmed.startsWith('{') || trimmed.startsWith('['))) {
+        // Replace escaped quotes with regular quotes and try to parse
+        const unescaped = trimmed.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+        try {
+          JSON.parse(unescaped);
+          current = unescaped;
+          continue;
+        } catch {
+          // Not valid after unescaping, continue
+        }
+      }
+
+      // Check for double-escaped pattern like {\\"key\\":\\"value\\"}
+      if (trimmed.includes('\\\\"') && (trimmed.startsWith('{') || trimmed.startsWith('['))) {
+        const unescaped = trimmed.replace(/\\\\"/g, '"').replace(/\\\\\\\\/g, '\\');
+        try {
+          JSON.parse(unescaped);
+          current = unescaped;
+          continue;
+        } catch {
+          // Not valid after unescaping
+        }
+      }
+
       break;
     }
 
