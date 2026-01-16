@@ -12,6 +12,8 @@ import TasksPanel from "./TasksPanel";
 import ServicesPanel from "./ServicesPanel";
 import ScheduledTasksPanel from "./ScheduledTasksPanel";
 import ScheduledTaskDetailPanel from "./ScheduledTaskDetailPanel";
+import EpicsPanel from "./EpicsPanel";
+import EpicDetailPanel from "./EpicDetailPanel";
 import ActivityFeed from "./ActivityFeed";
 import AgentDetailPanel from "./AgentDetailPanel";
 import TaskDetailPanel from "./TaskDetailPanel";
@@ -26,10 +28,11 @@ interface DashboardProps {
 function getUrlParams() {
   const params = new URLSearchParams(window.location.search);
   return {
-    tab: params.get("tab") as "agents" | "tasks" | "chat" | "services" | "schedules" | "usage" | null,
+    tab: params.get("tab") as "agents" | "tasks" | "chat" | "services" | "schedules" | "usage" | "epics" | null,
     agent: params.get("agent"),
     task: params.get("task"),
     schedule: params.get("schedule"),
+    epic: params.get("epic"),
     channel: params.get("channel"),
     thread: params.get("thread"),
     agentStatus: params.get("agentStatus") as "all" | "busy" | "idle" | "offline" | null,
@@ -43,6 +46,7 @@ function updateUrl(params: {
   agent?: string | null;
   task?: string | null;
   schedule?: string | null;
+  epic?: string | null;
   channel?: string | null;
   thread?: string | null;
   agentStatus?: string | null;
@@ -76,8 +80,19 @@ function updateUrl(params: {
     url.searchParams.set("schedule", params.schedule);
     url.searchParams.delete("agent");
     url.searchParams.delete("task");
+    url.searchParams.delete("epic");
   } else if (params.schedule === null) {
     url.searchParams.delete("schedule");
+    url.searchParams.delete("expand");
+  }
+
+  if (params.epic) {
+    url.searchParams.set("epic", params.epic);
+    url.searchParams.delete("agent");
+    url.searchParams.delete("task");
+    url.searchParams.delete("schedule");
+  } else if (params.epic === null) {
+    url.searchParams.delete("epic");
     url.searchParams.delete("expand");
   }
 
@@ -116,10 +131,11 @@ function updateUrl(params: {
 }
 
 export default function Dashboard({ onSettingsClick }: DashboardProps) {
-  const [activeTab, setActiveTab] = useState<"agents" | "tasks" | "chat" | "services" | "schedules" | "usage">("agents");
+  const [activeTab, setActiveTab] = useState<"agents" | "tasks" | "chat" | "services" | "schedules" | "usage" | "epics">("agents");
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null);
+  const [selectedEpicId, setSelectedEpicId] = useState<string | null>(null);
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [preFilterAgentId, setPreFilterAgentId] = useState<string | undefined>(undefined);
@@ -163,6 +179,11 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
       }
     } else if (params.tab === "usage") {
       setActiveTab("usage");
+    } else if (params.tab === "epics") {
+      setActiveTab("epics");
+      if (params.epic) {
+        setSelectedEpicId(params.epic);
+      }
     } else {
       setActiveTab("agents");
       if (params.agent) {
@@ -201,6 +222,14 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
     updateUrl({ tab: "schedules", schedule: scheduleId, expand: false });
   }, []);
 
+  // Update URL when epic selection changes
+  const handleSelectEpic = useCallback((epicId: string | null) => {
+    setSelectedEpicId(epicId);
+    // Reset expand when selecting a new epic or deselecting
+    setExpandDetail(false);
+    updateUrl({ tab: "epics", epic: epicId, expand: false });
+  }, []);
+
   // Toggle expand state
   const handleToggleExpand = useCallback(() => {
     setExpandDetail((prev) => {
@@ -221,45 +250,49 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
   };
 
   const handleTabChange = (_: unknown, value: string | number | null) => {
-    const tab = value as "agents" | "tasks" | "chat" | "services" | "schedules" | "usage";
+    const tab = value as "agents" | "tasks" | "chat" | "services" | "schedules" | "usage" | "epics";
     setActiveTab(tab);
     // Clear selections, filters, and expand when switching tabs
     setExpandDetail(false);
     if (tab === "agents") {
       setSelectedTaskId(null);
       setSelectedScheduleId(null);
+      setSelectedEpicId(null);
       setSelectedChannelId(null);
       setSelectedThreadId(null);
       setPreFilterAgentId(undefined);
       setTaskStatusFilter("all");
-      updateUrl({ tab: "agents", task: null, schedule: null, channel: null, taskStatus: null, expand: false });
+      updateUrl({ tab: "agents", task: null, schedule: null, epic: null, channel: null, taskStatus: null, expand: false });
     } else if (tab === "tasks") {
       setSelectedAgentId(null);
       setSelectedScheduleId(null);
+      setSelectedEpicId(null);
       setSelectedChannelId(null);
       setSelectedThreadId(null);
       setAgentStatusFilter("all");
-      updateUrl({ tab: "tasks", agent: null, schedule: null, channel: null, agentStatus: null, expand: false });
+      updateUrl({ tab: "tasks", agent: null, schedule: null, epic: null, channel: null, agentStatus: null, expand: false });
     } else if (tab === "services") {
       setSelectedAgentId(null);
       setSelectedTaskId(null);
       setSelectedScheduleId(null);
+      setSelectedEpicId(null);
       setSelectedChannelId(null);
       setSelectedThreadId(null);
       setPreFilterAgentId(undefined);
       setAgentStatusFilter("all");
       setTaskStatusFilter("all");
-      updateUrl({ tab: "services", agent: null, task: null, schedule: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
+      updateUrl({ tab: "services", agent: null, task: null, schedule: null, epic: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
     } else if (tab === "schedules") {
       setSelectedAgentId(null);
       setSelectedTaskId(null);
+      setSelectedEpicId(null);
       setSelectedChannelId(null);
       setSelectedThreadId(null);
       setPreFilterAgentId(undefined);
       setAgentStatusFilter("all");
       setTaskStatusFilter("all");
-      updateUrl({ tab: "schedules", agent: null, task: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
-    } else if (tab === "usage") {
+      updateUrl({ tab: "schedules", agent: null, task: null, epic: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
+    } else if (tab === "epics") {
       setSelectedAgentId(null);
       setSelectedTaskId(null);
       setSelectedScheduleId(null);
@@ -268,16 +301,28 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
       setPreFilterAgentId(undefined);
       setAgentStatusFilter("all");
       setTaskStatusFilter("all");
-      updateUrl({ tab: "usage", agent: null, task: null, schedule: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
+      updateUrl({ tab: "epics", agent: null, task: null, schedule: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
+    } else if (tab === "usage") {
+      setSelectedAgentId(null);
+      setSelectedTaskId(null);
+      setSelectedScheduleId(null);
+      setSelectedEpicId(null);
+      setSelectedChannelId(null);
+      setSelectedThreadId(null);
+      setPreFilterAgentId(undefined);
+      setAgentStatusFilter("all");
+      setTaskStatusFilter("all");
+      updateUrl({ tab: "usage", agent: null, task: null, schedule: null, epic: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
     } else {
       // chat tab
       setSelectedAgentId(null);
       setSelectedTaskId(null);
       setSelectedScheduleId(null);
+      setSelectedEpicId(null);
       setPreFilterAgentId(undefined);
       setAgentStatusFilter("all");
       setTaskStatusFilter("all");
-      updateUrl({ tab: "chat", agent: null, task: null, schedule: null, agentStatus: null, taskStatus: null, expand: false });
+      updateUrl({ tab: "chat", agent: null, task: null, schedule: null, epic: null, agentStatus: null, taskStatus: null, expand: false });
     }
   };
 
@@ -414,6 +459,7 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
             <Tab value="chat">CHAT</Tab>
             <Tab value="services">SERVICES</Tab>
             <Tab value="schedules">SCHEDULES</Tab>
+            <Tab value="epics">EPICS</Tab>
             <Tab value="usage">USAGE</Tab>
           </TabList>
 
@@ -650,6 +696,58 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
             }}
           >
             <UsageTab />
+          </TabPanel>
+
+          {/* Epics Tab */}
+          <TabPanel
+            value="epics"
+            sx={{
+              p: 0,
+              pt: 2,
+              flex: 1,
+              minHeight: 0,
+              "&[hidden]": {
+                display: "none",
+              },
+            }}
+          >
+            <Box
+              sx={{
+                height: "100%",
+                display: "flex",
+                flexDirection: { xs: "column", lg: "row" },
+                gap: { xs: 2, md: 3 },
+              }}
+            >
+              {/* Epics Panel - hidden when expanded or when detail selected on mobile */}
+              {!(selectedEpicId && expandDetail) && (
+                <Box
+                  sx={{
+                    flex: 1,
+                    minWidth: 0,
+                    display: {
+                      xs: selectedEpicId ? "none" : "block",
+                      md: "block",
+                    },
+                  }}
+                >
+                  <EpicsPanel
+                    selectedEpicId={selectedEpicId}
+                    onSelectEpic={handleSelectEpic}
+                  />
+                </Box>
+              )}
+
+              {/* Epic Detail Panel */}
+              {selectedEpicId && (
+                <EpicDetailPanel
+                  epicId={selectedEpicId}
+                  onClose={() => handleSelectEpic(null)}
+                  expanded={expandDetail}
+                  onToggleExpand={handleToggleExpand}
+                />
+              )}
+            </Box>
           </TabPanel>
         </Tabs>
       </Box>
