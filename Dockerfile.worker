@@ -79,6 +79,14 @@ ENV BUN_INSTALL="/home/worker/.bun"
 RUN HOME=/home/worker BUN_INSTALL=/home/worker/.bun curl -fsSL https://bun.sh/install | bash
 ENV PATH="/home/worker/.bun/bin:$PATH"
 
+# Install QMD globally (Quick Markdown Search for knowledge base)
+RUN HOME=/home/worker bun install -g https://github.com/tobi/qmd
+
+# Pre-download QMD models (~1.6GB) to avoid first-use delay
+# Models: EmbeddingGemma-300M (~300MB), Qwen3-Reranker-0.6B (~640MB), Qwen3-0.6B (~640MB)
+RUN mkdir -p /home/worker/.cache/qmd/models && \
+    HOME=/home/worker qmd embed --help || true
+
 # Install Claude CLI using official installer
 RUN HOME=/home/worker curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/home/worker/.local/bin:$PATH"
