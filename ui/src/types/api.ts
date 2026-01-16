@@ -234,3 +234,28 @@ export interface AgentUsageSummary {
   monthlyTokens: number;
   sessionCount: number;
 }
+
+// Scheduled Task Types
+export interface ScheduledTask {
+  id: string;
+  name: string;
+  description?: string;
+  cronExpression?: string;
+  intervalMs?: number;
+  taskTemplate: string;
+  taskType?: string;
+  tags: string[];
+  priority: number;
+  targetAgentId?: string;
+  enabled: boolean;
+  lastRunAt?: string;
+  nextRunAt?: string;
+  createdByAgentId?: string;
+  timezone: string;
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+
+export interface ScheduledTasksResponse {
+  scheduledTasks: ScheduledTask[];
+}
