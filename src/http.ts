@@ -39,6 +39,7 @@ import {
   getPendingTaskForAgent,
   getRecentlyCancelledTasksForAgent,
   getRecentlyFinishedWorkerTasks,
+  getScheduledTasks,
   getServicesByAgentId,
   getSessionCostsByAgentId,
   getSessionCostsByTaskId,
@@ -1198,6 +1199,24 @@ const httpServer = createHttpServer(async (req, res) => {
     });
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ services }));
+    return;
+  }
+
+  // GET /api/scheduled-tasks - List all scheduled tasks (with optional filters: enabled, name)
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "scheduled-tasks" &&
+    !pathSegments[2]
+  ) {
+    const enabledParam = queryParams.get("enabled");
+    const name = queryParams.get("name");
+    const scheduledTasks = getScheduledTasks({
+      enabled: enabledParam !== null ? enabledParam === "true" : undefined,
+      name: name || undefined,
+    });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ scheduledTasks }));
     return;
   }
 
