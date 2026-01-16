@@ -54,6 +54,7 @@ import {
   startTask,
   updateAgentMaxTasks,
   updateAgentName,
+  updateAgentProfile,
   updateAgentStatus,
   updateAgentStatusFromCapacity,
 } from "./be/db";
@@ -924,6 +925,78 @@ const httpServer = createHttpServer(async (req, res) => {
       res.writeHead(409, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: (error as Error).message }));
     }
+    return;
+  }
+
+  // PUT /api/agents/:id/profile - Update agent profile (role, description, capabilities)
+  if (
+    req.method === "PUT" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "agents" &&
+    pathSegments[2] &&
+    pathSegments[3] === "profile"
+  ) {
+    const agentId = pathSegments[2];
+
+    // Parse request body
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk as Buffer);
+    }
+    const bodyText = Buffer.concat(chunks).toString();
+
+    let body: { role?: string; description?: string; capabilities?: string[] };
+    try {
+      body = JSON.parse(bodyText);
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid JSON" }));
+      return;
+    }
+
+    // At least one field must be provided
+    if (
+      body.role === undefined &&
+      body.description === undefined &&
+      body.capabilities === undefined
+    ) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: "At least one field (role, description, or capabilities) must be provided",
+        }),
+      );
+      return;
+    }
+
+    // Validate role length if provided
+    if (body.role !== undefined && body.role.length > 100) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Role must be 100 characters or less" }));
+      return;
+    }
+
+    // Validate capabilities if provided
+    if (body.capabilities !== undefined && !Array.isArray(body.capabilities)) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Capabilities must be an array of strings" }));
+      return;
+    }
+
+    const agent = updateAgentProfile(agentId, {
+      role: body.role,
+      description: body.description,
+      capabilities: body.capabilities,
+    });
+
+    if (!agent) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Agent not found" }));
+      return;
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(agentWithCapacity(agent)));
     return;
   }
 
