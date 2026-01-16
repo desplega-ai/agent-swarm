@@ -1,11 +1,12 @@
 import Box from "@mui/joy/Box";
 import Typography from "@mui/joy/Typography";
 import { useColorScheme } from "@mui/joy/styles";
-import { useStats } from "../hooks/queries";
+import { useStats, useMonthlyUsageStats } from "../hooks/queries";
+import { formatCompactNumber, formatCurrency } from "../lib/utils";
 
 interface HexStatProps {
   label: string;
-  value: number;
+  value: number | string;
   color: string;
   glowColor: string;
   isActive?: boolean;
@@ -115,6 +116,7 @@ interface StatsBarProps {
 
 export default function StatsBar({ onFilterAgents, onNavigateToTasks }: StatsBarProps) {
   const { data: stats } = useStats();
+  const { data: usageStats } = useMonthlyUsageStats();
   const { mode } = useColorScheme();
   const isDark = mode === "dark";
 
@@ -126,11 +128,13 @@ export default function StatsBar({ onFilterAgents, onNavigateToTasks }: StatsBar
     gold: isDark ? "#D4A574" : "#8B6914",
     tertiary: isDark ? "#8B7355" : "#6B5344",
     rust: isDark ? "#A85454" : "#B54242",
+    green: "#22C55E",
     blueGlow: isDark ? "rgba(59, 130, 246, 0.5)" : "rgba(59, 130, 246, 0.25)",
     amberGlow: isDark ? "rgba(245, 166, 35, 0.5)" : "rgba(212, 136, 6, 0.25)",
     goldGlow: isDark ? "rgba(212, 165, 116, 0.5)" : "rgba(139, 105, 20, 0.25)",
     tertiaryGlow: isDark ? "rgba(139, 115, 85, 0.4)" : "rgba(107, 83, 68, 0.2)",
     rustGlow: isDark ? "rgba(168, 84, 84, 0.5)" : "rgba(181, 66, 66, 0.25)",
+    greenGlow: isDark ? "rgba(34, 197, 94, 0.5)" : "rgba(34, 197, 94, 0.25)",
   };
 
   // Honeycomb-style arrangement: two rows offset
@@ -188,6 +192,22 @@ export default function StatsBar({ onFilterAgents, onNavigateToTasks }: StatsBar
       color: colors.rust,
       glowColor: colors.rustGlow,
       onClick: onNavigateToTasks ? () => onNavigateToTasks("failed") : undefined,
+    },
+  ];
+
+  // Usage stats row (MTD = Month to Date)
+  const usageRow = [
+    {
+      label: "MTD TOKENS",
+      value: usageStats ? formatCompactNumber(usageStats.totalTokens) : "—",
+      color: colors.green,
+      glowColor: colors.greenGlow,
+    },
+    {
+      label: "MTD COST",
+      value: usageStats ? formatCurrency(usageStats.totalCostUsd) : "—",
+      color: colors.amber,
+      glowColor: colors.amberGlow,
     },
   ];
 
@@ -257,6 +277,27 @@ export default function StatsBar({ onFilterAgents, onNavigateToTasks }: StatsBar
             />
           ))}
         </Box>
+
+        {/* Usage row - 2 hexagons for MTD stats */}
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "center",
+            gap: 0.5,
+            mt: -2.5, // Overlap for honeycomb effect
+          }}
+        >
+          {usageRow.map((stat) => (
+            <HexStat
+              key={stat.label}
+              label={stat.label}
+              value={stat.value}
+              color={stat.color}
+              glowColor={stat.glowColor}
+              isDark={isDark}
+            />
+          ))}
+        </Box>
       </Box>
 
       {/* Mobile: Single row horizontal scroll */}
@@ -270,16 +311,16 @@ export default function StatsBar({ onFilterAgents, onNavigateToTasks }: StatsBar
           minWidth: "max-content",
         }}
       >
-        {[...topRow, ...bottomRow].map((stat) => (
+        {[...topRow, ...bottomRow, ...usageRow].map((stat) => (
           <HexStat
             key={stat.label}
             label={stat.label}
             value={stat.value}
             color={stat.color}
             glowColor={stat.glowColor}
-            isActive={stat.isActive}
+            isActive={"isActive" in stat ? stat.isActive : undefined}
             isDark={isDark}
-            onClick={stat.onClick}
+            onClick={"onClick" in stat ? stat.onClick : undefined}
           />
         ))}
       </Box>

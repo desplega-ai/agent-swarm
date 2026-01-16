@@ -10,8 +10,8 @@ import Tab from "@mui/joy/Tab";
 import TabPanel from "@mui/joy/TabPanel";
 import Chip from "@mui/joy/Chip";
 import { useColorScheme } from "@mui/joy/styles";
-import { useTask, useAgents, useTaskSessionLogs } from "../hooks/queries";
-import { formatRelativeTime } from "../lib/utils";
+import { useTask, useAgents, useTaskSessionLogs, useTaskUsage } from "../hooks/queries";
+import { formatRelativeTime, formatCurrency, formatCompactNumber } from "../lib/utils";
 import StatusBadge from "./StatusBadge";
 import SessionLogPanel from "./SessionLogPanel";
 
@@ -31,6 +31,7 @@ export default function TaskDetailPanel({
   const { data: task, isLoading: taskLoading } = useTask(taskId);
   const { data: agents } = useAgents();
   const { data: sessionLogs } = useTaskSessionLogs(taskId);
+  const { data: taskUsage } = useTaskUsage(taskId);
   const { mode } = useColorScheme();
   const isDark = mode === "dark";
   const [outputTab, setOutputTab] = useState<"output" | "error">("output");
@@ -240,6 +241,42 @@ export default function TaskDetailPanel({
             {getElapsedTime()}
           </Typography>
         </Box>
+
+        {/* Task Cost Section */}
+        {taskUsage && taskUsage.sessionCount > 0 && (
+          <Box
+            sx={{
+              bgcolor: colors.goldSoftBg,
+              border: `1px solid ${colors.goldBorder}`,
+              borderRadius: 1,
+              p: 1.5,
+              mt: 1,
+            }}
+          >
+            <Typography
+              sx={{
+                fontFamily: "code",
+                fontSize: "0.6rem",
+                color: "text.tertiary",
+                letterSpacing: "0.05em",
+                mb: 0.5,
+              }}
+            >
+              TASK COST
+            </Typography>
+            <Box sx={{ display: "flex", alignItems: "baseline", gap: 1 }}>
+              <Typography sx={{ fontFamily: "code", fontSize: "1rem", fontWeight: 600, color: colors.amber }}>
+                {formatCurrency(taskUsage.totalCostUsd)}
+              </Typography>
+              <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.secondary" }}>
+                {formatCompactNumber(taskUsage.totalTokens)} tokens
+              </Typography>
+            </Box>
+            <Typography sx={{ fontFamily: "code", fontSize: "0.6rem", color: "text.tertiary", mt: 0.5 }}>
+              {taskUsage.sessionCount} session{taskUsage.sessionCount !== 1 ? "s" : ""}
+            </Typography>
+          </Box>
+        )}
 
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
