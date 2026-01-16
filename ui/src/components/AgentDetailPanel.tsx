@@ -1,3 +1,4 @@
+import { useState } from "react";
 import Box from "@mui/joy/Box";
 import Typography from "@mui/joy/Typography";
 import IconButton from "@mui/joy/IconButton";
@@ -10,6 +11,7 @@ import { useAgent, useLogs, useAgentUsageSummary, useSessionCosts } from "../hoo
 import { formatRelativeTime, formatCurrency, formatCompactNumber } from "../lib/utils";
 import StatusBadge from "./StatusBadge";
 import { CostTrendChart, TokenDistributionChart, ModelUsageChart } from "./UsageCharts";
+import EditAgentProfileModal from "./EditAgentProfileModal";
 import type { AgentLog } from "../types/api";
 
 interface AgentDetailPanelProps {
@@ -33,6 +35,7 @@ export default function AgentDetailPanel({
   const { data: agentCosts } = useSessionCosts({ agentId, limit: 500 });
   const { mode } = useColorScheme();
   const isDark = mode === "dark";
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
 
   const colors = {
     amber: isDark ? "#F5A623" : "#D48806",
@@ -168,6 +171,22 @@ export default function AgentDetailPanel({
             LEAD
           </Typography>
         )}
+        <Box sx={{ flex: 1 }} />
+        <Tooltip title="Edit profile" placement="bottom">
+          <IconButton
+            size="sm"
+            variant="plain"
+            onClick={() => setEditProfileOpen(true)}
+            sx={{
+              fontFamily: "code",
+              fontSize: "0.7rem",
+              color: colors.closeBtn,
+              "&:hover": { color: colors.amber, bgcolor: colors.hoverBg },
+            }}
+          >
+            ✎
+          </IconButton>
+        </Tooltip>
       </Box>
 
       <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
@@ -677,6 +696,13 @@ export default function AgentDetailPanel({
           </>
         )}
       </Box>
+
+      {/* Edit Profile Modal */}
+      <EditAgentProfileModal
+        open={editProfileOpen}
+        onClose={() => setEditProfileOpen(false)}
+        agent={agent}
+      />
     </Box>
   );
 }
