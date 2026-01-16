@@ -4,6 +4,7 @@ import Typography from "@mui/joy/Typography";
 import Chip from "@mui/joy/Chip";
 import IconButton from "@mui/joy/IconButton";
 import Tooltip from "@mui/joy/Tooltip";
+import Button from "@mui/joy/Button";
 import { useColorScheme } from "@mui/joy/styles";
 import { formatRelativeTime } from "../lib/utils";
 import { useAutoScroll } from "../hooks/useAutoScroll";
@@ -87,7 +88,7 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
     : [], [sessionLogs]);
 
   // Auto-scroll when new logs arrive (respects user scroll position)
-  useAutoScroll(scrollRef.current, [sortedLogs.length]);
+  const { isFollowing, scrollToBottom } = useAutoScroll(scrollRef.current, [sortedLogs.length]);
 
   /** Truncate string with ellipsis */
   const truncate = (str: string, maxLen: number): string => {
@@ -398,60 +399,143 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
 
   if (!sessionLogs || sessionLogs.length === 0) {
     return (
-      <Box sx={{ p: 2, height: "100%", overflow: "auto" }}>
-        <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: colors.text.tertiary }}>
-          No session logs available
-        </Typography>
+      <Box sx={{
+        p: 3,
+        height: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}>
+        <Box sx={{
+          textAlign: "center",
+          p: 4,
+          bgcolor: isDark ? "rgba(100, 100, 100, 0.08)" : "rgba(150, 150, 150, 0.06)",
+          borderRadius: 2,
+          border: "1px dashed",
+          borderColor: isDark ? "rgba(100, 100, 100, 0.2)" : "rgba(150, 150, 150, 0.2)",
+        }}>
+          <Typography sx={{
+            fontFamily: "code",
+            fontSize: "0.8rem",
+            color: colors.text.tertiary,
+            mb: 0.5,
+          }}>
+            No session logs yet
+          </Typography>
+          <Typography sx={{
+            fontFamily: "code",
+            fontSize: "0.7rem",
+            color: colors.text.tertiary,
+            opacity: 0.7,
+          }}>
+            Logs will appear here when the task starts running
+          </Typography>
+        </Box>
       </Box>
     );
   }
 
   return (
-    <Box
-      ref={scrollRef}
-      sx={{
-        flex: 1,
-        overflow: "auto",
-        p: 1.5,
-        display: "flex",
-        flexDirection: "column",
-        minHeight: 0,
-      }}
-    >
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-        {sortedLogs.map((log) => {
-          const formatted = formatLogLine(log.content);
-          return (
-            <Box
-              key={log.id}
-              sx={{
-                bgcolor: "background.level1",
-                p: 2,
-                borderRadius: 1,
-                border: "1px solid",
-                borderColor: "neutral.outlinedBorder",
-              }}
-            >
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1 }}>
-                <Chip
-                  size="sm"
-                  variant="soft"
-                  sx={{
-                    fontFamily: "code",
-                    fontSize: "0.65rem",
-                    color: formatted.color,
-                    bgcolor: isDark ? "rgba(100, 100, 100, 0.15)" : "rgba(150, 150, 150, 0.12)",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  {formatted.type}
-                </Chip>
-                <Tooltip title={new Date(log.createdAt).toLocaleString()} placement="top">
-                  <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: colors.text.tertiary }}>
-                    {formatRelativeTime(log.createdAt)}
-                  </Typography>
-                </Tooltip>
-              </Box>
+    <Box sx={{ position: "relative", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+      {/* Follow button - shown when user scrolls up */}
+      {!isFollowing && (
+        <Box
+          sx={{
+            position: "absolute",
+            bottom: 16,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 10,
+          }}
+        >
+          <Button
+            variant="soft"
+            size="sm"
+            onClick={scrollToBottom}
+            sx={{
+              fontFamily: "code",
+              fontSize: "0.7rem",
+              fontWeight: 600,
+              letterSpacing: "0.03em",
+              bgcolor: isDark ? "rgba(59, 130, 246, 0.2)" : "rgba(59, 130, 246, 0.15)",
+              color: colors.blue,
+              border: "1px solid",
+              borderColor: isDark ? "rgba(59, 130, 246, 0.3)" : "rgba(59, 130, 246, 0.25)",
+              boxShadow: isDark
+                ? "0 4px 12px rgba(0, 0, 0, 0.4)"
+                : "0 4px 12px rgba(0, 0, 0, 0.15)",
+              "&:hover": {
+                bgcolor: isDark ? "rgba(59, 130, 246, 0.3)" : "rgba(59, 130, 246, 0.2)",
+              },
+              gap: 0.5,
+              px: 2,
+              py: 0.75,
+            }}
+          >
+            <span style={{ fontSize: "0.8rem" }}>↓</span>
+            Follow
+          </Button>
+        </Box>
+      )}
+
+      <Box
+        ref={scrollRef}
+        sx={{
+          flex: 1,
+          overflow: "auto",
+          p: 1.5,
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
+        }}
+      >
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          {sortedLogs.map((log) => {
+            const formatted = formatLogLine(log.content);
+            return (
+              <Box
+                key={log.id}
+                sx={{
+                  bgcolor: isDark ? "rgba(30, 30, 35, 0.6)" : "rgba(255, 255, 255, 0.8)",
+                  p: 1.5,
+                  borderRadius: 1,
+                  border: "1px solid",
+                  borderColor: isDark ? "rgba(100, 100, 100, 0.15)" : "rgba(200, 200, 200, 0.3)",
+                  transition: "border-color 0.15s ease",
+                  "&:hover": {
+                    borderColor: isDark ? "rgba(100, 100, 100, 0.25)" : "rgba(180, 180, 180, 0.4)",
+                  },
+                }}
+              >
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.75 }}>
+                  <Chip
+                    size="sm"
+                    variant="soft"
+                    sx={{
+                      fontFamily: "code",
+                      fontSize: "0.6rem",
+                      fontWeight: 600,
+                      color: formatted.color,
+                      bgcolor: isDark ? "rgba(100, 100, 100, 0.12)" : "rgba(150, 150, 150, 0.1)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.04em",
+                      height: 18,
+                      minHeight: 18,
+                    }}
+                  >
+                    {formatted.type}
+                  </Chip>
+                  <Tooltip title={new Date(log.createdAt).toLocaleString()} placement="top">
+                    <Typography sx={{
+                      fontFamily: "code",
+                      fontSize: "0.65rem",
+                      color: colors.text.tertiary,
+                      opacity: 0.8,
+                    }}>
+                      {formatRelativeTime(log.createdAt)}
+                    </Typography>
+                  </Tooltip>
+                </Box>
               <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                 {formatted.blocks.map((block, idx) => {
                   const blockId = `${log.id}-${block.blockType}-${idx}`;
@@ -649,6 +733,7 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
             </Box>
           );
         })}
+        </Box>
       </Box>
     </Box>
   );
