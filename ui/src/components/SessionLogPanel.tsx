@@ -147,6 +147,7 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
       iterations++;
       if (typeof current === 'string') {
         const trimmed = current.trim();
+
         // Check if it's a JSON string that was escaped (starts and ends with quotes)
         if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
           try {
@@ -159,6 +160,21 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
             break;
           }
         }
+
+        // Check for inline escaped quotes like {\"key\":\"value\"}
+        // This happens when JSON was stringified without outer quotes
+        if (trimmed.includes('\\"') && (trimmed.startsWith('{') || trimmed.startsWith('['))) {
+          // Replace escaped quotes with regular quotes and try to parse
+          const unescaped = trimmed.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+          try {
+            JSON.parse(unescaped);
+            current = unescaped;
+            continue;
+          } catch {
+            // Not valid after unescaping, continue
+          }
+        }
+
         // Try parsing as JSON object/array to validate
         if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
           try {
@@ -553,12 +569,12 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
         const successMatch = actualContent.match(/"success":\s*(true|false)/);
         const yourAgentMatch = actualContent.match(/"yourAgentId":\s*"([^"]+)"/);
 
-        if (yourAgentMatch && successMatch) {
+        if (yourAgentMatch?.[1] && successMatch?.[1]) {
           const status = successMatch[1] === 'true' ? '✓' : '✗';
           summary = `${status} Agent response (${yourAgentMatch[1].slice(0, 8)}...)`;
-        } else if (toolResultMatch) {
+        } else if (toolResultMatch?.[1]) {
           summary = `Tool result for ${toolResultMatch[1].slice(0, 20)}...`;
-        } else if (messageMatch) {
+        } else if (messageMatch?.[1]) {
           summary = `Message: ${messageMatch[1]}...`;
         }
 
