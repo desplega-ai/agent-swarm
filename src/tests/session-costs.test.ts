@@ -661,7 +661,7 @@ describe("Session Costs API", () => {
         body: JSON.stringify({
           sessionId: "token-query-test",
           agentId: agent.id,
-          totalCostUsd: 0.10,
+          totalCostUsd: 0.1,
           inputTokens: 500,
           outputTokens: 300,
           cacheReadTokens: 200,
@@ -698,9 +698,9 @@ describe("Session Costs API", () => {
         body: JSON.stringify({
           sessionId: "large-token-test",
           agentId: testAgent.id,
-          totalCostUsd: 5.50,
-          inputTokens: 150000,  // Large context window
-          outputTokens: 50000,  // Large output
+          totalCostUsd: 5.5,
+          inputTokens: 150000, // Large context window
+          outputTokens: 50000, // Large output
           cacheReadTokens: 100000,
           cacheWriteTokens: 25000,
           durationMs: 120000,

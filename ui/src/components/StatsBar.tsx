@@ -231,7 +231,7 @@ export default function StatsBar({ onFilterAgents, onNavigateToTasks }: StatsBar
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
-          gap: 0.5,
+          gap: 0,
         }}
       >
         {/* Top row: Agents stats + Usage */}
@@ -250,7 +250,7 @@ export default function StatsBar({ onFilterAgents, onNavigateToTasks }: StatsBar
           ))}
         </Box>
         {/* Bottom row: Tasks stats (offset for honeycomb effect) */}
-        <Box sx={{ display: "flex", gap: 0.5, mt: -1 }}>
+        <Box sx={{ display: "flex", gap: 0.5, mt: -2.5 }}>
           {bottomRow.map((stat) => (
             <HexStat
               key={stat.label}

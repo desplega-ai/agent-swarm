@@ -809,12 +809,14 @@ async function spawnClaudeProcess(
                 if (json.type === "result" && json.total_cost_usd !== undefined) {
                   // Extract token data from the usage object
                   // Claude's result JSON has: usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens
-                  const usage = json.usage as {
-                    input_tokens?: number;
-                    output_tokens?: number;
-                    cache_read_input_tokens?: number;
-                    cache_creation_input_tokens?: number;
-                  } | undefined;
+                  const usage = json.usage as
+                    | {
+                        input_tokens?: number;
+                        output_tokens?: number;
+                        cache_read_input_tokens?: number;
+                        cache_creation_input_tokens?: number;
+                      }
+                    | undefined;
 
                   // Fire and forget - don't block the stream
                   saveCostData(
