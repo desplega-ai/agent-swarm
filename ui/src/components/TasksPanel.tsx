@@ -346,6 +346,7 @@ export default function TasksPanel({
             <Option value="offered">OFFERED</Option>
             <Option value="pending">PENDING</Option>
             <Option value="in_progress">IN PROGRESS</Option>
+            <Option value="paused">PAUSED</Option>
             <Option value="completed">COMPLETED</Option>
             <Option value="failed">FAILED</Option>
           </Select>

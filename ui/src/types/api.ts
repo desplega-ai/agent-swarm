@@ -1,6 +1,6 @@
 // Backend types (mirrored from cc-orch-mcp/src/types.ts)
 export type AgentStatus = "idle" | "busy" | "offline";
-export type AgentTaskStatus = "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "completed" | "failed" | "cancelled";
+export type AgentTaskStatus = "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled";
 export type AgentTaskSource = "mcp" | "slack" | "api";
 export type ChannelType = "public" | "dm";
 
@@ -124,6 +124,7 @@ export interface DashboardStats {
     total: number;
     pending: number;
     in_progress: number;
+    paused: number;
     completed: number;
     failed: number;
   };

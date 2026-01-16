@@ -74,6 +74,13 @@ const statusConfig: Record<AgentStatus | TaskStatus, StatusConfig> = {
     textColor: { dark: "#F5A623", light: "#D48806" },
     glowColor: { dark: "rgba(245, 166, 35, 0.5)", light: "rgba(212, 136, 6, 0.25)" },
   },
+  paused: {
+    color: "warning",
+    label: "PAUSED",
+    bgColor: { dark: "rgba(255, 152, 0, 0.15)", light: "rgba(230, 126, 34, 0.12)" },
+    textColor: { dark: "#FF9800", light: "#E67E22" },
+    glowColor: { dark: "rgba(255, 152, 0, 0.4)", light: "rgba(230, 126, 34, 0.2)" },
+  },
   completed: {
     color: "success",
     label: "COMPLETED",

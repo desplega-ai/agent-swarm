@@ -111,7 +111,7 @@ function HexStat({ label, value, color, glowColor, isActive, isDark, onClick }: 
 
 interface StatsBarProps {
   onFilterAgents?: (status: "all" | "busy" | "idle") => void;
-  onNavigateToTasks?: (status?: "pending" | "in_progress" | "completed" | "failed") => void;
+  onNavigateToTasks?: (status?: "pending" | "in_progress" | "paused" | "completed" | "failed") => void;
 }
 
 export default function StatsBar({ onFilterAgents, onNavigateToTasks }: StatsBarProps) {
