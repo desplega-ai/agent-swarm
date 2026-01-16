@@ -14,6 +14,8 @@ import type {
   Stats,
   AgentWithTasks,
   TaskWithLogs,
+  EpicsResponse,
+  EpicWithTasks,
 } from "../types/api";
 
 class ApiClient {
@@ -227,6 +229,29 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/scheduled-tasks${queryString ? `?${queryString}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch scheduled tasks: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchEpics(filters?: {
+    status?: string;
+    search?: string;
+    leadAgentId?: string;
+  }): Promise<EpicsResponse> {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.search) params.set("search", filters.search);
+    if (filters?.leadAgentId) params.set("leadAgentId", filters.leadAgentId);
+    const queryString = params.toString();
+    const url = `${this.getBaseUrl()}/api/epics${queryString ? `?${queryString}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch epics: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchEpic(id: string): Promise<EpicWithTasks> {
+    const url = `${this.getBaseUrl()}/api/epics/${id}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch epic: ${res.status}`);
     return res.json();
   }
 }
