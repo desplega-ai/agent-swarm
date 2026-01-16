@@ -6,9 +6,10 @@ import Button from "@mui/joy/Button";
 import Tooltip from "@mui/joy/Tooltip";
 import Chip from "@mui/joy/Chip";
 import { useColorScheme } from "@mui/joy/styles";
-import { useAgent, useLogs } from "../hooks/queries";
-import { formatRelativeTime } from "../lib/utils";
+import { useAgent, useLogs, useAgentUsageSummary, useSessionCosts } from "../hooks/queries";
+import { formatRelativeTime, formatCurrency, formatCompactNumber } from "../lib/utils";
 import StatusBadge from "./StatusBadge";
+import { CostTrendChart, TokenDistributionChart, ModelUsageChart } from "./UsageCharts";
 import type { AgentLog } from "../types/api";
 
 interface AgentDetailPanelProps {
@@ -28,6 +29,8 @@ export default function AgentDetailPanel({
 }: AgentDetailPanelProps) {
   const { data: agent, isLoading: agentLoading } = useAgent(agentId);
   const { data: logs, isLoading: logsLoading } = useLogs(20, agentId);
+  const { data: usage } = useAgentUsageSummary(agentId);
+  const { data: agentCosts } = useSessionCosts({ agentId, limit: 500 });
   const { mode } = useColorScheme();
   const isDark = mode === "dark";
 
@@ -307,6 +310,134 @@ export default function AgentDetailPanel({
     </Box>
   );
 
+  // Usage card helper component
+  const UsageCard = ({ title, cost, tokens, sessions, color }: {
+    title: string;
+    cost: number;
+    tokens: number;
+    sessions: number;
+    color: string;
+  }) => (
+    <Box
+      sx={{
+        bgcolor: "background.level1",
+        border: "1px solid",
+        borderColor: "neutral.outlinedBorder",
+        borderRadius: 1,
+        p: 1.5,
+      }}
+    >
+      <Typography
+        sx={{
+          fontFamily: "code",
+          fontSize: "0.6rem",
+          color: "text.tertiary",
+          letterSpacing: "0.05em",
+          mb: 0.5,
+        }}
+      >
+        {title}
+      </Typography>
+      <Box sx={{ display: "flex", alignItems: "baseline", gap: 1 }}>
+        <Typography sx={{ fontFamily: "code", fontSize: "1rem", fontWeight: 600, color }}>
+          {formatCurrency(cost)}
+        </Typography>
+        <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.secondary" }}>
+          {formatCompactNumber(tokens)} tokens
+        </Typography>
+      </Box>
+      <Typography sx={{ fontFamily: "code", fontSize: "0.6rem", color: "text.tertiary", mt: 0.5 }}>
+        {sessions} session{sessions !== 1 ? "s" : ""}
+      </Typography>
+    </Box>
+  );
+
+  // Usage section component
+  const UsageSection = () => (
+    <Box sx={{ p: { xs: 1.5, md: 2 } }}>
+      <Typography
+        sx={{
+          fontFamily: "code",
+          fontSize: "0.7rem",
+          color: "text.tertiary",
+          letterSpacing: "0.05em",
+          mb: 1.5,
+        }}
+      >
+        USAGE BREAKDOWN
+      </Typography>
+
+      {!usage ? (
+        <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
+          Loading usage data...
+        </Typography>
+      ) : (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          {/* Daily */}
+          <UsageCard
+            title="TODAY"
+            cost={usage.daily.totalCostUsd}
+            tokens={usage.daily.totalTokens}
+            sessions={usage.daily.sessionCount}
+            color={colors.amber}
+          />
+
+          {/* Weekly */}
+          <UsageCard
+            title="THIS WEEK"
+            cost={usage.weekly.totalCostUsd}
+            tokens={usage.weekly.totalTokens}
+            sessions={usage.weekly.sessionCount}
+            color={colors.gold}
+          />
+
+          {/* Monthly */}
+          <UsageCard
+            title="THIS MONTH"
+            cost={usage.monthly.totalCostUsd}
+            tokens={usage.monthly.totalTokens}
+            sessions={usage.monthly.sessionCount}
+            color={colors.blue}
+          />
+        </Box>
+      )}
+    </Box>
+  );
+
+  // Charts section component (for expanded view)
+  const ChartsSection = () => (
+    <Box sx={{ p: 2, display: "flex", flexDirection: "column", gap: 3 }}>
+      <Typography
+        sx={{
+          fontFamily: "code",
+          fontSize: "0.7rem",
+          color: "text.tertiary",
+          letterSpacing: "0.05em",
+        }}
+      >
+        USAGE ANALYTICS
+      </Typography>
+
+      {agentCosts && agentCosts.length > 0 ? (
+        <>
+          <CostTrendChart costs={agentCosts} timeRange="30d" />
+          <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+            <Box sx={{ flex: 1, minWidth: 250 }}>
+              <TokenDistributionChart costs={agentCosts} />
+            </Box>
+            <Box sx={{ flex: 1, minWidth: 250 }}>
+              <ModelUsageChart costs={agentCosts} />
+            </Box>
+          </Box>
+        </>
+      ) : (
+        <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
+          No usage data available
+        </Typography>
+      )}
+    </Box>
+  );
+
   // Activity section component
   const ActivitySection = () => (
     <>
@@ -500,7 +631,7 @@ export default function AgentDetailPanel({
             <Box
               sx={{
                 minWidth: 220,
-                maxWidth: 500,
+                maxWidth: 350,
                 flexShrink: 0,
                 borderRight: "1px solid",
                 borderColor: "neutral.outlinedBorder",
@@ -508,11 +639,26 @@ export default function AgentDetailPanel({
               }}
             >
               <InfoSection />
+              <Divider sx={{ bgcolor: "neutral.outlinedBorder" }} />
+              <UsageSection />
+            </Box>
+            {/* Middle - Charts */}
+            <Box
+              sx={{
+                flex: 1,
+                borderRight: "1px solid",
+                borderColor: "neutral.outlinedBorder",
+                overflow: "auto",
+              }}
+            >
+              <ChartsSection />
             </Box>
             {/* Right side - Activity */}
             <Box
               sx={{
-                flex: 1,
+                minWidth: 280,
+                maxWidth: 400,
+                flexShrink: 0,
                 display: "flex",
                 flexDirection: "column",
                 overflow: "hidden",
@@ -524,6 +670,8 @@ export default function AgentDetailPanel({
         ) : (
           <>
             <InfoSection />
+            <Divider sx={{ bgcolor: "neutral.outlinedBorder" }} />
+            <UsageSection />
             <Divider sx={{ bgcolor: "neutral.outlinedBorder" }} />
             <ActivitySection />
           </>

@@ -184,3 +184,53 @@ export interface Service {
 export interface ServicesResponse {
   services: Service[];
 }
+
+// Session Cost Types (for Usage/Cost Tracking)
+export interface SessionCost {
+  id: string;
+  sessionId: string;
+  taskId?: string;
+  agentId: string;
+  totalCostUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  durationMs: number;
+  numTurns: number;
+  model: string;
+  isError: boolean;
+  createdAt: string;
+}
+
+export interface SessionCostsResponse {
+  costs: SessionCost[];
+}
+
+// Aggregated usage types for UI
+export interface UsageStats {
+  totalCostUsd: number;
+  totalTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  sessionCount: number;
+  totalDurationMs: number;
+  avgCostPerSession: number;
+}
+
+export interface DailyUsage {
+  date: string;
+  costUsd: number;
+  tokens: number;
+  sessions: number;
+}
+
+export interface AgentUsageSummary {
+  agentId: string;
+  agentName?: string;
+  monthlyCostUsd: number;
+  monthlyTokens: number;
+  sessionCount: number;
+}

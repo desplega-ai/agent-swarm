@@ -14,6 +14,7 @@ import ActivityFeed from "./ActivityFeed";
 import AgentDetailPanel from "./AgentDetailPanel";
 import TaskDetailPanel from "./TaskDetailPanel";
 import ChatPanel from "./ChatPanel";
+import UsageTab from "./UsageTab";
 import type { TaskStatus } from "../types/api";
 
 interface DashboardProps {
@@ -23,7 +24,7 @@ interface DashboardProps {
 function getUrlParams() {
   const params = new URLSearchParams(window.location.search);
   return {
-    tab: params.get("tab") as "agents" | "tasks" | "chat" | "services" | null,
+    tab: params.get("tab") as "agents" | "tasks" | "chat" | "services" | "usage" | null,
     agent: params.get("agent"),
     task: params.get("task"),
     channel: params.get("channel"),
@@ -101,7 +102,7 @@ function updateUrl(params: {
 }
 
 export default function Dashboard({ onSettingsClick }: DashboardProps) {
-  const [activeTab, setActiveTab] = useState<"agents" | "tasks" | "chat" | "services">("agents");
+  const [activeTab, setActiveTab] = useState<"agents" | "tasks" | "chat" | "services" | "usage">("agents");
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
@@ -140,6 +141,8 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
       }
     } else if (params.tab === "services") {
       setActiveTab("services");
+    } else if (params.tab === "usage") {
+      setActiveTab("usage");
     } else {
       setActiveTab("agents");
       if (params.agent) {
@@ -190,7 +193,7 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
   };
 
   const handleTabChange = (_: unknown, value: string | number | null) => {
-    const tab = value as "agents" | "tasks" | "chat" | "services";
+    const tab = value as "agents" | "tasks" | "chat" | "services" | "usage";
     setActiveTab(tab);
     // Clear selections, filters, and expand when switching tabs
     setExpandDetail(false);
@@ -216,6 +219,15 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
       setAgentStatusFilter("all");
       setTaskStatusFilter("all");
       updateUrl({ tab: "services", agent: null, task: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
+    } else if (tab === "usage") {
+      setSelectedAgentId(null);
+      setSelectedTaskId(null);
+      setSelectedChannelId(null);
+      setSelectedThreadId(null);
+      setPreFilterAgentId(undefined);
+      setAgentStatusFilter("all");
+      setTaskStatusFilter("all");
+      updateUrl({ tab: "usage", agent: null, task: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
     } else {
       // chat tab
       setSelectedAgentId(null);
@@ -359,6 +371,7 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
             <Tab value="tasks">TASKS</Tab>
             <Tab value="chat">CHAT</Tab>
             <Tab value="services">SERVICES</Tab>
+            <Tab value="usage">USAGE</Tab>
           </TabList>
 
           {/* Agents Tab */}
@@ -526,6 +539,22 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
             }}
           >
             <ServicesPanel />
+          </TabPanel>
+
+          {/* Usage Tab */}
+          <TabPanel
+            value="usage"
+            sx={{
+              p: 0,
+              pt: 2,
+              flex: 1,
+              minHeight: 0,
+              "&[hidden]": {
+                display: "none",
+              },
+            }}
+          >
+            <UsageTab />
           </TabPanel>
         </Tabs>
       </Box>

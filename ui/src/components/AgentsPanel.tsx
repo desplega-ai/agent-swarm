@@ -8,7 +8,8 @@ import Select from "@mui/joy/Select";
 import Option from "@mui/joy/Option";
 import IconButton from "@mui/joy/IconButton";
 import { useColorScheme } from "@mui/joy/styles";
-import { useAgents, useUpdateAgentName } from "../hooks/queries";
+import { useAgents, useUpdateAgentName, useSessionCosts } from "../hooks/queries";
+import { formatCurrency, formatCompactNumber } from "../lib/utils";
 import StatusBadge from "./StatusBadge";
 import type { AgentWithTasks, AgentStatus } from "../types/api";
 
@@ -38,9 +39,10 @@ interface AgentsRowProps {
   selected: boolean;
   onClick: () => void;
   isDark: boolean;
+  usage?: { cost: number; tokens: number };
 }
 
-function AgentRow({ agent, selected, onClick, isDark }: AgentsRowProps) {
+function AgentRow({ agent, selected, onClick, isDark, usage }: AgentsRowProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(agent.name);
   const [error, setError] = useState<string | null>(null);
@@ -236,6 +238,28 @@ function AgentRow({ agent, selected, onClick, isDark }: AgentsRowProps) {
             `${agent.capacity.current}/${agent.capacity.max}` :
             `${activeTasks}/${agent.tasks.length}`}
         </Typography>
+      </td>
+      <td>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25 }}>
+          <Typography
+            sx={{
+              fontFamily: "code",
+              fontSize: "0.7rem",
+              color: usage && usage.cost > 0 ? colors.amber : "text.tertiary",
+            }}
+          >
+            {usage ? formatCurrency(usage.cost) : "—"}
+          </Typography>
+          <Typography
+            sx={{
+              fontFamily: "code",
+              fontSize: "0.6rem",
+              color: "text.tertiary",
+            }}
+          >
+            {usage ? `${formatCompactNumber(usage.tokens)} tok` : ""}
+          </Typography>
+        </Box>
       </td>
       <td>
         <Typography
@@ -467,8 +491,31 @@ export default function AgentsPanel({
   const setStatusFilter = onStatusFilterChange ?? setInternalStatusFilter;
 
   const { data: agents, isLoading } = useAgents();
+  const { data: allCosts } = useSessionCosts({ limit: 2000 });
   const { mode } = useColorScheme();
   const isDark = mode === "dark";
+
+  // Create agent usage map (memoized) - MTD = Month to Date
+  const agentUsageMap = useMemo(() => {
+    if (!allCosts) return new Map<string, { cost: number; tokens: number }>();
+
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const map = new Map<string, { cost: number; tokens: number }>();
+
+    allCosts
+      .filter((c) => new Date(c.createdAt) >= startOfMonth)
+      .forEach((cost) => {
+        const existing = map.get(cost.agentId) || { cost: 0, tokens: 0 };
+        map.set(cost.agentId, {
+          cost: existing.cost + cost.totalCostUsd,
+          tokens: existing.tokens + cost.inputTokens + cost.outputTokens,
+        });
+      });
+
+    return map;
+  }, [allCosts]);
 
   const colors = {
     amber: isDark ? "#F5A623" : "#D48806",
@@ -704,6 +751,7 @@ export default function AgentsPanel({
                     <th style={{ width: "130px" }}>ROLE</th>
                     <th style={{ width: "90px" }}>STATUS</th>
                     <th style={{ width: "100px" }}>CAPACITY</th>
+                    <th style={{ width: "100px" }}>MTD USAGE</th>
                     <th style={{ width: "100px" }}>UPDATED</th>
                   </tr>
                 </thead>
@@ -715,6 +763,7 @@ export default function AgentsPanel({
                       selected={selectedAgentId === agent.id}
                       onClick={() => onSelectAgent(selectedAgentId === agent.id ? null : agent.id)}
                       isDark={isDark}
+                      usage={agentUsageMap.get(agent.id)}
                     />
                   ))}
                 </tbody>
