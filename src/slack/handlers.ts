@@ -3,6 +3,127 @@ import type { WebClient } from "@slack/web-api";
 import { createInboxMessage, createTask, getAgentById, getTasksByAgentId } from "../be/db";
 import { extractTaskFromMessage, routeMessage } from "./router";
 
+// User filtering configuration from environment variables
+const allowedEmailDomains = (process.env.SLACK_ALLOWED_EMAIL_DOMAINS || "")
+  .split(",")
+  .map((d) => d.trim().toLowerCase())
+  .filter(Boolean);
+
+const allowedUserIds = (process.env.SLACK_ALLOWED_USER_IDS || "")
+  .split(",")
+  .map((id) => id.trim())
+  .filter(Boolean);
+
+const filteringEnabled = allowedEmailDomains.length > 0 || allowedUserIds.length > 0;
+
+// Cache for user email lookups (to avoid repeated API calls)
+const userEmailCache = new Map<string, string | null>();
+
+/**
+ * Configuration for user filtering.
+ */
+export interface UserFilterConfig {
+  allowedEmailDomains: string[];
+  allowedUserIds: string[];
+}
+
+/**
+ * Core logic for checking if a user is allowed based on email and/or user ID.
+ * Exported for testing.
+ *
+ * @param userId - The Slack user ID to check
+ * @param email - The user's email address (or null if unknown)
+ * @param config - The filtering configuration
+ * @returns true if the user is allowed, false otherwise
+ */
+export function checkUserAccess(
+  userId: string,
+  email: string | null,
+  config: UserFilterConfig,
+): boolean {
+  const { allowedEmailDomains: domains, allowedUserIds: userIds } = config;
+
+  // If no filtering configured, allow all users (backwards compatible)
+  if (domains.length === 0 && userIds.length === 0) {
+    return true;
+  }
+
+  // Check user ID whitelist first (fast path)
+  if (userIds.includes(userId)) {
+    return true;
+  }
+
+  // No email domains configured and not in user whitelist
+  if (domains.length === 0) {
+    return false;
+  }
+
+  // No email available
+  if (!email) {
+    return false;
+  }
+
+  // Extract and validate domain
+  const domain = email.split("@")[1]?.toLowerCase();
+  if (!domain) {
+    return false;
+  }
+
+  return domains.includes(domain);
+}
+
+/**
+ * Check if a user is allowed to interact with the swarm.
+ * Returns true if filtering is disabled, user is in whitelist, or user's email domain is allowed.
+ */
+async function isUserAllowed(client: WebClient, userId: string): Promise<boolean> {
+  // If no filtering configured, allow all users (backwards compatible)
+  if (!filteringEnabled) {
+    return true;
+  }
+
+  // Check user ID whitelist first (fast path)
+  if (allowedUserIds.includes(userId)) {
+    return true;
+  }
+
+  // No email domains configured and not in user whitelist
+  if (allowedEmailDomains.length === 0) {
+    return false;
+  }
+
+  // Check email domain
+  let email = userEmailCache.get(userId);
+  if (email === undefined) {
+    try {
+      const result = await client.users.info({ user: userId });
+      email = result.user?.profile?.email || null;
+      userEmailCache.set(userId, email);
+    } catch (error) {
+      console.error(`[Slack] Failed to fetch user email for ${userId}:`, error);
+      userEmailCache.set(userId, null);
+      email = null;
+    }
+  }
+
+  if (!email) {
+    console.log(`[Slack] User ${userId} has no email, denying access`);
+    return false;
+  }
+
+  const domain = email.split("@")[1]?.toLowerCase();
+  if (!domain) {
+    console.log(`[Slack] User ${userId} has invalid email format, denying access`);
+    return false;
+  }
+
+  const allowed = allowedEmailDomains.includes(domain);
+  if (!allowed) {
+    console.log(`[Slack] User ${userId} email domain "${domain}" not in allowed list`);
+  }
+  return allowed;
+}
+
 interface MessageEvent {
   type: string;
   subtype?: string;
@@ -159,6 +280,12 @@ export function registerMessageHandler(app: App): void {
     // Deduplicate events (Slack can send same event twice)
     const messageKey = `${msg.channel}:${msg.ts}`;
     if (isMessageProcessed(messageKey)) {
+      return;
+    }
+
+    // Check user authorization
+    if (!(await isUserAllowed(client, msg.user))) {
+      console.log(`[Slack] Ignoring message from unauthorized user ${msg.user}`);
       return;
     }
 
