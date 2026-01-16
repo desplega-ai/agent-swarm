@@ -258,3 +258,33 @@ export const SessionCostSchema = z.object({
 });
 
 export type SessionCost = z.infer<typeof SessionCostSchema>;
+
+// ============================================================================
+// Scheduled Task Types
+// ============================================================================
+
+export const ScheduledTaskSchema = z
+  .object({
+    id: z.uuid(),
+    name: z.string().min(1).max(100),
+    description: z.string().optional(),
+    cronExpression: z.string().optional(),
+    intervalMs: z.number().int().positive().optional(),
+    taskTemplate: z.string().min(1),
+    taskType: z.string().max(50).optional(),
+    tags: z.array(z.string()).default([]),
+    priority: z.number().int().min(0).max(100).default(50),
+    targetAgentId: z.uuid().optional(),
+    enabled: z.boolean().default(true),
+    lastRunAt: z.iso.datetime().optional(),
+    nextRunAt: z.iso.datetime().optional(),
+    createdByAgentId: z.uuid().optional(),
+    timezone: z.string().default("UTC"),
+    createdAt: z.iso.datetime(),
+    lastUpdatedAt: z.iso.datetime(),
+  })
+  .refine((data) => data.cronExpression || data.intervalMs, {
+    message: "Either cronExpression or intervalMs must be provided",
+  });
+
+export type ScheduledTask = z.infer<typeof ScheduledTaskSchema>;

@@ -7,7 +7,7 @@ import {
 } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import { createServer } from "@/server";
+import { createServer, hasCapability } from "@/server";
 import {
   claimInboxMessages,
   claimMentions,
@@ -39,6 +39,7 @@ import {
   getPendingTaskForAgent,
   getRecentlyCancelledTasksForAgent,
   getRecentlyFinishedWorkerTasks,
+  getScheduledTasks,
   getServicesByAgentId,
   getSessionCostsByAgentId,
   getSessionCostsByTaskId,
@@ -1201,6 +1202,24 @@ const httpServer = createHttpServer(async (req, res) => {
     return;
   }
 
+  // GET /api/scheduled-tasks - List all scheduled tasks (with optional filters: enabled, name)
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "scheduled-tasks" &&
+    !pathSegments[2]
+  ) {
+    const enabledParam = queryParams.get("enabled");
+    const name = queryParams.get("name");
+    const scheduledTasks = getScheduledTasks({
+      enabled: enabledParam !== null ? enabledParam === "true" : undefined,
+      name: name || undefined,
+    });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ scheduledTasks }));
+    return;
+  }
+
   // GET /api/channels - List all channels
   if (
     req.method === "GET" &&
@@ -1398,6 +1417,12 @@ globalState.__transports = transports;
 async function shutdown() {
   console.log("Shutting down HTTP server...");
 
+  // Stop scheduler (if enabled)
+  if (hasCapability("scheduling")) {
+    const { stopScheduler } = await import("./scheduler");
+    stopScheduler();
+  }
+
   // Stop Slack bot
   await stopSlackApp();
 
@@ -1432,6 +1457,13 @@ httpServer
 
     // Initialize GitHub webhook handler (if configured)
     initGitHub();
+
+    // Start scheduler (if enabled)
+    if (hasCapability("scheduling")) {
+      const { startScheduler } = await import("./scheduler");
+      const intervalMs = Number(process.env.SCHEDULER_INTERVAL_MS) || 10000;
+      startScheduler(intervalMs);
+    }
   })
   .on("error", (err) => {
     console.error("HTTP Server Error:", err);

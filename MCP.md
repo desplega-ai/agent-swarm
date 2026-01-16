@@ -14,8 +14,10 @@
   - [get-task-details](#get-task-details)
   - [store-progress](#store-progress)
   - [my-agent-info](#my-agent-info)
+  - [cancel-task](#cancel-task)
   - [slack-reply](#slack-reply)
   - [slack-read](#slack-read)
+  - [slack-post](#slack-post)
   - [slack-list-channels](#slack-list-channels)
   - [inbox-delegate](#inbox-delegate)
   - [get-inbox-message](#get-inbox-message)
@@ -33,6 +35,12 @@
   - [unregister-service](#unregister-service)
   - [list-services](#list-services)
   - [update-service-status](#update-service-status)
+- [Scheduling Tools](#scheduling-tools)
+  - [list-schedules](#list-schedules)
+  - [create-schedule](#create-schedule)
+  - [update-schedule](#update-schedule)
+  - [delete-schedule](#delete-schedule)
+  - [run-schedule-now](#run-schedule-now)
 
 ---
 
@@ -126,6 +134,17 @@ Returns your agent ID based on the X-Agent-ID header.
 
 *No parameters*
 
+### cancel-task
+
+**Cancel Task**
+
+Cancel a task that is pending or in progress. Only the lead or task creator can cancel tasks. The worker will be notified via hooks.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `taskId` | `uuid` | Yes | - | The ID of the task to cancel. |
+| `reason` | `string` | No | - | Reason for cancellation. |
+
 ### slack-reply
 
 **Reply to Slack thread**
@@ -144,7 +163,19 @@ Read messages from a Slack thread or channel. Use inboxMessageId or taskId to re
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
+| `inboxMessageId` | `uuid` | No | - | Read thread history for an inbox message. |
 | `taskId` | `uuid` | No | - | Read thread history for a task. |
+
+### slack-post
+
+**Post new message to Slack channel**
+
+Post a new message to a Slack channel. This creates a new message (not a thread reply). Requires lead privileges.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `channelId` | `string` | Yes | - | The Slack channel ID to post to. |
+| `message` | `string` | Yes | - | The message content to post. |
 
 ### slack-list-channels
 
@@ -301,4 +332,75 @@ Update the health status of a registered service. Use this after a service becom
 |-----------|------|----------|---------|-------------|
 | `serviceId` | `uuid` | No | - | Service ID to update. |
 | `name` | `string` | No | - | Service name to update (alternative to serviceId). |
+
+## Scheduling Tools
+
+*Scheduling*
+
+### list-schedules
+
+**List Scheduled Tasks**
+
+View all scheduled tasks with optional filters. Use this to discover existing schedules.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `enabled` | `boolean` | No | - | Filter by enabled status |
+| `name` | `string` | No | - | Filter by name (partial match) |
+
+### create-schedule
+
+**Create Scheduled Task**
+
+Create a new scheduled task that will automatically create agent tasks at specified intervals. Either cronExpression or intervalMs must be provided.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `description` | `string` | No | - | Human-readable description of the schedule |
+| `tags` | `array` | No | - | Tags to apply to created tasks |
+| `timezone` | `string` | No | "UTC" | Timezone for cron schedules |
+
+### update-schedule
+
+**Update Scheduled Task**
+
+Update an existing scheduled task. Only the creator or lead agent can update schedules.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `scheduleId` | `string` | No | - | Schedule ID to update |
+| `name` | `string` | No | - | Schedule name to update (alternative to ID) |
+| `newName` | `string` | No | - | New name for the schedule |
+| `taskTemplate` | `string` | No | - | New task template |
+| `cronExpression` | `string` | No | - | New cron expression |
+| `intervalMs` | `number` | No | - | New interval in milliseconds |
+| `description` | `string` | No | - | New description |
+| `taskType` | `string` | No | - | New task type |
+| `tags` | `array` | No | - | New tags |
+| `priority` | `number` | No | - | New priority |
+| `targetAgentId` | `string` | No | - | New target agent ID |
+| `timezone` | `string` | No | - | New timezone |
+| `enabled` | `boolean` | No | - | Enable or disable the schedule |
+
+### delete-schedule
+
+**Delete Scheduled Task**
+
+Delete a scheduled task permanently. Only the creator or lead agent can delete schedules.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `scheduleId` | `string` | No | - | Schedule ID to delete |
+| `name` | `string` | No | - | Schedule name to delete (alternative to ID) |
+
+### run-schedule-now
+
+**Run Schedule Now**
+
+Immediately execute a scheduled task, creating a task right away. Does not affect the regular schedule timing.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `scheduleId` | `string` | No | - | Schedule ID to run |
+| `name` | `string` | No | - | Schedule name to run (alternative to ID) |
 
