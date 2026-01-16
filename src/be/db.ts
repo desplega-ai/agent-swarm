@@ -1115,6 +1115,7 @@ export function getTaskStats(): {
   reviewing: number;
   pending: number;
   in_progress: number;
+  paused: number;
   completed: number;
   failed: number;
 } {
@@ -1127,6 +1128,7 @@ export function getTaskStats(): {
         reviewing: number;
         pending: number;
         in_progress: number;
+        paused: number;
         completed: number;
         failed: number;
       },
@@ -1139,6 +1141,7 @@ export function getTaskStats(): {
         SUM(CASE WHEN status = 'reviewing' THEN 1 ELSE 0 END) as reviewing,
         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
         SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
+        SUM(CASE WHEN status = 'paused' THEN 1 ELSE 0 END) as paused,
         SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
       FROM agent_tasks`,
@@ -1153,6 +1156,7 @@ export function getTaskStats(): {
       reviewing: 0,
       pending: 0,
       in_progress: 0,
+      paused: 0,
       completed: 0,
       failed: 0,
     }
@@ -1333,6 +1337,96 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
   }
 
   return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Pause a task that is currently in progress.
+ * Used during graceful shutdown to allow tasks to resume after container restart.
+ * Unlike failTask, paused tasks retain their agent assignment and can be resumed.
+ */
+export function pauseTask(id: string): AgentTask | null {
+  const oldTask = getTaskById(id);
+  if (!oldTask) return null;
+
+  // Only pause tasks that are in progress
+  if (oldTask.status !== "in_progress") {
+    return null;
+  }
+
+  const row = getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `UPDATE agent_tasks
+       SET status = 'paused',
+           lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? AND status = 'in_progress'
+       RETURNING *`,
+    )
+    .get(id);
+
+  if (row && oldTask) {
+    try {
+      createLogEntry({
+        eventType: "task_status_change",
+        taskId: id,
+        agentId: row.agentId ?? undefined,
+        oldValue: oldTask.status,
+        newValue: "paused",
+        metadata: { pausedForShutdown: true },
+      });
+    } catch {}
+  }
+
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Resume a paused task - transitions it back to in_progress.
+ * Called when worker restarts and picks up paused work.
+ */
+export function resumeTask(taskId: string): AgentTask | null {
+  const oldTask = getTaskById(taskId);
+  if (!oldTask || oldTask.status !== "paused") return null;
+
+  const row = getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `UPDATE agent_tasks
+       SET status = 'in_progress',
+           lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? AND status = 'paused'
+       RETURNING *`,
+    )
+    .get(taskId);
+
+  if (row && oldTask) {
+    try {
+      createLogEntry({
+        eventType: "task_status_change",
+        taskId,
+        agentId: row.agentId ?? undefined,
+        oldValue: "paused",
+        newValue: "in_progress",
+        metadata: { resumed: true },
+      });
+    } catch {}
+  }
+
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Get paused tasks for a specific agent.
+ * Used on startup to resume tasks that were interrupted by deployment.
+ * Returns tasks ordered by creation time (oldest first for FIFO).
+ */
+export function getPausedTasksForAgent(agentId: string): AgentTask[] {
+  const rows = getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks
+       WHERE agentId = ? AND status = 'paused'
+       ORDER BY createdAt ASC`,
+    )
+    .all(agentId);
+  return rows.map(rowToAgentTask);
 }
 
 /**

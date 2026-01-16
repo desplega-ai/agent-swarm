@@ -7,6 +7,7 @@ export const AgentTaskStatusSchema = z.enum([
   "reviewing", // Agent is reviewing an offered task
   "pending", // Assigned/accepted, waiting to start
   "in_progress",
+  "paused", // Interrupted by graceful shutdown, can resume
   "completed",
   "failed",
   "cancelled", // Task was cancelled by lead or creator
