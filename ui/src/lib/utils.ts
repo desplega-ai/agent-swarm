@@ -58,12 +58,15 @@ export function formatCompactNumber(num: number): string {
 }
 
 /**
- * Format a currency value
+ * Format a currency value (max 3 digits display)
  */
 export function formatCurrency(amount: number): string {
+  if (amount >= 1_000_000) return `$${(amount / 1_000_000).toFixed(1)}M`;
   if (amount >= 1000) return `$${(amount / 1000).toFixed(1)}K`;
+  if (amount >= 100) return `$${Math.round(amount)}`;
+  if (amount >= 10) return `$${amount.toFixed(1)}`;
   if (amount >= 1) return `$${amount.toFixed(2)}`;
-  return `$${amount.toFixed(4)}`;
+  return `$${amount.toFixed(3)}`;
 }
 
 /**

@@ -224,80 +224,29 @@ export default function StatsBar({ onFilterAgents, onNavigateToTasks }: StatsBar
         WebkitOverflowScrolling: "touch",
       }}
     >
-      {/* Desktop: Honeycomb layout */}
+      {/* Desktop: Horizontal honeycomb layout */}
       <Box
         sx={{
           display: { xs: "none", md: "flex" },
-          flexDirection: "column",
+          flexDirection: "row",
           alignItems: "center",
-          gap: 0,
+          justifyContent: "center",
+          gap: 0.5,
+          flexWrap: "wrap",
         }}
       >
-        {/* Top row - 3 hexagons */}
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "center",
-            gap: 0.5,
-          }}
-        >
-          {topRow.map((stat) => (
-            <HexStat
-              key={stat.label}
-              label={stat.label}
-              value={stat.value}
-              color={stat.color}
-              glowColor={stat.glowColor}
-              isActive={stat.isActive}
-              isDark={isDark}
-              onClick={stat.onClick}
-            />
-          ))}
-        </Box>
-
-        {/* Bottom row - 4 hexagons, offset for honeycomb effect */}
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "center",
-            gap: 0.5,
-            mt: -2.5, // Overlap for honeycomb effect
-          }}
-        >
-          {bottomRow.map((stat) => (
-            <HexStat
-              key={stat.label}
-              label={stat.label}
-              value={stat.value}
-              color={stat.color}
-              glowColor={stat.glowColor}
-              isActive={stat.isActive}
-              isDark={isDark}
-              onClick={stat.onClick}
-            />
-          ))}
-        </Box>
-
-        {/* Usage row - 2 hexagons for MTD stats */}
-        <Box
-          sx={{
-            display: "flex",
-            justifyContent: "center",
-            gap: 0.5,
-            mt: -2.5, // Overlap for honeycomb effect
-          }}
-        >
-          {usageRow.map((stat) => (
-            <HexStat
-              key={stat.label}
-              label={stat.label}
-              value={stat.value}
-              color={stat.color}
-              glowColor={stat.glowColor}
-              isDark={isDark}
-            />
-          ))}
-        </Box>
+        {[...topRow, ...bottomRow, ...usageRow].map((stat) => (
+          <HexStat
+            key={stat.label}
+            label={stat.label}
+            value={stat.value}
+            color={stat.color}
+            glowColor={stat.glowColor}
+            isActive={"isActive" in stat ? stat.isActive : undefined}
+            isDark={isDark}
+            onClick={"onClick" in stat ? stat.onClick : undefined}
+          />
+        ))}
       </Box>
 
       {/* Mobile: Single row horizontal scroll */}
