@@ -137,56 +137,72 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
     return `{${keys.join(', ')}${suffix}}`;
   };
 
-  /** Try to unwrap double/triple escaped JSON strings */
+  /**
+   * Recursively unwrap escaped JSON strings.
+   * Handles patterns like:
+   * - {"key":"value"} - regular JSON (returned as-is)
+   * - {\"key\":\"value\"} - single-escaped JSON (unescaped once)
+   * - {\\\"key\\\":\\\"value\\\"} - double-escaped JSON (unescaped twice)
+   * - "{"key":"value"}" - JSON string wrapped in quotes (unwrapped and parsed)
+   */
   const unwrapEscapedJson = (content: string): string => {
+    if (typeof content !== 'string' || !content.trim()) {
+      return content;
+    }
+
     let current = content;
     let iterations = 0;
-    const maxIterations = 3; // Prevent infinite loops
+    const maxIterations = 5; // Allow more iterations for deeply nested escaping
 
     while (iterations < maxIterations) {
       iterations++;
-      if (typeof current === 'string') {
-        const trimmed = current.trim();
+      const trimmed = current.trim();
 
-        // Check if it's a JSON string that was escaped (starts and ends with quotes)
-        if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
-          try {
-            const unescaped = JSON.parse(trimmed);
-            if (typeof unescaped === 'string') {
-              current = unescaped;
-              continue;
-            }
-          } catch {
-            break;
+      // First, try to parse as-is - if it works, it's valid JSON
+      try {
+        const parsed = JSON.parse(trimmed);
+        // If it parses to a string that looks like JSON, unwrap it
+        if (typeof parsed === 'string') {
+          const parsedTrimmed = parsed.trim();
+          if (parsedTrimmed.startsWith('{') || parsedTrimmed.startsWith('[')) {
+            current = parsed;
+            continue; // Try to unwrap further
           }
         }
+        // It's valid JSON object/array, return the current string
+        return current;
+      } catch {
+        // Not valid JSON as-is, try unescaping
+      }
 
-        // Check for inline escaped quotes like {\"key\":\"value\"}
-        // This happens when JSON was stringified without outer quotes
-        if (trimmed.includes('\\"') && (trimmed.startsWith('{') || trimmed.startsWith('['))) {
-          // Replace escaped quotes with regular quotes and try to parse
-          const unescaped = trimmed.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+      // Check for escaped quotes pattern: {\"key\":\"value\"}
+      // This is common when JSON is stored as an escaped string in a database
+      if (trimmed.includes('\\"') || trimmed.includes("\\'")) {
+        // Unescape one level: \" -> " and \\ -> \
+        const unescaped = trimmed
+          .replace(/\\"/g, '"')
+          .replace(/\\'/g, "'")
+          .replace(/\\\\/g, '\\');
+
+        // Check if unescaping made a difference
+        if (unescaped !== current) {
           try {
             JSON.parse(unescaped);
             current = unescaped;
+            continue; // Successfully unescaped, try again for deeper levels
+          } catch {
+            // Still not valid JSON, but try using unescaped anyway
+            // and continue loop to try more unescaping
+            current = unescaped;
             continue;
-          } catch {
-            // Not valid after unescaping, continue
-          }
-        }
-
-        // Try parsing as JSON object/array to validate
-        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-          try {
-            JSON.parse(trimmed);
-            return current; // It's valid JSON, return as-is
-          } catch {
-            break;
           }
         }
       }
+
+      // No more transformations possible
       break;
     }
+
     return current;
   };
 
@@ -284,23 +300,8 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
   };
 
   const formatLogLine = (content: string): FormattedLog => {
-    // Try to unwrap potentially double-encoded JSON
-    let actualContent = content;
-    try {
-      const parsed = JSON.parse(content);
-      // If the parsed content is a string that looks like JSON, try parsing it again
-      if (typeof parsed === 'string' && (parsed.trim().startsWith('{') || parsed.trim().startsWith('['))) {
-        try {
-          JSON.parse(parsed); // Validate it's valid JSON
-          // Successfully unwrapped double-encoded JSON
-          actualContent = parsed;
-        } catch {
-          // Not double-encoded, continue with original
-        }
-      }
-    } catch {
-      // Original content is not JSON, continue
-    }
+    // First, try to unwrap any escaped JSON (handles {\"key\":...} patterns)
+    const actualContent = unwrapEscapedJson(content);
 
     try {
       const json = JSON.parse(actualContent);
