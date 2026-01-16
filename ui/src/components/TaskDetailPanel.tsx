@@ -41,12 +41,13 @@ export default function TaskDetailPanel({
   // Track whether we've set the initial tab for this task
   const initialTabSetRef = useRef<string | null>(null);
 
-  // Reset to session tab when opening a different task
+  // Set initial tab based on task status
   useEffect(() => {
     if (!task || initialTabSetRef.current === taskId) return;
 
-    // Always default to session (logs) tab
-    setOutcomesTab("session");
+    // Finished tasks → output tab, in-progress tasks → session/logs tab
+    const isFinished = task.status === "completed" || task.status === "failed";
+    setOutcomesTab(isFinished ? "output" : "session");
     initialTabSetRef.current = taskId;
   }, [task, taskId]);
 

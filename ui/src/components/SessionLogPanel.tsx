@@ -111,8 +111,34 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
     return `${str.slice(0, maxLen - 3)}...`;
   };
 
+  /** Generate a human-readable summary from a JSON object */
+  const generateJsonSummary = (obj: Record<string, unknown>, maxLen = 100): string => {
+    // Check for common patterns and generate nice summaries
+    if ('success' in obj && 'message' in obj) {
+      // API response pattern
+      const status = obj.success ? '✓' : '✗';
+      return `${status} ${truncate(String(obj.message), maxLen - 2)}`;
+    }
+    if ('yourAgentId' in obj) {
+      // Agent swarm response
+      const status = obj.success ? '✓' : '✗';
+      const msg = obj.message ? String(obj.message) : 'Agent operation';
+      return `${status} ${truncate(msg, maxLen - 2)}`;
+    }
+    if ('oldTodos' in obj || 'todos' in obj) {
+      // TodoWrite result
+      const count = Array.isArray(obj.todos) ? obj.todos.length : (Array.isArray(obj.oldTodos) ? obj.oldTodos.length : 0);
+      return `Todo list updated (${count} items)`;
+    }
+
+    // Generic object: list top-level keys
+    const keys = Object.keys(obj).slice(0, 4);
+    const suffix = Object.keys(obj).length > 4 ? `, +${Object.keys(obj).length - 4} more` : '';
+    return `{${keys.join(', ')}${suffix}}`;
+  };
+
   /** Try to parse and extract meaningful content from tool result */
-  const parseToolResultContent = (content: string): { display: string; fullContent: string; isJson: boolean } => {
+  const parseToolResultContent = (content: string): { display: string; fullContent: string; isJson: boolean; summary?: string } => {
     try {
       const parsed = JSON.parse(content);
 
@@ -125,9 +151,10 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
 
           // Try to parse stdout as JSON (double-encoded JSON)
           let displayStdout = stdout;
+          let innerParsed: Record<string, unknown> | null = null;
           try {
-            const innerJson = JSON.parse(stdout);
-            displayStdout = JSON.stringify(innerJson, null, 2);
+            innerParsed = JSON.parse(stdout);
+            displayStdout = JSON.stringify(innerParsed, null, 2);
           } catch {
             // stdout is not JSON, keep as-is
           }
@@ -143,18 +170,26 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
             display += (display ? '\n' : '') + '[interrupted]';
           }
 
+          // Generate summary for JSON stdout
+          const summary = innerParsed
+            ? generateJsonSummary(innerParsed)
+            : (stdout ? truncate(stdout.replace(/\n/g, ' '), 100) : '(empty output)');
+
           return {
             display: display || '(empty output)',
             fullContent: display || content,
             isJson: isJsonContent(displayStdout),
+            summary,
           };
         }
 
-        // For other JSON objects, pretty-print them
+        // For other JSON objects, create summary and pretty-print
+        const summary = generateJsonSummary(parsed);
         return {
           display: JSON.stringify(parsed, null, 2),
           fullContent: JSON.stringify(parsed, null, 2),
           isJson: true,
+          summary,
         };
       }
 
@@ -328,16 +363,16 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
             const toolResult = typeof rawToolResult === "string" ? rawToolResult : JSON.stringify(rawToolResult);
             const parsed = parseToolResultContent(toolResult);
             const isError = toolResult.includes("Error") || toolResult.includes("error");
-            const displayContent = truncate(parsed.display, 300);
+            // Use summary if available, otherwise truncate the display
+            const displayContent = parsed.summary || truncate(parsed.display, 300);
 
             blocks.push({
               blockType: "tool_result",
               icon: isError ? "✗" : "✓",
               content: displayContent,
               fullContent: parsed.fullContent,
-              isExpandable: parsed.display.length > 300,
+              isExpandable: parsed.isJson || parsed.display.length > 100,
               isError,
-              extraInfo: parsed.display.length > 300 ? `+${parsed.display.length - 300} chars` : undefined,
             });
           } else if (message) {
             const contentBlocks = message.content as Array<Record<string, unknown>>;
@@ -348,16 +383,16 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
                   const result = typeof rawResult === "string" ? rawResult : rawResult ? JSON.stringify(rawResult) : "";
                   const parsed = parseToolResultContent(result);
                   const isError = block.is_error as boolean;
-                  const displayContent = truncate(parsed.display, 300);
+                  // Use summary if available, otherwise truncate the display
+                  const displayContent = parsed.summary || truncate(parsed.display, 300);
 
                   blocks.push({
                     blockType: "tool_result",
                     icon: isError ? "✗" : "✓",
                     content: displayContent,
                     fullContent: parsed.fullContent,
-                    isExpandable: parsed.display.length > 300,
+                    isExpandable: parsed.isJson || parsed.display.length > 100,
                     isError,
-                    extraInfo: parsed.display.length > 300 ? `+${parsed.display.length - 300} chars` : undefined,
                   });
                 }
               }
@@ -581,7 +616,7 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
           }}
         >
           <Button
-            variant="soft"
+            variant="solid"
             size="sm"
             onClick={scrollToBottom}
             sx={{
@@ -589,17 +624,17 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
               fontSize: "0.7rem",
               fontWeight: 600,
               letterSpacing: "0.03em",
-              // Solid opaque colors - no transparency
-              bgcolor: isDark ? "#1e3a5f" : "#dbeafe",
-              color: isDark ? "#93c5fd" : "#1d4ed8",
+              // Fully opaque solid background
+              bgcolor: isDark ? "#1e4068" : "#2563eb",
+              color: "#ffffff",
               border: "2px solid",
-              borderColor: isDark ? "#3b82f6" : "#1d4ed8",
+              borderColor: isDark ? "#3b82f6" : "#1e40af",
               boxShadow: isDark
-                ? "0 4px 16px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255,255,255,0.1)"
-                : "0 4px 16px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.3)",
+                ? "0 4px 16px rgba(0, 0, 0, 0.8), 0 2px 4px rgba(0, 0, 0, 0.4)"
+                : "0 4px 16px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.2)",
               "&:hover": {
-                bgcolor: isDark ? "#264b7a" : "#bfdbfe",
-                borderColor: isDark ? "#60a5fa" : "#1d4ed8",
+                bgcolor: isDark ? "#2563eb" : "#1d4ed8",
+                borderColor: isDark ? "#60a5fa" : "#1e3a8a",
               },
               gap: 0.5,
               px: 2,
