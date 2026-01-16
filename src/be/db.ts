@@ -609,6 +609,13 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     /* exists */
   }
 
+  // Epic progress trigger migration: Add progressNotifiedAt to epics
+  try {
+    db.run(`ALTER TABLE epics ADD COLUMN progressNotifiedAt TEXT`);
+  } catch {
+    /* exists */
+  }
+
   return db;
 }
 
@@ -3507,6 +3514,7 @@ type EpicRow = {
   lastUpdatedAt: string;
   startedAt: string | null;
   completedAt: string | null;
+  progressNotifiedAt: string | null;
 };
 
 function rowToEpic(row: EpicRow): Epic {
@@ -3864,4 +3872,94 @@ export function unassignTaskFromEpic(taskId: string): AgentTask | null {
     )
     .get(now, taskId);
   return row ? rowToAgentTask(row) : null;
+}
+
+// ============================================================================
+// Epic Progress Trigger Functions (Lead-only iterative epic processing)
+// ============================================================================
+
+/**
+ * Get active epics that have progress updates (task completions/failures)
+ * since the last notification. Used to trigger lead to plan next steps.
+ * Returns epics with their progress stats and recently finished tasks.
+ */
+export function getEpicsWithProgressUpdates(): Array<{
+  epic: EpicWithProgress;
+  finishedTasks: AgentTask[];
+}> {
+  // Find active epics that have tasks finished since last notification
+  const rows = getDb()
+    .prepare<EpicRow, []>(
+      `SELECT e.* FROM epics e
+       WHERE e.status = 'active'
+       AND EXISTS (
+         SELECT 1 FROM agent_tasks t
+         WHERE t.epicId = e.id
+         AND t.status IN ('completed', 'failed')
+         AND t.finishedAt IS NOT NULL
+         AND (e.progressNotifiedAt IS NULL OR t.finishedAt > e.progressNotifiedAt)
+       )
+       ORDER BY e.priority DESC, e.lastUpdatedAt DESC`,
+    )
+    .all();
+
+  return rows
+    .map((row) => {
+      const epic = getEpicWithProgress(row.id);
+      if (!epic) return null;
+
+      // Get tasks that finished since last notification
+      const progressNotifiedAt = row.progressNotifiedAt;
+      const finishedTasks = getDb()
+        .prepare<AgentTaskRow, [string] | [string, string]>(
+          progressNotifiedAt
+            ? `SELECT * FROM agent_tasks
+               WHERE epicId = ?
+               AND status IN ('completed', 'failed')
+               AND finishedAt > ?
+               ORDER BY finishedAt DESC`
+            : `SELECT * FROM agent_tasks
+               WHERE epicId = ?
+               AND status IN ('completed', 'failed')
+               ORDER BY finishedAt DESC`,
+        )
+        .all(...(progressNotifiedAt ? [row.id, progressNotifiedAt] : [row.id]))
+        .map(rowToAgentTask);
+
+      return { epic, finishedTasks };
+    })
+    .filter((result): result is NonNullable<typeof result> => result !== null);
+}
+
+/**
+ * Mark an epic's progress as notified.
+ * Prevents returning the same progress updates in future polls.
+ */
+export function markEpicProgressNotified(epicId: string): Epic | null {
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<EpicRow, [string, string, string]>(
+      `UPDATE epics SET progressNotifiedAt = ?, lastUpdatedAt = ?
+       WHERE id = ? RETURNING *`,
+    )
+    .get(now, now, epicId);
+  return row ? rowToEpic(row) : null;
+}
+
+/**
+ * Mark multiple epics' progress as notified atomically.
+ */
+export function markEpicsProgressNotified(epicIds: string[]): number {
+  if (epicIds.length === 0) return 0;
+
+  const now = new Date().toISOString();
+  const placeholders = epicIds.map(() => "?").join(",");
+
+  const result = getDb().run(
+    `UPDATE epics SET progressNotifiedAt = ?, lastUpdatedAt = ?
+     WHERE id IN (${placeholders}) AND progressNotifiedAt IS NULL OR progressNotifiedAt < ?`,
+    [now, now, ...epicIds, now],
+  );
+
+  return result.changes;
 }

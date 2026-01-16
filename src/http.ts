@@ -37,6 +37,7 @@ import {
   getDb,
   getEpicById,
   getEpics,
+  getEpicsWithProgressUpdates,
   getEpicWithProgress,
   getInboxSummary,
   getLogsByAgentId,
@@ -57,6 +58,7 @@ import {
   getTasksCount,
   getUnassignedTasksCount,
   hasCapacity,
+  markEpicsProgressNotified,
   markTasksNotified,
   pauseTask,
   postMessage,
@@ -528,6 +530,23 @@ const httpServer = createHttpServer(async (req, res) => {
                 type: "tasks_finished",
                 count: finishedTasks.length,
                 tasks: finishedTasks,
+              },
+            };
+          }
+
+          // Check for epic progress updates (tasks completed/failed for active epics)
+          // This trigger helps lead plan next steps for epics - similar to ralph loop
+          const epicsWithUpdates = getEpicsWithProgressUpdates();
+          if (epicsWithUpdates.length > 0) {
+            // Atomically mark as notified within this transaction
+            const epicIds = epicsWithUpdates.map((e) => e.epic.id);
+            markEpicsProgressNotified(epicIds);
+
+            return {
+              trigger: {
+                type: "epic_progress_changed",
+                count: epicsWithUpdates.length,
+                epics: epicsWithUpdates,
               },
             };
           }
