@@ -7,7 +7,10 @@ This guide covers all deployment options for Agent Swarm MCP.
 - [Docker Compose (Recommended)](#docker-compose-recommended)
 - [Docker Worker](#docker-worker)
 - [Server Deployment (systemd)](#server-deployment-systemd)
+- [Graceful Shutdown & Task Resume](#graceful-shutdown--task-resume)
 - [Environment Variables](#environment-variables)
+- [Slack Integration](#slack-integration)
+- [GitHub App Integration](#github-app-integration)
 - [System Prompts](#system-prompts)
 - [Service Registry (PM2)](#service-registry-pm2)
 - [Publishing (Maintainers)](#publishing-maintainers)
@@ -71,8 +74,21 @@ GITHUB_NAME=Your Name
 |--------|---------|
 | `swarm_api` | SQLite database persistence |
 | `swarm_logs` | Session logs |
-| `swarm_shared` | Shared workspace between agents |
-| `swarm_worker_*` | Personal workspace per worker |
+| `swarm_shared` | Shared workspace between agents (`/workspace/shared`) |
+| `swarm_lead` | Lead agent's personal workspace (`/workspace/personal`) |
+| `swarm_worker_*` | Personal workspace per worker (`/workspace/personal`) |
+
+### Graceful Shutdown
+
+The docker-compose example uses `stop_grace_period: 60s` to allow graceful task pause during deployments. When a container receives SIGTERM:
+
+1. In-progress tasks are **paused** (not failed)
+2. Task state and progress are preserved
+3. After restart, paused tasks are automatically **resumed** with context
+
+This enables zero-downtime deployments. See [Graceful Shutdown & Task Resume](#graceful-shutdown--task-resume) for details.
+
+> **Important:** Use stable `AGENT_ID` values for each worker to enable task resume after restarts.
 
 ---
 
@@ -111,7 +127,7 @@ docker run --rm -it \
 docker run --rm -it \
   -e CLAUDE_CODE_OAUTH_TOKEN=your-token \
   -e API_KEY=your-api-key \
-  -e WORKER_SYSTEM_PROMPT="You are a Python specialist" \
+  -e SYSTEM_PROMPT="You are a Python specialist" \
   -v ./logs:/logs \
   -v ./work:/workspace \
   ghcr.io/desplega-ai/agent-swarm-worker
@@ -120,7 +136,7 @@ docker run --rm -it \
 docker run --rm -it \
   -e CLAUDE_CODE_OAUTH_TOKEN=your-token \
   -e API_KEY=your-api-key \
-  -e WORKER_SYSTEM_PROMPT_FILE=/workspace/prompts/specialist.txt \
+  -e SYSTEM_PROMPT_FILE=/workspace/prompts/specialist.txt \
   -v ./work:/workspace \
   ghcr.io/desplega-ai/agent-swarm-worker
 
@@ -160,12 +176,15 @@ The Docker worker image uses a multi-stage build:
 - **Languages**: Python 3, Node.js 22, Bun
 - **Build tools**: gcc, g++, make, cmake
 - **Process manager**: PM2 (for background services)
+- **CLI tools**: GitHub CLI (`gh`), sqlite3
+- **Agent tools**: `wts` (git worktree manager), `cc-ai-tracker` (code change tracking)
 - **Utilities**: git, git-lfs, vim, nano, jq, curl, wget, ssh
 - **Sudo access**: Worker can install packages with `sudo apt-get install`
 
 **Volumes:**
 
-- `/workspace` - Working directory for cloning repos
+- `/workspace/personal` - Agent's personal workspace (isolated per agent)
+- `/workspace/shared` - Shared workspace between all agents
 - `/logs` - Session logs
 
 ### Startup Scripts
@@ -265,6 +284,56 @@ sudo systemctl stop agent-swarm
 
 ---
 
+## Graceful Shutdown & Task Resume
+
+Agent Swarm supports graceful task handling during deployments and container restarts.
+
+### How It Works
+
+When a worker container receives SIGTERM (e.g., during `docker-compose down` or Kubernetes rollout):
+
+1. **Grace period starts** - Worker waits for active tasks to complete (default: 30s, configurable via `SHUTDOWN_TIMEOUT`)
+2. **Tasks are paused** - Any tasks still running after the grace period are marked as `paused` (not `failed`)
+3. **State preserved** - Task progress and context are saved to the database
+4. **On restart** - Worker automatically fetches and resumes its paused tasks with full context
+
+### Task States During Shutdown
+
+| State | Description |
+|-------|-------------|
+| `in_progress` | Task completes normally if it finishes within grace period |
+| `paused` | Task is paused for resume after restart |
+| `failed` | Only used if pause API fails (fallback) |
+
+### Configuration
+
+```bash
+# Grace period before force-pausing tasks (milliseconds)
+SHUTDOWN_TIMEOUT=30000
+
+# Docker compose stop grace period (should be >= SHUTDOWN_TIMEOUT + buffer)
+stop_grace_period: 60s
+```
+
+### Resume Behavior
+
+When a worker starts, it:
+
+1. Registers with the MCP server
+2. Checks for paused tasks assigned to its `AGENT_ID`
+3. Resumes each paused task with context:
+   - Original task description
+   - Previous progress (if any was saved)
+   - Notification that this is a resumed task
+
+### Best Practices
+
+- **Use stable Agent IDs** - Set explicit `AGENT_ID` for each worker to enable resume after restarts
+- **Save progress regularly** - Workers should call `store-progress` during long tasks
+- **Test deployments** - Verify tasks resume correctly in staging before production
+
+---
+
 ## Environment Variables
 
 ### Docker Worker Variables
@@ -273,24 +342,119 @@ sudo systemctl stop agent-swarm
 |----------|----------|-------------|
 | `CLAUDE_CODE_OAUTH_TOKEN` | Yes | OAuth token for Claude CLI (run `claude setup-token`) |
 | `API_KEY` | Yes | API key for MCP server |
-| `AGENT_ID` | No | Agent UUID (assigned on join if not set) |
+| `AGENT_ID` | No | Agent UUID (assigned on join if not set). **Keep stable for task resume.** |
+| `AGENT_ROLE` | No | Role: `worker` (default) or `lead` |
+| `AGENT_NAME` | No | Display name for the agent (auto-generated if not set) |
 | `MCP_BASE_URL` | No | MCP server URL (default: `http://host.docker.internal:3013`) |
 | `SESSION_ID` | No | Log folder name (auto-generated if not provided) |
-| `WORKER_YOLO` | No | Continue on errors (default: `false`) |
-| `WORKER_SYSTEM_PROMPT` | No | Custom system prompt text |
-| `WORKER_SYSTEM_PROMPT_FILE` | No | Path to system prompt file |
+| `YOLO` | No | Continue on errors (default: `false`) |
+| `SYSTEM_PROMPT` | No | Custom system prompt text |
+| `SYSTEM_PROMPT_FILE` | No | Path to system prompt file |
 | `STARTUP_SCRIPT_STRICT` | No | Exit on startup script failure (default: `true`) |
+| `SHUTDOWN_TIMEOUT` | No | Grace period in ms before pausing tasks (default: `30000`) |
+| `MAX_CONCURRENT_TASKS` | No | Maximum parallel tasks per worker (default: `1`) |
 | `SWARM_URL` | No | Base domain for service URLs (default: `localhost`) |
 | `SERVICE_PORT` | No | Host port for exposed services (default: `3000`) |
 | `PM2_HOME` | No | PM2 state directory (default: `/workspace/.pm2`) |
+| `GITHUB_TOKEN` | No | GitHub token for git operations |
+| `GITHUB_EMAIL` | No | Git commit email (default: `worker-agent@desplega.ai`) |
+| `GITHUB_NAME` | No | Git commit name (default: `Worker Agent`) |
 
 ### Server Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MCP_BASE_URL` | Base URL for the MCP server | `https://agent-swarm-mcp.desplega.sh` |
-| `PORT` | Port for self-hosted MCP server | `3013` |
+| `PORT` | Port for MCP HTTP server | `3013` |
 | `API_KEY` | API key for server authentication | - |
+| `MCP_BASE_URL` | Base URL (for setup command) | `https://agent-swarm-mcp.desplega.sh` |
+| `SWARM_URL` | Base domain for service discovery | `localhost` |
+| `APP_URL` | Dashboard URL for Slack message links | - |
+| `ENV` | Environment mode (`development` adds prefix to Slack agent names) | - |
+| `SCHEDULER_INTERVAL_MS` | Polling interval for scheduled tasks | `10000` |
+| `DATABASE_PATH` | SQLite database file path | `./agent-swarm-db.sqlite` |
+
+---
+
+## Slack Integration
+
+Enable Slack for task creation and agent communication via direct messages.
+
+### Setup
+
+1. Create a Slack App at https://api.slack.com/apps
+2. Enable Socket Mode (for real-time events without public webhooks)
+3. Add required scopes: `chat:write`, `users:read`, `users:read.email`, `channels:history`, `im:history`
+4. Install to workspace and copy tokens
+
+### Configuration
+
+```bash
+# Required for Slack
+SLACK_BOT_TOKEN=xoxb-...      # Bot User OAuth Token
+SLACK_APP_TOKEN=xapp-...      # App-Level Token (Socket Mode)
+SLACK_SIGNING_SECRET=...      # Signing Secret (optional for Socket Mode)
+
+# Disable Slack (if not using)
+SLACK_DISABLE=true
+
+# Optional: Filter allowed users
+SLACK_ALLOWED_EMAIL_DOMAINS=company.com,partner.com  # Comma-separated email domains
+SLACK_ALLOWED_USER_IDS=U12345678,U87654321           # Comma-separated user IDs to always allow
+```
+
+### User Filtering
+
+By default, all Slack users can interact with the bot. To restrict access:
+
+- **Email domains**: Only users with matching email domains can send messages
+- **User ID whitelist**: Specific user IDs are always allowed (useful for admins or service accounts)
+
+If both are set, a user must match **either** an allowed domain **or** be in the user ID whitelist.
+
+---
+
+## GitHub App Integration
+
+Enable GitHub webhooks for automated task creation from PR reviews and issue assignments.
+
+### Setup
+
+1. Create a GitHub App at https://github.com/settings/apps/new
+2. Set webhook URL to your server: `https://your-server.com/github/webhook`
+3. Generate a webhook secret
+4. (Optional) Generate a private key for bot reactions
+
+### Configuration
+
+```bash
+# Required for GitHub webhooks
+GITHUB_WEBHOOK_SECRET=your-webhook-secret
+
+# Optional: Disable GitHub integration
+GITHUB_DISABLE=true
+
+# Optional: Bot name for @mentions (default: agent-swarm-bot)
+GITHUB_BOT_NAME=your-bot-name
+
+# Optional: Enable bot reactions (requires GitHub App)
+GITHUB_APP_ID=123456
+GITHUB_APP_PRIVATE_KEY=-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----
+# Or use base64-encoded private key:
+GITHUB_APP_PRIVATE_KEY=base64-encoded-key
+```
+
+### Supported Events
+
+| Event | Action |
+|-------|--------|
+| PR assigned to bot | Creates task for lead agent |
+| Review requested from bot | Creates review task |
+| PR/Issue comment @mentioning bot | Creates task with context |
+| Issue assigned to bot | Creates task for lead agent |
+
+### Bot Reactions
+
+If GitHub App credentials are provided, the bot can react to comments/issues to acknowledge receipt.
 
 ---
 
@@ -319,14 +483,14 @@ bunx @desplega.ai/agent-swarm lead --system-prompt-file ./prompts/coordinator.tx
 docker run --rm -it \
   -e CLAUDE_CODE_OAUTH_TOKEN=your-token \
   -e API_KEY=your-api-key \
-  -e WORKER_SYSTEM_PROMPT="You are a Python specialist." \
+  -e SYSTEM_PROMPT="You are a Python specialist." \
   ghcr.io/desplega-ai/agent-swarm-worker
 
 # Using system prompt file
 docker run --rm -it \
   -e CLAUDE_CODE_OAUTH_TOKEN=your-token \
   -e API_KEY=your-api-key \
-  -e WORKER_SYSTEM_PROMPT_FILE=/workspace/prompts/specialist.txt \
+  -e SYSTEM_PROMPT_FILE=/workspace/prompts/specialist.txt \
   -v ./work:/workspace \
   ghcr.io/desplega-ai/agent-swarm-worker
 ```
@@ -334,7 +498,7 @@ docker run --rm -it \
 ### Priority
 
 - CLI flags > Environment variables
-- Inline text (`*_SYSTEM_PROMPT`) > File (`*_SYSTEM_PROMPT_FILE`)
+- Inline text (`SYSTEM_PROMPT`) > File (`SYSTEM_PROMPT_FILE`)
 
 ---
 
