@@ -3,6 +3,16 @@ import pkg from "../package.json";
 import { initDb } from "./be/db";
 import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerCreateChannelTool } from "./tools/create-channel";
+// Epics capability
+import {
+  registerAssignTaskToEpicTool,
+  registerCreateEpicTool,
+  registerDeleteEpicTool,
+  registerGetEpicDetailsTool,
+  registerListEpicsTool,
+  registerUnassignTaskFromEpicTool,
+  registerUpdateEpicTool,
+} from "./tools/epics";
 // Lead inbox tools
 import { registerGetInboxMessageTool } from "./tools/get-inbox-message";
 import { registerGetSwarmTool } from "./tools/get-swarm";
@@ -42,7 +52,7 @@ import { registerUpdateServiceStatusTool } from "./tools/update-service-status";
 
 // Capability-based feature flags
 // Default: all capabilities enabled
-const DEFAULT_CAPABILITIES = "core,task-pool,messaging,profiles,services,scheduling";
+const DEFAULT_CAPABILITIES = "core,task-pool,messaging,profiles,services,scheduling,epics";
 const CAPABILITIES = new Set(
   (process.env.CAPABILITIES || DEFAULT_CAPABILITIES).split(",").map((s) => s.trim()),
 );
@@ -125,6 +135,17 @@ export function createServer() {
     registerUpdateScheduleTool(server);
     registerDeleteScheduleTool(server);
     registerRunScheduleNowTool(server);
+  }
+
+  // Epics capability - epic/project management
+  if (hasCapability("epics")) {
+    registerCreateEpicTool(server);
+    registerListEpicsTool(server);
+    registerGetEpicDetailsTool(server);
+    registerUpdateEpicTool(server);
+    registerDeleteEpicTool(server);
+    registerAssignTaskToEpicTool(server);
+    registerUnassignTaskFromEpicTool(server);
   }
 
   return server;
