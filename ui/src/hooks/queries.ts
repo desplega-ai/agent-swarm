@@ -31,6 +31,24 @@ export function useUpdateAgentName() {
   });
 }
 
+export function useUpdateAgentProfile() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      id,
+      profile,
+    }: {
+      id: string;
+      profile: { role?: string; description?: string; capabilities?: string[] };
+    }) => api.updateAgentProfile(id, profile),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      queryClient.invalidateQueries({ queryKey: ["agent"] });
+    },
+  });
+}
+
 export interface TaskFilters {
   status?: string;
   agentId?: string;

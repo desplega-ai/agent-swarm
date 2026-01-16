@@ -66,6 +66,23 @@ class ApiClient {
     return res.json();
   }
 
+  async updateAgentProfile(
+    id: string,
+    profile: { role?: string; description?: string; capabilities?: string[] }
+  ): Promise<AgentWithTasks> {
+    const url = `${this.getBaseUrl()}/api/agents/${id}/profile`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: this.getHeaders(),
+      body: JSON.stringify(profile),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to update profile" }));
+      throw new Error(error.error || `Failed to update profile: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async fetchTasks(filters?: { status?: string; agentId?: string; search?: string }): Promise<TasksResponse> {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
