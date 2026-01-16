@@ -8,6 +8,7 @@ import type {
   ServicesResponse,
   SessionLog,
   SessionLogsResponse,
+  SessionCostsResponse,
   ChannelMessage,
   Stats,
   AgentWithTasks,
@@ -178,6 +179,22 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/services${queryString ? `?${queryString}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch services: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchSessionCosts(filters?: {
+    agentId?: string;
+    taskId?: string;
+    limit?: number;
+  }): Promise<SessionCostsResponse> {
+    const params = new URLSearchParams();
+    if (filters?.agentId) params.set("agentId", filters.agentId);
+    if (filters?.taskId) params.set("taskId", filters.taskId);
+    if (filters?.limit) params.set("limit", String(filters.limit));
+    const queryString = params.toString();
+    const url = `${this.getBaseUrl()}/api/session-costs${queryString ? `?${queryString}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch session costs: ${res.status}`);
     return res.json();
   }
 }

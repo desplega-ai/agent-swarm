@@ -320,6 +320,10 @@ interface CostData {
   taskId?: string;
   agentId: string;
   totalCostUsd: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   durationMs: number;
   numTurns: number;
   model: string;
@@ -803,6 +807,17 @@ async function spawnClaudeProcess(
               try {
                 const json = JSON.parse(line.trim());
                 if (json.type === "result" && json.total_cost_usd !== undefined) {
+                  // Extract token data from the usage object
+                  // Claude's result JSON has: usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens
+                  const usage = json.usage as
+                    | {
+                        input_tokens?: number;
+                        output_tokens?: number;
+                        cache_read_input_tokens?: number;
+                        cache_creation_input_tokens?: number;
+                      }
+                    | undefined;
+
                   // Fire and forget - don't block the stream
                   saveCostData(
                     {
@@ -810,6 +825,10 @@ async function spawnClaudeProcess(
                       taskId: opts.taskId,
                       agentId: opts.agentId || "",
                       totalCostUsd: json.total_cost_usd || 0,
+                      inputTokens: usage?.input_tokens ?? 0,
+                      outputTokens: usage?.output_tokens ?? 0,
+                      cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
+                      cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
                       durationMs: json.duration_ms || 0,
                       numTurns: json.num_turns || 1,
                       model: "opus",

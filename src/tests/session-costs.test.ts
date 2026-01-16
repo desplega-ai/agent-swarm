@@ -580,4 +580,146 @@ describe("Session Costs API", () => {
       expect(parsedDate.toString()).not.toBe("Invalid Date");
     });
   });
+
+  describe("Token Fields Extraction", () => {
+    test("should store and retrieve token counts correctly", async () => {
+      // Simulate the data that would be extracted from Claude's result JSON
+      // Claude returns: usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens
+      const response = await fetch(`${baseUrl}/api/session-costs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "token-extraction-test",
+          agentId: testAgent.id,
+          totalCostUsd: 0.25,
+          inputTokens: 1500,
+          outputTokens: 750,
+          cacheReadTokens: 100,
+          cacheWriteTokens: 50,
+          durationMs: 5000,
+          numTurns: 3,
+          model: "opus",
+          isError: false,
+        }),
+      });
+
+      expect(response.status).toBe(201);
+      const data = (await response.json()) as {
+        success: boolean;
+        cost: {
+          inputTokens: number;
+          outputTokens: number;
+          cacheReadTokens: number;
+          cacheWriteTokens: number;
+        };
+      };
+      expect(data.success).toBe(true);
+      expect(data.cost.inputTokens).toBe(1500);
+      expect(data.cost.outputTokens).toBe(750);
+      expect(data.cost.cacheReadTokens).toBe(100);
+      expect(data.cost.cacheWriteTokens).toBe(50);
+    });
+
+    test("should default token counts to 0 when not provided", async () => {
+      const response = await fetch(`${baseUrl}/api/session-costs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "token-default-test",
+          agentId: testAgent.id,
+          totalCostUsd: 0.05,
+          durationMs: 1000,
+          numTurns: 1,
+          model: "opus",
+        }),
+      });
+
+      expect(response.status).toBe(201);
+      const data = (await response.json()) as {
+        success: boolean;
+        cost: {
+          inputTokens: number;
+          outputTokens: number;
+          cacheReadTokens: number;
+          cacheWriteTokens: number;
+        };
+      };
+      expect(data.success).toBe(true);
+      expect(data.cost.inputTokens).toBe(0);
+      expect(data.cost.outputTokens).toBe(0);
+      expect(data.cost.cacheReadTokens).toBe(0);
+      expect(data.cost.cacheWriteTokens).toBe(0);
+    });
+
+    test("should compute total tokens correctly in queries", async () => {
+      // Create a session cost with known token values
+      const agent = createAgent({ name: "Token Query Agent", isLead: false, status: "idle" });
+
+      await fetch(`${baseUrl}/api/session-costs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "token-query-test",
+          agentId: agent.id,
+          totalCostUsd: 0.1,
+          inputTokens: 500,
+          outputTokens: 300,
+          cacheReadTokens: 200,
+          cacheWriteTokens: 100,
+          durationMs: 2000,
+          numTurns: 2,
+          model: "opus",
+        }),
+      });
+
+      // Retrieve and verify
+      const response = await fetch(`${baseUrl}/api/session-costs?agentId=${agent.id}`);
+      expect(response.status).toBe(200);
+
+      const data = (await response.json()) as {
+        costs: Array<{
+          inputTokens: number;
+          outputTokens: number;
+          cacheReadTokens: number;
+          cacheWriteTokens: number;
+        }>;
+      };
+
+      expect(data.costs.length).toBe(1);
+      const cost = data.costs[0];
+      // Total tokens = inputTokens + outputTokens = 500 + 300 = 800
+      expect((cost?.inputTokens ?? 0) + (cost?.outputTokens ?? 0)).toBe(800);
+    });
+
+    test("should handle large token counts", async () => {
+      const response = await fetch(`${baseUrl}/api/session-costs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "large-token-test",
+          agentId: testAgent.id,
+          totalCostUsd: 5.5,
+          inputTokens: 150000, // Large context window
+          outputTokens: 50000, // Large output
+          cacheReadTokens: 100000,
+          cacheWriteTokens: 25000,
+          durationMs: 120000,
+          numTurns: 15,
+          model: "opus",
+        }),
+      });
+
+      expect(response.status).toBe(201);
+      const data = (await response.json()) as {
+        success: boolean;
+        cost: {
+          inputTokens: number;
+          outputTokens: number;
+        };
+      };
+      expect(data.success).toBe(true);
+      expect(data.cost.inputTokens).toBe(150000);
+      expect(data.cost.outputTokens).toBe(50000);
+    });
+  });
 });
