@@ -258,8 +258,13 @@ export default function StatsBar({ onFilterAgents, onNavigateToTasks }: StatsBar
             />
           ))}
         </Box>
-        {/* Bottom row: Tasks stats (offset for honeycomb effect) */}
-        <Box sx={{ display: "flex", gap: 0.5, mt: -2.5 }}>
+        {/* Bottom row: Tasks stats (horizontally offset for honeycomb effect) */}
+        <Box sx={{
+          display: "flex",
+          gap: 0.5,
+          mt: { md: "-20px" },  // Overlap rows vertically to create honeycomb interlocking
+          ml: { md: "88px" },   // Offset by ~half hex width for proper honeycomb tessellation
+        }}>
           {bottomRow.map((stat) => (
             <HexStat
               key={stat.label}
