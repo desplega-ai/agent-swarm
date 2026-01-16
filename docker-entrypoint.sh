@@ -351,24 +351,30 @@ echo ""
 echo "=== QMD Knowledge Base Setup ==="
 
 if command -v qmd >/dev/null 2>&1; then
-    echo "Initializing QMD knowledge base..."
+    # Only lead agent should initialize the shared collection to avoid
+    # concurrent writes to SQLite from multiple workers on shared volume
+    if [ "$ROLE" = "lead" ]; then
+        echo "Initializing QMD knowledge base (lead only)..."
 
-    # Add shared workspace as a collection (if not already added)
-    if ! qmd collection list 2>/dev/null | grep -q "shared-kb"; then
-        echo "Adding /workspace/shared as 'shared-kb' collection..."
-        qmd collection add /workspace/shared --name shared-kb --mask "**/*.md" || true
-        qmd context add qmd://shared-kb "Shared knowledge base for AI agent swarm" || true
+        # Add shared workspace as a collection (if not already added)
+        if ! qmd collection list 2>/dev/null | grep -q "shared-kb"; then
+            echo "Adding /workspace/shared as 'shared-kb' collection..."
+            qmd collection add /workspace/shared --name shared-kb --mask "**/*.md" || true
+            qmd context add qmd://shared-kb "Shared knowledge base for AI agent swarm" || true
+        else
+            echo "Collection 'shared-kb' already exists"
+        fi
+
+        # Update index (scan for new files)
+        echo "Updating QMD index..."
+        qmd update || true
+
+        # Note: Embedding generation is expensive, skip on startup
+        # Agents can run 'qmd embed' manually when needed
+        echo "QMD setup complete (run 'qmd embed' to generate embeddings)"
     else
-        echo "Collection 'shared-kb' already exists"
+        echo "Skipping QMD collection setup (workers use lead-initialized collection)"
     fi
-
-    # Update index (scan for new files)
-    echo "Updating QMD index..."
-    qmd update || true
-
-    # Note: Embedding generation is expensive, skip on startup
-    # Agents can run 'qmd embed' manually when needed
-    echo "QMD setup complete (run 'qmd embed' to generate embeddings)"
 else
     echo "QMD not found, skipping knowledge base setup"
 fi
