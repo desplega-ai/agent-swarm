@@ -449,7 +449,30 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
           }],
         };
       }
-      // For non-JSON content, show it nicely formatted
+      // For non-JSON content, check if it looks like truncated/partial JSON
+      const trimmed = content.trim();
+      const looksLikeJson = trimmed.includes('"') && (
+        trimmed.includes(':') ||
+        trimmed.includes('{') ||
+        trimmed.includes('[')
+      );
+
+      if (looksLikeJson) {
+        // It's partial/malformed JSON - display as code with expand
+        return {
+          type: "log",
+          color: colors.tertiary,
+          blocks: [{
+            blockType: "json",
+            icon: "◇",
+            content: truncate(content, 100),
+            fullContent: content,
+            isExpandable: true,
+          }],
+        };
+      }
+
+      // Regular text content
       return {
         type: "log",
         color: colors.tertiary,
@@ -566,22 +589,21 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
               fontSize: "0.7rem",
               fontWeight: 600,
               letterSpacing: "0.03em",
+              // Solid opaque colors - no transparency
               bgcolor: isDark ? "#1e3a5f" : "#dbeafe",
               color: isDark ? "#93c5fd" : "#1d4ed8",
-              border: "1px solid",
-              borderColor: isDark ? "#3b82f6" : "#93c5fd",
+              border: "2px solid",
+              borderColor: isDark ? "#3b82f6" : "#1d4ed8",
               boxShadow: isDark
-                ? "0 4px 12px rgba(0, 0, 0, 0.5)"
-                : "0 4px 12px rgba(0, 0, 0, 0.2)",
+                ? "0 4px 16px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255,255,255,0.1)"
+                : "0 4px 16px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255,255,255,0.3)",
               "&:hover": {
-                bgcolor: isDark ? "#1e4068" : "#bfdbfe",
+                bgcolor: isDark ? "#264b7a" : "#bfdbfe",
+                borderColor: isDark ? "#60a5fa" : "#1d4ed8",
               },
               gap: 0.5,
               px: 2,
               py: 0.75,
-              // Ensure fully opaque background
-              opacity: 1,
-              backdropFilter: "none",
             }}
           >
             <span style={{ fontSize: "0.8rem" }}>↓</span>
