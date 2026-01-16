@@ -154,6 +154,123 @@ async function ensureTaskFinished(
   }
 }
 
+/**
+ * Pause a task via the API (for graceful shutdown).
+ * Unlike marking as failed, paused tasks can be resumed after container restart.
+ */
+async function pauseTaskViaAPI(config: ApiConfig, role: string, taskId: string): Promise<boolean> {
+  const headers: Record<string, string> = {
+    "X-Agent-ID": config.agentId,
+    "Content-Type": "application/json",
+  };
+  if (config.apiKey) {
+    headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+
+  try {
+    const response = await fetch(`${config.apiUrl}/api/tasks/${taskId}/pause`, {
+      method: "POST",
+      headers,
+    });
+
+    if (response.ok) {
+      console.log(`[${role}] Task ${taskId.slice(0, 8)} paused for graceful shutdown`);
+      return true;
+    } else {
+      const error = await response.text();
+      console.warn(
+        `[${role}] Failed to pause task ${taskId.slice(0, 8)}: ${response.status} ${error}`,
+      );
+      return false;
+    }
+  } catch (err) {
+    console.warn(`[${role}] Error pausing task ${taskId.slice(0, 8)}: ${err}`);
+    return false;
+  }
+}
+
+/** Fetch paused tasks from API for this agent */
+async function getPausedTasksFromAPI(
+  config: ApiConfig,
+): Promise<Array<{ id: string; task: string; progress?: string }>> {
+  const headers: Record<string, string> = {
+    "X-Agent-ID": config.agentId,
+  };
+  if (config.apiKey) {
+    headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+
+  try {
+    const response = await fetch(`${config.apiUrl}/api/paused-tasks`, {
+      method: "GET",
+      headers,
+    });
+
+    if (!response.ok) {
+      console.warn(`[runner] Failed to fetch paused tasks: ${response.status}`);
+      return [];
+    }
+
+    const data = (await response.json()) as {
+      tasks: Array<{ id: string; task: string; progress?: string }>;
+    };
+    return data.tasks || [];
+  } catch (error) {
+    console.warn(`[runner] Error fetching paused tasks: ${error}`);
+    return [];
+  }
+}
+
+/** Resume a task via API (marks as in_progress) */
+async function resumeTaskViaAPI(config: ApiConfig, taskId: string): Promise<boolean> {
+  const headers: Record<string, string> = {
+    "X-Agent-ID": config.agentId,
+    "Content-Type": "application/json",
+  };
+  if (config.apiKey) {
+    headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+
+  try {
+    const response = await fetch(`${config.apiUrl}/api/tasks/${taskId}/resume`, {
+      method: "POST",
+      headers,
+    });
+
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Build prompt for a resumed task */
+function buildResumePrompt(task: { id: string; task: string; progress?: string }): string {
+  let prompt = `/work-on-task ${task.id}
+
+**RESUMED TASK** - This task was interrupted during a deployment and is being resumed.
+
+Task: "${task.task}"`;
+
+  if (task.progress) {
+    prompt += `
+
+Previous Progress:
+${task.progress}
+
+Continue from where you left off. Review the progress above and complete the remaining work.`;
+  } else {
+    prompt += `
+
+No progress was saved before the interruption. Start the task fresh but be aware files may have been partially modified.`;
+  }
+
+  prompt += `
+
+When done, use \`store-progress\` with status: "completed" and include your output.`;
+
+  return prompt;
+}
+
 /** Setup signal handlers for graceful shutdown */
 function setupShutdownHandlers(
   role: string,
@@ -179,15 +296,24 @@ function setupShutdownHandlers(
         }
       }
 
-      // Force kill remaining tasks and mark them as failed
+      // Force kill remaining tasks and mark them as paused (for graceful resume after restart)
       if (state.activeTasks.size > 0) {
-        console.log(`[${role}] Force stopping ${state.activeTasks.size} remaining task(s)...`);
+        console.log(
+          `[${role}] Pausing ${state.activeTasks.size} remaining task(s) for resume after restart...`,
+        );
         for (const [taskId, task] of state.activeTasks) {
-          console.log(`[${role}] Force stopping task ${taskId.slice(0, 8)}`);
+          console.log(`[${role}] Pausing task ${taskId.slice(0, 8)}`);
           task.process.kill("SIGTERM");
-          // Mark as failed due to forced shutdown
+          // Mark as paused for graceful resume (instead of failed)
           if (apiConfig) {
-            await ensureTaskFinished(apiConfig, role, taskId, 1); // Use exit code 1 for forced shutdown
+            const paused = await pauseTaskViaAPI(apiConfig, role, taskId);
+            if (!paused) {
+              // Fallback to marking as failed if pause fails
+              console.warn(
+                `[${role}] Failed to pause task ${taskId.slice(0, 8)}, marking as failed instead`,
+              );
+              await ensureTaskFinished(apiConfig, role, taskId, 1);
+            }
           }
         }
       }
@@ -1096,6 +1222,95 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       console.error(`[${role}] Failed to register: ${error}`);
       process.exit(1);
     }
+
+    // ========== Resume paused tasks with PRIORITY ==========
+    // Check for paused tasks from previous shutdown and resume them before normal polling
+    try {
+      console.log(`[${role}] Checking for paused tasks to resume...`);
+      const pausedTasks = await getPausedTasksFromAPI(apiConfig);
+
+      if (pausedTasks.length > 0) {
+        console.log(`[${role}] Found ${pausedTasks.length} paused task(s) to resume`);
+
+        for (const task of pausedTasks) {
+          // Wait if at capacity (though unlikely on fresh startup)
+          while (state.activeTasks.size >= state.maxConcurrent) {
+            await checkCompletedProcesses(state, role, apiConfig);
+            await Bun.sleep(1000);
+          }
+
+          console.log(
+            `[${role}] Resuming paused task ${task.id.slice(0, 8)}: "${task.task.slice(0, 50)}..."`,
+          );
+
+          // Resume the task via API (marks as in_progress)
+          const resumed = await resumeTaskViaAPI(apiConfig, task.id);
+          if (!resumed) {
+            console.warn(
+              `[${role}] Failed to resume task ${task.id.slice(0, 8)} via API, skipping`,
+            );
+            continue;
+          }
+
+          // Build prompt with resume context
+          const resumePrompt = buildResumePrompt(task);
+
+          // Spawn Claude process for resumed task
+          iteration++;
+          const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+          const logFile = `${logDir}/${timestamp}-resume-${task.id.slice(0, 8)}.jsonl`;
+
+          console.log(`\n[${role}] === Resuming paused task (iteration ${iteration}) ===`);
+          console.log(`[${role}] Logging to: ${logFile}`);
+          console.log(`[${role}] Prompt: ${resumePrompt.slice(0, 100)}...`);
+
+          const metadata = {
+            type: metadataType,
+            sessionId,
+            iteration,
+            timestamp: new Date().toISOString(),
+            prompt: resumePrompt,
+            trigger: "task_resumed",
+            resumedTaskId: task.id,
+            yolo: isYolo,
+          };
+          await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
+
+          const runningTask = await spawnClaudeProcess(
+            {
+              prompt: resumePrompt,
+              logFile,
+              systemPrompt: resolvedSystemPrompt,
+              additionalArgs: opts.additionalArgs,
+              role,
+              apiUrl,
+              apiKey,
+              agentId,
+              sessionId,
+              iteration,
+              taskId: task.id,
+            },
+            logDir,
+            metadataType,
+            sessionId,
+            isYolo,
+          );
+
+          state.activeTasks.set(task.id, runningTask);
+          console.log(
+            `[${role}] Resumed task ${task.id.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active)`,
+          );
+        }
+
+        console.log(`[${role}] All paused tasks resumed. Entering normal polling...`);
+      } else {
+        console.log(`[${role}] No paused tasks found. Entering normal polling...`);
+      }
+    } catch (error) {
+      console.error(`[${role}] Error checking/resuming paused tasks: ${error}`);
+      // Continue to normal polling even if resume fails
+    }
+    // ========== END: Resume paused tasks ==========
 
     // Track last finished task check for leads (to avoid re-processing)
     let lastFinishedTaskCheck: string | undefined;

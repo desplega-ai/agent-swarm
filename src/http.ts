@@ -36,6 +36,7 @@ import {
   getLogsByAgentId,
   getLogsByTaskId,
   getOfferedTasksForAgent,
+  getPausedTasksForAgent,
   getPendingTaskForAgent,
   getRecentlyCancelledTasksForAgent,
   getRecentlyFinishedWorkerTasks,
@@ -50,7 +51,9 @@ import {
   getUnassignedTasksCount,
   hasCapacity,
   markTasksNotified,
+  pauseTask,
   postMessage,
+  resumeTask,
   startTask,
   updateAgentMaxTasks,
   updateAgentName,
@@ -1210,6 +1213,116 @@ const httpServer = createHttpServer(async (req, res) => {
     return;
   }
 
+  // GET /api/paused-tasks - Get paused tasks for this agent
+  if (req.method === "GET" && pathSegments[0] === "api" && pathSegments[1] === "paused-tasks") {
+    if (!myAgentId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
+      return;
+    }
+
+    const pausedTasks = getPausedTasksForAgent(myAgentId);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ tasks: pausedTasks }));
+    return;
+  }
+
+  // POST /api/tasks/:id/pause - Pause an in-progress task (for graceful shutdown)
+  if (
+    req.method === "POST" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "tasks" &&
+    pathSegments[2] &&
+    pathSegments[3] === "pause"
+  ) {
+    if (!myAgentId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
+      return;
+    }
+
+    const taskId = pathSegments[2];
+    const task = getTaskById(taskId);
+
+    if (!task) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Task not found" }));
+      return;
+    }
+
+    // Only allow the assigned agent to pause their own task
+    if (task.agentId !== myAgentId) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Task belongs to another agent" }));
+      return;
+    }
+
+    if (task.status !== "in_progress") {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: `Task status is '${task.status}', not 'in_progress'` }));
+      return;
+    }
+
+    const pausedTask = pauseTask(taskId);
+    if (!pausedTask) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Failed to pause task" }));
+      return;
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ success: true, task: pausedTask }));
+    return;
+  }
+
+  // POST /api/tasks/:id/resume - Resume a paused task
+  if (
+    req.method === "POST" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "tasks" &&
+    pathSegments[2] &&
+    pathSegments[3] === "resume"
+  ) {
+    if (!myAgentId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
+      return;
+    }
+
+    const taskId = pathSegments[2];
+    const task = getTaskById(taskId);
+
+    if (!task) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Task not found" }));
+      return;
+    }
+
+    // Only allow the assigned agent to resume their own task
+    if (task.agentId !== myAgentId) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Task belongs to another agent" }));
+      return;
+    }
+
+    if (task.status !== "paused") {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: `Task status is '${task.status}', not 'paused'` }));
+      return;
+    }
+
+    const resumedTask = resumeTask(taskId);
+    if (!resumedTask) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Failed to resume task" }));
+      return;
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ success: true, task: resumedTask }));
+    return;
+  }
+
   // GET /api/logs - List recent logs (optionally filtered by agentId)
   if (req.method === "GET" && pathSegments[0] === "api" && pathSegments[1] === "logs") {
     const limitParam = queryParams.get("limit");
@@ -1245,6 +1358,7 @@ const httpServer = createHttpServer(async (req, res) => {
         reviewing: taskStats.reviewing,
         pending: taskStats.pending,
         in_progress: taskStats.in_progress,
+        paused: taskStats.paused,
         completed: taskStats.completed,
         failed: taskStats.failed,
       },

@@ -12,6 +12,7 @@ services:
   api:
     image: "ghcr.io/desplega-ai/agent-swarm:latest"
     pull_policy: always
+    stop_grace_period: 60s
 
     environment:
       - API_KEY=${API_KEY}
@@ -42,6 +43,7 @@ services:
   lead:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
     pull_policy: always
+    stop_grace_period: 60s
 
     depends_on:
       api:
@@ -79,6 +81,7 @@ services:
   worker-1:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
     pull_policy: always
+    stop_grace_period: 60s
 
     depends_on:
       api:
@@ -87,7 +90,7 @@ services:
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
-      # Replace by a valid UUID
+      # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
       - AGENT_ID=38d36438-58a0-45b5-8602-a5d52b07c2f1
       - AGENT_ROLE=worker
 
@@ -114,6 +117,7 @@ services:
   worker-2:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
     pull_policy: always
+    stop_grace_period: 60s
 
     depends_on:
       api:
@@ -122,7 +126,7 @@ services:
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
-      # Replace by a valid UUID
+      # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
       - AGENT_ID=c1e2f3a4-5678-90ab-cdef-1234567890ab
       - AGENT_ROLE=worker
 

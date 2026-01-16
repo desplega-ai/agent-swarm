@@ -111,7 +111,7 @@ function HexStat({ label, value, color, glowColor, isActive, isDark, onClick }: 
 
 interface StatsBarProps {
   onFilterAgents?: (status: "all" | "busy" | "idle") => void;
-  onNavigateToTasks?: (status?: "pending" | "in_progress" | "completed" | "failed") => void;
+  onNavigateToTasks?: (status?: "pending" | "in_progress" | "paused" | "completed" | "failed") => void;
 }
 
 export default function StatsBar({ onFilterAgents, onNavigateToTasks }: StatsBarProps) {
@@ -129,12 +129,14 @@ export default function StatsBar({ onFilterAgents, onNavigateToTasks }: StatsBar
     tertiary: isDark ? "#8B7355" : "#6B5344",
     rust: isDark ? "#A85454" : "#B54242",
     green: "#22C55E",
+    orange: isDark ? "#FF9800" : "#E67E22",
     blueGlow: isDark ? "rgba(59, 130, 246, 0.5)" : "rgba(59, 130, 246, 0.25)",
     amberGlow: isDark ? "rgba(245, 166, 35, 0.5)" : "rgba(212, 136, 6, 0.25)",
     goldGlow: isDark ? "rgba(212, 165, 116, 0.5)" : "rgba(139, 105, 20, 0.25)",
     tertiaryGlow: isDark ? "rgba(139, 115, 85, 0.4)" : "rgba(107, 83, 68, 0.2)",
     rustGlow: isDark ? "rgba(168, 84, 84, 0.5)" : "rgba(181, 66, 66, 0.25)",
     greenGlow: isDark ? "rgba(34, 197, 94, 0.5)" : "rgba(34, 197, 94, 0.25)",
+    orangeGlow: isDark ? "rgba(255, 152, 0, 0.4)" : "rgba(230, 126, 34, 0.2)",
   };
 
   // Honeycomb-style arrangement: two rows offset
@@ -178,6 +180,13 @@ export default function StatsBar({ onFilterAgents, onNavigateToTasks }: StatsBar
       glowColor: colors.amberGlow,
       isActive: stats.tasks.in_progress > 0,
       onClick: onNavigateToTasks ? () => onNavigateToTasks("in_progress") : undefined,
+    },
+    {
+      label: "PAUSED",
+      value: stats.tasks.paused,
+      color: colors.orange,
+      glowColor: colors.orangeGlow,
+      onClick: onNavigateToTasks ? () => onNavigateToTasks("paused") : undefined,
     },
     {
       label: "DONE",
