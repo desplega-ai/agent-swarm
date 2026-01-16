@@ -1,13 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
-import {
-  closeDb,
-  createAgent,
-  createScheduledTask,
-  getScheduledTasks,
-  initDb,
-} from "../be/db";
+import { closeDb, createAgent, createScheduledTask, getScheduledTasks, initDb } from "../be/db";
 import type { ScheduledTask } from "../types";
 
 const TEST_DB_PATH = "./test-scheduled-tasks-api.sqlite";
@@ -64,10 +58,7 @@ function createTestServer(): Server {
     }
     const body = Buffer.concat(chunks).toString();
 
-    const result = await handleRequest(
-      { method: req.method || "GET", url: req.url || "/" },
-      body,
-    );
+    const result = await handleRequest({ method: req.method || "GET", url: req.url || "/" }, body);
 
     res.writeHead(result.status);
     res.end(JSON.stringify(result.body));
@@ -200,9 +191,7 @@ describe("Scheduled Tasks REST API", () => {
       expect(data.scheduledTasks.every((s) => s.enabled === true)).toBe(true);
 
       // The disabled schedule should not be in the results
-      const disabledSchedule = data.scheduledTasks.find(
-        (s) => s.name === "api-filter-disabled-1",
-      );
+      const disabledSchedule = data.scheduledTasks.find((s) => s.name === "api-filter-disabled-1");
       expect(disabledSchedule).toBeUndefined();
     });
 
@@ -216,9 +205,7 @@ describe("Scheduled Tasks REST API", () => {
       expect(data.scheduledTasks.every((s) => s.enabled === false)).toBe(true);
 
       // Should include the disabled schedule created earlier
-      const disabledSchedule = data.scheduledTasks.find(
-        (s) => s.name === "api-filter-disabled-1",
-      );
+      const disabledSchedule = data.scheduledTasks.find((s) => s.name === "api-filter-disabled-1");
       expect(disabledSchedule).toBeDefined();
     });
 
@@ -255,9 +242,7 @@ describe("Scheduled Tasks REST API", () => {
       });
 
       // Filter by name AND enabled=true
-      const response = await fetch(
-        `${baseUrl}/api/scheduled-tasks?name=combo-filter&enabled=true`,
-      );
+      const response = await fetch(`${baseUrl}/api/scheduled-tasks?name=combo-filter&enabled=true`);
 
       expect(response.status).toBe(200);
       const data = (await response.json()) as { scheduledTasks: ScheduledTask[] };
@@ -338,9 +323,7 @@ describe("Scheduled Tasks REST API", () => {
       const data = (await response.json()) as { scheduledTasks: ScheduledTask[] };
 
       // Find the indices of our test schedules
-      const firstIndex = data.scheduledTasks.findIndex(
-        (s) => s.name === "aaa-first-schedule",
-      );
+      const firstIndex = data.scheduledTasks.findIndex((s) => s.name === "aaa-first-schedule");
       const lastIndex = data.scheduledTasks.findIndex((s) => s.name === "zzz-last-schedule");
 
       // The "aaa" schedule should come before "zzz" schedule
