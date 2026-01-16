@@ -41,6 +41,19 @@ export const registerCreateEpicTool = (server: McpServer) => {
         };
       }
 
+      // Only lead agents can create epics
+      const agent = getAgentById(requestInfo.agentId);
+      if (!agent || !agent.isLead) {
+        return {
+          content: [{ type: "text", text: "Only lead agents can create epics." }],
+          structuredContent: {
+            yourAgentId: requestInfo.agentId,
+            success: false,
+            message: "Only lead agents can create epics.",
+          },
+        };
+      }
+
       // Check for duplicate name
       const existing = getEpicByName(args.name);
       if (existing) {

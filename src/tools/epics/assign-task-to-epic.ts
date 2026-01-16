@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { assignTaskToEpic, getEpicById, getEpicByName, getTaskById } from "@/be/db";
+import { assignTaskToEpic, getAgentById, getEpicById, getEpicByName, getTaskById } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerAssignTaskToEpicTool = (server: McpServer) => {
@@ -22,6 +22,26 @@ export const registerAssignTaskToEpicTool = (server: McpServer) => {
       }),
     },
     async (args, requestInfo, _meta) => {
+      if (!requestInfo.agentId) {
+        return {
+          content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
+          structuredContent: { success: false, message: "Agent ID not found." },
+        };
+      }
+
+      // Only lead agents can assign tasks to epics
+      const agent = getAgentById(requestInfo.agentId);
+      if (!agent || !agent.isLead) {
+        return {
+          content: [{ type: "text", text: "Only lead agents can assign tasks to epics." }],
+          structuredContent: {
+            yourAgentId: requestInfo.agentId,
+            success: false,
+            message: "Only lead agents can assign tasks to epics.",
+          },
+        };
+      }
+
       if (!args.epicId && !args.epicName) {
         return {
           content: [{ type: "text", text: "Either epicId or epicName must be provided." }],
