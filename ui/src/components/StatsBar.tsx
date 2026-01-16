@@ -262,8 +262,8 @@ export default function StatsBar({ onFilterAgents, onNavigateToTasks }: StatsBar
         <Box sx={{
           display: "flex",
           gap: 0.5,
-          mt: { md: "-24px" },  // Overlap rows vertically to create honeycomb interlocking
-          ml: { md: "47px" },   // Offset by exactly half (hex width + gap) = (90 + 4) / 2 = 47px
+          mt: { md: "-20px" },  // Overlap rows vertically to create honeycomb interlocking
+          ml: { md: "88px" },   // Offset by ~half hex width for proper honeycomb tessellation
         }}>
           {bottomRow.map((stat) => (
             <HexStat
