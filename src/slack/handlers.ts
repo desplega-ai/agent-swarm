@@ -20,6 +20,59 @@ const filteringEnabled = allowedEmailDomains.length > 0 || allowedUserIds.length
 const userEmailCache = new Map<string, string | null>();
 
 /**
+ * Configuration for user filtering.
+ */
+export interface UserFilterConfig {
+  allowedEmailDomains: string[];
+  allowedUserIds: string[];
+}
+
+/**
+ * Core logic for checking if a user is allowed based on email and/or user ID.
+ * Exported for testing.
+ *
+ * @param userId - The Slack user ID to check
+ * @param email - The user's email address (or null if unknown)
+ * @param config - The filtering configuration
+ * @returns true if the user is allowed, false otherwise
+ */
+export function checkUserAccess(
+  userId: string,
+  email: string | null,
+  config: UserFilterConfig,
+): boolean {
+  const { allowedEmailDomains: domains, allowedUserIds: userIds } = config;
+
+  // If no filtering configured, allow all users (backwards compatible)
+  if (domains.length === 0 && userIds.length === 0) {
+    return true;
+  }
+
+  // Check user ID whitelist first (fast path)
+  if (userIds.includes(userId)) {
+    return true;
+  }
+
+  // No email domains configured and not in user whitelist
+  if (domains.length === 0) {
+    return false;
+  }
+
+  // No email available
+  if (!email) {
+    return false;
+  }
+
+  // Extract and validate domain
+  const domain = email.split("@")[1]?.toLowerCase();
+  if (!domain) {
+    return false;
+  }
+
+  return domains.includes(domain);
+}
+
+/**
  * Check if a user is allowed to interact with the swarm.
  * Returns true if filtering is disabled, user is in whitelist, or user's email domain is allowed.
  */
