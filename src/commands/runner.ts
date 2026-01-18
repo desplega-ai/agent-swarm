@@ -386,6 +386,7 @@ interface RunnerState {
 interface LogBuffer {
   lines: string[];
   lastFlush: number;
+  partialLine: string; // Accumulates incomplete line across chunks
 }
 
 /** Configuration for log streaming */
@@ -858,7 +859,7 @@ async function runClaudeIteration(opts: RunClaudeIterationOptions): Promise<numb
   const stdoutPromise = (async () => {
     if (proc.stdout) {
       // Initialize log buffer for API streaming
-      const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now() };
+      const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now(), partialLine: "" };
       const shouldStream = opts.apiUrl && opts.sessionId && opts.iteration;
 
       for await (const chunk of proc.stdout) {
@@ -866,8 +867,15 @@ async function runClaudeIteration(opts: RunClaudeIterationOptions): Promise<numb
         const text = new TextDecoder().decode(chunk);
         logFileHandle.write(text);
 
-        const lines = text.split("\n");
-        for (const line of lines) {
+        // Prepend any partial line from previous chunk
+        const combined = logBuffer.partialLine + text;
+        const parts = combined.split("\n");
+
+        // Last element may be incomplete - save for next chunk
+        logBuffer.partialLine = parts.pop() || "";
+
+        // Process only complete lines (those that ended with \n)
+        for (const line of parts) {
           prettyPrintLine(line, role);
 
           // Buffer non-empty lines for API streaming
@@ -892,6 +900,15 @@ async function runClaudeIteration(opts: RunClaudeIterationOptions): Promise<numb
             }
           }
         }
+      }
+
+      // Handle any remaining partial line at stream end
+      if (logBuffer.partialLine.trim()) {
+        prettyPrintLine(logBuffer.partialLine, role);
+        if (shouldStream) {
+          logBuffer.lines.push(logBuffer.partialLine.trim());
+        }
+        logBuffer.partialLine = "";
       }
 
       // Final flush for remaining buffered logs
@@ -1005,7 +1022,7 @@ async function spawnClaudeProcess(
     let stderrChunks = 0;
 
     // Initialize log buffer for API streaming
-    const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now() };
+    const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now(), partialLine: "" };
     const shouldStream = opts.apiUrl && opts.sessionId && opts.iteration;
 
     const stdoutPromise = (async () => {
@@ -1015,8 +1032,15 @@ async function spawnClaudeProcess(
           const text = new TextDecoder().decode(chunk);
           logFileHandle.write(text);
 
-          const lines = text.split("\n");
-          for (const line of lines) {
+          // Prepend any partial line from previous chunk
+          const combined = logBuffer.partialLine + text;
+          const parts = combined.split("\n");
+
+          // Last element may be incomplete - save for next chunk
+          logBuffer.partialLine = parts.pop() || "";
+
+          // Process only complete lines (those that ended with \n)
+          for (const line of parts) {
             prettyPrintLine(line, role);
 
             // Extract cost data from result messages
@@ -1079,6 +1103,49 @@ async function spawnClaudeProcess(
               }
             }
           }
+        }
+
+        // Handle any remaining partial line at stream end
+        if (logBuffer.partialLine.trim()) {
+          prettyPrintLine(logBuffer.partialLine, role);
+          if (shouldStream) {
+            // Try to extract cost data from final partial line
+            try {
+              const json = JSON.parse(logBuffer.partialLine.trim());
+              if (json.type === "result" && json.total_cost_usd !== undefined) {
+                const usage = json.usage as
+                  | {
+                      input_tokens?: number;
+                      output_tokens?: number;
+                      cache_read_input_tokens?: number;
+                      cache_creation_input_tokens?: number;
+                    }
+                  | undefined;
+                saveCostData(
+                  {
+                    sessionId: opts.sessionId!,
+                    taskId: opts.taskId,
+                    agentId: opts.agentId || "",
+                    totalCostUsd: json.total_cost_usd || 0,
+                    inputTokens: usage?.input_tokens ?? 0,
+                    outputTokens: usage?.output_tokens ?? 0,
+                    cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
+                    cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
+                    durationMs: json.duration_ms || 0,
+                    numTurns: json.num_turns || 1,
+                    model: "opus",
+                    isError: json.is_error || false,
+                  },
+                  opts.apiUrl!,
+                  opts.apiKey || "",
+                ).catch((err) => console.warn(`[runner] Failed to save cost: ${err}`));
+              }
+            } catch {
+              // Ignore parse errors
+            }
+            logBuffer.lines.push(logBuffer.partialLine.trim());
+          }
+          logBuffer.partialLine = "";
         }
 
         // Final flush for remaining buffered logs
