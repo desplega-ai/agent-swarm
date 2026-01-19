@@ -162,6 +162,62 @@ gh api repos/owner/repo/pulls/123/comments \
   -f body="⚠️ SQL injection risk: Use parameterized queries instead of string interpolation."
 ```
 
+### 10. Re-reviewing and Resolving Comments
+
+When the PR author makes changes in response to your review:
+
+#### Re-review After Changes
+
+Check for new commits and re-review the updated code:
+
+```bash
+# Fetch latest changes
+git fetch origin
+gh pr checkout <pr-number>
+
+# View commits since your last review
+gh pr view <pr-number> --json commits --jq '.commits[-3:]'
+
+# See the full updated diff
+gh pr diff <pr-number>
+```
+
+#### Follow Up on Previous Comments
+
+When re-reviewing:
+- Check if your previous concerns have been addressed
+- Resolve comment threads that are now fixed
+- Add follow-up comments if changes need further refinement
+
+```bash
+# View existing review comments on the PR
+gh api repos/<owner>/<repo>/pulls/<pr-number>/comments --jq '.[].body'
+
+# Reply to a specific comment thread
+gh api repos/<owner>/<repo>/pulls/<pr-number>/comments/<comment-id>/replies \
+  --method POST \
+  -f body="Thanks, this looks good now!"
+```
+
+#### Resolve Conversations (via GitHub UI)
+
+Comment threads are typically resolved through the GitHub web interface:
+- Navigate to the PR's "Files changed" tab
+- Click "Resolve conversation" on addressed comments
+- This keeps the review history clean and shows progress
+
+#### Update Your Review Status
+
+After re-reviewing, update your overall review status:
+
+```bash
+# If all issues are addressed
+gh pr review <pr-number> --approve --body "All feedback addressed. LGTM!"
+
+# If some issues remain
+gh pr review <pr-number> --request-changes --body "A few items still need attention - see comments."
+```
+
 ## Tips
 
 - Focus on substantive issues, not style nitpicks
