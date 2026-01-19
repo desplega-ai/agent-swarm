@@ -1691,6 +1691,7 @@ export interface CreateTaskOptions {
   priority?: number;
   dependsOn?: string[];
   offeredTo?: string;
+  status?: "backlog" | "unassigned"; // Explicitly set initial status
   slackChannelId?: string;
   slackThreadTs?: string;
   slackUserId?: string;
@@ -1712,7 +1713,9 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
     ? "offered"
     : options?.agentId
       ? "pending"
-      : "unassigned";
+      : options?.status === "backlog"
+        ? "backlog"
+        : "unassigned";
 
   const row = getDb()
     .prepare<AgentTaskRow, (string | number | null)[]>(
@@ -1880,6 +1883,67 @@ export function rejectTask(taskId: string, agentId: string, reason?: string): Ag
         oldValue: task.status,
         newValue: "unassigned",
         metadata: reason ? { reason } : undefined,
+      });
+    } catch {}
+  }
+
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Move a task to backlog status. Task must be unassigned (in pool).
+ * Backlog tasks are not returned by pool queries.
+ */
+export function moveTaskToBacklog(taskId: string): AgentTask | null {
+  const task = getTaskById(taskId);
+  if (!task) return null;
+  if (task.status !== "unassigned") return null;
+
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      `UPDATE agent_tasks SET status = 'backlog', lastUpdatedAt = ?
+       WHERE id = ? AND status = 'unassigned' RETURNING *`,
+    )
+    .get(now, taskId);
+
+  if (row) {
+    try {
+      createLogEntry({
+        eventType: "task_status_change",
+        taskId,
+        oldValue: "unassigned",
+        newValue: "backlog",
+      });
+    } catch {}
+  }
+
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Move a task from backlog to unassigned (pool). Task must be in backlog status.
+ */
+export function moveTaskFromBacklog(taskId: string): AgentTask | null {
+  const task = getTaskById(taskId);
+  if (!task) return null;
+  if (task.status !== "backlog") return null;
+
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      `UPDATE agent_tasks SET status = 'unassigned', lastUpdatedAt = ?
+       WHERE id = ? AND status = 'backlog' RETURNING *`,
+    )
+    .get(now, taskId);
+
+  if (row) {
+    try {
+      createLogEntry({
+        eventType: "task_status_change",
+        taskId,
+        oldValue: "backlog",
+        newValue: "unassigned",
       });
     } catch {}
   }
