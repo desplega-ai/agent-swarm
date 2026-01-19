@@ -104,6 +104,64 @@ gh pr review <pr-number> --request-changes --body "Your review message"
 gh pr review <pr-number> --comment --body "Your review message"
 ```
 
+### 9. Post Inline Comments on Specific Lines
+
+For more detailed feedback, you can post inline comments directly on specific lines of code using the GitHub API:
+
+#### Get the Commit SHA
+
+First, get the latest commit SHA for the PR head:
+
+```bash
+COMMIT_SHA=$(gh pr view <pr-number> --json headRefOid --jq '.headRefOid')
+```
+
+#### Post an Inline Comment
+
+Use `gh api` to post a comment on a specific line:
+
+```bash
+gh api repos/<owner>/<repo>/pulls/<pr-number>/comments \
+  --method POST \
+  -f commit_id="$COMMIT_SHA" \
+  -f path="src/path/to/file.ts" \
+  -f line=42 \
+  -f side="RIGHT" \
+  -f body="Your inline comment here explaining the issue or suggestion."
+```
+
+**Parameters:**
+- `commit_id`: The SHA of the commit to comment on (use the PR head commit)
+- `path`: The relative path to the file being commented on
+- `line`: The line number in the diff to attach the comment to
+- `side`: Use `"RIGHT"` for the new code (additions), `"LEFT"` for removed code
+- `body`: The comment text (supports markdown)
+
+#### Example: Multiple Inline Comments
+
+```bash
+# Get commit SHA once
+COMMIT_SHA=$(gh pr view 123 --json headRefOid --jq '.headRefOid')
+
+# Comment on a potential bug
+gh api repos/owner/repo/pulls/123/comments \
+  --method POST \
+  -f commit_id="$COMMIT_SHA" \
+  -f path="src/utils/validate.ts" \
+  -f line=15 \
+  -f side="RIGHT" \
+  -f body="This could throw if \`input\` is undefined. Consider adding a null check."
+
+# Comment on a security concern
+gh api repos/owner/repo/pulls/123/comments \
+  --method POST \
+  -f commit_id="$COMMIT_SHA" \
+  -f path="src/api/handler.ts" \
+  -f line=28 \
+  -f side="RIGHT" \
+  -f body="⚠️ SQL injection risk: Use parameterized queries instead of string interpolation."
+```
+
 ## Tips
 
 - Focus on substantive issues, not style nitpicks
