@@ -1,0 +1,210 @@
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import * as z from "zod";
+import { getAgentById, getInboxMessageById, getTaskById } from "@/be/db";
+import { getSlackApp } from "@/slack/app";
+import { MAX_FILE_SIZE, uploadFile } from "@/slack/files";
+import { createToolRegistrar } from "@/tools/utils";
+
+export const registerSlackUploadFileTool = (server: McpServer) => {
+  createToolRegistrar(server)(
+    "slack-upload-file",
+    {
+      title: "Upload file to Slack",
+      description:
+        "Upload a file (image, document, etc.) to a Slack channel or thread. Use inboxMessageId or taskId for context, or provide channelId directly (leads only). Maximum file size is 1 GB.",
+      inputSchema: z.object({
+        inboxMessageId: z
+          .uuid()
+          .optional()
+          .describe("The inbox message ID for thread context (leads only)."),
+        taskId: z
+          .uuid()
+          .optional()
+          .describe("The task ID with Slack context (for task-related threads)."),
+        channelId: z
+          .string()
+          .optional()
+          .describe("Direct channel ID to upload to (requires lead privileges)."),
+        threadTs: z
+          .string()
+          .optional()
+          .describe("Thread timestamp to upload as a thread reply (used with channelId)."),
+        filePath: z.string().min(1).describe("Path to the file to upload."),
+        filename: z
+          .string()
+          .optional()
+          .describe("Name to give the file in Slack. Defaults to the original filename."),
+        initialComment: z
+          .string()
+          .max(4000)
+          .optional()
+          .describe("Optional message to post with the file."),
+      }),
+      outputSchema: z.object({
+        success: z.boolean(),
+        message: z.string(),
+        fileId: z.string().optional(),
+      }),
+    },
+    async (
+      { inboxMessageId, taskId, channelId, threadTs, filePath, filename, initialComment },
+      requestInfo,
+      _meta,
+    ) => {
+      if (!requestInfo.agentId) {
+        return {
+          content: [{ type: "text", text: "Agent ID not found." }],
+          structuredContent: { success: false, message: "Agent ID not found." },
+        };
+      }
+
+      const agent = getAgentById(requestInfo.agentId);
+      if (!agent) {
+        return {
+          content: [{ type: "text", text: "Agent not found." }],
+          structuredContent: { success: false, message: "Agent not found." },
+        };
+      }
+
+      let slackChannelId: string | undefined;
+      let slackThreadTs: string | undefined;
+
+      // Determine Slack context from inbox message, task, or direct params
+      if (inboxMessageId) {
+        const inboxMsg = getInboxMessageById(inboxMessageId);
+        if (!inboxMsg) {
+          return {
+            content: [{ type: "text", text: "Inbox message not found." }],
+            structuredContent: { success: false, message: "Inbox message not found." },
+          };
+        }
+        if (inboxMsg.agentId !== requestInfo.agentId) {
+          return {
+            content: [{ type: "text", text: "This inbox message is not yours." }],
+            structuredContent: { success: false, message: "This inbox message is not yours." },
+          };
+        }
+        slackChannelId = inboxMsg.slackChannelId;
+        slackThreadTs = inboxMsg.slackThreadTs;
+      } else if (taskId) {
+        const task = getTaskById(taskId);
+        if (!task) {
+          return {
+            content: [{ type: "text", text: "Task not found." }],
+            structuredContent: { success: false, message: "Task not found." },
+          };
+        }
+        // Verify agent has context for this task
+        if (task.agentId !== requestInfo.agentId && task.creatorAgentId !== requestInfo.agentId) {
+          return {
+            content: [{ type: "text", text: "You don't have context for this task." }],
+            structuredContent: { success: false, message: "You don't have context for this task." },
+          };
+        }
+        slackChannelId = task.slackChannelId;
+        slackThreadTs = task.slackThreadTs;
+      } else if (channelId) {
+        // Direct channel access requires lead privileges
+        if (!agent.isLead) {
+          return {
+            content: [{ type: "text", text: "Direct channel access requires lead privileges." }],
+            structuredContent: {
+              success: false,
+              message: "Direct channel access requires lead privileges.",
+            },
+          };
+        }
+        slackChannelId = channelId;
+        slackThreadTs = threadTs;
+      } else {
+        return {
+          content: [{ type: "text", text: "Must provide inboxMessageId, taskId, or channelId." }],
+          structuredContent: {
+            success: false,
+            message: "Must provide inboxMessageId, taskId, or channelId.",
+          },
+        };
+      }
+
+      if (!slackChannelId) {
+        return {
+          content: [{ type: "text", text: "No Slack channel context available." }],
+          structuredContent: {
+            success: false,
+            message: "No Slack channel context available.",
+          },
+        };
+      }
+
+      const app = getSlackApp();
+      if (!app) {
+        return {
+          content: [{ type: "text", text: "Slack not configured." }],
+          structuredContent: { success: false, message: "Slack not configured." },
+        };
+      }
+
+      // Check if file exists
+      const bunFile = Bun.file(filePath);
+      const exists = await bunFile.exists();
+      if (!exists) {
+        return {
+          content: [{ type: "text", text: `File not found: ${filePath}` }],
+          structuredContent: { success: false, message: `File not found: ${filePath}` },
+        };
+      }
+
+      // Check file size
+      const fileSize = bunFile.size;
+      if (fileSize > MAX_FILE_SIZE) {
+        const sizeMB = Math.round(fileSize / 1024 / 1024);
+        return {
+          content: [{ type: "text", text: `File too large: ${sizeMB} MB. Maximum is 1 GB.` }],
+          structuredContent: {
+            success: false,
+            message: `File too large: ${sizeMB} MB. Maximum is 1 GB.`,
+          },
+        };
+      }
+
+      // Determine filename
+      const actualFilename = filename || filePath.split("/").pop() || "file";
+
+      try {
+        const result = await uploadFile(app.client, {
+          file: filePath,
+          filename: actualFilename,
+          channelId: slackChannelId,
+          threadTs: slackThreadTs,
+          initialComment,
+        });
+
+        if (!result.success) {
+          return {
+            content: [{ type: "text", text: `Failed to upload file: ${result.error}` }],
+            structuredContent: {
+              success: false,
+              message: `Failed to upload file: ${result.error}`,
+            },
+          };
+        }
+
+        const successMsg = `File uploaded successfully${result.fileId ? ` (ID: ${result.fileId})` : ""}.`;
+        return {
+          content: [{ type: "text", text: successMsg }],
+          structuredContent: {
+            success: true,
+            message: successMsg,
+            fileId: result.fileId,
+          },
+        };
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Failed to upload file: ${errorMsg}` }],
+          structuredContent: { success: false, message: `Failed to upload file: ${errorMsg}` },
+        };
+      }
+    },
+  );
+};

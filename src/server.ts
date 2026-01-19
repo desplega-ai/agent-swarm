@@ -38,10 +38,12 @@ import {
   registerUpdateScheduleTool,
 } from "./tools/schedules";
 import { registerSendTaskTool } from "./tools/send-task";
+import { registerSlackDownloadFileTool } from "./tools/slack-download-file";
 import { registerSlackListChannelsTool } from "./tools/slack-list-channels";
 import { registerSlackPostTool } from "./tools/slack-post";
 import { registerSlackReadTool } from "./tools/slack-read";
 import { registerSlackReplyTool } from "./tools/slack-reply";
+import { registerSlackUploadFileTool } from "./tools/slack-upload-file";
 import { registerStoreProgressTool } from "./tools/store-progress";
 // Task pool capability
 import { registerTaskActionTool } from "./tools/task-action";
@@ -99,6 +101,8 @@ export function createServer() {
   registerSlackReadTool(server);
   registerSlackPostTool(server);
   registerSlackListChannelsTool(server);
+  registerSlackUploadFileTool(server);
+  registerSlackDownloadFileTool(server);
   registerInboxDelegateTool(server);
   registerGetInboxMessageTool(server);
 

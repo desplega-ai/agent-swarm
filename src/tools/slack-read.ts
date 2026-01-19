@@ -4,12 +4,22 @@ import { getAgentById, getInboxMessageById, getTaskById } from "@/be/db";
 import { getSlackApp } from "@/slack/app";
 import { createToolRegistrar } from "@/tools/utils";
 
+const SlackFileSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  mimetype: z.string(),
+  filetype: z.string(),
+  size: z.number(),
+  url_private_download: z.string(),
+});
+
 const SlackMessageSchema = z.object({
   user: z.string().optional(),
   username: z.string().optional(),
   isBot: z.boolean(),
   text: z.string(),
   ts: z.string(),
+  files: z.array(SlackFileSchema).optional(),
 });
 
 export const registerSlackReadTool = (server: McpServer) => {
@@ -37,6 +47,10 @@ export const registerSlackReadTool = (server: McpServer) => {
           .max(100)
           .default(20)
           .describe("Maximum number of messages to retrieve (default: 20, max: 100)."),
+        includeFiles: z
+          .boolean()
+          .default(true)
+          .describe("Include file attachments in the response (default: true)."),
       }),
       outputSchema: z.object({
         success: z.boolean(),
@@ -46,7 +60,11 @@ export const registerSlackReadTool = (server: McpServer) => {
         messages: z.array(SlackMessageSchema),
       }),
     },
-    async ({ inboxMessageId, taskId, channelId, threadTs, limit = 20 }, requestInfo, _meta) => {
+    async (
+      { inboxMessageId, taskId, channelId, threadTs, limit = 20, includeFiles = true },
+      requestInfo,
+      _meta,
+    ) => {
       if (!requestInfo.agentId) {
         return {
           content: [{ type: "text", text: "Agent ID not found." }],
@@ -158,6 +176,15 @@ export const registerSlackReadTool = (server: McpServer) => {
       try {
         const client = app.client;
 
+        type RawFile = {
+          id: string;
+          name: string;
+          mimetype: string;
+          filetype: string;
+          size: number;
+          url_private_download: string;
+        };
+
         type RawMessage = {
           user?: string;
           bot_id?: string;
@@ -165,6 +192,7 @@ export const registerSlackReadTool = (server: McpServer) => {
           subtype?: string;
           text?: string;
           ts: string;
+          files?: RawFile[];
         };
 
         let rawMessages: RawMessage[] = [];
@@ -214,10 +242,19 @@ export const registerSlackReadTool = (server: McpServer) => {
           isBot: boolean;
           text: string;
           ts: string;
+          files?: Array<{
+            id: string;
+            name: string;
+            mimetype: string;
+            filetype: string;
+            size: number;
+            url_private_download: string;
+          }>;
         }> = [];
 
         for (const m of rawMessages) {
-          if (!m.text) continue;
+          // Include messages with text OR files
+          if (!m.text && (!m.files || m.files.length === 0)) continue;
 
           const isBot =
             m.user === botUserId || m.bot_id !== undefined || m.subtype === "bot_message";
@@ -229,18 +266,51 @@ export const registerSlackReadTool = (server: McpServer) => {
             username = await getUserDisplayName(m.user);
           }
 
+          // Extract file information if includeFiles is true
+          let files:
+            | Array<{
+                id: string;
+                name: string;
+                mimetype: string;
+                filetype: string;
+                size: number;
+                url_private_download: string;
+              }>
+            | undefined;
+
+          if (includeFiles && m.files && m.files.length > 0) {
+            files = m.files.map((f) => ({
+              id: f.id,
+              name: f.name,
+              mimetype: f.mimetype,
+              filetype: f.filetype,
+              size: f.size,
+              url_private_download: f.url_private_download,
+            }));
+          }
+
           messages.push({
             user: m.user,
             username,
             isBot,
-            text: m.text,
+            text: m.text || "",
             ts: m.ts,
+            files,
           });
         }
 
         // Format for text output
         const textOutput = messages
-          .map((m) => `[${m.username || m.user || "Unknown"}]: ${m.text}`)
+          .map((m) => {
+            let text = `[${m.username || m.user || "Unknown"}]: ${m.text}`;
+            if (m.files && m.files.length > 0) {
+              const fileList = m.files
+                .map((f) => `  - ${f.name} (${f.mimetype}, ${Math.round(f.size / 1024)} KB)`)
+                .join("\n");
+              text += `\n  [Attachments: ${m.files.length} file(s)]\n${fileList}`;
+            }
+            return text;
+          })
           .join("\n\n");
 
         return {
