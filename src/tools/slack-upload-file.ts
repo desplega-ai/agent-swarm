@@ -29,11 +29,23 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
           .string()
           .optional()
           .describe("Thread timestamp to upload as a thread reply (used with channelId)."),
-        filePath: z.string().min(1).describe("Path to the file to upload."),
+        filePath: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Path to the file to upload. Either filePath OR content must be provided."),
+        content: z
+          .string()
+          .optional()
+          .describe(
+            "Base64-encoded file content. Use this when the file is not on the local filesystem. Either filePath OR content must be provided.",
+          ),
         filename: z
           .string()
           .optional()
-          .describe("Name to give the file in Slack. Defaults to the original filename."),
+          .describe(
+            "Name to give the file in Slack. Required when using content, defaults to original filename when using filePath.",
+          ),
         initialComment: z
           .string()
           .max(4000)
@@ -47,7 +59,7 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
       }),
     },
     async (
-      { inboxMessageId, taskId, channelId, threadTs, filePath, filename, initialComment },
+      { inboxMessageId, taskId, channelId, threadTs, filePath, content, filename, initialComment },
       requestInfo,
       _meta,
     ) => {
@@ -144,35 +156,101 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
         };
       }
 
-      // Check if file exists
-      const bunFile = Bun.file(filePath);
-      const exists = await bunFile.exists();
-      if (!exists) {
+      // Validate: must provide either filePath OR content (not both, not neither)
+      if (!filePath && !content) {
         return {
-          content: [{ type: "text", text: `File not found: ${filePath}` }],
-          structuredContent: { success: false, message: `File not found: ${filePath}` },
-        };
-      }
-
-      // Check file size
-      const fileSize = bunFile.size;
-      if (fileSize > MAX_FILE_SIZE) {
-        const sizeMB = Math.round(fileSize / 1024 / 1024);
-        return {
-          content: [{ type: "text", text: `File too large: ${sizeMB} MB. Maximum is 1 GB.` }],
+          content: [{ type: "text", text: "Must provide either filePath or content (base64)." }],
           structuredContent: {
             success: false,
-            message: `File too large: ${sizeMB} MB. Maximum is 1 GB.`,
+            message: "Must provide either filePath or content (base64).",
           },
         };
       }
 
-      // Determine filename
-      const actualFilename = filename || filePath.split("/").pop() || "file";
+      if (filePath && content) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Cannot provide both filePath and content. Use one or the other.",
+            },
+          ],
+          structuredContent: {
+            success: false,
+            message: "Cannot provide both filePath and content. Use one or the other.",
+          },
+        };
+      }
+
+      // If using content (base64), filename is required
+      if (content && !filename) {
+        return {
+          content: [
+            { type: "text", text: "filename is required when using base64 content upload." },
+          ],
+          structuredContent: {
+            success: false,
+            message: "filename is required when using base64 content upload.",
+          },
+        };
+      }
+
+      let fileToUpload: string | Buffer;
+      let actualFilename: string;
+
+      if (filePath) {
+        // File path mode: check if file exists and get size
+        const bunFile = Bun.file(filePath);
+        const exists = await bunFile.exists();
+        if (!exists) {
+          return {
+            content: [{ type: "text", text: `File not found: ${filePath}` }],
+            structuredContent: { success: false, message: `File not found: ${filePath}` },
+          };
+        }
+
+        const fileSize = bunFile.size;
+        if (fileSize > MAX_FILE_SIZE) {
+          const sizeMB = Math.round(fileSize / 1024 / 1024);
+          return {
+            content: [{ type: "text", text: `File too large: ${sizeMB} MB. Maximum is 1 GB.` }],
+            structuredContent: {
+              success: false,
+              message: `File too large: ${sizeMB} MB. Maximum is 1 GB.`,
+            },
+          };
+        }
+
+        fileToUpload = filePath;
+        actualFilename = filename || filePath.split("/").pop() || "file";
+      } else {
+        // Base64 content mode: decode and check size
+        try {
+          fileToUpload = Buffer.from(content!, "base64");
+        } catch {
+          return {
+            content: [{ type: "text", text: "Invalid base64 content." }],
+            structuredContent: { success: false, message: "Invalid base64 content." },
+          };
+        }
+
+        if (fileToUpload.length > MAX_FILE_SIZE) {
+          const sizeMB = Math.round(fileToUpload.length / 1024 / 1024);
+          return {
+            content: [{ type: "text", text: `File too large: ${sizeMB} MB. Maximum is 1 GB.` }],
+            structuredContent: {
+              success: false,
+              message: `File too large: ${sizeMB} MB. Maximum is 1 GB.`,
+            },
+          };
+        }
+
+        actualFilename = filename!;
+      }
 
       try {
         const result = await uploadFile(app.client, {
-          file: filePath,
+          file: fileToUpload,
           filename: actualFilename,
           channelId: slackChannelId,
           threadTs: slackThreadTs,
