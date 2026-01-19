@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import {
   acceptTask,
+  checkDependencies,
   claimTask,
   createTaskExtended,
   getActiveTaskCount,
@@ -125,6 +126,14 @@ export const registerTaskActionTool = (server: McpServer) => {
                 message: `Task "${taskId}" is not unassigned (status: ${existingTask.status}).`,
               };
             }
+            // Check if task dependencies are met
+            const { ready, blockedBy } = checkDependencies(taskId);
+            if (!ready) {
+              return {
+                success: false,
+                message: `Task "${taskId}" has unmet dependencies: ${blockedBy.join(", ")}. Cannot claim until dependencies are completed.`,
+              };
+            }
             const claimedTask = claimTask(taskId, agentId);
             if (!claimedTask) {
               return { success: false, message: `Failed to claim task "${taskId}".` };
@@ -177,6 +186,14 @@ export const registerTaskActionTool = (server: McpServer) => {
             }
             if (existingTask.offeredTo !== agentId) {
               return { success: false, message: `Task "${taskId}" was not offered to you.` };
+            }
+            // Check if task dependencies are met
+            const { ready, blockedBy } = checkDependencies(taskId);
+            if (!ready) {
+              return {
+                success: false,
+                message: `Task "${taskId}" has unmet dependencies: ${blockedBy.join(", ")}. Cannot accept until dependencies are completed.`,
+              };
             }
             const acceptedTask = acceptTask(taskId, agentId);
             if (!acceptedTask) {
