@@ -2,7 +2,14 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { getAgentById, getInboxMessageById, getTaskById } from "@/be/db";
 import { getSlackApp } from "@/slack/app";
+import { downloadFile } from "@/slack/files";
 import { createToolRegistrar } from "@/tools/utils";
+
+/**
+ * Default download directory for auto-downloaded Slack files (inside MCP container).
+ * This differs from the agent's /workspace/shared path as the MCP server runs in a separate container.
+ */
+const AUTO_DOWNLOAD_DIR = "/app/shared/downloads/slack";
 
 const SlackFileSchema = z.object({
   id: z.string(),
@@ -11,6 +18,7 @@ const SlackFileSchema = z.object({
   filetype: z.string(),
   size: z.number(),
   url_private_download: z.string(),
+  localPath: z.string().optional(),
 });
 
 const SlackMessageSchema = z.object({
@@ -235,6 +243,9 @@ export const registerSlackReadTool = (server: McpServer) => {
           }
         }
 
+        // Get token for auto-download
+        const token = process.env.SLACK_BOT_TOKEN;
+
         // Format messages
         const messages: Array<{
           user: string | undefined;
@@ -249,6 +260,7 @@ export const registerSlackReadTool = (server: McpServer) => {
             filetype: string;
             size: number;
             url_private_download: string;
+            localPath?: string;
           }>;
         }> = [];
 
@@ -275,18 +287,41 @@ export const registerSlackReadTool = (server: McpServer) => {
                 filetype: string;
                 size: number;
                 url_private_download: string;
+                localPath?: string;
               }>
             | undefined;
 
           if (includeFiles && m.files && m.files.length > 0) {
-            files = m.files.map((f) => ({
-              id: f.id,
-              name: f.name,
-              mimetype: f.mimetype,
-              filetype: f.filetype,
-              size: f.size,
-              url_private_download: f.url_private_download,
-            }));
+            files = [];
+            for (const f of m.files) {
+              const fileInfo: (typeof files)[number] = {
+                id: f.id,
+                name: f.name,
+                mimetype: f.mimetype,
+                filetype: f.filetype,
+                size: f.size,
+                url_private_download: f.url_private_download,
+              };
+
+              // Auto-download file if token is available
+              if (token && f.url_private_download) {
+                const savePath = `${AUTO_DOWNLOAD_DIR}/${f.id}_${f.name}`;
+                try {
+                  const downloadResult = await downloadFile({
+                    file: f.url_private_download,
+                    savePath,
+                    token,
+                  });
+                  if (downloadResult.success && downloadResult.savedPath) {
+                    fileInfo.localPath = downloadResult.savedPath;
+                  }
+                } catch {
+                  // Download failed silently, localPath will be undefined
+                }
+              }
+
+              files.push(fileInfo);
+            }
           }
 
           messages.push({
@@ -305,7 +340,13 @@ export const registerSlackReadTool = (server: McpServer) => {
             let text = `[${m.username || m.user || "Unknown"}]: ${m.text}`;
             if (m.files && m.files.length > 0) {
               const fileList = m.files
-                .map((f) => `  - ${f.name} (${f.mimetype}, ${Math.round(f.size / 1024)} KB)`)
+                .map((f) => {
+                  let line = `  - ${f.name} (${f.mimetype}, ${Math.round(f.size / 1024)} KB)`;
+                  if (f.localPath) {
+                    line += ` [Downloaded: ${f.localPath}]`;
+                  }
+                  return line;
+                })
                 .join("\n");
               text += `\n  [Attachments: ${m.files.length} file(s)]\n${fileList}`;
             }
