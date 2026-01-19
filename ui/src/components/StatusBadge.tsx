@@ -39,6 +39,13 @@ const statusConfig: Record<AgentStatus | TaskStatus | EpicStatus, StatusConfig> 
     glowColor: { dark: "rgba(107, 83, 68, 0.3)", light: "rgba(168, 154, 124, 0.15)" },
   },
   // Task statuses
+  backlog: {
+    color: "neutral",
+    label: "BACKLOG",
+    bgColor: { dark: "rgba(75, 85, 99, 0.15)", light: "rgba(107, 114, 128, 0.15)" },
+    textColor: { dark: "#9CA3AF", light: "#4B5563" },
+    glowColor: { dark: "rgba(75, 85, 99, 0.3)", light: "rgba(107, 114, 128, 0.15)" },
+  },
   unassigned: {
     color: "neutral",
     label: "UNASSIGNED",

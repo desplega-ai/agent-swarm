@@ -2,6 +2,7 @@ import * as z from "zod";
 
 // Task status - includes new unassigned and offered states
 export const AgentTaskStatusSchema = z.enum([
+  "backlog", // Task is in backlog, not yet ready for pool
   "unassigned", // Task pool - no owner yet
   "offered", // Offered to agent, awaiting accept/reject
   "reviewing", // Agent is reviewing an offered task
