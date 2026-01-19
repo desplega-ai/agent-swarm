@@ -139,10 +139,11 @@ export async function uploadFile(
       uploadArgs as Parameters<typeof client.filesUploadV2>[0],
     );
 
-    // The result has a files array with the uploaded file(s)
-    // Each file object has id in its properties
-    const uploadedFile = result.files?.[0] as { id?: string } | undefined;
-    const fileId = uploadedFile?.id;
+    // The filesUploadV2 method returns a doubly-nested structure:
+    // result.files[0].files[0].id contains the actual file ID
+    // See: https://github.com/slackapi/node-slack-sdk/issues/1968
+    const uploadedFile = result.files?.[0] as { files?: { id?: string }[] } | undefined;
+    const fileId = uploadedFile?.files?.[0]?.id;
 
     if (!fileId) {
       return {
