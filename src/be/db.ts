@@ -986,12 +986,23 @@ export function createTask(
 }
 
 export function getPendingTaskForAgent(agentId: string): AgentTask | null {
-  const row = getDb()
+  // Get all pending tasks for this agent, ordered by priority (desc) then creation time (asc)
+  const rows = getDb()
     .prepare<AgentTaskRow, [string]>(
-      "SELECT * FROM agent_tasks WHERE agentId = ? AND status = 'pending' ORDER BY createdAt ASC LIMIT 1",
+      "SELECT * FROM agent_tasks WHERE agentId = ? AND status = 'pending' ORDER BY priority DESC, createdAt ASC",
     )
-    .get(agentId);
-  return row ? rowToAgentTask(row) : null;
+    .all(agentId);
+
+  // Find the first task whose dependencies are met
+  for (const row of rows) {
+    const task = rowToAgentTask(row);
+    const { ready } = checkDependencies(task.id);
+    if (ready) {
+      return task;
+    }
+  }
+
+  return null;
 }
 
 export function startTask(taskId: string): AgentTask | null {
