@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import {
   completeTask,
+  createSessionCost,
   failTask,
   getAgentById,
   getDb,
@@ -11,6 +12,20 @@ import {
 } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import { AgentTaskSchema } from "@/types";
+
+// Schema for optional cost data that agents can self-report
+const CostDataSchema = z
+  .object({
+    totalCostUsd: z.number().min(0).describe("Total cost in USD"),
+    inputTokens: z.number().int().min(0).optional().describe("Input tokens used"),
+    outputTokens: z.number().int().min(0).optional().describe("Output tokens used"),
+    cacheReadTokens: z.number().int().min(0).optional().describe("Cache read tokens"),
+    cacheWriteTokens: z.number().int().min(0).optional().describe("Cache write tokens"),
+    durationMs: z.number().int().min(0).optional().describe("Duration in milliseconds"),
+    numTurns: z.number().int().min(1).optional().describe("Number of turns/iterations"),
+    model: z.string().optional().describe("Model used (e.g., 'opus', 'sonnet')"),
+  })
+  .describe("Optional cost data for tracking session costs");
 
 export const registerStoreProgressTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -31,6 +46,9 @@ export const registerStoreProgressTool = (server: McpServer) => {
           .string()
           .optional()
           .describe("The reason for failure (used when failing)."),
+        costData: CostDataSchema.optional().describe(
+          "Optional cost data for tracking session costs. When provided, a session cost record will be created linked to this task.",
+        ),
       }),
       outputSchema: z.object({
         success: z.boolean(),
@@ -38,7 +56,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         task: AgentTaskSchema.optional(),
       }),
     },
-    async ({ taskId, progress, status, output, failureReason }, requestInfo, _meta) => {
+    async ({ taskId, progress, status, output, failureReason, costData }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         return {
           content: [
@@ -106,6 +124,24 @@ export const registerStoreProgressTool = (server: McpServer) => {
           if (existingTask.agentId) {
             updateAgentStatusFromCapacity(existingTask.agentId);
           }
+        }
+
+        // Store cost data if provided (agents can self-report costs)
+        if (costData && requestInfo.agentId) {
+          createSessionCost({
+            sessionId: `mcp-${taskId}-${Date.now()}`, // Generate unique session ID for MCP-based tasks
+            taskId,
+            agentId: requestInfo.agentId,
+            totalCostUsd: costData.totalCostUsd,
+            inputTokens: costData.inputTokens ?? 0,
+            outputTokens: costData.outputTokens ?? 0,
+            cacheReadTokens: costData.cacheReadTokens ?? 0,
+            cacheWriteTokens: costData.cacheWriteTokens ?? 0,
+            durationMs: costData.durationMs ?? 0,
+            numTurns: costData.numTurns ?? 1,
+            model: costData.model ?? "unknown",
+            isError: status === "failed",
+          });
         }
 
         return {
