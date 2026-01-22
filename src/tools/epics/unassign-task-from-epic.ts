@@ -13,7 +13,7 @@ export const registerUnassignTaskFromEpicTool = (server: McpServer) => {
         taskId: z.string().uuid().describe("The ID of the task to unassign"),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().optional(),
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         task: z.any().optional(),

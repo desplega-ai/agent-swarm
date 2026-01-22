@@ -60,6 +60,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
           .describe("Whether the schedule is enabled (default: true)"),
       }),
       outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         schedule: z

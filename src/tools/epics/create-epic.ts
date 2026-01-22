@@ -26,7 +26,7 @@ export const registerCreateEpicTool = (server: McpServer) => {
         githubMilestone: z.string().optional(),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().optional(),
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         epic: z.any().optional(),

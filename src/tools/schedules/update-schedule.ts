@@ -33,6 +33,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         enabled: z.boolean().optional().describe("Enable or disable the schedule"),
       }),
       outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         schedule: z

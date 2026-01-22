@@ -22,6 +22,7 @@ export const registerListServicesTool = (server: McpServer) => {
           .describe("Include services registered by calling agent (default: true)."),
       }),
       outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         services: z.array(

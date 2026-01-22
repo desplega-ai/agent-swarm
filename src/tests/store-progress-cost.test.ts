@@ -2,22 +2,27 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   closeDb,
+  completeTask,
   createAgent,
   createSessionCost,
   createTaskExtended,
-  getDb,
   getSessionCostsByTaskId,
   initDb,
   updateTaskProgress,
-  completeTask,
-  failTask,
-  getAgentById,
-  updateAgentStatusFromCapacity,
-  getTaskById,
 } from "../be/db";
-import type { SessionCost } from "../types";
 
 const TEST_DB_PATH = "./test-store-progress-cost.sqlite";
+
+type TestCostData = {
+  totalCostUsd: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  durationMs?: number;
+  numTurns?: number;
+  model?: string;
+};
 
 describe("store-progress with cost data", () => {
   let agentId: string;
@@ -35,13 +40,14 @@ describe("store-progress with cost data", () => {
       isLead: false,
       status: "idle",
       maxTasks: 1,
+      capabilities: [],
     });
     agentId = agent.id;
 
     // Create test task
     const task = createTaskExtended("Test task for cost tracking", {
       agentId,
-      source: "test",
+      source: "mcp",
       priority: 50,
     });
     taskId = task.id;
@@ -110,11 +116,11 @@ describe("store-progress with cost data", () => {
     // Create another task for this test
     const failTask2 = createTaskExtended("Test task for failure cost tracking", {
       agentId,
-      source: "test",
+      source: "mcp",
       priority: 50,
     });
 
-    const costData = {
+    const costData: TestCostData = {
       totalCostUsd: 0.02,
       inputTokens: 500,
       outputTokens: 200,
@@ -147,12 +153,12 @@ describe("store-progress with cost data", () => {
     // Create another task for this test
     const minimalTask = createTaskExtended("Test task with minimal cost data", {
       agentId,
-      source: "test",
+      source: "mcp",
       priority: 50,
     });
 
     // Only provide required field
-    const costData = {
+    const costData: TestCostData = {
       totalCostUsd: 0.01,
     };
 
@@ -186,7 +192,7 @@ describe("store-progress with cost data", () => {
     // Create a task without cost data
     const noCostTask = createTaskExtended("Test task without cost data", {
       agentId,
-      source: "test",
+      source: "mcp",
       priority: 50,
     });
 

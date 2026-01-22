@@ -48,6 +48,7 @@ export const registerSendTaskTool = (server: McpServer) => {
         epicId: z.string().uuid().optional().describe("Epic to associate this task with."),
       }),
       outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         task: AgentTaskSchema.optional(),

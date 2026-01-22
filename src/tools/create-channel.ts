@@ -17,6 +17,7 @@ export const registerCreateChannelTool = (server: McpServer) => {
         participants: z.array(z.uuid()).optional().describe("Agent IDs for DM channels."),
       }),
       outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         channel: ChannelSchema.optional(),

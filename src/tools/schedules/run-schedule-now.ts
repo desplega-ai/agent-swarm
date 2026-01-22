@@ -16,6 +16,7 @@ export const registerRunScheduleNowTool = (server: McpServer) => {
         name: z.string().optional().describe("Schedule name to run (alternative to ID)"),
       }),
       outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         schedule: z

@@ -19,6 +19,7 @@ export const registerUpdateServiceStatusTool = (server: McpServer) => {
         ),
       }),
       outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         service: ServiceSchema.optional(),

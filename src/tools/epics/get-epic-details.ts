@@ -15,7 +15,7 @@ export const registerGetEpicDetailsTool = (server: McpServer) => {
         name: z.string().optional().describe("The name of the epic (alternative to ID)"),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().optional(),
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         epic: z.any().optional(),

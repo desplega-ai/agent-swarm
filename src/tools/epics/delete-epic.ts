@@ -15,7 +15,7 @@ export const registerDeleteEpicTool = (server: McpServer) => {
         name: z.string().optional().describe("Epic name (alternative to ID)"),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().optional(),
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
       }),

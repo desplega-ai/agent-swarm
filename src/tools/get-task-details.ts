@@ -15,6 +15,7 @@ export const registerGetTaskDetailsTool = (server: McpServer) => {
         taskId: z.uuid().describe("The ID of the task to get details for."),
       }),
       outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         task: AgentTaskSchema.optional(),

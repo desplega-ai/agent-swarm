@@ -28,7 +28,7 @@ export const registerListEpicsTool = (server: McpServer) => {
           .describe("Max epics to return (default: 25)"),
       }),
       outputSchema: z.object({
-        yourAgentId: z.string().optional(),
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         epics: z.array(z.any()).optional(),

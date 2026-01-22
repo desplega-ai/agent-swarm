@@ -20,6 +20,7 @@ export const registerPostMessageTool = (server: McpServer) => {
           .describe("Agent IDs to @mention (they'll see it in unread)."),
       }),
       outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         posted: ChannelMessageSchema.optional(),

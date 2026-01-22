@@ -60,6 +60,7 @@ export const registerTaskActionTool = (server: McpServer) => {
         reason: z.string().optional().describe("Reason for rejection (optional for 'reject')."),
       }),
       outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         task: AgentTaskSchema.optional(),

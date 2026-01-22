@@ -20,6 +20,7 @@ export const registerDeleteScheduleTool = (server: McpServer) => {
         name: z.string().optional().describe("Schedule name to delete (alternative to ID)"),
       }),
       outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         deletedSchedule: z

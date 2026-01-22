@@ -50,6 +50,7 @@ export const registerGetTasksTool = (server: McpServer) => {
           .describe("Max tasks to return (default: 25, max: 100)."),
       }),
       outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
         tasks: z.array(TaskSummarySchema),
       }),
     },

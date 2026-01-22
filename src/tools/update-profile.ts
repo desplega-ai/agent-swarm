@@ -25,6 +25,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           .describe("List of capabilities (e.g., ['typescript', 'react', 'testing'])."),
       }),
       outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         agent: AgentSchema.optional(),

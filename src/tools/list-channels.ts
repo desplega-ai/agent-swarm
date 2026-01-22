@@ -12,6 +12,7 @@ export const registerListChannelsTool = (server: McpServer) => {
       description: "Lists all available channels for cross-agent communication.",
       inputSchema: z.object({}),
       outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         channels: z.array(ChannelSchema),
       }),

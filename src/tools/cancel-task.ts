@@ -23,6 +23,7 @@ export const registerCancelTaskTool = (server: McpServer) => {
         reason: z.string().optional().describe("Reason for cancellation."),
       }),
       outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         task: AgentTaskSchema.optional(),

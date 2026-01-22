@@ -15,6 +15,7 @@ export const registerGetInboxMessageTool = (server: McpServer) => {
         inboxMessageId: z.uuid().describe("The ID of the inbox message to retrieve."),
       }),
       outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         inboxMessage: InboxMessageSchema.optional(),

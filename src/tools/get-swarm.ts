@@ -14,6 +14,7 @@ export const registerGetSwarmTool = (server: McpServer) => {
         a: z.string().optional(),
       }),
       outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
         agents: z.array(AgentSchema),
       }),
     },

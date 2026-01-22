@@ -15,6 +15,7 @@ export const registerListSchedulesTool = (server: McpServer) => {
         name: z.string().optional().describe("Filter by name (partial match)"),
       }),
       outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
         success: z.boolean(),
         message: z.string(),
         schedules: z.array(
