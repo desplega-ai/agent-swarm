@@ -5,6 +5,79 @@ import { getSlackApp } from "@/slack/app";
 import { MAX_FILE_SIZE, uploadFile } from "@/slack/files";
 import { createToolRegistrar } from "@/tools/utils";
 
+/**
+ * Base directory for agent file operations.
+ * All relative paths are resolved from here.
+ */
+const WORKSPACE_DIR = "/workspace";
+
+/**
+ * Resolves a file path to an absolute path and checks if it exists.
+ * Handles several common patterns:
+ * 1. Relative paths (e.g., "shared/file.png") -> resolved from /workspace
+ * 2. Absolute paths under /workspace (e.g., "/workspace/shared/file.png") -> used as-is
+ * 3. Absolute paths that look like they should be under /workspace (e.g., "/tmp/file.png")
+ *    -> tries to find at /workspace/tmp/file.png if not found at original path
+ *
+ * @param filePath - The path provided by the user
+ * @returns Object with resolved path and exists flag, or error message
+ */
+async function resolveAndValidateFilePath(
+  filePath: string,
+): Promise<
+  { success: true; resolvedPath: string } | { success: false; error: string; triedPaths: string[] }
+> {
+  const triedPaths: string[] = [];
+
+  // Helper to check if file exists
+  const fileExists = async (path: string): Promise<boolean> => {
+    try {
+      const bunFile = Bun.file(path);
+      return await bunFile.exists();
+    } catch {
+      return false;
+    }
+  };
+
+  // Case 1: Relative path - resolve from /workspace
+  if (!filePath.startsWith("/")) {
+    const absolutePath = `${WORKSPACE_DIR}/${filePath}`;
+    triedPaths.push(absolutePath);
+    if (await fileExists(absolutePath)) {
+      return { success: true, resolvedPath: absolutePath };
+    }
+    return {
+      success: false,
+      error: `File not found. Relative paths are resolved from ${WORKSPACE_DIR}.`,
+      triedPaths,
+    };
+  }
+
+  // Case 2: Absolute path - try it directly first
+  triedPaths.push(filePath);
+  if (await fileExists(filePath)) {
+    return { success: true, resolvedPath: filePath };
+  }
+
+  // Case 3: Absolute path didn't exist - try resolving under /workspace
+  // This helps with paths like /tmp/file.png -> /workspace/tmp/file.png
+  if (!filePath.startsWith(WORKSPACE_DIR)) {
+    // Remove leading slash and resolve from workspace
+    const relativePath = filePath.slice(1); // "/tmp/file.png" -> "tmp/file.png"
+    const workspacePath = `${WORKSPACE_DIR}/${relativePath}`;
+    triedPaths.push(workspacePath);
+    if (await fileExists(workspacePath)) {
+      return { success: true, resolvedPath: workspacePath };
+    }
+  }
+
+  return {
+    success: false,
+    error: `File not found at any of the attempted locations.`,
+    triedPaths,
+  };
+}
+
 export const registerSlackUploadFileTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "slack-upload-file",
@@ -33,7 +106,11 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
           .string()
           .min(1)
           .optional()
-          .describe("Path to the file to upload. Either filePath OR content must be provided."),
+          .describe(
+            "Path to the file to upload. Either filePath OR content must be provided. " +
+              "Relative paths are resolved from /workspace (e.g., 'shared/file.png' -> '/workspace/shared/file.png'). " +
+              "Absolute paths work if they exist or if the file exists under /workspace with that path (e.g., '/tmp/file.png' checks '/tmp/file.png' then '/workspace/tmp/file.png').",
+          ),
         content: z
           .string()
           .optional()
@@ -199,17 +276,28 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
       let actualFilename: string;
 
       if (filePath) {
-        // File path mode: check if file exists and get size
-        const bunFile = Bun.file(filePath);
-        const exists = await bunFile.exists();
-        if (!exists) {
+        // Resolve and validate the file path
+        const pathResult = await resolveAndValidateFilePath(filePath);
+
+        if (!pathResult.success) {
+          const triedPathsList = pathResult.triedPaths.map((p) => `  - ${p}`).join("\n");
+          const errorMsg =
+            `${pathResult.error}\n` +
+            `Provided path: ${filePath}\n` +
+            `Tried locations:\n${triedPathsList}\n\n` +
+            `Tips:\n` +
+            `- Use relative paths from /workspace (e.g., 'shared/my-file.png')\n` +
+            `- Or use absolute paths under /workspace (e.g., '/workspace/shared/my-file.png')`;
           return {
-            content: [{ type: "text", text: `File not found: ${filePath}` }],
-            structuredContent: { success: false, message: `File not found: ${filePath}` },
+            content: [{ type: "text", text: errorMsg }],
+            structuredContent: { success: false, message: errorMsg },
           };
         }
 
+        const resolvedPath = pathResult.resolvedPath;
+        const bunFile = Bun.file(resolvedPath);
         const fileSize = bunFile.size;
+
         if (fileSize > MAX_FILE_SIZE) {
           const sizeMB = Math.round(fileSize / 1024 / 1024);
           return {
@@ -221,8 +309,8 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
           };
         }
 
-        fileToUpload = filePath;
-        actualFilename = filename || filePath.split("/").pop() || "file";
+        fileToUpload = resolvedPath;
+        actualFilename = filename || resolvedPath.split("/").pop() || "file";
       } else {
         // Base64 content mode: decode and check size
         try {
