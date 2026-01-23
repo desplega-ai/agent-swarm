@@ -1,25 +1,25 @@
-import { useState, useEffect, useCallback } from "react";
 import Box from "@mui/joy/Box";
-import Tabs from "@mui/joy/Tabs";
-import TabList from "@mui/joy/TabList";
-import Tab from "@mui/joy/Tab";
-import TabPanel from "@mui/joy/TabPanel";
 import { useColorScheme } from "@mui/joy/styles";
-import Header from "./Header";
-import StatsBar from "./StatsBar";
-import AgentsPanel from "./AgentsPanel";
-import TasksPanel from "./TasksPanel";
-import ServicesPanel from "./ServicesPanel";
-import ScheduledTasksPanel from "./ScheduledTasksPanel";
-import ScheduledTaskDetailPanel from "./ScheduledTaskDetailPanel";
+import Tab from "@mui/joy/Tab";
+import TabList from "@mui/joy/TabList";
+import TabPanel from "@mui/joy/TabPanel";
+import Tabs from "@mui/joy/Tabs";
+import { useCallback, useEffect, useState } from "react";
+import type { TaskStatus } from "../types/api";
 import ActivityFeed from "./ActivityFeed";
 import AgentDetailPanel from "./AgentDetailPanel";
-import TaskDetailPanel from "./TaskDetailPanel";
+import AgentsPanel from "./AgentsPanel";
 import ChatPanel from "./ChatPanel";
-import UsageTab from "./UsageTab";
-import EpicsPanel from "./EpicsPanel";
 import EpicDetailPage from "./EpicDetailPage";
-import type { TaskStatus } from "../types/api";
+import EpicsPanel from "./EpicsPanel";
+import Header from "./Header";
+import ScheduledTaskDetailPanel from "./ScheduledTaskDetailPanel";
+import ScheduledTasksPanel from "./ScheduledTasksPanel";
+import ServicesPanel from "./ServicesPanel";
+import StatsBar from "./StatsBar";
+import TaskDetailPanel from "./TaskDetailPanel";
+import TasksPanel from "./TasksPanel";
+import UsageTab from "./UsageTab";
 
 interface DashboardProps {
   onSettingsClick: () => void;
@@ -28,7 +28,15 @@ interface DashboardProps {
 function getUrlParams() {
   const params = new URLSearchParams(window.location.search);
   return {
-    tab: params.get("tab") as "agents" | "tasks" | "chat" | "services" | "schedules" | "usage" | "epics" | null,
+    tab: params.get("tab") as
+      | "agents"
+      | "tasks"
+      | "chat"
+      | "services"
+      | "schedules"
+      | "usage"
+      | "epics"
+      | null,
     agent: params.get("agent"),
     task: params.get("task"),
     schedule: params.get("schedule"),
@@ -130,7 +138,9 @@ function updateUrl(params: {
 }
 
 export default function Dashboard({ onSettingsClick }: DashboardProps) {
-  const [activeTab, setActiveTab] = useState<"agents" | "tasks" | "chat" | "services" | "schedules" | "usage" | "epics">("agents");
+  const [activeTab, setActiveTab] = useState<
+    "agents" | "tasks" | "chat" | "services" | "schedules" | "usage" | "epics"
+  >("agents");
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedEpicId, setSelectedEpicId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -138,7 +148,9 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [preFilterAgentId, setPreFilterAgentId] = useState<string | undefined>(undefined);
-  const [agentStatusFilter, setAgentStatusFilter] = useState<"all" | "busy" | "idle" | "offline">("all");
+  const [agentStatusFilter, setAgentStatusFilter] = useState<"all" | "busy" | "idle" | "offline">(
+    "all",
+  );
   const [taskStatusFilter, setTaskStatusFilter] = useState<TaskStatus | "all">("all");
   const [expandDetail, setExpandDetail] = useState(false);
 
@@ -264,7 +276,15 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
       setSelectedThreadId(null);
       setPreFilterAgentId(undefined);
       setTaskStatusFilter("all");
-      updateUrl({ tab: "agents", task: null, schedule: null, epic: null, channel: null, taskStatus: null, expand: false });
+      updateUrl({
+        tab: "agents",
+        task: null,
+        schedule: null,
+        epic: null,
+        channel: null,
+        taskStatus: null,
+        expand: false,
+      });
     } else if (tab === "tasks") {
       setSelectedAgentId(null);
       setSelectedScheduleId(null);
@@ -272,7 +292,15 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
       setSelectedChannelId(null);
       setSelectedThreadId(null);
       setAgentStatusFilter("all");
-      updateUrl({ tab: "tasks", agent: null, schedule: null, epic: null, channel: null, agentStatus: null, expand: false });
+      updateUrl({
+        tab: "tasks",
+        agent: null,
+        schedule: null,
+        epic: null,
+        channel: null,
+        agentStatus: null,
+        expand: false,
+      });
     } else if (tab === "services") {
       setSelectedAgentId(null);
       setSelectedTaskId(null);
@@ -283,7 +311,17 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
       setPreFilterAgentId(undefined);
       setAgentStatusFilter("all");
       setTaskStatusFilter("all");
-      updateUrl({ tab: "services", agent: null, task: null, schedule: null, epic: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
+      updateUrl({
+        tab: "services",
+        agent: null,
+        task: null,
+        schedule: null,
+        epic: null,
+        channel: null,
+        agentStatus: null,
+        taskStatus: null,
+        expand: false,
+      });
     } else if (tab === "schedules") {
       setSelectedAgentId(null);
       setSelectedTaskId(null);
@@ -293,7 +331,16 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
       setPreFilterAgentId(undefined);
       setAgentStatusFilter("all");
       setTaskStatusFilter("all");
-      updateUrl({ tab: "schedules", agent: null, task: null, epic: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
+      updateUrl({
+        tab: "schedules",
+        agent: null,
+        task: null,
+        epic: null,
+        channel: null,
+        agentStatus: null,
+        taskStatus: null,
+        expand: false,
+      });
     } else if (tab === "usage") {
       setSelectedAgentId(null);
       setSelectedTaskId(null);
@@ -304,7 +351,17 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
       setPreFilterAgentId(undefined);
       setAgentStatusFilter("all");
       setTaskStatusFilter("all");
-      updateUrl({ tab: "usage", agent: null, task: null, schedule: null, epic: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
+      updateUrl({
+        tab: "usage",
+        agent: null,
+        task: null,
+        schedule: null,
+        epic: null,
+        channel: null,
+        agentStatus: null,
+        taskStatus: null,
+        expand: false,
+      });
     } else if (tab === "epics") {
       setSelectedAgentId(null);
       setSelectedTaskId(null);
@@ -314,7 +371,16 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
       setPreFilterAgentId(undefined);
       setAgentStatusFilter("all");
       setTaskStatusFilter("all");
-      updateUrl({ tab: "epics", agent: null, task: null, schedule: null, channel: null, agentStatus: null, taskStatus: null, expand: false });
+      updateUrl({
+        tab: "epics",
+        agent: null,
+        task: null,
+        schedule: null,
+        channel: null,
+        agentStatus: null,
+        taskStatus: null,
+        expand: false,
+      });
     } else {
       // chat tab
       setSelectedAgentId(null);
@@ -324,7 +390,16 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
       setPreFilterAgentId(undefined);
       setAgentStatusFilter("all");
       setTaskStatusFilter("all");
-      updateUrl({ tab: "chat", agent: null, task: null, schedule: null, epic: null, agentStatus: null, taskStatus: null, expand: false });
+      updateUrl({
+        tab: "chat",
+        agent: null,
+        task: null,
+        schedule: null,
+        epic: null,
+        agentStatus: null,
+        taskStatus: null,
+        expand: false,
+      });
     }
   };
 
@@ -353,7 +428,14 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
     setSelectedAgentId(null);
     setSelectedTaskId(null);
     setExpandDetail(false);
-    updateUrl({ tab: "chat", channel: channelId, thread: messageId || null, agent: null, task: null, expand: false });
+    updateUrl({
+      tab: "chat",
+      channel: channelId,
+      thread: messageId || null,
+      agent: null,
+      task: null,
+      expand: false,
+    });
   }, []);
 
   // Chat handlers
@@ -369,10 +451,13 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
   }, []);
 
   // Filter change handlers with URL updates
-  const handleAgentStatusFilterChange = useCallback((status: "all" | "busy" | "idle" | "offline") => {
-    setAgentStatusFilter(status);
-    updateUrl({ agentStatus: status });
-  }, []);
+  const handleAgentStatusFilterChange = useCallback(
+    (status: "all" | "busy" | "idle" | "offline") => {
+      setAgentStatusFilter(status);
+      updateUrl({ agentStatus: status });
+    },
+    [],
+  );
 
   const handleTaskStatusFilterChange = useCallback((status: TaskStatus | "all") => {
     setTaskStatusFilter(status);
@@ -408,7 +493,17 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
       <Header onSettingsClick={onSettingsClick} />
 
       {/* Tabs */}
-      <Box sx={{ px: { xs: 1.5, sm: 2, md: 3 }, pt: { xs: 1.5, md: 2 }, pb: { xs: 2, md: 3 }, flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <Box
+        sx={{
+          px: { xs: 1.5, sm: 2, md: 3 },
+          pt: { xs: 1.5, md: 2 },
+          pb: { xs: 2, md: 3 },
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
+        }}
+      >
         <Tabs
           value={activeTab}
           onChange={handleTabChange}
@@ -501,7 +596,9 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
                   }}
                 >
                   {/* Agents Panel */}
-                  <Box sx={{ flex: 2, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                  <Box
+                    sx={{ flex: 2, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}
+                  >
                     <StatsBar
                       onFilterAgents={handleFilterAgents}
                       onNavigateToTasks={handleNavigateToTasksWithFilter}

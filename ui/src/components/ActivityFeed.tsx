@@ -1,10 +1,10 @@
-import { useMemo } from "react";
 import Box from "@mui/joy/Box";
 import Card from "@mui/joy/Card";
-import Typography from "@mui/joy/Typography";
 import Link from "@mui/joy/Link";
 import { useColorScheme } from "@mui/joy/styles";
-import { useLogs, useAgents, useChannels } from "../hooks/queries";
+import Typography from "@mui/joy/Typography";
+import { useMemo } from "react";
+import { useAgents, useChannels, useLogs } from "../hooks/queries";
 import { formatSmartTime } from "../lib/utils";
 import type { AgentLog } from "../types/api";
 
@@ -14,7 +14,11 @@ interface ActivityFeedProps {
   onNavigateToChat?: (channelId: string, messageId?: string) => void;
 }
 
-export default function ActivityFeed({ onNavigateToAgent, onNavigateToTask, onNavigateToChat }: ActivityFeedProps) {
+export default function ActivityFeed({
+  onNavigateToAgent,
+  onNavigateToTask,
+  onNavigateToChat,
+}: ActivityFeedProps) {
   const { data: logs, isLoading } = useLogs(30);
   const { data: agents } = useAgents();
   const { data: channels } = useChannels();
@@ -74,71 +78,77 @@ export default function ActivityFeed({ onNavigateToAgent, onNavigateToTask, onNa
   };
 
   const renderEventContent = (log: AgentLog) => {
-    const agentName = log.agentId ? (agentNames.get(log.agentId) || log.agentId.slice(0, 8)) : null;
+    const agentName = log.agentId ? agentNames.get(log.agentId) || log.agentId.slice(0, 8) : null;
 
-    const agentLink = log.agentId && onNavigateToAgent ? (
-      <Link
-        component="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onNavigateToAgent(log.agentId!);
-        }}
-        sx={{
-          fontFamily: "'Space Grotesk', sans-serif",
-          fontSize: "0.75rem",
-          fontWeight: 600,
-          color: colors.amber,
-          textDecoration: "none",
-          cursor: "pointer",
-          whiteSpace: "nowrap",
-          "&:hover": {
-            textDecoration: "underline",
-            color: colors.honey,
-          },
-        }}
-      >
-        {agentName}
-      </Link>
-    ) : log.agentId ? (
-      <span style={{ fontWeight: 600, color: colors.amber, whiteSpace: "nowrap" }}>{agentName}</span>
-    ) : null;
+    const agentLink =
+      log.agentId && onNavigateToAgent ? (
+        <Link
+          component="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onNavigateToAgent(log.agentId!);
+          }}
+          sx={{
+            fontFamily: "'Space Grotesk', sans-serif",
+            fontSize: "0.75rem",
+            fontWeight: 600,
+            color: colors.amber,
+            textDecoration: "none",
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            "&:hover": {
+              textDecoration: "underline",
+              color: colors.honey,
+            },
+          }}
+        >
+          {agentName}
+        </Link>
+      ) : log.agentId ? (
+        <span style={{ fontWeight: 600, color: colors.amber, whiteSpace: "nowrap" }}>
+          {agentName}
+        </span>
+      ) : null;
 
-    const taskLink = log.taskId && onNavigateToTask ? (
-      <Link
-        component="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onNavigateToTask(log.taskId!);
-        }}
-        sx={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: "0.7rem",
-          color: colors.gold,
-          textDecoration: "none",
-          cursor: "pointer",
-          bgcolor: isDark ? "rgba(212, 165, 116, 0.1)" : "rgba(139, 105, 20, 0.08)",
-          px: 0.75,
-          py: 0.25,
-          borderRadius: "4px",
-          "&:hover": {
-            textDecoration: "underline",
-            bgcolor: isDark ? "rgba(212, 165, 116, 0.15)" : "rgba(139, 105, 20, 0.12)",
-          },
-        }}
-      >
-        #{log.taskId.slice(0, 8)}
-      </Link>
-    ) : log.taskId ? (
-      <span style={{
-        fontFamily: "'JetBrains Mono', monospace",
-        fontSize: "0.7rem",
-        backgroundColor: isDark ? "rgba(212, 165, 116, 0.1)" : "rgba(139, 105, 20, 0.08)",
-        padding: "2px 6px",
-        borderRadius: "4px",
-      }}>
-        #{log.taskId.slice(0, 8)}
-      </span>
-    ) : null;
+    const taskLink =
+      log.taskId && onNavigateToTask ? (
+        <Link
+          component="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onNavigateToTask(log.taskId!);
+          }}
+          sx={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: "0.7rem",
+            color: colors.gold,
+            textDecoration: "none",
+            cursor: "pointer",
+            bgcolor: isDark ? "rgba(212, 165, 116, 0.1)" : "rgba(139, 105, 20, 0.08)",
+            px: 0.75,
+            py: 0.25,
+            borderRadius: "4px",
+            "&:hover": {
+              textDecoration: "underline",
+              bgcolor: isDark ? "rgba(212, 165, 116, 0.15)" : "rgba(139, 105, 20, 0.12)",
+            },
+          }}
+        >
+          #{log.taskId.slice(0, 8)}
+        </Link>
+      ) : log.taskId ? (
+        <span
+          style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: "0.7rem",
+            backgroundColor: isDark ? "rgba(212, 165, 116, 0.1)" : "rgba(139, 105, 20, 0.08)",
+            padding: "2px 6px",
+            borderRadius: "4px",
+          }}
+        >
+          #{log.taskId.slice(0, 8)}
+        </span>
+      ) : null;
 
     // Format progress messages nicely
     const formatProgress = (value: string | null | undefined) => {
@@ -178,7 +188,12 @@ export default function ActivityFeed({ onNavigateToAgent, onNavigateToTask, onNa
               component="span"
               sx={{
                 fontWeight: 600,
-                color: log.newValue === "busy" ? colors.amber : log.newValue === "idle" ? colors.gold : colors.dormant,
+                color:
+                  log.newValue === "busy"
+                    ? colors.amber
+                    : log.newValue === "idle"
+                      ? colors.gold
+                      : colors.dormant,
               }}
             >
               {log.newValue}
@@ -200,7 +215,12 @@ export default function ActivityFeed({ onNavigateToAgent, onNavigateToTask, onNa
               component="span"
               sx={{
                 fontWeight: 600,
-                color: log.newValue === "completed" ? "#22C55E" : log.newValue === "failed" ? colors.dormant : colors.gold,
+                color:
+                  log.newValue === "completed"
+                    ? "#22C55E"
+                    : log.newValue === "failed"
+                      ? colors.dormant
+                      : colors.gold,
               }}
             >
               {log.newValue}
@@ -227,35 +247,38 @@ export default function ActivityFeed({ onNavigateToAgent, onNavigateToTask, onNa
             // ignore parse errors
           }
         }
-        const channelName = channelId ? (channelNames.get(channelId) || "chat") : "chat";
-        const senderName = log.agentId ? agentLink : (
+        const channelName = channelId ? channelNames.get(channelId) || "chat" : "chat";
+        const senderName = log.agentId ? (
+          agentLink
+        ) : (
           <span style={{ fontWeight: 600, color: colors.warmGray }}>Human</span>
         );
 
-        const channelLink = onNavigateToChat && channelId ? (
-          <Link
-            component="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onNavigateToChat(channelId!, messageId);
-            }}
-            sx={{
-              fontFamily: "'Space Grotesk', sans-serif",
-              fontSize: "0.75rem",
-              fontWeight: 600,
-              color: colors.purple,
-              textDecoration: "none",
-              cursor: "pointer",
-              "&:hover": {
-                textDecoration: "underline",
-              },
-            }}
-          >
-            #{channelName}
-          </Link>
-        ) : (
-          <span style={{ fontWeight: 600, color: colors.purple }}>#{channelName}</span>
-        );
+        const channelLink =
+          onNavigateToChat && channelId ? (
+            <Link
+              component="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigateToChat(channelId!, messageId);
+              }}
+              sx={{
+                fontFamily: "'Space Grotesk', sans-serif",
+                fontSize: "0.75rem",
+                fontWeight: 600,
+                color: colors.purple,
+                textDecoration: "none",
+                cursor: "pointer",
+                "&:hover": {
+                  textDecoration: "underline",
+                },
+              }}
+            >
+              #{channelName}
+            </Link>
+          ) : (
+            <span style={{ fontWeight: 600, color: colors.purple }}>#{channelName}</span>
+          );
 
         return (
           <>
@@ -303,7 +326,9 @@ export default function ActivityFeed({ onNavigateToAgent, onNavigateToTask, onNa
             height: 10,
             clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
             bgcolor: colors.blue,
-            boxShadow: isDark ? "0 0 8px rgba(59, 130, 246, 0.5)" : "0 0 4px rgba(59, 130, 246, 0.3)",
+            boxShadow: isDark
+              ? "0 0 8px rgba(59, 130, 246, 0.5)"
+              : "0 0 4px rgba(59, 130, 246, 0.3)",
           }}
         />
         <Typography

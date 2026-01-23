@@ -1,18 +1,24 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import Box from "@mui/joy/Box";
-import Typography from "@mui/joy/Typography";
-import Textarea from "@mui/joy/Textarea";
-import IconButton from "@mui/joy/IconButton";
 import Card from "@mui/joy/Card";
-import Link from "@mui/joy/Link";
-import Tooltip from "@mui/joy/Tooltip";
 import Drawer from "@mui/joy/Drawer";
+import IconButton from "@mui/joy/IconButton";
+import Link from "@mui/joy/Link";
 import { useColorScheme } from "@mui/joy/styles";
-import { useChannels, useInfiniteMessages, useThreadMessages, usePostMessage, useAgents } from "../hooks/queries";
-import type { ChannelMessage, Agent } from "../types/api";
-import { formatSmartTime } from "@/lib/utils";
+import Textarea from "@mui/joy/Textarea";
+import Tooltip from "@mui/joy/Tooltip";
+import Typography from "@mui/joy/Typography";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { formatSmartTime } from "@/lib/utils";
+import {
+  useAgents,
+  useChannels,
+  useInfiniteMessages,
+  usePostMessage,
+  useThreadMessages,
+} from "../hooks/queries";
+import type { Agent, ChannelMessage } from "../types/api";
 
 interface MentionInputProps {
   value: string;
@@ -58,7 +64,7 @@ const MentionInput = React.memo(function MentionInput({
     return agents.filter(
       (agent) =>
         agent.name.toLowerCase().includes(query) ||
-        (agent.role && agent.role.toLowerCase().includes(query))
+        (agent.role && agent.role.toLowerCase().includes(query)),
     );
   }, [agents, mentionQuery]);
 
@@ -198,9 +204,7 @@ const MentionInput = React.memo(function MentionInput({
             border: "1px solid",
             borderColor: colors.amberBorder,
             borderRadius: "8px",
-            boxShadow: isDark
-              ? "0 4px 20px rgba(0, 0, 0, 0.5)"
-              : "0 4px 20px rgba(0, 0, 0, 0.15)",
+            boxShadow: isDark ? "0 4px 20px rgba(0, 0, 0, 0.5)" : "0 4px 20px rgba(0, 0, 0, 0.15)",
             maxHeight: 200,
             overflow: "auto",
             zIndex: 1000,
@@ -296,12 +300,7 @@ const MentionInput = React.memo(function MentionInput({
         </Box>
       )}
 
-      <Box
-        component="button"
-        onClick={onSend}
-        disabled={disabled}
-        sx={sendButtonStyles}
-      >
+      <Box component="button" onClick={onSend} disabled={disabled} sx={sendButtonStyles}>
         {sendLabel}
       </Box>
     </Box>
@@ -357,7 +356,13 @@ function DateDivider({ date, isDark, colors }: DateDividerProps) {
         my: 1,
       }}
     >
-      <Box sx={{ flex: 1, height: 1, bgcolor: isDark ? "rgba(212, 165, 116, 0.2)" : "rgba(139, 105, 20, 0.15)" }} />
+      <Box
+        sx={{
+          flex: 1,
+          height: 1,
+          bgcolor: isDark ? "rgba(212, 165, 116, 0.2)" : "rgba(139, 105, 20, 0.15)",
+        }}
+      />
       <Typography
         sx={{
           fontFamily: "'JetBrains Mono', monospace",
@@ -370,7 +375,13 @@ function DateDivider({ date, isDark, colors }: DateDividerProps) {
       >
         {formatDateDivider(date)}
       </Typography>
-      <Box sx={{ flex: 1, height: 1, bgcolor: isDark ? "rgba(212, 165, 116, 0.2)" : "rgba(139, 105, 20, 0.15)" }} />
+      <Box
+        sx={{
+          flex: 1,
+          height: 1,
+          bgcolor: isDark ? "rgba(212, 165, 116, 0.2)" : "rgba(139, 105, 20, 0.15)",
+        }}
+      />
     </Box>
   );
 }
@@ -428,8 +439,8 @@ function MessageItem({
       const agentNames = Array.from(agentsByName.keys()).sort((a, b) => b.length - a.length);
       if (agentNames.length === 0) return text;
 
-      const escapedNames = agentNames.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-      const mentionPattern = new RegExp(`@(${escapedNames.join('|')})(?=\\s|$|[.,!?;:])`, 'g');
+      const escapedNames = agentNames.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+      const mentionPattern = new RegExp(`@(${escapedNames.join("|")})(?=\\s|$|[.,!?;:])`, "g");
 
       const parts: React.ReactNode[] = [];
       let lastIndex = 0;
@@ -470,7 +481,7 @@ function MessageItem({
               }}
             >
               @{mentionName}
-            </Link>
+            </Link>,
           );
         } else {
           parts.push(
@@ -486,7 +497,7 @@ function MessageItem({
               }}
             >
               @{mentionName}
-            </Box>
+            </Box>,
           );
         }
 
@@ -561,7 +572,9 @@ function MessageItem({
             return renderTextWithMentions(child);
           }
           if (Array.isArray(child)) {
-            return child.map((c, i) => <React.Fragment key={i}>{processChildren(c)}</React.Fragment>);
+            return child.map((c, i) => (
+              <React.Fragment key={i}>{processChildren(c)}</React.Fragment>
+            ));
           }
           return child;
         };
@@ -573,7 +586,9 @@ function MessageItem({
             return renderTextWithMentions(child);
           }
           if (Array.isArray(child)) {
-            return child.map((c, i) => <React.Fragment key={i}>{processChildren(c)}</React.Fragment>);
+            return child.map((c, i) => (
+              <React.Fragment key={i}>{processChildren(c)}</React.Fragment>
+            ));
           }
           return child;
         };
@@ -597,7 +612,9 @@ function MessageItem({
         borderColor: isSelected ? colors.amberBorder : "transparent",
         bgcolor: isSelected
           ? colors.selectedBg
-          : isDark ? "rgba(26, 19, 14, 0.5)" : "rgba(255, 255, 255, 0.5)",
+          : isDark
+            ? "rgba(26, 19, 14, 0.5)"
+            : "rgba(255, 255, 255, 0.5)",
         transition: "all 0.2s ease",
         "&:hover": {
           bgcolor: isDark ? "rgba(245, 166, 35, 0.06)" : "rgba(212, 136, 6, 0.04)",
@@ -618,7 +635,9 @@ function MessageItem({
               clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
               bgcolor: colors.honey,
               flexShrink: 0,
-              boxShadow: isDark ? "0 0 8px rgba(255, 184, 77, 0.5)" : "0 0 6px rgba(184, 115, 0, 0.4)",
+              boxShadow: isDark
+                ? "0 0 8px rgba(255, 184, 77, 0.5)"
+                : "0 0 6px rgba(184, 115, 0, 0.4)",
             }}
           />
         ) : (
@@ -630,7 +649,9 @@ function MessageItem({
               bgcolor: message.agentId ? colors.amber : colors.blue,
               flexShrink: 0,
               boxShadow: message.agentId
-                ? (isDark ? "0 0 6px rgba(245, 166, 35, 0.4)" : "0 0 4px rgba(212, 136, 6, 0.3)")
+                ? isDark
+                  ? "0 0 6px rgba(245, 166, 35, 0.4)"
+                  : "0 0 4px rgba(212, 136, 6, 0.3)"
                 : "0 0 6px rgba(59, 130, 246, 0.4)",
             }}
           />
@@ -739,7 +760,10 @@ function MessageItem({
         )}
 
         {/* Action icons - appear on hover */}
-        <Box className="action-icons" sx={{ display: "flex", gap: 0.5, opacity: 0, transition: "opacity 0.2s ease" }}>
+        <Box
+          className="action-icons"
+          sx={{ display: "flex", gap: 0.5, opacity: 0, transition: "opacity 0.2s ease" }}
+        >
           {/* Toggle raw/markdown */}
           <Tooltip title={showRaw ? "Show formatted" : "Show raw"} placement="top">
             <IconButton
@@ -930,10 +954,7 @@ function MessageItem({
             },
           }}
         >
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={markdownComponents}
-          >
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
             {message.content}
           </ReactMarkdown>
         </Box>
@@ -972,41 +993,51 @@ export default function ChatPanel({
   const scrollPositionRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
 
   // Use controlled or internal state
-  const selectedChannelId = controlledChannelId !== undefined ? controlledChannelId : internalChannelId;
+  const selectedChannelId =
+    controlledChannelId !== undefined ? controlledChannelId : internalChannelId;
   const selectedThreadId = controlledThreadId !== undefined ? controlledThreadId : internalThreadId;
 
-  const setSelectedChannelId = useCallback((id: string | null) => {
-    if (onSelectChannel) {
-      onSelectChannel(id);
-    } else {
-      setInternalChannelId(id);
-    }
-  }, [onSelectChannel]);
+  const setSelectedChannelId = useCallback(
+    (id: string | null) => {
+      if (onSelectChannel) {
+        onSelectChannel(id);
+      } else {
+        setInternalChannelId(id);
+      }
+    },
+    [onSelectChannel],
+  );
 
-  const setSelectedThreadId = useCallback((id: string | null) => {
-    if (onSelectThread) {
-      onSelectThread(id);
-    } else {
-      setInternalThreadId(id);
-    }
-  }, [onSelectThread]);
+  const setSelectedThreadId = useCallback(
+    (id: string | null) => {
+      if (onSelectThread) {
+        onSelectThread(id);
+      } else {
+        setInternalThreadId(id);
+      }
+    },
+    [onSelectThread],
+  );
 
   const { mode } = useColorScheme();
   const isDark = mode === "dark";
 
-  const colors = useMemo(() => ({
-    amber: isDark ? "#F5A623" : "#D48806",
-    gold: isDark ? "#D4A574" : "#8B6914",
-    honey: isDark ? "#FFB84D" : "#B87300",
-    blue: "#3B82F6",
-    dormant: isDark ? "#6B5344" : "#A89A7C",
-    amberGlow: isDark ? "0 0 8px rgba(245, 166, 35, 0.5)" : "0 0 6px rgba(212, 136, 6, 0.3)",
-    hoverBg: isDark ? "rgba(245, 166, 35, 0.05)" : "rgba(212, 136, 6, 0.05)",
-    selectedBg: isDark ? "rgba(245, 166, 35, 0.1)" : "rgba(212, 136, 6, 0.08)",
-    amberBorder: isDark ? "rgba(245, 166, 35, 0.3)" : "rgba(212, 136, 6, 0.25)",
-    inputBg: isDark ? "rgba(13, 9, 6, 0.6)" : "rgba(255, 255, 255, 0.8)",
-    inputBorder: isDark ? "#3A2D1F" : "#E5D9CA",
-  }), [isDark]);
+  const colors = useMemo(
+    () => ({
+      amber: isDark ? "#F5A623" : "#D48806",
+      gold: isDark ? "#D4A574" : "#8B6914",
+      honey: isDark ? "#FFB84D" : "#B87300",
+      blue: "#3B82F6",
+      dormant: isDark ? "#6B5344" : "#A89A7C",
+      amberGlow: isDark ? "0 0 8px rgba(245, 166, 35, 0.5)" : "0 0 6px rgba(212, 136, 6, 0.3)",
+      hoverBg: isDark ? "rgba(245, 166, 35, 0.05)" : "rgba(212, 136, 6, 0.05)",
+      selectedBg: isDark ? "rgba(245, 166, 35, 0.1)" : "rgba(212, 136, 6, 0.08)",
+      amberBorder: isDark ? "rgba(245, 166, 35, 0.3)" : "rgba(212, 136, 6, 0.25)",
+      inputBg: isDark ? "rgba(13, 9, 6, 0.6)" : "rgba(255, 255, 255, 0.8)",
+      inputBorder: isDark ? "#3A2D1F" : "#E5D9CA",
+    }),
+    [isDark],
+  );
 
   const { data: channels, isLoading: channelsLoading } = useChannels();
   const {
@@ -1018,7 +1049,7 @@ export default function ChatPanel({
   } = useInfiniteMessages(selectedChannelId || "");
   const { data: threadMessages } = useThreadMessages(
     selectedChannelId || "",
-    selectedThreadId || ""
+    selectedThreadId || "",
   );
   const postMessageMutation = usePostMessage(selectedChannelId || "");
   const { data: agents } = useAgents();
@@ -1155,89 +1186,125 @@ export default function ChatPanel({
     });
     setThreadMessageInput("");
     setThreadMentions([]);
-  }, [threadMessageInput, selectedChannelId, selectedThreadMessage, postMessageMutation, threadMentions]);
+  }, [
+    threadMessageInput,
+    selectedChannelId,
+    selectedThreadMessage,
+    postMessageMutation,
+    threadMentions,
+  ]);
 
-  const handleOpenThread = useCallback((message: ChannelMessage) => {
-    setSelectedThreadId(message.id);
-  }, [setSelectedThreadId]);
+  const handleOpenThread = useCallback(
+    (message: ChannelMessage) => {
+      setSelectedThreadId(message.id);
+    },
+    [setSelectedThreadId],
+  );
 
   const handleCloseThread = useCallback(() => {
     setSelectedThreadId(null);
   }, [setSelectedThreadId]);
 
-  const handleAgentClick = useCallback((agentId: string) => {
-    if (onNavigateToAgent) {
-      onNavigateToAgent(agentId);
-    }
-  }, [onNavigateToAgent]);
+  const handleAgentClick = useCallback(
+    (agentId: string) => {
+      if (onNavigateToAgent) {
+        onNavigateToAgent(agentId);
+      }
+    },
+    [onNavigateToAgent],
+  );
 
   // Input styles shared between main and thread (memoized to prevent re-renders)
-  const inputStyles = useMemo(() => ({
-    flex: 1,
-    fontFamily: "'Space Grotesk', sans-serif",
-    fontSize: "16px", // 16px prevents iOS zoom on focus
-    bgcolor: colors.inputBg,
-    borderColor: colors.inputBorder,
-    borderRadius: "8px",
-    "--Textarea-focusedThickness": "2px",
-    "--Textarea-focusedHighlight": colors.amber,
-    "&:hover": {
-      borderColor: isDark ? "#4A3A2F" : "#D1C5B4",
-    },
-    "&:focus-within": {
-      borderColor: colors.amber,
-      boxShadow: isDark ? "0 0 0 2px rgba(245, 166, 35, 0.15)" : "0 0 0 2px rgba(212, 136, 6, 0.1)",
-    },
-    "& textarea": {
+  const inputStyles = useMemo(
+    () => ({
+      flex: 1,
       fontFamily: "'Space Grotesk', sans-serif",
       fontSize: "16px", // 16px prevents iOS zoom on focus
-      color: isDark ? "#FFF8E7" : "#1A130E",
-    },
-    "& textarea::placeholder": {
-      color: isDark ? "#8B7355" : "#8B7355",
-      fontFamily: "'Space Grotesk', sans-serif",
-    },
-  }), [colors.inputBg, colors.inputBorder, colors.amber, isDark]);
+      bgcolor: colors.inputBg,
+      borderColor: colors.inputBorder,
+      borderRadius: "8px",
+      "--Textarea-focusedThickness": "2px",
+      "--Textarea-focusedHighlight": colors.amber,
+      "&:hover": {
+        borderColor: isDark ? "#4A3A2F" : "#D1C5B4",
+      },
+      "&:focus-within": {
+        borderColor: colors.amber,
+        boxShadow: isDark
+          ? "0 0 0 2px rgba(245, 166, 35, 0.15)"
+          : "0 0 0 2px rgba(212, 136, 6, 0.1)",
+      },
+      "& textarea": {
+        fontFamily: "'Space Grotesk', sans-serif",
+        fontSize: "16px", // 16px prevents iOS zoom on focus
+        color: isDark ? "#FFF8E7" : "#1A130E",
+      },
+      "& textarea::placeholder": {
+        color: isDark ? "#8B7355" : "#8B7355",
+        fontFamily: "'Space Grotesk', sans-serif",
+      },
+    }),
+    [colors.inputBg, colors.inputBorder, colors.amber, isDark],
+  );
 
-  const sendButtonStyles = useMemo(() => ({
-    fontFamily: "'Space Grotesk', sans-serif",
-    fontSize: "0.9rem",
-    fontWeight: 600,
-    letterSpacing: "0.03em",
-    px: 3,
-    py: 1.5,
-    minHeight: 44, // Good touch target size
-    borderRadius: "8px",
-    bgcolor: colors.amber,
-    color: isDark ? "#1A130E" : "#FFFFFF",
-    border: "none",
-    cursor: "pointer",
-    transition: "all 0.2s ease",
-    "&:hover": {
-      bgcolor: colors.honey,
-      transform: "translateY(-1px)",
-      boxShadow: isDark ? "0 4px 12px rgba(245, 166, 35, 0.3)" : "0 4px 12px rgba(212, 136, 6, 0.2)",
-    },
-    "&:active": {
-      transform: "translateY(0)",
-    },
-    "&:disabled": {
-      opacity: 0.5,
-      cursor: "not-allowed",
-      transform: "none",
-      boxShadow: "none",
-    },
-  }), [colors.amber, colors.honey, isDark]);
+  const sendButtonStyles = useMemo(
+    () => ({
+      fontFamily: "'Space Grotesk', sans-serif",
+      fontSize: "0.9rem",
+      fontWeight: 600,
+      letterSpacing: "0.03em",
+      px: 3,
+      py: 1.5,
+      minHeight: 44, // Good touch target size
+      borderRadius: "8px",
+      bgcolor: colors.amber,
+      color: isDark ? "#1A130E" : "#FFFFFF",
+      border: "none",
+      cursor: "pointer",
+      transition: "all 0.2s ease",
+      "&:hover": {
+        bgcolor: colors.honey,
+        transform: "translateY(-1px)",
+        boxShadow: isDark
+          ? "0 4px 12px rgba(245, 166, 35, 0.3)"
+          : "0 4px 12px rgba(212, 136, 6, 0.2)",
+      },
+      "&:active": {
+        transform: "translateY(0)",
+      },
+      "&:disabled": {
+        opacity: 0.5,
+        cursor: "not-allowed",
+        transform: "none",
+        boxShadow: "none",
+      },
+    }),
+    [colors.amber, colors.honey, isDark],
+  );
 
   // Channel list content - reused in drawer and desktop sidebar
   const channelListContent = (
     <Box sx={{ flex: 1, overflow: "auto", p: 1 }}>
       {channelsLoading ? (
-        <Typography sx={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "0.8rem", color: "text.tertiary", p: 1.5 }}>
+        <Typography
+          sx={{
+            fontFamily: "'Space Grotesk', sans-serif",
+            fontSize: "0.8rem",
+            color: "text.tertiary",
+            p: 1.5,
+          }}
+        >
           Loading...
         </Typography>
       ) : !channels || channels.length === 0 ? (
-        <Typography sx={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "0.8rem", color: "text.tertiary", p: 1.5 }}>
+        <Typography
+          sx={{
+            fontFamily: "'Space Grotesk', sans-serif",
+            fontSize: "0.8rem",
+            color: "text.tertiary",
+            p: 1.5,
+          }}
+        >
           No channels
         </Typography>
       ) : (
@@ -1511,15 +1578,35 @@ export default function ChatPanel({
           }}
         >
           {messagesLoading ? (
-            <Typography sx={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "0.85rem", color: "text.tertiary", p: 3 }}>
+            <Typography
+              sx={{
+                fontFamily: "'Space Grotesk', sans-serif",
+                fontSize: "0.85rem",
+                color: "text.tertiary",
+                p: 3,
+              }}
+            >
               Loading messages...
             </Typography>
           ) : topLevelMessages.length === 0 ? (
             <Box sx={{ p: 3, textAlign: "center" }}>
-              <Typography sx={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "0.9rem", color: "text.tertiary", mb: 1 }}>
+              <Typography
+                sx={{
+                  fontFamily: "'Space Grotesk', sans-serif",
+                  fontSize: "0.9rem",
+                  color: "text.tertiary",
+                  mb: 1,
+                }}
+              >
                 No messages yet
               </Typography>
-              <Typography sx={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "0.8rem", color: "text.tertiary" }}>
+              <Typography
+                sx={{
+                  fontFamily: "'Space Grotesk', sans-serif",
+                  fontSize: "0.8rem",
+                  color: "text.tertiary",
+                }}
+              >
                 Start the conversation!
               </Typography>
             </Box>
@@ -1680,7 +1767,9 @@ export default function ChatPanel({
                   height: 10,
                   clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
                   bgcolor: colors.gold,
-                  boxShadow: isDark ? "0 0 6px rgba(212, 165, 116, 0.4)" : "0 0 4px rgba(139, 105, 20, 0.3)",
+                  boxShadow: isDark
+                    ? "0 0 6px rgba(212, 165, 116, 0.4)"
+                    : "0 0 4px rgba(139, 105, 20, 0.3)",
                   display: { xs: "none", md: "block" },
                 }}
               />
@@ -1735,7 +1824,11 @@ export default function ChatPanel({
               onAgentClick={handleAgentClick}
               onTaskClick={onNavigateToTask}
               agentsByName={agentsByName}
-              isLeadAgent={selectedThreadMessage.agentId ? leadAgentIds.has(selectedThreadMessage.agentId) : false}
+              isLeadAgent={
+                selectedThreadMessage.agentId
+                  ? leadAgentIds.has(selectedThreadMessage.agentId)
+                  : false
+              }
             />
           </Box>
 
@@ -1750,7 +1843,8 @@ export default function ChatPanel({
                 letterSpacing: "0.05em",
               }}
             >
-              {threadMessages?.length || 0} {(threadMessages?.length || 0) === 1 ? "REPLY" : "REPLIES"}
+              {threadMessages?.length || 0}{" "}
+              {(threadMessages?.length || 0) === 1 ? "REPLY" : "REPLIES"}
             </Typography>
             <Box sx={{ flex: 1, height: 1, bgcolor: "neutral.outlinedBorder" }} />
           </Box>
@@ -1782,7 +1876,13 @@ export default function ChatPanel({
               </>
             ) : (
               <Box sx={{ p: 3, textAlign: "center" }}>
-                <Typography sx={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: "0.85rem", color: "text.tertiary" }}>
+                <Typography
+                  sx={{
+                    fontFamily: "'Space Grotesk', sans-serif",
+                    fontSize: "0.85rem",
+                    color: "text.tertiary",
+                  }}
+                >
                   No replies yet
                 </Typography>
               </Box>

@@ -1,6 +1,6 @@
 import Chip from "@mui/joy/Chip";
 import { useColorScheme } from "@mui/joy/styles";
-import type { AgentStatus, TaskStatus, EpicStatus } from "../types/api";
+import type { AgentStatus, EpicStatus, TaskStatus } from "../types/api";
 
 interface StatusBadgeProps {
   status: AgentStatus | TaskStatus | EpicStatus;
@@ -130,7 +130,8 @@ export default function StatusBadge({ status, size = "sm" }: StatusBadgeProps) {
   const { mode } = useColorScheme();
   const isDark = mode === "dark";
   const config = statusConfig[status];
-  const isActive = status === "busy" || status === "in_progress" || status === "offered" || status === "active";
+  const isActive =
+    status === "busy" || status === "in_progress" || status === "offered" || status === "active";
 
   const bgColor = isDark ? config.bgColor.dark : config.bgColor.light;
   const textColor = isDark ? config.textColor.dark : config.textColor.light;

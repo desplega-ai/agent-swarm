@@ -1,18 +1,18 @@
-import { useState } from "react";
 import Box from "@mui/joy/Box";
-import Typography from "@mui/joy/Typography";
-import IconButton from "@mui/joy/IconButton";
-import Divider from "@mui/joy/Divider";
 import Button from "@mui/joy/Button";
-import Tooltip from "@mui/joy/Tooltip";
 import Chip from "@mui/joy/Chip";
+import Divider from "@mui/joy/Divider";
+import IconButton from "@mui/joy/IconButton";
 import { useColorScheme } from "@mui/joy/styles";
-import { useAgent, useLogs, useAgentUsageSummary, useSessionCosts } from "../hooks/queries";
-import { formatRelativeTime, formatCurrency, formatCompactNumber } from "../lib/utils";
-import StatusBadge from "./StatusBadge";
-import { CostTrendChart, TokenDistributionChart, ModelUsageChart } from "./UsageCharts";
-import EditAgentProfileModal from "./EditAgentProfileModal";
+import Tooltip from "@mui/joy/Tooltip";
+import Typography from "@mui/joy/Typography";
+import { useState } from "react";
+import { useAgent, useAgentUsageSummary, useLogs, useSessionCosts } from "../hooks/queries";
+import { formatCompactNumber, formatCurrency, formatRelativeTime } from "../lib/utils";
 import type { AgentLog } from "../types/api";
+import EditAgentProfileModal from "./EditAgentProfileModal";
+import StatusBadge from "./StatusBadge";
+import { CostTrendChart, ModelUsageChart, TokenDistributionChart } from "./UsageCharts";
 
 interface AgentDetailPanelProps {
   agentId: string;
@@ -94,15 +94,11 @@ export default function AgentDetailPanel({
   const panelWidth = expanded ? "100%" : 400;
 
   const loadingContent = (
-    <Typography sx={{ fontFamily: "code", color: "text.tertiary" }}>
-      Loading agent...
-    </Typography>
+    <Typography sx={{ fontFamily: "code", color: "text.tertiary" }}>Loading agent...</Typography>
   );
 
   const notFoundContent = (
-    <Typography sx={{ fontFamily: "code", color: "text.tertiary" }}>
-      Agent not found
-    </Typography>
+    <Typography sx={{ fontFamily: "code", color: "text.tertiary" }}>Agent not found</Typography>
   );
 
   if (agentLoading || !agent) {
@@ -127,9 +123,8 @@ export default function AgentDetailPanel({
     );
   }
 
-  const activeTasks = agent.tasks?.filter(
-    (t) => t.status === "pending" || t.status === "in_progress"
-  ).length || 0;
+  const activeTasks =
+    agent.tasks?.filter((t) => t.status === "pending" || t.status === "in_progress").length || 0;
 
   // Info section component
   const InfoSection = () => (
@@ -140,7 +135,12 @@ export default function AgentDetailPanel({
             width: 12,
             height: 12,
             borderRadius: "50%",
-            bgcolor: agent.status === "busy" ? colors.amber : agent.status === "idle" ? colors.gold : colors.dormant,
+            bgcolor:
+              agent.status === "busy"
+                ? colors.amber
+                : agent.status === "idle"
+                  ? colors.gold
+                  : colors.dormant,
             boxShadow: agent.status === "busy" ? colors.amberGlow : "none",
           }}
         />
@@ -251,37 +251,45 @@ export default function AgentDetailPanel({
         </Box>
 
         <Box>
-          <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary", mb: 0.5 }}>
+          <Typography
+            sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary", mb: 0.5 }}
+          >
             Capabilities
           </Typography>
           <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-            {agent.capabilities && agent.capabilities?.map((cap) => (
-              <Chip
-                key={cap}
-                size="sm"
-                variant="soft"
-                sx={{
-                  fontFamily: "code",
-                  fontSize: "0.65rem",
-                  bgcolor: colors.amberSoftBg,
-                  color: colors.gold,
-                  border: `1px solid ${colors.amberBorder}`,
-                }}
-              >
-                {cap}
-              </Chip>
-            ))}
-            {!agent.capabilities || agent.capabilities.length === 0 && (
-              <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.secondary" }}>
-                No capabilities listed
-              </Typography>
-            )}
+            {agent.capabilities &&
+              agent.capabilities?.map((cap) => (
+                <Chip
+                  key={cap}
+                  size="sm"
+                  variant="soft"
+                  sx={{
+                    fontFamily: "code",
+                    fontSize: "0.65rem",
+                    bgcolor: colors.amberSoftBg,
+                    color: colors.gold,
+                    border: `1px solid ${colors.amberBorder}`,
+                  }}
+                >
+                  {cap}
+                </Chip>
+              ))}
+            {!agent.capabilities ||
+              (agent.capabilities.length === 0 && (
+                <Typography
+                  sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.secondary" }}
+                >
+                  No capabilities listed
+                </Typography>
+              ))}
           </Box>
         </Box>
 
         {agent.description && (
           <Box>
-            <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary", mb: 0.5 }}>
+            <Typography
+              sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary", mb: 0.5 }}
+            >
               Description
             </Typography>
             <Box
@@ -330,7 +338,13 @@ export default function AgentDetailPanel({
   );
 
   // Usage card helper component
-  const UsageCard = ({ title, cost, tokens, sessions, color }: {
+  const UsageCard = ({
+    title,
+    cost,
+    tokens,
+    sessions,
+    color,
+  }: {
     title: string;
     cost: number;
     tokens: number;
@@ -460,7 +474,15 @@ export default function AgentDetailPanel({
   // Activity section component
   const ActivitySection = () => (
     <>
-      <Box sx={{ px: 2, py: 1.5, bgcolor: "background.level1", borderTop: expanded ? "none" : "1px solid", borderColor: "neutral.outlinedBorder" }}>
+      <Box
+        sx={{
+          px: 2,
+          py: 1.5,
+          bgcolor: "background.level1",
+          borderTop: expanded ? "none" : "1px solid",
+          borderColor: "neutral.outlinedBorder",
+        }}
+      >
         <Typography
           sx={{
             fontFamily: "code",
@@ -605,7 +627,10 @@ export default function AgentDetailPanel({
         {/* Desktop buttons - hidden on mobile */}
         <Box sx={{ display: { xs: "none", md: "flex" }, alignItems: "center", gap: 0.5 }}>
           {onToggleExpand && (
-            <Tooltip title={expanded ? "Collapse panel" : "Expand to full width"} placement="bottom">
+            <Tooltip
+              title={expanded ? "Collapse panel" : "Expand to full width"}
+              placement="bottom"
+            >
               <IconButton
                 size="sm"
                 variant="plain"

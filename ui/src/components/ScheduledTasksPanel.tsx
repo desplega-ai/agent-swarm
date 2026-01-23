@@ -1,14 +1,14 @@
-import { useState, useMemo } from "react";
 import Box from "@mui/joy/Box";
 import Card from "@mui/joy/Card";
-import Typography from "@mui/joy/Typography";
-import Table from "@mui/joy/Table";
-import Select from "@mui/joy/Select";
-import Option from "@mui/joy/Option";
-import Input from "@mui/joy/Input";
 import Chip from "@mui/joy/Chip";
+import Input from "@mui/joy/Input";
+import Option from "@mui/joy/Option";
+import Select from "@mui/joy/Select";
 import { useColorScheme } from "@mui/joy/styles";
-import { useScheduledTasks, useAgents } from "../hooks/queries";
+import Table from "@mui/joy/Table";
+import Typography from "@mui/joy/Typography";
+import { useMemo, useState } from "react";
+import { useAgents, useScheduledTasks } from "../hooks/queries";
 import type { ScheduledTask } from "../types/api";
 
 interface ScheduledTasksPanelProps {
@@ -53,7 +53,12 @@ function formatSmartTime(dateStr: string | undefined): string {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
 
-  return date.toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function formatNextRun(dateStr: string | undefined): string {
@@ -69,7 +74,12 @@ function formatNextRun(dateStr: string | undefined): string {
   if (diffMins < 60) return `in ${diffMins}m`;
   if (diffHours < 24) return `in ${diffHours}h ${diffMins % 60}m`;
 
-  return date.toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 // Mobile card component
@@ -109,7 +119,9 @@ function ScheduleCard({ schedule, selected, onClick, agent, isDark }: ScheduleCa
         },
       }}
     >
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 1 }}>
+      <Box
+        sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 1 }}
+      >
         <Typography
           sx={{
             fontFamily: "code",
@@ -131,8 +143,12 @@ function ScheduleCard({ schedule, selected, onClick, agent, isDark }: ScheduleCa
             fontFamily: "code",
             fontSize: "0.6rem",
             bgcolor: schedule.enabled
-              ? isDark ? "rgba(76, 175, 80, 0.15)" : "rgba(46, 125, 50, 0.1)"
-              : isDark ? "rgba(239, 83, 80, 0.15)" : "rgba(211, 47, 47, 0.1)",
+              ? isDark
+                ? "rgba(76, 175, 80, 0.15)"
+                : "rgba(46, 125, 50, 0.1)"
+              : isDark
+                ? "rgba(239, 83, 80, 0.15)"
+                : "rgba(211, 47, 47, 0.1)",
             color: schedule.enabled ? colors.green : colors.red,
             ml: 1,
           }}
@@ -157,7 +173,8 @@ function ScheduleCard({ schedule, selected, onClick, agent, isDark }: ScheduleCa
       </Typography>
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: colors.amber }}>
-          {schedule.cronExpression || (schedule.intervalMs ? `every ${formatInterval(schedule.intervalMs)}` : "—")}
+          {schedule.cronExpression ||
+            (schedule.intervalMs ? `every ${formatInterval(schedule.intervalMs)}` : "—")}
         </Typography>
         <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary" }}>
           Next: {formatNextRun(schedule.nextRunAt)}
@@ -428,7 +445,9 @@ export default function ScheduledTasksPanel({
                   {schedules.map((schedule) => (
                     <tr
                       key={schedule.id}
-                      onClick={() => onSelectSchedule(selectedScheduleId === schedule.id ? null : schedule.id)}
+                      onClick={() =>
+                        onSelectSchedule(selectedScheduleId === schedule.id ? null : schedule.id)
+                      }
                     >
                       <td>
                         <Typography
@@ -470,7 +489,8 @@ export default function ScheduledTasksPanel({
                             whiteSpace: "nowrap",
                           }}
                         >
-                          {schedule.cronExpression || (schedule.intervalMs ? `${formatInterval(schedule.intervalMs)}` : "—")}
+                          {schedule.cronExpression ||
+                            (schedule.intervalMs ? `${formatInterval(schedule.intervalMs)}` : "—")}
                         </Typography>
                       </td>
                       <td>
@@ -485,7 +505,8 @@ export default function ScheduledTasksPanel({
                               whiteSpace: "nowrap",
                             }}
                           >
-                            {agentMap.get(schedule.targetAgentId)?.name || schedule.targetAgentId.slice(0, 8)}
+                            {agentMap.get(schedule.targetAgentId)?.name ||
+                              schedule.targetAgentId.slice(0, 8)}
                           </Typography>
                         ) : (
                           <Typography
@@ -507,8 +528,12 @@ export default function ScheduledTasksPanel({
                             fontFamily: "code",
                             fontSize: "0.6rem",
                             bgcolor: schedule.enabled
-                              ? isDark ? "rgba(76, 175, 80, 0.15)" : "rgba(46, 125, 50, 0.1)"
-                              : isDark ? "rgba(239, 83, 80, 0.15)" : "rgba(211, 47, 47, 0.1)",
+                              ? isDark
+                                ? "rgba(76, 175, 80, 0.15)"
+                                : "rgba(46, 125, 50, 0.1)"
+                              : isDark
+                                ? "rgba(239, 83, 80, 0.15)"
+                                : "rgba(211, 47, 47, 0.1)",
                             color: schedule.enabled ? colors.green : colors.red,
                           }}
                         >
@@ -539,7 +564,14 @@ export default function ScheduledTasksPanel({
                       </td>
                       <td>
                         {schedule.tags && schedule.tags.length > 0 ? (
-                          <Box sx={{ display: "flex", gap: 0.5, flexWrap: "nowrap", overflow: "hidden" }}>
+                          <Box
+                            sx={{
+                              display: "flex",
+                              gap: 0.5,
+                              flexWrap: "nowrap",
+                              overflow: "hidden",
+                            }}
+                          >
                             {schedule.tags.slice(0, 2).map((tag) => (
                               <Chip
                                 key={tag}
@@ -548,7 +580,9 @@ export default function ScheduledTasksPanel({
                                 sx={{
                                   fontFamily: "code",
                                   fontSize: "0.6rem",
-                                  bgcolor: isDark ? "rgba(212, 165, 116, 0.1)" : "rgba(139, 105, 20, 0.08)",
+                                  bgcolor: isDark
+                                    ? "rgba(212, 165, 116, 0.1)"
+                                    : "rgba(139, 105, 20, 0.08)",
                                   color: colors.gold,
                                   border: `1px solid ${isDark ? "rgba(212, 165, 116, 0.3)" : "rgba(139, 105, 20, 0.25)"}`,
                                 }}
@@ -557,13 +591,21 @@ export default function ScheduledTasksPanel({
                               </Chip>
                             ))}
                             {schedule.tags.length > 2 && (
-                              <Typography sx={{ fontFamily: "code", fontSize: "0.6rem", color: "text.tertiary" }}>
+                              <Typography
+                                sx={{
+                                  fontFamily: "code",
+                                  fontSize: "0.6rem",
+                                  color: "text.tertiary",
+                                }}
+                              >
                                 +{schedule.tags.length - 2}
                               </Typography>
                             )}
                           </Box>
                         ) : (
-                          <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary" }}>
+                          <Typography
+                            sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary" }}
+                          >
                             —
                           </Typography>
                         )}
@@ -581,7 +623,9 @@ export default function ScheduledTasksPanel({
                   key={schedule.id}
                   schedule={schedule}
                   selected={selectedScheduleId === schedule.id}
-                  onClick={() => onSelectSchedule(selectedScheduleId === schedule.id ? null : schedule.id)}
+                  onClick={() =>
+                    onSelectSchedule(selectedScheduleId === schedule.id ? null : schedule.id)
+                  }
                   agent={schedule.targetAgentId ? agentMap.get(schedule.targetAgentId) : undefined}
                   isDark={isDark}
                 />

@@ -1,7 +1,7 @@
 import Box from "@mui/joy/Box";
-import Typography from "@mui/joy/Typography";
 import { useColorScheme } from "@mui/joy/styles";
-import { useStats, useMonthlyUsageStats } from "../hooks/queries";
+import Typography from "@mui/joy/Typography";
+import { useMonthlyUsageStats, useStats } from "../hooks/queries";
 import { formatCompactNumber, formatCurrency } from "../lib/utils";
 
 interface HexStatProps {
@@ -20,7 +20,13 @@ function HexStat({ label, value, color, glowColor, isActive, isDark, onClick }: 
       onClick={onClick}
       role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
-      onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") onClick(); } : undefined}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") onClick();
+            }
+          : undefined
+      }
       sx={{
         position: "relative",
         width: { xs: 65, sm: 75, md: 90 },
@@ -34,7 +40,9 @@ function HexStat({ label, value, color, glowColor, isActive, isDark, onClick }: 
           "50%": { opacity: 1, transform: "scale(1.02)" },
         },
         "&:hover": {
-          filter: isDark ? `drop-shadow(0 0 15px ${glowColor})` : `drop-shadow(0 0 8px ${glowColor})`,
+          filter: isDark
+            ? `drop-shadow(0 0 15px ${glowColor})`
+            : `drop-shadow(0 0 8px ${glowColor})`,
           transform: onClick ? "scale(1.05)" : undefined,
         },
         "&:hover .hex-bg": {
@@ -111,7 +119,9 @@ function HexStat({ label, value, color, glowColor, isActive, isDark, onClick }: 
 
 interface StatsBarProps {
   onFilterAgents?: (status: "all" | "busy" | "idle") => void;
-  onNavigateToTasks?: (status?: "pending" | "in_progress" | "paused" | "completed" | "failed") => void;
+  onNavigateToTasks?: (
+    status?: "pending" | "in_progress" | "paused" | "completed" | "failed",
+  ) => void;
 }
 
 export default function StatsBar({ onFilterAgents, onNavigateToTasks }: StatsBarProps) {
@@ -259,12 +269,14 @@ export default function StatsBar({ onFilterAgents, onNavigateToTasks }: StatsBar
           ))}
         </Box>
         {/* Bottom row: Tasks stats (horizontally offset for honeycomb effect) */}
-        <Box sx={{
-          display: "flex",
-          gap: 0.5,
-          mt: { md: "-20px" },  // Overlap rows vertically to create honeycomb interlocking
-          ml: { md: "88px" },   // Offset by ~half hex width for proper honeycomb tessellation
-        }}>
+        <Box
+          sx={{
+            display: "flex",
+            gap: 0.5,
+            mt: { md: "-20px" }, // Overlap rows vertically to create honeycomb interlocking
+            ml: { md: "88px" }, // Offset by ~half hex width for proper honeycomb tessellation
+          }}
+        >
           {bottomRow.map((stat) => (
             <HexStat
               key={stat.label}

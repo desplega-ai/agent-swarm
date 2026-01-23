@@ -44,7 +44,12 @@ export function formatSmartTime(dateStr: string): string {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
 
-  return date.toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 /**

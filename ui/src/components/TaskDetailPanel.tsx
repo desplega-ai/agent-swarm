@@ -1,19 +1,19 @@
-import { useState, useCallback, useEffect, useRef } from "react";
 import Box from "@mui/joy/Box";
-import Typography from "@mui/joy/Typography";
-import IconButton from "@mui/joy/IconButton";
-import Divider from "@mui/joy/Divider";
-import Tooltip from "@mui/joy/Tooltip";
-import Tabs from "@mui/joy/Tabs";
-import TabList from "@mui/joy/TabList";
-import Tab from "@mui/joy/Tab";
-import TabPanel from "@mui/joy/TabPanel";
 import Chip from "@mui/joy/Chip";
+import Divider from "@mui/joy/Divider";
+import IconButton from "@mui/joy/IconButton";
 import { useColorScheme } from "@mui/joy/styles";
-import { useTask, useAgents, useTaskSessionLogs, useTaskUsage } from "../hooks/queries";
-import { formatRelativeTime, formatCurrency, formatCompactNumber } from "../lib/utils";
-import StatusBadge from "./StatusBadge";
+import Tab from "@mui/joy/Tab";
+import TabList from "@mui/joy/TabList";
+import TabPanel from "@mui/joy/TabPanel";
+import Tabs from "@mui/joy/Tabs";
+import Tooltip from "@mui/joy/Tooltip";
+import Typography from "@mui/joy/Typography";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useAgents, useTask, useTaskSessionLogs, useTaskUsage } from "../hooks/queries";
+import { formatCompactNumber, formatCurrency, formatRelativeTime } from "../lib/utils";
 import SessionLogPanel from "./SessionLogPanel";
+import StatusBadge from "./StatusBadge";
 
 interface TaskDetailPanelProps {
   taskId: string;
@@ -79,10 +79,14 @@ export default function TaskDetailPanel({
 
   const getSourceColor = (source: string) => {
     switch (source) {
-      case "mcp": return colors.amber;
-      case "slack": return colors.purple;
-      case "api": return colors.blue;
-      default: return colors.tertiary;
+      case "mcp":
+        return colors.amber;
+      case "slack":
+        return colors.purple;
+      case "api":
+        return colors.blue;
+      default:
+        return colors.tertiary;
     }
   };
 
@@ -91,9 +95,7 @@ export default function TaskDetailPanel({
   const getElapsedTime = () => {
     if (!task) return "—";
     const start = new Date(task.createdAt).getTime();
-    const end = task.finishedAt
-      ? new Date(task.finishedAt).getTime()
-      : Date.now();
+    const end = task.finishedAt ? new Date(task.finishedAt).getTime() : Date.now();
     const elapsed = end - start;
 
     const seconds = Math.floor(elapsed / 1000);
@@ -111,15 +113,11 @@ export default function TaskDetailPanel({
   const panelWidth = expanded ? "100%" : 450;
 
   const loadingContent = (
-    <Typography sx={{ fontFamily: "code", color: "text.tertiary" }}>
-      Loading task...
-    </Typography>
+    <Typography sx={{ fontFamily: "code", color: "text.tertiary" }}>Loading task...</Typography>
   );
 
   const notFoundContent = (
-    <Typography sx={{ fontFamily: "code", color: "text.tertiary" }}>
-      Task not found
-    </Typography>
+    <Typography sx={{ fontFamily: "code", color: "text.tertiary" }}>Task not found</Typography>
   );
 
   if (taskLoading || !task) {
@@ -151,14 +149,16 @@ export default function TaskDetailPanel({
 
   // Details section - task info
   const DetailsSection = ({ showProgress = true }: { showProgress?: boolean }) => (
-    <Box sx={{
-      p: { xs: 1.5, md: 2 },
-      display: "flex",
-      flexDirection: "column",
-      flex: showProgress ? "0 0 auto" : "1 1 auto",
-      overflow: showProgress ? "visible" : "auto",
-      minHeight: 0,
-    }}>
+    <Box
+      sx={{
+        p: { xs: 1.5, md: 2 },
+        display: "flex",
+        flexDirection: "column",
+        flex: showProgress ? "0 0 auto" : "1 1 auto",
+        overflow: showProgress ? "visible" : "auto",
+        minHeight: 0,
+      }}
+    >
       {/* Info fields first */}
       <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, flexShrink: 0, mb: 2 }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -172,7 +172,13 @@ export default function TaskDetailPanel({
           <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
             Agent
           </Typography>
-          <Typography sx={{ fontFamily: "code", fontSize: "0.8rem", color: task.agentId ? colors.amber : "text.tertiary" }}>
+          <Typography
+            sx={{
+              fontFamily: "code",
+              fontSize: "0.8rem",
+              color: task.agentId ? colors.amber : "text.tertiary",
+            }}
+          >
             {task.agentId ? agentName : "Unassigned"}
           </Typography>
         </Box>
@@ -211,7 +217,9 @@ export default function TaskDetailPanel({
 
         {task.tags && task.tags.length > 0 && (
           <Box>
-            <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary", mb: 0.5 }}>
+            <Typography
+              sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary", mb: 0.5 }}
+            >
               Tags
             </Typography>
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
@@ -240,7 +248,13 @@ export default function TaskDetailPanel({
             <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
               Priority
             </Typography>
-            <Typography sx={{ fontFamily: "code", fontSize: "0.8rem", color: task.priority > 50 ? colors.amber : "text.secondary" }}>
+            <Typography
+              sx={{
+                fontFamily: "code",
+                fontSize: "0.8rem",
+                color: task.priority > 50 ? colors.amber : "text.secondary",
+              }}
+            >
               {task.priority}
             </Typography>
           </Box>
@@ -278,14 +292,18 @@ export default function TaskDetailPanel({
               TASK COST
             </Typography>
             <Box sx={{ display: "flex", alignItems: "baseline", gap: 1 }}>
-              <Typography sx={{ fontFamily: "code", fontSize: "1rem", fontWeight: 600, color: colors.amber }}>
+              <Typography
+                sx={{ fontFamily: "code", fontSize: "1rem", fontWeight: 600, color: colors.amber }}
+              >
                 {formatCurrency(taskUsage.totalCostUsd)}
               </Typography>
               <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.secondary" }}>
                 {formatCompactNumber(taskUsage.totalTokens)} tokens
               </Typography>
             </Box>
-            <Typography sx={{ fontFamily: "code", fontSize: "0.6rem", color: "text.tertiary", mt: 0.5 }}>
+            <Typography
+              sx={{ fontFamily: "code", fontSize: "0.6rem", color: "text.tertiary", mt: 0.5 }}
+            >
               {taskUsage.sessionCount} session{taskUsage.sessionCount !== 1 ? "s" : ""}
             </Typography>
           </Box>
@@ -600,7 +618,16 @@ export default function TaskDetailPanel({
       if (hasError) {
         return (
           <Box sx={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
-            <Box sx={{ px: 2, py: 1.5, bgcolor: "background.level1", borderTop: "1px solid", borderColor: "neutral.outlinedBorder", flexShrink: 0 }}>
+            <Box
+              sx={{
+                px: 2,
+                py: 1.5,
+                bgcolor: "background.level1",
+                borderTop: "1px solid",
+                borderColor: "neutral.outlinedBorder",
+                flexShrink: 0,
+              }}
+            >
               <Typography
                 sx={{
                   fontFamily: "code",
@@ -619,7 +646,16 @@ export default function TaskDetailPanel({
 
       return (
         <Box sx={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
-          <Box sx={{ px: 2, py: 1.5, bgcolor: "background.level1", borderTop: "1px solid", borderColor: "neutral.outlinedBorder", flexShrink: 0 }}>
+          <Box
+            sx={{
+              px: 2,
+              py: 1.5,
+              bgcolor: "background.level1",
+              borderTop: "1px solid",
+              borderColor: "neutral.outlinedBorder",
+              flexShrink: 0,
+            }}
+          >
             <Typography
               sx={{
                 fontFamily: "code",
@@ -712,7 +748,10 @@ export default function TaskDetailPanel({
         {/* Desktop buttons - hidden on mobile */}
         <Box sx={{ display: { xs: "none", md: "flex" }, alignItems: "center", gap: 0.5 }}>
           {onToggleExpand && (
-            <Tooltip title={expanded ? "Collapse panel" : "Expand to full width"} placement="bottom">
+            <Tooltip
+              title={expanded ? "Collapse panel" : "Expand to full width"}
+              placement="bottom"
+            >
               <IconButton
                 size="sm"
                 variant="plain"
@@ -798,10 +837,15 @@ export default function TaskDetailPanel({
                 onChange={(_, value) => setOutcomesTab(value as "output" | "error" | "session")}
                 sx={{ display: "flex", flexDirection: "column", height: "100%" }}
               >
-                <TabList sx={getTabListStyles(
-                  outcomesTab === "error" ? colors.rust :
-                    outcomesTab === "session" ? colors.blue : colors.gold
-                )}>
+                <TabList
+                  sx={getTabListStyles(
+                    outcomesTab === "error"
+                      ? colors.rust
+                      : outcomesTab === "session"
+                        ? colors.blue
+                        : colors.gold,
+                  )}
+                >
                   <Tab value="output">OUTPUT</Tab>
                   {hasError && <Tab value="error">ERROR</Tab>}
                   <Tab value="session">
@@ -832,7 +876,16 @@ export default function TaskDetailPanel({
                     <ErrorContent />
                   </TabPanel>
                 )}
-                <TabPanel value="session" sx={{ p: 0, flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                <TabPanel
+                  value="session"
+                  sx={{
+                    p: 0,
+                    flex: 1,
+                    overflow: "hidden",
+                    display: "flex",
+                    flexDirection: "column",
+                  }}
+                >
                   <SessionLogPanel sessionLogs={sessionLogs} />
                 </TabPanel>
               </Tabs>

@@ -1,16 +1,16 @@
-import { useMemo, useRef, useState, useCallback } from "react";
 import Box from "@mui/joy/Box";
-import Typography from "@mui/joy/Typography";
+import Button from "@mui/joy/Button";
 import Chip from "@mui/joy/Chip";
 import IconButton from "@mui/joy/IconButton";
-import Tooltip from "@mui/joy/Tooltip";
-import Button from "@mui/joy/Button";
 import { useColorScheme } from "@mui/joy/styles";
-import { formatRelativeTime } from "../lib/utils";
+import Tooltip from "@mui/joy/Tooltip";
+import Typography from "@mui/joy/Typography";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useAutoScroll } from "../hooks/useAutoScroll";
 import { generatePreview } from "../lib/contentPreview";
-import JsonViewer from "./JsonViewer";
+import { formatRelativeTime } from "../lib/utils";
 import type { SessionLog } from "../types/api";
+import JsonViewer from "./JsonViewer";
 
 interface SessionLogPanelProps {
   sessionLogs: SessionLog[] | undefined;
@@ -36,8 +36,10 @@ interface FormattedLog {
 /** Check if content is likely JSON */
 const isJsonContent = (content: string): boolean => {
   const trimmed = content.trim();
-  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
-      (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+  if (
+    (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+    (trimmed.startsWith("[") && trimmed.endsWith("]"))
+  ) {
     try {
       JSON.parse(trimmed);
       return true;
@@ -58,7 +60,7 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
   const [copiedBlock, setCopiedBlock] = useState<string | null>(null);
 
   const toggleBlock = useCallback((blockId: string) => {
-    setExpandedBlocks(prev => {
+    setExpandedBlocks((prev) => {
       const next = new Set(prev);
       if (next.has(blockId)) {
         next.delete(blockId);
@@ -94,13 +96,17 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
   };
 
   // Sort logs by createdAt ascending (oldest first), then by lineNumber
-  const sortedLogs = useMemo(() => sessionLogs
-    ? [...sessionLogs].sort((a, b) => {
-      const timeCompare = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-      if (timeCompare !== 0) return timeCompare;
-      return a.lineNumber - b.lineNumber;
-    })
-    : [], [sessionLogs]);
+  const sortedLogs = useMemo(
+    () =>
+      sessionLogs
+        ? [...sessionLogs].sort((a, b) => {
+            const timeCompare = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+            if (timeCompare !== 0) return timeCompare;
+            return a.lineNumber - b.lineNumber;
+          })
+        : [],
+    [sessionLogs],
+  );
 
   // Auto-scroll when new logs arrive (respects user scroll position)
   const { isFollowing, scrollToBottom } = useAutoScroll(scrollRef.current, [sortedLogs.length]);
@@ -114,27 +120,31 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
   /** Generate a human-readable summary from a JSON object */
   const generateJsonSummary = (obj: Record<string, unknown>, maxLen = 100): string => {
     // Check for common patterns and generate nice summaries
-    if ('success' in obj && 'message' in obj) {
+    if ("success" in obj && "message" in obj) {
       // API response pattern
-      const status = obj.success ? '✓' : '✗';
+      const status = obj.success ? "✓" : "✗";
       return `${status} ${truncate(String(obj.message), maxLen - 2)}`;
     }
-    if ('yourAgentId' in obj) {
+    if ("yourAgentId" in obj) {
       // Agent swarm response
-      const status = obj.success ? '✓' : '✗';
-      const msg = obj.message ? String(obj.message) : 'Agent operation';
+      const status = obj.success ? "✓" : "✗";
+      const msg = obj.message ? String(obj.message) : "Agent operation";
       return `${status} ${truncate(msg, maxLen - 2)}`;
     }
-    if ('oldTodos' in obj || 'todos' in obj) {
+    if ("oldTodos" in obj || "todos" in obj) {
       // TodoWrite result
-      const count = Array.isArray(obj.todos) ? obj.todos.length : (Array.isArray(obj.oldTodos) ? obj.oldTodos.length : 0);
+      const count = Array.isArray(obj.todos)
+        ? obj.todos.length
+        : Array.isArray(obj.oldTodos)
+          ? obj.oldTodos.length
+          : 0;
       return `Todo list updated (${count} items)`;
     }
 
     // Generic object: list top-level keys
     const keys = Object.keys(obj).slice(0, 4);
-    const suffix = Object.keys(obj).length > 4 ? `, +${Object.keys(obj).length - 4} more` : '';
-    return `{${keys.join(', ')}${suffix}}`;
+    const suffix = Object.keys(obj).length > 4 ? `, +${Object.keys(obj).length - 4} more` : "";
+    return `{${keys.join(", ")}${suffix}}`;
   };
 
   /**
@@ -146,7 +156,7 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
    * - "{"key":"value"}" - JSON string wrapped in quotes (unwrapped and parsed)
    */
   const unwrapEscapedJson = (content: string): string => {
-    if (typeof content !== 'string' || !content.trim()) {
+    if (typeof content !== "string" || !content.trim()) {
       return content;
     }
 
@@ -162,9 +172,9 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
       try {
         const parsed = JSON.parse(trimmed);
         // If it parses to a string that looks like JSON, unwrap it
-        if (typeof parsed === 'string') {
+        if (typeof parsed === "string") {
           const parsedTrimmed = parsed.trim();
-          if (parsedTrimmed.startsWith('{') || parsedTrimmed.startsWith('[')) {
+          if (parsedTrimmed.startsWith("{") || parsedTrimmed.startsWith("[")) {
             current = parsed;
             continue; // Try to unwrap further
           }
@@ -179,10 +189,7 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
       // This is common when JSON is stored as an escaped string in a database
       if (trimmed.includes('\\"') || trimmed.includes("\\'")) {
         // Unescape one level: \" -> " and \\ -> \
-        const unescaped = trimmed
-          .replace(/\\"/g, '"')
-          .replace(/\\'/g, "'")
-          .replace(/\\\\/g, '\\');
+        const unescaped = trimmed.replace(/\\"/g, '"').replace(/\\'/g, "'").replace(/\\\\/g, "\\");
 
         // Check if unescaping made a difference
         if (unescaped !== current) {
@@ -207,7 +214,9 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
   };
 
   /** Try to parse and extract meaningful content from tool result */
-  const parseToolResultContent = (content: string): { display: string; fullContent: string; isJson: boolean; summary?: string } => {
+  const parseToolResultContent = (
+    content: string,
+  ): { display: string; fullContent: string; isJson: boolean; summary?: string } => {
     // First, try to unwrap any escaped JSON
     const unwrapped = unwrapEscapedJson(content);
 
@@ -215,10 +224,10 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
       const parsed = JSON.parse(unwrapped);
 
       // Handle Bash tool results: {"stdout":"...","stderr":"...","interrupted":...}
-      if (typeof parsed === 'object' && parsed !== null) {
-        if ('stdout' in parsed || 'stderr' in parsed) {
-          const stdout = parsed.stdout as string || '';
-          const stderr = parsed.stderr as string || '';
+      if (typeof parsed === "object" && parsed !== null) {
+        if ("stdout" in parsed || "stderr" in parsed) {
+          const stdout = (parsed.stdout as string) || "";
+          const stderr = (parsed.stderr as string) || "";
           const interrupted = parsed.interrupted as boolean;
 
           // Try to parse stdout as JSON (may be double-encoded)
@@ -232,24 +241,26 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
             // stdout is not JSON, keep as-is
           }
 
-          let display = '';
+          let display = "";
           if (displayStdout) {
             display = displayStdout;
           }
           if (stderr) {
-            display += (display ? '\n\nSTDERR:\n' : '') + stderr;
+            display += (display ? "\n\nSTDERR:\n" : "") + stderr;
           }
           if (interrupted) {
-            display += (display ? '\n' : '') + '[interrupted]';
+            display += (display ? "\n" : "") + "[interrupted]";
           }
 
           // Generate summary for JSON stdout
           const summary = innerParsed
             ? generateJsonSummary(innerParsed)
-            : (stdout ? truncate(stdout.replace(/\n/g, ' '), 100) : '(empty output)');
+            : stdout
+              ? truncate(stdout.replace(/\n/g, " "), 100)
+              : "(empty output)";
 
           return {
-            display: display || '(empty output)',
+            display: display || "(empty output)",
             fullContent: display || content,
             isJson: isJsonContent(displayStdout),
             summary,
@@ -336,13 +347,15 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
             return {
               type: "assistant",
               color: colors.gold,
-              blocks: [{
-                blockType: "json",
-                icon: "◆",
-                content: "Unrecognized message format",
-                fullContent: JSON.stringify(json, null, 2),
-                isExpandable: true,
-              }],
+              blocks: [
+                {
+                  blockType: "json",
+                  icon: "◆",
+                  content: "Unrecognized message format",
+                  fullContent: JSON.stringify(json, null, 2),
+                  isExpandable: true,
+                },
+              ],
             };
           }
 
@@ -351,13 +364,15 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
             return {
               type: "assistant",
               color: colors.gold,
-              blocks: [{
-                blockType: "json",
-                icon: "◆",
-                content: "Unrecognized message format",
-                fullContent: JSON.stringify(json, null, 2),
-                isExpandable: true,
-              }],
+              blocks: [
+                {
+                  blockType: "json",
+                  icon: "◆",
+                  content: "Unrecognized message format",
+                  fullContent: JSON.stringify(json, null, 2),
+                  isExpandable: true,
+                },
+              ],
             };
           }
 
@@ -403,13 +418,18 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
           return {
             type: "assistant",
             color: colors.gold,
-            blocks: blocks.length > 0 ? blocks : [{
-              blockType: "json",
-              icon: "◆",
-              content: "Unrecognized message format",
-              fullContent: JSON.stringify(json, null, 2),
-              isExpandable: true,
-            }],
+            blocks:
+              blocks.length > 0
+                ? blocks
+                : [
+                    {
+                      blockType: "json",
+                      icon: "◆",
+                      content: "Unrecognized message format",
+                      fullContent: JSON.stringify(json, null, 2),
+                      isExpandable: true,
+                    },
+                  ],
           };
         }
 
@@ -419,7 +439,8 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
 
           const rawToolResult = json.tool_use_result;
           if (rawToolResult) {
-            const toolResult = typeof rawToolResult === "string" ? rawToolResult : JSON.stringify(rawToolResult);
+            const toolResult =
+              typeof rawToolResult === "string" ? rawToolResult : JSON.stringify(rawToolResult);
             const parsed = parseToolResultContent(toolResult);
             const isError = toolResult.includes("Error") || toolResult.includes("error");
             // Use summary if available, otherwise truncate the display
@@ -439,7 +460,12 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
               for (const block of contentBlocks) {
                 if (block.type === "tool_result") {
                   const rawResult = block.content;
-                  const result = typeof rawResult === "string" ? rawResult : rawResult ? JSON.stringify(rawResult) : "";
+                  const result =
+                    typeof rawResult === "string"
+                      ? rawResult
+                      : rawResult
+                        ? JSON.stringify(rawResult)
+                        : "";
                   const parsed = parseToolResultContent(result);
                   const isError = block.is_error as boolean;
                   // Use summary if available, otherwise truncate the display
@@ -461,13 +487,18 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
           return {
             type: "tool_result",
             color: colors.purple,
-            blocks: blocks.length > 0 ? blocks : [{
-              blockType: "json",
-              icon: "←",
-              content: "Unrecognized tool result format",
-              fullContent: JSON.stringify(json, null, 2),
-              isExpandable: true,
-            }],
+            blocks:
+              blocks.length > 0
+                ? blocks
+                : [
+                    {
+                      blockType: "json",
+                      icon: "←",
+                      content: "Unrecognized tool result format",
+                      fullContent: JSON.stringify(json, null, 2),
+                      isExpandable: true,
+                    },
+                  ],
           };
         }
 
@@ -519,13 +550,15 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
           return {
             type: json.type || "unknown",
             color: colors.tertiary,
-            blocks: [{
-              blockType: "json",
-              icon: "?",
-              content: "Unknown message type",
-              fullContent: JSON.stringify(json, null, 2),
-              isExpandable: true,
-            }],
+            blocks: [
+              {
+                blockType: "json",
+                icon: "?",
+                content: "Unknown message type",
+                fullContent: JSON.stringify(json, null, 2),
+                isExpandable: true,
+              },
+            ],
           };
       }
     } catch {
@@ -538,13 +571,15 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
           return {
             type: "data",
             color: colors.tertiary,
-            blocks: [{
-              blockType: "json",
-              icon: "◇",
-              content: summary,
-              fullContent: JSON.stringify(parsedData, null, 2),
-              isExpandable: true,
-            }],
+            blocks: [
+              {
+                blockType: "json",
+                icon: "◇",
+                content: summary,
+                fullContent: JSON.stringify(parsedData, null, 2),
+                isExpandable: true,
+              },
+            ],
           };
         } catch {
           // Fall through to partial JSON handling
@@ -553,11 +588,9 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
 
       // For non-JSON content, check if it looks like truncated/partial JSON
       const trimmed = actualContent.trim();
-      const looksLikeJson = trimmed.includes('"') && (
-        trimmed.includes(':') ||
-        trimmed.includes('{') ||
-        trimmed.includes('[')
-      );
+      const looksLikeJson =
+        trimmed.includes('"') &&
+        (trimmed.includes(":") || trimmed.includes("{") || trimmed.includes("["));
 
       if (looksLikeJson) {
         // Try to unwrap escaped JSON first (handles {\"key\":\"value\"} patterns)
@@ -566,18 +599,20 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
         // Try parsing the unescaped content
         try {
           const parsed = JSON.parse(unescapedContent);
-          if (typeof parsed === 'object' && parsed !== null) {
+          if (typeof parsed === "object" && parsed !== null) {
             const summary = generateJsonSummary(parsed);
             return {
               type: parsed.type || "data",
               color: colors.tertiary,
-              blocks: [{
-                blockType: "json",
-                icon: "◇",
-                content: summary,
-                fullContent: JSON.stringify(parsed, null, 2),
-                isExpandable: true,
-              }],
+              blocks: [
+                {
+                  blockType: "json",
+                  icon: "◇",
+                  content: summary,
+                  fullContent: JSON.stringify(parsed, null, 2),
+                  isExpandable: true,
+                },
+              ],
             };
           }
         } catch {
@@ -586,7 +621,7 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
 
         // Try to extract something meaningful from partial JSON
         // Look for common patterns like tool results or messages
-        let summary = truncate(unescapedContent.replace(/\n/g, ' '), 100);
+        let summary = truncate(unescapedContent.replace(/\n/g, " "), 100);
 
         // Try to find and extract key information (use unescaped content for cleaner matches)
         const toolResultMatch = unescapedContent.match(/"tool_use_id":\s*"([^"]+)"/);
@@ -596,8 +631,8 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
         const progressMatch = unescapedContent.match(/"progress":\s*"([^"]{0,80})/);
 
         if (yourAgentMatch?.[1] && successMatch?.[1]) {
-          const status = successMatch[1] === 'true' ? '✓' : '✗';
-          const progressText = progressMatch?.[1] ? `: ${truncate(progressMatch[1], 60)}` : '';
+          const status = successMatch[1] === "true" ? "✓" : "✗";
+          const progressText = progressMatch?.[1] ? `: ${truncate(progressMatch[1], 60)}` : "";
           summary = `${status} Agent response${progressText}`;
         } else if (toolResultMatch?.[1]) {
           summary = `Tool result for ${toolResultMatch[1].slice(0, 20)}...`;
@@ -610,14 +645,16 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
         return {
           type: "log",
           color: colors.tertiary,
-          blocks: [{
-            blockType: "json",
-            icon: "◇",
-            content: summary,
-            // Store the unescaped content for expansion
-            fullContent: unescapedContent !== actualContent ? unescapedContent : actualContent,
-            isExpandable: true,
-          }],
+          blocks: [
+            {
+              blockType: "json",
+              icon: "◇",
+              content: summary,
+              // Store the unescaped content for expansion
+              fullContent: unescapedContent !== actualContent ? unescapedContent : actualContent,
+              isExpandable: true,
+            },
+          ],
         };
       }
 
@@ -625,13 +662,16 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
       return {
         type: "log",
         color: colors.tertiary,
-        blocks: [{
-          blockType: "text",
-          icon: "•",
-          content: actualContent.length > 500 ? actualContent.slice(0, 500) + "..." : actualContent,
-          fullContent: actualContent.length > 500 ? actualContent : undefined,
-          isExpandable: actualContent.length > 500,
-        }],
+        blocks: [
+          {
+            blockType: "text",
+            icon: "•",
+            content:
+              actualContent.length > 500 ? actualContent.slice(0, 500) + "..." : actualContent,
+            fullContent: actualContent.length > 500 ? actualContent : undefined,
+            isExpandable: actualContent.length > 500,
+          },
+        ],
       };
     }
   };
@@ -655,8 +695,12 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
       case "tool_result":
         return {
           bgcolor: block.isError
-            ? (isDark ? "rgba(168, 84, 84, 0.15)" : "rgba(181, 66, 66, 0.12)")
-            : (isDark ? "rgba(76, 175, 80, 0.1)" : "rgba(56, 142, 60, 0.08)"),
+            ? isDark
+              ? "rgba(168, 84, 84, 0.15)"
+              : "rgba(181, 66, 66, 0.12)"
+            : isDark
+              ? "rgba(76, 175, 80, 0.1)"
+              : "rgba(56, 142, 60, 0.08)",
           borderLeft: block.isError ? `3px solid ${colors.rust}` : `2px solid ${colors.amber}`,
           pl: 1,
         };
@@ -680,35 +724,43 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
 
   if (!sessionLogs || sessionLogs.length === 0) {
     return (
-      <Box sx={{
-        p: 3,
-        height: "100%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}>
-        <Box sx={{
-          textAlign: "center",
-          p: 4,
-          bgcolor: isDark ? "rgba(100, 100, 100, 0.08)" : "rgba(150, 150, 150, 0.06)",
-          borderRadius: 2,
-          border: "1px dashed",
-          borderColor: isDark ? "rgba(100, 100, 100, 0.2)" : "rgba(150, 150, 150, 0.2)",
-        }}>
-          <Typography sx={{
-            fontFamily: "code",
-            fontSize: "0.8rem",
-            color: colors.text.tertiary,
-            mb: 0.5,
-          }}>
+      <Box
+        sx={{
+          p: 3,
+          height: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Box
+          sx={{
+            textAlign: "center",
+            p: 4,
+            bgcolor: isDark ? "rgba(100, 100, 100, 0.08)" : "rgba(150, 150, 150, 0.06)",
+            borderRadius: 2,
+            border: "1px dashed",
+            borderColor: isDark ? "rgba(100, 100, 100, 0.2)" : "rgba(150, 150, 150, 0.2)",
+          }}
+        >
+          <Typography
+            sx={{
+              fontFamily: "code",
+              fontSize: "0.8rem",
+              color: colors.text.tertiary,
+              mb: 0.5,
+            }}
+          >
             No session logs yet
           </Typography>
-          <Typography sx={{
-            fontFamily: "code",
-            fontSize: "0.7rem",
-            color: colors.text.tertiary,
-            opacity: 0.7,
-          }}>
+          <Typography
+            sx={{
+              fontFamily: "code",
+              fontSize: "0.7rem",
+              color: colors.text.tertiary,
+              opacity: 0.7,
+            }}
+          >
             Logs will appear here when the task starts running
           </Typography>
         </Box>
@@ -717,7 +769,9 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
   }
 
   return (
-    <Box sx={{ position: "relative", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+    <Box
+      sx={{ position: "relative", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}
+    >
       {/* Follow button - shown when user scrolls up */}
       {!isFollowing && (
         <Box
@@ -809,78 +863,123 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
                     {formatted.type}
                   </Chip>
                   <Tooltip title={new Date(log.createdAt).toLocaleString()} placement="top">
-                    <Typography sx={{
-                      fontFamily: "code",
-                      fontSize: "0.65rem",
-                      color: colors.text.tertiary,
-                      opacity: 0.8,
-                    }}>
+                    <Typography
+                      sx={{
+                        fontFamily: "code",
+                        fontSize: "0.65rem",
+                        color: colors.text.tertiary,
+                        opacity: 0.8,
+                      }}
+                    >
                       {formatRelativeTime(log.createdAt)}
                     </Typography>
                   </Tooltip>
                 </Box>
-              <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                {formatted.blocks.map((block, idx) => {
-                  const blockId = `${log.id}-${block.blockType}-${idx}`;
-                  const isExpanded = expandedBlocks.has(blockId);
-                  const isCopied = copiedBlock === blockId;
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                  {formatted.blocks.map((block, idx) => {
+                    const blockId = `${log.id}-${block.blockType}-${idx}`;
+                    const isExpanded = expandedBlocks.has(blockId);
+                    const isCopied = copiedBlock === blockId;
 
-                  return (
-                    <Box
-                      key={idx}
-                      sx={{
-                        display: "flex",
-                        flexDirection: "column",
-                        fontFamily: "code",
-                        fontSize: "0.75rem",
-                        borderRadius: 0.5,
-                        py: 0.5,
-                        ...getBlockStyles(block, formatted.color),
-                      }}
-                    >
-                      <Box sx={{ display: "flex", alignItems: "flex-start", gap: 0.5 }}>
-                        {block.icon && (
-                          <Typography
-                            component="span"
-                            sx={{
-                              mr: 0.5,
-                              fontFamily: "code",
-                              fontSize: block.isError ? "0.8rem" : "0.75rem",
-                              color: block.isError ? colors.rust : formatted.color,
-                              flexShrink: 0,
-                            }}
-                          >
-                            {block.icon}
-                          </Typography>
-                        )}
+                    return (
+                      <Box
+                        key={idx}
+                        sx={{
+                          display: "flex",
+                          flexDirection: "column",
+                          fontFamily: "code",
+                          fontSize: "0.75rem",
+                          borderRadius: 0.5,
+                          py: 0.5,
+                          ...getBlockStyles(block, formatted.color),
+                        }}
+                      >
+                        <Box sx={{ display: "flex", alignItems: "flex-start", gap: 0.5 }}>
+                          {block.icon && (
+                            <Typography
+                              component="span"
+                              sx={{
+                                mr: 0.5,
+                                fontFamily: "code",
+                                fontSize: block.isError ? "0.8rem" : "0.75rem",
+                                color: block.isError ? colors.rust : formatted.color,
+                                flexShrink: 0,
+                              }}
+                            >
+                              {block.icon}
+                            </Typography>
+                          )}
 
-                        {block.blockType === "tool" ? (
-                          <Box sx={{ flex: 1 }}>
-                            <Box sx={{ display: "flex", alignItems: "baseline", gap: 0.5, flexWrap: "wrap" }}>
-                              <Typography
-                                component="span"
+                          {block.blockType === "tool" ? (
+                            <Box sx={{ flex: 1 }}>
+                              <Box
                                 sx={{
-                                  fontFamily: "code",
-                                  fontSize: "0.75rem",
-                                  color: colors.purple,
-                                  fontWeight: 600,
+                                  display: "flex",
+                                  alignItems: "baseline",
+                                  gap: 0.5,
+                                  flexWrap: "wrap",
                                 }}
                               >
-                                {block.label}
-                              </Typography>
-                              {!isExpanded && block.content && (
                                 <Typography
                                   component="span"
                                   sx={{
                                     fontFamily: "code",
-                                    fontSize: "0.7rem",
+                                    fontSize: "0.75rem",
+                                    color: colors.purple,
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  {block.label}
+                                </Typography>
+                                {!isExpanded && block.content && (
+                                  <Typography
+                                    component="span"
+                                    sx={{
+                                      fontFamily: "code",
+                                      fontSize: "0.7rem",
+                                      color: colors.text.tertiary,
+                                    }}
+                                  >
+                                    {block.content}
+                                  </Typography>
+                                )}
+                                {block.isExpandable && (
+                                  <IconButton
+                                    size="sm"
+                                    variant="plain"
+                                    onClick={() => toggleBlock(blockId)}
+                                    sx={{
+                                      fontSize: "0.65rem",
+                                      minWidth: "auto",
+                                      minHeight: "auto",
+                                      ml: 0.5,
+                                      color: colors.purple,
+                                    }}
+                                  >
+                                    {isExpanded ? "▼" : "▶"}
+                                  </IconButton>
+                                )}
+                              </Box>
+                              {isExpanded && block.fullContent && (
+                                <Box sx={{ mt: 1, mx: 0 }}>
+                                  <JsonViewer content={block.fullContent} maxHeight="300px" />
+                                </Box>
+                              )}
+                            </Box>
+                          ) : block.blockType === "json" ? (
+                            <Box sx={{ flex: 1 }}>
+                              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                                <Typography
+                                  component="span"
+                                  sx={{
+                                    fontFamily: "code",
+                                    fontSize: "0.75rem",
                                     color: colors.text.tertiary,
+                                    fontStyle: "italic",
                                   }}
                                 >
                                   {block.content}
                                 </Typography>
-                              )}
-                              {block.isExpandable && (
                                 <IconButton
                                   size="sm"
                                   variant="plain"
@@ -889,71 +988,162 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
                                     fontSize: "0.65rem",
                                     minWidth: "auto",
                                     minHeight: "auto",
-                                    ml: 0.5,
-                                    color: colors.purple,
+                                    color: "text.tertiary",
                                   }}
                                 >
                                   {isExpanded ? "▼" : "▶"}
                                 </IconButton>
+                              </Box>
+                              {isExpanded && block.fullContent && (
+                                <Box sx={{ mt: 1, mx: 0 }}>
+                                  <JsonViewer content={block.fullContent} maxHeight="400px" />
+                                </Box>
                               )}
                             </Box>
-                            {isExpanded && block.fullContent && (
-                              <Box sx={{ mt: 1, mx: 0 }}>
-                                <JsonViewer content={block.fullContent} maxHeight="300px" />
+                          ) : block.blockType === "tool_result" ? (
+                            <Box sx={{ flex: 1 }}>
+                              <Box
+                                sx={{
+                                  display: "flex",
+                                  alignItems: "flex-start",
+                                  justifyContent: "space-between",
+                                  gap: 1,
+                                }}
+                              >
+                                {!isExpanded ? (
+                                  <Typography
+                                    component="div"
+                                    sx={{
+                                      fontFamily: "code",
+                                      fontSize: block.isError ? "0.8rem" : "0.75rem",
+                                      color: block.isError ? colors.rust : colors.text.secondary,
+                                      whiteSpace: "pre-wrap",
+                                      wordBreak: "break-word",
+                                      flex: 1,
+                                    }}
+                                  >
+                                    {block.content}
+                                    {block.isExpandable && block.extraInfo && (
+                                      <Typography
+                                        component="span"
+                                        sx={{
+                                          fontFamily: "code",
+                                          fontSize: "0.65rem",
+                                          color: colors.text.tertiary,
+                                          fontStyle: "italic",
+                                          ml: 0.5,
+                                        }}
+                                      >
+                                        {` (${block.extraInfo})`}
+                                      </Typography>
+                                    )}
+                                  </Typography>
+                                ) : (
+                                  <Box sx={{ flex: 1 }} />
+                                )}
+                                <Box sx={{ display: "flex", gap: 0.25, flexShrink: 0 }}>
+                                  {block.isExpandable && (
+                                    <Tooltip
+                                      title={isExpanded ? "Collapse" : "Expand"}
+                                      placement="top"
+                                    >
+                                      <IconButton
+                                        size="sm"
+                                        variant="plain"
+                                        onClick={() => toggleBlock(blockId)}
+                                        sx={{
+                                          fontSize: "0.65rem",
+                                          minWidth: "auto",
+                                          minHeight: "auto",
+                                          color: "text.tertiary",
+                                          "&:hover": { color: "text.primary" },
+                                        }}
+                                      >
+                                        {isExpanded ? "▼" : "▶"}
+                                      </IconButton>
+                                    </Tooltip>
+                                  )}
+                                  {(block.fullContent || block.content) && (
+                                    <Tooltip title={isCopied ? "Copied!" : "Copy"} placement="top">
+                                      <IconButton
+                                        size="sm"
+                                        variant="plain"
+                                        onClick={() =>
+                                          copyBlock(block.fullContent || block.content, blockId)
+                                        }
+                                        sx={{
+                                          fontSize: "0.65rem",
+                                          minWidth: "auto",
+                                          minHeight: "auto",
+                                          color: isCopied ? colors.amber : "text.tertiary",
+                                          "&:hover": { color: "text.primary" },
+                                        }}
+                                      >
+                                        {isCopied ? "✓" : "⧉"}
+                                      </IconButton>
+                                    </Tooltip>
+                                  )}
+                                </Box>
                               </Box>
-                            )}
-                          </Box>
-                        ) : block.blockType === "json" ? (
-                          <Box sx={{ flex: 1 }}>
-                            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                              <Typography
-                                component="span"
-                                sx={{
-                                  fontFamily: "code",
-                                  fontSize: "0.75rem",
-                                  color: colors.text.tertiary,
-                                  fontStyle: "italic",
-                                }}
-                              >
-                                {block.content}
-                              </Typography>
-                              <IconButton
-                                size="sm"
-                                variant="plain"
-                                onClick={() => toggleBlock(blockId)}
-                                sx={{
-                                  fontSize: "0.65rem",
-                                  minWidth: "auto",
-                                  minHeight: "auto",
-                                  color: "text.tertiary",
-                                }}
-                              >
-                                {isExpanded ? "▼" : "▶"}
-                              </IconButton>
+                              {isExpanded && block.fullContent && (
+                                <Box sx={{ mt: 1, mx: 0 }}>
+                                  {isJsonContent(block.fullContent) ? (
+                                    <JsonViewer content={block.fullContent} maxHeight="400px" />
+                                  ) : (
+                                    <Typography
+                                      component="div"
+                                      sx={{
+                                        fontFamily: "code",
+                                        fontSize: "0.75rem",
+                                        color: block.isError ? colors.rust : colors.text.secondary,
+                                        whiteSpace: "pre-wrap",
+                                        wordBreak: "break-word",
+                                        p: 1,
+                                        bgcolor: isDark
+                                          ? "rgba(30, 30, 30, 0.5)"
+                                          : "rgba(250, 250, 250, 0.95)",
+                                        border: "1px solid",
+                                        borderColor: isDark
+                                          ? "rgba(100, 100, 100, 0.3)"
+                                          : "rgba(120, 120, 120, 0.5)",
+                                        borderRadius: 1,
+                                      }}
+                                    >
+                                      {block.fullContent}
+                                    </Typography>
+                                  )}
+                                </Box>
+                              )}
                             </Box>
-                            {isExpanded && block.fullContent && (
-                              <Box sx={{ mt: 1, mx: 0 }}>
-                                <JsonViewer content={block.fullContent} maxHeight="400px" />
-                              </Box>
-                            )}
-                          </Box>
-                        ) : block.blockType === "tool_result" ? (
-                          <Box sx={{ flex: 1 }}>
-                            <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 1 }}>
-                              {!isExpanded ? (
+                          ) : (
+                            <Box sx={{ flex: 1 }}>
+                              <Box
+                                sx={{
+                                  display: "flex",
+                                  alignItems: "flex-start",
+                                  justifyContent: "space-between",
+                                  gap: 1,
+                                }}
+                              >
                                 <Typography
                                   component="div"
                                   sx={{
                                     fontFamily: "code",
                                     fontSize: block.isError ? "0.8rem" : "0.75rem",
-                                    color: block.isError ? colors.rust : colors.text.secondary,
+                                    color: block.isError
+                                      ? colors.rust
+                                      : block.blockType === "thinking"
+                                        ? colors.text.tertiary
+                                        : colors.text.secondary,
                                     whiteSpace: "pre-wrap",
                                     wordBreak: "break-word",
                                     flex: 1,
                                   }}
                                 >
-                                  {block.content}
-                                  {block.isExpandable && block.extraInfo && (
+                                  {isExpanded && block.fullContent
+                                    ? block.fullContent
+                                    : block.content}
+                                  {block.isExpandable && !isExpanded && block.extraInfo && (
                                     <Typography
                                       component="span"
                                       sx={{
@@ -968,153 +1158,60 @@ export default function SessionLogPanel({ sessionLogs }: SessionLogPanelProps) {
                                     </Typography>
                                   )}
                                 </Typography>
-                              ) : (
-                                <Box sx={{ flex: 1 }} />
-                              )}
-                              <Box sx={{ display: "flex", gap: 0.25, flexShrink: 0 }}>
-                                {block.isExpandable && (
-                                  <Tooltip title={isExpanded ? "Collapse" : "Expand"} placement="top">
-                                    <IconButton
-                                      size="sm"
-                                      variant="plain"
-                                      onClick={() => toggleBlock(blockId)}
-                                      sx={{
-                                        fontSize: "0.65rem",
-                                        minWidth: "auto",
-                                        minHeight: "auto",
-                                        color: "text.tertiary",
-                                        "&:hover": { color: "text.primary" },
-                                      }}
+                                <Box sx={{ display: "flex", gap: 0.25, flexShrink: 0 }}>
+                                  {block.isExpandable && (
+                                    <Tooltip
+                                      title={isExpanded ? "Collapse" : "Expand"}
+                                      placement="top"
                                     >
-                                      {isExpanded ? "▼" : "▶"}
-                                    </IconButton>
-                                  </Tooltip>
-                                )}
-                                {(block.fullContent || block.content) && (
-                                  <Tooltip title={isCopied ? "Copied!" : "Copy"} placement="top">
-                                    <IconButton
-                                      size="sm"
-                                      variant="plain"
-                                      onClick={() => copyBlock(block.fullContent || block.content, blockId)}
-                                      sx={{
-                                        fontSize: "0.65rem",
-                                        minWidth: "auto",
-                                        minHeight: "auto",
-                                        color: isCopied ? colors.amber : "text.tertiary",
-                                        "&:hover": { color: "text.primary" },
-                                      }}
-                                    >
-                                      {isCopied ? "✓" : "⧉"}
-                                    </IconButton>
-                                  </Tooltip>
-                                )}
+                                      <IconButton
+                                        size="sm"
+                                        variant="plain"
+                                        onClick={() => toggleBlock(blockId)}
+                                        sx={{
+                                          fontSize: "0.65rem",
+                                          minWidth: "auto",
+                                          minHeight: "auto",
+                                          color: "text.tertiary",
+                                          "&:hover": { color: "text.primary" },
+                                        }}
+                                      >
+                                        {isExpanded ? "▼" : "▶"}
+                                      </IconButton>
+                                    </Tooltip>
+                                  )}
+                                  {(block.fullContent || block.content) && (
+                                    <Tooltip title={isCopied ? "Copied!" : "Copy"} placement="top">
+                                      <IconButton
+                                        size="sm"
+                                        variant="plain"
+                                        onClick={() =>
+                                          copyBlock(block.fullContent || block.content, blockId)
+                                        }
+                                        sx={{
+                                          fontSize: "0.65rem",
+                                          minWidth: "auto",
+                                          minHeight: "auto",
+                                          color: isCopied ? colors.amber : "text.tertiary",
+                                          "&:hover": { color: "text.primary" },
+                                        }}
+                                      >
+                                        {isCopied ? "✓" : "⧉"}
+                                      </IconButton>
+                                    </Tooltip>
+                                  )}
+                                </Box>
                               </Box>
                             </Box>
-                            {isExpanded && block.fullContent && (
-                              <Box sx={{ mt: 1, mx: 0 }}>
-                                {isJsonContent(block.fullContent) ? (
-                                  <JsonViewer content={block.fullContent} maxHeight="400px" />
-                                ) : (
-                                  <Typography
-                                    component="div"
-                                    sx={{
-                                      fontFamily: "code",
-                                      fontSize: "0.75rem",
-                                      color: block.isError ? colors.rust : colors.text.secondary,
-                                      whiteSpace: "pre-wrap",
-                                      wordBreak: "break-word",
-                                      p: 1,
-                                      bgcolor: isDark ? "rgba(30, 30, 30, 0.5)" : "rgba(250, 250, 250, 0.95)",
-                                      border: "1px solid",
-                                      borderColor: isDark ? "rgba(100, 100, 100, 0.3)" : "rgba(120, 120, 120, 0.5)",
-                                      borderRadius: 1,
-                                    }}
-                                  >
-                                    {block.fullContent}
-                                  </Typography>
-                                )}
-                              </Box>
-                            )}
-                          </Box>
-                        ) : (
-                          <Box sx={{ flex: 1 }}>
-                            <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 1 }}>
-                              <Typography
-                                component="div"
-                                sx={{
-                                  fontFamily: "code",
-                                  fontSize: block.isError ? "0.8rem" : "0.75rem",
-                                  color: block.isError ? colors.rust : (block.blockType === "thinking" ? colors.text.tertiary : colors.text.secondary),
-                                  whiteSpace: "pre-wrap",
-                                  wordBreak: "break-word",
-                                  flex: 1,
-                                }}
-                              >
-                                {isExpanded && block.fullContent ? block.fullContent : block.content}
-                                {block.isExpandable && !isExpanded && block.extraInfo && (
-                                  <Typography
-                                    component="span"
-                                    sx={{
-                                      fontFamily: "code",
-                                      fontSize: "0.65rem",
-                                      color: colors.text.tertiary,
-                                      fontStyle: "italic",
-                                      ml: 0.5,
-                                    }}
-                                  >
-                                    {` (${block.extraInfo})`}
-                                  </Typography>
-                                )}
-                              </Typography>
-                              <Box sx={{ display: "flex", gap: 0.25, flexShrink: 0 }}>
-                                {block.isExpandable && (
-                                  <Tooltip title={isExpanded ? "Collapse" : "Expand"} placement="top">
-                                    <IconButton
-                                      size="sm"
-                                      variant="plain"
-                                      onClick={() => toggleBlock(blockId)}
-                                      sx={{
-                                        fontSize: "0.65rem",
-                                        minWidth: "auto",
-                                        minHeight: "auto",
-                                        color: "text.tertiary",
-                                        "&:hover": { color: "text.primary" },
-                                      }}
-                                    >
-                                      {isExpanded ? "▼" : "▶"}
-                                    </IconButton>
-                                  </Tooltip>
-                                )}
-                                {(block.fullContent || block.content) && (
-                                  <Tooltip title={isCopied ? "Copied!" : "Copy"} placement="top">
-                                    <IconButton
-                                      size="sm"
-                                      variant="plain"
-                                      onClick={() => copyBlock(block.fullContent || block.content, blockId)}
-                                      sx={{
-                                        fontSize: "0.65rem",
-                                        minWidth: "auto",
-                                        minHeight: "auto",
-                                        color: isCopied ? colors.amber : "text.tertiary",
-                                        "&:hover": { color: "text.primary" },
-                                      }}
-                                    >
-                                      {isCopied ? "✓" : "⧉"}
-                                    </IconButton>
-                                  </Tooltip>
-                                )}
-                              </Box>
-                            </Box>
-                          </Box>
-                        )}
+                          )}
+                        </Box>
                       </Box>
-                    </Box>
-                  );
-                })}
+                    );
+                  })}
+                </Box>
               </Box>
-            </Box>
-          );
-        })}
+            );
+          })}
         </Box>
       </Box>
     </Box>

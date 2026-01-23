@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface UseAutoScrollResult {
   /** Whether auto-scroll is currently following new content */
@@ -18,7 +18,10 @@ interface UseAutoScrollResult {
  * @param deps - Array of dependencies that trigger scroll check
  * @returns Object with isFollowing state and scrollToBottom function
  */
-export function useAutoScroll(element: HTMLDivElement | null, deps: unknown[]): UseAutoScrollResult {
+export function useAutoScroll(
+  element: HTMLDivElement | null,
+  deps: unknown[],
+): UseAutoScrollResult {
   const [isFollowing, setIsFollowing] = useState(true);
   const hasInitializedRef = useRef(false);
 

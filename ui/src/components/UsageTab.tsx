@@ -1,14 +1,14 @@
-import { useMemo, useState } from "react";
 import Box from "@mui/joy/Box";
 import Card from "@mui/joy/Card";
-import Typography from "@mui/joy/Typography";
-import Select from "@mui/joy/Select";
 import Option from "@mui/joy/Option";
-import Table from "@mui/joy/Table";
+import Select from "@mui/joy/Select";
 import { useColorScheme } from "@mui/joy/styles";
-import { useSessionCosts, useAgents } from "../hooks/queries";
-import { formatCurrency, formatCompactNumber, formatDuration } from "../lib/utils";
-import { CostTrendChart, TokenDistributionChart, ModelUsageChart } from "./UsageCharts";
+import Table from "@mui/joy/Table";
+import Typography from "@mui/joy/Typography";
+import { useMemo, useState } from "react";
+import { useAgents, useSessionCosts } from "../hooks/queries";
+import { formatCompactNumber, formatCurrency, formatDuration } from "../lib/utils";
+import { CostTrendChart, ModelUsageChart, TokenDistributionChart } from "./UsageCharts";
 
 type TimeRange = "7d" | "30d" | "90d";
 
@@ -46,9 +46,10 @@ export default function UsageTab() {
       totalTokens: filteredCosts.reduce((sum, c) => sum + c.inputTokens + c.outputTokens, 0),
       totalSessions: filteredCosts.length,
       totalDuration: filteredCosts.reduce((sum, c) => sum + c.durationMs, 0),
-      avgCostPerSession: filteredCosts.length > 0
-        ? filteredCosts.reduce((sum, c) => sum + c.totalCostUsd, 0) / filteredCosts.length
-        : 0,
+      avgCostPerSession:
+        filteredCosts.length > 0
+          ? filteredCosts.reduce((sum, c) => sum + c.totalCostUsd, 0) / filteredCosts.length
+          : 0,
     };
   }, [filteredCosts]);
 
@@ -76,7 +77,12 @@ export default function UsageTab() {
   }, [filteredCosts, agents]);
 
   // Stat card component
-  const StatCard = ({ title, value, subValue, color }: {
+  const StatCard = ({
+    title,
+    value,
+    subValue,
+    color,
+  }: {
     title: string;
     value: string;
     subValue?: string;
@@ -186,185 +192,202 @@ export default function UsageTab() {
       </Box>
 
       {/* Scrollable content area */}
-      <Box sx={{ flex: 1, overflow: "auto", p: { xs: 1.5, md: 2 }, display: "flex", flexDirection: "column", gap: 3 }}>
+      <Box
+        sx={{
+          flex: 1,
+          overflow: "auto",
+          p: { xs: 1.5, md: 2 },
+          display: "flex",
+          flexDirection: "column",
+          gap: 3,
+        }}
+      >
         {/* Summary Stats */}
         <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
-        <StatCard
-          title="TOTAL COST"
-          value={formatCurrency(summaryStats.totalCost)}
-          color={colors.amber}
-        />
-        <StatCard
-          title="TOTAL TOKENS"
-          value={formatCompactNumber(summaryStats.totalTokens)}
-          color={colors.green}
-        />
-        <StatCard
-          title="SESSIONS"
-          value={summaryStats.totalSessions.toString()}
-          color={colors.blue}
-        />
-        <StatCard
-          title="TOTAL TIME"
-          value={formatDuration(summaryStats.totalDuration)}
-          color={colors.gold}
-        />
-        <StatCard
-          title="AVG COST/SESSION"
-          value={formatCurrency(summaryStats.avgCostPerSession)}
-          color={colors.amber}
-        />
-      </Box>
+          <StatCard
+            title="TOTAL COST"
+            value={formatCurrency(summaryStats.totalCost)}
+            color={colors.amber}
+          />
+          <StatCard
+            title="TOTAL TOKENS"
+            value={formatCompactNumber(summaryStats.totalTokens)}
+            color={colors.green}
+          />
+          <StatCard
+            title="SESSIONS"
+            value={summaryStats.totalSessions.toString()}
+            color={colors.blue}
+          />
+          <StatCard
+            title="TOTAL TIME"
+            value={formatDuration(summaryStats.totalDuration)}
+            color={colors.gold}
+          />
+          <StatCard
+            title="AVG COST/SESSION"
+            value={formatCurrency(summaryStats.avgCostPerSession)}
+            color={colors.amber}
+          />
+        </Box>
 
-      {/* Charts */}
-      <Box sx={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-        {/* Cost Trend */}
-        <Card
-          variant="outlined"
-          sx={{
-            p: 2,
-            bgcolor: "background.surface",
-            borderColor: "neutral.outlinedBorder",
-            flex: 2,
-            minWidth: 300,
-          }}
-        >
-          {filteredCosts.length > 0 ? (
-            <CostTrendChart costs={filteredCosts} timeRange={timeRange} />
-          ) : (
-            <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
-              No usage data available
-            </Typography>
-          )}
-        </Card>
-
-        {/* Token Distribution */}
-        <Card
-          variant="outlined"
-          sx={{
-            p: 2,
-            bgcolor: "background.surface",
-            borderColor: "neutral.outlinedBorder",
-            flex: 1,
-            minWidth: 250,
-          }}
-        >
-          {filteredCosts.length > 0 ? (
-            <TokenDistributionChart costs={filteredCosts} />
-          ) : (
-            <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
-              No usage data
-            </Typography>
-          )}
-        </Card>
-      </Box>
-
-      {/* Second Row: Model Usage + Agent Leaderboard */}
-      <Box sx={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-        {/* Model Usage */}
-        <Card
-          variant="outlined"
-          sx={{
-            p: 2,
-            bgcolor: "background.surface",
-            borderColor: "neutral.outlinedBorder",
-            flex: 1,
-            minWidth: 250,
-          }}
-        >
-          {filteredCosts.length > 0 ? (
-            <ModelUsageChart costs={filteredCosts} />
-          ) : (
-            <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
-              No usage data
-            </Typography>
-          )}
-        </Card>
-
-        {/* Agent Leaderboard */}
-        <Card
-          variant="outlined"
-          sx={{
-            p: 2,
-            bgcolor: "background.surface",
-            borderColor: "neutral.outlinedBorder",
-            flex: 1,
-            minWidth: 300,
-          }}
-        >
-          <Typography
+        {/* Charts */}
+        <Box sx={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+          {/* Cost Trend */}
+          <Card
+            variant="outlined"
             sx={{
-              fontFamily: "code",
-              fontSize: "0.7rem",
-              color: "text.tertiary",
-              letterSpacing: "0.05em",
-              mb: 2,
+              p: 2,
+              bgcolor: "background.surface",
+              borderColor: "neutral.outlinedBorder",
+              flex: 2,
+              minWidth: 300,
             }}
           >
-            TOP AGENTS BY COST
-          </Typography>
+            {filteredCosts.length > 0 ? (
+              <CostTrendChart costs={filteredCosts} timeRange={timeRange} />
+            ) : (
+              <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
+                No usage data available
+              </Typography>
+            )}
+          </Card>
 
-          {agentLeaderboard.length > 0 ? (
-            <Table
-              size="sm"
+          {/* Token Distribution */}
+          <Card
+            variant="outlined"
+            sx={{
+              p: 2,
+              bgcolor: "background.surface",
+              borderColor: "neutral.outlinedBorder",
+              flex: 1,
+              minWidth: 250,
+            }}
+          >
+            {filteredCosts.length > 0 ? (
+              <TokenDistributionChart costs={filteredCosts} />
+            ) : (
+              <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
+                No usage data
+              </Typography>
+            )}
+          </Card>
+        </Box>
+
+        {/* Second Row: Model Usage + Agent Leaderboard */}
+        <Box sx={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+          {/* Model Usage */}
+          <Card
+            variant="outlined"
+            sx={{
+              p: 2,
+              bgcolor: "background.surface",
+              borderColor: "neutral.outlinedBorder",
+              flex: 1,
+              minWidth: 250,
+            }}
+          >
+            {filteredCosts.length > 0 ? (
+              <ModelUsageChart costs={filteredCosts} />
+            ) : (
+              <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
+                No usage data
+              </Typography>
+            )}
+          </Card>
+
+          {/* Agent Leaderboard */}
+          <Card
+            variant="outlined"
+            sx={{
+              p: 2,
+              bgcolor: "background.surface",
+              borderColor: "neutral.outlinedBorder",
+              flex: 1,
+              minWidth: 300,
+            }}
+          >
+            <Typography
               sx={{
-                "--TableCell-paddingY": "8px",
-                "--TableCell-paddingX": "8px",
-                "--TableCell-borderColor": "var(--joy-palette-neutral-outlinedBorder)",
-                "& thead th": {
-                  bgcolor: "background.surface",
-                  fontFamily: "code",
-                  fontSize: "0.65rem",
-                  letterSpacing: "0.05em",
-                  color: "text.tertiary",
-                },
-                "& tbody tr:hover": {
-                  bgcolor: colors.hoverBg,
-                },
+                fontFamily: "code",
+                fontSize: "0.7rem",
+                color: "text.tertiary",
+                letterSpacing: "0.05em",
+                mb: 2,
               }}
             >
-              <thead>
-                <tr>
-                  <th>AGENT</th>
-                  <th style={{ width: 80, textAlign: "right" }}>COST</th>
-                  <th style={{ width: 80, textAlign: "right" }}>TOKENS</th>
-                  <th style={{ width: 60, textAlign: "right" }}>SESSIONS</th>
-                </tr>
-              </thead>
-              <tbody>
-                {agentLeaderboard.map((agent) => (
-                  <tr key={agent.agentId}>
-                    <td>
-                      <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.primary" }}>
-                        {agent.agentName}
-                      </Typography>
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: colors.amber }}>
-                        {formatCurrency(agent.cost)}
-                      </Typography>
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.secondary" }}>
-                        {formatCompactNumber(agent.tokens)}
-                      </Typography>
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary" }}>
-                        {agent.sessions}
-                      </Typography>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          ) : (
-            <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
-              No agent usage data
+              TOP AGENTS BY COST
             </Typography>
-          )}
-        </Card>
-      </Box>
+
+            {agentLeaderboard.length > 0 ? (
+              <Table
+                size="sm"
+                sx={{
+                  "--TableCell-paddingY": "8px",
+                  "--TableCell-paddingX": "8px",
+                  "--TableCell-borderColor": "var(--joy-palette-neutral-outlinedBorder)",
+                  "& thead th": {
+                    bgcolor: "background.surface",
+                    fontFamily: "code",
+                    fontSize: "0.65rem",
+                    letterSpacing: "0.05em",
+                    color: "text.tertiary",
+                  },
+                  "& tbody tr:hover": {
+                    bgcolor: colors.hoverBg,
+                  },
+                }}
+              >
+                <thead>
+                  <tr>
+                    <th>AGENT</th>
+                    <th style={{ width: 80, textAlign: "right" }}>COST</th>
+                    <th style={{ width: 80, textAlign: "right" }}>TOKENS</th>
+                    <th style={{ width: 60, textAlign: "right" }}>SESSIONS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {agentLeaderboard.map((agent) => (
+                    <tr key={agent.agentId}>
+                      <td>
+                        <Typography
+                          sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.primary" }}
+                        >
+                          {agent.agentName}
+                        </Typography>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <Typography
+                          sx={{ fontFamily: "code", fontSize: "0.75rem", color: colors.amber }}
+                        >
+                          {formatCurrency(agent.cost)}
+                        </Typography>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <Typography
+                          sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.secondary" }}
+                        >
+                          {formatCompactNumber(agent.tokens)}
+                        </Typography>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <Typography
+                          sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary" }}
+                        >
+                          {agent.sessions}
+                        </Typography>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            ) : (
+              <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
+                No agent usage data
+              </Typography>
+            )}
+          </Card>
+        </Box>
       </Box>
     </Card>
   );

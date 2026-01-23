@@ -42,15 +42,6 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install PM2 globally for process management
-RUN npm install -g pm2
-
-# Install ai-tracker for tracking AI vs human code changes
-RUN pip3 install --break-system-packages cc-ai-tracker
-
-# Install wts (git worktree manager) globally for agents
-RUN npm install -g @desplega.ai/wts
-
 # Install GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
     && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
@@ -107,6 +98,23 @@ RUN echo '{ \
 USER root
 COPY --from=builder /build/agent-swarm /usr/local/bin/agent-swarm
 RUN chmod +x /usr/local/bin/agent-swarm
+
+# Install step (at the end to leverage caching)
+
+# Install PM2 globally for process management
+RUN npm install -g pm2
+
+# Install ai-tracker for tracking AI vs human code changes
+RUN pip3 install --break-system-packages cc-ai-tracker
+
+# Install wts (git worktree manager) globally for agents
+RUN npm install -g @desplega.ai/wts@latest
+
+# Install qa-use (QA tool) globally
+RUN npm install -g @desplega.ai/qa-use@latest
+
+# Install qa-use dependencies
+RUN qa-use install-deps
 
 # Copy commands
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/

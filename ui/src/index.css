@@ -4,20 +4,20 @@
 
 :root {
   /* Beehive color palette - dark mode defaults */
-  --hive-amber: #F5A623;
-  --hive-honey: #FFB84D;
-  --hive-gold: #D4A574;
-  --hive-deep: #C67C00;
-  --hive-rust: #A85454;
-  --hive-blue: #3B82F6;
-  --hive-cream: #FFF8E7;
-  --hive-body: #0D0906;
-  --hive-surface: #1A130E;
-  --hive-earth: #251C15;
-  --hive-border: #3A2D1F;
-  --hive-text-primary: #FFF8E7;
-  --hive-text-secondary: #C9B896;
-  --hive-text-tertiary: #8B7355;
+  --hive-amber: #f5a623;
+  --hive-honey: #ffb84d;
+  --hive-gold: #d4a574;
+  --hive-deep: #c67c00;
+  --hive-rust: #a85454;
+  --hive-blue: #3b82f6;
+  --hive-cream: #fff8e7;
+  --hive-body: #0d0906;
+  --hive-surface: #1a130e;
+  --hive-earth: #251c15;
+  --hive-border: #3a2d1f;
+  --hive-text-primary: #fff8e7;
+  --hive-text-secondary: #c9b896;
+  --hive-text-tertiary: #8b7355;
 
   font-family: "Space Grotesk", sans-serif;
   font-synthesis: none;
@@ -28,19 +28,19 @@
 
 /* Light mode color overrides */
 [data-joy-color-scheme="light"] {
-  --hive-amber: #D48806;
-  --hive-honey: #B87300;
-  --hive-gold: #8B6914;
-  --hive-deep: #9A5F00;
-  --hive-rust: #B54242;
-  --hive-cream: #1A130E;
-  --hive-body: #FDF8F3;
-  --hive-surface: #FFFFFF;
-  --hive-earth: #F5EDE4;
-  --hive-border: #E5D9CA;
-  --hive-text-primary: #1A130E;
-  --hive-text-secondary: #5C4A3D;
-  --hive-text-tertiary: #8B7355;
+  --hive-amber: #d48806;
+  --hive-honey: #b87300;
+  --hive-gold: #8b6914;
+  --hive-deep: #9a5f00;
+  --hive-rust: #b54242;
+  --hive-cream: #1a130e;
+  --hive-body: #fdf8f3;
+  --hive-surface: #ffffff;
+  --hive-earth: #f5ede4;
+  --hive-border: #e5d9ca;
+  --hive-text-primary: #1a130e;
+  --hive-text-secondary: #5c4a3d;
+  --hive-text-tertiary: #8b7355;
 }
 
 body {
@@ -95,33 +95,46 @@ body {
 
 /* Amber glow effects */
 .glow-amber {
-  text-shadow: 0 0 10px rgba(245, 166, 35, 0.5), 0 0 20px rgba(245, 166, 35, 0.3);
+  text-shadow:
+    0 0 10px rgba(245, 166, 35, 0.5),
+    0 0 20px rgba(245, 166, 35, 0.3);
 }
 
 .glow-gold {
-  text-shadow: 0 0 10px rgba(212, 165, 116, 0.5), 0 0 20px rgba(212, 165, 116, 0.3);
+  text-shadow:
+    0 0 10px rgba(212, 165, 116, 0.5),
+    0 0 20px rgba(212, 165, 116, 0.3);
 }
 
 .glow-rust {
-  text-shadow: 0 0 10px rgba(168, 84, 84, 0.5), 0 0 20px rgba(168, 84, 84, 0.3);
+  text-shadow:
+    0 0 10px rgba(168, 84, 84, 0.5),
+    0 0 20px rgba(168, 84, 84, 0.3);
 }
 
 .glow-blue {
-  text-shadow: 0 0 10px rgba(59, 130, 246, 0.5), 0 0 20px rgba(59, 130, 246, 0.3);
+  text-shadow:
+    0 0 10px rgba(59, 130, 246, 0.5),
+    0 0 20px rgba(59, 130, 246, 0.3);
 }
 
 /* Box glow effects */
 .box-glow-amber {
-  box-shadow: 0 0 15px rgba(245, 166, 35, 0.3), 0 0 30px rgba(245, 166, 35, 0.15);
+  box-shadow:
+    0 0 15px rgba(245, 166, 35, 0.3),
+    0 0 30px rgba(245, 166, 35, 0.15);
 }
 
 .box-glow-gold {
-  box-shadow: 0 0 15px rgba(212, 165, 116, 0.3), 0 0 30px rgba(212, 165, 116, 0.15);
+  box-shadow:
+    0 0 15px rgba(212, 165, 116, 0.3),
+    0 0 30px rgba(212, 165, 116, 0.15);
 }
 
 /* Breathing animation for active elements */
 @keyframes breathe {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 0.85;
     transform: scale(1);
   }
@@ -137,11 +150,14 @@ body {
 
 /* Pulse animation */
 @keyframes pulse-amber {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow: 0 0 5px rgba(245, 166, 35, 0.4);
   }
   50% {
-    box-shadow: 0 0 15px rgba(245, 166, 35, 0.6), 0 0 25px rgba(245, 166, 35, 0.3);
+    box-shadow:
+      0 0 15px rgba(245, 166, 35, 0.6),
+      0 0 25px rgba(245, 166, 35, 0.3);
   }
 }
 
@@ -151,7 +167,8 @@ body {
 
 /* Heartbeat animation for connection status */
 @keyframes heartbeat {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(1);
   }
   14% {
@@ -193,7 +210,12 @@ body {
 
 /* Gradient text for headers */
 .text-gradient-amber {
-  background: linear-gradient(135deg, var(--hive-amber) 0%, var(--hive-honey) 50%, var(--hive-deep) 100%);
+  background: linear-gradient(
+    135deg,
+    var(--hive-amber) 0%,
+    var(--hive-honey) 50%,
+    var(--hive-deep) 100%
+  );
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -233,4 +255,3 @@ body {
   pointer-events: none;
   z-index: 0;
 }
-

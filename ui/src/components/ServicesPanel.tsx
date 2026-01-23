@@ -1,15 +1,15 @@
-import { useState, useMemo } from "react";
 import Box from "@mui/joy/Box";
 import Card from "@mui/joy/Card";
-import Typography from "@mui/joy/Typography";
-import Table from "@mui/joy/Table";
-import Select from "@mui/joy/Select";
-import Option from "@mui/joy/Option";
-import Input from "@mui/joy/Input";
 import Chip from "@mui/joy/Chip";
+import Input from "@mui/joy/Input";
 import Link from "@mui/joy/Link";
+import Option from "@mui/joy/Option";
+import Select from "@mui/joy/Select";
 import { useColorScheme } from "@mui/joy/styles";
-import { useServices, useAgents } from "../hooks/queries";
+import Table from "@mui/joy/Table";
+import Typography from "@mui/joy/Typography";
+import { useMemo, useState } from "react";
+import { useAgents, useServices } from "../hooks/queries";
 import type { ServiceStatus } from "../types/api";
 
 interface ServicesPanelProps {
@@ -38,10 +38,18 @@ function formatSmartTime(dateStr: string): string {
   }
 
   // Before today: full date
-  return date.toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
-function getStatusColor(status: ServiceStatus, isDark: boolean): { bg: string; text: string; border: string } {
+function getStatusColor(
+  status: ServiceStatus,
+  isDark: boolean,
+): { bg: string; text: string; border: string } {
   switch (status) {
     case "healthy":
       return {
@@ -105,7 +113,9 @@ function ServiceCard({ service, agentName, isDark }: ServiceCardProps) {
         bgcolor: "background.surface",
       }}
     >
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 1 }}>
+      <Box
+        sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 1 }}
+      >
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography
             sx={{

@@ -144,14 +144,21 @@ echo "=============================="
 # Install the desplega-ai marketplace
 echo ""
 echo "=== Marketplace Installation ==="
+
 if command -v claude >/dev/null 2>&1; then
     echo "Installing desplega-ai/ai-toolbox marketplace..."
-    claude plugin marketplace add desplega-ai/ai-toolbox || echo "Marketplace add failed, continuing..."
+    claude plugin marketplace add desplega-ai/ai-toolbox || echo "Toolbox marketplace add failed, continuing..."
 
     echo "Installing plugins from desplega-ai-toolbox..."
     claude plugin install desplega@desplega-ai-toolbox --scope user || echo "Plugin install failed, continuing..."
     claude plugin install agent-swarm@desplega-ai-toolbox --scope user || echo "Plugin install failed, continuing..."
     claude plugin install wts@desplega-ai-toolbox --scope user || echo "Plugin install failed, continuing..."
+
+    echo "Installing desplega-ai/qa-use marketplace..."
+    claude plugin marketplace add desplega-ai/qa-use || echo "qa-use marketplace add failed, continuing..."
+
+    echo "Installing plugins from desplega.ai..."
+    claude plugin install qa-use@desplega.ai --scope user || echo "Plugin install failed, continuing..."
 
     echo "Marketplace installation completed"
 else

@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { api } from "../lib/api";
 import type { AgentWithTasks, SessionCost, UsageStats } from "../types/api";
@@ -159,7 +159,9 @@ export function useInfiniteMessages(channelId: string, pageSize = DEFAULT_MESSAG
         return true;
       });
       // Sort chronologically (oldest first)
-      return deduped.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      return deduped.sort(
+        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+      );
     },
   });
 }
@@ -177,7 +179,12 @@ export function usePostMessage(channelId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (params: { content: string; agentId?: string; replyToId?: string; mentions?: string[] }) =>
+    mutationFn: (params: {
+      content: string;
+      agentId?: string;
+      replyToId?: string;
+      mentions?: string[];
+    }) =>
       api.postMessage(channelId, params.content, {
         agentId: params.agentId,
         replyToId: params.replyToId,
@@ -236,9 +243,8 @@ function aggregateUsage(costs: SessionCost[]): UsageStats {
     cacheWriteTokens: costs.reduce((sum, c) => sum + c.cacheWriteTokens, 0),
     sessionCount: costs.length,
     totalDurationMs: costs.reduce((sum, c) => sum + c.durationMs, 0),
-    avgCostPerSession: costs.length > 0
-      ? costs.reduce((sum, c) => sum + c.totalCostUsd, 0) / costs.length
-      : 0,
+    avgCostPerSession:
+      costs.length > 0 ? costs.reduce((sum, c) => sum + c.totalCostUsd, 0) / costs.length : 0,
   };
 }
 
@@ -252,24 +258,21 @@ export function useMonthlyUsageStats() {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    const monthlyCosts = costs.filter(
-      (c) => new Date(c.createdAt) >= startOfMonth
-    );
+    const monthlyCosts = costs.filter((c) => new Date(c.createdAt) >= startOfMonth);
 
     return {
       totalCostUsd: monthlyCosts.reduce((sum, c) => sum + c.totalCostUsd, 0),
-      totalTokens: monthlyCosts.reduce(
-        (sum, c) => sum + c.inputTokens + c.outputTokens, 0
-      ),
+      totalTokens: monthlyCosts.reduce((sum, c) => sum + c.inputTokens + c.outputTokens, 0),
       inputTokens: monthlyCosts.reduce((sum, c) => sum + c.inputTokens, 0),
       outputTokens: monthlyCosts.reduce((sum, c) => sum + c.outputTokens, 0),
       cacheReadTokens: monthlyCosts.reduce((sum, c) => sum + c.cacheReadTokens, 0),
       cacheWriteTokens: monthlyCosts.reduce((sum, c) => sum + c.cacheWriteTokens, 0),
       sessionCount: monthlyCosts.length,
       totalDurationMs: monthlyCosts.reduce((sum, c) => sum + c.durationMs, 0),
-      avgCostPerSession: monthlyCosts.length > 0
-        ? monthlyCosts.reduce((sum, c) => sum + c.totalCostUsd, 0) / monthlyCosts.length
-        : 0,
+      avgCostPerSession:
+        monthlyCosts.length > 0
+          ? monthlyCosts.reduce((sum, c) => sum + c.totalCostUsd, 0) / monthlyCosts.length
+          : 0,
     };
   }, [costs]);
 
@@ -289,8 +292,7 @@ export function useAgentUsageSummary(agentId: string) {
       startOfWeek.setDate(now.getDate() - now.getDay());
       const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-      const filterByDate = (start: Date) =>
-        costs.filter((c) => new Date(c.createdAt) >= start);
+      const filterByDate = (start: Date) => costs.filter((c) => new Date(c.createdAt) >= start);
 
       return {
         daily: aggregateUsage(filterByDate(startOfDay)),

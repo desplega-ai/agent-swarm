@@ -26,7 +26,9 @@ export default {
       keyframes: {
         glow: {
           "0%": { boxShadow: "0 0 5px currentColor, 0 0 10px currentColor" },
-          "100%": { boxShadow: "0 0 10px currentColor, 0 0 20px currentColor, 0 0 30px currentColor" },
+          "100%": {
+            boxShadow: "0 0 10px currentColor, 0 0 20px currentColor, 0 0 30px currentColor",
+          },
         },
       },
     },

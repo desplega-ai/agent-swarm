@@ -1,20 +1,20 @@
-import { useState, useEffect } from "react";
-import Modal from "@mui/joy/Modal";
-import ModalDialog from "@mui/joy/ModalDialog";
-import Typography from "@mui/joy/Typography";
-import Input from "@mui/joy/Input";
-import Textarea from "@mui/joy/Textarea";
-import Button from "@mui/joy/Button";
-import FormControl from "@mui/joy/FormControl";
-import FormLabel from "@mui/joy/FormLabel";
-import FormHelperText from "@mui/joy/FormHelperText";
-import Stack from "@mui/joy/Stack";
 import Box from "@mui/joy/Box";
-import Divider from "@mui/joy/Divider";
+import Button from "@mui/joy/Button";
 import Chip from "@mui/joy/Chip";
 import ChipDelete from "@mui/joy/ChipDelete";
 import CircularProgress from "@mui/joy/CircularProgress";
+import Divider from "@mui/joy/Divider";
+import FormControl from "@mui/joy/FormControl";
+import FormHelperText from "@mui/joy/FormHelperText";
+import FormLabel from "@mui/joy/FormLabel";
+import Input from "@mui/joy/Input";
+import Modal from "@mui/joy/Modal";
+import ModalDialog from "@mui/joy/ModalDialog";
+import Stack from "@mui/joy/Stack";
 import { useColorScheme } from "@mui/joy/styles";
+import Textarea from "@mui/joy/Textarea";
+import Typography from "@mui/joy/Typography";
+import { useEffect, useState } from "react";
 import { useUpdateAgentProfile } from "../hooks/queries";
 import type { Agent } from "../types/api";
 
@@ -49,20 +49,14 @@ export default function EditAgentProfileModal({
     textPrimary: isDark ? "#FFF8E7" : "#1A130E",
     textSecondary: isDark ? "#C9B896" : "#5C4A3D",
     textTertiary: isDark ? "#8B7355" : "#6B5344",
-    amberGlow: isDark
-      ? "0 0 10px rgba(245, 166, 35, 0.5)"
-      : "0 0 8px rgba(212, 136, 6, 0.4)",
+    amberGlow: isDark ? "0 0 10px rgba(245, 166, 35, 0.5)" : "0 0 8px rgba(212, 136, 6, 0.4)",
     modalGlow: isDark
       ? "0 0 40px rgba(245, 166, 35, 0.1), 0 0 80px rgba(245, 166, 35, 0.05)"
       : "0 4px 20px rgba(0, 0, 0, 0.15), 0 0 40px rgba(212, 136, 6, 0.1)",
-    focusGlow: isDark
-      ? "0 0 10px rgba(245, 166, 35, 0.2)"
-      : "0 0 8px rgba(212, 136, 6, 0.15)",
+    focusGlow: isDark ? "0 0 10px rgba(245, 166, 35, 0.2)" : "0 0 8px rgba(212, 136, 6, 0.15)",
     hoverBg: isDark ? "rgba(255, 255, 255, 0.02)" : "rgba(0, 0, 0, 0.02)",
     amberSoftBg: isDark ? "rgba(245, 166, 35, 0.1)" : "rgba(212, 136, 6, 0.08)",
-    amberBorder: isDark
-      ? "rgba(245, 166, 35, 0.3)"
-      : "rgba(212, 136, 6, 0.25)",
+    amberBorder: isDark ? "rgba(245, 166, 35, 0.3)" : "rgba(212, 136, 6, 0.25)",
     gold: isDark ? "#D4A574" : "#8B6914",
   };
 
@@ -134,8 +128,7 @@ export default function EditAgentProfileModal({
             sx={{
               width: 12,
               height: 14,
-              clipPath:
-                "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
+              clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
               bgcolor: colors.amber,
               boxShadow: colors.amberGlow,
             }}

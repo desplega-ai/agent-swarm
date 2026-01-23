@@ -1,16 +1,17 @@
-import { useState, useEffect } from "react";
-import Modal from "@mui/joy/Modal";
-import ModalDialog from "@mui/joy/ModalDialog";
-import Typography from "@mui/joy/Typography";
-import Input from "@mui/joy/Input";
+import Box from "@mui/joy/Box";
 import Button from "@mui/joy/Button";
+import Divider from "@mui/joy/Divider";
 import FormControl from "@mui/joy/FormControl";
 import FormLabel from "@mui/joy/FormLabel";
+import IconButton from "@mui/joy/IconButton";
+import Input from "@mui/joy/Input";
+import Modal from "@mui/joy/Modal";
+import ModalDialog from "@mui/joy/ModalDialog";
 import Stack from "@mui/joy/Stack";
-import Box from "@mui/joy/Box";
-import Divider from "@mui/joy/Divider";
 import { useColorScheme } from "@mui/joy/styles";
-import { getConfig, saveConfig, resetConfig, getDefaultConfig } from "../lib/config";
+import Typography from "@mui/joy/Typography";
+import { useEffect, useState } from "react";
+import { getConfig, getDefaultConfig, resetConfig, saveConfig } from "../lib/config";
 
 interface ConfigModalProps {
   open: boolean;
@@ -22,6 +23,7 @@ interface ConfigModalProps {
 export default function ConfigModal({ open, onClose, onSave, blocking }: ConfigModalProps) {
   const [apiUrl, setApiUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [showApiKey, setShowApiKey] = useState(false);
   const { mode } = useColorScheme();
   const isDark = mode === "dark";
 
@@ -148,10 +150,27 @@ export default function ConfigModal({ open, onClose, onSave, blocking }: ConfigM
               API KEY (optional)
             </FormLabel>
             <Input
-              type="password"
+              type={showApiKey ? "text" : "password"}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="Enter API key if required"
+              endDecorator={
+                <IconButton
+                  variant="plain"
+                  onClick={() => setShowApiKey(!showApiKey)}
+                  sx={{
+                    color: colors.textTertiary,
+                    "&:hover": {
+                      bgcolor: "transparent",
+                      color: colors.textSecondary,
+                    },
+                  }}
+                >
+                  <Box component="span" sx={{ fontSize: "0.9rem" }}>
+                    {showApiKey ? "👁" : "👁‍🗨"}
+                  </Box>
+                </IconButton>
+              }
               sx={{
                 fontFamily: "code",
                 bgcolor: colors.level1,
@@ -218,7 +237,9 @@ export default function ConfigModal({ open, onClose, onSave, blocking }: ConfigM
                 fontWeight: 700,
                 "&:hover": {
                   bgcolor: colors.honey,
-                  boxShadow: isDark ? "0 0 20px rgba(245, 166, 35, 0.4)" : "0 0 15px rgba(212, 136, 6, 0.3)",
+                  boxShadow: isDark
+                    ? "0 0 20px rgba(245, 166, 35, 0.4)"
+                    : "0 0 15px rgba(212, 136, 6, 0.3)",
                 },
               }}
             >

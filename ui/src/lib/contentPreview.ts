@@ -2,7 +2,7 @@
  * Content preview utilities for smart truncation and content type detection
  */
 
-export type ContentType = 'json' | 'html' | 'text' | 'code';
+export type ContentType = "json" | "html" | "text" | "code";
 
 /**
  * Detect content type from string
@@ -11,19 +11,21 @@ export function detectContentType(content: string): ContentType {
   const trimmed = content.trim();
 
   // Check for JSON
-  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
-      (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+  if (
+    (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+    (trimmed.startsWith("[") && trimmed.endsWith("]"))
+  ) {
     try {
       JSON.parse(trimmed);
-      return 'json';
+      return "json";
     } catch {
       // Not valid JSON, continue checking
     }
   }
 
   // Check for HTML
-  if (trimmed.startsWith('<') && trimmed.includes('>')) {
-    return 'html';
+  if (trimmed.startsWith("<") && trimmed.includes(">")) {
+    return "html";
   }
 
   // Check for code (heuristic: contains common programming patterns)
@@ -37,11 +39,11 @@ export function detectContentType(content: string): ContentType {
     /export\s+(default|const|function|class)/,
   ];
 
-  if (codePatterns.some(pattern => pattern.test(content))) {
-    return 'code';
+  if (codePatterns.some((pattern) => pattern.test(content))) {
+    return "code";
   }
 
-  return 'text';
+  return "text";
 }
 
 /**
@@ -49,7 +51,7 @@ export function detectContentType(content: string): ContentType {
  */
 export function generatePreview(
   content: string,
-  maxLength: number
+  maxLength: number,
 ): { preview: string; isTruncated: boolean; extraInfo?: string } {
   if (content.length <= maxLength) {
     return { preview: content, isTruncated: false };
@@ -58,13 +60,13 @@ export function generatePreview(
   const contentType = detectContentType(content);
 
   switch (contentType) {
-    case 'json':
+    case "json":
       return generateJsonPreview(content, maxLength);
 
-    case 'html':
+    case "html":
       return generateHtmlPreview(content, maxLength);
 
-    case 'code':
+    case "code":
       return generateCodePreview(content, maxLength);
 
     default:
@@ -77,31 +79,32 @@ export function generatePreview(
  */
 function generateJsonPreview(
   content: string,
-  maxLength: number
+  maxLength: number,
 ): { preview: string; isTruncated: boolean; extraInfo: string } {
   try {
     const obj = JSON.parse(content);
 
     if (content.length <= maxLength) {
-      return { preview: content, isTruncated: false, extraInfo: '' };
+      return { preview: content, isTruncated: false, extraInfo: "" };
     }
 
     // Show structure summary
     const preview = JSON.stringify(obj, null, 2).slice(0, maxLength);
-    const lastNewline = preview.lastIndexOf('\n');
+    const lastNewline = preview.lastIndexOf("\n");
     const truncatedPreview = lastNewline > 0 ? preview.slice(0, lastNewline) : preview;
 
     const hiddenChars = content.length - truncatedPreview.length;
     const totalFields = countJsonFields(obj);
-    const visibleFields = countJsonFields(JSON.parse(truncatedPreview + '}'));
+    const visibleFields = countJsonFields(JSON.parse(truncatedPreview + "}"));
     const hiddenFields = totalFields - visibleFields;
 
     return {
       preview: truncatedPreview,
       isTruncated: true,
-      extraInfo: hiddenFields > 0
-        ? `+${hiddenFields} more fields, ${hiddenChars} chars`
-        : `+${hiddenChars} chars`,
+      extraInfo:
+        hiddenFields > 0
+          ? `+${hiddenFields} more fields, ${hiddenChars} chars`
+          : `+${hiddenChars} chars`,
     };
   } catch {
     // If JSON parsing fails, treat as text
@@ -113,12 +116,12 @@ function generateJsonPreview(
  * Count total fields in JSON object (recursive)
  */
 function countJsonFields(obj: unknown): number {
-  if (typeof obj !== 'object' || obj === null) return 0;
+  if (typeof obj !== "object" || obj === null) return 0;
 
   let count = 0;
   for (const value of Object.values(obj)) {
     count++;
-    if (typeof value === 'object' && value !== null) {
+    if (typeof value === "object" && value !== null) {
       count += countJsonFields(value);
     }
   }
@@ -130,10 +133,10 @@ function countJsonFields(obj: unknown): number {
  */
 function generateHtmlPreview(
   content: string,
-  maxLength: number
+  maxLength: number,
 ): { preview: string; isTruncated: boolean; extraInfo: string } {
   // Strip HTML tags for preview
-  const strippedText = content.replace(/<[^>]*>/g, '');
+  const strippedText = content.replace(/<[^>]*>/g, "");
   const textPreview = generateTextPreview(strippedText, maxLength);
 
   const tagCount = (content.match(/<[^>]+>/g) || []).length;
@@ -150,20 +153,20 @@ function generateHtmlPreview(
  */
 function generateCodePreview(
   content: string,
-  maxLength: number
+  maxLength: number,
 ): { preview: string; isTruncated: boolean; extraInfo: string } {
-  const lines = content.split('\n');
+  const lines = content.split("\n");
 
   if (content.length <= maxLength) {
-    return { preview: content, isTruncated: false, extraInfo: '' };
+    return { preview: content, isTruncated: false, extraInfo: "" };
   }
 
-  let preview = '';
+  let preview = "";
   let lineCount = 0;
 
   for (const line of lines) {
     if (preview.length + line.length + 1 > maxLength) break;
-    preview += line + '\n';
+    preview += line + "\n";
     lineCount++;
   }
 
@@ -172,7 +175,7 @@ function generateCodePreview(
   return {
     preview: preview.trimEnd(),
     isTruncated: true,
-    extraInfo: hiddenLines > 0 ? `+${hiddenLines} more lines` : '',
+    extraInfo: hiddenLines > 0 ? `+${hiddenLines} more lines` : "",
   };
 }
 
@@ -181,15 +184,15 @@ function generateCodePreview(
  */
 function generateTextPreview(
   content: string,
-  maxLength: number
+  maxLength: number,
 ): { preview: string; isTruncated: boolean; extraInfo: string } {
   if (content.length <= maxLength) {
-    return { preview: content, isTruncated: false, extraInfo: '' };
+    return { preview: content, isTruncated: false, extraInfo: "" };
   }
 
   // Try to break at word boundary
   let preview = content.slice(0, maxLength);
-  const lastSpace = preview.lastIndexOf(' ');
+  const lastSpace = preview.lastIndexOf(" ");
 
   if (lastSpace > maxLength * 0.8) {
     preview = preview.slice(0, lastSpace);

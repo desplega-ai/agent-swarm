@@ -1,19 +1,19 @@
-import { useMemo } from "react";
 import Box from "@mui/joy/Box";
 import Card from "@mui/joy/Card";
-import Typography from "@mui/joy/Typography";
-import IconButton from "@mui/joy/IconButton";
-import Tabs from "@mui/joy/Tabs";
-import TabList from "@mui/joy/TabList";
-import Tab from "@mui/joy/Tab";
-import TabPanel from "@mui/joy/TabPanel";
 import Chip from "@mui/joy/Chip";
-import LinearProgress from "@mui/joy/LinearProgress";
 import Divider from "@mui/joy/Divider";
+import IconButton from "@mui/joy/IconButton";
+import LinearProgress from "@mui/joy/LinearProgress";
 import { useColorScheme } from "@mui/joy/styles";
-import { useEpic, useAgents } from "../hooks/queries";
-import StatusBadge from "./StatusBadge";
+import Tab from "@mui/joy/Tab";
+import TabList from "@mui/joy/TabList";
+import TabPanel from "@mui/joy/TabPanel";
+import Tabs from "@mui/joy/Tabs";
+import Typography from "@mui/joy/Typography";
+import { useMemo } from "react";
+import { useAgents, useEpic } from "../hooks/queries";
 import type { AgentTask, EpicWithTasks } from "../types/api";
+import StatusBadge from "./StatusBadge";
 
 interface EpicDetailPageProps {
   epicId: string;
@@ -132,10 +132,12 @@ function TaskColumn({ title, tasks, color, bgColor, onTaskClick }: TaskColumnPro
                 borderColor: "neutral.outlinedBorder",
                 cursor: onTaskClick ? "pointer" : "default",
                 transition: "all 0.2s ease",
-                "&:hover": onTaskClick ? {
-                  borderColor: color,
-                  transform: "translateY(-1px)",
-                } : {},
+                "&:hover": onTaskClick
+                  ? {
+                      borderColor: color,
+                      transform: "translateY(-1px)",
+                    }
+                  : {},
               }}
             >
               <Typography
@@ -280,9 +282,7 @@ export default function EpicDetailPage({ epicId, onClose, onNavigateToTask }: Ep
   if (isLoading) {
     return (
       <Box sx={{ p: 4, textAlign: "center" }}>
-        <Typography sx={{ fontFamily: "code", color: "text.tertiary" }}>
-          Loading epic...
-        </Typography>
+        <Typography sx={{ fontFamily: "code", color: "text.tertiary" }}>Loading epic...</Typography>
       </Box>
     );
   }
@@ -290,9 +290,7 @@ export default function EpicDetailPage({ epicId, onClose, onNavigateToTask }: Ep
   if (!epic) {
     return (
       <Box sx={{ p: 4, textAlign: "center" }}>
-        <Typography sx={{ fontFamily: "code", color: "text.tertiary" }}>
-          Epic not found
-        </Typography>
+        <Typography sx={{ fontFamily: "code", color: "text.tertiary" }}>Epic not found</Typography>
       </Box>
     );
   }
@@ -435,7 +433,9 @@ export default function EpicDetailPage({ epicId, onClose, onNavigateToTask }: Ep
 
           {/* Goal */}
           <Box sx={{ mb: 2 }}>
-            <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary", mb: 0.5 }}>
+            <Typography
+              sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary", mb: 0.5 }}
+            >
               GOAL
             </Typography>
             <Typography sx={{ fontFamily: "code", fontSize: "0.85rem", color: "text.primary" }}>
@@ -445,7 +445,9 @@ export default function EpicDetailPage({ epicId, onClose, onNavigateToTask }: Ep
 
           {epic.description && (
             <Box sx={{ mb: 2 }}>
-              <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary", mb: 0.5 }}>
+              <Typography
+                sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary", mb: 0.5 }}
+              >
                 DESCRIPTION
               </Typography>
               <Typography sx={{ fontFamily: "code", fontSize: "0.8rem", color: "text.secondary" }}>
@@ -462,7 +464,14 @@ export default function EpicDetailPage({ epicId, onClose, onNavigateToTask }: Ep
               <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary" }}>
                 Priority
               </Typography>
-              <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: colors.amber, fontWeight: 600 }}>
+              <Typography
+                sx={{
+                  fontFamily: "code",
+                  fontSize: "0.75rem",
+                  color: colors.amber,
+                  fontWeight: 600,
+                }}
+              >
                 {epic.priority}
               </Typography>
             </Box>
@@ -483,7 +492,9 @@ export default function EpicDetailPage({ epicId, onClose, onNavigateToTask }: Ep
                 <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary" }}>
                   Created By
                 </Typography>
-                <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.secondary" }}>
+                <Typography
+                  sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.secondary" }}
+                >
                   {agentMap.get(epic.createdByAgentId)?.name || epic.createdByAgentId.slice(0, 8)}
                 </Typography>
               </Box>
@@ -503,7 +514,9 @@ export default function EpicDetailPage({ epicId, onClose, onNavigateToTask }: Ep
                 <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary" }}>
                   Started
                 </Typography>
-                <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.secondary" }}>
+                <Typography
+                  sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.secondary" }}
+                >
                   {formatDate(epic.startedAt)}
                 </Typography>
               </Box>
@@ -526,7 +539,9 @@ export default function EpicDetailPage({ epicId, onClose, onNavigateToTask }: Ep
             <>
               <Divider sx={{ my: 2 }} />
               <Box>
-                <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary", mb: 1 }}>
+                <Typography
+                  sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary", mb: 1 }}
+                >
                   TAGS
                 </Typography>
                 <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
@@ -555,7 +570,9 @@ export default function EpicDetailPage({ epicId, onClose, onNavigateToTask }: Ep
             <>
               <Divider sx={{ my: 2 }} />
               <Box>
-                <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary", mb: 1 }}>
+                <Typography
+                  sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary", mb: 1 }}
+                >
                   LINKS
                 </Typography>
                 <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
@@ -565,12 +582,16 @@ export default function EpicDetailPage({ epicId, onClose, onNavigateToTask }: Ep
                     </Typography>
                   )}
                   {epic.researchDocPath && (
-                    <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.secondary" }}>
+                    <Typography
+                      sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.secondary" }}
+                    >
                       Research: {epic.researchDocPath}
                     </Typography>
                   )}
                   {epic.planDocPath && (
-                    <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.secondary" }}>
+                    <Typography
+                      sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.secondary" }}
+                    >
                       Plan: {epic.planDocPath}
                     </Typography>
                   )}
@@ -590,7 +611,10 @@ export default function EpicDetailPage({ epicId, onClose, onNavigateToTask }: Ep
             flexDirection: "column",
           }}
         >
-          <Tabs defaultValue="tasks" sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+          <Tabs
+            defaultValue="tasks"
+            sx={{ height: "100%", display: "flex", flexDirection: "column" }}
+          >
             <TabList
               sx={{
                 px: 2,

@@ -1,21 +1,21 @@
-import { useMemo } from "react";
 import Box from "@mui/joy/Box";
-import Typography from "@mui/joy/Typography";
 import { useColorScheme } from "@mui/joy/styles";
+import Typography from "@mui/joy/Typography";
+import { useMemo } from "react";
 import {
-  AreaChart,
   Area,
-  BarChart,
+  AreaChart,
   Bar,
-  PieChart,
-  Pie,
+  BarChart,
+  CartesianGrid,
   Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
 } from "recharts";
 import type { SessionCost } from "../types/api";
 
@@ -37,9 +37,7 @@ export function CostTrendChart({ costs, timeRange = "30d" }: UsageChartsProps) {
       date.setDate(date.getDate() - i);
       const dateStr = date.toISOString().split("T")[0] ?? "";
 
-      const dayCosts = costs.filter(
-        (c) => c.createdAt.startsWith(dateStr)
-      );
+      const dayCosts = costs.filter((c) => c.createdAt.startsWith(dateStr));
 
       data.push({
         date: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
@@ -65,11 +63,7 @@ export function CostTrendChart({ costs, timeRange = "30d" }: UsageChartsProps) {
       <ResponsiveContainer>
         <AreaChart data={chartData}>
           <CartesianGrid strokeDasharray="3 3" stroke={colors.grid} />
-          <XAxis
-            dataKey="date"
-            tick={{ fontSize: 10, fill: colors.text }}
-            tickLine={false}
-          />
+          <XAxis dataKey="date" tick={{ fontSize: 10, fill: colors.text }} tickLine={false} />
           <YAxis
             tick={{ fontSize: 10, fill: colors.text }}
             tickFormatter={(v) => `$${v.toFixed(2)}`}
@@ -110,7 +104,7 @@ export function TokenDistributionChart({ costs }: { costs: SessionCost[] }) {
         cacheRead: acc.cacheRead + c.cacheReadTokens,
         cacheWrite: acc.cacheWrite + c.cacheWriteTokens,
       }),
-      { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+      { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     );
 
     return [

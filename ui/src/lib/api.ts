@@ -1,22 +1,22 @@
-import { getConfig } from "./config";
 import type {
   AgentsResponse,
-  TasksResponse,
-  LogsResponse,
-  ChannelsResponse,
-  MessagesResponse,
-  ServicesResponse,
-  SessionLog,
-  SessionLogsResponse,
-  SessionCostsResponse,
-  ScheduledTasksResponse,
-  ChannelMessage,
-  Stats,
   AgentWithTasks,
-  TaskWithLogs,
+  ChannelMessage,
+  ChannelsResponse,
   EpicsResponse,
   EpicWithTasks,
+  LogsResponse,
+  MessagesResponse,
+  ScheduledTasksResponse,
+  ServicesResponse,
+  SessionCostsResponse,
+  SessionLog,
+  SessionLogsResponse,
+  Stats,
+  TasksResponse,
+  TaskWithLogs,
 } from "../types/api";
+import { getConfig } from "./config";
 
 class ApiClient {
   private getHeaders(): HeadersInit {
@@ -70,7 +70,7 @@ class ApiClient {
 
   async updateAgentProfile(
     id: string,
-    profile: { role?: string; description?: string; capabilities?: string[] }
+    profile: { role?: string; description?: string; capabilities?: string[] },
   ): Promise<AgentWithTasks> {
     const url = `${this.getBaseUrl()}/api/agents/${id}/profile`;
     const res = await fetch(url, {
@@ -85,7 +85,11 @@ class ApiClient {
     return res.json();
   }
 
-  async fetchTasks(filters?: { status?: string; agentId?: string; search?: string }): Promise<TasksResponse> {
+  async fetchTasks(filters?: {
+    status?: string;
+    agentId?: string;
+    search?: string;
+  }): Promise<TasksResponse> {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
     if (filters?.agentId) params.set("agentId", filters.agentId);
@@ -132,9 +136,10 @@ class ApiClient {
   async checkHealth(): Promise<{ status: string; version: string }> {
     // Health endpoint is not under /api, so we need to handle it specially
     const config = getConfig();
-    const baseUrl = import.meta.env.DEV && config.apiUrl === "http://localhost:3013"
-      ? "http://localhost:3013"
-      : config.apiUrl;
+    const baseUrl =
+      import.meta.env.DEV && config.apiUrl === "http://localhost:3013"
+        ? "http://localhost:3013"
+        : config.apiUrl;
     const url = `${baseUrl}/health`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
@@ -150,7 +155,7 @@ class ApiClient {
 
   async fetchMessages(
     channelId: string,
-    options?: { limit?: number; since?: string; before?: string }
+    options?: { limit?: number; since?: string; before?: string },
   ): Promise<MessagesResponse> {
     const params = new URLSearchParams();
     if (options?.limit) params.set("limit", String(options.limit));
@@ -173,7 +178,7 @@ class ApiClient {
   async postMessage(
     channelId: string,
     content: string,
-    options?: { agentId?: string; replyToId?: string; mentions?: string[] }
+    options?: { agentId?: string; replyToId?: string; mentions?: string[] },
   ): Promise<ChannelMessage> {
     const url = `${this.getBaseUrl()}/api/channels/${channelId}/messages`;
     const res = await fetch(url, {
@@ -190,7 +195,11 @@ class ApiClient {
     return res.json();
   }
 
-  async fetchServices(filters?: { status?: string; agentId?: string; name?: string }): Promise<ServicesResponse> {
+  async fetchServices(filters?: {
+    status?: string;
+    agentId?: string;
+    name?: string;
+  }): Promise<ServicesResponse> {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
     if (filters?.agentId) params.set("agentId", filters.agentId);

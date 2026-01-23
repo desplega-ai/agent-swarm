@@ -1,17 +1,17 @@
-import { useState, useMemo } from "react";
 import Box from "@mui/joy/Box";
 import Card from "@mui/joy/Card";
-import Typography from "@mui/joy/Typography";
-import Table from "@mui/joy/Table";
-import Select from "@mui/joy/Select";
-import Option from "@mui/joy/Option";
-import Input from "@mui/joy/Input";
 import Chip from "@mui/joy/Chip";
+import Input from "@mui/joy/Input";
 import LinearProgress from "@mui/joy/LinearProgress";
+import Option from "@mui/joy/Option";
+import Select from "@mui/joy/Select";
 import { useColorScheme } from "@mui/joy/styles";
-import { useEpics, useAgents } from "../hooks/queries";
+import Table from "@mui/joy/Table";
+import Typography from "@mui/joy/Typography";
+import { useMemo, useState } from "react";
+import { useAgents, useEpics } from "../hooks/queries";
+import type { Epic, EpicStatus } from "../types/api";
 import StatusBadge from "./StatusBadge";
-import type { EpicStatus, Epic } from "../types/api";
 
 interface EpicsPanelProps {
   onSelectEpic: (epicId: string) => void;
@@ -37,7 +37,12 @@ function formatSmartTime(dateStr: string): string {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
 
-  return date.toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 // Mobile card component
@@ -366,10 +371,7 @@ export default function EpicsPanel({
                 </thead>
                 <tbody>
                   {epics.slice(0, 50).map((epic) => (
-                    <tr
-                      key={epic.id}
-                      onClick={() => onSelectEpic(epic.id)}
-                    >
+                    <tr key={epic.id} onClick={() => onSelectEpic(epic.id)}>
                       <td>
                         <Typography
                           sx={{
@@ -456,7 +458,14 @@ export default function EpicsPanel({
                       </td>
                       <td>
                         {epic.tags && epic.tags.length > 0 ? (
-                          <Box sx={{ display: "flex", gap: 0.5, flexWrap: "nowrap", overflow: "hidden" }}>
+                          <Box
+                            sx={{
+                              display: "flex",
+                              gap: 0.5,
+                              flexWrap: "nowrap",
+                              overflow: "hidden",
+                            }}
+                          >
                             {epic.tags.slice(0, 2).map((tag) => (
                               <Chip
                                 key={tag}
@@ -465,7 +474,9 @@ export default function EpicsPanel({
                                 sx={{
                                   fontFamily: "code",
                                   fontSize: "0.6rem",
-                                  bgcolor: isDark ? "rgba(212, 165, 116, 0.1)" : "rgba(139, 105, 20, 0.08)",
+                                  bgcolor: isDark
+                                    ? "rgba(212, 165, 116, 0.1)"
+                                    : "rgba(139, 105, 20, 0.08)",
                                   color: colors.gold,
                                   border: `1px solid ${isDark ? "rgba(212, 165, 116, 0.3)" : "rgba(139, 105, 20, 0.25)"}`,
                                 }}
@@ -474,13 +485,21 @@ export default function EpicsPanel({
                               </Chip>
                             ))}
                             {epic.tags.length > 2 && (
-                              <Typography sx={{ fontFamily: "code", fontSize: "0.6rem", color: "text.tertiary" }}>
+                              <Typography
+                                sx={{
+                                  fontFamily: "code",
+                                  fontSize: "0.6rem",
+                                  color: "text.tertiary",
+                                }}
+                              >
                                 +{epic.tags.length - 2}
                               </Typography>
                             )}
                           </Box>
                         ) : (
-                          <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary" }}>
+                          <Typography
+                            sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary" }}
+                          >
                             —
                           </Typography>
                         )}
@@ -509,7 +528,9 @@ export default function EpicsPanel({
                   key={epic.id}
                   epic={epic}
                   onClick={() => onSelectEpic(epic.id)}
-                  leadAgentName={epic.leadAgentId ? agentMap.get(epic.leadAgentId)?.name : undefined}
+                  leadAgentName={
+                    epic.leadAgentId ? agentMap.get(epic.leadAgentId)?.name : undefined
+                  }
                   isDark={isDark}
                 />
               ))}

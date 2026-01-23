@@ -1,9 +1,9 @@
-import { useState, useMemo } from "react";
 import Box from "@mui/joy/Box";
-import Typography from "@mui/joy/Typography";
 import IconButton from "@mui/joy/IconButton";
-import Tooltip from "@mui/joy/Tooltip";
 import { useColorScheme } from "@mui/joy/styles";
+import Tooltip from "@mui/joy/Tooltip";
+import Typography from "@mui/joy/Typography";
+import { useMemo, useState } from "react";
 
 interface JsonViewerProps {
   content: string | object;
@@ -11,7 +11,11 @@ interface JsonViewerProps {
   defaultCollapsed?: boolean;
 }
 
-export default function JsonViewer({ content, maxHeight, defaultCollapsed = false }: JsonViewerProps) {
+export default function JsonViewer({
+  content,
+  maxHeight,
+  defaultCollapsed = false,
+}: JsonViewerProps) {
   const { mode } = useColorScheme();
   const isDark = mode === "dark";
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
@@ -55,31 +59,31 @@ export default function JsonViewer({ content, maxHeight, defaultCollapsed = fals
       // Highlight keys (property names)
       highlightedLine = highlightedLine.replace(
         /"([^"]+)":/g,
-        `<span style="color:${colors.key};font-weight:600">"$1"</span>:`
+        `<span style="color:${colors.key};font-weight:600">"$1"</span>:`,
       );
 
       // Highlight string values
       highlightedLine = highlightedLine.replace(
         /: "([^"]*)"/g,
-        `: <span style="color:${colors.string}">"$1"</span>`
+        `: <span style="color:${colors.string}">"$1"</span>`,
       );
 
       // Highlight numbers (only valid JSON numbers)
       highlightedLine = highlightedLine.replace(
         /: (-?\d+\.?\d*)([,\s\]}])/g,
-        `: <span style="color:${colors.number}">$1</span>$2`
+        `: <span style="color:${colors.number}">$1</span>$2`,
       );
 
       // Highlight booleans
       highlightedLine = highlightedLine.replace(
         /: (true|false)([,\s\]}])/g,
-        `: <span style="color:${colors.boolean}">$1</span>$2`
+        `: <span style="color:${colors.boolean}">$1</span>$2`,
       );
 
       // Highlight null
       highlightedLine = highlightedLine.replace(
         /: (null)([,\s\]}])/g,
-        `: <span style="color:${colors.null}">$1</span>$2`
+        `: <span style="color:${colors.null}">$1</span>$2`,
       );
 
       return (
@@ -161,9 +165,7 @@ export default function JsonViewer({ content, maxHeight, defaultCollapsed = fals
           </Tooltip>
         </Box>
       </Box>
-      <Box>
-        {collapsed && preview ? syntaxHighlight(preview) : syntaxHighlight(jsonString)}
-      </Box>
+      <Box>{collapsed && preview ? syntaxHighlight(preview) : syntaxHighlight(jsonString)}</Box>
     </Box>
   );
 }

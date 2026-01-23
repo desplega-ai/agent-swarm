@@ -1,17 +1,17 @@
-import { useState, useMemo } from "react";
 import Box from "@mui/joy/Box";
 import Card from "@mui/joy/Card";
-import Typography from "@mui/joy/Typography";
-import Table from "@mui/joy/Table";
-import Input from "@mui/joy/Input";
-import Select from "@mui/joy/Select";
-import Option from "@mui/joy/Option";
 import IconButton from "@mui/joy/IconButton";
+import Input from "@mui/joy/Input";
+import Option from "@mui/joy/Option";
+import Select from "@mui/joy/Select";
 import { useColorScheme } from "@mui/joy/styles";
-import { useAgents, useUpdateAgentName, useSessionCosts } from "../hooks/queries";
-import { formatCurrency, formatCompactNumber } from "../lib/utils";
+import Table from "@mui/joy/Table";
+import Typography from "@mui/joy/Typography";
+import { useMemo, useState } from "react";
+import { useAgents, useSessionCosts, useUpdateAgentName } from "../hooks/queries";
+import { formatCompactNumber, formatCurrency } from "../lib/utils";
+import type { AgentStatus, AgentWithTasks } from "../types/api";
 import StatusBadge from "./StatusBadge";
-import type { AgentWithTasks, AgentStatus } from "../types/api";
 
 function formatSmartTime(dateStr: string): string {
   const date = new Date(dateStr);
@@ -31,7 +31,12 @@ function formatSmartTime(dateStr: string): string {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
 
-  return date.toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 interface AgentsRowProps {
@@ -49,7 +54,7 @@ function AgentRow({ agent, selected, onClick, isDark, usage }: AgentsRowProps) {
   const updateNameMutation = useUpdateAgentName();
 
   const activeTasks = agent.tasks.filter(
-    (t) => t.status === "pending" || t.status === "in_progress"
+    (t) => t.status === "pending" || t.status === "in_progress",
   ).length;
 
   const isActive = agent.status === "busy";
@@ -104,92 +109,99 @@ function AgentRow({ agent, selected, onClick, isDark, usage }: AgentsRowProps) {
                 width: 8,
                 height: 8,
                 borderRadius: "50%",
-                bgcolor: isActive ? colors.amber : agent.status === "idle" ? colors.gold : colors.dormant,
+                bgcolor: isActive
+                  ? colors.amber
+                  : agent.status === "idle"
+                    ? colors.gold
+                    : colors.dormant,
                 boxShadow: isActive ? colors.amberGlow : "none",
                 animation: isActive ? "pulse-amber 2s ease-in-out infinite" : undefined,
               }}
             />
             {isEditing ? (
-            <Input
-              value={editName}
-              onChange={(e) => setEditName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.stopPropagation();
-                  handleSave();
-                }
-                if (e.key === "Escape") {
-                  e.stopPropagation();
-                  handleCancel();
-                }
-              }}
-              onBlur={handleSave}
-              onClick={(e) => e.stopPropagation()}
-              autoFocus
-              size="sm"
-              sx={{
-                fontFamily: "code",
-                fontSize: "0.875rem",
-                fontWeight: 600,
-                maxWidth: 150,
-                bgcolor: "background.surface",
-                borderColor: colors.amber,
-                color: "text.primary",
-                "&:focus-within": {
+              <Input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.stopPropagation();
+                    handleSave();
+                  }
+                  if (e.key === "Escape") {
+                    e.stopPropagation();
+                    handleCancel();
+                  }
+                }}
+                onBlur={handleSave}
+                onClick={(e) => e.stopPropagation()}
+                autoFocus
+                size="sm"
+                sx={{
+                  fontFamily: "code",
+                  fontSize: "0.875rem",
+                  fontWeight: 600,
+                  maxWidth: 150,
+                  bgcolor: "background.surface",
                   borderColor: colors.amber,
-                  boxShadow: colors.amberGlow,
-                },
-              }}
-            />
-          ) : (
-            <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                  color: "text.primary",
+                  "&:focus-within": {
+                    borderColor: colors.amber,
+                    boxShadow: colors.amberGlow,
+                  },
+                }}
+              />
+            ) : (
+              <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                <Typography
+                  sx={{
+                    fontFamily: "code",
+                    fontWeight: 600,
+                    color: agent.isLead ? colors.amber : "text.primary",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {agent.name}
+                </Typography>
+                <IconButton
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsEditing(true);
+                  }}
+                  sx={{
+                    opacity: 0,
+                    ".row-hover:hover &": { opacity: 0.6 },
+                    "&:hover": {
+                      opacity: 1,
+                      bgcolor: isDark ? "rgba(245, 166, 35, 0.1)" : "rgba(212, 136, 6, 0.15)",
+                    },
+                    minHeight: 20,
+                    minWidth: 20,
+                    padding: 0.25,
+                    color: "text.secondary",
+                  }}
+                >
+                  ✎
+                </IconButton>
+              </Box>
+            )}
+            {agent.isLead && (
               <Typography
                 sx={{
                   fontFamily: "code",
-                  fontWeight: 600,
-                  color: agent.isLead ? colors.amber : "text.primary",
-                  whiteSpace: "nowrap",
+                  fontSize: "0.6rem",
+                  color: colors.amber,
+                  textShadow: colors.amberTextShadow,
+                  bgcolor: colors.amberSoftBg,
+                  px: 0.75,
+                  py: 0.25,
+                  borderRadius: 1,
+                  border: `1px solid ${colors.amberBorder}`,
                 }}
               >
-                {agent.name}
+                LEAD
               </Typography>
-              <IconButton
-                size="sm"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsEditing(true);
-                }}
-                sx={{
-                  opacity: 0,
-                  ".row-hover:hover &": { opacity: 0.6 },
-                  "&:hover": { opacity: 1, bgcolor: isDark ? "rgba(245, 166, 35, 0.1)" : "rgba(212, 136, 6, 0.15)" },
-                  minHeight: 20,
-                  minWidth: 20,
-                  padding: 0.25,
-                  color: "text.secondary",
-                }}
-              >
-                ✎
-              </IconButton>
-            </Box>
-          )}
-          {agent.isLead && (
-            <Typography
-              sx={{
-                fontFamily: "code",
-                fontSize: "0.6rem",
-                color: colors.amber,
-                textShadow: colors.amberTextShadow,
-                bgcolor: colors.amberSoftBg,
-                px: 0.75,
-                py: 0.25,
-                borderRadius: 1,
-                border: `1px solid ${colors.amberBorder}`,
-              }}
-            >
-              LEAD
-            </Typography>
-          )}
+            )}
           </Box>
           {error && (
             <Typography
@@ -228,15 +240,19 @@ function AgentRow({ agent, selected, onClick, isDark, usage }: AgentsRowProps) {
           sx={{
             fontFamily: "code",
             fontSize: "0.8rem",
-            color: agent.capacity ?
-              (agent.capacity.current > 0 ? colors.amber : "text.tertiary") :
-              (activeTasks > 0 ? colors.amber : "text.tertiary"),
+            color: agent.capacity
+              ? agent.capacity.current > 0
+                ? colors.amber
+                : "text.tertiary"
+              : activeTasks > 0
+                ? colors.amber
+                : "text.tertiary",
             whiteSpace: "nowrap",
           }}
         >
-          {agent.capacity ?
-            `${agent.capacity.current}/${agent.capacity.max}` :
-            `${activeTasks}/${agent.tasks.length}`}
+          {agent.capacity
+            ? `${agent.capacity.current}/${agent.capacity.max}`
+            : `${activeTasks}/${agent.tasks.length}`}
         </Typography>
       </td>
       <td>
@@ -291,7 +307,7 @@ function AgentCard({ agent, selected, onClick, isDark }: AgentCardProps) {
   const updateNameMutation = useUpdateAgentName();
 
   const activeTasks = agent.tasks.filter(
-    (t) => t.status === "pending" || t.status === "in_progress"
+    (t) => t.status === "pending" || t.status === "in_progress",
   ).length;
 
   const isActive = agent.status === "busy";
@@ -345,14 +361,20 @@ function AgentCard({ agent, selected, onClick, isDark }: AgentCardProps) {
         },
       }}
     >
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 1 }}>
+      <Box
+        sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 1 }}
+      >
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, flex: 1, minWidth: 0 }}>
           <Box
             sx={{
               width: 10,
               height: 10,
               borderRadius: "50%",
-              bgcolor: isActive ? colors.amber : agent.status === "idle" ? colors.gold : colors.dormant,
+              bgcolor: isActive
+                ? colors.amber
+                : agent.status === "idle"
+                  ? colors.gold
+                  : colors.dormant,
               boxShadow: isActive ? colors.amberGlow : "none",
               flexShrink: 0,
             }}
@@ -415,7 +437,9 @@ function AgentCard({ agent, selected, onClick, isDark }: AgentCardProps) {
                   minWidth: 20,
                   padding: 0.25,
                   color: "text.secondary",
-                  "&:hover": { bgcolor: isDark ? "rgba(245, 166, 35, 0.1)" : "rgba(212, 136, 6, 0.15)" },
+                  "&:hover": {
+                    bgcolor: isDark ? "rgba(245, 166, 35, 0.1)" : "rgba(212, 136, 6, 0.15)",
+                  },
                 }}
               >
                 ✎
@@ -462,9 +486,11 @@ function AgentCard({ agent, selected, onClick, isDark }: AgentCardProps) {
           color: "text.tertiary",
         }}
       >
-        {agent.role || "No role"} · {agent.capacity ?
-          `${agent.capacity.current}/${agent.capacity.max}` :
-          `${activeTasks}/${agent.tasks.length}`} tasks
+        {agent.role || "No role"} ·{" "}
+        {agent.capacity
+          ? `${agent.capacity.current}/${agent.capacity.max}`
+          : `${activeTasks}/${agent.tasks.length}`}{" "}
+        tasks
       </Typography>
     </Box>
   );
@@ -533,8 +559,7 @@ export default function AgentsPanel({
       // Search filter
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
-        if (!agent.name.toLowerCase().includes(query) &&
-            !agent.id.toLowerCase().includes(query)) {
+        if (!agent.name.toLowerCase().includes(query) && !agent.id.toLowerCase().includes(query)) {
           return false;
         }
       }

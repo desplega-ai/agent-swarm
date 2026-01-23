@@ -5,25 +5,25 @@ export const theme = extendTheme({
     dark: {
       palette: {
         background: {
-          body: "#0D0906",      // deep hive interior
-          surface: "#1A130E",   // warm dark brown
-          level1: "#251C15",    // rich earth
-          level2: "#2F2419",    // honeycomb shadow
-          level3: "#3A2D1F",    // lighter earth
+          body: "#0D0906", // deep hive interior
+          surface: "#1A130E", // warm dark brown
+          level1: "#251C15", // rich earth
+          level2: "#2F2419", // honeycomb shadow
+          level3: "#3A2D1F", // lighter earth
         },
         text: {
-          primary: "#FFF8E7",   // cream white
+          primary: "#FFF8E7", // cream white
           secondary: "#C9B896", // warm gray
-          tertiary: "#8B7355",  // muted brown
+          tertiary: "#8B7355", // muted brown
         },
         primary: {
           50: "#FFF5E0",
           100: "#FFE8B8",
           200: "#FFD98A",
           300: "#FFC95C",
-          400: "#FFB84D",       // bright honey
-          500: "#F5A623",       // primary amber
-          600: "#C67C00",       // deep amber
+          400: "#FFB84D", // bright honey
+          500: "#F5A623", // primary amber
+          600: "#C67C00", // deep amber
           700: "#9A5F00",
           800: "#6E4400",
           900: "#422800",
@@ -35,17 +35,17 @@ export const theme = extendTheme({
           softColor: "#F5A623",
         },
         success: {
-          500: "#D4A574",       // warm gold
+          500: "#D4A574", // warm gold
           softBg: "rgba(212, 165, 116, 0.15)",
           softColor: "#D4A574",
         },
         warning: {
-          500: "#F5A623",       // pulsing amber
+          500: "#F5A623", // pulsing amber
           softBg: "rgba(245, 166, 35, 0.15)",
           softColor: "#F5A623",
         },
         danger: {
-          500: "#A85454",       // rust red
+          500: "#A85454", // rust red
           softBg: "rgba(168, 84, 84, 0.15)",
           softColor: "#A85454",
         },
@@ -55,7 +55,7 @@ export const theme = extendTheme({
           200: "#C9B896",
           300: "#A89A7C",
           400: "#8B7355",
-          500: "#6B5344",       // dormant brown
+          500: "#6B5344", // dormant brown
           600: "#4A3A2F",
           700: "#3A2D1F",
           800: "#251C15",
@@ -67,16 +67,16 @@ export const theme = extendTheme({
     light: {
       palette: {
         background: {
-          body: "#FDF8F3",      // warm cream
-          surface: "#FFFFFF",   // white
-          level1: "#F5EDE4",    // light warm
-          level2: "#EDE3D7",    // slightly darker
-          level3: "#E5D9CA",    // warm gray
+          body: "#FDF8F3", // warm cream
+          surface: "#FFFFFF", // white
+          level1: "#F5EDE4", // light warm
+          level2: "#EDE3D7", // slightly darker
+          level3: "#E5D9CA", // warm gray
         },
         text: {
-          primary: "#1A130E",   // dark brown
+          primary: "#1A130E", // dark brown
           secondary: "#5C4A3D", // medium brown
-          tertiary: "#8B7355",  // muted brown
+          tertiary: "#8B7355", // muted brown
         },
         primary: {
           50: "#FFF5E0",
@@ -84,7 +84,7 @@ export const theme = extendTheme({
           200: "#FFD98A",
           300: "#FFC95C",
           400: "#FFB84D",
-          500: "#D48806",       // slightly darker amber for light mode
+          500: "#D48806", // slightly darker amber for light mode
           600: "#B87300",
           700: "#9A5F00",
           800: "#6E4400",
@@ -97,7 +97,7 @@ export const theme = extendTheme({
           softColor: "#B87300",
         },
         success: {
-          500: "#8B6914",       // darker gold for light mode
+          500: "#8B6914", // darker gold for light mode
           softBg: "rgba(139, 105, 20, 0.12)",
           softColor: "#8B6914",
         },
@@ -107,7 +107,7 @@ export const theme = extendTheme({
           softColor: "#D48806",
         },
         danger: {
-          500: "#B54242",       // darker red for light mode
+          500: "#B54242", // darker red for light mode
           softBg: "rgba(181, 66, 66, 0.12)",
           softColor: "#B54242",
         },

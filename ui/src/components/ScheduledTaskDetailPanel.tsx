@@ -1,11 +1,11 @@
 import Box from "@mui/joy/Box";
-import Typography from "@mui/joy/Typography";
-import IconButton from "@mui/joy/IconButton";
-import Divider from "@mui/joy/Divider";
-import Tooltip from "@mui/joy/Tooltip";
 import Chip from "@mui/joy/Chip";
+import Divider from "@mui/joy/Divider";
+import IconButton from "@mui/joy/IconButton";
 import { useColorScheme } from "@mui/joy/styles";
-import { useScheduledTasks, useAgents } from "../hooks/queries";
+import Tooltip from "@mui/joy/Tooltip";
+import Typography from "@mui/joy/Typography";
+import { useAgents, useScheduledTasks } from "../hooks/queries";
 
 interface ScheduledTaskDetailPanelProps {
   scheduleId: string;
@@ -88,15 +88,11 @@ export default function ScheduledTaskDetailPanel({
   const panelWidth = expanded ? "100%" : 450;
 
   const loadingContent = (
-    <Typography sx={{ fontFamily: "code", color: "text.tertiary" }}>
-      Loading schedule...
-    </Typography>
+    <Typography sx={{ fontFamily: "code", color: "text.tertiary" }}>Loading schedule...</Typography>
   );
 
   const notFoundContent = (
-    <Typography sx={{ fontFamily: "code", color: "text.tertiary" }}>
-      Schedule not found
-    </Typography>
+    <Typography sx={{ fontFamily: "code", color: "text.tertiary" }}>Schedule not found</Typography>
   );
 
   if (isLoading || !schedule) {
@@ -194,7 +190,10 @@ export default function ScheduledTaskDetailPanel({
         {/* Desktop buttons */}
         <Box sx={{ display: { xs: "none", md: "flex" }, alignItems: "center", gap: 0.5 }}>
           {onToggleExpand && (
-            <Tooltip title={expanded ? "Collapse panel" : "Expand to full width"} placement="bottom">
+            <Tooltip
+              title={expanded ? "Collapse panel" : "Expand to full width"}
+              placement="bottom"
+            >
               <IconButton
                 size="sm"
                 variant="plain"
@@ -246,7 +245,9 @@ export default function ScheduledTaskDetailPanel({
         >
           {/* Schedule name and status */}
           <Box sx={{ mb: 2 }}>
-            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
+            <Box
+              sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}
+            >
               <Typography
                 sx={{
                   fontFamily: "code",
@@ -264,8 +265,12 @@ export default function ScheduledTaskDetailPanel({
                   fontFamily: "code",
                   fontSize: "0.65rem",
                   bgcolor: schedule.enabled
-                    ? isDark ? "rgba(76, 175, 80, 0.15)" : "rgba(46, 125, 50, 0.1)"
-                    : isDark ? "rgba(239, 83, 80, 0.15)" : "rgba(211, 47, 47, 0.1)",
+                    ? isDark
+                      ? "rgba(76, 175, 80, 0.15)"
+                      : "rgba(46, 125, 50, 0.1)"
+                    : isDark
+                      ? "rgba(239, 83, 80, 0.15)"
+                      : "rgba(211, 47, 47, 0.1)",
                   color: schedule.enabled ? colors.green : colors.red,
                 }}
               >
@@ -319,18 +324,33 @@ export default function ScheduledTaskDetailPanel({
               <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
                 Target
               </Typography>
-              <Typography sx={{ fontFamily: "code", fontSize: "0.8rem", color: schedule.targetAgentId ? colors.amber : "text.secondary" }}>
-                {targetAgent?.name || (schedule.targetAgentId ? schedule.targetAgentId.slice(0, 8) : "Task Pool")}
+              <Typography
+                sx={{
+                  fontFamily: "code",
+                  fontSize: "0.8rem",
+                  color: schedule.targetAgentId ? colors.amber : "text.secondary",
+                }}
+              >
+                {targetAgent?.name ||
+                  (schedule.targetAgentId ? schedule.targetAgentId.slice(0, 8) : "Task Pool")}
               </Typography>
             </Box>
 
             {/* Priority */}
             {schedule.priority !== 50 && (
               <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
+                <Typography
+                  sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}
+                >
                   Priority
                 </Typography>
-                <Typography sx={{ fontFamily: "code", fontSize: "0.8rem", color: schedule.priority > 50 ? colors.amber : "text.secondary" }}>
+                <Typography
+                  sx={{
+                    fontFamily: "code",
+                    fontSize: "0.8rem",
+                    color: schedule.priority > 50 ? colors.amber : "text.secondary",
+                  }}
+                >
                   {schedule.priority}
                 </Typography>
               </Box>
@@ -339,10 +359,14 @@ export default function ScheduledTaskDetailPanel({
             {/* Task Type */}
             {schedule.taskType && (
               <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
+                <Typography
+                  sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}
+                >
                   Task Type
                 </Typography>
-                <Typography sx={{ fontFamily: "code", fontSize: "0.8rem", color: "text.secondary" }}>
+                <Typography
+                  sx={{ fontFamily: "code", fontSize: "0.8rem", color: "text.secondary" }}
+                >
                   {schedule.taskType}
                 </Typography>
               </Box>
@@ -351,7 +375,9 @@ export default function ScheduledTaskDetailPanel({
             {/* Tags */}
             {schedule.tags && schedule.tags.length > 0 && (
               <Box>
-                <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary", mb: 0.5 }}>
+                <Typography
+                  sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary", mb: 0.5 }}
+                >
                   Tags
                 </Typography>
                 <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
@@ -391,7 +417,13 @@ export default function ScheduledTaskDetailPanel({
               <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
                 Next Run
               </Typography>
-              <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: schedule.enabled ? colors.amber : "text.tertiary" }}>
+              <Typography
+                sx={{
+                  fontFamily: "code",
+                  fontSize: "0.75rem",
+                  color: schedule.enabled ? colors.amber : "text.tertiary",
+                }}
+              >
                 {schedule.enabled ? formatNextRun(schedule.nextRunAt) : "Disabled"}
               </Typography>
             </Box>
@@ -401,7 +433,9 @@ export default function ScheduledTaskDetailPanel({
             {/* Created By */}
             {schedule.createdByAgentId && (
               <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}>
+                <Typography
+                  sx={{ fontFamily: "code", fontSize: "0.75rem", color: "text.tertiary" }}
+                >
                   Created By
                 </Typography>
                 <Typography sx={{ fontFamily: "code", fontSize: "0.75rem", color: colors.amber }}>

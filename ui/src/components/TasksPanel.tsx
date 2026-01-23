@@ -1,16 +1,16 @@
-import { useState, useMemo } from "react";
 import Box from "@mui/joy/Box";
 import Card from "@mui/joy/Card";
-import Typography from "@mui/joy/Typography";
-import Table from "@mui/joy/Table";
-import Select from "@mui/joy/Select";
-import Option from "@mui/joy/Option";
-import Input from "@mui/joy/Input";
 import Chip from "@mui/joy/Chip";
+import Input from "@mui/joy/Input";
+import Option from "@mui/joy/Option";
+import Select from "@mui/joy/Select";
 import { useColorScheme } from "@mui/joy/styles";
-import { useTasks, useAgents } from "../hooks/queries";
+import Table from "@mui/joy/Table";
+import Typography from "@mui/joy/Typography";
+import { useMemo, useState } from "react";
+import { useAgents, useTasks } from "../hooks/queries";
+import type { AgentTask, TaskStatus } from "../types/api";
 import StatusBadge from "./StatusBadge";
-import type { TaskStatus, AgentTask } from "../types/api";
 
 interface TasksPanelProps {
   selectedTaskId: string | null;
@@ -58,7 +58,12 @@ function formatSmartTime(dateStr: string): string {
   }
 
   // Before today: full date
-  return date.toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 // Mobile card component
@@ -474,7 +479,14 @@ export default function TasksPanel({
                       </td>
                       <td>
                         {task.tags && task.tags.length > 0 ? (
-                          <Box sx={{ display: "flex", gap: 0.5, flexWrap: "nowrap", overflow: "hidden" }}>
+                          <Box
+                            sx={{
+                              display: "flex",
+                              gap: 0.5,
+                              flexWrap: "nowrap",
+                              overflow: "hidden",
+                            }}
+                          >
                             {task.tags.slice(0, 2).map((tag) => (
                               <Chip
                                 key={tag}
@@ -483,7 +495,9 @@ export default function TasksPanel({
                                 sx={{
                                   fontFamily: "code",
                                   fontSize: "0.6rem",
-                                  bgcolor: isDark ? "rgba(212, 165, 116, 0.1)" : "rgba(139, 105, 20, 0.08)",
+                                  bgcolor: isDark
+                                    ? "rgba(212, 165, 116, 0.1)"
+                                    : "rgba(139, 105, 20, 0.08)",
                                   color: colors.gold,
                                   border: `1px solid ${isDark ? "rgba(212, 165, 116, 0.3)" : "rgba(139, 105, 20, 0.25)"}`,
                                 }}
@@ -492,13 +506,21 @@ export default function TasksPanel({
                               </Chip>
                             ))}
                             {task.tags.length > 2 && (
-                              <Typography sx={{ fontFamily: "code", fontSize: "0.6rem", color: "text.tertiary" }}>
+                              <Typography
+                                sx={{
+                                  fontFamily: "code",
+                                  fontSize: "0.6rem",
+                                  color: "text.tertiary",
+                                }}
+                              >
                                 +{task.tags.length - 2}
                               </Typography>
                             )}
                           </Box>
                         ) : (
-                          <Typography sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary" }}>
+                          <Typography
+                            sx={{ fontFamily: "code", fontSize: "0.7rem", color: "text.tertiary" }}
+                          >
                             —
                           </Typography>
                         )}

@@ -1,7 +1,7 @@
 import Box from "@mui/joy/Box";
-import Typography from "@mui/joy/Typography";
 import IconButton from "@mui/joy/IconButton";
 import { useColorScheme } from "@mui/joy/styles";
+import Typography from "@mui/joy/Typography";
 import { useHealth } from "../hooks/queries";
 
 interface HeaderProps {
@@ -16,11 +16,7 @@ export default function Header({ onSettingsClick }: HeaderProps) {
     setMode(mode === "dark" ? "light" : "dark");
   };
 
-  const connectionStatus = isLoading
-    ? "connecting"
-    : isError
-      ? "error"
-      : "connected";
+  const connectionStatus = isLoading ? "connecting" : isError ? "error" : "connected";
 
   const isDark = mode === "dark";
 
@@ -65,9 +61,7 @@ export default function Header({ onSettingsClick }: HeaderProps) {
           fontFamily: "display",
           fontWeight: 700,
           fontSize: { xs: "1.1rem", sm: "1.25rem", md: "1.5rem" },
-          background: isDark
-            ? "#F5A623"
-            : "#9A5F00",
+          background: isDark ? "#F5A623" : "#9A5F00",
           backgroundClip: "text",
           WebkitBackgroundClip: "text",
           WebkitTextFillColor: "transparent",
@@ -102,9 +96,7 @@ export default function Header({ onSettingsClick }: HeaderProps) {
             alignItems: "center",
             boxShadow: isDark ? `0 0 10px ${colors.border}33` : "none",
             animation:
-              connectionStatus === "connecting"
-                ? "heartbeat 1.5s ease-in-out infinite"
-                : undefined,
+              connectionStatus === "connecting" ? "heartbeat 1.5s ease-in-out infinite" : undefined,
             "@keyframes heartbeat": {
               "0%, 100%": { transform: "scale(1)" },
               "14%": { transform: "scale(1.1)" },
