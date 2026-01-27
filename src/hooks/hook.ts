@@ -301,6 +301,25 @@ export async function handleHook(): Promise<void> {
     return false;
   };
 
+  /**
+   * Check if agent has exceeded poll limit and should stop polling.
+   * @returns true if polling should be blocked, false otherwise
+   */
+  const checkShouldBlockPolling = async (): Promise<boolean> => {
+    if (!mcpConfig) return false;
+    try {
+      const resp = await fetch(`${getBaseUrl()}/me`, {
+        method: "GET",
+        headers: mcpConfig.headers,
+      });
+      if (!resp.ok) return false;
+      const data = (await resp.json()) as AgentWithInbox & { shouldBlockPolling?: boolean };
+      return data.shouldBlockPolling === true;
+    } catch {
+      return false;
+    }
+  };
+
   const formatSystemTray = (inbox: InboxSummary): string | null => {
     const {
       unreadCount,
@@ -416,6 +435,18 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
       if (agentInfo && !agentInfo.isLead && agentInfo.status === "busy") {
         if (await checkAndBlockIfCancelled(true)) {
           return; // Exit early - don't process other hooks
+        }
+      }
+
+      // Block poll-task when polling limit reached
+      if (msg.tool_name?.endsWith("poll-task")) {
+        const shouldBlock = await checkShouldBlockPolling();
+        if (shouldBlock) {
+          outputBlockResponse(
+            `🛑 POLLING LIMIT REACHED: You have exceeded the maximum empty poll attempts. ` +
+              `EXIT NOW - do not make any more tool calls.`,
+          );
+          return;
         }
       }
       break;

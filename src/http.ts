@@ -62,7 +62,9 @@ import {
   markTasksNotified,
   pauseTask,
   postMessage,
+  resetEmptyPollCount,
   resumeTask,
+  shouldBlockPolling,
   startTask,
   updateAgentMaxTasks,
   updateAgentName,
@@ -234,8 +236,11 @@ const httpServer = createHttpServer(async (req, res) => {
     // Check for ?include=inbox query param
     const includeInbox = parseQueryParams(req.url || "").get("include") === "inbox";
 
-    // Add capacity info to agent response
-    const agentResponse = agentWithCapacity(agent);
+    // Add capacity info and polling limit check to agent response
+    const agentResponse = {
+      ...agentWithCapacity(agent),
+      shouldBlockPolling: shouldBlockPolling(myAgentId),
+    };
 
     if (includeInbox) {
       const inbox = getInboxSummary(myAgentId);
@@ -412,6 +417,8 @@ const httpServer = createHttpServer(async (req, res) => {
         if (body.maxTasks !== undefined && body.maxTasks !== existingAgent.maxTasks) {
           updateAgentMaxTasks(existingAgent.id, body.maxTasks);
         }
+        // Reset empty poll count on re-registration (agent is starting fresh)
+        resetEmptyPollCount(existingAgent.id);
         return { agent: getAgentById(agentId), created: false };
       }
 
