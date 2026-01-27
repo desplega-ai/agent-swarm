@@ -7,6 +7,9 @@ import {
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
   getUnassignedTasksCount,
+  incrementEmptyPollCount,
+  MAX_EMPTY_POLLS,
+  resetEmptyPollCount,
   startTask,
   updateAgentStatus,
 } from "@/be/db";
@@ -34,6 +37,8 @@ export const registerPollTaskTool = (server: McpServer) => {
           .describe("Tasks offered to you awaiting accept/reject."),
         availableCount: z.number().describe("Count of unassigned tasks in the pool."),
         waitedForSeconds: z.number().describe("Seconds waited before receiving the task."),
+        shouldExit: z.boolean().optional().describe("If true, agent should exit immediately."),
+        emptyPollCount: z.number().optional().describe("Current consecutive empty poll count."),
       }),
     },
     async (_input, requestInfo, meta) => {
@@ -148,6 +153,9 @@ export const registerPollTaskTool = (server: McpServer) => {
         })();
 
         if (startedTask) {
+          // Reset empty poll count when task is assigned
+          resetEmptyPollCount(agentId);
+
           const waitedFor = Math.round((Date.now() - now.getTime()) / 1000);
 
           return {
@@ -165,6 +173,7 @@ export const registerPollTaskTool = (server: McpServer) => {
               offeredTasks: [],
               availableCount: getUnassignedTasksCount(),
               waitedForSeconds: waitedFor,
+              emptyPollCount: 0,
             },
           };
         }
@@ -183,21 +192,31 @@ export const registerPollTaskTool = (server: McpServer) => {
 
       const waitedForSeconds = Math.round((Date.now() - now.getTime()) / 1000);
 
+      // Increment empty poll count and check if agent should exit
+      const newCount = incrementEmptyPollCount(agentId);
+      const shouldExit = newCount >= MAX_EMPTY_POLLS;
+
       // If no task was found within the time limit
       return {
         content: [
           {
             type: "text",
-            text: `No task assigned within the polling duration. ${availableCount} unassigned task(s) available in pool.`,
+            text: shouldExit
+              ? `No task assigned after ${newCount} polling attempts. EXIT NOW - do not poll again.`
+              : `No task assigned within the polling duration (${waitedForSeconds}s). ${getUnassignedTasksCount()} unassigned task(s) available in pool.`,
           },
         ],
         structuredContent: {
           yourAgentId: requestInfo.agentId,
           success: false,
-          message: `No task assigned within the polling duration, please keep polling until a task is assigned.`,
+          message: shouldExit
+            ? `Polling limit reached (${newCount}/${MAX_EMPTY_POLLS}). You must exit now.`
+            : `No task assigned within the polling duration.`,
           offeredTasks: [],
           availableCount: getUnassignedTasksCount(),
           waitedForSeconds,
+          shouldExit,
+          emptyPollCount: newCount,
         },
       };
     },

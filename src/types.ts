@@ -124,6 +124,9 @@ export const AgentSchema = z.object({
   // Concurrency limit (defaults to 1 for backwards compatibility)
   maxTasks: z.number().int().min(1).max(20).optional(),
 
+  // Polling limit tracking (consecutive empty polls)
+  emptyPollCount: z.number().int().min(0).optional(),
+
   createdAt: z.iso.datetime().default(() => new Date().toISOString()),
   lastUpdatedAt: z.iso.datetime().default(() => new Date().toISOString()),
 });

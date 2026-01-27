@@ -487,6 +487,13 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     /* exists */
   }
 
+  // Polling limit tracking column
+  try {
+    db.run(`ALTER TABLE agents ADD COLUMN emptyPollCount INTEGER DEFAULT 0`);
+  } catch {
+    /* exists */
+  }
+
   // Service PM2 columns migration
   try {
     db.run(`ALTER TABLE services ADD COLUMN script TEXT NOT NULL DEFAULT ''`);
@@ -657,6 +664,7 @@ type AgentRow = {
   role: string | null;
   capabilities: string | null;
   maxTasks: number | null;
+  emptyPollCount: number | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -671,6 +679,7 @@ function rowToAgent(row: AgentRow): Agent {
     role: row.role ?? undefined,
     capabilities: row.capabilities ? JSON.parse(row.capabilities) : [],
     maxTasks: row.maxTasks ?? 1,
+    emptyPollCount: row.emptyPollCount ?? 0,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -742,6 +751,52 @@ export function updateAgentMaxTasks(id: string, maxTasks: number): Agent | null 
     )
     .get(maxTasks, id);
   return row ? rowToAgent(row) : null;
+}
+
+// ============================================================================
+// Agent Poll Tracking Functions
+// ============================================================================
+
+/** Maximum consecutive empty polls before agent should stop polling */
+export const MAX_EMPTY_POLLS = 2;
+
+/**
+ * Increment the empty poll count for an agent.
+ * Returns the new count after incrementing.
+ */
+export function incrementEmptyPollCount(agentId: string): number {
+  const row = getDb()
+    .prepare<{ emptyPollCount: number }, [string]>(
+      `UPDATE agents
+       SET emptyPollCount = emptyPollCount + 1,
+           lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ?
+       RETURNING emptyPollCount`,
+    )
+    .get(agentId);
+  return row?.emptyPollCount ?? 0;
+}
+
+/**
+ * Reset the empty poll count for an agent to zero.
+ * Called when a task is assigned or agent re-registers.
+ */
+export function resetEmptyPollCount(agentId: string): void {
+  getDb().run(
+    `UPDATE agents
+     SET emptyPollCount = 0,
+         lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+     WHERE id = ?`,
+    [agentId],
+  );
+}
+
+/**
+ * Check if an agent has exceeded the maximum empty poll count.
+ */
+export function shouldBlockPolling(agentId: string): boolean {
+  const agent = getAgentById(agentId);
+  return (agent?.emptyPollCount ?? 0) >= MAX_EMPTY_POLLS;
 }
 
 export function deleteAgent(id: string): boolean {
