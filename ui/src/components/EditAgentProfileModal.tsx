@@ -33,6 +33,7 @@ export default function EditAgentProfileModal({
   const [description, setDescription] = useState("");
   const [capabilities, setCapabilities] = useState<string[]>([]);
   const [newCapability, setNewCapability] = useState("");
+  const [claudeMd, setClaudeMd] = useState("");
   const { mode } = useColorScheme();
   const isDark = mode === "dark";
 
@@ -66,6 +67,7 @@ export default function EditAgentProfileModal({
       setDescription(agent.description || "");
       setCapabilities(agent.capabilities || []);
       setNewCapability("");
+      setClaudeMd(agent.claudeMd || "");
     }
   }, [open, agent]);
 
@@ -77,6 +79,7 @@ export default function EditAgentProfileModal({
           role: role || undefined,
           description: description || undefined,
           capabilities: capabilities.length > 0 ? capabilities : undefined,
+          claudeMd: claudeMd || undefined,
         },
       });
       onClose();
@@ -107,6 +110,7 @@ export default function EditAgentProfileModal({
   const hasChanges =
     role !== (agent.role || "") ||
     description !== (agent.description || "") ||
+    claudeMd !== (agent.claudeMd || "") ||
     JSON.stringify(capabilities) !== JSON.stringify(agent.capabilities || []);
 
   return (
@@ -118,8 +122,8 @@ export default function EditAgentProfileModal({
           borderColor: colors.border,
           borderRadius: "12px",
           boxShadow: colors.modalGlow,
-          minWidth: 450,
-          maxWidth: 550,
+          minWidth: 550,
+          maxWidth: 650,
         }}
       >
         {/* Header */}
@@ -318,6 +322,46 @@ export default function EditAgentProfileModal({
               sx={{ fontFamily: "code", fontSize: "0.65rem", color: colors.textTertiary }}
             >
               Press Enter or click Add to add capabilities
+            </FormHelperText>
+          </FormControl>
+
+          <FormControl>
+            <FormLabel
+              sx={{
+                fontFamily: "code",
+                color: colors.textSecondary,
+                fontSize: "0.75rem",
+                letterSpacing: "0.05em",
+              }}
+            >
+              CLAUDE.MD
+            </FormLabel>
+            <Textarea
+              value={claudeMd}
+              onChange={(e) => setClaudeMd(e.target.value)}
+              placeholder="Personal CLAUDE.md instructions and notes..."
+              minRows={6}
+              maxRows={12}
+              sx={{
+                fontFamily: "code",
+                fontSize: "0.8rem",
+                bgcolor: colors.level1,
+                borderColor: colors.border,
+                color: colors.textPrimary,
+                "&:focus-within": {
+                  borderColor: colors.amber,
+                  boxShadow: colors.focusGlow,
+                },
+                "&:hover": {
+                  borderColor: colors.borderHover,
+                },
+              }}
+            />
+            <FormHelperText
+              sx={{ fontFamily: "code", fontSize: "0.65rem", color: colors.textTertiary }}
+            >
+              Personal instructions loaded on session start. Notes you add here persist across
+              sessions.
             </FormHelperText>
           </FormControl>
         </Stack>

@@ -982,7 +982,7 @@ const httpServer = createHttpServer(async (req, res) => {
     }
     const bodyText = Buffer.concat(chunks).toString();
 
-    let body: { role?: string; description?: string; capabilities?: string[] };
+    let body: { role?: string; description?: string; capabilities?: string[]; claudeMd?: string };
     try {
       body = JSON.parse(bodyText);
     } catch {
@@ -995,12 +995,14 @@ const httpServer = createHttpServer(async (req, res) => {
     if (
       body.role === undefined &&
       body.description === undefined &&
-      body.capabilities === undefined
+      body.capabilities === undefined &&
+      body.claudeMd === undefined
     ) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
-          error: "At least one field (role, description, or capabilities) must be provided",
+          error:
+            "At least one field (role, description, capabilities, or claudeMd) must be provided",
         }),
       );
       return;
@@ -1020,10 +1022,18 @@ const httpServer = createHttpServer(async (req, res) => {
       return;
     }
 
+    // Validate claudeMd size if provided (max 64KB)
+    if (body.claudeMd !== undefined && body.claudeMd.length > 65536) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "claudeMd must be 64KB or less" }));
+      return;
+    }
+
     const agent = updateAgentProfile(agentId, {
       role: body.role,
       description: body.description,
       capabilities: body.capabilities,
+      claudeMd: body.claudeMd,
     });
 
     if (!agent) {

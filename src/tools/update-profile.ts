@@ -23,6 +23,13 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           .array(z.string())
           .optional()
           .describe("List of capabilities (e.g., ['typescript', 'react', 'testing'])."),
+        claudeMd: z
+          .string()
+          .max(65536)
+          .optional()
+          .describe(
+            "Personal CLAUDE.md content. Loaded on session start and synced back on session end. Use for persistent notes and instructions.",
+          ),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
@@ -31,7 +38,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         agent: AgentSchema.optional(),
       }),
     },
-    async ({ name, description, role, capabilities }, requestInfo, _meta) => {
+    async ({ name, description, role, capabilities, claudeMd }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         return {
           content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
@@ -47,20 +54,21 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         name === undefined &&
         description === undefined &&
         role === undefined &&
-        capabilities === undefined
+        capabilities === undefined &&
+        claudeMd === undefined
       ) {
         return {
           content: [
             {
               type: "text",
-              text: "At least one field (name, description, role, or capabilities) must be provided.",
+              text: "At least one field (name, description, role, capabilities, or claudeMd) must be provided.",
             },
           ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: false,
             message:
-              "At least one field (name, description, role, or capabilities) must be provided.",
+              "At least one field (name, description, role, capabilities, or claudeMd) must be provided.",
           },
         };
       }
@@ -88,6 +96,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           description,
           role,
           capabilities,
+          claudeMd,
         });
 
         if (!agent) {
@@ -106,6 +115,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         if (description !== undefined) updatedFields.push("description");
         if (role !== undefined) updatedFields.push("role");
         if (capabilities !== undefined) updatedFields.push("capabilities");
+        if (claudeMd !== undefined) updatedFields.push("claudeMd");
 
         return {
           content: [{ type: "text", text: `Updated profile: ${updatedFields.join(", ")}.` }],

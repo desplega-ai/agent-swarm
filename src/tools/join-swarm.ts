@@ -1,6 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { createAgent, getAllAgents, getDb, updateAgentProfile } from "@/be/db";
+import {
+  createAgent,
+  generateDefaultClaudeMd,
+  getAllAgents,
+  getDb,
+  updateAgentProfile,
+} from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import { AgentSchema } from "@/types";
 
@@ -90,17 +96,23 @@ export const registerJoinSwarmTool = (server: McpServer) => {
             capabilities: [],
           });
 
-          // Update profile if any profile fields were provided
-          if (description !== undefined || role !== undefined || capabilities !== undefined) {
-            const updatedAgent = updateAgentProfile(agent.id, {
-              description,
-              role,
-              capabilities,
-            });
-            return updatedAgent ?? agent;
-          }
+          // Generate default CLAUDE.md with agent info
+          const defaultClaudeMd = generateDefaultClaudeMd({
+            name,
+            description,
+            role,
+            capabilities,
+          });
 
-          return agent;
+          // Update profile with any provided fields and the default CLAUDE.md
+          const updatedAgent = updateAgentProfile(agent.id, {
+            description,
+            role,
+            capabilities,
+            claudeMd: defaultClaudeMd,
+          });
+
+          return updatedAgent ?? agent;
         });
 
         const agent = agentTx();

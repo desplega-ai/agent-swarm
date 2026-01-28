@@ -494,6 +494,13 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     /* exists */
   }
 
+  // CLAUDE.md storage column
+  try {
+    db.run(`ALTER TABLE agents ADD COLUMN claudeMd TEXT`);
+  } catch {
+    /* exists */
+  }
+
   // Service PM2 columns migration
   try {
     db.run(`ALTER TABLE services ADD COLUMN script TEXT NOT NULL DEFAULT ''`);
@@ -665,6 +672,7 @@ type AgentRow = {
   capabilities: string | null;
   maxTasks: number | null;
   emptyPollCount: number | null;
+  claudeMd: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -680,6 +688,7 @@ function rowToAgent(row: AgentRow): Agent {
     capabilities: row.capabilities ? JSON.parse(row.capabilities) : [],
     maxTasks: row.maxTasks ?? 1,
     emptyPollCount: row.emptyPollCount ?? 0,
+    claudeMd: row.claudeMd ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -2114,12 +2123,58 @@ export function checkDependencies(taskId: string): {
 // Agent Profile Operations
 // ============================================================================
 
+/**
+ * Generate default CLAUDE.md content for a new agent
+ */
+export function generateDefaultClaudeMd(agent: {
+  name: string;
+  description?: string;
+  role?: string;
+  capabilities?: string[];
+}): string {
+  const lines = [`# Agent: ${agent.name}`, ""];
+
+  if (agent.description) {
+    lines.push(agent.description, "");
+  }
+
+  if (agent.role) {
+    lines.push("## Role", agent.role, "");
+  }
+
+  if (agent.capabilities && agent.capabilities.length > 0) {
+    lines.push("## Capabilities");
+    for (const cap of agent.capabilities) {
+      lines.push(`- ${cap}`);
+    }
+    lines.push("");
+  }
+
+  lines.push(
+    "---",
+    "",
+    "## Notes",
+    "",
+    "If you need to remember something, write it down here. This section persists across sessions.",
+    "",
+    "### Learnings",
+    "",
+    "### Preferences",
+    "",
+    "### Important Context",
+    "",
+  );
+
+  return lines.join("\n");
+}
+
 export function updateAgentProfile(
   id: string,
   updates: {
     description?: string;
     role?: string;
     capabilities?: string[];
+    claudeMd?: string;
   },
 ): Agent | null {
   const agent = getAgentById(id);
@@ -2127,11 +2182,15 @@ export function updateAgentProfile(
 
   const now = new Date().toISOString();
   const row = getDb()
-    .prepare<AgentRow, [string | null, string | null, string | null, string, string]>(
+    .prepare<
+      AgentRow,
+      [string | null, string | null, string | null, string | null, string, string]
+    >(
       `UPDATE agents SET
         description = COALESCE(?, description),
         role = COALESCE(?, role),
         capabilities = COALESCE(?, capabilities),
+        claudeMd = COALESCE(?, claudeMd),
         lastUpdatedAt = ?
        WHERE id = ? RETURNING *`,
     )
@@ -2139,6 +2198,7 @@ export function updateAgentProfile(
       updates.description ?? null,
       updates.role ?? null,
       updates.capabilities ? JSON.stringify(updates.capabilities) : null,
+      updates.claudeMd ?? null,
       now,
       id,
     );

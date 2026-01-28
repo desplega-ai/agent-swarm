@@ -14,6 +14,15 @@ bun run start:http        # Run MCP HTTP server (port 3013)
 bun run dev:http          # Dev with hot reload
 bun run lint:fix          # Lint & format with Biome
 bun run tsc:check         # Type check
+
+# PM2 (run API + UI + lead + worker together)
+bun run pm2-start         # Start all (API :3013, UI :5274, lead :3201, worker :3202)
+bun run pm2-stop          # Stop all services
+bun run pm2-restart       # Restart all services
+bun run pm2-logs          # View logs
+bun run pm2-status        # Check status
+# Note: lead/worker run in Docker. On code changes:
+# bun run docker:build:worker && bun run pm2-restart
 ```
 
 ## Tech Stack
@@ -52,6 +61,28 @@ ui/             # Dashboard (separate React app)
 - [MCP.md](./MCP.md) - MCP tools reference
 - [DEPLOYMENT.md](./DEPLOYMENT.md) - Production deployment
 - [CONTRIBUTING.md](./CONTRIBUTING.md) - Development setup
+
+---
+
+## Local Development
+
+**Environment Files:**
+- `.env` - Local dev config (API server, Slack, GitHub)
+- `.env.docker` - Docker worker config
+
+**Testing API locally:**
+```bash
+# API_KEY from .env (default: 123123)
+curl -H "Authorization: Bearer 123123" http://localhost:3013/api/agents
+
+# With agent ID header for MCP tools
+curl -H "Authorization: Bearer 123123" -H "X-Agent-ID: <uuid>" http://localhost:3013/mcp
+```
+
+**Key env vars:**
+- `API_KEY` - Auth token for API requests
+- `MCP_BASE_URL` - API server URL (default: http://localhost:3013)
+- `SLACK_DISABLE=true` / `GITHUB_DISABLE=true` - Disable integrations locally
 
 ---
 
