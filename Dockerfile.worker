@@ -110,6 +110,9 @@ RUN pip3 install --break-system-packages cc-ai-tracker
 # Install wts (git worktree manager) globally for agents
 RUN npm install -g @desplega.ai/wts@latest
 
+# Install sentry-cli for issue investigation
+RUN npm install -g @sentry/cli
+
 # Install qa-use (QA tool) globally
 RUN npm install -g @desplega.ai/qa-use@latest
 
