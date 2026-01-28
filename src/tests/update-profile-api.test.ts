@@ -30,7 +30,7 @@ async function handleRequest(
   ) {
     const agentId = pathSegments[2];
 
-    let body: { role?: string; description?: string; capabilities?: string[] };
+    let body: { role?: string; description?: string; capabilities?: string[]; claudeMd?: string };
     try {
       body = JSON.parse(bodyText);
     } catch {
@@ -41,11 +41,15 @@ async function handleRequest(
     if (
       body.role === undefined &&
       body.description === undefined &&
-      body.capabilities === undefined
+      body.capabilities === undefined &&
+      body.claudeMd === undefined
     ) {
       return {
         status: 400,
-        body: { error: "At least one field (role, description, or capabilities) must be provided" },
+        body: {
+          error:
+            "At least one field (role, description, capabilities, or claudeMd) must be provided",
+        },
       };
     }
 
@@ -59,10 +63,16 @@ async function handleRequest(
       return { status: 400, body: { error: "Capabilities must be an array of strings" } };
     }
 
+    // Validate claudeMd size if provided (max 64KB)
+    if (body.claudeMd !== undefined && body.claudeMd.length > 65536) {
+      return { status: 400, body: { error: "claudeMd must be 64KB or less" } };
+    }
+
     const agent = updateAgentProfile(agentId, {
       role: body.role,
       description: body.description,
       capabilities: body.capabilities,
+      claudeMd: body.claudeMd,
     });
 
     if (!agent) {
@@ -426,6 +436,126 @@ describe("PUT /api/agents/:id/profile", () => {
       // Other fields should be preserved (due to COALESCE in the SQL)
       expect(data.description).toBe("Initial description");
       expect(data.capabilities).toEqual(["javascript"]);
+    });
+  });
+
+  describe("Update claudeMd", () => {
+    test("should update agent claudeMd successfully", async () => {
+      const agentId = "test-agent-claudemd-update";
+      createAgent({
+        id: agentId,
+        name: "Test Agent ClaudeMd Update",
+        isLead: false,
+        status: "idle",
+      });
+
+      const claudeMdContent = "# My Notes\n\nThis is my personal CLAUDE.md content.";
+      const response = await fetch(`${baseUrl}/api/agents/${agentId}/profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ claudeMd: claudeMdContent }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = (await response.json()) as { id?: string; claudeMd?: string };
+      expect(data.id).toBe(agentId);
+      expect(data.claudeMd).toBe(claudeMdContent);
+
+      // Verify in database
+      const agent = getAgentById(agentId);
+      expect(agent?.claudeMd).toBe(claudeMdContent);
+    });
+
+    test("should return 400 if claudeMd exceeds 64KB", async () => {
+      const largeContent = "a".repeat(65537); // 64KB + 1 byte
+      const response = await fetch(`${baseUrl}/api/agents/test-agent/profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ claudeMd: largeContent }),
+      });
+
+      expect(response.status).toBe(400);
+      const data = (await response.json()) as { error?: string };
+      expect(data.error).toContain("64KB");
+    });
+
+    test("should allow claudeMd at exactly 64KB", async () => {
+      const agentId = "test-agent-claudemd-64kb";
+      createAgent({
+        id: agentId,
+        name: "Test Agent ClaudeMd 64KB",
+        isLead: false,
+        status: "idle",
+      });
+
+      const exactContent = "a".repeat(65536); // Exactly 64KB
+      const response = await fetch(`${baseUrl}/api/agents/${agentId}/profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ claudeMd: exactContent }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = (await response.json()) as { claudeMd?: string };
+      expect(data.claudeMd?.length).toBe(65536);
+    });
+
+    test("should allow clearing claudeMd by setting empty string", async () => {
+      const agentId = "test-agent-claudemd-clear";
+      createAgent({
+        id: agentId,
+        name: "Test Agent ClaudeMd Clear",
+        isLead: false,
+        status: "idle",
+      });
+
+      // First set claudeMd
+      await fetch(`${baseUrl}/api/agents/${agentId}/profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ claudeMd: "Some content" }),
+      });
+
+      // Then clear it
+      const response = await fetch(`${baseUrl}/api/agents/${agentId}/profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ claudeMd: "" }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = (await response.json()) as { claudeMd?: string };
+      expect(data.claudeMd).toBe("");
+    });
+
+    test("should preserve claudeMd when updating other fields", async () => {
+      const agentId = "test-agent-claudemd-preserve";
+      createAgent({
+        id: agentId,
+        name: "Test Agent ClaudeMd Preserve",
+        isLead: false,
+        status: "idle",
+      });
+
+      // Set initial claudeMd
+      await fetch(`${baseUrl}/api/agents/${agentId}/profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ claudeMd: "My notes" }),
+      });
+
+      // Update only the role
+      const response = await fetch(`${baseUrl}/api/agents/${agentId}/profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "Developer" }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = (await response.json()) as { role?: string; claudeMd?: string };
+      expect(data.role).toBe("Developer");
+      // claudeMd should be preserved (due to COALESCE in the SQL)
+      expect(data.claudeMd).toBe("My notes");
     });
   });
 });

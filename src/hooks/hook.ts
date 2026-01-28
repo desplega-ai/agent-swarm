@@ -5,6 +5,10 @@ import type { Agent } from "../types";
 
 const SERVER_NAME = pkg.config?.name ?? "agent-swarm";
 
+// CLAUDE.md file paths
+const CLAUDE_MD_PATH = `${process.env.HOME}/.claude/CLAUDE.md`;
+const CLAUDE_MD_BACKUP_PATH = `${process.env.HOME}/.claude/CLAUDE.md.bak`;
+
 type McpServerConfig = {
   url: string;
   headers: {
@@ -100,6 +104,47 @@ async function readTaskFile(): Promise<TaskFileData | null> {
 }
 
 /**
+ * Backup existing CLAUDE.md file if it exists
+ */
+async function backupExistingClaudeMd(): Promise<void> {
+  const file = Bun.file(CLAUDE_MD_PATH);
+  if (await file.exists()) {
+    const content = await file.text();
+    await Bun.write(CLAUDE_MD_BACKUP_PATH, content);
+  }
+}
+
+/**
+ * Write agent's CLAUDE.md content to ~/.claude/CLAUDE.md
+ */
+async function writeAgentClaudeMd(content: string): Promise<void> {
+  // Ensure ~/.claude directory exists
+  const dir = `${process.env.HOME}/.claude`;
+  try {
+    await Bun.$`mkdir -p ${dir}`.quiet();
+  } catch {
+    // Directory may already exist
+  }
+  await Bun.write(CLAUDE_MD_PATH, content);
+}
+
+/**
+ * Restore CLAUDE.md from backup or remove it if no backup exists
+ */
+async function restoreClaudeMdBackup(): Promise<void> {
+  const backupFile = Bun.file(CLAUDE_MD_BACKUP_PATH);
+  if (await backupFile.exists()) {
+    const content = await backupFile.text();
+    await Bun.write(CLAUDE_MD_PATH, content);
+    // Remove backup file
+    await Bun.$`rm -f ${CLAUDE_MD_BACKUP_PATH}`.quiet();
+  } else {
+    // No backup existed, remove the agent's CLAUDE.md
+    await Bun.$`rm -f ${CLAUDE_MD_PATH}`.quiet();
+  }
+}
+
+/**
  * Main hook handler - processes Claude Code hook events
  */
 export async function handleHook(): Promise<void> {
@@ -185,6 +230,34 @@ export async function handleHook(): Promise<void> {
     }
 
     return;
+  };
+
+  /**
+   * Sync CLAUDE.md content back to the server
+   */
+  const syncClaudeMdToServer = async (agentId: string): Promise<void> => {
+    if (!mcpConfig) return;
+
+    const file = Bun.file(CLAUDE_MD_PATH);
+    if (!(await file.exists())) return;
+
+    const content = await file.text();
+
+    // Don't sync if content is empty or too large (>64KB)
+    if (!content.trim() || content.length > 65536) return;
+
+    try {
+      await fetch(`${getBaseUrl()}/api/agents/${agentId}/profile`, {
+        method: "PUT",
+        headers: {
+          ...mcpConfig.headers,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ claudeMd: content }),
+      });
+    } catch {
+      // Silently fail - don't block shutdown
+    }
   };
 
   /**
@@ -422,7 +495,16 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
     case "SessionStart":
       if (!agentInfo) break;
 
-      // Covered by base system prompt
+      // Write agent's CLAUDE.md if available
+      if (agentInfo.claudeMd) {
+        try {
+          await backupExistingClaudeMd();
+          await writeAgentClaudeMd(agentInfo.claudeMd);
+          console.log("Loaded your personal CLAUDE.md configuration.");
+        } catch (error) {
+          console.log(`Warning: Could not load CLAUDE.md: ${(error as Error).message}`);
+        }
+      }
       break;
 
     case "PreCompact":
@@ -488,6 +570,17 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
       } catch {
         // PM2 not available or no processes - silently ignore
       }
+
+      // Sync CLAUDE.md back to database and restore backup
+      if (agentInfo?.id) {
+        try {
+          await syncClaudeMdToServer(agentInfo.id);
+          await restoreClaudeMdBackup();
+        } catch {
+          // Silently fail - don't block shutdown
+        }
+      }
+
       // Mark the agent as offline
       await close();
       // NOTE: Task completion is NOT handled here intentionally.
