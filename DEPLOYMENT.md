@@ -11,6 +11,7 @@ This guide covers all deployment options for Agent Swarm MCP.
 - [Environment Variables](#environment-variables)
 - [Slack Integration](#slack-integration)
 - [GitHub App Integration](#github-app-integration)
+- [Sentry Integration](#sentry-integration)
 - [System Prompts](#system-prompts)
 - [Service Registry (PM2)](#service-registry-pm2)
 - [Publishing (Maintainers)](#publishing-maintainers)
@@ -359,6 +360,8 @@ When a worker starts, it:
 | `GITHUB_TOKEN` | No | GitHub token for git operations |
 | `GITHUB_EMAIL` | No | Git commit email (default: `worker-agent@desplega.ai`) |
 | `GITHUB_NAME` | No | Git commit name (default: `Worker Agent`) |
+| `SENTRY_AUTH_TOKEN` | No | Sentry Organization Auth Token for issue investigation |
+| `SENTRY_ORG` | No | Sentry organization slug |
 
 ### Server Variables
 
@@ -455,6 +458,53 @@ GITHUB_APP_PRIVATE_KEY=base64-encoded-key
 ### Bot Reactions
 
 If GitHub App credentials are provided, the bot can react to comments/issues to acknowledge receipt.
+
+---
+
+## Sentry Integration
+
+Docker workers include `sentry-cli` pre-installed, enabling agents to investigate and triage Sentry issues directly.
+
+### Setup
+
+1. Create an Organization Auth Token at `https://sentry.io/settings/{org}/auth-tokens/` with scopes:
+   - `event:read` - Read issues and events
+   - `project:read` - Read project data
+   - `org:read` - Read organization info
+
+2. Add to `.env.docker` or `.env`:
+   ```bash
+   SENTRY_AUTH_TOKEN=your-auth-token
+   SENTRY_ORG=your-org-slug
+   ```
+
+3. Verify authentication in a worker:
+   ```bash
+   sentry-cli info
+   ```
+
+### Agent Commands
+
+| Command | Description |
+|---------|-------------|
+| `/investigate-sentry-issue <url-or-id>` | Investigate a Sentry issue, get stacktrace, and triage |
+
+### Usage
+
+Workers can use the `/investigate-sentry-issue` command to:
+- Get issue details and stacktraces
+- Analyze breadcrumbs and context
+- Resolve, mute, or unresolve issues
+
+Example:
+```
+/investigate-sentry-issue https://sentry.io/organizations/myorg/issues/123456/
+```
+
+Or just the issue ID:
+```
+/investigate-sentry-issue 123456
+```
 
 ---
 
