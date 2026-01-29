@@ -80,6 +80,53 @@ Agent Swarm can receive tasks from GitHub via webhooks. When someone mentions `@
 
 ---
 
+## Sentry Integration
+
+Docker workers include `sentry-cli` pre-installed, enabling agents to investigate and triage Sentry issues directly. This is useful for debugging errors reported via Slack alerts.
+
+### Setup
+
+1. Create an Organization Auth Token at `https://sentry.io/settings/{org}/auth-tokens/` with scopes:
+   - `event:read` - Read issues and events
+   - `project:read` - Read project data
+   - `org:read` - Read organization info
+
+2. Add to `.env.docker`:
+   ```bash
+   SENTRY_AUTH_TOKEN=your-auth-token
+   SENTRY_ORG=your-org-slug
+   ```
+
+3. Verify authentication in a worker:
+   ```bash
+   sentry-cli info
+   ```
+
+### Agent Commands
+
+| Command | Description |
+|---------|-------------|
+| `/investigate-sentry-issue <url-or-id>` | Investigate a Sentry issue, get stacktrace, and triage |
+
+### Usage
+
+Workers can use the `/investigate-sentry-issue` command to:
+- Get issue details and stacktraces
+- Analyze breadcrumbs and context
+- Resolve, mute, or unresolve issues
+
+Example:
+```
+/investigate-sentry-issue https://sentry.io/organizations/myorg/issues/123456/
+```
+
+Or just the issue ID:
+```
+/investigate-sentry-issue 123456
+```
+
+---
+
 ## Quick Start
 
 The recommended setup: run the API locally, run a Docker worker, and connect Claude Code as the lead agent.
