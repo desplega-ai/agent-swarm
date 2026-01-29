@@ -159,7 +159,7 @@ Document -> comment-analyzer -> code-simplifier (polish) -> Create PR
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Layer 1: Global Memory
+### Layer 1: Global Memory (Agent Profile Integration)
 
 **Purpose**: Store cross-repository preferences and learned patterns
 
@@ -170,23 +170,45 @@ Document -> comment-analyzer -> code-simplifier (polish) -> Create PR
 - Learning history (false positives, adjusted thresholds)
 - Review statistics (avg issues per PR, approval rate)
 
-**Storage**: SQLite database, synced to swarm storage
+**Storage**: Integrated with existing agent infrastructure
 
-### Layer 2: Per-Repo Memory
+**Implementation using existing swarm architecture**:
+1. **Agent profile storage**: Use the existing `update-profile` MCP tool's `claudeMd` field to store persistent agent-specific memory
+2. **File-based approach**: Store learned patterns/preferences as files in `/workspace/personal/` that can be referenced
+3. **CLAUDE.md composition**: The agent's CLAUDE.md can include references to these memory files, making them automatically loaded
 
-**Purpose**: Store repository-specific knowledge
+**Benefits**:
+- Reuses existing infrastructure
+- Memory becomes portable across sessions (already synced via profile)
+- Can be used for other purposes beyond PR reviews
+- Follows the "mounted file" pattern already established in the swarm
+
+### Layer 2: Per-Repo Memory (Fetch-on-Demand)
+
+**Purpose**: Access repository-specific knowledge
 
 **Contents**:
 - Architecture understanding (modules, services, dependencies)
 - Conventions (naming patterns, file structure, test patterns)
-- CLAUDE.md content (auto-loaded and parsed into rules)
+- CLAUDE.md content (fetched fresh each time)
 - History (previous reviews, recurring issues, known tech debt)
 - Hot files (files with frequent changes/issues)
 
-**Auto-Loading**:
+**Approach: Fetch-on-Demand vs Caching**
+
+Trade-offs considered:
+- **Fetch on-demand**: Simpler, always fresh, no sync issues. Works well for CLAUDE.md content.
+- **Cached/stored**: Better for computed/derived data (e.g., architecture analysis, pattern learning, review history aggregates).
+
+**Revised proposal**:
+- **CLAUDE.md**: Always fetch fresh via `gh api` (no caching needed)
+- **Architecture/conventions**: Derive on-demand from codebase analysis
+- **Review history/patterns**: Only store learned insights from past reviews that can't just be fetched
+
+**Auto-Loading** (on-demand):
 ```bash
-# On every PR review, automatically:
-gh api repos/{owner}/{repo}/contents/CLAUDE.md | base64 -d > /tmp/claude.md
+# On every PR review, fetch fresh CLAUDE.md:
+CLAUDE_MD=$(gh api repos/{owner}/{repo}/contents/CLAUDE.md 2>/dev/null | jq -r '.content' | base64 -d)
 # Parse into structured rules for review checklist
 ```
 
@@ -208,57 +230,44 @@ OPEN ──(author responds)──> PENDING_RESPONSE
 - Follow-up requirements
 - Iteration count
 
-### Database Schema (SQLite)
+### Storage Implementation (File-Based with Agent Profile)
 
+Instead of a separate SQLite database, the memory system integrates with existing swarm infrastructure:
+
+**1. Agent Profile Storage** (`update-profile` MCP tool):
+```json
+{
+  "claudeMd": "## Review Memory\n\n@import /workspace/personal/review-patterns.md\n@import /workspace/personal/review-preferences.md"
+}
+```
+
+**2. Personal Directory Files** (`/workspace/personal/`):
+```
+/workspace/personal/
+├── review-patterns.md      # Learned patterns from past reviews
+├── review-preferences.md   # User preferences and thresholds
+└── review-history/         # Per-repo review history
+    └── {owner}-{repo}.md   # Repo-specific review notes
+```
+
+**3. PR Interaction Memory** (if needed for complex thread tracking):
 ```sql
--- Global memory
-CREATE TABLE global_memory (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  preferences JSON NOT NULL,
-  patterns JSON NOT NULL,
-  statistics JSON NOT NULL,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- Per-repo memory
-CREATE TABLE repo_memory (
-  id TEXT PRIMARY KEY,
-  repo_full_name TEXT NOT NULL UNIQUE,
-  architecture JSON,
-  conventions JSON,
-  claude_md TEXT,
-  claude_md_rules JSON,
-  history JSON,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- PR interaction memory
-CREATE TABLE pr_memory (
+-- Minimal schema for PR thread state only (what genuinely needs persistence)
+CREATE TABLE pr_threads (
   id TEXT PRIMARY KEY,
   repo_full_name TEXT NOT NULL,
   pr_number INTEGER NOT NULL,
-  review_threads JSON NOT NULL,
-  overall_state TEXT NOT NULL,
-  iterations JSON NOT NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  thread_states JSON NOT NULL,  -- {commentId: state}
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(repo_full_name, pr_number)
 );
-
--- Review comment threads
-CREATE TABLE review_threads (
-  id TEXT PRIMARY KEY,
-  pr_memory_id TEXT NOT NULL REFERENCES pr_memory(id),
-  file_path TEXT NOT NULL,
-  line_number INTEGER,
-  original_comment TEXT NOT NULL,
-  state TEXT NOT NULL DEFAULT 'open',
-  conversation JSON NOT NULL DEFAULT '[]',
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
 ```
+
+This approach:
+- Minimizes new infrastructure
+- Leverages existing agent profile sync
+- Keeps CLAUDE.md as the source of truth for agent behavior
+- Only persists what can't be fetched on-demand
 
 ---
 
@@ -296,28 +305,47 @@ Implement 0-100 confidence scale:
 
 ### Medium-Term (1-2 months)
 
-#### 4. Multi-Agent Review Architecture
-Create orchestrator that spawns parallel specialized agents:
+#### 4. Multi-Agent Review Architecture (Using Existing Swarm Infrastructure)
+
+**Leverage existing agent-swarm architecture** instead of creating a parallel system:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    ORCHESTRATOR                             │
-│  (Coordinates agents, merges results, posts review)         │
+│                    LEAD AGENT                               │
+│  (Coordinates review, delegates to workers, merges results) │
 └─────────────────────────────────────────────────────────────┘
+                           │
+                    send-task (MCP)
                            │
     ┌──────────────────────┼──────────────────────┐
     │                      │                      │
     ▼                      ▼                      ▼
 ┌─────────┐         ┌─────────────┐         ┌─────────┐
 │ Security│         │ Bug Detector│         │ Style   │
-│ Analyzer│         │             │         │ Checker │
+│ Worker  │         │   Worker    │         │ Worker  │
 └─────────┘         └─────────────┘         └─────────┘
+    │                      │                      │
+    └──────────────────────┴──────────────────────┘
+                           │
+                  store-progress (MCP)
+                           │
+                    ▼ Results to Lead
 ```
 
-#### 5. Implement Memory System
-- Create SQLite database for memory storage
+**Implementation using existing swarm tools**:
+- Use `send-task` MCP tool to spawn specialized review sub-tasks
+- Each specialized reviewer (security, bugs, style) is a worker agent task
+- The orchestrator role is handled by the lead agent coordinating reviews
+- Results flow through the existing task completion/progress system
+- Use `store-progress` to report findings back to lead
+
+This aligns with the swarm's current design pattern where the lead delegates to workers.
+
+#### 5. Implement Memory System (File-Based)
+- Use agent profile `claudeMd` field for persistent memory
+- Store learned patterns in `/workspace/personal/` files
 - Implement memory read/write in review-pr skill
-- Track comment threads and states
+- Track comment threads via minimal persistence (only what can't be fetched)
 
 #### 6. Add Reply Threading
 When author replies to a comment:
@@ -372,10 +400,10 @@ Multi-agent architecture with parallel specialized reviewers, confidence scoring
 Current plugins use summary comments with links to specific lines (format: `https://github.com/owner/repo/blob/[sha]/path#L[start]-L[end]`). True inline comments require GitHub's PR review API or the `gh-pr-review` CLI extension.
 
 ### Q3: How to implement memory for PR review interactions?
-Three-layer system:
-- **Global**: User preferences, org standards, learned patterns
-- **Per-Repo**: Architecture, CLAUDE.md, conventions, history
-- **Interaction**: PR thread state machine (open -> addressed -> resolved)
+Three-layer system integrated with existing swarm infrastructure:
+- **Global**: User preferences, org standards, learned patterns (via agent profile `claudeMd` and `/workspace/personal/` files)
+- **Per-Repo**: Architecture, CLAUDE.md, conventions, history (fetch-on-demand where possible)
+- **Interaction**: PR thread state machine (open -> addressed -> resolved) - minimal persistence only for what can't be fetched
 
 ### Q4: What makes thorough vs rubber-stamp review?
 **Thorough**: Verifies correctness, checks maintainability, assesses tech debt, reviews security, validates tests, uses confidence scoring, provides actionable feedback.
@@ -407,18 +435,17 @@ Three-layer system:
 - [ ] Implement inline comments via `gh api` or `gh-pr-review`
 - [ ] Keep summary comment smaller, focused on overall assessment
 
-### Phase 2: Memory System
-- [ ] Create SQLite database schema
-- [ ] Implement global memory storage
-- [ ] Implement per-repo memory storage
-- [ ] Implement PR interaction memory
-- [ ] Track comment thread states
+### Phase 2: Memory System (File-Based)
+- [ ] Integrate with agent profile `claudeMd` field for persistent memory
+- [ ] Create file structure in `/workspace/personal/` for review patterns
+- [ ] Implement memory read/write helpers in review-pr skill
+- [ ] Track comment thread states (minimal DB only for what can't be fetched)
 
-### Phase 3: Multi-Agent Architecture
-- [ ] Create review orchestrator
-- [ ] Implement specialized reviewer agents
-- [ ] Add parallel execution
-- [ ] Merge and deduplicate findings
+### Phase 3: Multi-Agent Architecture (Using Existing Swarm)
+- [ ] Configure lead agent to coordinate reviews via `send-task`
+- [ ] Create specialized reviewer worker task types (security, bugs, style)
+- [ ] Use existing swarm parallel task execution
+- [ ] Implement result aggregation from worker `store-progress` outputs
 
 ### Phase 4: Learning & Intelligence
 - [ ] Track issue acceptance/rejection
