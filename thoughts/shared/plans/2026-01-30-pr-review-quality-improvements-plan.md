@@ -838,3 +838,121 @@ export function getReviewStatistics(repoFullName?: string) {
 - **Review thoroughness**: Average issues per PR increases 2x from baseline
 - **Thread resolution**: >70% of threads reach resolved state
 - **Memory utilization**: CLAUDE.md loaded in >95% of repos that have it
+
+---
+
+## Appendix: User Interaction Patterns for Memory Layer
+
+This section documents how PR creators, reviewers, and external agents can interact with the swarm's memory layer during PR reviews. Full documentation is available in [docs/MEMORY_INTERACTION.md](../../../docs/MEMORY_INTERACTION.md).
+
+### Memory Trigger Phrases
+
+The memory layer responds to natural language commands in PR comments:
+
+#### Storing Preferences
+
+| Trigger | Example | Scope |
+|---------|---------|-------|
+| `remember this: ...` | `@swarm-bot remember this: We use 2-space indentation` | Per-repo |
+| `remember that ...` | `@swarm-bot remember that error messages are English-only` | Per-repo |
+| `for future reviews: ...` | `@swarm-bot for future reviews: Always check SQL injection` | Per-repo |
+| `we use ... in this repo` | `@swarm-bot we use PascalCase for components in this repo` | Per-repo |
+| `this is intentional because ...` | `@swarm-bot this is intentional because of backwards compat` | Per-PR |
+
+#### Dismissing Feedback
+
+| Trigger | Example | Scope |
+|---------|---------|-------|
+| `i don't care about ...` | `@swarm-bot i don't care about trailing whitespace` | Per-repo |
+| `ignore ... issues` | `@swarm-bot ignore nit-level style issues in tests` | Per-repo |
+| `don't flag ...` | `@swarm-bot don't flag console.log in dev scripts` | Per-repo |
+| `this is fine because ...` | `@swarm-bot this is fine because null checked in caller` | Per-PR |
+| `won't fix: ...` | `@swarm-bot won't fix: we prefer this pattern` | Per-thread |
+
+#### Adjusting Sensitivity
+
+| Trigger | Example |
+|---------|---------|
+| `be stricter about ...` | `@swarm-bot be stricter about security in API handlers` |
+| `be more lenient with ...` | `@swarm-bot be more lenient with types in test files` |
+| `focus more on ...` | `@swarm-bot focus more on performance in DB queries` |
+
+### Best Practices
+
+1. **Be Specific**: `remember this: All API endpoints must validate with Zod` > `remember to validate stuff`
+2. **Provide Context**: `this is fine because we're using a factory pattern` > `this is fine`
+3. **Scope Appropriately**: Use per-repo for standards, per-PR for exceptions
+4. **Update When Things Change**: `forget: the 2-space rule - we're moving to 4-space`
+
+### How Memory Affects Reviews
+
+**Before Review**: Agent loads repo preferences, applies sensitivity adjustments, filters dismissed issue types
+
+**During Review**: Issues scored against patterns, dismissed types get lower confidence, focus areas get extra attention
+
+**After Review**: Your responses update memory - accepted issues reinforce patterns, dismissals lower future confidence
+
+### Memory Types
+
+| Type | Example | Lifetime |
+|------|---------|----------|
+| **Episodic** | "PR #42 had auth issue" | Months |
+| **Semantic** | "Uses 2-space indentation" | Permanent until updated |
+| **Procedural** | "How to review auth code" | Permanent, improved over time |
+
+### Integration Points
+
+The memory layer integrates with:
+
+1. **Thread Response Handler** (Phase 4): Parses trigger phrases from author replies
+2. **Repo Memory Table** (Phase 2): Stores per-repo preferences and conventions
+3. **PR Interaction Memory** (Phase 2): Tracks per-PR exceptions and decisions
+4. **Confidence Scoring** (Phase 1): Adjusts scores based on stored preferences
+
+### Implementation Requirements
+
+To support these interaction patterns, the thread response handler (Phase 4) must:
+
+1. **Parse trigger phrases** from comment text
+2. **Extract the preference/rule** being set or modified
+3. **Determine scope** (per-repo, per-PR, per-thread)
+4. **Store in appropriate memory table**
+5. **Confirm to user** what was stored
+
+Example parsing logic:
+
+```typescript
+const MEMORY_TRIGGERS = {
+  store: [
+    /remember this:\s*(.+)/i,
+    /remember that\s+(.+)/i,
+    /for future reviews:\s*(.+)/i,
+    /we use (.+) in this repo/i,
+    /our convention is\s*(.+)/i,
+  ],
+  dismiss: [
+    /i don't care about\s+(.+)/i,
+    /ignore (.+) issues/i,
+    /don't flag\s+(.+)/i,
+    /skip (.+) checks/i,
+  ],
+  adjust: [
+    /be stricter about\s+(.+)/i,
+    /be more lenient with\s+(.+)/i,
+    /focus more on\s+(.+)/i,
+    /focus less on\s+(.+)/i,
+  ],
+};
+
+function parseMemoryTrigger(comment: string): MemoryAction | null {
+  for (const [action, patterns] of Object.entries(MEMORY_TRIGGERS)) {
+    for (const pattern of patterns) {
+      const match = comment.match(pattern);
+      if (match) {
+        return { action, content: match[1].trim() };
+      }
+    }
+  }
+  return null;
+}
+```
