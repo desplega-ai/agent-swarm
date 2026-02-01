@@ -91,9 +91,6 @@ export default function AgentDetailPanel({
     }
   };
 
-  // Width is controlled by parent flex container - always use 100%
-  const panelWidth = "100%";
-
   const loadingContent = (
     <Typography sx={{ fontFamily: "code", color: "text.tertiary" }}>Loading agent...</Typography>
   );
@@ -109,7 +106,7 @@ export default function AgentDetailPanel({
           position: { xs: "fixed", md: "relative" },
           inset: { xs: 0, md: "auto" },
           zIndex: { xs: 1300, md: "auto" },
-          width: { xs: "100%", md: panelWidth },
+          width: "100%",
           height: "100%",
           bgcolor: "background.surface",
           border: { xs: "none", md: "1px solid" },
@@ -561,7 +558,7 @@ export default function AgentDetailPanel({
         position: { xs: "fixed", md: "relative" },
         inset: { xs: 0, md: "auto" },
         zIndex: { xs: 1300, md: "auto" },
-        width: { xs: "100%", md: expanded ? "100%" : 400 },
+        width: "100%",
         height: { xs: "100%", md: "100%" },
         bgcolor: "background.surface",
         border: { xs: "none", md: "1px solid" },
