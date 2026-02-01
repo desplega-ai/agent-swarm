@@ -624,6 +624,7 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
                       minWidth: 0,
                       display: { xs: "none", lg: "flex" },
                       height: "100%",
+                      width: "100%",
                     }}
                   >
                     <ActivityFeed
@@ -641,6 +642,7 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
                         minWidth: 0,
                         display: { xs: "none", lg: "flex" },
                         height: "100%",
+                        width: "100%",
                       }}
                     >
                       <AgentDetailPanel
