@@ -46,7 +46,7 @@ function HexStat({ label, value, color, glowColor, isActive, isDark, onClick }: 
           transform: onClick ? "scale(1.05)" : undefined,
         },
         "&:hover .hex-bg": {
-          bgcolor: isDark ? "#2F2419" : "#F5EDE4",
+          bgcolor: isDark ? "#2F2419" : "#EBE1D4",
         },
         "& *": {
           cursor: onClick ? "pointer" : "inherit",
@@ -69,7 +69,7 @@ function HexStat({ label, value, color, glowColor, isActive, isDark, onClick }: 
           position: "absolute",
           inset: 2,
           clipPath: "polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)",
-          bgcolor: isDark ? "#1A130E" : "#FFFFFF",
+          bgcolor: isDark ? "#1A130E" : "#F5EDE4",
           transition: "background-color 0.2s ease",
         }}
       />
@@ -233,7 +233,7 @@ export default function StatsBar({ onFilterAgents, onNavigateToTasks }: StatsBar
   return (
     <Box
       sx={{
-        bgcolor: "background.surface",
+        bgcolor: isDark ? "rgba(26, 19, 14, 0.8)" : "rgba(245, 237, 228, 0.9)",
         border: "1px solid",
         borderColor: "neutral.outlinedBorder",
         borderRadius: "8px",

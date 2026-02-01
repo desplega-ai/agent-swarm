@@ -581,7 +581,7 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
                 gap: { xs: 2, md: 3 },
               }}
             >
-              {/* Main Content - hidden when expanded or when detail selected on mobile */}
+              {/* Main Content - hidden when expanded */}
               {!(selectedAgentId && expandDetail) && (
                 <Box
                   sx={{
@@ -595,9 +595,15 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
                     minWidth: 0,
                   }}
                 >
-                  {/* Agents Panel */}
+                  {/* Left Panel: Swarm/Agents - 50% on desktop (stays same with or without agent selected) */}
                   <Box
-                    sx={{ flex: 2, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}
+                    sx={{
+                      flex: { xs: 1, lg: 2 },
+                      minWidth: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 2,
+                    }}
                   >
                     <StatsBar
                       onFilterAgents={handleFilterAgents}
@@ -611,19 +617,59 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
                     />
                   </Box>
 
-                  {/* Activity Feed - hidden on mobile */}
-                  <Box sx={{ flex: 1, minWidth: 0, display: { xs: "none", lg: "block" } }}>
+                  {/* Activity Feed - 50% when no agent selected, 25% when agent selected */}
+                  <Box
+                    sx={{
+                      flex: { xs: 1, lg: selectedAgentId ? 1 : 2 },
+                      minWidth: 0,
+                      display: { xs: "none", lg: "flex" },
+                      height: "100%",
+                    }}
+                  >
                     <ActivityFeed
                       onNavigateToAgent={handleNavigateToAgent}
                       onNavigateToTask={handleNavigateToTask}
                       onNavigateToChat={handleNavigateToChat}
                     />
                   </Box>
+
+                  {/* Agent Detail Panel - 25% when agent selected */}
+                  {selectedAgentId && (
+                    <Box
+                      sx={{
+                        flex: { xs: 1, lg: 1 },
+                        minWidth: 0,
+                        display: { xs: "none", lg: "flex" },
+                        height: "100%",
+                      }}
+                    >
+                      <AgentDetailPanel
+                        agentId={selectedAgentId}
+                        onClose={() => handleSelectAgent(null)}
+                        onGoToTasks={handleGoToTasks}
+                        expanded={expandDetail}
+                        onToggleExpand={handleToggleExpand}
+                      />
+                    </Box>
+                  )}
                 </Box>
               )}
 
-              {/* Agent Detail Panel */}
+              {/* Mobile: Agent Detail Panel shown separately */}
               {selectedAgentId && (
+                <Box sx={{ display: { xs: "block", lg: "none" }, height: "100%" }}>
+                  <AgentDetailPanel
+                    agentId={selectedAgentId}
+                    onClose={() => handleSelectAgent(null)}
+                    onGoToTasks={handleGoToTasks}
+                    expanded={expandDetail}
+                    onToggleExpand={handleToggleExpand}
+                  />
+                </Box>
+              )}
+
+              {/* Expanded Agent Detail Panel - full width */}
+              {selectedAgentId && expandDetail && (
                 <AgentDetailPanel
                   agentId={selectedAgentId}
                   onClose={() => handleSelectAgent(null)}
