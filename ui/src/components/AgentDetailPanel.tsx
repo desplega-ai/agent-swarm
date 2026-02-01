@@ -91,7 +91,8 @@ export default function AgentDetailPanel({
     }
   };
 
-  const panelWidth = expanded ? "100%" : 400;
+  // Width is controlled by parent flex container - always use 100%
+  const panelWidth = "100%";
 
   const loadingContent = (
     <Typography sx={{ fontFamily: "code", color: "text.tertiary" }}>Loading agent...</Typography>
