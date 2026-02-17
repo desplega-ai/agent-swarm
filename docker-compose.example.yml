@@ -25,6 +25,13 @@ services:
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-}
       - SLACK_APP_TOKEN=${SLACK_APP_TOKEN:-}
 
+      # Optional: Enable GitHub integration
+      - GITHUB_DISABLE=${GITHUB_DISABLE:-true}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-}
+      - GITHUB_BOT_NAME=${GITHUB_BOT_NAME:-agent-swarm-bot}
+      - GITHUB_APP_ID=${GITHUB_APP_ID:-}
+      - GITHUB_APP_PRIVATE_KEY=${GITHUB_APP_PRIVATE_KEY:-}
+
     ports:
       - "3013:3013"
 

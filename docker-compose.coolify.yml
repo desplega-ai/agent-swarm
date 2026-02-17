@@ -38,6 +38,8 @@ services:
       - GITHUB_DISABLE=${GITHUB_DISABLE:-true}
       - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-}
       - GITHUB_BOT_NAME=${GITHUB_BOT_NAME:-agent-swarm-bot}
+      - GITHUB_APP_ID=${GITHUB_APP_ID:-}
+      - GITHUB_APP_PRIVATE_KEY=${GITHUB_APP_PRIVATE_KEY:-}
 
     volumes:
       - type: bind
