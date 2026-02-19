@@ -1,4 +1,6 @@
 {
-  "setup": [],
+  "setup": [
+    "WTS_WORKTREE_PATH=\"$SUPERSET_WORKSPACE_NAME\" WTS_GIT_ROOT=\"$SUPERSET_ROOT_PATH\" bun .wts-setup.ts"
+  ],
   "teardown": []
 }
