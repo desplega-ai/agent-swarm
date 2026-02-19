@@ -1,6 +1,6 @@
 {
   "setup": [
-    "WTS_WORKTREE_PATH=\"$SUPERSET_WORKSPACE_NAME\" \\\nWTS_GIT_ROOT=\"$SUPERSET_ROOT_PATH\" \\\n    bun .wts-setup.ts"
+    "WTS_WORKTREE_PATH=\"~/.superset/worktrees/agent-swarm/$SUPERSET_WORKSPACE_NAME\" \\\nWTS_GIT_ROOT=\"$SUPERSET_ROOT_PATH\" \\\n    bun .wts-setup.ts"
   ],
   "teardown": []
 }
