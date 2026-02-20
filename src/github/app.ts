@@ -16,6 +16,14 @@ export function isGitHubEnabled(): boolean {
   return !!process.env.GITHUB_WEBHOOK_SECRET;
 }
 
+export function resetGitHub(): void {
+  initialized = false;
+  webhookSecret = null;
+  appId = null;
+  privateKey = null;
+  tokenCache.clear();
+}
+
 export function initGitHub(): boolean {
   // Prevent double initialization
   if (initialized) {

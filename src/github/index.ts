@@ -5,6 +5,7 @@ export {
   initGitHub,
   isGitHubEnabled,
   isReactionsEnabled,
+  resetGitHub,
   verifyWebhookSignature,
 } from "./app";
 export {
