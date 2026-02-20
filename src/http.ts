@@ -1124,6 +1124,7 @@ const httpServer = createHttpServer(async (req, res) => {
         priority: body.priority || 50,
         dependsOn: body.dependsOn || undefined,
         offeredTo: body.offeredTo || undefined,
+        parentTaskId: body.parentTaskId || undefined,
         source: body.source || "api",
       });
 

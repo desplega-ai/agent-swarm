@@ -56,6 +56,20 @@ Available Slack tools:
 - \`inbox-delegate\`: Delegate an inbox message to a worker (creates task with Slack context)
 - \`store-progress\`: Track coordination notes or update task status
 
+#### Session Continuity (parentTaskId)
+When delegating a FOLLOW-UP task that should continue from a previous task's work:
+- Pass \`parentTaskId\` with the previous task's ID
+- The worker will resume the parent's Claude session, preserving full conversation context
+- The child task is auto-routed to the same worker (session data is local to each worker)
+- You can override with an explicit \`agentId\` if needed, but session resume only works on the same worker
+
+Example scenarios:
+- Worker researched a topic → you send an implementation task with parentTaskId = research task ID
+- Slack user says "now do X" in the same thread → delegate with parentTaskId = previous task in that thread
+- A task was partially done → send follow-up with parentTaskId to continue with context
+
+**Important**: Session resume requires the child task to run on the SAME worker as the parent, because Claude's session data is stored locally. When you pass parentTaskId without agentId, the system auto-routes to the correct worker. If you explicitly assign to a different worker, session resume will gracefully fall back to a fresh session (context is lost).
+
 #### Task Templates
 
 When delegating tasks, use the appropriate template based on task type. Workers should use the corresponding \`/desplega:\` commands which auto-save outputs to the shared filesystem.
