@@ -232,12 +232,12 @@ Note: The `envPath` writer only runs on the API server (where the DB lives). For
 #### Automated Verification:
 - [x] Type check passes: `bun run tsc:check`
 - [x] Lint passes: `bun run lint:fix`
-- [ ] Server starts without errors: `bun run start:http` (ctrl+c after startup)
-- [ ] Table exists: `sqlite3 agent-swarm-db.sqlite ".schema swarm_config"`
+- [x] Server starts without errors: `bun run start:http` (ctrl+c after startup)
+- [x] Table exists: `sqlite3 agent-swarm-db.sqlite ".schema swarm_config"`
 
 #### Manual Verification:
-- [ ] Start server, confirm no migration errors in console output
-- [ ] Verify the unique constraint works (try inserting duplicate scope+scopeId+key via DB directly)
+- [x] Start server, confirm no migration errors in console output
+- [x] Verify the unique constraint works (try inserting duplicate scope+scopeId+key via DB directly)
 
 **Implementation Note**: After completing this phase, pause for manual confirmation before proceeding.
 
@@ -297,18 +297,18 @@ DELETE /api/config/:id   → method === "DELETE" && pathSegments = ["api", "conf
 #### Automated Verification:
 - [x] Type check passes: `bun run tsc:check`
 - [x] Lint passes: `bun run lint:fix`
-- [ ] Create global config: `curl -s -X PUT -H "Authorization: Bearer 123123" -H "Content-Type: application/json" -d '{"scope":"global","key":"TEST_KEY","value":"test_value","description":"A test config"}' http://localhost:3013/api/config | jq .`
-- [ ] List global config: `curl -s -H "Authorization: Bearer 123123" "http://localhost:3013/api/config?scope=global" | jq .`
-- [ ] Create secret: `curl -s -X PUT -H "Authorization: Bearer 123123" -H "Content-Type: application/json" -d '{"scope":"global","key":"SECRET_KEY","value":"s3cret","isSecret":true}' http://localhost:3013/api/config | jq .`
-- [ ] Verify masking: `curl -s -H "Authorization: Bearer 123123" "http://localhost:3013/api/config?scope=global" | jq '.configs[] | select(.key == "SECRET_KEY") | .value'` — should return `"********"`
-- [ ] Verify reveal: `curl -s -H "Authorization: Bearer 123123" "http://localhost:3013/api/config?scope=global&includeSecrets=true" | jq '.configs[] | select(.key == "SECRET_KEY") | .value'` — should return `"s3cret"`
-- [ ] Get resolved config: `curl -s -H "Authorization: Bearer 123123" "http://localhost:3013/api/config/resolved" | jq .`
-- [ ] Delete config: `curl -s -X DELETE -H "Authorization: Bearer 123123" http://localhost:3013/api/config/<id> | jq .`
+- [x] Create global config: `curl -s -X PUT -H "Authorization: Bearer 123123" -H "Content-Type: application/json" -d '{"scope":"global","key":"TEST_KEY","value":"test_value","description":"A test config"}' http://localhost:3013/api/config | jq .`
+- [x] List global config: `curl -s -H "Authorization: Bearer 123123" "http://localhost:3013/api/config?scope=global" | jq .`
+- [x] Create secret: `curl -s -X PUT -H "Authorization: Bearer 123123" -H "Content-Type: application/json" -d '{"scope":"global","key":"SECRET_KEY","value":"s3cret","isSecret":true}' http://localhost:3013/api/config | jq .`
+- [x] Verify masking: `curl -s -H "Authorization: Bearer 123123" "http://localhost:3013/api/config?scope=global" | jq '.configs[] | select(.key == "SECRET_KEY") | .value'` — should return `"********"`
+- [x] Verify reveal: `curl -s -H "Authorization: Bearer 123123" "http://localhost:3013/api/config?scope=global&includeSecrets=true" | jq '.configs[] | select(.key == "SECRET_KEY") | .value'` — should return `"s3cret"`
+- [x] Get resolved config: `curl -s -H "Authorization: Bearer 123123" "http://localhost:3013/api/config/resolved" | jq .`
+- [x] Delete config: `curl -s -X DELETE -H "Authorization: Bearer 123123" http://localhost:3013/api/config/<id> | jq .`
 
 #### Manual Verification:
-- [ ] Test scope override: create a global key, then an agent-scoped key with the same name, verify resolved endpoint returns the agent-scoped value
-- [ ] Test upsert: PUT the same scope+scopeId+key twice with different values, verify only one entry exists with the updated value
-- [ ] Test validation: PUT with missing `key` field, verify 400 error
+- [x] Test scope override: create a global key, then an agent-scoped key with the same name, verify resolved endpoint returns the agent-scoped value
+- [x] Test upsert: PUT the same scope+scopeId+key twice with different values, verify only one entry exists with the updated value
+- [x] Test validation: PUT with missing `key` field, verify 400 error
 
 **Implementation Note**: After completing this phase, pause for manual confirmation before proceeding.
 
