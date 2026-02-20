@@ -1512,6 +1512,38 @@ async function spawnClaudeProcess(
     await cleanupTaskFile(taskFilePid);
     console.log(`\x1b[2m[${role}]\x1b[0m Task file cleaned up: ${taskFilePath}`);
 
+    // Retry without --resume if the session was not found (stale session ID on disk)
+    if (exitCode !== 0 && errorTracker.isSessionNotFound()) {
+      const hasResume = (opts.additionalArgs || []).includes("--resume");
+      if (hasResume) {
+        console.log(
+          `\x1b[33m[${role}] Session not found for task ${effectiveTaskId.slice(0, 8)} — retrying without --resume\x1b[0m`,
+        );
+
+        // Strip --resume and its value from additional args
+        const freshAdditionalArgs = (opts.additionalArgs || []).filter(
+          (arg, idx, arr) => {
+            if (arg === "--resume") return false;
+            if (idx > 0 && arr[idx - 1] === "--resume") return false;
+            return true;
+          },
+        );
+
+        const retryTimestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const retryLogFile = `${logDir}/${retryTimestamp}-retry-${effectiveTaskId.slice(0, 8)}.jsonl`;
+
+        const retryTask = await spawnClaudeProcess(
+          { ...opts, additionalArgs: freshAdditionalArgs, logFile: retryLogFile },
+          logDir,
+          _metadataType,
+          _sessionId,
+          isYolo,
+        );
+
+        return await retryTask.promise;
+      }
+    }
+
     return { exitCode: exitCode ?? 1, errorTracker };
   })();
 
@@ -1561,13 +1593,17 @@ async function checkCompletedProcesses(
     // Call the finish API to ensure task status is updated
     // This is idempotent - if the agent already marked it, this is a no-op
     if (apiConfig) {
-      // Await the promise to get error tracker with detailed failure info
+      // Await the promise to get error tracker with detailed failure info.
+      // Use the promise's exit code (not the process's) because the promise may
+      // have retried with a fresh session after a stale --resume failure.
       let failureReason: string | undefined;
+      let effectiveExitCode = exitCode;
       if (exitCode !== 0) {
         try {
           const result = await promise;
-          if (result.errorTracker.hasErrors()) {
-            failureReason = result.errorTracker.buildFailureReason(exitCode);
+          effectiveExitCode = result.exitCode;
+          if (result.exitCode !== 0 && result.errorTracker.hasErrors()) {
+            failureReason = result.errorTracker.buildFailureReason(result.exitCode);
             console.log(
               `[${role}] Detected error for task ${taskId.slice(0, 8)}: ${failureReason}`,
             );
@@ -1576,7 +1612,7 @@ async function checkCompletedProcesses(
           // Promise rejection - use default failure reason
         }
       }
-      await ensureTaskFinished(apiConfig, role, taskId, exitCode, failureReason);
+      await ensureTaskFinished(apiConfig, role, taskId, effectiveExitCode, failureReason);
     }
 
     // If this was a tasks_finished trigger that failed, reset the notifications
