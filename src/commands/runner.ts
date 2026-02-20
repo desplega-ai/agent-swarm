@@ -324,9 +324,7 @@ async function resetTaskNotifications(
       );
     } else {
       const error = await response.text();
-      console.warn(
-        `[${role}] Failed to reset notifications: ${response.status} ${error}`,
-      );
+      console.warn(`[${role}] Failed to reset notifications: ${response.status} ${error}`);
     }
   } catch (err) {
     console.warn(`[${role}] Error resetting notifications: ${err}`);
@@ -1538,7 +1536,12 @@ async function checkCompletedProcesses(
     // If this was a tasks_finished trigger that failed, reset the notifications
     // so those tasks will be re-delivered on the next poll. This prevents permanent
     // notification loss from the mark-before-process race condition.
-    if (exitCode !== 0 && triggerType === "tasks_finished" && notifiedTaskIds?.length && apiConfig) {
+    if (
+      exitCode !== 0 &&
+      triggerType === "tasks_finished" &&
+      notifiedTaskIds?.length &&
+      apiConfig
+    ) {
       console.log(
         `[${role}] Session failed (exit ${exitCode}) for tasks_finished trigger — resetting notification for ${notifiedTaskIds.length} task(s)`,
       );
