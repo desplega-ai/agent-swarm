@@ -13,6 +13,7 @@ import {
   handleMessageReceived,
   initAgentMail,
   isAgentMailEnabled,
+  resetAgentMail,
   verifyAgentMailWebhook,
 } from "./agentmail";
 import { chunkContent } from "./be/chunking";
@@ -114,6 +115,7 @@ import {
   handleWorkflowRun,
   initGitHub,
   isGitHubEnabled,
+  resetGitHub,
   verifyWebhookSignature,
 } from "./github";
 import { startSlackApp, stopSlackApp } from "./slack";
@@ -121,6 +123,24 @@ import type { AgentLog, AgentStatus, EpicStatus, SessionCost } from "./types";
 
 const port = parseInt(process.env.PORT || process.argv[2] || "3013", 10);
 const apiKey = process.env.API_KEY || "";
+
+/**
+ * Load global swarm_config entries into process.env.
+ * When override=false (default, used at startup), existing env vars take precedence.
+ * When override=true (used for reload), DB values overwrite process.env.
+ * Returns the list of keys that were set/updated.
+ */
+function loadGlobalConfigsIntoEnv(override = false): string[] {
+  const globalConfigs = getResolvedConfig();
+  const updated: string[] = [];
+  for (const config of globalConfigs) {
+    if (override || !process.env[config.key]) {
+      process.env[config.key] = config.value;
+      updated.push(config.key);
+    }
+  }
+  return updated;
+}
 
 // Use globalThis to persist state across hot reloads
 const globalState = globalThis as typeof globalThis & {
@@ -239,6 +259,47 @@ const httpServer = createHttpServer(async (req, res) => {
       res.end(JSON.stringify({ error: "Unauthorized" }));
       return;
     }
+  }
+
+  // POST /internal/reload-config — re-read swarm_config into process.env and re-init integrations
+  if (req.method === "POST" && req.url === "/internal/reload-config") {
+    try {
+      const updated = loadGlobalConfigsIntoEnv(true);
+
+      // Re-initialize integrations so they pick up new secrets
+      const integrations: string[] = [];
+
+      resetAgentMail();
+      if (initAgentMail()) integrations.push("agentmail");
+
+      resetGitHub();
+      if (initGitHub()) integrations.push("github");
+
+      // Slack: stop and restart to pick up new token
+      await stopSlackApp();
+      await startSlackApp();
+      integrations.push("slack");
+
+      console.log(
+        `[reload-config] Loaded ${updated.length} config(s), re-initialized: ${integrations.join(", ") || "none"}`,
+      );
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          success: true,
+          configsLoaded: updated.length,
+          keysUpdated: updated,
+          integrationsReinitialized: integrations,
+        }),
+      );
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error("[reload-config] Failed:", message);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Failed to reload config", details: message }));
+    }
+    return;
   }
 
   if (req.method === "GET" && (req.url === "/me" || req.url?.startsWith("/me?"))) {
@@ -2425,16 +2486,9 @@ httpServer
     // Load global swarm configs into process.env (so integrations can read them)
     // Infrastructure-level env vars take precedence — only missing keys are filled.
     try {
-      const globalConfigs = getResolvedConfig();
-      let injected = 0;
-      for (const config of globalConfigs) {
-        if (!process.env[config.key]) {
-          process.env[config.key] = config.value;
-          injected++;
-        }
-      }
-      if (injected > 0) {
-        console.log(`Injected ${injected} swarm_config value(s) into process.env`);
+      const updated = loadGlobalConfigsIntoEnv(false);
+      if (updated.length > 0) {
+        console.log(`Injected ${updated.length} swarm_config value(s) into process.env`);
       }
     } catch (e) {
       console.error("Failed to load global swarm configs:", e);
