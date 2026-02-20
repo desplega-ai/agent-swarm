@@ -6,6 +6,11 @@ import {
   generateDefaultToolsMd,
 } from "../be/db.ts";
 import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt.ts";
+import {
+  parseStderrForErrors,
+  SessionErrorTracker,
+  trackErrorFromJson,
+} from "../utils/error-tracker.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 
 /** Task file data written to /tmp for hook to read */
@@ -235,6 +240,7 @@ async function ensureTaskFinished(
   role: string,
   taskId: string,
   exitCode: number,
+  failureReason?: string,
 ): Promise<void> {
   const headers: Record<string, string> = {
     "X-Agent-ID": config.agentId,
@@ -250,7 +256,7 @@ async function ensureTaskFinished(
   const body: Record<string, string> = { status };
 
   if (status === "failed") {
-    body.failureReason = `Claude process exited with code ${exitCode}`;
+    body.failureReason = failureReason || `Claude process exited with code ${exitCode}`;
   } else {
     body.output =
       "Process completed (runner wrapper fallback - agent may have provided explicit output)";
@@ -564,7 +570,7 @@ interface RunningTask {
   process: ReturnType<typeof Bun.spawn>;
   logFile: string;
   startTime: Date;
-  promise: Promise<number>;
+  promise: Promise<{ exitCode: number; errorTracker: SessionErrorTracker }>;
   /** The trigger type that caused this task to be spawned */
   triggerType?: string;
   /** For tasks_finished triggers: the IDs of finished worker tasks that were notified.
@@ -1047,7 +1053,9 @@ Do not leave messages unanswered.`;
   }
 }
 
-async function runClaudeIteration(opts: RunClaudeIterationOptions): Promise<number> {
+async function runClaudeIteration(
+  opts: RunClaudeIterationOptions,
+): Promise<{ exitCode: number; errorTracker: SessionErrorTracker }> {
   const { role } = opts;
   const Cmd = [
     "claude",
@@ -1088,6 +1096,9 @@ async function runClaudeIteration(opts: RunClaudeIterationOptions): Promise<numb
   let stdoutChunks = 0;
   let stderrChunks = 0;
 
+  // Track error signals from Claude CLI output for meaningful failure reasons
+  const errorTracker = new SessionErrorTracker();
+
   const stdoutPromise = (async () => {
     if (proc.stdout) {
       // Initialize log buffer for API streaming
@@ -1125,6 +1136,7 @@ async function runClaudeIteration(opts: RunClaudeIterationOptions): Promise<numb
                   ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
                 }
               }
+              trackErrorFromJson(json, errorTracker);
             } catch {
               // Not JSON - ignore
             }
@@ -1155,6 +1167,12 @@ async function runClaudeIteration(opts: RunClaudeIterationOptions): Promise<numb
       if (logBuffer.partialLine.trim()) {
         prettyPrintLine(logBuffer.partialLine, role);
         if (shouldStream) {
+          try {
+            const json = JSON.parse(logBuffer.partialLine.trim());
+            trackErrorFromJson(json, errorTracker);
+          } catch {
+            // Not JSON - ignore
+          }
           logBuffer.lines.push(logBuffer.partialLine.trim());
         }
         logBuffer.partialLine = "";
@@ -1182,6 +1200,7 @@ async function runClaudeIteration(opts: RunClaudeIterationOptions): Promise<numb
         const text = new TextDecoder().decode(chunk);
         stderrOutput += text;
         prettyPrintStderr(text, role);
+        parseStderrForErrors(text, errorTracker);
         logFileHandle.write(
           `${JSON.stringify({ type: "stderr", content: text, timestamp: new Date().toISOString() })}\n`,
         );
@@ -1201,7 +1220,7 @@ async function runClaudeIteration(opts: RunClaudeIterationOptions): Promise<numb
     console.warn(`\x1b[33m[${role}] WARNING: No output from Claude - check auth/startup\x1b[0m`);
   }
 
-  return exitCode ?? 1;
+  return { exitCode: exitCode ?? 1, errorTracker };
 }
 
 /** Spawn a Claude process without blocking - returns immediately with tracking info */
@@ -1276,6 +1295,9 @@ async function spawnClaudeProcess(
     const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now(), partialLine: "" };
     const shouldStream = opts.apiUrl && opts.sessionId && opts.iteration;
 
+    // Track error signals from Claude CLI output for meaningful failure reasons
+    const errorTracker = new SessionErrorTracker();
+
     const stdoutPromise = (async () => {
       if (proc.stdout) {
         for await (const chunk of proc.stdout) {
@@ -1341,6 +1363,9 @@ async function spawnClaudeProcess(
                     opts.apiKey || "",
                   ).catch((err) => console.warn(`[runner] Failed to save cost: ${err}`));
                 }
+
+                // Track error signals for meaningful failure reasons
+                trackErrorFromJson(json, errorTracker);
               } catch {
                 // Ignore parse errors - not all lines are JSON
               }
@@ -1371,7 +1396,7 @@ async function spawnClaudeProcess(
         if (logBuffer.partialLine.trim()) {
           prettyPrintLine(logBuffer.partialLine, role);
           if (shouldStream) {
-            // Try to extract cost data from final partial line
+            // Try to extract cost data and error signals from final partial line
             try {
               const json = JSON.parse(logBuffer.partialLine.trim());
               if (json.type === "result" && json.total_cost_usd !== undefined) {
@@ -1402,6 +1427,7 @@ async function spawnClaudeProcess(
                   opts.apiKey || "",
                 ).catch((err) => console.warn(`[runner] Failed to save cost: ${err}`));
               }
+              trackErrorFromJson(json, errorTracker);
             } catch {
               // Ignore parse errors
             }
@@ -1432,6 +1458,7 @@ async function spawnClaudeProcess(
           const text = new TextDecoder().decode(chunk);
           stderrOutput += text;
           prettyPrintStderr(text, role);
+          parseStderrForErrors(text, errorTracker);
           logFileHandle.write(
             `${JSON.stringify({ type: "stderr", content: text, timestamp: new Date().toISOString() })}\n`,
           );
@@ -1485,7 +1512,7 @@ async function spawnClaudeProcess(
     await cleanupTaskFile(taskFilePid);
     console.log(`\x1b[2m[${role}]\x1b[0m Task file cleaned up: ${taskFilePath}`);
 
-    return exitCode ?? 1;
+    return { exitCode: exitCode ?? 1, errorTracker };
   })();
 
   return {
@@ -1508,6 +1535,7 @@ async function checkCompletedProcesses(
     exitCode: number;
     triggerType?: string;
     notifiedTaskIds?: string[];
+    promise: RunningTask["promise"];
   }> = [];
 
   for (const [taskId, task] of state.activeTasks) {
@@ -1521,18 +1549,34 @@ async function checkCompletedProcesses(
         exitCode: task.process.exitCode,
         triggerType: task.triggerType,
         notifiedTaskIds: task.notifiedTaskIds,
+        promise: task.promise,
       });
     }
   }
 
   // Remove completed tasks from the map and ensure they're marked as finished
-  for (const { taskId, exitCode, triggerType, notifiedTaskIds } of completedTasks) {
+  for (const { taskId, exitCode, triggerType, notifiedTaskIds, promise } of completedTasks) {
     state.activeTasks.delete(taskId);
 
     // Call the finish API to ensure task status is updated
     // This is idempotent - if the agent already marked it, this is a no-op
     if (apiConfig) {
-      await ensureTaskFinished(apiConfig, role, taskId, exitCode);
+      // Await the promise to get error tracker with detailed failure info
+      let failureReason: string | undefined;
+      if (exitCode !== 0) {
+        try {
+          const result = await promise;
+          if (result.errorTracker.hasErrors()) {
+            failureReason = result.errorTracker.buildFailureReason(exitCode);
+            console.log(
+              `[${role}] Detected error for task ${taskId.slice(0, 8)}: ${failureReason}`,
+            );
+          }
+        } catch {
+          // Promise rejection - use default failure reason
+        }
+      }
+      await ensureTaskFinished(apiConfig, role, taskId, exitCode, failureReason);
     }
 
     // If this was a tasks_finished trigger that failed, reset the notifications
@@ -2095,7 +2139,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       };
       await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
 
-      const exitCode = await runClaudeIteration({
+      const { exitCode, errorTracker } = await runClaudeIteration({
         prompt,
         logFile,
         systemPrompt: resolvedSystemPrompt,
@@ -2107,10 +2151,15 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       });
 
       if (exitCode !== 0) {
+        const failureReason = errorTracker.hasErrors()
+          ? errorTracker.buildFailureReason(exitCode)
+          : `Claude process exited with code ${exitCode}`;
+
         const errorLog = {
           timestamp: new Date().toISOString(),
           iteration,
           exitCode,
+          failureReason,
           error: true,
         };
 
@@ -2120,12 +2169,12 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         await Bun.write(errorsFile, `${existingErrors}${JSON.stringify(errorLog)}\n`);
 
         if (!isYolo) {
-          console.error(`[${role}] Claude exited with code ${exitCode}. Stopping.`);
+          console.error(`[${role}] ${failureReason}. Stopping.`);
           console.error(`[${role}] Error logged to: ${errorsFile}`);
           process.exit(exitCode);
         }
 
-        console.warn(`[${role}] Claude exited with code ${exitCode}. YOLO mode - continuing...`);
+        console.warn(`[${role}] ${failureReason}. YOLO mode - continuing...`);
       }
 
       console.log(`[${role}] Iteration ${iteration} complete. Starting next iteration...`);
