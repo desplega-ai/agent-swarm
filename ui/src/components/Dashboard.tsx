@@ -10,6 +10,7 @@ import ActivityFeed from "./ActivityFeed";
 import AgentDetailPanel from "./AgentDetailPanel";
 import AgentsPanel from "./AgentsPanel";
 import ChatPanel from "./ChatPanel";
+import ConfigPanel from "./ConfigPanel";
 import EpicDetailPage from "./EpicDetailPage";
 import EpicsPanel from "./EpicsPanel";
 import Header from "./Header";
@@ -36,6 +37,7 @@ function getUrlParams() {
       | "schedules"
       | "usage"
       | "epics"
+      | "config"
       | null,
     agent: params.get("agent"),
     task: params.get("task"),
@@ -139,7 +141,7 @@ function updateUrl(params: {
 
 export default function Dashboard({ onSettingsClick }: DashboardProps) {
   const [activeTab, setActiveTab] = useState<
-    "agents" | "tasks" | "chat" | "services" | "schedules" | "usage" | "epics"
+    "agents" | "tasks" | "chat" | "services" | "schedules" | "usage" | "epics" | "config"
   >("agents");
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedEpicId, setSelectedEpicId] = useState<string | null>(null);
@@ -195,6 +197,8 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
       if (params.epic) {
         setSelectedEpicId(params.epic);
       }
+    } else if (params.tab === "config") {
+      setActiveTab("config");
     } else {
       setActiveTab("agents");
       if (params.agent) {
@@ -264,7 +268,15 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
   };
 
   const handleTabChange = (_: unknown, value: string | number | null) => {
-    const tab = value as "agents" | "tasks" | "chat" | "services" | "schedules" | "usage" | "epics";
+    const tab = value as
+      | "agents"
+      | "tasks"
+      | "chat"
+      | "services"
+      | "schedules"
+      | "usage"
+      | "epics"
+      | "config";
     setActiveTab(tab);
     // Clear selections, filters, and expand when switching tabs
     setExpandDetail(false);
@@ -376,6 +388,27 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
         agent: null,
         task: null,
         schedule: null,
+        channel: null,
+        agentStatus: null,
+        taskStatus: null,
+        expand: false,
+      });
+    } else if (tab === "config") {
+      setSelectedAgentId(null);
+      setSelectedTaskId(null);
+      setSelectedScheduleId(null);
+      setSelectedEpicId(null);
+      setSelectedChannelId(null);
+      setSelectedThreadId(null);
+      setPreFilterAgentId(undefined);
+      setAgentStatusFilter("all");
+      setTaskStatusFilter("all");
+      updateUrl({
+        tab: "config",
+        agent: null,
+        task: null,
+        schedule: null,
+        epic: null,
         channel: null,
         agentStatus: null,
         taskStatus: null,
@@ -558,6 +591,7 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
             <Tab value="services">SERVICES</Tab>
             <Tab value="schedules">SCHEDULES</Tab>
             <Tab value="usage">USAGE</Tab>
+            <Tab value="config">CONFIG</Tab>
           </TabList>
 
           {/* Agents Tab */}
@@ -824,6 +858,22 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
             ) : (
               <EpicsPanel onSelectEpic={handleSelectEpic} />
             )}
+          </TabPanel>
+
+          {/* Config Tab */}
+          <TabPanel
+            value="config"
+            sx={{
+              p: 0,
+              pt: 2,
+              flex: 1,
+              minHeight: 0,
+              "&[hidden]": {
+                display: "none",
+              },
+            }}
+          >
+            <ConfigPanel />
           </TabPanel>
         </Tabs>
       </Box>
