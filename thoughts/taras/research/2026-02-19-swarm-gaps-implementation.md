@@ -555,6 +555,7 @@ Each gap should be planned and implemented as a separate phase using `/desplega:
 5. **Phase 5 — Repos Knowledge (Gap 4)**: `swarm_repos` table, auto-clone on worker start, repo CLAUDE.md injection when task has linked `githubRepo`, API/UI for repo management.
 
 6. **Phase 6 — Auto-improvement (Gap 5)**: DB-stored setup script (global + per-worker), prepend to mounted startup file, self-learning instructions in system prompt.
+   - **Plan**: [`thoughts/taras/plans/2026-02-20-auto-improvement.md`](../plans/2026-02-20-auto-improvement.md)
 
 ## Historical Context (from thoughts/)
 

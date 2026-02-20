@@ -3,6 +3,7 @@ import {
   generateDefaultClaudeMd,
   generateDefaultIdentityMd,
   generateDefaultSoulMd,
+  generateDefaultToolsMd,
 } from "../be/db.ts";
 import { getBasePrompt } from "../prompts/base-prompt.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
@@ -1414,6 +1415,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Agent identity fields — populated after registration by fetching full profile
   let agentSoulMd: string | undefined;
   let agentIdentityMd: string | undefined;
+  let agentSetupScript: string | undefined;
+  let agentToolsMd: string | undefined;
   let agentProfileName: string | undefined;
   let agentDescription: string | undefined;
 
@@ -1540,17 +1543,21 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           soulMd?: string;
           identityMd?: string;
           claudeMd?: string;
+          setupScript?: string;
+          toolsMd?: string;
           name?: string;
           description?: string;
         };
         agentSoulMd = profile.soulMd;
         agentIdentityMd = profile.identityMd;
+        agentSetupScript = profile.setupScript;
+        agentToolsMd = profile.toolsMd;
         agentProfileName = profile.name;
         agentDescription = profile.description;
 
         // Generate default templates if missing (runner registers via POST /api/agents
         // which doesn't generate templates like join-swarm does)
-        if (!agentSoulMd || !agentIdentityMd) {
+        if (!agentSoulMd || !agentIdentityMd || !agentToolsMd) {
           const agentInfo = {
             name: agentProfileName || agentName,
             role: role,
@@ -1559,6 +1566,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           };
           if (!agentSoulMd) agentSoulMd = generateDefaultSoulMd(agentInfo);
           if (!agentIdentityMd) agentIdentityMd = generateDefaultIdentityMd(agentInfo);
+          if (!agentToolsMd) agentToolsMd = generateDefaultToolsMd(agentInfo);
           const defaultClaudeMd = !profile.claudeMd
             ? generateDefaultClaudeMd(agentInfo)
             : undefined;
@@ -1568,6 +1576,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             const profileUpdate: Record<string, string> = {};
             if (!profile.soulMd) profileUpdate.soulMd = agentSoulMd;
             if (!profile.identityMd) profileUpdate.identityMd = agentIdentityMd;
+            if (!profile.toolsMd) profileUpdate.toolsMd = agentToolsMd;
             if (defaultClaudeMd) profileUpdate.claudeMd = defaultClaudeMd;
 
             await fetch(`${apiUrl}/api/agents/${agentId}/profile`, {
@@ -1617,6 +1626,33 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         console.log(`[${role}] Wrote IDENTITY.md to workspace`);
       } catch (err) {
         console.warn(`[${role}] Could not write IDENTITY.md: ${(err as Error).message}`);
+      }
+    }
+
+    // Write setup script to workspace (agent can edit during session)
+    // Only create if it doesn't exist — the entrypoint already composed/prepended it at container start
+    const SETUP_SCRIPT_PATH = "/workspace/start-up.sh";
+    if (agentSetupScript) {
+      try {
+        const file = Bun.file(SETUP_SCRIPT_PATH);
+        const exists = await file.exists();
+        if (!exists) {
+          await Bun.write(SETUP_SCRIPT_PATH, `#!/bin/bash\n${agentSetupScript}\n`);
+          console.log(`[${role}] Wrote start-up.sh to workspace`);
+        }
+      } catch (err) {
+        console.warn(`[${role}] Could not write start-up.sh: ${(err as Error).message}`);
+      }
+    }
+
+    // Write TOOLS.md to workspace (agent can edit during session)
+    const TOOLS_MD_PATH = "/workspace/TOOLS.md";
+    if (agentToolsMd) {
+      try {
+        await Bun.write(TOOLS_MD_PATH, agentToolsMd);
+        console.log(`[${role}] Wrote TOOLS.md to workspace`);
+      } catch (err) {
+        console.warn(`[${role}] Could not write TOOLS.md: ${(err as Error).message}`);
       }
     }
 

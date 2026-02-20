@@ -972,6 +972,36 @@ const httpServer = createHttpServer(async (req, res) => {
     return;
   }
 
+  // GET /api/agents/:id/setup-script - Fetch agent + global setup scripts for Docker entrypoint
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "agents" &&
+    pathSegments[2] &&
+    pathSegments[3] === "setup-script"
+  ) {
+    const agentId = pathSegments[2];
+    const agent = getAgentById(agentId);
+    if (!agent) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Agent not found" }));
+      return;
+    }
+
+    // Fetch global setup script from swarm_config
+    const globalConfigs = getSwarmConfigs({ scope: "global", key: "SETUP_SCRIPT" });
+    const globalSetupScript = globalConfigs[0]?.value ?? null;
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        setupScript: agent.setupScript ?? null,
+        globalSetupScript,
+      }),
+    );
+    return;
+  }
+
   // PUT /api/agents/:id/profile - Update agent profile (role, description, capabilities)
   if (
     req.method === "PUT" &&
@@ -996,6 +1026,8 @@ const httpServer = createHttpServer(async (req, res) => {
       claudeMd?: string;
       soulMd?: string;
       identityMd?: string;
+      setupScript?: string;
+      toolsMd?: string;
     };
     try {
       body = JSON.parse(bodyText);
@@ -1012,13 +1044,15 @@ const httpServer = createHttpServer(async (req, res) => {
       body.capabilities === undefined &&
       body.claudeMd === undefined &&
       body.soulMd === undefined &&
-      body.identityMd === undefined
+      body.identityMd === undefined &&
+      body.setupScript === undefined &&
+      body.toolsMd === undefined
     ) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
           error:
-            "At least one field (role, description, capabilities, claudeMd, soulMd, or identityMd) must be provided",
+            "At least one field (role, description, capabilities, claudeMd, soulMd, identityMd, setupScript, or toolsMd) must be provided",
         }),
       );
       return;
@@ -1059,6 +1093,20 @@ const httpServer = createHttpServer(async (req, res) => {
       return;
     }
 
+    // Validate setupScript size if provided (max 64KB)
+    if (body.setupScript !== undefined && body.setupScript.length > 65536) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "setupScript must be 64KB or less" }));
+      return;
+    }
+
+    // Validate toolsMd size if provided (max 64KB)
+    if (body.toolsMd !== undefined && body.toolsMd.length > 65536) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "toolsMd must be 64KB or less" }));
+      return;
+    }
+
     const agent = updateAgentProfile(agentId, {
       role: body.role,
       description: body.description,
@@ -1066,6 +1114,8 @@ const httpServer = createHttpServer(async (req, res) => {
       claudeMd: body.claudeMd,
       soulMd: body.soulMd,
       identityMd: body.identityMd,
+      setupScript: body.setupScript,
+      toolsMd: body.toolsMd,
     });
 
     if (!agent) {
