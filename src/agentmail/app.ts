@@ -12,6 +12,11 @@ export function isAgentMailEnabled(): boolean {
   return !!process.env.AGENTMAIL_WEBHOOK_SECRET;
 }
 
+export function resetAgentMail(): void {
+  initialized = false;
+  webhookSecret = null;
+}
+
 export function initAgentMail(): boolean {
   if (initialized) {
     console.log("[AgentMail] Already initialized, skipping");
