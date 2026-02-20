@@ -9,6 +9,7 @@ import {
   initDb,
   updateTaskClaudeSessionId,
 } from "../be/db";
+import { SessionErrorTracker, trackErrorFromJson } from "../utils/error-tracker";
 
 const TEST_DB_PATH = "./test-session-attach.sqlite";
 const TEST_PORT = 13022;
@@ -443,6 +444,97 @@ describe("Session Attachment", () => {
       // Verify the parent doesn't exist
       const parent = getTaskById(bogusParentId);
       expect(parent).toBeNull();
+    });
+  });
+
+  describe("Stale Session Detection — SessionErrorTracker", () => {
+    test("isSessionNotFound() returns true when session ID error is present", () => {
+      const tracker = new SessionErrorTracker();
+      trackErrorFromJson(
+        {
+          type: "result",
+          subtype: "error_during_execution",
+          is_error: true,
+          errors: [
+            "No conversation found with session ID: fbb0bde4-1a83-425b-8b9d-1312141406cd",
+          ],
+        },
+        tracker,
+      );
+
+      expect(tracker.isSessionNotFound()).toBe(true);
+      expect(tracker.hasErrors()).toBe(true);
+    });
+
+    test("isSessionNotFound() returns false for unrelated errors", () => {
+      const tracker = new SessionErrorTracker();
+      trackErrorFromJson(
+        {
+          type: "result",
+          subtype: "error_during_execution",
+          is_error: true,
+          errors: ["Some other execution error"],
+        },
+        tracker,
+      );
+
+      expect(tracker.isSessionNotFound()).toBe(false);
+      expect(tracker.hasErrors()).toBe(true);
+    });
+
+    test("isSessionNotFound() returns false when no errors", () => {
+      const tracker = new SessionErrorTracker();
+      expect(tracker.isSessionNotFound()).toBe(false);
+      expect(tracker.hasErrors()).toBe(false);
+    });
+
+    test("isSessionNotFound() detects among multiple errors", () => {
+      const tracker = new SessionErrorTracker();
+      tracker.addApiError("rate_limit", "Rate limit hit");
+      trackErrorFromJson(
+        {
+          type: "result",
+          subtype: "error_during_execution",
+          is_error: true,
+          errors: [
+            "No conversation found with session ID: abc12345-0000-0000-0000-000000000000",
+          ],
+        },
+        tracker,
+      );
+
+      expect(tracker.isSessionNotFound()).toBe(true);
+    });
+
+    test("stale session ID in DB should be detectable for retry", () => {
+      // Simulate: parent has session ID in DB but session data is gone from disk
+      const parentTask = createTaskExtended("Parent with stale session", {
+        creatorAgentId: "lead-session-test",
+        agentId: "worker-a-session",
+      });
+
+      const staleSessionId = "stale-session-00000000";
+      updateTaskClaudeSessionId(parentTask.id, staleSessionId);
+
+      // Verify the stale session ID is in DB
+      const fetched = getTaskById(parentTask.id);
+      expect(fetched?.claudeSessionId).toBe(staleSessionId);
+
+      // Simulate the error that Claude CLI would produce
+      const tracker = new SessionErrorTracker();
+      trackErrorFromJson(
+        {
+          type: "result",
+          subtype: "error_during_execution",
+          is_error: true,
+          errors: [`No conversation found with session ID: ${staleSessionId}`],
+        },
+        tracker,
+      );
+
+      // The error tracker should detect this as a session-not-found error
+      expect(tracker.isSessionNotFound()).toBe(true);
+      expect(tracker.buildFailureReason(1)).toContain("No conversation found");
     });
   });
 });
