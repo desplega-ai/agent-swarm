@@ -72,7 +72,14 @@ class ApiClient {
 
   async updateAgentProfile(
     id: string,
-    profile: { role?: string; description?: string; capabilities?: string[]; claudeMd?: string },
+    profile: {
+      role?: string;
+      description?: string;
+      capabilities?: string[];
+      claudeMd?: string;
+      soulMd?: string;
+      identityMd?: string;
+    },
   ): Promise<AgentWithTasks> {
     const url = `${this.getBaseUrl()}/api/agents/${id}/profile`;
     const res = await fetch(url, {

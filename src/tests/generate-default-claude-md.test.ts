@@ -12,6 +12,14 @@ describe("generateDefaultClaudeMd", () => {
     expect(result).toContain("### Important Context");
   });
 
+  test("should include identity file references", () => {
+    const result = generateDefaultClaudeMd({ name: "TestAgent" });
+
+    expect(result).toContain("## Your Identity Files");
+    expect(result).toContain("/workspace/SOUL.md");
+    expect(result).toContain("/workspace/IDENTITY.md");
+  });
+
   test("should include description when provided", () => {
     const result = generateDefaultClaudeMd({
       name: "TestAgent",

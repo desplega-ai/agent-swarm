@@ -104,13 +104,13 @@ bun test                                  # Run all tests
 
 For full integration tests (session capture, `--resume`, hooks), use a Docker worker against a local API server.
 
-**Worktree port check**: When working in a worktree, other worktrees may already be running the API server on port 3013. Always check first:
+**Worktree port check**: When working in a worktree, other worktrees may already be running the API server on port 3013. Always check `.env` for `PORT` and `MCP_BASE_URL` first:
 
 ```bash
 lsof -i :3013    # Check if default port is in use
 ```
 
-If occupied, use `PORT=<alt-port>` to run on a different port (the server reads `PORT` env var). Update `MCP_BASE_URL` for the Docker worker accordingly:
+If occupied, set `PORT=<alt-port>` in `.env` and update `MCP_BASE_URL` to match. Also update `.env.docker` `MCP_BASE_URL` (use `host.docker.internal:<port>`):
 
 ```bash
 # Start API on alternate port
@@ -141,6 +141,49 @@ docker run --rm -d \
 **Task cancellation caveat**: Direct DB updates (`sqlite3 ... UPDATE`) bypass the hook-based cancellation flow. The Claude process inside Docker won't stop — you'll need to `docker restart` the container. Use the MCP `cancel-task` tool for proper cancellation when possible.
 
 **Keep test tasks trivial**: Use simple tasks like "Say hi" for E2E tests. Complex tasks (web searches, research) waste time and API credits during testing.
+
+### MCP Tool Testing (Streamable HTTP)
+
+To test MCP tools via curl, you need a proper session handshake:
+
+```bash
+# 1. Initialize session (capture session ID from response headers)
+curl -s -D /tmp/mcp-headers.txt -X POST \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "X-Agent-ID: <uuid>" \
+  http://localhost:$PORT/mcp \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}'
+
+# 2. Extract session ID
+SESSION_ID=$(grep -i 'mcp-session-id' /tmp/mcp-headers.txt | awk '{print $2}' | tr -d '\r\n')
+
+# 3. Send initialized notification
+curl -s -X POST \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "X-Agent-ID: <uuid>" \
+  -H "mcp-session-id: $SESSION_ID" \
+  http://localhost:$PORT/mcp \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+
+# 4. Call tools using the session
+curl -s -X POST \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "X-Agent-ID: <uuid>" \
+  -H "mcp-session-id: $SESSION_ID" \
+  http://localhost:$PORT/mcp \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"join-swarm","arguments":{...}}}'
+```
+
+Key gotchas:
+- `Accept` header MUST include both `application/json` and `text/event-stream`
+- `X-Agent-ID` must be a valid UUID (use `uuidgen` to generate)
+- Session must be initialized before calling tools
 
 ### UI Testing
 

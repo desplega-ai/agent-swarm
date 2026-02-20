@@ -34,6 +34,8 @@ export default function EditAgentProfileModal({
   const [capabilities, setCapabilities] = useState<string[]>([]);
   const [newCapability, setNewCapability] = useState("");
   const [claudeMd, setClaudeMd] = useState("");
+  const [soulMd, setSoulMd] = useState("");
+  const [identityMd, setIdentityMd] = useState("");
   const { mode } = useColorScheme();
   const isDark = mode === "dark";
 
@@ -68,6 +70,8 @@ export default function EditAgentProfileModal({
       setCapabilities(agent.capabilities || []);
       setNewCapability("");
       setClaudeMd(agent.claudeMd || "");
+      setSoulMd(agent.soulMd || "");
+      setIdentityMd(agent.identityMd || "");
     }
   }, [open, agent]);
 
@@ -80,6 +84,8 @@ export default function EditAgentProfileModal({
           description: description || undefined,
           capabilities: capabilities.length > 0 ? capabilities : undefined,
           claudeMd: claudeMd || undefined,
+          soulMd: soulMd || undefined,
+          identityMd: identityMd || undefined,
         },
       });
       onClose();
@@ -111,6 +117,8 @@ export default function EditAgentProfileModal({
     role !== (agent.role || "") ||
     description !== (agent.description || "") ||
     claudeMd !== (agent.claudeMd || "") ||
+    soulMd !== (agent.soulMd || "") ||
+    identityMd !== (agent.identityMd || "") ||
     JSON.stringify(capabilities) !== JSON.stringify(agent.capabilities || []);
 
   return (
@@ -362,6 +370,86 @@ export default function EditAgentProfileModal({
             >
               Personal instructions loaded on session start. Notes you add here persist across
               sessions.
+            </FormHelperText>
+          </FormControl>
+
+          <FormControl>
+            <FormLabel
+              sx={{
+                fontFamily: "code",
+                color: colors.textSecondary,
+                fontSize: "0.75rem",
+                letterSpacing: "0.05em",
+              }}
+            >
+              SOUL (PERSONA & BEHAVIORAL DIRECTIVES)
+            </FormLabel>
+            <Textarea
+              value={soulMd}
+              onChange={(e) => setSoulMd(e.target.value)}
+              placeholder="Persona, values, and behavioral directives..."
+              minRows={6}
+              maxRows={12}
+              sx={{
+                fontFamily: "code",
+                fontSize: "0.8rem",
+                bgcolor: colors.level1,
+                borderColor: colors.border,
+                color: colors.textPrimary,
+                "&:focus-within": {
+                  borderColor: colors.amber,
+                  boxShadow: colors.focusGlow,
+                },
+                "&:hover": {
+                  borderColor: colors.borderHover,
+                },
+              }}
+            />
+            <FormHelperText
+              sx={{ fontFamily: "code", fontSize: "0.65rem", color: colors.textTertiary }}
+            >
+              Injected into system prompt. Defines who the agent is. Also written to
+              /workspace/SOUL.md.
+            </FormHelperText>
+          </FormControl>
+
+          <FormControl>
+            <FormLabel
+              sx={{
+                fontFamily: "code",
+                color: colors.textSecondary,
+                fontSize: "0.75rem",
+                letterSpacing: "0.05em",
+              }}
+            >
+              IDENTITY (EXPERTISE & WORKING STYLE)
+            </FormLabel>
+            <Textarea
+              value={identityMd}
+              onChange={(e) => setIdentityMd(e.target.value)}
+              placeholder="Expertise, working style, and quirks..."
+              minRows={6}
+              maxRows={12}
+              sx={{
+                fontFamily: "code",
+                fontSize: "0.8rem",
+                bgcolor: colors.level1,
+                borderColor: colors.border,
+                color: colors.textPrimary,
+                "&:focus-within": {
+                  borderColor: colors.amber,
+                  boxShadow: colors.focusGlow,
+                },
+                "&:hover": {
+                  borderColor: colors.borderHover,
+                },
+              }}
+            />
+            <FormHelperText
+              sx={{ fontFamily: "code", fontSize: "0.65rem", color: colors.textTertiary }}
+            >
+              Injected into system prompt. Defines expertise and working patterns. Also written to
+              /workspace/IDENTITY.md.
             </FormHelperText>
           </FormControl>
         </Stack>

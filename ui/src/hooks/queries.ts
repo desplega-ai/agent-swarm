@@ -40,7 +40,14 @@ export function useUpdateAgentProfile() {
       profile,
     }: {
       id: string;
-      profile: { role?: string; description?: string; capabilities?: string[]; claudeMd?: string };
+      profile: {
+        role?: string;
+        description?: string;
+        capabilities?: string[];
+        claudeMd?: string;
+        soulMd?: string;
+        identityMd?: string;
+      };
     }) => api.updateAgentProfile(id, profile),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agents"] });
