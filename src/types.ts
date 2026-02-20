@@ -30,7 +30,7 @@ export const InboxMessageSchema = z.object({
   id: z.uuid(),
   agentId: z.uuid(), // Lead agent who received this
   content: z.string().min(1), // The message content
-  source: z.enum(["slack"]).default("slack"),
+  source: z.enum(["slack", "agentmail"]).default("slack"),
   status: InboxMessageStatusSchema.default("unread"),
 
   // Slack context (for replying)
@@ -53,7 +53,7 @@ export const InboxMessageSchema = z.object({
 export type InboxMessageStatus = z.infer<typeof InboxMessageStatusSchema>;
 export type InboxMessage = z.infer<typeof InboxMessageSchema>;
 
-export const AgentTaskSourceSchema = z.enum(["mcp", "slack", "api", "github"]);
+export const AgentTaskSourceSchema = z.enum(["mcp", "slack", "api", "github", "agentmail"]);
 export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 
 export const AgentTaskSchema = z.object({
@@ -99,6 +99,11 @@ export const AgentTaskSchema = z.object({
   githubCommentId: z.number().int().optional(),
   githubAuthor: z.string().optional(),
   githubUrl: z.string().optional(),
+
+  // AgentMail-specific metadata (optional)
+  agentmailInboxId: z.string().optional(),
+  agentmailMessageId: z.string().optional(),
+  agentmailThreadId: z.string().optional(),
 
   // Mention-to-task metadata (optional)
   mentionMessageId: z.uuid().optional(),
