@@ -6,6 +6,7 @@ import {
   getAgentById,
   getDb,
   getEpicById,
+  getTaskById,
   hasCapacity,
 } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
@@ -46,6 +47,12 @@ export const registerSendTaskTool = (server: McpServer) => {
           .describe("Priority 0-100 (default: 50)."),
         dependsOn: z.array(z.uuid()).optional().describe("Task IDs this task depends on."),
         epicId: z.string().uuid().optional().describe("Epic to associate this task with."),
+        parentTaskId: z
+          .uuid()
+          .optional()
+          .describe(
+            "Parent task ID for session continuity. Child task will resume the parent's Claude session. Auto-routes to the same worker unless agentId is explicitly provided.",
+          ),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
@@ -55,7 +62,7 @@ export const registerSendTaskTool = (server: McpServer) => {
       }),
     },
     async (
-      { agentId, task, offerMode, taskType, tags, priority, dependsOn, epicId },
+      { agentId, task, offerMode, taskType, tags, priority, dependsOn, epicId, parentTaskId },
       requestInfo,
       _meta,
     ) => {
@@ -106,12 +113,21 @@ export const registerSendTaskTool = (server: McpServer) => {
         }
       }
 
+      // Auto-route to parent's worker if parentTaskId is set and no explicit agentId
+      let effectiveAgentId = agentId;
+      if (parentTaskId && !agentId) {
+        const parentTask = getTaskById(parentTaskId);
+        if (parentTask?.agentId) {
+          effectiveAgentId = parentTask.agentId;
+        }
+      }
+
       const txn = getDb().transaction(() => {
         // Build tags with epic tag if epicId is provided
         const finalTags = epicId ? [...(tags || []), `epic:${getEpicById(epicId)?.name}`] : tags;
 
-        // If no agentId, create an unassigned task for the pool
-        if (!agentId) {
+        // If no agentId (and no auto-routed agentId), create an unassigned task for the pool
+        if (!effectiveAgentId) {
           const newTask = createTaskExtended(task, {
             creatorAgentId: requestInfo.agentId,
             taskType,
@@ -119,6 +135,7 @@ export const registerSendTaskTool = (server: McpServer) => {
             priority,
             dependsOn,
             epicId,
+            parentTaskId,
           });
 
           return {
@@ -128,12 +145,12 @@ export const registerSendTaskTool = (server: McpServer) => {
           };
         }
 
-        const agent = getAgentById(agentId);
+        const agent = getAgentById(effectiveAgentId);
 
         if (!agent) {
           return {
             success: false,
-            message: `Agent with ID "${agentId}" not found.`,
+            message: `Agent with ID "${effectiveAgentId}" not found.`,
           };
         }
 
@@ -145,8 +162,8 @@ export const registerSendTaskTool = (server: McpServer) => {
         }
 
         // For direct assignment (not offer), check if agent has capacity
-        if (!offerMode && !hasCapacity(agentId)) {
-          const activeCount = getActiveTaskCount(agentId);
+        if (!offerMode && !hasCapacity(effectiveAgentId)) {
+          const activeCount = getActiveTaskCount(effectiveAgentId);
           return {
             success: false,
             message: `Agent "${agent.name}" is at capacity (${activeCount}/${agent.maxTasks ?? 1} tasks). Use offerMode: true to offer the task instead, or wait for a task to complete.`,
@@ -156,13 +173,14 @@ export const registerSendTaskTool = (server: McpServer) => {
         if (offerMode) {
           // Offer the task to the agent (they must accept/reject)
           const newTask = createTaskExtended(task, {
-            offeredTo: agentId,
+            offeredTo: effectiveAgentId,
             creatorAgentId: requestInfo.agentId,
             taskType,
             tags: finalTags,
             priority,
             dependsOn,
             epicId,
+            parentTaskId,
           });
 
           return {
@@ -174,13 +192,14 @@ export const registerSendTaskTool = (server: McpServer) => {
 
         // Direct assignment
         const newTask = createTaskExtended(task, {
-          agentId,
+          agentId: effectiveAgentId,
           creatorAgentId: requestInfo.agentId,
           taskType,
           tags: finalTags,
           priority,
           dependsOn,
           epicId,
+          parentTaskId,
         });
 
         return {
