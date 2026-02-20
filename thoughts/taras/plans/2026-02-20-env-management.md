@@ -230,8 +230,8 @@ Note: The `envPath` writer only runs on the API server (where the DB lives). For
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
 - [ ] Server starts without errors: `bun run start:http` (ctrl+c after startup)
 - [ ] Table exists: `sqlite3 agent-swarm-db.sqlite ".schema swarm_config"`
 
@@ -295,8 +295,8 @@ DELETE /api/config/:id   → method === "DELETE" && pathSegments = ["api", "conf
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
 - [ ] Create global config: `curl -s -X PUT -H "Authorization: Bearer 123123" -H "Content-Type: application/json" -d '{"scope":"global","key":"TEST_KEY","value":"test_value","description":"A test config"}' http://localhost:3013/api/config | jq .`
 - [ ] List global config: `curl -s -H "Authorization: Bearer 123123" "http://localhost:3013/api/config?scope=global" | jq .`
 - [ ] Create secret: `curl -s -X PUT -H "Authorization: Bearer 123123" -H "Content-Type: application/json" -d '{"scope":"global","key":"SECRET_KEY","value":"s3cret","isSecret":true}' http://localhost:3013/api/config | jq .`
@@ -369,8 +369,8 @@ DB config unconditionally overwrites any existing env vars. This is intentional 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Entrypoint syntax is valid: `bash -n docker-entrypoint.sh`
-- [ ] Lint passes: `bun run lint:fix`
+- [x] Entrypoint syntax is valid: `bash -n docker-entrypoint.sh`
+- [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
 - [ ] If Docker environment available: build worker image, start container with some config in DB, verify env vars are exported (check with `env | grep <KEY>` inside the container)
@@ -455,9 +455,9 @@ Recommendation: Keep the gear icon opening ConfigModal (it's dashboard-specific 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] UI type check passes: `cd ui && bun run tsc` (or equivalent)
-- [ ] UI builds without errors: `cd ui && bun run build`
-- [ ] Lint passes: `bun run lint:fix`
+- [x] UI type check passes: `cd ui && bun run tsc` (or equivalent)
+- [x] UI builds without errors: `cd ui && bun run build`
+- [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
 - [ ] Navigate to CONFIG tab in the dashboard
