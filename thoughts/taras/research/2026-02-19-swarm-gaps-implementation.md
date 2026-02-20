@@ -538,13 +538,19 @@ Rationale: Env management (6) is foundational infrastructure with no dependencie
 
 Each gap should be planned and implemented as a separate phase using `/desplega:create-plan`. High-level scope per phase:
 
-1. **Phase 1 — Env Management (Gap 6)**: `swarm_config` table, CRUD API endpoints + MCP tools, env file writer (`envPath`), UI management page. No dependencies.
+1. **Phase 1 — Env Management (Gap 6)** ✅: `swarm_config` table, CRUD API endpoints + MCP tools, env file writer (`envPath`), UI management page. No dependencies.
+   - **Plan**: [`thoughts/taras/plans/2026-02-20-env-management.md`](../plans/2026-02-20-env-management.md)
+   - **PR**: [#60 `claw-env-management`](https://github.com/desplega-ai/agent-swarm/pull/60) (merged)
 
-2. **Phase 2 — Worker Identity (Gap 1)**: `soulMd` + `identityMd` columns on `agents`, injection via `--append-system-prompt`, PostToolUse hook for real-time CLAUDE.md persistence, API/UI for editing identity files.
+2. **Phase 2 — Worker Identity (Gap 1)** ✅: `soulMd` + `identityMd` columns on `agents`, injection via `--append-system-prompt`, PostToolUse hook for real-time CLAUDE.md persistence, API/UI for editing identity files.
+   - **Plan**: [`thoughts/taras/plans/2026-02-20-worker-identity.md`](../plans/2026-02-20-worker-identity.md)
+   - **PR**: [#62 `claw-worker-identity`](https://github.com/desplega-ai/agent-swarm/pull/62) (merged)
 
 3. **Phase 3 — Memory System (Gap 2)**: sqlite-vec setup (`vec_memory` table), OpenAI embedding integration, `memory-search` + `memory-get` MCP tools, file-based auto-indexing via PostToolUse hook, session auto-summarization at Stop hook.
 
-4. **Phase 4 — Session Attachment (Gap 3)**: `parentTaskId` + `claudeSessionId` columns on `agent_tasks`, session ID capture from stream-json, `--resume` with `-p` for child tasks, compact hook for goal reminder.
+4. **Phase 4 — Session Attachment (Gap 3)** ✅: `parentTaskId` + `claudeSessionId` columns on `agent_tasks`, session ID capture from stream-json, `--resume` with `-p` for child tasks, compact hook for goal reminder.
+   - **Plan**: [`thoughts/taras/plans/2026-02-20-session-attach.md`](../plans/2026-02-20-session-attach.md)
+   - **PR**: [#61 `claw-session-attach`](https://github.com/desplega-ai/agent-swarm/pull/61) (merged)
 
 5. **Phase 5 — Repos Knowledge (Gap 4)**: `swarm_repos` table, auto-clone on worker start, repo CLAUDE.md injection when task has linked `githubRepo`, API/UI for repo management.
 
