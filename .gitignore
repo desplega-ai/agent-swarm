@@ -3,6 +3,8 @@
 # Not the one inside cc-plugin/
 !cc-plugin/.mcp.json
 
+.qa-use-tests.json
+
 # Docker agent bindings
 logs
 work
