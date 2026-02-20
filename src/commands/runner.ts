@@ -1521,13 +1521,11 @@ async function spawnClaudeProcess(
         );
 
         // Strip --resume and its value from additional args
-        const freshAdditionalArgs = (opts.additionalArgs || []).filter(
-          (arg, idx, arr) => {
-            if (arg === "--resume") return false;
-            if (idx > 0 && arr[idx - 1] === "--resume") return false;
-            return true;
-          },
-        );
+        const freshAdditionalArgs = (opts.additionalArgs || []).filter((arg, idx, arr) => {
+          if (arg === "--resume") return false;
+          if (idx > 0 && arr[idx - 1] === "--resume") return false;
+          return true;
+        });
 
         const retryTimestamp = new Date().toISOString().replace(/[:.]/g, "-");
         const retryLogFile = `${logDir}/${retryTimestamp}-retry-${effectiveTaskId.slice(0, 8)}.jsonl`;

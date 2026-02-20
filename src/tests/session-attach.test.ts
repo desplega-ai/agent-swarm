@@ -455,9 +455,7 @@ describe("Session Attachment", () => {
           type: "result",
           subtype: "error_during_execution",
           is_error: true,
-          errors: [
-            "No conversation found with session ID: fbb0bde4-1a83-425b-8b9d-1312141406cd",
-          ],
+          errors: ["No conversation found with session ID: fbb0bde4-1a83-425b-8b9d-1312141406cd"],
         },
         tracker,
       );
@@ -496,9 +494,7 @@ describe("Session Attachment", () => {
           type: "result",
           subtype: "error_during_execution",
           is_error: true,
-          errors: [
-            "No conversation found with session ID: abc12345-0000-0000-0000-000000000000",
-          ],
+          errors: ["No conversation found with session ID: abc12345-0000-0000-0000-000000000000"],
         },
         tracker,
       );
