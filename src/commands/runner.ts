@@ -94,6 +94,49 @@ async function closeAgent(config: ApiConfig, role: string): Promise<void> {
 }
 
 /**
+ * Fetch resolved config from the API and merge into a base env object.
+ * Falls back to baseEnv on any error (network, parse, etc).
+ */
+async function fetchResolvedEnv(
+  apiUrl: string,
+  apiKey: string,
+  agentId: string,
+  baseEnv: Record<string, string | undefined> = process.env,
+): Promise<Record<string, string | undefined>> {
+  if (!apiUrl || !agentId) return { ...baseEnv };
+
+  try {
+    const headers: Record<string, string> = { "X-Agent-ID": agentId };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+    const url = `${apiUrl}/api/config/resolved?agentId=${encodeURIComponent(agentId)}&includeSecrets=true`;
+    const response = await fetch(url, { headers });
+
+    if (!response.ok) {
+      console.warn(`[env-reload] Failed to fetch config: ${response.status}`);
+      return { ...baseEnv };
+    }
+
+    const data = (await response.json()) as {
+      configs: Array<{ key: string; value: string }>;
+    };
+
+    if (!data.configs?.length) return { ...baseEnv };
+
+    const merged: Record<string, string | undefined> = { ...baseEnv };
+    for (const config of data.configs) {
+      merged[config.key] = config.value;
+    }
+
+    console.log(`[env-reload] Loaded ${data.configs.length} config entries from API`);
+    return merged;
+  } catch (error) {
+    console.warn(`[env-reload] Could not fetch config, using current env: ${error}`);
+    return { ...baseEnv };
+  }
+}
+
+/**
  * Ensure task is marked as completed or failed via the API.
  * This is called when a Claude process exits to ensure task status is updated,
  * regardless of whether the agent explicitly called store-progress.
@@ -195,9 +238,15 @@ async function pauseTaskViaAPI(config: ApiConfig, role: string, taskId: string):
 }
 
 /** Fetch paused tasks from API for this agent */
-async function getPausedTasksFromAPI(
-  config: ApiConfig,
-): Promise<Array<{ id: string; task: string; progress?: string }>> {
+async function getPausedTasksFromAPI(config: ApiConfig): Promise<
+  Array<{
+    id: string;
+    task: string;
+    progress?: string;
+    claudeSessionId?: string;
+    parentTaskId?: string;
+  }>
+> {
   const headers: Record<string, string> = {
     "X-Agent-ID": config.agentId,
   };
@@ -217,7 +266,13 @@ async function getPausedTasksFromAPI(
     }
 
     const data = (await response.json()) as {
-      tasks: Array<{ id: string; task: string; progress?: string }>;
+      tasks: Array<{
+        id: string;
+        task: string;
+        progress?: string;
+        claudeSessionId?: string;
+        parentTaskId?: string;
+      }>;
     };
     return data.tasks || [];
   } catch (error) {
@@ -484,6 +539,40 @@ async function saveCostData(cost: CostData, apiUrl: string, apiKey: string): Pro
     }
   } catch (error) {
     console.warn(`[runner] Error saving cost data: ${error}`);
+  }
+}
+
+/** Save Claude session ID for a task (fire-and-forget) */
+async function saveClaudeSessionId(
+  apiUrl: string,
+  apiKey: string,
+  taskId: string,
+  claudeSessionId: string,
+): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  await fetch(`${apiUrl}/api/tasks/${taskId}/claude-session`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ claudeSessionId }),
+  });
+}
+
+/** Fetch Claude session ID for a task (for --resume) */
+async function fetchClaudeSessionId(
+  apiUrl: string,
+  apiKey: string,
+  taskId: string,
+): Promise<string | null> {
+  const headers: Record<string, string> = {};
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  try {
+    const response = await fetch(`${apiUrl}/api/tasks/${taskId}`, { headers });
+    if (!response.ok) return null;
+    const data = (await response.json()) as { claudeSessionId?: string };
+    return data.claudeSessionId || null;
+  } catch {
+    return null;
   }
 }
 
@@ -852,8 +941,10 @@ async function runClaudeIteration(opts: RunClaudeIterationOptions): Promise<numb
   const logFileHandle = Bun.file(opts.logFile).writer();
   let stderrOutput = "";
 
+  const freshEnv = await fetchResolvedEnv(opts.apiUrl || "", opts.apiKey || "", opts.agentId || "");
+
   const proc = Bun.spawn(Cmd, {
-    env: process.env,
+    env: freshEnv,
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -885,6 +976,23 @@ async function runClaudeIteration(opts: RunClaudeIterationOptions): Promise<numb
 
           // Buffer non-empty lines for API streaming
           if (shouldStream && line.trim()) {
+            // Capture Claude session ID from init message (legacy mode)
+            try {
+              const json = JSON.parse(line.trim());
+              if (json.type === "system" && json.subtype === "init" && json.session_id) {
+                if (opts.taskId) {
+                  saveClaudeSessionId(
+                    opts.apiUrl || "",
+                    opts.apiKey || "",
+                    opts.taskId,
+                    json.session_id,
+                  ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
+                }
+              }
+            } catch {
+              // Not JSON - ignore
+            }
+
             logBuffer.lines.push(line.trim());
 
             // Check if we should flush (buffer full or time elapsed)
@@ -1011,9 +1119,11 @@ async function spawnClaudeProcess(
 
   console.log(`\x1b[2m[${role}]\x1b[0m Task file written: ${taskFilePath}`);
 
+  const freshEnv = await fetchResolvedEnv(opts.apiUrl || "", opts.apiKey || "", opts.agentId || "");
+
   const proc = Bun.spawn(Cmd, {
     env: {
-      ...process.env,
+      ...freshEnv,
       TASK_FILE: taskFilePath,
     },
     stdout: "pipe",
@@ -1052,6 +1162,17 @@ async function spawnClaudeProcess(
             if (shouldStream && line.trim()) {
               try {
                 const json = JSON.parse(line.trim());
+                // Capture Claude session ID from init message
+                if (json.type === "system" && json.subtype === "init" && json.session_id) {
+                  if (opts.taskId) {
+                    saveClaudeSessionId(
+                      opts.apiUrl || "",
+                      opts.apiKey || "",
+                      opts.taskId,
+                      json.session_id,
+                    ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
+                  }
+                }
                 if (json.type === "result" && json.total_cost_usd !== undefined) {
                   // Extract token data from the usage object
                   // Claude's result JSON has: usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens
@@ -1531,6 +1652,21 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           // Build prompt with resume context
           const resumePrompt = buildResumePrompt(task);
 
+          // Resolve --resume: prefer own session ID, then parent's
+          let resumeAdditionalArgs = opts.additionalArgs || [];
+          if (task.claudeSessionId) {
+            resumeAdditionalArgs = [...resumeAdditionalArgs, "--resume", task.claudeSessionId];
+            console.log(
+              `[${role}] Resuming task's own session ${task.claudeSessionId.slice(0, 8)}`,
+            );
+          } else if (task.parentTaskId) {
+            const parentSessionId = await fetchClaudeSessionId(apiUrl, apiKey, task.parentTaskId);
+            if (parentSessionId) {
+              resumeAdditionalArgs = [...resumeAdditionalArgs, "--resume", parentSessionId];
+              console.log(`[${role}] Resuming parent session ${parentSessionId.slice(0, 8)}`);
+            }
+          }
+
           // Spawn Claude process for resumed task
           iteration++;
           const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -1557,7 +1693,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               prompt: resumePrompt,
               logFile,
               systemPrompt: resolvedSystemPrompt,
-              additionalArgs: opts.additionalArgs,
+              additionalArgs: resumeAdditionalArgs,
               role,
               apiUrl,
               apiKey,
@@ -1627,6 +1763,25 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           // Build prompt based on trigger
           const triggerPrompt = buildPromptForTrigger(trigger, prompt);
 
+          // Resolve --resume for child tasks with parentTaskId
+          let effectiveAdditionalArgs = opts.additionalArgs || [];
+          const taskObj = trigger.task as { parentTaskId?: string } | undefined;
+          if (taskObj?.parentTaskId) {
+            const parentSessionId = await fetchClaudeSessionId(
+              apiUrl,
+              apiKey,
+              taskObj.parentTaskId,
+            );
+            if (parentSessionId) {
+              effectiveAdditionalArgs = [...effectiveAdditionalArgs, "--resume", parentSessionId];
+              console.log(
+                `[${role}] Child task — resuming parent session ${parentSessionId.slice(0, 8)}`,
+              );
+            } else {
+              console.log(`[${role}] Child task — parent session ID not found, starting fresh`);
+            }
+          }
+
           iteration++;
           const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
           const taskIdSlice = trigger.taskId?.slice(0, 8) || "notask";
@@ -1653,7 +1808,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               prompt: triggerPrompt,
               logFile,
               systemPrompt: resolvedSystemPrompt,
-              additionalArgs: opts.additionalArgs,
+              additionalArgs: effectiveAdditionalArgs,
               role,
               apiUrl,
               apiKey,
@@ -1717,6 +1872,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         systemPrompt: resolvedSystemPrompt,
         additionalArgs: opts.additionalArgs,
         role,
+        apiUrl,
+        apiKey,
+        agentId,
       });
 
       if (exitCode !== 0) {

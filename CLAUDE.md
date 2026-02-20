@@ -86,11 +86,61 @@ curl -H "Authorization: Bearer 123123" -H "X-Agent-ID: <uuid>" http://localhost:
 
 ---
 
-## E2E Testing
+## Testing
 
-### Worktree Port Check
+### Unit Tests
 
-**Before running E2E tests in a worktree**, check `.env` for `PORT` and `MCP_BASE_URL`. Worktrees share the same host, so each worktree needs a unique port to avoid collisions with the main branch or other worktrees. Also update `.env.docker` `MCP_BASE_URL` to match (use `host.docker.internal:<port>`).
+```bash
+bun test src/tests/<test-file>.test.ts   # Run specific test
+bun test                                  # Run all tests
+```
+
+- Tests use isolated SQLite DBs (e.g. `./test-<name>.sqlite`) with `initDb()`/`closeDb()` in `beforeAll`/`afterAll`
+- Tests that need HTTP use a minimal `node:http` handler — NOT the full `src/http.ts` server
+- Use unique test ports to avoid conflicts (e.g. 13022, 13023)
+- Clean up DB files (including `-wal` and `-shm`) in `afterAll`
+
+### E2E Testing with Docker
+
+For full integration tests (session capture, `--resume`, hooks), use a Docker worker against a local API server.
+
+**Worktree port check**: When working in a worktree, other worktrees may already be running the API server on port 3013. Always check `.env` for `PORT` and `MCP_BASE_URL` first:
+
+```bash
+lsof -i :3013    # Check if default port is in use
+```
+
+If occupied, set `PORT=<alt-port>` in `.env` and update `MCP_BASE_URL` to match. Also update `.env.docker` `MCP_BASE_URL` (use `host.docker.internal:<port>`):
+
+```bash
+# Start API on alternate port
+PORT=3014 bun run start:http &
+
+# Build image with current code changes
+docker build -f Dockerfile.worker -t agent-swarm-worker:<tag> .
+
+# Run worker pointing at alternate port, on alternate host port
+docker run --rm -d \
+  --name e2e-test-worker \
+  --env-file .env.docker \
+  -e MCP_BASE_URL=http://host.docker.internal:3014 \
+  -e MAX_CONCURRENT_TASKS=1 \
+  -p 3203:3000 \
+  agent-swarm-worker:<tag>
+```
+
+**E2E flow**:
+1. Start API server (check port first)
+2. Rebuild Docker image: `bun run docker:build:worker` (or with custom tag)
+3. Start worker container pointing at your API port
+4. Create tasks via `curl` against the API
+5. Poll `GET /api/tasks/:id` to verify status, `claudeSessionId`, etc.
+6. Check worker logs: `docker logs <container-name>`
+7. Clean up: `docker stop <container-name>` and kill the API process
+
+**Task cancellation caveat**: Direct DB updates (`sqlite3 ... UPDATE`) bypass the hook-based cancellation flow. The Claude process inside Docker won't stop — you'll need to `docker restart` the container. Use the MCP `cancel-task` tool for proper cancellation when possible.
+
+**Keep test tasks trivial**: Use simple tasks like "Say hi" for E2E tests. Complex tasks (web searches, research) waste time and API credits during testing.
 
 ### MCP Tool Testing (Streamable HTTP)
 
@@ -135,36 +185,23 @@ Key gotchas:
 - `X-Agent-ID` must be a valid UUID (use `uuidgen` to generate)
 - Session must be initialized before calling tools
 
-### Docker Worker Testing
+### UI Testing
+
+Use the `qa-use` tool (`/qa-use:test-run`, `/qa-use:verify`, `/qa-use:explore`) for browser-based UI testing of the dashboard.
+
+**Worktree port check for UI**: The dashboard dev server defaults to port 5274 (see `APP_URL` in `.env`). Check before starting:
 
 ```bash
-# Build the image
-bun run docker:build:worker
-
-# Run a worker (uses .env.docker)
-docker run --name test-worker \
-  --env-file .env.docker \
-  -e "ROLE=worker" \
-  -e "AGENT_NAME=Test Worker" \
-  agent-swarm-worker:latest
-
-# Inspect files inside the running container
-docker exec test-worker cat /workspace/SOUL.md
-docker exec test-worker ls -la /workspace/
-
-# Simulate hook sync from inside the container
-docker exec test-worker curl -s -X PUT \
-  -H "Authorization: Bearer $API_KEY" \
-  -H "X-Agent-ID: $AGENT_ID" \
-  -H "Content-Type: application/json" \
-  http://host.docker.internal:$PORT/api/agents/$AGENT_ID/profile \
-  -d '{"soulMd": "..."}'
-
-# Clean up
-docker stop test-worker && docker rm test-worker
+lsof -i :5274    # Check if UI port is in use
 ```
 
-Note: PostToolUse and Stop hooks only fire during a live Claude session (not testable via Docker exec alone). These validate naturally when a worker picks up a real task.
+If occupied by another worktree, start on an alternate port and update `APP_URL`:
+
+```bash
+cd ui && pnpm run dev --port 5275
+```
+
+The UI connects to the API via `VITE_API_URL` (defaults to `http://localhost:3013`). When using alternate API ports, update accordingly in the UI `.env` or pass as env var.
 
 ---
 
