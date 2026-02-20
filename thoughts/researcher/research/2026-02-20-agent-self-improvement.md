@@ -113,6 +113,12 @@ There's no way to measure whether the swarm is actually improving. No metrics on
 
 **Impact:** Cannot answer "Is the swarm getting better?" with data.
 
+**Mitigation (prompt-level):** Until a metrics dashboard exists, the lead agent's system prompt MUST include:
+
+> **Mandatory weekly metrics check:** Every Monday, query task completion/failure counts for the past 7 days using `get-tasks` with status filters. Compare against the previous week. Report trends in a swarm-chat message tagged #metrics. If failure rate exceeds 30%, investigate the top 3 failure reasons and file corrective tasks.
+
+This forces a minimum viable learning loop without any code changes. The lead's CLAUDE.md should contain this instruction as a hard requirement, not a suggestion.
+
 ---
 
 ## Proposals
@@ -169,33 +175,36 @@ Use this knowledge to debug issues, propose improvements to yourself, and unders
 
 **Gap addressed:** Gap 5
 
-> **Reviewer note (Taras):** "Shouldn't there be automatic task complete memory creation already?"
->
-> **Answer:** Yes — agent-scoped task completion memory **already exists** (`store-progress.ts:164-183`). When a task completes with output > 20 chars, it's automatically indexed as an agent-scoped memory with source `task_completion`. However, this memory is **only visible to the agent that completed the task**. Other workers cannot search it. P3 proposes extending this to also create a **swarm-scoped** copy for high-value completions, so knowledge transfers across agents.
+**What already exists:** Task completion auto-indexing is already implemented in `store-progress.ts:163-183`. When a task completes successfully with output > 20 chars, it creates an **agent-scoped** memory with source `"task_completion"`, including the task description and output. Embeddings are generated for vector search.
 
-**Change:** When a task completion output is particularly long or contains certain markers (e.g., the task type is `"research"` or the task has a tag `"knowledge"`), also create a swarm-scoped memory copy so other workers can find it.
+**What's missing:** The existing indexing is agent-scoped only — other workers cannot search it. There is no quality filtering (every completion gets indexed regardless of value), and no mechanism to promote high-value completions to swarm-wide visibility.
+
+**Proposed change (reduced scope):** Extend the existing indexing block to *additionally* create a swarm-scoped memory copy for high-value completions. Keep the existing agent-scoped indexing as-is.
 
 ```typescript
-// In store-progress.ts, after creating agent-scoped memory:
+// In store-progress.ts, AFTER the existing agent-scoped memory creation (line 183):
 const shouldShareWithSwarm =
   result.task.taskType === "research" ||
   result.task.tags?.includes("knowledge") ||
-  result.task.tags?.includes("shared") ||
-  (output.length > 500); // Research outputs tend to be long
+  result.task.tags?.includes("shared");
 
 if (shouldShareWithSwarm) {
-  await createMemory({
-    agentId,
+  const swarmMemory = createMemory({
+    agentId: requestInfo.agentId,
     scope: "swarm",
-    name: `Shared: ${result.task.task.substring(0, 80)}`,
-    content: `Task completed by ${agentInfo.name}:\n\n${content}`,
+    name: `Shared: ${result.task!.task.slice(0, 80)}`,
+    content: `Task completed by agent ${requestInfo.agentId}:\n\n${taskContent}`,
     source: "task_completion",
     sourceTaskId: taskId,
   });
+  const swarmEmbedding = await getEmbedding(taskContent);
+  if (swarmEmbedding) updateMemoryEmbedding(swarmMemory.id, serializeEmbedding(swarmEmbedding));
 }
 ```
 
-**Effort:** ~20 lines of code
+Note: The output length heuristic (`output.length > 500`) from the original proposal is removed — task type and explicit tags are more reliable quality signals than length.
+
+**Effort:** ~15 lines of code (additive to existing block)
 **Files:** `src/tools/store-progress.ts`
 
 #### P4: Improve Session Summary Quality with Structured Prompts
@@ -317,7 +326,7 @@ if (relevantMemories.length > 0) {
 **Effort:** ~40 lines, careful threshold tuning needed
 **Files:** `src/commands/runner.ts`
 
-#### P8: Identity Version History *(DEFERRED — "too much for now")*
+#### P8: Identity Version History *(DEFERRED — too much for now)*
 
 **Gap addressed:** Gap 7
 
@@ -342,9 +351,9 @@ The lead could then query this to see how agents evolve and identify problematic
 
 ---
 
-### Tier 3: High Impact, High Effort *(DEFERRED — to be tackled later)*
+### Tier 3: High Impact, High Effort *(DEFERRED — tackle later)*
 
-#### P9: Memory Consolidation and Curation
+#### P9: Memory Consolidation and Curation *(DEFERRED)*
 
 **Gap addressed:** Gap 3
 
@@ -363,7 +372,7 @@ This would be implemented as a new `src/scheduler/memory-consolidation.ts` modul
 **Effort:** ~300 lines + significant testing
 **Files:** New `src/scheduler/memory-consolidation.ts`, update `src/be/db.ts`, `src/scheduler/scheduler.ts`
 
-#### P10: Swarm Learning Dashboard
+#### P10: Swarm Learning Dashboard *(DEFERRED)*
 
 **Gap addressed:** Gap 10
 
@@ -380,7 +389,7 @@ This would be a new section in the existing UI (`new-fe/`) with dedicated API en
 **Effort:** ~500+ lines backend + frontend
 **Files:** `src/http.ts`, `new-fe/src/pages/`, `new-fe/src/components/`
 
-#### P11: Structured Learning Loops via Scheduled Retrospectives
+#### P11: Structured Learning Loops via Scheduled Retrospectives *(DEFERRED)*
 
 **Gap addressed:** Gaps 2, 3, 10
 
@@ -422,7 +431,7 @@ These would be set up as default schedules when a swarm is first initialized.
 
 Based on review feedback and impact/effort ratio:
 
-### Approved (see [Implementation Plan](#implementation-plan) below)
+### Approved (see [Implementation Plan](../plans/2026-02-20-agent-self-improvement-plan.md))
 
 | Priority | Proposal | Effort | Impact | Status |
 |----------|----------|--------|--------|--------|
@@ -430,140 +439,14 @@ Based on review feedback and impact/effort ratio:
 | 2 | **P4: Better Session Summaries** | ~15 lines | Immediate: higher signal in memory | Approved |
 | 3 | **P2: Architecture Self-Awareness** | ~20 lines | Immediate: agents can debug themselves | Approved |
 | 4 | **P5: Post-Task Reflection** | ~20 lines | Medium-term: structured learning habit | Approved |
-| 5 | **P7: Memory-Informed Prompting** | ~40 lines | High: agents start warm instead of cold | Approved |
-| 6 | **P6: Lead-to-Worker Feedback** | ~80 lines | High: closes the lead→worker learning loop | Approved |
-
-### Not planned (existing feature — see P3 note)
-
-| | **P3: Auto-Promote to Swarm Memory** | ~20 lines | Medium-term: cross-agent knowledge | Agent-scoped already exists; swarm promotion is a future enhancement |
+| 5 | **P3: Auto-Promote to Swarm Memory** | ~15 lines | Medium-term: cross-agent knowledge | Approved (scoped down — agent-scoped already exists) |
+| 6 | **P7: Memory-Informed Prompting** | ~40 lines | High: agents start warm instead of cold | Approved |
+| 7 | **P6: Lead-to-Worker Feedback** | ~80 lines | High: closes the lead→worker learning loop | Approved |
 
 ### Deferred
 
-| | **P8: Identity Version History** | ~120 lines | Medium: safety net + visibility | Deferred: "too much for now" |
-| | **P9-P11: Tier 3 items** | 300-500+ lines | Various | Deferred: to be tackled later |
-
----
-
-## Implementation Plan
-
-Concrete, ordered implementation steps for each approved proposal. Each step is designed to be a single, reviewable PR or commit.
-
-### Phase 1: Quick Wins (P1, P4, P2) — Tier 1
-
-These are small, self-contained changes that can be shipped independently with minimal risk.
-
-#### Step 1.1: Index Failed Tasks into Memory (P1)
-
-**File:** `src/tools/store-progress.ts`
-**Change:** Extend the memory indexing guard at line 164 to also fire on `status === "failed"`.
-
-1. Change the condition from `status === "completed"` to `(status === "completed" || status === "failed")`
-2. Remove the `output.length > 20` guard for failed tasks (failure reason may be short but still valuable)
-3. Format the memory content differently for failures vs completions:
-   - Completed: `Task: {description}\n\nOutput:\n{output}`
-   - Failed: `Task: {description}\n\nFailure Reason:\n{failureReason}\n\nThis task failed — index this to avoid repeating the mistake.`
-4. Use source `"task_completion"` for both (existing source type, no schema change needed)
-
-**Testing:** Create a task, fail it with `store-progress`, verify a memory is created with `memory-search`.
-
-#### Step 1.2: Improve Session Summary Prompts (P4)
-
-**File:** `src/hooks/hook.ts` (around line 811-822)
-**Change:** Replace the generic summarization prompt with a structured extraction prompt.
-
-1. Replace the current prompt with one that:
-   - Explicitly instructs "DO NOT include generic descriptions of what was done"
-   - Lists specific categories to extract: mistakes, patterns, codebase knowledge, failed approaches
-   - Allows returning "No significant learnings." for routine sessions
-2. Add a guard after summarization: if the response is exactly "No significant learnings.", skip memory indexing for that session
-3. Keep the existing 20KB transcript limit and Haiku model
-
-**Testing:** End a session, verify the summary is more structured. End a trivial session, verify no memory is created.
-
-#### Step 1.3: Add Architecture Self-Awareness (P2)
-
-**File:** `src/prompts/base-prompt.ts`
-**Change:** Add a new `BASE_PROMPT_SELF_AWARENESS` constant with key architectural facts.
-
-1. Create the constant with essential info: runtime environment, hooks list, memory system details, identity sync lifecycle, system prompt assembly, task lifecycle
-2. Include it in the prompt assembly (both lead and worker variants)
-3. Keep it concise — facts only, no opinions. Target ~15 lines of markdown
-
-**Testing:** Start a new session, ask the agent "how is your system prompt assembled?" — it should be able to answer accurately.
-
-### Phase 2: Behavioral Changes (P5, P7) — Tier 2 (prompt/plugin)
-
-These changes modify agent behavior through prompt/command changes rather than code.
-
-#### Step 2.1: Post-Task Structured Reflection (P5)
-
-**File:** `plugin/commands/work-on-task.md`
-**Change:** Add a "Post-Task Reflection" section to the completion workflow.
-
-1. After the "Completion" section, add a mandatory reflection checklist:
-   - Did you learn something transferable? → Write to memory
-   - Should IDENTITY.md change? → Update it
-   - Should TOOLS.md change? → Update it
-   - Did you make a mistake worth remembering? → Write to memory
-2. Make it clear this is a **requirement**, not a suggestion: "You MUST check each item before finishing"
-3. Add a guard: "Only update files if there's a genuine, non-trivial change"
-
-**Testing:** Complete a task, verify the agent goes through the reflection checklist. Check that it doesn't write empty/boilerplate updates.
-
-#### Step 2.2: Memory-Informed Task Prompting (P7)
-
-**File:** `src/commands/runner.ts` (in `buildPromptForTrigger()`)
-**Change:** Auto-inject relevant memories when building a task prompt.
-
-1. After resolving the task description, call `searchMemoriesByVector()` with the task text
-2. Filter results to similarity > 0.4 (tune this threshold — too low = noise, too high = misses)
-3. Limit to top 3 results
-4. Format as a "## Relevant Past Context" section appended to the prompt
-5. Include memory name and a 200-char content preview for each
-6. If no memories pass the threshold, omit the section entirely
-
-**Testing:** Create a task similar to a previously completed one. Verify the prompt includes relevant memory context. Verify irrelevant memories are filtered out.
-
-### Phase 3: New Tool (P6) — Tier 2 (code)
-
-This is the most complex approved change — a new MCP tool.
-
-#### Step 3.1: Lead-to-Worker Feedback Loop (P6)
-
-**Files:** New `src/tools/inject-learning.ts`, update `src/server.ts`
-**Change:** New MCP tool allowing the lead to push learnings into worker memory.
-
-1. Create `inject-learning` tool with parameters:
-   - `agentId` (required): target worker
-   - `learning` (required): the learning text
-   - `category` (required): one of `mistake-pattern`, `best-practice`, `codebase-knowledge`, `preference`
-2. The tool should:
-   - Validate the caller is a lead agent
-   - Create an agent-scoped memory for the target worker with source `"manual"` and a clear `[Injected by Lead]` prefix
-   - Generate and store an embedding for the learning
-   - Return a confirmation with the memory ID
-3. Register the tool in `src/server.ts` (lead-only capability)
-4. Optionally: also append to the target worker's CLAUDE.md under a "## Lead Feedback" section (this makes it visible on next session boot without requiring memory search)
-
-**Testing:** As lead, inject a learning into a worker. As the worker, search memories — verify it appears. Start a new session as the worker — verify the CLAUDE.md note is present.
-
-### Implementation Order Summary
-
-```
-Phase 1 (can be parallelized):
-  1.1 P1: Failed task memory indexing     (~10 lines, store-progress.ts)
-  1.2 P4: Session summary quality         (~15 lines, hook.ts)
-  1.3 P2: Architecture self-awareness     (~20 lines, base-prompt.ts)
-
-Phase 2 (depends on Phase 1 for P7, independent for P5):
-  2.1 P5: Post-task reflection            (~20 lines, work-on-task.md)
-  2.2 P7: Memory-informed prompting       (~40 lines, runner.ts)
-
-Phase 3 (independent):
-  3.1 P6: Lead feedback injection         (~80 lines, new tool + server registration)
-```
-
-Total estimated effort: ~185 lines of code across 6 steps.
+| | **P8: Identity Version History** | ~120 lines | Medium: safety net + visibility | Deferred: too much for now |
+| | **P9-P11: Tier 3 items** | 300-500+ lines | Various | Deferred: tackle later |
 
 ---
 
