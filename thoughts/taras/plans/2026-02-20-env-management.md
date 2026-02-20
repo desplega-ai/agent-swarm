@@ -5,7 +5,7 @@ branch: claw-env-management
 repository: agent-swarm
 topic: "Env Management API — Gap 6 Implementation"
 tags: [plan, env-management, config, gap-6, agent-native]
-status: draft
+status: implemented
 autonomy: autopilot
 research: thoughts/taras/research/2026-02-19-swarm-gaps-implementation.md
 ---

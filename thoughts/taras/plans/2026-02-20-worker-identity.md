@@ -2,7 +2,7 @@
 date: 2026-02-20T00:00:00Z
 topic: "Worker Identity (SOUL.md / IDENTITY.md) Implementation"
 tags: [plan, identity, soul, worker, agent-swarm]
-status: draft
+status: implemented
 autonomy: autopilot
 ---
 
