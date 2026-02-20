@@ -2390,11 +2390,11 @@ const httpServer = createHttpServer(async (req, res) => {
     }
     const body = JSON.parse(Buffer.concat(chunks).toString());
     const { query, limit = 5 } = body;
-    const searchAgentId = myAgentId || body.agentId;
+    const searchAgentId = myAgentId;
 
     if (!query || !searchAgentId) {
       res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing required fields: query, agentId" }));
+      res.end(JSON.stringify({ error: "Missing required fields: query, X-Agent-ID header" }));
       return;
     }
 
