@@ -49,6 +49,13 @@ import { registerSlackReadTool } from "./tools/slack-read";
 import { registerSlackReplyTool } from "./tools/slack-reply";
 import { registerSlackUploadFileTool } from "./tools/slack-upload-file";
 import { registerStoreProgressTool } from "./tools/store-progress";
+// Swarm config tools
+import {
+  registerDeleteConfigTool,
+  registerGetConfigTool,
+  registerListConfigTool,
+  registerSetConfigTool,
+} from "./tools/swarm-config";
 // Task pool capability
 import { registerTaskActionTool } from "./tools/task-action";
 import { registerUnregisterServiceTool } from "./tools/unregister-service";
@@ -99,6 +106,12 @@ export function createServer() {
   registerStoreProgressTool(server);
   registerMyAgentInfoTool(server);
   registerCancelTaskTool(server);
+
+  // Swarm config tools - always registered (config management is fundamental)
+  registerSetConfigTool(server);
+  registerGetConfigTool(server);
+  registerListConfigTool(server);
+  registerDeleteConfigTool(server);
 
   // Slack integration tools (always registered, will no-op if Slack not configured)
   registerSlackReplyTool(server);

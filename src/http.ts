@@ -2486,6 +2486,24 @@ httpServer
   .listen(port, async () => {
     console.log(`MCP HTTP server running on http://localhost:${port}/mcp`);
 
+    // Load global swarm configs into process.env (so integrations can read them)
+    // Infrastructure-level env vars take precedence — only missing keys are filled.
+    try {
+      const globalConfigs = getResolvedConfig();
+      let injected = 0;
+      for (const config of globalConfigs) {
+        if (!process.env[config.key]) {
+          process.env[config.key] = config.value;
+          injected++;
+        }
+      }
+      if (injected > 0) {
+        console.log(`Injected ${injected} swarm_config value(s) into process.env`);
+      }
+    } catch (e) {
+      console.error("Failed to load global swarm configs:", e);
+    }
+
     // Start Slack bot (if configured)
     await startSlackApp();
 
