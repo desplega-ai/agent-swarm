@@ -524,7 +524,30 @@ const httpServer = createHttpServer(async (req, res) => {
         if (agent.isLead) {
           // === LEAD-SPECIFIC TRIGGERS ===
 
-          // Check for unread Slack inbox messages (highest priority for lead)
+          // Check for recently finished worker tasks (highest lead-specific priority)
+          // Processing task completions promptly keeps the swarm moving.
+          const finishedTasks = getRecentlyFinishedWorkerTasks();
+          if (finishedTasks.length > 0) {
+            // Atomically mark as notified within this transaction.
+            // NOTE: If the consuming session fails, the runner will call
+            // POST /api/tasks/reset-notification to reset notifiedAt,
+            // allowing re-delivery on the next poll.
+            const taskIds = finishedTasks.map((t) => t.id);
+            markTasksNotified(taskIds);
+            console.log(
+              `[api/poll] tasks_finished trigger: ${taskIds.length} task(s) marked notified [${taskIds.map((id) => id.slice(0, 8)).join(", ")}] for agent ${myAgentId.slice(0, 8)}`,
+            );
+
+            return {
+              trigger: {
+                type: "tasks_finished",
+                count: finishedTasks.length,
+                tasks: finishedTasks,
+              },
+            };
+          }
+
+          // Check for unread Slack inbox messages
           // Atomically claim messages to prevent duplicate processing
           const claimedInbox = claimInboxMessages(myAgentId, 5);
           if (claimedInbox.length > 0) {
@@ -547,28 +570,6 @@ const httpServer = createHttpServer(async (req, res) => {
                 type: "unread_mentions",
                 mentionsCount: inbox.mentionsCount,
                 claimedChannels: claimedChannels.map((c) => c.channelId), // Include for tracking
-              },
-            };
-          }
-
-          // Check for recently finished worker tasks
-          const finishedTasks = getRecentlyFinishedWorkerTasks();
-          if (finishedTasks.length > 0) {
-            // Atomically mark as notified within this transaction.
-            // NOTE: If the consuming session fails, the runner will call
-            // POST /api/tasks/reset-notification to reset notifiedAt,
-            // allowing re-delivery on the next poll.
-            const taskIds = finishedTasks.map((t) => t.id);
-            markTasksNotified(taskIds);
-            console.log(
-              `[api/poll] tasks_finished trigger: ${taskIds.length} task(s) marked notified [${taskIds.map((id) => id.slice(0, 8)).join(", ")}] for agent ${myAgentId.slice(0, 8)}`,
-            );
-
-            return {
-              trigger: {
-                type: "tasks_finished",
-                count: finishedTasks.length,
-                tasks: finishedTasks,
               },
             };
           }
