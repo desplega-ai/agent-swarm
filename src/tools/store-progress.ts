@@ -166,8 +166,8 @@ export const registerStoreProgressTool = (server: McpServer) => {
           try {
             const taskContent =
               status === "completed"
-                ? `Task: ${result.task!.task}\n\nOutput:\n${output}`
-                : `Task: ${result.task!.task}\n\nFailure reason:\n${failureReason}\n\nThis task failed. Learn from this to avoid repeating the mistake.`;
+                ? `Task: ${result.task!.task}\n\nOutput:\n${output || "(no output)"}`
+                : `Task: ${result.task!.task}\n\nFailure reason:\n${failureReason || "No reason provided"}\n\nThis task failed. Learn from this to avoid repeating the mistake.`;
 
             // Skip indexing if there's truly no content
             if (taskContent.length < 30) return;
