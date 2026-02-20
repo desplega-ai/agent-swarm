@@ -851,9 +851,11 @@ ${transcript}`;
             }
 
             // Skip indexing if the session had no significant learnings
-            if (summary?.trim().toLowerCase().includes("no significant learnings")) {
-              // Routine session — don't pollute memory with generic summaries
-            } else if (summary && summary.length > 20) {
+            if (
+              summary &&
+              summary.length > 20 &&
+              !summary.trim().toLowerCase().includes("no significant learnings")
+            ) {
               const apiUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
               const apiKey = process.env.API_KEY || "";
 
