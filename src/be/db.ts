@@ -21,6 +21,7 @@ import type {
   ServiceStatus,
   SessionCost,
   SessionLog,
+  SwarmConfig,
 } from "../types";
 
 let db: Database | null = null;
@@ -322,6 +323,30 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       `CREATE INDEX IF NOT EXISTS idx_epics_createdByAgentId ON epics(createdByAgentId)`,
     );
     database.run(`CREATE INDEX IF NOT EXISTS idx_epics_leadAgentId ON epics(leadAgentId)`);
+
+    // Swarm config table - centralized environment/config management
+    database.run(`
+      CREATE TABLE IF NOT EXISTS swarm_config (
+        id TEXT PRIMARY KEY,
+        scope TEXT NOT NULL CHECK(scope IN ('global', 'agent', 'repo')),
+        scopeId TEXT,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        isSecret INTEGER NOT NULL DEFAULT 0,
+        envPath TEXT,
+        description TEXT,
+        createdAt TEXT NOT NULL,
+        lastUpdatedAt TEXT NOT NULL,
+        UNIQUE(scope, scopeId, key)
+      )
+    `);
+
+    // Swarm config indexes
+    database.run(`CREATE INDEX IF NOT EXISTS idx_swarm_config_scope ON swarm_config(scope)`);
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_swarm_config_scope_id ON swarm_config(scope, scopeId)`,
+    );
+    database.run(`CREATE INDEX IF NOT EXISTS idx_swarm_config_key ON swarm_config(key)`);
   });
 
   initSchema();
@@ -4178,4 +4203,252 @@ export function markEpicsProgressNotified(epicIds: string[]): number {
   );
 
   return result.changes;
+}
+
+// ============================================================================
+// Swarm Config Operations (Centralized Environment/Config Management)
+// ============================================================================
+
+type SwarmConfigRow = {
+  id: string;
+  scope: string;
+  scopeId: string | null;
+  key: string;
+  value: string;
+  isSecret: number; // SQLite boolean
+  envPath: string | null;
+  description: string | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+};
+
+function rowToSwarmConfig(row: SwarmConfigRow): SwarmConfig {
+  return {
+    id: row.id,
+    scope: row.scope as "global" | "agent" | "repo",
+    scopeId: row.scopeId ?? null,
+    key: row.key,
+    value: row.value,
+    isSecret: row.isSecret === 1,
+    envPath: row.envPath ?? null,
+    description: row.description ?? null,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+/**
+ * Mask secret values in config entries for API responses.
+ */
+export function maskSecrets(configs: SwarmConfig[]): SwarmConfig[] {
+  return configs.map((c) => (c.isSecret ? { ...c, value: "********" } : c));
+}
+
+/**
+ * Write config values to .env files on disk when `envPath` is set.
+ * Groups configs by envPath, reads existing file, updates/adds matching keys, writes back.
+ */
+function writeEnvFile(configs: SwarmConfig[]): void {
+  const { readFileSync, writeFileSync } = require("node:fs");
+
+  const byPath = new Map<string, SwarmConfig[]>();
+  for (const config of configs) {
+    if (!config.envPath) continue;
+    const existing = byPath.get(config.envPath) ?? [];
+    existing.push(config);
+    byPath.set(config.envPath, existing);
+  }
+
+  for (const [envPath, entries] of byPath) {
+    let lines: string[] = [];
+    try {
+      const content = readFileSync(envPath, "utf-8") as string;
+      lines = content.split("\n");
+    } catch {
+      // File doesn't exist yet, start empty
+    }
+
+    for (const entry of entries) {
+      const prefix = `${entry.key}=`;
+      const lineIndex = lines.findIndex((l) => l.startsWith(prefix));
+      const newLine = `${entry.key}=${entry.value}`;
+      if (lineIndex >= 0) {
+        lines[lineIndex] = newLine;
+      } else {
+        lines.push(newLine);
+      }
+    }
+
+    const output = `${lines.filter((l) => l !== "").join("\n")}\n`;
+    writeFileSync(envPath, output, "utf-8");
+  }
+}
+
+/**
+ * List config entries with optional filters.
+ */
+export function getSwarmConfigs(filters?: {
+  scope?: string;
+  scopeId?: string;
+  key?: string;
+}): SwarmConfig[] {
+  const conditions: string[] = [];
+  const params: string[] = [];
+
+  if (filters?.scope) {
+    conditions.push("scope = ?");
+    params.push(filters.scope);
+  }
+  if (filters?.scopeId) {
+    conditions.push("scopeId = ?");
+    params.push(filters.scopeId);
+  }
+  if (filters?.key) {
+    conditions.push("key = ?");
+    params.push(filters.key);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const query = `SELECT * FROM swarm_config ${whereClause} ORDER BY key ASC`;
+
+  return getDb()
+    .prepare<SwarmConfigRow, string[]>(query)
+    .all(...params)
+    .map(rowToSwarmConfig);
+}
+
+/**
+ * Get a single config entry by ID.
+ */
+export function getSwarmConfigById(id: string): SwarmConfig | null {
+  const row = getDb()
+    .prepare<SwarmConfigRow, [string]>("SELECT * FROM swarm_config WHERE id = ?")
+    .get(id);
+  return row ? rowToSwarmConfig(row) : null;
+}
+
+/**
+ * Upsert a config entry. Inserts or updates by (scope, scopeId, key) unique constraint.
+ */
+export function upsertSwarmConfig(data: {
+  scope: "global" | "agent" | "repo";
+  scopeId?: string | null;
+  key: string;
+  value: string;
+  isSecret?: boolean;
+  envPath?: string | null;
+  description?: string | null;
+}): SwarmConfig {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const scopeId = data.scope === "global" ? null : (data.scopeId ?? null);
+  const isSecret = data.isSecret ? 1 : 0;
+  const envPath = data.envPath ?? null;
+  const description = data.description ?? null;
+
+  const row = getDb()
+    .prepare<
+      SwarmConfigRow,
+      [
+        string,
+        string,
+        string | null,
+        string,
+        string,
+        number,
+        string | null,
+        string | null,
+        string,
+        string,
+        string,
+        number,
+        string | null,
+        string | null,
+        string,
+      ]
+    >(
+      `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(scope, scopeId, key) DO UPDATE SET
+         value = ?,
+         isSecret = ?,
+         envPath = ?,
+         description = ?,
+         lastUpdatedAt = ?
+       RETURNING *`,
+    )
+    .get(
+      id,
+      data.scope,
+      scopeId,
+      data.key,
+      data.value,
+      isSecret,
+      envPath,
+      description,
+      now,
+      now,
+      // ON CONFLICT update values:
+      data.value,
+      isSecret,
+      envPath,
+      description,
+      now,
+    );
+
+  if (!row) throw new Error("Failed to upsert swarm config");
+
+  const config = rowToSwarmConfig(row);
+
+  // Write to envPath if set
+  if (config.envPath) {
+    try {
+      writeEnvFile([config]);
+    } catch (e) {
+      console.error(`Failed to write env file ${config.envPath}:`, e);
+    }
+  }
+
+  return config;
+}
+
+/**
+ * Delete a config entry by ID.
+ */
+export function deleteSwarmConfig(id: string): boolean {
+  const result = getDb().run("DELETE FROM swarm_config WHERE id = ?", [id]);
+  return result.changes > 0;
+}
+
+/**
+ * Get resolved (merged) config for a given agent and/or repo.
+ * Scope resolution: repo > agent > global (most-specific wins).
+ * Returns one entry per unique key with the most-specific scope winning.
+ */
+export function getResolvedConfig(agentId?: string, repoId?: string): SwarmConfig[] {
+  // Start with global configs
+  const configMap = new Map<string, SwarmConfig>();
+
+  const globalConfigs = getSwarmConfigs({ scope: "global" });
+  for (const config of globalConfigs) {
+    configMap.set(config.key, config);
+  }
+
+  // Overlay agent configs (agent wins over global)
+  if (agentId) {
+    const agentConfigs = getSwarmConfigs({ scope: "agent", scopeId: agentId });
+    for (const config of agentConfigs) {
+      configMap.set(config.key, config);
+    }
+  }
+
+  // Overlay repo configs (repo wins over agent and global)
+  if (repoId) {
+    const repoConfigs = getSwarmConfigs({ scope: "repo", scopeId: repoId });
+    for (const config of repoConfigs) {
+      configMap.set(config.key, config);
+    }
+  }
+
+  return Array.from(configMap.values()).sort((a, b) => a.key.localeCompare(b.key));
 }
