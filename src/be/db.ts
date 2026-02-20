@@ -501,6 +501,18 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     /* exists */
   }
 
+  // Soul and Identity content columns
+  try {
+    db.run(`ALTER TABLE agents ADD COLUMN soulMd TEXT`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE agents ADD COLUMN identityMd TEXT`);
+  } catch {
+    /* exists */
+  }
+
   // Service PM2 columns migration
   try {
     db.run(`ALTER TABLE services ADD COLUMN script TEXT NOT NULL DEFAULT ''`);
@@ -673,6 +685,8 @@ type AgentRow = {
   maxTasks: number | null;
   emptyPollCount: number | null;
   claudeMd: string | null;
+  soulMd: string | null;
+  identityMd: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -689,6 +703,8 @@ function rowToAgent(row: AgentRow): Agent {
     maxTasks: row.maxTasks ?? 1,
     emptyPollCount: row.emptyPollCount ?? 0,
     claudeMd: row.claudeMd ?? undefined,
+    soulMd: row.soulMd ?? undefined,
+    identityMd: row.identityMd ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
