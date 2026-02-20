@@ -519,8 +519,8 @@ const syncIdentityFilesToServer = async (agentId: string): Promise<void> => {
 - [x] Start API server, register an agent with soul/identity content
 - [x] Start a worker — verify SOUL.md and IDENTITY.md exist at `/workspace/` before session starts (Docker: files present, SOUL.md 1291B, IDENTITY.md 708B)
 - [x] Edit SOUL.md inside container, sync to DB via profile API — verified "Learned Traits" section persisted to DB via `GET /me`
-- [ ] Edit SOUL.md via the agent (Write tool) — verify PostToolUse hook fires automatically (requires live Claude session in Docker)
-- [ ] Stop the worker — verify Stop hook syncs any final changes (requires live Claude session in Docker)
+- [x] Edit SOUL.md via the agent (Edit tool) — PostToolUse hook synced to DB (Docker: created task, worker spawned Claude, Claude edited SOUL.md + IDENTITY.md, DB confirmed "E2E Hook Test" and "Hook Verified" sections)
+- [x] Stop the worker — Stop hook synced final changes (Docker: Claude session ended cleanly after 7 turns, DB content matches edits)
 - [x] Start a new session — verify SOUL.md contains the updated content (Docker: runner fetches profile, writes files with updated content)
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. This establishes the file-based editing flow that agents will use for self-evolution. Note: Phase 4 (runner profile fetch) is a prerequisite for the runner file writing in step 2 — implement them together.
@@ -802,12 +802,15 @@ After all phases are complete, run through this end-to-end:
 - [x] Modified SOUL.md inside container (added "Learned Traits" section), synced via profile API from within container — DB updated, verified via `GET /me` from host
 - [x] Runner generates templates for agents registered via `POST /api/agents` (bug found and fixed: runner now calls `generateDefaultSoulMd`/`generateDefaultIdentityMd` when profile is empty)
 
-**Remaining (require live Claude session in Docker):**
-- [ ] PostToolUse hook fires on Write/Edit to SOUL.md or IDENTITY.md — auto-syncs to DB
-- [ ] Stop hook syncs final identity file changes on session end
-- [ ] `update-profile` MCP tool invoked from within a Claude session
-
-These will validate naturally when a Docker worker picks up its first real task.
+**Live Claude session in Docker (task-driven E2E, port 3015):**
+- [x] Created task assigned to worker: "edit SOUL.md and IDENTITY.md"
+- [x] Worker polled, picked up task, spawned Claude session (7 turns, 19.9s, $0.25)
+- [x] Claude used Edit tool on `/workspace/SOUL.md` — added "## E2E Hook Test" section
+- [x] Claude used Edit tool on `/workspace/IDENTITY.md` — added "## Hook Verified" section
+- [x] PostToolUse hook fired on Edit to SOUL.md/IDENTITY.md — DB confirmed both edits synced ("E2E Hook Test" in soulMd, "Hook Verified" in identityMd via `GET /me`)
+- [x] Stop hook fired on session end — Claude exited cleanly, DB content matches final file state
+- [x] Task marked completed by agent via `store-progress` MCP tool
+- [ ] `update-profile` MCP tool invoked from within a Claude session (not tested — lower priority, underlying `updateAgentProfile()` verified via unit tests + REST API)
 
 ## References
 
