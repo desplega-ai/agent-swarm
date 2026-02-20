@@ -430,8 +430,8 @@ Note: The paused task's `task` object comes from the API response which fetches 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
 - [ ] Create a task, let a worker run it, verify `claudeSessionId` is captured
