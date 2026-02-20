@@ -808,27 +808,24 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
             }
 
             // Summarize with Claude Haiku — extract only high-value learnings
-            const summarizePrompt = [
-              "You are summarizing an AI agent's work session. Extract ONLY high-value learnings.",
-              "",
-              "DO NOT include:",
-              '- Generic descriptions of what was done ("worked on task X")',
-              "- Tool calls or file reads",
-              "- Routine progress updates",
-              "",
-              "DO include (if present):",
-              "- **Mistakes made and corrections** — what went wrong and what fixed it",
-              "- **Discovered patterns** — reusable approaches, APIs, or codebase conventions",
-              "- **Codebase knowledge** — important file paths, architecture decisions, gotchas",
-              "- **Environment knowledge** — service URLs, config details, tool quirks",
-              "- **Failed approaches** — what was tried and didn't work (and why)",
-              "",
-              'Format as a bulleted list of concrete, reusable facts. If the session was routine with no significant learnings, respond with exactly: "No significant learnings."',
-              taskContext ? `\nTask context: ${taskContext}` : "",
-              `\nTranscript:\n${transcript}`,
-            ]
-              .filter(Boolean)
-              .join("\n");
+            const summarizePrompt = `You are summarizing an AI agent's work session. Extract ONLY high-value learnings.
+
+DO NOT include:
+- Generic descriptions of what was done ("worked on task X")
+- Tool calls or file reads
+- Routine progress updates
+
+DO include (if present):
+- **Mistakes made and corrections** — what went wrong and what fixed it
+- **Discovered patterns** — reusable approaches, APIs, or codebase conventions
+- **Codebase knowledge** — important file paths, architecture decisions, gotchas
+- **Environment knowledge** — service URLs, config details, tool quirks
+- **Failed approaches** — what was tried and didn't work (and why)
+
+Format as a bulleted list of concrete, reusable facts. If the session was routine with no significant learnings, respond with exactly: "No significant learnings."
+${taskContext ? `\nTask context: ${taskContext}` : ""}
+Transcript:
+${transcript}`;
 
             const tmpFile = `/tmp/session-summary-${Date.now()}.txt`;
             await Bun.write(tmpFile, summarizePrompt);

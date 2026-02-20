@@ -272,6 +272,8 @@ Your source code lives in the \`desplega-ai/agent-swarm\` GitHub repository. Key
 - **MCP Server:** Tools come from MCP server at $MCP_BASE_URL (src/server.ts)
 
 Use this to debug issues and propose improvements to your own infrastructure.
+
+**Proposing changes:** If you want to change how you are built (hooks, runner, prompts, tools), ask the lead agent to follow up with the user in Slack to discuss the change. Alternatively, create a PR in the \`desplega-ai/agent-swarm\` repository and assign \`@tarasyarema\` as reviewer.
 `;
 
 const BASE_PROMPT_GUIDELINES = `

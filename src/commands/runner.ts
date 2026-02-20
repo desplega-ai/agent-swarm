@@ -986,17 +986,17 @@ async function fetchRelevantMemories(
     if (!response.ok) return null;
 
     const data = (await response.json()) as {
-      results: Array<{ name: string; content: string; similarity: number }>;
+      results: Array<{ id: string; name: string; content: string; similarity: number }>;
     };
 
     const useful = (data.results || []).filter((m) => m.similarity > 0.4);
     if (useful.length === 0) return null;
 
     const memoryContext = useful
-      .map((m) => `- **${m.name}**: ${m.content.substring(0, 300)}`)
+      .map((m) => `- **${m.name}** (id: ${m.id}): ${m.content.substring(0, 300)}`)
       .join("\n");
 
-    return `\n\n### Relevant Past Knowledge\n\nThese memories from your previous sessions may be useful:\n\n${memoryContext}\n`;
+    return `\n\n### Relevant Past Knowledge\n\nThese memories from your previous sessions may be useful. Use \`memory-get\` with the memory ID to retrieve full details.\n\n${memoryContext}\n`;
   } catch {
     // Non-blocking — don't fail task start because of memory search
     return null;
