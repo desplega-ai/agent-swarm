@@ -1631,13 +1631,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
     // Write setup script to workspace (agent can edit during session)
     // Only create if it doesn't exist — the entrypoint already composed/prepended it at container start
-    const SETUP_SCRIPT_PATH = "/workspace/start-up.sh";
     if (agentSetupScript) {
       try {
-        const file = Bun.file(SETUP_SCRIPT_PATH);
-        const exists = await file.exists();
-        if (!exists) {
-          await Bun.write(SETUP_SCRIPT_PATH, `#!/bin/bash\n${agentSetupScript}\n`);
+        if (!(await Bun.file("/workspace/start-up.sh").exists())) {
+          await Bun.write("/workspace/start-up.sh", `#!/bin/bash\n${agentSetupScript}\n`);
           console.log(`[${role}] Wrote start-up.sh to workspace`);
         }
       } catch (err) {
@@ -1646,10 +1643,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     }
 
     // Write TOOLS.md to workspace (agent can edit during session)
-    const TOOLS_MD_PATH = "/workspace/TOOLS.md";
     if (agentToolsMd) {
       try {
-        await Bun.write(TOOLS_MD_PATH, agentToolsMd);
+        await Bun.write("/workspace/TOOLS.md", agentToolsMd);
         console.log(`[${role}] Wrote TOOLS.md to workspace`);
       } catch (err) {
         console.warn(`[${role}] Could not write TOOLS.md: ${(err as Error).message}`);

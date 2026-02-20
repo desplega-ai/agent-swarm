@@ -226,6 +226,18 @@ fi
 echo "==============================="
 
 
+# Find existing startup script in /workspace (start-up.sh, .bash, .js, .ts, .bun, or bare)
+find_startup_script() {
+    for pattern in start-up.sh start-up.bash start-up.js start-up.ts start-up.bun start-up; do
+        if [ -f "/workspace/${pattern}" ]; then
+            echo "/workspace/${pattern}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+
 # ---- Fetch and compose setup scripts from API ----
 if [ -n "$AGENT_ID" ]; then
     echo ""
@@ -240,14 +252,7 @@ if [ -n "$AGENT_ID" ]; then
         AGENT_SCRIPT=$(jq -r '.setupScript // empty' /tmp/setup_scripts.json 2>/dev/null)
 
         if [ -n "$GLOBAL_SCRIPT" ] || [ -n "$AGENT_SCRIPT" ]; then
-            # Find existing startup file (same discovery logic as below)
-            EXISTING_STARTUP=""
-            for pattern in start-up.sh start-up.bash start-up.js start-up.ts start-up.bun start-up; do
-                if [ -f "/workspace/${pattern}" ]; then
-                    EXISTING_STARTUP="/workspace/${pattern}"
-                    break
-                fi
-            done
+            EXISTING_STARTUP=$(find_startup_script) || true
 
             if [ -n "$EXISTING_STARTUP" ]; then
                 # Prepend to existing file (preserve operator content)
@@ -309,13 +314,7 @@ echo ""
 echo "=== Startup Script Detection (${ROLE}) ==="
 
 # Find startup script matching /workspace/start-up.* pattern
-STARTUP_SCRIPT=""
-for pattern in start-up.sh start-up.bash start-up.js start-up.ts start-up.bun start-up; do
-    if [ -f "/workspace/${pattern}" ]; then
-        STARTUP_SCRIPT="/workspace/${pattern}"
-        break
-    fi
-done
+STARTUP_SCRIPT=$(find_startup_script) || true
 
 if [ -n "$STARTUP_SCRIPT" ]; then
     echo "Found startup script: $STARTUP_SCRIPT"
