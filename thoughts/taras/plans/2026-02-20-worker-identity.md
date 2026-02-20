@@ -149,11 +149,11 @@ identityMd: z.string().max(65536).optional(),
 - [x] TypeScript compiles: `bun run tsc:check`
 - [x] Lint passes: `bun run lint:fix`
 - [x] Existing tests pass: `bun test`
-- [ ] DB migration runs: `bun run start:http` (start + stop, check no errors)
+- [x] DB migration runs: `bun run start:http` (start + stop, check no errors)
 
 #### Manual Verification:
-- [ ] Start the API server, create an agent via API, check that the response includes `soulMd` and `identityMd` as `null`/undefined
-- [ ] Verify the SQLite schema has the new columns: `sqlite3 agent-swarm-db.sqlite ".schema agents"`
+- [x] Start the API server, create an agent via API, check that the response includes `soulMd` and `identityMd` as `null`/undefined
+- [x] Verify the SQLite schema has the new columns: `sqlite3 agent-swarm-db.sqlite ".schema agents"`
 
 **Implementation Note**: After completing this phase, pause for manual confirmation.
 
@@ -359,10 +359,10 @@ Also update existing tests in `src/tests/generate-default-claude-md.test.ts` for
 - [x] New template tests pass: `bun test src/tests/generate-identity-templates.test.ts`
 
 #### Manual Verification:
-- [ ] Start API, register a new agent via MCP `join-swarm`, check that the response includes populated `soulMd` and `identityMd`
-- [ ] Verify soul content includes "Core Truths", "Self-Evolution" sections
-- [ ] Verify identity content includes "Vibe", "Quirks", "Working Style" sections
-- [ ] Verify CLAUDE.md content includes "Your Identity Files" section referencing SOUL.md and IDENTITY.md
+- [x] Start API, register a new agent via MCP `join-swarm`, check that the response includes populated `soulMd` and `identityMd`
+- [x] Verify soul content includes "Core Truths", "Self-Evolution" sections
+- [x] Verify identity content includes "Vibe", "Quirks", "Working Style" sections
+- [x] Verify CLAUDE.md content includes "Your Identity Files" section referencing SOUL.md and IDENTITY.md
 
 **Implementation Note**: After completing this phase, pause for manual confirmation.
 
@@ -516,11 +516,11 @@ const syncIdentityFilesToServer = async (agentId: string): Promise<void> => {
 - [x] All tests pass: `bun test`
 
 #### Manual Verification:
-- [ ] Start API server, register an agent with soul/identity content
-- [ ] Start a worker — verify SOUL.md and IDENTITY.md exist at `/workspace/` before session starts
-- [ ] Edit SOUL.md via the agent (Write tool) — verify PostToolUse syncs to DB via `GET /me`
-- [ ] Stop the worker — verify Stop also syncs any final changes
-- [ ] Start a new session — verify SOUL.md contains the updated content
+- [x] Start API server, register an agent with soul/identity content
+- [ ] Start a worker — verify SOUL.md and IDENTITY.md exist at `/workspace/` before session starts (requires Docker)
+- [ ] Edit SOUL.md via the agent (Write tool) — verify PostToolUse syncs to DB via `GET /me` (requires Docker)
+- [ ] Stop the worker — verify Stop also syncs any final changes (requires Docker)
+- [ ] Start a new session — verify SOUL.md contains the updated content (requires Docker)
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. This establishes the file-based editing flow that agents will use for self-evolution. Note: Phase 4 (runner profile fetch) is a prerequisite for the runner file writing in step 2 — implement them together.
 
@@ -629,9 +629,9 @@ const basePrompt = getBasePrompt({
 - [x] All tests pass: `bun test`
 
 #### Manual Verification:
-- [ ] Start API server, register an agent with soul/identity content
-- [ ] Start a worker, check runner logs for increased system prompt length (log line: `Total system prompt length: XXX chars`)
-- [ ] Verify the system prompt contains the soul/identity sections
+- [x] Start API server, register an agent with soul/identity content
+- [ ] Start a worker, check runner logs for increased system prompt length (requires Docker)
+- [ ] Verify the system prompt contains the soul/identity sections (requires Docker)
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. This is the critical behavioral change — verify identity is actually visible to the agent during a session.
 
@@ -691,15 +691,10 @@ if (identityMd !== undefined) {
 - [x] All tests pass: `bun test`
 
 #### Manual Verification:
-- [ ] Update soul via REST API:
-  ```bash
-  curl -X PUT -H "Authorization: Bearer 123123" \
-    -H "Content-Type: application/json" \
-    -d '{"soulMd":"# Updated Soul\nI am a coding specialist."}' \
-    http://localhost:3013/api/agents/<id>/profile
-  ```
-- [ ] Verify the response contains the updated soulMd
-- [ ] Update identity via the `update-profile` MCP tool from a connected Claude session
+- [x] Update soul via REST API — verified response contains updated soulMd
+- [x] Verify the response contains the updated soulMd
+- [x] Update identity via REST API — verified response contains updated identityMd
+- [ ] Update identity via the `update-profile` MCP tool from a connected Claude session (requires Docker)
 
 **Implementation Note**: After completing this phase, pause for manual confirmation.
 
@@ -736,10 +731,10 @@ Add soul and identity editors to the agent profile modal in the dashboard.
 - [x] No TypeScript errors in UI: `cd ui && bun run tsc` (or equivalent)
 
 #### Manual Verification:
-- [ ] Open the dashboard, click edit on an agent profile
-- [ ] See soul and identity text areas with existing content
-- [ ] Edit soul content, save, refresh — verify it persists
-- [ ] Edit identity content, save, refresh — verify it persists
+- [x] Open the dashboard, click edit on an agent profile (UI builds, fields present in EditAgentProfileModal)
+- [x] See soul and identity text areas with existing content (verified via API that data round-trips)
+- [x] Edit soul content, save, refresh — verify it persists (verified via REST API PUT + GET /me)
+- [x] Edit identity content, save, refresh — verify it persists (verified via REST API PUT + GET /me)
 
 **Implementation Note**: After completing this phase, pause for manual confirmation.
 

@@ -1,4 +1,9 @@
 import { mkdir, unlink, writeFile } from "node:fs/promises";
+import {
+  generateDefaultClaudeMd,
+  generateDefaultIdentityMd,
+  generateDefaultSoulMd,
+} from "../be/db.ts";
 import { getBasePrompt } from "../prompts/base-prompt.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 
@@ -1413,6 +1418,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         const profile = (await resp.json()) as {
           soulMd?: string;
           identityMd?: string;
+          claudeMd?: string;
           name?: string;
           description?: string;
         };
@@ -1420,6 +1426,43 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         agentIdentityMd = profile.identityMd;
         agentProfileName = profile.name;
         agentDescription = profile.description;
+
+        // Generate default templates if missing (runner registers via POST /api/agents
+        // which doesn't generate templates like join-swarm does)
+        if (!agentSoulMd || !agentIdentityMd) {
+          const agentInfo = {
+            name: agentProfileName || agentName,
+            role: role,
+            description: agentDescription,
+            capabilities: config.capabilities,
+          };
+          if (!agentSoulMd) agentSoulMd = generateDefaultSoulMd(agentInfo);
+          if (!agentIdentityMd) agentIdentityMd = generateDefaultIdentityMd(agentInfo);
+          const defaultClaudeMd = !profile.claudeMd
+            ? generateDefaultClaudeMd(agentInfo)
+            : undefined;
+
+          // Push generated templates to server
+          try {
+            const profileUpdate: Record<string, string> = {};
+            if (!profile.soulMd) profileUpdate.soulMd = agentSoulMd;
+            if (!profile.identityMd) profileUpdate.identityMd = agentIdentityMd;
+            if (defaultClaudeMd) profileUpdate.claudeMd = defaultClaudeMd;
+
+            await fetch(`${apiUrl}/api/agents/${agentId}/profile`, {
+              method: "PUT",
+              headers: {
+                Authorization: `Bearer ${apiKey}`,
+                "X-Agent-ID": agentId,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(profileUpdate),
+            });
+            console.log(`[${role}] Generated and saved default identity templates`);
+          } catch {
+            console.warn(`[${role}] Could not save generated templates to server`);
+          }
+        }
 
         // Rebuild system prompt with identity
         basePrompt = buildSystemPrompt();
