@@ -74,7 +74,7 @@ const targetQa = join(worktreePath, ".qa-use-tests.json");
 
 if (await exists(mainQa)) {
   console.log("Copying .qa-use-tests.json...");
-  let qaContent = await readFile(mainMcp, "utf-8");
+  let qaContent = await readFile(mainQa, "utf-8");
   await writeFile(targetQa, qaContent);
 }
 
