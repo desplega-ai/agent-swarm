@@ -625,6 +625,18 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     /* exists */
   }
 
+  // Session attachment columns
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN parentTaskId TEXT`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN claudeSessionId TEXT`);
+  } catch {
+    /* exists */
+  }
+
   // Epic progress trigger migration: Add progressNotifiedAt to epics
   try {
     db.run(`ALTER TABLE epics ADD COLUMN progressNotifiedAt TEXT`);
@@ -904,6 +916,8 @@ type AgentTaskRow = {
   mentionMessageId: string | null;
   mentionChannelId: string | null;
   epicId: string | null;
+  parentTaskId: string | null;
+  claudeSessionId: string | null;
   createdAt: string;
   lastUpdatedAt: string;
   finishedAt: string | null;
@@ -941,6 +955,8 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     mentionMessageId: row.mentionMessageId ?? undefined,
     mentionChannelId: row.mentionChannelId ?? undefined,
     epicId: row.epicId ?? undefined,
+    parentTaskId: row.parentTaskId ?? undefined,
+    claudeSessionId: row.claudeSessionId ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     finishedAt: row.finishedAt ?? undefined,
@@ -1093,6 +1109,18 @@ export function startTask(taskId: string): AgentTask | null {
 
 export function getTaskById(id: string): AgentTask | null {
   const row = taskQueries.getById().get(id);
+  return row ? rowToAgentTask(row) : null;
+}
+
+export function updateTaskClaudeSessionId(
+  taskId: string,
+  claudeSessionId: string,
+): AgentTask | null {
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string, string]>(
+      `UPDATE agent_tasks SET claudeSessionId = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *`,
+    )
+    .get(claudeSessionId, new Date().toISOString(), taskId);
   return row ? rowToAgentTask(row) : null;
 }
 
@@ -1779,6 +1807,7 @@ export interface CreateTaskOptions {
   mentionMessageId?: string;
   mentionChannelId?: string;
   epicId?: string;
+  parentTaskId?: string;
 }
 
 export function createTaskExtended(task: string, options?: CreateTaskOptions): AgentTask {
@@ -1799,8 +1828,8 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         taskType, tags, priority, dependsOn, offeredTo, offeredAt,
         slackChannelId, slackThreadTs, slackUserId,
         githubRepo, githubEventType, githubNumber, githubCommentId, githubAuthor, githubUrl,
-        mentionMessageId, mentionChannelId, epicId, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        mentionMessageId, mentionChannelId, epicId, parentTaskId, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -1827,6 +1856,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.mentionMessageId ?? null,
       options?.mentionChannelId ?? null,
       options?.epicId ?? null,
+      options?.parentTaskId ?? null,
       now,
       now,
     );

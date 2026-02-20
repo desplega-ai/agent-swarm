@@ -72,6 +72,7 @@ import {
   updateAgentStatus,
   updateAgentStatusFromCapacity,
   updateEpic,
+  updateTaskClaudeSessionId,
 } from "./be/db";
 import type {
   CheckRunEvent,
@@ -1133,6 +1134,39 @@ const httpServer = createHttpServer(async (req, res) => {
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Failed to create task" }));
     }
+    return;
+  }
+
+  // PUT /api/tasks/:id/claude-session - Update Claude session ID (called by runner)
+  if (
+    req.method === "PUT" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "tasks" &&
+    pathSegments[2] &&
+    pathSegments[3] === "claude-session"
+  ) {
+    const taskId = pathSegments[2];
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    if (!body.claudeSessionId || typeof body.claudeSessionId !== "string") {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing or invalid 'claudeSessionId' field" }));
+      return;
+    }
+
+    const task = updateTaskClaudeSessionId(taskId, body.claudeSessionId);
+    if (!task) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Task not found" }));
+      return;
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(task));
     return;
   }
 
