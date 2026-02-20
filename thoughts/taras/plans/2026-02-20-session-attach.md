@@ -327,8 +327,8 @@ const task = createTaskExtended(body.task, {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
 - [ ] Create a parent task via API, note its ID

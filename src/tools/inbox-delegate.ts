@@ -28,6 +28,12 @@ export const registerInboxDelegateTool = (server: McpServer) => {
           .boolean()
           .default(false)
           .describe("If true, offer the task instead of direct assign."),
+        parentTaskId: z
+          .uuid()
+          .optional()
+          .describe(
+            "Parent task ID. If the Slack message is a follow-up to a previous task, pass the parent task ID so the worker continues in the same session.",
+          ),
       }),
       outputSchema: z.object({
         success: z.boolean(),
@@ -35,7 +41,11 @@ export const registerInboxDelegateTool = (server: McpServer) => {
         task: AgentTaskSchema.optional(),
       }),
     },
-    async ({ inboxMessageId, agentId, taskDescription, offerMode }, requestInfo, _meta) => {
+    async (
+      { inboxMessageId, agentId, taskDescription, offerMode, parentTaskId },
+      requestInfo,
+      _meta,
+    ) => {
       if (!requestInfo.agentId) {
         return {
           content: [{ type: "text", text: "Agent ID not found." }],
@@ -90,6 +100,7 @@ export const registerInboxDelegateTool = (server: McpServer) => {
         slackChannelId: inboxMsg.slackChannelId,
         slackThreadTs: inboxMsg.slackThreadTs,
         slackUserId: inboxMsg.slackUserId,
+        parentTaskId,
       });
 
       // Mark inbox as delegated
