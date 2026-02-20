@@ -807,14 +807,23 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
               }
             }
 
-            // Summarize with Claude Haiku
+            // Summarize with Claude Haiku — extract only high-value learnings
             const summarizePrompt = [
-              "Summarize this agent session transcript concisely. Output ONLY the summary, no preamble.",
-              "Format as 3-7 bullet points covering:",
-              "- What was accomplished",
-              "- Key decisions made",
-              "- Problems encountered and solutions found",
-              "- Learnings useful for future sessions",
+              "You are summarizing an AI agent's work session. Extract ONLY high-value learnings.",
+              "",
+              "DO NOT include:",
+              '- Generic descriptions of what was done ("worked on task X")',
+              "- Tool calls or file reads",
+              "- Routine progress updates",
+              "",
+              "DO include (if present):",
+              "- **Mistakes made and corrections** — what went wrong and what fixed it",
+              "- **Discovered patterns** — reusable approaches, APIs, or codebase conventions",
+              "- **Codebase knowledge** — important file paths, architecture decisions, gotchas",
+              "- **Environment knowledge** — service URLs, config details, tool quirks",
+              "- **Failed approaches** — what was tried and didn't work (and why)",
+              "",
+              'Format as a bulleted list of concrete, reusable facts. If the session was routine with no significant learnings, respond with exactly: "No significant learnings."',
               taskContext ? `\nTask context: ${taskContext}` : "",
               `\nTranscript:\n${transcript}`,
             ]
@@ -844,7 +853,10 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
               summary = result.stdout;
             }
 
-            if (summary && summary.length > 20) {
+            // Skip indexing if the session had no significant learnings
+            if (summary?.trim().toLowerCase().includes("no significant learnings")) {
+              // Routine session — don't pollute memory with generic summaries
+            } else if (summary && summary.length > 20) {
               const apiUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
               const apiKey = process.env.API_KEY || "";
 
