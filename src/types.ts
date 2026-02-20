@@ -106,6 +106,10 @@ export const AgentTaskSchema = z.object({
 
   // Epic association (optional)
   epicId: z.uuid().optional(),
+
+  // Session attachment (optional)
+  parentTaskId: z.uuid().optional(),
+  claudeSessionId: z.string().optional(),
 });
 
 export const AgentStatusSchema = z.enum(["idle", "busy", "offline"]);
