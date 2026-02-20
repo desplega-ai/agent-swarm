@@ -289,6 +289,51 @@ async function ensureTaskFinished(
 }
 
 /**
+ * Reset task notifications via the API.
+ * Called when a tasks_finished trigger was consumed but the Claude session failed.
+ * Resets notifiedAt to NULL so the tasks will be re-delivered on the next poll.
+ */
+async function resetTaskNotifications(
+  config: ApiConfig,
+  role: string,
+  taskIds: string[],
+  exitCode: number,
+): Promise<void> {
+  const headers: Record<string, string> = {
+    "X-Agent-ID": config.agentId,
+    "Content-Type": "application/json",
+  };
+  if (config.apiKey) {
+    headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+
+  try {
+    const response = await fetch(`${config.apiUrl}/api/tasks/reset-notification`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        taskIds,
+        reason: `Claude session exited with code ${exitCode}`,
+      }),
+    });
+
+    if (response.ok) {
+      const result = (await response.json()) as { resetCount: number };
+      console.log(
+        `[${role}] Reset notifications for ${result.resetCount}/${taskIds.length} task(s) — they will be re-delivered on next poll`,
+      );
+    } else {
+      const error = await response.text();
+      console.warn(
+        `[${role}] Failed to reset notifications: ${response.status} ${error}`,
+      );
+    }
+  } catch (err) {
+    console.warn(`[${role}] Error resetting notifications: ${err}`);
+  }
+}
+
+/**
  * Pause a task via the API (for graceful shutdown).
  * Unlike marking as failed, paused tasks can be resumed after container restart.
  */
@@ -520,6 +565,11 @@ interface RunningTask {
   logFile: string;
   startTime: Date;
   promise: Promise<number>;
+  /** The trigger type that caused this task to be spawned */
+  triggerType?: string;
+  /** For tasks_finished triggers: the IDs of finished worker tasks that were notified.
+   *  Used to reset notifiedAt if the session fails (prevents notification loss). */
+  notifiedTaskIds?: string[];
 }
 
 /** Runner state for tracking concurrent tasks */
@@ -1453,26 +1503,46 @@ async function checkCompletedProcesses(
   role: string,
   apiConfig?: ApiConfig,
 ): Promise<void> {
-  const completedTasks: Array<{ taskId: string; exitCode: number }> = [];
+  const completedTasks: Array<{
+    taskId: string;
+    exitCode: number;
+    triggerType?: string;
+    notifiedTaskIds?: string[];
+  }> = [];
 
   for (const [taskId, task] of state.activeTasks) {
     // Check if the Bun subprocess has exited (non-blocking)
     if (task.process.exitCode !== null) {
       console.log(
-        `[${role}] Task ${taskId.slice(0, 8)} completed with exit code ${task.process.exitCode}`,
+        `[${role}] Task ${taskId.slice(0, 8)} completed with exit code ${task.process.exitCode} (trigger: ${task.triggerType || "unknown"})`,
       );
-      completedTasks.push({ taskId, exitCode: task.process.exitCode });
+      completedTasks.push({
+        taskId,
+        exitCode: task.process.exitCode,
+        triggerType: task.triggerType,
+        notifiedTaskIds: task.notifiedTaskIds,
+      });
     }
   }
 
   // Remove completed tasks from the map and ensure they're marked as finished
-  for (const { taskId, exitCode } of completedTasks) {
+  for (const { taskId, exitCode, triggerType, notifiedTaskIds } of completedTasks) {
     state.activeTasks.delete(taskId);
 
     // Call the finish API to ensure task status is updated
     // This is idempotent - if the agent already marked it, this is a no-op
     if (apiConfig) {
       await ensureTaskFinished(apiConfig, role, taskId, exitCode);
+    }
+
+    // If this was a tasks_finished trigger that failed, reset the notifications
+    // so those tasks will be re-delivered on the next poll. This prevents permanent
+    // notification loss from the mark-before-process race condition.
+    if (exitCode !== 0 && triggerType === "tasks_finished" && notifiedTaskIds?.length && apiConfig) {
+      console.log(
+        `[${role}] Session failed (exit ${exitCode}) for tasks_finished trigger — resetting notification for ${notifiedTaskIds.length} task(s)`,
+      );
+      await resetTaskNotifications(apiConfig, role, notifiedTaskIds, exitCode);
     }
   }
 }
@@ -1874,12 +1944,17 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         });
 
         if (trigger) {
-          // After getting a tasks_finished trigger, update the timestamp
+          // Extract finished task IDs before processing (for notification reset on failure)
+          let notifiedTaskIds: string[] | undefined;
           if (trigger.type === "tasks_finished") {
             lastFinishedTaskCheck = new Date().toISOString();
+            notifiedTaskIds = trigger.tasks?.map((t) => t.id);
+            console.log(
+              `[${role}] Trigger received: tasks_finished (${trigger.count} task(s): ${notifiedTaskIds?.map((id) => id.slice(0, 8)).join(", ") || "none"})`,
+            );
+          } else {
+            console.log(`[${role}] Trigger received: ${trigger.type}`);
           }
-
-          console.log(`[${role}] Trigger received: ${trigger.type}`);
 
           // Build prompt based on trigger
           const triggerPrompt = buildPromptForTrigger(trigger, prompt);
@@ -1966,9 +2041,15 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             isYolo,
           );
 
+          // Attach trigger metadata for post-completion handling (e.g., notification reset)
+          runningTask.triggerType = trigger.type;
+          if (notifiedTaskIds?.length) {
+            runningTask.notifiedTaskIds = notifiedTaskIds;
+          }
+
           state.activeTasks.set(runningTask.taskId, runningTask);
           console.log(
-            `[${role}] Started task ${runningTask.taskId.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active)`,
+            `[${role}] Started task ${runningTask.taskId.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active, trigger: ${trigger.type})`,
           );
         }
       } else {
