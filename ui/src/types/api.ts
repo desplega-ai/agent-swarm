@@ -321,3 +321,23 @@ export interface EpicsResponse {
   epics: Epic[];
   total: number;
 }
+
+// Swarm Config Types (Centralized Environment/Config Management)
+export type SwarmConfigScope = "global" | "agent" | "repo";
+
+export interface SwarmConfig {
+  id: string;
+  scope: SwarmConfigScope;
+  scopeId: string | null;
+  key: string;
+  value: string;
+  isSecret: boolean;
+  envPath: string | null;
+  description: string | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+
+export interface SwarmConfigsResponse {
+  configs: SwarmConfig[];
+}

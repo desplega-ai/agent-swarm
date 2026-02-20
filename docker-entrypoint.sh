@@ -85,6 +85,32 @@ cleanup() {
 }
 trap cleanup EXIT SIGINT SIGTERM
 
+# ---- Fetch swarm config from API ----
+if [ -n "$AGENT_ID" ]; then
+    echo "Fetching swarm config from API..."
+    if curl -s -f -H "Authorization: Bearer ${API_KEY}" \
+       -H "X-Agent-ID: ${AGENT_ID}" \
+       "${MCP_URL}/api/config/resolved?agentId=${AGENT_ID}&includeSecrets=true" \
+       > /tmp/swarm_config.json 2>/dev/null; then
+
+        CONFIG_COUNT=$(jq '.configs | length' /tmp/swarm_config.json 2>/dev/null || echo "0")
+        if [ "$CONFIG_COUNT" -gt 0 ]; then
+            echo "Found $CONFIG_COUNT config entries, exporting as env vars..."
+            jq -r '.configs[] | "\(.key)=\(.value)"' /tmp/swarm_config.json > /tmp/swarm_config.env 2>/dev/null || true
+            if [ -f /tmp/swarm_config.env ]; then
+                set -a
+                . /tmp/swarm_config.env
+                set +a
+                rm -f /tmp/swarm_config.env
+            fi
+        fi
+        rm -f /tmp/swarm_config.json
+    else
+        echo "Warning: Could not fetch swarm config (API may not be ready)"
+    fi
+fi
+# ---- End swarm config fetch ----
+
 # Create .mcp.json in /workspace (project-level config)
 echo "Creating MCP config in /workspace..."
 if [ -n "$AGENT_ID" ]; then

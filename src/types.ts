@@ -357,3 +357,25 @@ export const EpicWithProgressSchema = EpicSchema.extend({
 });
 
 export type EpicWithProgress = z.infer<typeof EpicWithProgressSchema>;
+
+// ============================================================================
+// Swarm Config Types (Centralized Environment/Config Management)
+// ============================================================================
+
+export const SwarmConfigScopeSchema = z.enum(["global", "agent", "repo"]);
+
+export const SwarmConfigSchema = z.object({
+  id: z.string().uuid(),
+  scope: SwarmConfigScopeSchema,
+  scopeId: z.string().nullable(), // agentId or repoId, null for global
+  key: z.string().min(1).max(255),
+  value: z.string(),
+  isSecret: z.boolean(),
+  envPath: z.string().nullable(),
+  description: z.string().nullable(),
+  createdAt: z.string(),
+  lastUpdatedAt: z.string(),
+});
+
+export type SwarmConfigScope = z.infer<typeof SwarmConfigScopeSchema>;
+export type SwarmConfig = z.infer<typeof SwarmConfigSchema>;

@@ -89,6 +89,49 @@ async function closeAgent(config: ApiConfig, role: string): Promise<void> {
 }
 
 /**
+ * Fetch resolved config from the API and merge into a base env object.
+ * Falls back to baseEnv on any error (network, parse, etc).
+ */
+async function fetchResolvedEnv(
+  apiUrl: string,
+  apiKey: string,
+  agentId: string,
+  baseEnv: Record<string, string | undefined> = process.env,
+): Promise<Record<string, string | undefined>> {
+  if (!apiUrl || !agentId) return { ...baseEnv };
+
+  try {
+    const headers: Record<string, string> = { "X-Agent-ID": agentId };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+    const url = `${apiUrl}/api/config/resolved?agentId=${encodeURIComponent(agentId)}&includeSecrets=true`;
+    const response = await fetch(url, { headers });
+
+    if (!response.ok) {
+      console.warn(`[env-reload] Failed to fetch config: ${response.status}`);
+      return { ...baseEnv };
+    }
+
+    const data = (await response.json()) as {
+      configs: Array<{ key: string; value: string }>;
+    };
+
+    if (!data.configs?.length) return { ...baseEnv };
+
+    const merged: Record<string, string | undefined> = { ...baseEnv };
+    for (const config of data.configs) {
+      merged[config.key] = config.value;
+    }
+
+    console.log(`[env-reload] Loaded ${data.configs.length} config entries from API`);
+    return merged;
+  } catch (error) {
+    console.warn(`[env-reload] Could not fetch config, using current env: ${error}`);
+    return { ...baseEnv };
+  }
+}
+
+/**
  * Ensure task is marked as completed or failed via the API.
  * This is called when a Claude process exits to ensure task status is updated,
  * regardless of whether the agent explicitly called store-progress.
@@ -893,8 +936,10 @@ async function runClaudeIteration(opts: RunClaudeIterationOptions): Promise<numb
   const logFileHandle = Bun.file(opts.logFile).writer();
   let stderrOutput = "";
 
+  const freshEnv = await fetchResolvedEnv(opts.apiUrl || "", opts.apiKey || "", opts.agentId || "");
+
   const proc = Bun.spawn(Cmd, {
-    env: process.env,
+    env: freshEnv,
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -1069,9 +1114,11 @@ async function spawnClaudeProcess(
 
   console.log(`\x1b[2m[${role}]\x1b[0m Task file written: ${taskFilePath}`);
 
+  const freshEnv = await fetchResolvedEnv(opts.apiUrl || "", opts.apiKey || "", opts.agentId || "");
+
   const proc = Bun.spawn(Cmd, {
     env: {
-      ...process.env,
+      ...freshEnv,
       TASK_FILE: taskFilePath,
     },
     stdout: "pipe",
@@ -1707,6 +1754,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         systemPrompt: resolvedSystemPrompt,
         additionalArgs: opts.additionalArgs,
         role,
+        apiUrl,
+        apiKey,
+        agentId,
       });
 
       if (exitCode !== 0) {
