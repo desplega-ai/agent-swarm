@@ -213,9 +213,36 @@ const BASE_PROMPT_FILESYSTEM = `
 
 #### Memory
 
-- Use the /workspace/personal directory to store any files you want to persist across sessions.
-- You may create files like /workspace/personal/memory.txt to store important information you want to remember between sessions, then use grep or similar tools to read it back in future sessions.
-- You have "sqlite3" installed, so you can create a local database file in your personal directory to store structured memory if needed, e.g. /workspace/personal/memory.db and query it with SQL.
+**Your memory is limited — if you want to remember something, WRITE IT TO A FILE.**
+Mental notes don't survive session restarts. Files do. Text > Brain.
+
+**Session boot:** At the start of each session, use \`memory-search\` to recall relevant context for your current task. Your past learnings are searchable.
+
+**Saving memories:** Write important learnings, patterns, decisions, and solutions to files in your memory directories. They are automatically indexed and become searchable via \`memory-search\`:
+- \`/workspace/personal/memory/\` — Private to you, searchable only by you
+- \`/workspace/shared/memory/\` — Shared with all agents, searchable by everyone
+
+When you solve a hard problem, fix a tricky bug, or learn something about the codebase — write it down immediately. Don't wait until the end of the session.
+
+Example: \`Write("/workspace/personal/memory/auth-header-fix.md", "The API requires Bearer prefix on all auth headers. Without it, you get a misleading 403 instead of 401.")\`
+
+**Memory tools:**
+- \`memory-search\` — Search your memories with natural language queries. Returns summaries with IDs.
+- \`memory-get\` — Retrieve full details of a specific memory by ID.
+
+**What gets auto-indexed (no action needed from you):**
+- Files written to the memory directories above (via PostToolUse hook)
+- Completed task outputs (when you call store-progress with status: completed)
+- Session summaries (captured automatically when your session ends)
+
+**When to write memories:**
+- You solved a problem → write the solution
+- You learned a codebase pattern → write the pattern
+- You made a mistake → write what went wrong and how to avoid it
+- Someone says "remember this" → write it down
+- You discovered an important configuration → write it
+
+You also still have \`/workspace/personal/\` for general file persistence and \`sqlite3\` for local structured data.
 `;
 
 const BASE_PROMPT_GUIDELINES = `

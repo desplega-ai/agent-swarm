@@ -384,3 +384,36 @@ export const SwarmConfigSchema = z.object({
 
 export type SwarmConfigScope = z.infer<typeof SwarmConfigScopeSchema>;
 export type SwarmConfig = z.infer<typeof SwarmConfigSchema>;
+
+// ============================================================================
+// Agent Memory Types (Persistent Memory System)
+// ============================================================================
+
+export const AgentMemoryScopeSchema = z.enum(["agent", "swarm"]);
+export const AgentMemorySourceSchema = z.enum([
+  "manual",
+  "file_index",
+  "session_summary",
+  "task_completion",
+]);
+
+export const AgentMemorySchema = z.object({
+  id: z.string().uuid(),
+  agentId: z.string().uuid().nullable(),
+  scope: AgentMemoryScopeSchema,
+  name: z.string().min(1).max(500),
+  content: z.string(),
+  summary: z.string().nullable(),
+  source: AgentMemorySourceSchema,
+  sourceTaskId: z.string().uuid().nullable(),
+  sourcePath: z.string().nullable(),
+  chunkIndex: z.number().int().min(0).default(0),
+  totalChunks: z.number().int().min(1).default(1),
+  tags: z.array(z.string()),
+  createdAt: z.string(),
+  accessedAt: z.string(),
+});
+
+export type AgentMemoryScope = z.infer<typeof AgentMemoryScopeSchema>;
+export type AgentMemorySource = z.infer<typeof AgentMemorySourceSchema>;
+export type AgentMemory = z.infer<typeof AgentMemorySchema>;

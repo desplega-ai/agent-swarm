@@ -546,7 +546,8 @@ Each gap should be planned and implemented as a separate phase using `/desplega:
    - **Plan**: [`thoughts/taras/plans/2026-02-20-worker-identity.md`](../plans/2026-02-20-worker-identity.md)
    - **PR**: [#62 `claw-worker-identity`](https://github.com/desplega-ai/agent-swarm/pull/62) (merged)
 
-3. **Phase 3 — Memory System (Gap 2)**: sqlite-vec setup (`vec_memory` table), OpenAI embedding integration, `memory-search` + `memory-get` MCP tools, file-based auto-indexing via PostToolUse hook, session auto-summarization at Stop hook.
+3. **Phase 3 — Memory System (Gap 2)**: BLOB-based vector storage with JS cosine similarity, OpenAI embedding integration, `memory-search` + `memory-get` MCP tools, file-based auto-indexing via PostToolUse hook, session auto-summarization at Stop hook, task completion memory via store-progress.
+   - **Plan**: [`thoughts/taras/plans/2026-02-20-memory-system.md`](../plans/2026-02-20-memory-system.md)
 
 4. **Phase 4 — Session Attachment (Gap 3)** ✅: `parentTaskId` + `claudeSessionId` columns on `agent_tasks`, session ID capture from stream-json, `--resume` with `-p` for child tasks, compact hook for goal reminder.
    - **Plan**: [`thoughts/taras/plans/2026-02-20-session-attach.md`](../plans/2026-02-20-session-attach.md)

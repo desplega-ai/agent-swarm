@@ -23,6 +23,9 @@ import { registerJoinSwarmTool } from "./tools/join-swarm";
 // Messaging capability
 import { registerListChannelsTool } from "./tools/list-channels";
 import { registerListServicesTool } from "./tools/list-services";
+// Memory capability
+import { registerMemoryGetTool } from "./tools/memory-get";
+import { registerMemorySearchTool } from "./tools/memory-search";
 import { registerMyAgentInfoTool } from "./tools/my-agent-info";
 import { registerPollTaskTool } from "./tools/poll-task";
 import { registerPostMessageTool } from "./tools/post-message";
@@ -54,7 +57,7 @@ import { registerUpdateServiceStatusTool } from "./tools/update-service-status";
 
 // Capability-based feature flags
 // Default: all capabilities enabled
-const DEFAULT_CAPABILITIES = "core,task-pool,messaging,profiles,services,scheduling,epics";
+const DEFAULT_CAPABILITIES = "core,task-pool,messaging,profiles,services,scheduling,epics,memory";
 const CAPABILITIES = new Set(
   (process.env.CAPABILITIES || DEFAULT_CAPABILITIES).split(",").map((s) => s.trim()),
 );
@@ -150,6 +153,12 @@ export function createServer() {
     registerDeleteEpicTool(server);
     registerAssignTaskToEpicTool(server);
     registerUnassignTaskFromEpicTool(server);
+  }
+
+  // Memory capability - persistent memory with vector search
+  if (hasCapability("memory")) {
+    registerMemorySearchTool(server);
+    registerMemoryGetTool(server);
   }
 
   return server;

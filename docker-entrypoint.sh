@@ -370,6 +370,11 @@ echo "Creating shared thoughts directories..."
 mkdir -p "$SHARED_DIR/shared/plans"
 mkdir -p "$SHARED_DIR/shared/research"
 
+# Memory directories (auto-indexed by PostToolUse hook)
+echo "Creating memory directories..."
+mkdir -p "$PERSONAL_DIR/memory"
+mkdir -p "/workspace/shared/memory"
+
 echo "==============================="
 echo ""
 

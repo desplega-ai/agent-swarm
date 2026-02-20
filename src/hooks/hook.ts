@@ -636,6 +636,41 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
           }
         }
 
+        // Auto-index files written to memory directories
+        if (
+          (toolName === "Write" || toolName === "Edit") &&
+          editedPath &&
+          (editedPath.startsWith("/workspace/personal/memory/") ||
+            editedPath.startsWith("/workspace/shared/memory/"))
+        ) {
+          try {
+            const apiUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
+            const apiKey = process.env.API_KEY || "";
+            const fileContent = await Bun.file(editedPath).text();
+            const isShared = editedPath.startsWith("/workspace/shared/");
+            const fileName = editedPath.split("/").pop() ?? "unnamed";
+
+            await fetch(`${apiUrl}/api/memory/index`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+                "X-Agent-ID": agentInfo.id,
+              },
+              body: JSON.stringify({
+                agentId: agentInfo.id,
+                content: fileContent,
+                name: fileName.replace(/\.\w+$/, ""),
+                scope: isShared ? "swarm" : "agent",
+                source: "file_index",
+                sourcePath: editedPath,
+              }),
+            });
+          } catch {
+            // Non-blocking — don't interrupt the agent's workflow
+          }
+        }
+
         if (agentInfo.isLead) {
           if (msg.tool_name?.endsWith("send-task")) {
             const maybeTaskId = (msg.tool_response as { task?: { id?: string } })?.task?.id;
@@ -679,6 +714,100 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
           await restoreClaudeMdBackup();
         } catch {
           // Silently fail - don't block shutdown
+        }
+      }
+
+      // Session summarization via Claude Haiku
+      // Skip if this is a child session spawned by the summarization itself (prevents recursion)
+      if (agentInfo?.id && msg.transcript_path && !process.env.SKIP_SESSION_SUMMARY) {
+        try {
+          let transcript = "";
+          try {
+            const fullTranscript = await Bun.file(msg.transcript_path).text();
+            transcript =
+              fullTranscript.length > 20000 ? fullTranscript.slice(-20000) : fullTranscript;
+          } catch {
+            /* no transcript */
+          }
+
+          if (transcript.length > 100) {
+            // Read task context if available
+            let taskContext = "";
+            let taskId: string | undefined;
+            const taskFile = process.env.TASK_FILE;
+            if (taskFile) {
+              try {
+                const taskData = JSON.parse(await Bun.file(taskFile).text());
+                taskContext = `Task: ${taskData.task || "Unknown"}`;
+                taskId = taskData.id;
+              } catch {
+                /* no task file */
+              }
+            }
+
+            // Summarize with Claude Haiku
+            const summarizePrompt = [
+              "Summarize this agent session transcript concisely. Output ONLY the summary, no preamble.",
+              "Format as 3-7 bullet points covering:",
+              "- What was accomplished",
+              "- Key decisions made",
+              "- Problems encountered and solutions found",
+              "- Learnings useful for future sessions",
+              taskContext ? `\nTask context: ${taskContext}` : "",
+              `\nTranscript:\n${transcript}`,
+            ]
+              .filter(Boolean)
+              .join("\n");
+
+            const tmpFile = `/tmp/session-summary-${Date.now()}.txt`;
+            await Bun.write(tmpFile, summarizePrompt);
+            const proc = Bun.spawn(
+              ["bash", "-c", `cat "${tmpFile}" | claude -p --model haiku --output-format json`],
+              {
+                stdout: "pipe",
+                stderr: "pipe",
+                env: { ...process.env, SKIP_SESSION_SUMMARY: "1" },
+              },
+            );
+            const timeoutId = setTimeout(() => proc.kill(), 30000);
+            const result = { stdout: await new Response(proc.stdout).text() };
+            clearTimeout(timeoutId);
+            await Bun.$`rm -f ${tmpFile}`.quiet();
+
+            let summary: string;
+            try {
+              const summaryOutput = JSON.parse(result.stdout);
+              summary = summaryOutput.result ?? result.stdout;
+            } catch {
+              summary = result.stdout;
+            }
+
+            if (summary && summary.length > 20) {
+              const apiUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
+              const apiKey = process.env.API_KEY || "";
+
+              await fetch(`${apiUrl}/api/memory/index`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+                  "X-Agent-ID": agentInfo.id,
+                },
+                body: JSON.stringify({
+                  agentId: agentInfo.id,
+                  content: summary,
+                  name: taskContext
+                    ? `Session: ${taskContext.slice(0, 80)}`
+                    : `Session: ${new Date().toISOString().slice(0, 16)}`,
+                  scope: "agent",
+                  source: "session_summary",
+                  ...(taskId ? { sourceTaskId: taskId } : {}),
+                }),
+              });
+            }
+          }
+        } catch {
+          // Non-blocking — session summarization failure should never block shutdown
         }
       }
 
