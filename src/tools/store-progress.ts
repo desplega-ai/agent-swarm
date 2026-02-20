@@ -4,9 +4,11 @@ import {
   completeTask,
   createMemory,
   createSessionCost,
+  createTaskExtended,
   failTask,
   getAgentById,
   getDb,
+  getLeadAgent,
   getTaskById,
   updateAgentStatusFromCapacity,
   updateMemoryEmbedding,
@@ -179,6 +181,49 @@ export const registerStoreProgressTool = (server: McpServer) => {
             // Non-blocking — task completion memory failure should not affect task status
           }
         })();
+      }
+
+      // Create follow-up task for the lead when a worker task finishes.
+      // This replaces the old poll-based tasks_finished trigger which was unreliable.
+      if (status && result.success && result.task) {
+        try {
+          const taskAgent = getAgentById(result.task.agentId ?? "");
+          // Only create follow-ups for worker tasks (not lead's own tasks)
+          if (taskAgent && !taskAgent.isLead) {
+            const leadAgent = getLeadAgent();
+            if (leadAgent) {
+              const agentName = taskAgent.name || result.task.agentId?.slice(0, 8) || "Unknown";
+              const taskDesc = result.task.task.slice(0, 200);
+
+              let followUpDescription: string;
+              if (status === "completed") {
+                const outputSummary = output ? output.slice(0, 500) : "(no output)";
+                followUpDescription = `Worker task completed — review needed.\n\nAgent: ${agentName}\nTask: "${taskDesc}"\n\nOutput:\n${outputSummary}${output && output.length > 500 ? "..." : ""}\n\nUse \`get-task-details\` with taskId "${taskId}" for full details.`;
+              } else {
+                const reason = failureReason || "(no reason given)";
+                followUpDescription = `Worker task failed — action needed.\n\nAgent: ${agentName}\nTask: "${taskDesc}"\n\nFailure reason: ${reason}\n\nDecide whether to reassign, retry, or handle the failure. Use \`get-task-details\` with taskId "${taskId}" for full details.`;
+              }
+
+              // If the original task came from Slack, forward context so lead can reply
+              createTaskExtended(followUpDescription, {
+                agentId: leadAgent.id,
+                source: "system",
+                taskType: "follow-up",
+                parentTaskId: taskId,
+                slackChannelId: result.task.slackChannelId,
+                slackThreadTs: result.task.slackThreadTs,
+                slackUserId: result.task.slackUserId,
+              });
+
+              console.log(
+                `[store-progress] Created follow-up task for lead (${leadAgent.name}) — ${status} task ${taskId.slice(0, 8)} by ${agentName}`,
+              );
+            }
+          }
+        } catch (err) {
+          // Non-blocking — follow-up task creation failure should not affect the store-progress response
+          console.warn(`[store-progress] Failed to create follow-up task: ${err}`);
+        }
       }
 
       return {
