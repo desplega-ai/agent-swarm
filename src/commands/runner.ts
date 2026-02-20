@@ -482,6 +482,22 @@ async function saveCostData(cost: CostData, apiUrl: string, apiKey: string): Pro
   }
 }
 
+/** Save Claude session ID for a task (fire-and-forget) */
+async function saveClaudeSessionId(
+  apiUrl: string,
+  apiKey: string,
+  taskId: string,
+  claudeSessionId: string,
+): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  await fetch(`${apiUrl}/api/tasks/${taskId}/claude-session`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ claudeSessionId }),
+  });
+}
+
 /** Trigger types returned by the poll API */
 interface Trigger {
   type:
@@ -880,6 +896,23 @@ async function runClaudeIteration(opts: RunClaudeIterationOptions): Promise<numb
 
           // Buffer non-empty lines for API streaming
           if (shouldStream && line.trim()) {
+            // Capture Claude session ID from init message (legacy mode)
+            try {
+              const json = JSON.parse(line.trim());
+              if (json.type === "system" && json.subtype === "init" && json.session_id) {
+                if (opts.taskId) {
+                  saveClaudeSessionId(
+                    opts.apiUrl || "",
+                    opts.apiKey || "",
+                    opts.taskId,
+                    json.session_id,
+                  ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
+                }
+              }
+            } catch {
+              // Not JSON - ignore
+            }
+
             logBuffer.lines.push(line.trim());
 
             // Check if we should flush (buffer full or time elapsed)
@@ -1047,6 +1080,17 @@ async function spawnClaudeProcess(
             if (shouldStream && line.trim()) {
               try {
                 const json = JSON.parse(line.trim());
+                // Capture Claude session ID from init message
+                if (json.type === "system" && json.subtype === "init" && json.session_id) {
+                  if (opts.taskId) {
+                    saveClaudeSessionId(
+                      opts.apiUrl || "",
+                      opts.apiKey || "",
+                      opts.taskId,
+                      json.session_id,
+                    ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
+                  }
+                }
                 if (json.type === "result" && json.total_cost_usd !== undefined) {
                   // Extract token data from the usage object
                   // Claude's result JSON has: usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens

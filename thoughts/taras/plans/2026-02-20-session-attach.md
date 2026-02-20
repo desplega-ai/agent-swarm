@@ -226,8 +226,8 @@ This must come BEFORE the `json.type === "result"` check so it fires on the firs
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
 - [ ] Start a worker, assign it a task, check logs for `"type":"system","subtype":"init"` line
