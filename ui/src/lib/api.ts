@@ -13,6 +13,8 @@ import type {
   SessionLog,
   SessionLogsResponse,
   Stats,
+  SwarmConfig,
+  SwarmConfigsResponse,
   TasksResponse,
   TaskWithLogs,
 } from "../types/api";
@@ -261,6 +263,71 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/epics/${id}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch epic: ${res.status}`);
+    return res.json();
+  }
+
+  // Config API methods
+  async fetchConfigs(filters?: {
+    scope?: string;
+    scopeId?: string;
+    includeSecrets?: boolean;
+  }): Promise<SwarmConfigsResponse> {
+    const params = new URLSearchParams();
+    if (filters?.scope) params.set("scope", filters.scope);
+    if (filters?.scopeId) params.set("scopeId", filters.scopeId);
+    if (filters?.includeSecrets) params.set("includeSecrets", "true");
+    const queryString = params.toString();
+    const url = `${this.getBaseUrl()}/api/config${queryString ? `?${queryString}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch configs: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchResolvedConfig(params?: {
+    agentId?: string;
+    repoId?: string;
+    includeSecrets?: boolean;
+  }): Promise<SwarmConfigsResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.agentId) searchParams.set("agentId", params.agentId);
+    if (params?.repoId) searchParams.set("repoId", params.repoId);
+    if (params?.includeSecrets) searchParams.set("includeSecrets", "true");
+    const queryString = searchParams.toString();
+    const url = `${this.getBaseUrl()}/api/config/resolved${queryString ? `?${queryString}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch resolved config: ${res.status}`);
+    return res.json();
+  }
+
+  async upsertConfig(data: {
+    scope: string;
+    scopeId?: string | null;
+    key: string;
+    value: string;
+    isSecret?: boolean;
+    envPath?: string | null;
+    description?: string | null;
+  }): Promise<SwarmConfig> {
+    const url = `${this.getBaseUrl()}/api/config?includeSecrets=true`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to upsert config" }));
+      throw new Error(error.error || `Failed to upsert config: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async deleteConfig(id: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/config/${id}`;
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to delete config: ${res.status}`);
     return res.json();
   }
 }
