@@ -384,3 +384,20 @@ export const SwarmConfigSchema = z.object({
 
 export type SwarmConfigScope = z.infer<typeof SwarmConfigScopeSchema>;
 export type SwarmConfig = z.infer<typeof SwarmConfigSchema>;
+
+// ============================================================================
+// Swarm Repos Types (Centralized Repository Management)
+// ============================================================================
+
+export const SwarmRepoSchema = z.object({
+  id: z.string().uuid(),
+  url: z.string().min(1),
+  name: z.string().min(1).max(100),
+  clonePath: z.string().min(1),
+  defaultBranch: z.string().default("main"),
+  autoClone: z.boolean().default(true),
+  createdAt: z.string(),
+  lastUpdatedAt: z.string(),
+});
+
+export type SwarmRepo = z.infer<typeof SwarmRepoSchema>;

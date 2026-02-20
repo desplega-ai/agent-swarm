@@ -343,3 +343,19 @@ export interface SwarmConfig {
 export interface SwarmConfigsResponse {
   configs: SwarmConfig[];
 }
+
+// Swarm Repo Types (Centralized Repository Management)
+export interface SwarmRepo {
+  id: string;
+  url: string;
+  name: string;
+  clonePath: string;
+  defaultBranch: string;
+  autoClone: boolean;
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+
+export interface SwarmReposResponse {
+  repos: SwarmRepo[];
+}

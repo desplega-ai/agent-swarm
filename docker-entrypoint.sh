@@ -167,6 +167,50 @@ else
 fi
 echo "=============================="
 
+# ---- Auto-clone registered repos ----
+echo ""
+echo "=== Repo Auto-Clone ==="
+if [ -n "$AGENT_ID" ]; then
+    echo "Fetching registered repos from API..."
+    if curl -s -f -H "Authorization: Bearer ${API_KEY}" \
+       -H "X-Agent-ID: ${AGENT_ID}" \
+       "${MCP_URL}/api/repos?autoClone=true" \
+       > /tmp/swarm_repos.json 2>/dev/null; then
+
+        REPO_COUNT=$(jq '.repos | length' /tmp/swarm_repos.json 2>/dev/null || echo "0")
+        if [ "$REPO_COUNT" -gt 0 ]; then
+            echo "Found $REPO_COUNT repos to clone..."
+
+            jq -c '.repos[]' /tmp/swarm_repos.json | while read -r repo; do
+                REPO_URL=$(echo "$repo" | jq -r '.url')
+                REPO_NAME=$(echo "$repo" | jq -r '.name')
+                REPO_BRANCH=$(echo "$repo" | jq -r '.defaultBranch // "main"')
+                REPO_DIR=$(echo "$repo" | jq -r '.clonePath')
+
+                # Ensure parent directory exists
+                mkdir -p "$(dirname "$REPO_DIR")"
+
+                if [ -d "${REPO_DIR}/.git" ]; then
+                    echo "  Pulling ${REPO_NAME} (${REPO_BRANCH}) at ${REPO_DIR}..."
+                    cd "$REPO_DIR" && git pull origin "$REPO_BRANCH" --ff-only 2>/dev/null || echo "  Warning: Could not pull ${REPO_NAME}"
+                    cd /workspace
+                else
+                    echo "  Cloning ${REPO_NAME} to ${REPO_DIR} (branch: ${REPO_BRANCH})..."
+                    gh repo clone "$REPO_URL" "$REPO_DIR" -- --branch "$REPO_BRANCH" --single-branch 2>/dev/null || echo "  Warning: Could not clone ${REPO_NAME}"
+                fi
+            done
+        else
+            echo "No repos registered for auto-clone"
+        fi
+        rm -f /tmp/swarm_repos.json
+    else
+        echo "Warning: Could not fetch repos (API may not be ready)"
+    fi
+else
+    echo "Skipping repo clone (no AGENT_ID)"
+fi
+echo "==============================="
+
 # Install the desplega-ai marketplace
 echo ""
 echo "=== Marketplace Installation ==="

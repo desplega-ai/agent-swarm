@@ -11,6 +11,7 @@ import AgentDetailPanel from "./AgentDetailPanel";
 import AgentsPanel from "./AgentsPanel";
 import ChatPanel from "./ChatPanel";
 import ConfigPanel from "./ConfigPanel";
+import ReposPanel from "./ReposPanel";
 import EpicDetailPage from "./EpicDetailPage";
 import EpicsPanel from "./EpicsPanel";
 import Header from "./Header";
@@ -38,6 +39,7 @@ function getUrlParams() {
       | "usage"
       | "epics"
       | "config"
+      | "repos"
       | null,
     agent: params.get("agent"),
     task: params.get("task"),
@@ -141,7 +143,7 @@ function updateUrl(params: {
 
 export default function Dashboard({ onSettingsClick }: DashboardProps) {
   const [activeTab, setActiveTab] = useState<
-    "agents" | "tasks" | "chat" | "services" | "schedules" | "usage" | "epics" | "config"
+    "agents" | "tasks" | "chat" | "services" | "schedules" | "usage" | "epics" | "config" | "repos"
   >("agents");
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [selectedEpicId, setSelectedEpicId] = useState<string | null>(null);
@@ -199,6 +201,8 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
       }
     } else if (params.tab === "config") {
       setActiveTab("config");
+    } else if (params.tab === "repos") {
+      setActiveTab("repos");
     } else {
       setActiveTab("agents");
       if (params.agent) {
@@ -592,6 +596,7 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
             <Tab value="schedules">SCHEDULES</Tab>
             <Tab value="usage">USAGE</Tab>
             <Tab value="config">CONFIG</Tab>
+            <Tab value="repos">REPOS</Tab>
           </TabList>
 
           {/* Agents Tab */}
@@ -874,6 +879,22 @@ export default function Dashboard({ onSettingsClick }: DashboardProps) {
             }}
           >
             <ConfigPanel />
+          </TabPanel>
+
+          {/* Repos Tab */}
+          <TabPanel
+            value="repos"
+            sx={{
+              p: 0,
+              pt: 2,
+              flex: 1,
+              minHeight: 0,
+              "&[hidden]": {
+                display: "none",
+              },
+            }}
+          >
+            <ReposPanel />
           </TabPanel>
         </Tabs>
       </Box>
