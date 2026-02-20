@@ -83,6 +83,7 @@
     "cron-parser": "^5.4.0",
     "date-fns": "^4.1.0",
     "ink": "^6.5.1",
+    "openai": "^6.22.0",
     "react": "^19.2.3",
     "react-devtools-core": "^7.0.1",
     "zod": "^4.2.1"

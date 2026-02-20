@@ -8,6 +8,7 @@ import {
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createServer, hasCapability } from "@/server";
+import { chunkContent } from "./be/chunking";
 import {
   assignTaskToEpic,
   claimInboxMessages,
@@ -17,11 +18,13 @@ import {
   completeTask,
   createAgent,
   createEpic,
+  createMemory,
   createSessionCost,
   createSessionLogs,
   createSwarmRepo,
   createTaskExtended,
   deleteEpic,
+  deleteMemoriesBySourcePath,
   deleteSwarmConfig,
   deleteSwarmRepo,
   failTask,
@@ -81,10 +84,12 @@ import {
   updateAgentStatus,
   updateAgentStatusFromCapacity,
   updateEpic,
+  updateMemoryEmbedding,
   updateSwarmRepo,
   updateTaskClaudeSessionId,
   upsertSwarmConfig,
 } from "./be/db";
+import { getEmbedding, serializeEmbedding } from "./be/embedding";
 import type {
   CheckRunEvent,
   CheckSuiteEvent,
@@ -977,6 +982,36 @@ const httpServer = createHttpServer(async (req, res) => {
     return;
   }
 
+  // GET /api/agents/:id/setup-script - Fetch agent + global setup scripts for Docker entrypoint
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "agents" &&
+    pathSegments[2] &&
+    pathSegments[3] === "setup-script"
+  ) {
+    const agentId = pathSegments[2];
+    const agent = getAgentById(agentId);
+    if (!agent) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Agent not found" }));
+      return;
+    }
+
+    // Fetch global setup script from swarm_config
+    const globalConfigs = getSwarmConfigs({ scope: "global", key: "SETUP_SCRIPT" });
+    const globalSetupScript = globalConfigs[0]?.value ?? null;
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        setupScript: agent.setupScript ?? null,
+        globalSetupScript,
+      }),
+    );
+    return;
+  }
+
   // PUT /api/agents/:id/profile - Update agent profile (role, description, capabilities)
   if (
     req.method === "PUT" &&
@@ -1001,6 +1036,8 @@ const httpServer = createHttpServer(async (req, res) => {
       claudeMd?: string;
       soulMd?: string;
       identityMd?: string;
+      setupScript?: string;
+      toolsMd?: string;
     };
     try {
       body = JSON.parse(bodyText);
@@ -1017,13 +1054,15 @@ const httpServer = createHttpServer(async (req, res) => {
       body.capabilities === undefined &&
       body.claudeMd === undefined &&
       body.soulMd === undefined &&
-      body.identityMd === undefined
+      body.identityMd === undefined &&
+      body.setupScript === undefined &&
+      body.toolsMd === undefined
     ) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
           error:
-            "At least one field (role, description, capabilities, claudeMd, soulMd, or identityMd) must be provided",
+            "At least one field (role, description, capabilities, claudeMd, soulMd, identityMd, setupScript, or toolsMd) must be provided",
         }),
       );
       return;
@@ -1043,25 +1082,14 @@ const httpServer = createHttpServer(async (req, res) => {
       return;
     }
 
-    // Validate claudeMd size if provided (max 64KB)
-    if (body.claudeMd !== undefined && body.claudeMd.length > 65536) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "claudeMd must be 64KB or less" }));
-      return;
-    }
-
-    // Validate soulMd size if provided (max 64KB)
-    if (body.soulMd !== undefined && body.soulMd.length > 65536) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "soulMd must be 64KB or less" }));
-      return;
-    }
-
-    // Validate identityMd size if provided (max 64KB)
-    if (body.identityMd !== undefined && body.identityMd.length > 65536) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "identityMd must be 64KB or less" }));
-      return;
+    // Validate text field sizes (max 64KB each)
+    for (const field of ["claudeMd", "soulMd", "identityMd", "setupScript", "toolsMd"] as const) {
+      const value = body[field];
+      if (value !== undefined && value.length > 65536) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: `${field} must be 64KB or less` }));
+        return;
+      }
     }
 
     const agent = updateAgentProfile(agentId, {
@@ -1071,6 +1099,8 @@ const httpServer = createHttpServer(async (req, res) => {
       claudeMd: body.claudeMd,
       soulMd: body.soulMd,
       identityMd: body.identityMd,
+      setupScript: body.setupScript,
+      toolsMd: body.toolsMd,
     });
 
     if (!agent) {
@@ -2125,6 +2155,96 @@ const httpServer = createHttpServer(async (req, res) => {
     }
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ success: true }));
+    return;
+  }
+
+  // POST /api/memory/index - Ingest content into memory system (async embedding)
+  if (
+    req.method === "POST" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "memory" &&
+    pathSegments[2] === "index" &&
+    !pathSegments[3]
+  ) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    const { agentId, content, name, scope, source, sourceTaskId, sourcePath, tags } = body;
+
+    if (!content || !name || !scope || !source) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing required fields: content, name, scope, source" }));
+      return;
+    }
+
+    if (!["agent", "swarm"].includes(scope)) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "scope must be 'agent' or 'swarm'" }));
+      return;
+    }
+
+    if (!["manual", "file_index", "session_summary", "task_completion"].includes(source)) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid source type" }));
+      return;
+    }
+
+    // Chunk content and create memories in a transaction (with dedup)
+    const contentChunks = chunkContent(content);
+    if (contentChunks.length === 0) {
+      // Content too small to chunk — create a single memory
+      contentChunks.push({
+        content: content.trim(),
+        chunkIndex: 0,
+        totalChunks: 1,
+        headings: [],
+      });
+    }
+
+    const memoryIds = getDb().transaction(() => {
+      // Delete old chunks if re-indexing same file
+      if (sourcePath && agentId) {
+        deleteMemoriesBySourcePath(sourcePath, agentId);
+      }
+
+      const ids: string[] = [];
+      for (const chunk of contentChunks) {
+        const memory = createMemory({
+          agentId: agentId || null,
+          content: chunk.content,
+          name,
+          scope,
+          source,
+          sourcePath: sourcePath || null,
+          sourceTaskId: sourceTaskId || null,
+          chunkIndex: chunk.chunkIndex,
+          totalChunks: chunk.totalChunks,
+          tags: tags || [],
+        });
+        ids.push(memory.id);
+      }
+      return ids;
+    })();
+
+    // Async embedding — fire and forget
+    (async () => {
+      for (let i = 0; i < contentChunks.length; i++) {
+        try {
+          const embedding = await getEmbedding(contentChunks[i]!.content);
+          if (embedding) {
+            updateMemoryEmbedding(memoryIds[i]!, serializeEmbedding(embedding));
+          }
+        } catch (err) {
+          console.error(`[memory] Failed to embed chunk ${memoryIds[i]}:`, (err as Error).message);
+        }
+      }
+    })();
+
+    res.writeHead(202, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ queued: true, memoryIds }));
     return;
   }
 

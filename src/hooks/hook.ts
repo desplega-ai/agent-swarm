@@ -9,9 +9,11 @@ const SERVER_NAME = pkg.config?.name ?? "agent-swarm";
 const CLAUDE_MD_PATH = `${process.env.HOME}/.claude/CLAUDE.md`;
 const CLAUDE_MD_BACKUP_PATH = `${process.env.HOME}/.claude/CLAUDE.md.bak`;
 
-// Identity file paths (workspace root)
+// Identity and workspace file paths
 const SOUL_MD_PATH = "/workspace/SOUL.md";
 const IDENTITY_MD_PATH = "/workspace/IDENTITY.md";
+const TOOLS_MD_PATH = "/workspace/TOOLS.md";
+const SETUP_SCRIPT_PATH = "/workspace/start-up.sh";
 
 type McpServerConfig = {
   url: string;
@@ -306,6 +308,14 @@ export async function handleHook(): Promise<void> {
       }
     }
 
+    const toolsMdFile = Bun.file(TOOLS_MD_PATH);
+    if (await toolsMdFile.exists()) {
+      const content = await toolsMdFile.text();
+      if (content.trim() && content.length <= 65536) {
+        updates.toolsMd = content;
+      }
+    }
+
     if (Object.keys(updates).length === 0) return;
 
     try {
@@ -319,6 +329,49 @@ export async function handleHook(): Promise<void> {
       });
     } catch {
       // Silently fail
+    }
+  };
+
+  /**
+   * Sync setup script content back to the server.
+   * Extracts only agent-managed content between markers to avoid duplicating operator content.
+   */
+  const syncSetupScriptToServer = async (agentId: string): Promise<void> => {
+    if (!mcpConfig) return;
+
+    const file = Bun.file(SETUP_SCRIPT_PATH);
+    if (!(await file.exists())) return;
+
+    const raw = await file.text();
+    if (!raw.trim()) return;
+
+    const markerStart = "# === Agent-managed setup (from DB) ===";
+    const markerEnd = "# === End agent-managed setup ===";
+    const startIdx = raw.indexOf(markerStart);
+    const endIdx = raw.indexOf(markerEnd);
+
+    let content: string;
+    if (startIdx !== -1 && endIdx !== -1) {
+      // Markers present — extract ONLY the content between them.
+      content = raw.substring(startIdx + markerStart.length, endIdx).trim();
+    } else {
+      // No markers — agent created/replaced the entire file. Store as-is minus shebang.
+      content = raw.replace(/^#!\/bin\/bash\n/, "").trim();
+    }
+
+    if (!content || content.length > 65536) return;
+
+    try {
+      await fetch(`${getBaseUrl()}/api/agents/${agentId}/profile`, {
+        method: "PUT",
+        headers: {
+          ...mcpConfig.headers,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ setupScript: content }),
+      });
+    } catch {
+      /* silently fail */
     }
   };
 
@@ -619,18 +672,61 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
 
     case "PostToolUse":
       if (agentInfo) {
-        // Sync identity files when agent edits them
+        // Sync workspace file edits back to DB
         const toolName = msg.tool_name;
         const toolInput = msg.tool_input as { file_path?: string } | undefined;
         const editedPath = toolInput?.file_path;
 
+        if ((toolName === "Write" || toolName === "Edit") && editedPath) {
+          try {
+            // Identity files: SOUL.md, IDENTITY.md, TOOLS.md
+            if (
+              editedPath === SOUL_MD_PATH ||
+              editedPath === IDENTITY_MD_PATH ||
+              editedPath === TOOLS_MD_PATH
+            ) {
+              await syncIdentityFilesToServer(agentInfo.id);
+            }
+
+            // Setup script: start-up.sh (or start-up.*)
+            if (editedPath.startsWith("/workspace/start-up")) {
+              await syncSetupScriptToServer(agentInfo.id);
+            }
+          } catch {
+            // Non-blocking — don't interrupt the agent's workflow
+          }
+        }
+
+        // Auto-index files written to memory directories
         if (
           (toolName === "Write" || toolName === "Edit") &&
           editedPath &&
-          (editedPath === SOUL_MD_PATH || editedPath === IDENTITY_MD_PATH)
+          (editedPath.startsWith("/workspace/personal/memory/") ||
+            editedPath.startsWith("/workspace/shared/memory/"))
         ) {
           try {
-            await syncIdentityFilesToServer(agentInfo.id);
+            const apiUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
+            const apiKey = process.env.API_KEY || "";
+            const fileContent = await Bun.file(editedPath).text();
+            const isShared = editedPath.startsWith("/workspace/shared/");
+            const fileName = editedPath.split("/").pop() ?? "unnamed";
+
+            await fetch(`${apiUrl}/api/memory/index`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+                "X-Agent-ID": agentInfo.id,
+              },
+              body: JSON.stringify({
+                agentId: agentInfo.id,
+                content: fileContent,
+                name: fileName.replace(/\.\w+$/, ""),
+                scope: isShared ? "swarm" : "agent",
+                source: "file_index",
+                sourcePath: editedPath,
+              }),
+            });
           } catch {
             // Non-blocking — don't interrupt the agent's workflow
           }
@@ -671,14 +767,109 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
         // PM2 not available or no processes - silently ignore
       }
 
-      // Sync CLAUDE.md and identity files back to database, then restore backup
+      // Sync CLAUDE.md, identity files, and setup script back to database, then restore backup
       if (agentInfo?.id) {
         try {
           await syncClaudeMdToServer(agentInfo.id);
           await syncIdentityFilesToServer(agentInfo.id);
+          await syncSetupScriptToServer(agentInfo.id);
           await restoreClaudeMdBackup();
         } catch {
           // Silently fail - don't block shutdown
+        }
+      }
+
+      // Session summarization via Claude Haiku
+      // Skip if this is a child session spawned by the summarization itself (prevents recursion)
+      if (agentInfo?.id && msg.transcript_path && !process.env.SKIP_SESSION_SUMMARY) {
+        try {
+          let transcript = "";
+          try {
+            const fullTranscript = await Bun.file(msg.transcript_path).text();
+            transcript =
+              fullTranscript.length > 20000 ? fullTranscript.slice(-20000) : fullTranscript;
+          } catch {
+            /* no transcript */
+          }
+
+          if (transcript.length > 100) {
+            // Read task context if available
+            let taskContext = "";
+            let taskId: string | undefined;
+            const taskFile = process.env.TASK_FILE;
+            if (taskFile) {
+              try {
+                const taskData = JSON.parse(await Bun.file(taskFile).text());
+                taskContext = `Task: ${taskData.task || "Unknown"}`;
+                taskId = taskData.id;
+              } catch {
+                /* no task file */
+              }
+            }
+
+            // Summarize with Claude Haiku
+            const summarizePrompt = [
+              "Summarize this agent session transcript concisely. Output ONLY the summary, no preamble.",
+              "Format as 3-7 bullet points covering:",
+              "- What was accomplished",
+              "- Key decisions made",
+              "- Problems encountered and solutions found",
+              "- Learnings useful for future sessions",
+              taskContext ? `\nTask context: ${taskContext}` : "",
+              `\nTranscript:\n${transcript}`,
+            ]
+              .filter(Boolean)
+              .join("\n");
+
+            const tmpFile = `/tmp/session-summary-${Date.now()}.txt`;
+            await Bun.write(tmpFile, summarizePrompt);
+            const proc = Bun.spawn(
+              ["bash", "-c", `cat "${tmpFile}" | claude -p --model haiku --output-format json`],
+              {
+                stdout: "pipe",
+                stderr: "pipe",
+                env: { ...process.env, SKIP_SESSION_SUMMARY: "1" },
+              },
+            );
+            const timeoutId = setTimeout(() => proc.kill(), 30000);
+            const result = { stdout: await new Response(proc.stdout).text() };
+            clearTimeout(timeoutId);
+            await Bun.$`rm -f ${tmpFile}`.quiet();
+
+            let summary: string;
+            try {
+              const summaryOutput = JSON.parse(result.stdout);
+              summary = summaryOutput.result ?? result.stdout;
+            } catch {
+              summary = result.stdout;
+            }
+
+            if (summary && summary.length > 20) {
+              const apiUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
+              const apiKey = process.env.API_KEY || "";
+
+              await fetch(`${apiUrl}/api/memory/index`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+                  "X-Agent-ID": agentInfo.id,
+                },
+                body: JSON.stringify({
+                  agentId: agentInfo.id,
+                  content: summary,
+                  name: taskContext
+                    ? `Session: ${taskContext.slice(0, 80)}`
+                    : `Session: ${new Date().toISOString().slice(0, 16)}`,
+                  scope: "agent",
+                  source: "session_summary",
+                  ...(taskId ? { sourceTaskId: taskId } : {}),
+                }),
+              });
+            }
+          }
+        } catch {
+          // Non-blocking — session summarization failure should never block shutdown
         }
       }
 

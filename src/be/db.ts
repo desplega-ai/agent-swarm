@@ -3,6 +3,9 @@ import type {
   Agent,
   AgentLog,
   AgentLogEventType,
+  AgentMemory,
+  AgentMemoryScope,
+  AgentMemorySource,
   AgentStatus,
   AgentTask,
   AgentTaskSource,
@@ -365,6 +368,36 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
 
     // Swarm repos indexes
     database.run(`CREATE INDEX IF NOT EXISTS idx_swarm_repos_name ON swarm_repos(name)`);
+
+    // Agent memory table - persistent memory system with vector search
+    database.run(`
+      CREATE TABLE IF NOT EXISTS agent_memory (
+        id TEXT PRIMARY KEY,
+        agentId TEXT,
+        scope TEXT NOT NULL CHECK(scope IN ('agent', 'swarm')),
+        name TEXT NOT NULL,
+        content TEXT NOT NULL,
+        summary TEXT,
+        embedding BLOB,
+        source TEXT NOT NULL CHECK(source IN ('manual', 'file_index', 'session_summary', 'task_completion')),
+        sourceTaskId TEXT,
+        sourcePath TEXT,
+        chunkIndex INTEGER DEFAULT 0,
+        totalChunks INTEGER DEFAULT 1,
+        tags TEXT DEFAULT '[]',
+        createdAt TEXT NOT NULL,
+        accessedAt TEXT NOT NULL
+      )
+    `);
+
+    // Agent memory indexes
+    database.run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_agent ON agent_memory(agentId)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_scope ON agent_memory(scope)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_source ON agent_memory(source)`);
+    database.run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_created ON agent_memory(createdAt)`);
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_agent_memory_source_path ON agent_memory(sourcePath)`,
+    );
   });
 
   initSchema();
@@ -556,6 +589,20 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     /* exists */
   }
 
+  // Setup script (per-agent auto-improvement)
+  try {
+    db.run(`ALTER TABLE agents ADD COLUMN setupScript TEXT`);
+  } catch {
+    /* exists */
+  }
+
+  // Tools/environment reference (per-agent operational knowledge)
+  try {
+    db.run(`ALTER TABLE agents ADD COLUMN toolsMd TEXT`);
+  } catch {
+    /* exists */
+  }
+
   // Service PM2 columns migration
   try {
     db.run(`ALTER TABLE services ADD COLUMN script TEXT NOT NULL DEFAULT ''`);
@@ -742,6 +789,8 @@ type AgentRow = {
   claudeMd: string | null;
   soulMd: string | null;
   identityMd: string | null;
+  setupScript: string | null;
+  toolsMd: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -760,6 +809,8 @@ function rowToAgent(row: AgentRow): Agent {
     claudeMd: row.claudeMd ?? undefined,
     soulMd: row.soulMd ?? undefined,
     identityMd: row.identityMd ?? undefined,
+    setupScript: row.setupScript ?? undefined,
+    toolsMd: row.toolsMd ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -2234,14 +2285,21 @@ ${descSection}${roleSection}${capSection}---
 
 ## Your Identity Files
 
-Your identity is defined across two files in your workspace. Read them at the start
+Your identity is defined across several files in your workspace. Read them at the start
 of each session and edit them as you grow:
 
 - **\`/workspace/SOUL.md\`** — Your persona, values, and behavioral directives
 - **\`/workspace/IDENTITY.md\`** — Your expertise, working style, and quirks
+- **\`/workspace/TOOLS.md\`** — Your environment-specific knowledge (repos, services, APIs, infra)
+- **\`/workspace/start-up.sh\`** — Your setup script (runs at container start, add tools/configs here)
 
-These files are injected into your system prompt AND available as editable files.
-When you edit them, changes sync to the database automatically. They persist across sessions.
+These files sync to the database automatically when you edit them. They persist across sessions.
+
+## Memory
+
+- Use \`memory-search\` to recall past experience before starting new tasks
+- Write important learnings to \`/workspace/personal/memory/\` files
+- Share useful knowledge to \`/workspace/shared/memory/\` for the swarm
 
 ## Notes
 
@@ -2289,10 +2347,29 @@ Your memories, preferences, and learnings accumulate over time.
 - Ask before taking irreversible actions
 - Don't push unpolished work to shared spaces
 
+## Growth Mindset
+
+After completing tasks, reflect on what made them harder or easier:
+- **Tools you wished you had?** Add them to your setup script (\`/workspace/start-up.sh\`).
+  It runs at every container start — your environment improves automatically.
+  Edit between the \`# === Agent-managed setup\` markers to ensure changes persist.
+  Or use the \`update-profile\` tool with the \`setupScript\` field.
+- **Environment knowledge gained?** Record it in your TOOLS.md — repos, services, APIs, infra.
+- **Patterns you discovered?** Record them in your CLAUDE.md notes.
+- **Mistakes you want to avoid?** Add guardrails to your setup script or notes.
+
+Your setup script and TOOLS.md are yours to evolve. Start small and iterate.
+
 ## Self-Evolution
 
-This file is yours. As you work and learn, refine your soul to reflect
-who you're becoming. Edit this file directly — changes persist across sessions.
+These files are yours. As you work and learn, refine them:
+- **This file (SOUL.md)** — Your persona and values
+- **IDENTITY.md** — Your expertise and working style
+- **TOOLS.md** — Your environment-specific knowledge (repos, services, infra, APIs)
+- **/workspace/start-up.sh** — Your environment setup (tools, configs, aliases)
+- **CLAUDE.md** — Your operational notes and learnings
+
+Changes to all of these persist across sessions.
 `;
 }
 
@@ -2334,6 +2411,50 @@ what you learned about your strengths. Edit this file directly.
 `;
 }
 
+export function generateDefaultToolsMd(agent: { name: string; role?: string }): string {
+  return `# TOOLS.md — ${agent.name}
+
+Skills define *how* tools work. This file is for *your* specifics.
+
+## What Goes Here
+
+Environment-specific knowledge that's unique to your setup:
+- Repos you work with and their conventions
+- Services, ports, and endpoints you interact with
+- SSH hosts and access patterns
+- API keys and auth patterns (references, not secrets)
+- CLI tools and their quirks
+- Anything that makes your job easier to remember
+
+## Repos
+
+<!-- Add repos you work with: name, path, conventions, gotchas -->
+
+## Services
+
+<!-- Add services you interact with: name, port, health check, notes -->
+
+## Infrastructure
+
+<!-- SSH hosts, Docker registries, cloud resources -->
+
+## APIs & Integrations
+
+<!-- Endpoints, auth patterns, rate limits -->
+
+## Tools & Shortcuts
+
+<!-- CLI aliases, scripts, preferred tools for specific tasks -->
+
+## Notes
+
+<!-- Anything else environment-specific -->
+
+---
+*This file is yours. Update it as you discover your environment. Changes persist across sessions.*
+`;
+}
+
 export function updateAgentProfile(
   id: string,
   updates: {
@@ -2343,6 +2464,8 @@ export function updateAgentProfile(
     claudeMd?: string;
     soulMd?: string;
     identityMd?: string;
+    setupScript?: string;
+    toolsMd?: string;
   },
 ): Agent | null {
   const agent = getAgentById(id);
@@ -2353,6 +2476,8 @@ export function updateAgentProfile(
     .prepare<
       AgentRow,
       [
+        string | null,
+        string | null,
         string | null,
         string | null,
         string | null,
@@ -2370,6 +2495,8 @@ export function updateAgentProfile(
         claudeMd = COALESCE(?, claudeMd),
         soulMd = COALESCE(?, soulMd),
         identityMd = COALESCE(?, identityMd),
+        setupScript = COALESCE(?, setupScript),
+        toolsMd = COALESCE(?, toolsMd),
         lastUpdatedAt = ?
        WHERE id = ? RETURNING *`,
     )
@@ -2380,6 +2507,8 @@ export function updateAgentProfile(
       updates.claudeMd ?? null,
       updates.soulMd ?? null,
       updates.identityMd ?? null,
+      updates.setupScript ?? null,
+      updates.toolsMd ?? null,
       now,
       id,
     );
@@ -4751,4 +4880,291 @@ export function updateSwarmRepo(
 export function deleteSwarmRepo(id: string): boolean {
   const result = getDb().run("DELETE FROM swarm_repos WHERE id = ?", [id]);
   return result.changes > 0;
+}
+
+// ============================================================================
+// Agent Memory Functions
+// ============================================================================
+
+type AgentMemoryRow = {
+  id: string;
+  agentId: string | null;
+  scope: string;
+  name: string;
+  content: string;
+  summary: string | null;
+  embedding: Buffer | null;
+  source: string;
+  sourceTaskId: string | null;
+  sourcePath: string | null;
+  chunkIndex: number;
+  totalChunks: number;
+  tags: string;
+  createdAt: string;
+  accessedAt: string;
+};
+
+function rowToAgentMemory(row: AgentMemoryRow): AgentMemory {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    scope: row.scope as AgentMemoryScope,
+    name: row.name,
+    content: row.content,
+    summary: row.summary,
+    source: row.source as AgentMemorySource,
+    sourceTaskId: row.sourceTaskId,
+    sourcePath: row.sourcePath,
+    chunkIndex: row.chunkIndex,
+    totalChunks: row.totalChunks,
+    tags: JSON.parse(row.tags || "[]"),
+    createdAt: row.createdAt,
+    accessedAt: row.accessedAt,
+  };
+}
+
+export interface CreateMemoryOptions {
+  agentId?: string | null;
+  scope: AgentMemoryScope;
+  name: string;
+  content: string;
+  summary?: string | null;
+  embedding?: Buffer | null;
+  source: AgentMemorySource;
+  sourceTaskId?: string | null;
+  sourcePath?: string | null;
+  chunkIndex?: number;
+  totalChunks?: number;
+  tags?: string[];
+}
+
+export function createMemory(data: CreateMemoryOptions): AgentMemory {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<
+      AgentMemoryRow,
+      [
+        string,
+        string | null,
+        string,
+        string,
+        string,
+        string | null,
+        Buffer | null,
+        string,
+        string | null,
+        string | null,
+        number,
+        number,
+        string,
+        string,
+        string,
+      ]
+    >(
+      `INSERT INTO agent_memory (id, agentId, scope, name, content, summary, embedding, source, sourceTaskId, sourcePath, chunkIndex, totalChunks, tags, createdAt, accessedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      data.agentId ?? null,
+      data.scope,
+      data.name,
+      data.content,
+      data.summary ?? null,
+      data.embedding ?? null,
+      data.source,
+      data.sourceTaskId ?? null,
+      data.sourcePath ?? null,
+      data.chunkIndex ?? 0,
+      data.totalChunks ?? 1,
+      JSON.stringify(data.tags ?? []),
+      now,
+      now,
+    );
+
+  if (!row) throw new Error("Failed to create memory");
+  return rowToAgentMemory(row);
+}
+
+export function getMemoryById(id: string): AgentMemory | null {
+  const row = getDb()
+    .prepare<AgentMemoryRow, [string]>("SELECT * FROM agent_memory WHERE id = ?")
+    .get(id);
+  if (!row) return null;
+
+  // Update accessedAt
+  getDb()
+    .prepare("UPDATE agent_memory SET accessedAt = ? WHERE id = ?")
+    .run(new Date().toISOString(), id);
+
+  return rowToAgentMemory(row);
+}
+
+export function updateMemoryEmbedding(id: string, embedding: Buffer): void {
+  getDb().prepare("UPDATE agent_memory SET embedding = ? WHERE id = ?").run(embedding, id);
+}
+
+export interface SearchMemoriesOptions {
+  scope?: "agent" | "swarm" | "all";
+  limit?: number;
+  source?: AgentMemorySource;
+  isLead?: boolean;
+}
+
+export function searchMemoriesByVector(
+  queryEmbedding: Float32Array,
+  agentId: string,
+  options: SearchMemoriesOptions = {},
+): (AgentMemory & { similarity: number })[] {
+  const { scope = "all", limit = 10, source, isLead = false } = options;
+
+  // Build WHERE clause
+  const conditions: string[] = ["embedding IS NOT NULL"];
+  const params: (string | null)[] = [];
+
+  if (!isLead) {
+    // Workers see their own agent-scoped + all swarm-scoped
+    if (scope === "agent") {
+      conditions.push("agentId = ? AND scope = 'agent'");
+      params.push(agentId);
+    } else if (scope === "swarm") {
+      conditions.push("scope = 'swarm'");
+    } else {
+      // "all" - own agent + swarm
+      conditions.push("(agentId = ? OR scope = 'swarm')");
+      params.push(agentId);
+    }
+  } else {
+    // Leads see everything
+    if (scope === "agent") {
+      conditions.push("scope = 'agent'");
+    } else if (scope === "swarm") {
+      conditions.push("scope = 'swarm'");
+    }
+    // "all" for lead = no scope filter needed
+  }
+
+  if (source) {
+    conditions.push("source = ?");
+    params.push(source);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const rows = getDb()
+    .prepare<AgentMemoryRow, (string | null)[]>(`SELECT * FROM agent_memory ${whereClause}`)
+    .all(...params);
+
+  // Import cosine similarity inline to avoid circular deps
+  const { cosineSimilarity, deserializeEmbedding } = require("./embedding");
+
+  // Compute similarities and sort
+  const results: (AgentMemory & { similarity: number })[] = [];
+  for (const row of rows) {
+    if (!row.embedding) continue;
+    const embedding = deserializeEmbedding(row.embedding);
+    // Skip embeddings with mismatched dimensions (can happen if embedding model changes)
+    if (embedding.length !== queryEmbedding.length) continue;
+    const similarity = cosineSimilarity(queryEmbedding, embedding) as number;
+    results.push({ ...rowToAgentMemory(row), similarity });
+  }
+
+  results.sort((a, b) => b.similarity - a.similarity);
+  return results.slice(0, limit);
+}
+
+export interface ListMemoriesOptions {
+  scope?: "agent" | "swarm" | "all";
+  limit?: number;
+  offset?: number;
+  isLead?: boolean;
+}
+
+export function listMemoriesByAgent(
+  agentId: string,
+  options: ListMemoriesOptions = {},
+): AgentMemory[] {
+  const { scope = "all", limit = 20, offset = 0, isLead = false } = options;
+
+  const conditions: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (!isLead) {
+    if (scope === "agent") {
+      conditions.push("agentId = ? AND scope = 'agent'");
+      params.push(agentId);
+    } else if (scope === "swarm") {
+      conditions.push("scope = 'swarm'");
+    } else {
+      conditions.push("(agentId = ? OR scope = 'swarm')");
+      params.push(agentId);
+    }
+  } else {
+    if (scope === "agent") {
+      conditions.push("scope = 'agent'");
+    } else if (scope === "swarm") {
+      conditions.push("scope = 'swarm'");
+    }
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  params.push(limit, offset);
+
+  const rows = getDb()
+    .prepare<AgentMemoryRow, (string | number)[]>(
+      `SELECT * FROM agent_memory ${whereClause} ORDER BY createdAt DESC LIMIT ? OFFSET ?`,
+    )
+    .all(...params);
+
+  return rows.map(rowToAgentMemory);
+}
+
+export function deleteMemoriesBySourcePath(sourcePath: string, agentId: string): number {
+  const result = getDb()
+    .prepare("DELETE FROM agent_memory WHERE sourcePath = ? AND agentId = ?")
+    .run(sourcePath, agentId);
+  return result.changes;
+}
+
+export function deleteMemory(id: string): boolean {
+  const result = getDb().prepare("DELETE FROM agent_memory WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
+export function getMemoryStats(agentId: string): {
+  total: number;
+  bySource: Record<string, number>;
+  byScope: Record<string, number>;
+} {
+  const total = getDb()
+    .prepare<{ count: number }, [string]>(
+      "SELECT COUNT(*) as count FROM agent_memory WHERE agentId = ?",
+    )
+    .get(agentId);
+
+  const bySourceRows = getDb()
+    .prepare<{ source: string; count: number }, [string]>(
+      "SELECT source, COUNT(*) as count FROM agent_memory WHERE agentId = ? GROUP BY source",
+    )
+    .all(agentId);
+
+  const byScopeRows = getDb()
+    .prepare<{ scope: string; count: number }, [string]>(
+      "SELECT scope, COUNT(*) as count FROM agent_memory WHERE agentId = ? GROUP BY scope",
+    )
+    .all(agentId);
+
+  const bySource: Record<string, number> = {};
+  for (const row of bySourceRows) {
+    bySource[row.source] = row.count;
+  }
+
+  const byScope: Record<string, number> = {};
+  for (const row of byScopeRows) {
+    byScope[row.scope] = row.count;
+  }
+
+  return { total: total?.count ?? 0, bySource, byScope };
 }

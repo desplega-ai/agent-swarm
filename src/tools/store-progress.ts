@@ -2,14 +2,17 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import {
   completeTask,
+  createMemory,
   createSessionCost,
   failTask,
   getAgentById,
   getDb,
   getTaskById,
   updateAgentStatusFromCapacity,
+  updateMemoryEmbedding,
   updateTaskProgress,
 } from "@/be/db";
+import { getEmbedding, serializeEmbedding } from "@/be/embedding";
 import { createToolRegistrar } from "@/tools/utils";
 import { AgentTaskSchema } from "@/types";
 
@@ -154,6 +157,29 @@ export const registerStoreProgressTool = (server: McpServer) => {
       });
 
       const result = txn();
+
+      // Index completed task as memory (async, non-blocking)
+      if (status === "completed" && result.success && result.task && output && output.length > 20) {
+        (async () => {
+          try {
+            const taskContent = `Task: ${result.task!.task}\n\nOutput:\n${output}`;
+            const memory = createMemory({
+              agentId: requestInfo.agentId,
+              content: taskContent,
+              name: `Task: ${result.task!.task.slice(0, 80)}`,
+              scope: "agent",
+              source: "task_completion",
+              sourceTaskId: taskId,
+            });
+            const embedding = await getEmbedding(taskContent);
+            if (embedding) {
+              updateMemoryEmbedding(memory.id, serializeEmbedding(embedding));
+            }
+          } catch {
+            // Non-blocking — task completion memory failure should not affect task status
+          }
+        })();
+      }
 
       return {
         content: [{ type: "text", text: result.message }],

@@ -132,6 +132,10 @@ export const AgentSchema = z.object({
   soulMd: z.string().max(65536).optional(),
   // Identity: Expertise, working style, self-evolution notes (injected via --append-system-prompt)
   identityMd: z.string().max(65536).optional(),
+  // Setup script: Runs at container start, agent-evolved (synced to /workspace/start-up.sh)
+  setupScript: z.string().max(65536).optional(),
+  // Tools/environment reference: Operational knowledge (synced to /workspace/TOOLS.md)
+  toolsMd: z.string().max(65536).optional(),
 
   // Concurrency limit (defaults to 1 for backwards compatibility)
   maxTasks: z.number().int().min(1).max(20).optional(),
@@ -401,3 +405,36 @@ export const SwarmRepoSchema = z.object({
 });
 
 export type SwarmRepo = z.infer<typeof SwarmRepoSchema>;
+
+// ============================================================================
+// Agent Memory Types (Persistent Memory System)
+// ============================================================================
+
+export const AgentMemoryScopeSchema = z.enum(["agent", "swarm"]);
+export const AgentMemorySourceSchema = z.enum([
+  "manual",
+  "file_index",
+  "session_summary",
+  "task_completion",
+]);
+
+export const AgentMemorySchema = z.object({
+  id: z.string().uuid(),
+  agentId: z.string().uuid().nullable(),
+  scope: AgentMemoryScopeSchema,
+  name: z.string().min(1).max(500),
+  content: z.string(),
+  summary: z.string().nullable(),
+  source: AgentMemorySourceSchema,
+  sourceTaskId: z.string().uuid().nullable(),
+  sourcePath: z.string().nullable(),
+  chunkIndex: z.number().int().min(0).default(0),
+  totalChunks: z.number().int().min(1).default(1),
+  tags: z.array(z.string()),
+  createdAt: z.string(),
+  accessedAt: z.string(),
+});
+
+export type AgentMemoryScope = z.infer<typeof AgentMemoryScopeSchema>;
+export type AgentMemorySource = z.infer<typeof AgentMemorySourceSchema>;
+export type AgentMemory = z.infer<typeof AgentMemorySchema>;
