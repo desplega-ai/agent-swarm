@@ -82,6 +82,7 @@ import {
   postMessage,
   resetEmptyPollCount,
   resumeTask,
+  searchMemoriesByVector,
   shouldBlockPolling,
   startTask,
   updateAgentMaxTasks,
@@ -2372,6 +2373,63 @@ const httpServer = createHttpServer(async (req, res) => {
 
     res.writeHead(202, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ queued: true, memoryIds }));
+    return;
+  }
+
+  // POST /api/memory/search - Search memories by natural language query
+  if (
+    req.method === "POST" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "memory" &&
+    pathSegments[2] === "search" &&
+    !pathSegments[3]
+  ) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+    const { query, limit = 5 } = body;
+    const searchAgentId = myAgentId;
+
+    if (!query || !searchAgentId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing required fields: query, X-Agent-ID header" }));
+      return;
+    }
+
+    try {
+      const queryEmbedding = await getEmbedding(query);
+      if (!queryEmbedding) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ results: [] }));
+        return;
+      }
+
+      const results = searchMemoriesByVector(queryEmbedding, searchAgentId, {
+        scope: "all",
+        limit: Math.min(limit, 20),
+        isLead: false,
+      });
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          results: results.map((r) => ({
+            id: r.id,
+            name: r.name,
+            content: r.content,
+            similarity: r.similarity,
+            source: r.source,
+            scope: r.scope,
+          })),
+        }),
+      );
+    } catch (err) {
+      console.error("[memory-search] Error:", (err as Error).message);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ results: [] }));
+    }
     return;
   }
 

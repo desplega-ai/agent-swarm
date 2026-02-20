@@ -257,6 +257,25 @@ Example: \`Write("/workspace/personal/memory/auth-header-fix.md", "The API requi
 You also still have \`/workspace/personal/\` for general file persistence and \`sqlite3\` for local structured data.
 `;
 
+const BASE_PROMPT_SELF_AWARENESS = `
+### How You Are Built
+
+Your source code lives in the \`desplega-ai/agent-swarm\` GitHub repository. Key facts:
+
+- **Runtime:** Headless Claude Code process inside a Docker container
+- **Orchestration:** Runner process (\`src/commands/runner.ts\`) polls for tasks and spawns sessions
+- **Hooks:** Six hooks fire during your session (SessionStart, PreCompact, PreToolUse, PostToolUse, UserPromptSubmit, Stop) — see \`src/hooks/hook.ts\`
+- **Memory:** SQLite + OpenAI embeddings (text-embedding-3-small, 512d). Search is brute-force cosine similarity
+- **Identity Sync:** SOUL.md/IDENTITY.md/TOOLS.md synced to DB on file edit (PostToolUse) and session end (Stop)
+- **System Prompt:** Assembled from base-prompt.ts + SOUL.md + IDENTITY.md, passed via --append-system-prompt
+- **Task Lifecycle:** unassigned → offered → pending → in_progress → completed/failed. Completed output auto-indexed into memory
+- **MCP Server:** Tools come from MCP server at $MCP_BASE_URL (src/server.ts)
+
+Use this to debug issues and propose improvements to your own infrastructure.
+
+**Proposing changes:** If you want to change how you are built (hooks, runner, prompts, tools), ask the lead agent to follow up with the user in Slack to discuss the change. Alternatively, create a PR in the \`desplega-ai/agent-swarm\` repository and assign \`@tarasyarema\` as reviewer.
+`;
+
 const BASE_PROMPT_GUIDELINES = `
 ### Agent Swarm Operational Guidelines
 
@@ -367,6 +386,7 @@ export const getBasePrompt = (args: BasePromptArgs): string => {
   }
 
   prompt += BASE_PROMPT_FILESYSTEM;
+  prompt += BASE_PROMPT_SELF_AWARENESS;
   prompt += BASE_PROMPT_GUIDELINES;
   prompt += BASE_PROMPT_SYSTEM.replace("{swarmUrl}", swarmUrl);
 

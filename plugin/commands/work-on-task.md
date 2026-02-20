@@ -50,4 +50,15 @@ Once you are done, or in a real dead-end, you should call `store-progress` tool 
 
 If you used the `/todos` command to add a todo item when starting the task, make sure to mark it as completed or remove it as needed.
 
-Once you are done (either ok or not), finish the session by just replying "DONE".
+Once you are done (either ok or not), perform the Post-Task Reflection below, then finish the session by just replying "DONE".
+
+### Post-Task Reflection (REQUIRED)
+
+After calling `store-progress` to complete or fail a task, do the following before finishing:
+
+1. **Transferable learning?** If you learned something reusable (a pattern, a gotcha, a fix), write it to `/workspace/personal/memory/<descriptive-name>.md`
+2. **Swarm-relevant?** If the learning applies to all agents (not just you), write it to `/workspace/shared/memory/<descriptive-name>.md` instead
+3. **Identity update?** If you discovered a new area of expertise or working style preference, update your IDENTITY.md
+4. **Tools update?** If you found a new service, API, or tool, update your TOOLS.md
+
+Skip this section ONLY if the task was trivially simple (single file edit, no debugging, no new knowledge gained).

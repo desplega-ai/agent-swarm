@@ -963,6 +963,46 @@ Do not leave messages unanswered.`;
   }
 }
 
+/** Search agent memories relevant to a task description via the API */
+async function fetchRelevantMemories(
+  apiUrl: string,
+  apiKey: string,
+  agentId: string,
+  taskDescription: string,
+): Promise<string | null> {
+  try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "X-Agent-ID": agentId,
+    };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+    const response = await fetch(`${apiUrl}/api/memory/search`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ query: taskDescription, limit: 5 }),
+    });
+
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as {
+      results: Array<{ id: string; name: string; content: string; similarity: number }>;
+    };
+
+    const useful = (data.results || []).filter((m) => m.similarity > 0.4);
+    if (useful.length === 0) return null;
+
+    const memoryContext = useful
+      .map((m) => `- **${m.name}** (id: ${m.id}): ${m.content.substring(0, 300)}`)
+      .join("\n");
+
+    return `\n\n### Relevant Past Knowledge\n\nThese memories from your previous sessions may be useful. Use \`memory-get\` with the memory ID to retrieve full details.\n\n${memoryContext}\n`;
+  } catch {
+    // Non-blocking — don't fail task start because of memory search
+    return null;
+  }
+}
+
 async function runClaudeIteration(
   opts: RunClaudeIterationOptions,
 ): Promise<{ exitCode: number; errorTracker: SessionErrorTracker }> {
@@ -1921,7 +1961,22 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           console.log(`[${role}] Trigger received: ${trigger.type}`);
 
           // Build prompt based on trigger
-          const triggerPrompt = buildPromptForTrigger(trigger, prompt);
+          let triggerPrompt = buildPromptForTrigger(trigger, prompt);
+
+          // Enrich prompt with relevant memories from past sessions
+          if (trigger.type === "task_assigned" || trigger.type === "task_offered") {
+            const taskDesc =
+              trigger.task && typeof trigger.task === "object" && "task" in trigger.task
+                ? (trigger.task as { task: string }).task
+                : null;
+            if (taskDesc) {
+              const memoryContext = await fetchRelevantMemories(apiUrl, apiKey, agentId, taskDesc);
+              if (memoryContext) {
+                triggerPrompt += memoryContext;
+                console.log(`[${role}] Injected relevant memories into task prompt`);
+              }
+            }
+          }
 
           // Resolve --resume for child tasks with parentTaskId
           let effectiveAdditionalArgs = opts.additionalArgs || [];

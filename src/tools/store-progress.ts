@@ -160,11 +160,18 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
       const result = txn();
 
-      // Index completed task as memory (async, non-blocking)
-      if (status === "completed" && result.success && result.task && output && output.length > 20) {
+      // Index completed and failed tasks as memory (async, non-blocking)
+      if ((status === "completed" || status === "failed") && result.success && result.task) {
         (async () => {
           try {
-            const taskContent = `Task: ${result.task!.task}\n\nOutput:\n${output}`;
+            const taskContent =
+              status === "completed"
+                ? `Task: ${result.task!.task}\n\nOutput:\n${output || "(no output)"}`
+                : `Task: ${result.task!.task}\n\nFailure reason:\n${failureReason || "No reason provided"}\n\nThis task failed. Learn from this to avoid repeating the mistake.`;
+
+            // Skip indexing if there's truly no content
+            if (taskContent.length < 30) return;
+
             const memory = createMemory({
               agentId: requestInfo.agentId,
               content: taskContent,
@@ -176,6 +183,32 @@ export const registerStoreProgressTool = (server: McpServer) => {
             const embedding = await getEmbedding(taskContent);
             if (embedding) {
               updateMemoryEmbedding(memory.id, serializeEmbedding(embedding));
+            }
+
+            // Auto-promote high-value completions to swarm memory (P3)
+            const shouldShareWithSwarm =
+              status === "completed" &&
+              (result.task!.taskType === "research" ||
+                result.task!.tags?.includes("knowledge") ||
+                result.task!.tags?.includes("shared"));
+
+            if (shouldShareWithSwarm) {
+              try {
+                const swarmMemory = createMemory({
+                  agentId: requestInfo.agentId,
+                  scope: "swarm",
+                  name: `Shared: ${result.task!.task.slice(0, 80)}`,
+                  content: `Task completed by agent ${requestInfo.agentId}:\n\n${taskContent}`,
+                  source: "task_completion",
+                  sourceTaskId: taskId,
+                });
+                const swarmEmbedding = await getEmbedding(taskContent);
+                if (swarmEmbedding) {
+                  updateMemoryEmbedding(swarmMemory.id, serializeEmbedding(swarmEmbedding));
+                }
+              } catch {
+                // Non-blocking — swarm memory promotion failure is not critical
+              }
             }
           } catch {
             // Non-blocking — task completion memory failure should not affect task status
