@@ -21,6 +21,7 @@ import {
   createSessionLogs,
   createTaskExtended,
   deleteEpic,
+  deleteSwarmConfig,
   failTask,
   getActiveTaskCount,
   getAgentById,
@@ -47,11 +48,14 @@ import {
   getPendingTaskForAgent,
   getRecentlyCancelledTasksForAgent,
   getRecentlyFinishedWorkerTasks,
+  getResolvedConfig,
   getScheduledTasks,
   getServicesByAgentId,
   getSessionCostsByAgentId,
   getSessionCostsByTaskId,
   getSessionLogsByTaskId,
+  getSwarmConfigById,
+  getSwarmConfigs,
   getTaskById,
   getTaskStats,
   getTasksByEpicId,
@@ -60,6 +64,7 @@ import {
   hasCapacity,
   markEpicsProgressNotified,
   markTasksNotified,
+  maskSecrets,
   pauseTask,
   postMessage,
   resetEmptyPollCount,
@@ -72,6 +77,7 @@ import {
   updateAgentStatus,
   updateAgentStatusFromCapacity,
   updateEpic,
+  upsertSwarmConfig,
 } from "./be/db";
 import type {
   CheckRunEvent,
@@ -1761,6 +1767,149 @@ const httpServer = createHttpServer(async (req, res) => {
 
     res.writeHead(201, { "Content-Type": "application/json" });
     res.end(JSON.stringify(message));
+    return;
+  }
+
+  // ============================================================================
+  // Config Endpoints (Centralized Environment/Config Management)
+  // ============================================================================
+
+  // GET /api/config/resolved - Get merged config with scope resolution
+  // MUST come before GET /api/config/:id to avoid "resolved" matching as an ID
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "config" &&
+    pathSegments[2] === "resolved" &&
+    !pathSegments[3]
+  ) {
+    const agentId = queryParams.get("agentId") || undefined;
+    const repoId = queryParams.get("repoId") || undefined;
+    const includeSecrets = queryParams.get("includeSecrets") === "true";
+    const configs = getResolvedConfig(agentId, repoId);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ configs: includeSecrets ? configs : maskSecrets(configs) }));
+    return;
+  }
+
+  // GET /api/config/:id - Get single config entry
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "config" &&
+    pathSegments[2] &&
+    !pathSegments[3]
+  ) {
+    const configId = pathSegments[2];
+    const includeSecrets = queryParams.get("includeSecrets") === "true";
+    const config = getSwarmConfigById(configId);
+
+    if (!config) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Config not found" }));
+      return;
+    }
+
+    const result = includeSecrets ? config : maskSecrets([config])[0];
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(result));
+    return;
+  }
+
+  // GET /api/config - List config entries with optional filters
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "config" &&
+    !pathSegments[2]
+  ) {
+    const scope = queryParams.get("scope") || undefined;
+    const scopeId = queryParams.get("scopeId") || undefined;
+    const includeSecrets = queryParams.get("includeSecrets") === "true";
+    const configs = getSwarmConfigs({ scope, scopeId });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ configs: includeSecrets ? configs : maskSecrets(configs) }));
+    return;
+  }
+
+  // PUT /api/config - Upsert a config entry
+  if (
+    req.method === "PUT" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "config" &&
+    !pathSegments[2]
+  ) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    if (!body.scope || !body.key || body.value === undefined) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing required fields: scope, key, value" }));
+      return;
+    }
+
+    const validScopes = ["global", "agent", "repo"];
+    if (!validScopes.includes(body.scope)) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid scope. Must be: global, agent, repo" }));
+      return;
+    }
+
+    if (body.scope === "global" && body.scopeId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Global scope must not have scopeId" }));
+      return;
+    }
+
+    if ((body.scope === "agent" || body.scope === "repo") && !body.scopeId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Agent/repo scope requires scopeId" }));
+      return;
+    }
+
+    try {
+      const includeSecrets = queryParams.get("includeSecrets") === "true";
+      const config = upsertSwarmConfig({
+        scope: body.scope,
+        scopeId: body.scopeId || null,
+        key: body.key,
+        value: String(body.value),
+        isSecret: body.isSecret || false,
+        envPath: body.envPath || null,
+        description: body.description || null,
+      });
+      const result = includeSecrets || !config.isSecret ? config : maskSecrets([config])[0];
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(result));
+    } catch (_error) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Failed to upsert config" }));
+    }
+    return;
+  }
+
+  // DELETE /api/config/:id - Delete a config entry
+  if (
+    req.method === "DELETE" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "config" &&
+    pathSegments[2] &&
+    !pathSegments[3]
+  ) {
+    const configId = pathSegments[2];
+    const deleted = deleteSwarmConfig(configId);
+
+    if (!deleted) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Config not found" }));
+      return;
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ success: true }));
     return;
   }
 
