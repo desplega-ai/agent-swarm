@@ -8,6 +8,7 @@ import {
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createServer, hasCapability } from "@/server";
+import { chunkContent } from "./be/chunking";
 import {
   assignTaskToEpic,
   claimInboxMessages,
@@ -17,10 +18,12 @@ import {
   completeTask,
   createAgent,
   createEpic,
+  createMemory,
   createSessionCost,
   createSessionLogs,
   createTaskExtended,
   deleteEpic,
+  deleteMemoriesBySourcePath,
   deleteSwarmConfig,
   failTask,
   getActiveTaskCount,
@@ -77,9 +80,11 @@ import {
   updateAgentStatus,
   updateAgentStatusFromCapacity,
   updateEpic,
+  updateMemoryEmbedding,
   updateTaskClaudeSessionId,
   upsertSwarmConfig,
 } from "./be/db";
+import { getEmbedding, serializeEmbedding } from "./be/embedding";
 import type {
   CheckRunEvent,
   CheckSuiteEvent,
@@ -1995,6 +2000,96 @@ const httpServer = createHttpServer(async (req, res) => {
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ success: true }));
+    return;
+  }
+
+  // POST /api/memory/index - Ingest content into memory system (async embedding)
+  if (
+    req.method === "POST" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "memory" &&
+    pathSegments[2] === "index" &&
+    !pathSegments[3]
+  ) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    const { agentId, content, name, scope, source, sourceTaskId, sourcePath, tags } = body;
+
+    if (!content || !name || !scope || !source) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing required fields: content, name, scope, source" }));
+      return;
+    }
+
+    if (!["agent", "swarm"].includes(scope)) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "scope must be 'agent' or 'swarm'" }));
+      return;
+    }
+
+    if (!["manual", "file_index", "session_summary", "task_completion"].includes(source)) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid source type" }));
+      return;
+    }
+
+    // Chunk content and create memories in a transaction (with dedup)
+    const contentChunks = chunkContent(content);
+    if (contentChunks.length === 0) {
+      // Content too small to chunk — create a single memory
+      contentChunks.push({
+        content: content.trim(),
+        chunkIndex: 0,
+        totalChunks: 1,
+        headings: [],
+      });
+    }
+
+    const memoryIds = getDb().transaction(() => {
+      // Delete old chunks if re-indexing same file
+      if (sourcePath && agentId) {
+        deleteMemoriesBySourcePath(sourcePath, agentId);
+      }
+
+      const ids: string[] = [];
+      for (const chunk of contentChunks) {
+        const memory = createMemory({
+          agentId: agentId || null,
+          content: chunk.content,
+          name,
+          scope,
+          source,
+          sourcePath: sourcePath || null,
+          sourceTaskId: sourceTaskId || null,
+          chunkIndex: chunk.chunkIndex,
+          totalChunks: chunk.totalChunks,
+          tags: tags || [],
+        });
+        ids.push(memory.id);
+      }
+      return ids;
+    })();
+
+    // Async embedding — fire and forget
+    (async () => {
+      for (let i = 0; i < contentChunks.length; i++) {
+        try {
+          const embedding = await getEmbedding(contentChunks[i]!.content);
+          if (embedding) {
+            updateMemoryEmbedding(memoryIds[i]!, serializeEmbedding(embedding));
+          }
+        } catch (err) {
+          console.error(`[memory] Failed to embed chunk ${memoryIds[i]}:`, (err as Error).message);
+        }
+      }
+    })();
+
+    res.writeHead(202, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ queued: true, memoryIds }));
     return;
   }
 
