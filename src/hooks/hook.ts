@@ -103,6 +103,24 @@ async function readTaskFile(): Promise<TaskFileData | null> {
   }
 }
 
+/** Fetch task details from API (for PreCompact goal reminder) */
+async function fetchTaskDetails(
+  taskId: string,
+): Promise<{ id: string; task: string; progress?: string } | null> {
+  const apiUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
+  const apiKey = process.env.API_KEY || "";
+  const headers: Record<string, string> = {};
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+  try {
+    const response = await fetch(`${apiUrl}/api/tasks/${taskId}`, { headers });
+    if (!response.ok) return null;
+    return (await response.json()) as { id: string; task: string; progress?: string };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Backup existing CLAUDE.md file if it exists
  */
@@ -507,9 +525,30 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
       }
       break;
 
-    case "PreCompact":
-      // Covered by SessionStart hook
+    case "PreCompact": {
+      // Inject goal reminder before context compaction
+      const taskFileData = await readTaskFile();
+      if (taskFileData?.taskId) {
+        try {
+          const taskDetails = await fetchTaskDetails(taskFileData.taskId);
+          if (taskDetails) {
+            const reminder = [
+              "=== GOAL REMINDER (injected before context compaction) ===",
+              `Task ID: ${taskDetails.id}`,
+              `Task: ${taskDetails.task}`,
+            ];
+            if (taskDetails.progress) {
+              reminder.push(`Current Progress: ${taskDetails.progress}`);
+            }
+            reminder.push("=== Continue working on this task after compaction ===");
+            console.log(reminder.join("\n"));
+          }
+        } catch {
+          // Don't block compaction if fetch fails
+        }
+      }
       break;
+    }
 
     case "PreToolUse": {
       // For worker agents, check if their task has been cancelled
