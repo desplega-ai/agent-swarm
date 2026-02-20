@@ -894,6 +894,11 @@ export function getAllAgents(): Agent[] {
   return agentQueries.getAll().all().map(rowToAgent);
 }
 
+export function getLeadAgent(): Agent | null {
+  const agents = getAllAgents();
+  return agents.find((a) => a.isLead) ?? null;
+}
+
 export function updateAgentStatus(id: string, status: AgentStatus): Agent | null {
   const oldAgent = getAgentById(id);
   const row = agentQueries.updateStatus().get(status, id);

@@ -53,7 +53,14 @@ export const InboxMessageSchema = z.object({
 export type InboxMessageStatus = z.infer<typeof InboxMessageStatusSchema>;
 export type InboxMessage = z.infer<typeof InboxMessageSchema>;
 
-export const AgentTaskSourceSchema = z.enum(["mcp", "slack", "api", "github", "agentmail"]);
+export const AgentTaskSourceSchema = z.enum([
+  "mcp",
+  "slack",
+  "api",
+  "github",
+  "agentmail",
+  "system",
+]);
 export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 
 export const AgentTaskSchema = z.object({
