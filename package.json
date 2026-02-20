@@ -1,13 +1,13 @@
 {
   "name": "@desplega.ai/agent-swarm",
-  "version": "1.22.0",
-  "description": "Agent orchestration layer MCP for Claude Code, Codex, Gemini CLI, and more!",
+  "version": "1.23.0",
+  "description": "Agent orchestration layer MCP for Claude Code (Codex, Gemini CLI coming soon)!",
   "license": "MIT",
-  "author": "desplega.ai <contact@desplega.ai>",
+  "author": "desplega.sh <contact@desplega.sh>",
   "maintainers": [
     {
       "name": "Taras",
-      "email": "t@desplega.ai"
+      "email": "t@desplega.sh"
     }
   ],
   "repository": {
