@@ -9,6 +9,10 @@ const SERVER_NAME = pkg.config?.name ?? "agent-swarm";
 const CLAUDE_MD_PATH = `${process.env.HOME}/.claude/CLAUDE.md`;
 const CLAUDE_MD_BACKUP_PATH = `${process.env.HOME}/.claude/CLAUDE.md.bak`;
 
+// Identity file paths (workspace root)
+const SOUL_MD_PATH = "/workspace/SOUL.md";
+const IDENTITY_MD_PATH = "/workspace/IDENTITY.md";
+
 type McpServerConfig = {
   url: string;
   headers: {
@@ -257,6 +261,46 @@ export async function handleHook(): Promise<void> {
       });
     } catch {
       // Silently fail - don't block shutdown
+    }
+  };
+
+  /**
+   * Sync SOUL.md and IDENTITY.md content back to the server
+   */
+  const syncIdentityFilesToServer = async (agentId: string): Promise<void> => {
+    if (!mcpConfig) return;
+
+    const updates: Record<string, string> = {};
+
+    const soulFile = Bun.file(SOUL_MD_PATH);
+    if (await soulFile.exists()) {
+      const content = await soulFile.text();
+      if (content.trim() && content.length <= 65536) {
+        updates.soulMd = content;
+      }
+    }
+
+    const identityFile = Bun.file(IDENTITY_MD_PATH);
+    if (await identityFile.exists()) {
+      const content = await identityFile.text();
+      if (content.trim() && content.length <= 65536) {
+        updates.identityMd = content;
+      }
+    }
+
+    if (Object.keys(updates).length === 0) return;
+
+    try {
+      await fetch(`${getBaseUrl()}/api/agents/${agentId}/profile`, {
+        method: "PUT",
+        headers: {
+          ...mcpConfig.headers,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(updates),
+      });
+    } catch {
+      // Silently fail
     }
   };
 
@@ -536,6 +580,23 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
 
     case "PostToolUse":
       if (agentInfo) {
+        // Sync identity files when agent edits them
+        const toolName = msg.tool_name;
+        const toolInput = msg.tool_input as { file_path?: string } | undefined;
+        const editedPath = toolInput?.file_path;
+
+        if (
+          (toolName === "Write" || toolName === "Edit") &&
+          editedPath &&
+          (editedPath === SOUL_MD_PATH || editedPath === IDENTITY_MD_PATH)
+        ) {
+          try {
+            await syncIdentityFilesToServer(agentInfo.id);
+          } catch {
+            // Non-blocking — don't interrupt the agent's workflow
+          }
+        }
+
         if (agentInfo.isLead) {
           if (msg.tool_name?.endsWith("send-task")) {
             const maybeTaskId = (msg.tool_response as { task?: { id?: string } })?.task?.id;
@@ -571,10 +632,11 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
         // PM2 not available or no processes - silently ignore
       }
 
-      // Sync CLAUDE.md back to database and restore backup
+      // Sync CLAUDE.md and identity files back to database, then restore backup
       if (agentInfo?.id) {
         try {
           await syncClaudeMdToServer(agentInfo.id);
+          await syncIdentityFilesToServer(agentInfo.id);
           await restoreClaudeMdBackup();
         } catch {
           // Silently fail - don't block shutdown

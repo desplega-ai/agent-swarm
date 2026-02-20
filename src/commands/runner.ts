@@ -1285,8 +1285,27 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
   const capabilities = config.capabilities;
 
-  // Generate base prompt that's always included
-  const basePrompt = getBasePrompt({ role, agentId, swarmUrl, capabilities });
+  // Agent identity fields — populated after registration by fetching full profile
+  let agentSoulMd: string | undefined;
+  let agentIdentityMd: string | undefined;
+  let agentProfileName: string | undefined;
+  let agentDescription: string | undefined;
+
+  // Generate base prompt (identity fields injected after profile fetch below)
+  const buildSystemPrompt = () => {
+    return getBasePrompt({
+      role,
+      agentId,
+      swarmUrl,
+      capabilities,
+      name: agentProfileName,
+      description: agentDescription,
+      soulMd: agentSoulMd,
+      identityMd: agentIdentityMd,
+    });
+  };
+
+  let basePrompt = buildSystemPrompt();
 
   // Resolve additional system prompt: CLI flag > env var
   let additionalSystemPrompt: string | undefined;
@@ -1318,7 +1337,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   }
 
   // Combine base prompt with any additional system prompt
-  const resolvedSystemPrompt = additionalSystemPrompt
+  // Note: resolvedSystemPrompt is rebuilt after profile fetch when identity is available
+  let resolvedSystemPrompt = additionalSystemPrompt
     ? `${basePrompt}\n\n${additionalSystemPrompt}`
     : basePrompt;
 
@@ -1379,6 +1399,61 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     } catch (error) {
       console.error(`[${role}] Failed to register: ${error}`);
       process.exit(1);
+    }
+
+    // Fetch full agent profile to get soul/identity content
+    try {
+      const resp = await fetch(`${apiUrl}/me`, {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "X-Agent-ID": agentId,
+        },
+      });
+      if (resp.ok) {
+        const profile = (await resp.json()) as {
+          soulMd?: string;
+          identityMd?: string;
+          name?: string;
+          description?: string;
+        };
+        agentSoulMd = profile.soulMd;
+        agentIdentityMd = profile.identityMd;
+        agentProfileName = profile.name;
+        agentDescription = profile.description;
+
+        // Rebuild system prompt with identity
+        basePrompt = buildSystemPrompt();
+        resolvedSystemPrompt = additionalSystemPrompt
+          ? `${basePrompt}\n\n${additionalSystemPrompt}`
+          : basePrompt;
+        console.log(
+          `[${role}] Loaded agent identity (soul: ${agentSoulMd ? "yes" : "no"}, identity: ${agentIdentityMd ? "yes" : "no"})`,
+        );
+        console.log(`[${role}] Updated system prompt length: ${resolvedSystemPrompt.length} chars`);
+      }
+    } catch {
+      console.warn(`[${role}] Could not fetch agent profile for identity — proceeding without`);
+    }
+
+    // Write SOUL.md and IDENTITY.md to workspace before spawning Claude
+    const SOUL_MD_PATH = "/workspace/SOUL.md";
+    const IDENTITY_MD_PATH = "/workspace/IDENTITY.md";
+
+    if (agentSoulMd) {
+      try {
+        await Bun.write(SOUL_MD_PATH, agentSoulMd);
+        console.log(`[${role}] Wrote SOUL.md to workspace`);
+      } catch (err) {
+        console.warn(`[${role}] Could not write SOUL.md: ${(err as Error).message}`);
+      }
+    }
+    if (agentIdentityMd) {
+      try {
+        await Bun.write(IDENTITY_MD_PATH, agentIdentityMd);
+        console.log(`[${role}] Wrote IDENTITY.md to workspace`);
+      } catch (err) {
+        console.warn(`[${role}] Could not write IDENTITY.md: ${(err as Error).message}`);
+      }
     }
 
     // ========== Resume paused tasks with PRIORITY ==========

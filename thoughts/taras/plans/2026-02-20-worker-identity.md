@@ -511,9 +511,9 @@ const syncIdentityFilesToServer = async (agentId: string): Promise<void> => {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] All tests pass: `bun test`
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] All tests pass: `bun test`
 
 #### Manual Verification:
 - [ ] Start API server, register an agent with soul/identity content
@@ -624,9 +624,9 @@ const basePrompt = getBasePrompt({
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] All tests pass: `bun test`
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] All tests pass: `bun test`
 
 #### Manual Verification:
 - [ ] Start API server, register an agent with soul/identity content

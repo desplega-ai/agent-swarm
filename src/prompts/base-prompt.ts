@@ -261,12 +261,27 @@ export type BasePromptArgs = {
   agentId: string;
   swarmUrl: string;
   capabilities?: string[];
+  name?: string;
+  description?: string;
+  soulMd?: string;
+  identityMd?: string;
 };
 
 export const getBasePrompt = (args: BasePromptArgs): string => {
   const { role, agentId, swarmUrl } = args;
 
   let prompt = BASE_PROMPT_ROLE.replace("{role}", role).replace("{agentId}", agentId);
+
+  // Inject agent identity (soul + identity) if available
+  if (args.soulMd || args.identityMd) {
+    prompt += "\n\n## Your Identity\n\n";
+    if (args.soulMd) {
+      prompt += `${args.soulMd}\n`;
+    }
+    if (args.identityMd) {
+      prompt += `${args.identityMd}\n`;
+    }
+  }
 
   prompt += BASE_PROMPT_REGISTER;
 
