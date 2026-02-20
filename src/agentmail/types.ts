@@ -16,7 +16,7 @@ export interface AgentMailMessage {
   thread_id: string;
   inbox_id: string;
   organization_id: string;
-  from_: string[];
+  from_: string | string[];
   to: string[];
   cc: string[];
   bcc: string[];

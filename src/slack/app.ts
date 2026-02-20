@@ -70,4 +70,5 @@ export async function stopSlackApp(): Promise<void> {
     app = null;
     console.log("[Slack] Bot disconnected");
   }
+  initialized = false;
 }

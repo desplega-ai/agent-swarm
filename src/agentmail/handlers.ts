@@ -59,7 +59,8 @@ export async function handleMessageReceived(
   }
 
   const { inbox_id, thread_id, message_id } = message;
-  const from = message.from_.join(", ") || "unknown";
+  const from =
+    (Array.isArray(message.from_) ? message.from_.join(", ") : message.from_) || "unknown";
   const subject = message.subject || "(no subject)";
   const body = message.text || message.html || "";
   const preview = body.length > 500 ? `${body.substring(0, 500)}...` : body;
