@@ -5,7 +5,7 @@ author: Claude
 branch: claw-session-attach
 repository: agent-swarm
 tags: [plan, session-attach, gap-3, runner, hooks]
-status: draft
+status: implemented
 ---
 
 # Session Attachment Implementation Plan
@@ -562,9 +562,9 @@ Add a test file covering session attachment features. Follows existing `bun:test
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] All tests pass: `bun test src/tests/session-attach.test.ts`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
+- [x] All tests pass: `bun test src/tests/session-attach.test.ts` (15/15 pass)
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
 - [ ] Review test file — verify coverage of happy paths, edge cases, and auto-routing logic
