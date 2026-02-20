@@ -299,6 +299,7 @@ function ScopedConfigSection({
   const { data: configs, isLoading } = useConfigs({
     scope,
     scopeId: scope === "global" ? undefined : scopeId,
+    includeSecrets: true,
   });
   const upsertMutation = useUpsertConfig();
   const deleteMutation = useDeleteConfig();

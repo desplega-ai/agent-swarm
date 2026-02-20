@@ -356,6 +356,7 @@ export function useEpic(id: string) {
 export interface ConfigFilters {
   scope?: string;
   scopeId?: string;
+  includeSecrets?: boolean;
 }
 
 export function useConfigs(filters?: ConfigFilters) {
