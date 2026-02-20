@@ -37,6 +37,8 @@ async function getUniquePort(): Promise<number> {
 }
 
 const port = await getUniquePort();
+const uiPort = port + 1000; // UI on a different port to avoid conflicts
+
 console.log(`Using port ${port} for this worktree`);
 
 // --- Copy and configure .env ---
@@ -47,13 +49,25 @@ const targetEnv = join(worktreePath, ".env");
 if (await exists(mainEnv)) {
   console.log("Copying .env from main repo...");
   let envContent = await readFile(mainEnv, "utf-8");
+
   // Update PORT to the unique port
   envContent = envContent.replace(/^PORT=\d+/m, `PORT=${port}`);
+  // Replace ":{PORT}" too
+  envContent = envContent.replace(/:\d+/g, `:${port}`);
+  // Change APP_URL=http://localhost:{baseUiPort} to use {uiPort}
+  envContent = envContent.replace(/APP_URL=http:\/\/localhost:\d+/m, `APP_URL=http://localhost:${uiPort}`);
+
   await writeFile(targetEnv, envContent);
 } else if (await exists(envExample)) {
   console.log("Creating .env from .env.example...");
   let envContent = await readFile(envExample, "utf-8");
+
   envContent = envContent.replace(/^PORT=\d+/m, `PORT=${port}`);
+  // Replace ":{PORT}" too
+  envContent = envContent.replace(/:\d+/g, `:${port}`);
+  // Change APP_URL=http://localhost:{baseUiPort} to use {uiPort}
+  envContent = envContent.replace(/APP_URL=http:\/\/localhost:\d+/m, `APP_URL=http://localhost:${uiPort}`);
+
   await writeFile(targetEnv, envContent);
 }
 
