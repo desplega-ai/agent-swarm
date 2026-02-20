@@ -732,8 +732,8 @@ Add soul and identity editors to the agent profile modal in the dashboard.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] UI builds: `cd ui && bun run build`
-- [ ] No TypeScript errors in UI: `cd ui && bun run tsc` (or equivalent)
+- [x] UI builds: `cd ui && bun run build`
+- [x] No TypeScript errors in UI: `cd ui && bun run tsc` (or equivalent)
 
 #### Manual Verification:
 - [ ] Open the dashboard, click edit on an agent profile
