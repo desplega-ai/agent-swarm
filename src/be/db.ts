@@ -4339,62 +4339,59 @@ export function upsertSwarmConfig(data: {
   envPath?: string | null;
   description?: string | null;
 }): SwarmConfig {
-  const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const scopeId = data.scope === "global" ? null : (data.scopeId ?? null);
   const isSecret = data.isSecret ? 1 : 0;
   const envPath = data.envPath ?? null;
   const description = data.description ?? null;
 
-  const row = getDb()
-    .prepare<
-      SwarmConfigRow,
-      [
-        string,
-        string,
-        string | null,
-        string,
-        string,
-        number,
-        string | null,
-        string | null,
-        string,
-        string,
-        string,
-        number,
-        string | null,
-        string | null,
-        string,
-      ]
-    >(
-      `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(scope, scopeId, key) DO UPDATE SET
-         value = ?,
-         isSecret = ?,
-         envPath = ?,
-         description = ?,
-         lastUpdatedAt = ?
-       RETURNING *`,
-    )
-    .get(
-      id,
-      data.scope,
-      scopeId,
-      data.key,
-      data.value,
-      isSecret,
-      envPath,
-      description,
-      now,
-      now,
-      // ON CONFLICT update values:
-      data.value,
-      isSecret,
-      envPath,
-      description,
-      now,
-    );
+  // Manual check for existing entry because SQLite's UNIQUE constraint
+  // treats NULL != NULL, so ON CONFLICT never fires when scopeId is NULL (global scope).
+  const existing =
+    scopeId === null
+      ? getDb()
+          .prepare<{ id: string }, [string, string]>(
+            "SELECT id FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
+          )
+          .get(data.scope, data.key)
+      : getDb()
+          .prepare<{ id: string }, [string, string, string]>(
+            "SELECT id FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
+          )
+          .get(data.scope, scopeId, data.key);
+
+  let row: SwarmConfigRow | null;
+
+  if (existing) {
+    row = getDb()
+      .prepare<SwarmConfigRow, [string, number, string | null, string | null, string, string]>(
+        `UPDATE swarm_config SET value = ?, isSecret = ?, envPath = ?, description = ?, lastUpdatedAt = ?
+         WHERE id = ? RETURNING *`,
+      )
+      .get(data.value, isSecret, envPath, description, now, existing.id);
+  } else {
+    const id = crypto.randomUUID();
+    row = getDb()
+      .prepare<
+        SwarmConfigRow,
+        [
+          string,
+          string,
+          string | null,
+          string,
+          string,
+          number,
+          string | null,
+          string | null,
+          string,
+          string,
+        ]
+      >(
+        `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      )
+      .get(id, data.scope, scopeId, data.key, data.value, isSecret, envPath, description, now, now);
+  }
 
   if (!row) throw new Error("Failed to upsert swarm config");
 
