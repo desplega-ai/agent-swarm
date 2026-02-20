@@ -289,6 +289,51 @@ async function ensureTaskFinished(
 }
 
 /**
+ * Reset trigger notification so the trigger retries on the next poll cycle.
+ * Called when a Claude session fails to process a tasks_finished or epic_progress_changed trigger.
+ */
+async function resetTriggerNotification(
+  config: ApiConfig,
+  role: string,
+  taskIds?: string[],
+  epicIds?: string[],
+): Promise<void> {
+  if ((!taskIds || taskIds.length === 0) && (!epicIds || epicIds.length === 0)) return;
+
+  const headers: Record<string, string> = {
+    "X-Agent-ID": config.agentId,
+    "Content-Type": "application/json",
+  };
+  if (config.apiKey) {
+    headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+
+  const body: Record<string, string[]> = {};
+  if (taskIds && taskIds.length > 0) body.taskIds = taskIds;
+  if (epicIds && epicIds.length > 0) body.epicIds = epicIds;
+
+  try {
+    const response = await fetch(`${config.apiUrl}/api/triggers/reset-notification`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    if (response.ok) {
+      const result = (await response.json()) as { tasksReset: number; epicsReset: number };
+      console.log(
+        `[${role}] Reset trigger notifications: ${result.tasksReset} tasks, ${result.epicsReset} epics (will retry on next poll)`,
+      );
+    } else {
+      const error = await response.text();
+      console.warn(`[${role}] Failed to reset trigger notifications: ${response.status} ${error}`);
+    }
+  } catch (err) {
+    console.warn(`[${role}] Error resetting trigger notifications: ${err}`);
+  }
+}
+
+/**
  * Pause a task via the API (for graceful shutdown).
  * Unlike marking as failed, paused tasks can be resumed after container restart.
  */
@@ -520,6 +565,12 @@ interface RunningTask {
   logFile: string;
   startTime: Date;
   promise: Promise<number>;
+  /** The trigger type that spawned this process (for retry on failure) */
+  triggerType?: string;
+  /** Task IDs from a tasks_finished trigger (to reset notifiedAt on failure) */
+  triggerTaskIds?: string[];
+  /** Epic IDs from an epic_progress_changed trigger (to reset progressNotifiedAt on failure) */
+  triggerEpicIds?: string[];
 }
 
 /** Runner state for tracking concurrent tasks */
@@ -1453,26 +1504,54 @@ async function checkCompletedProcesses(
   role: string,
   apiConfig?: ApiConfig,
 ): Promise<void> {
-  const completedTasks: Array<{ taskId: string; exitCode: number }> = [];
+  const completedTasks: Array<{
+    taskId: string;
+    exitCode: number;
+    triggerType?: string;
+    triggerTaskIds?: string[];
+    triggerEpicIds?: string[];
+  }> = [];
 
   for (const [taskId, task] of state.activeTasks) {
     // Check if the Bun subprocess has exited (non-blocking)
     if (task.process.exitCode !== null) {
       console.log(
-        `[${role}] Task ${taskId.slice(0, 8)} completed with exit code ${task.process.exitCode}`,
+        `[${role}] Session exited: task=${taskId.slice(0, 8)} trigger=${task.triggerType || "unknown"} exitCode=${task.process.exitCode}`,
       );
-      completedTasks.push({ taskId, exitCode: task.process.exitCode });
+      completedTasks.push({
+        taskId,
+        exitCode: task.process.exitCode,
+        triggerType: task.triggerType,
+        triggerTaskIds: task.triggerTaskIds,
+        triggerEpicIds: task.triggerEpicIds,
+      });
     }
   }
 
   // Remove completed tasks from the map and ensure they're marked as finished
-  for (const { taskId, exitCode } of completedTasks) {
+  for (const { taskId, exitCode, triggerType, triggerTaskIds, triggerEpicIds } of completedTasks) {
     state.activeTasks.delete(taskId);
 
     // Call the finish API to ensure task status is updated
     // This is idempotent - if the agent already marked it, this is a no-op
     if (apiConfig) {
       await ensureTaskFinished(apiConfig, role, taskId, exitCode);
+    }
+
+    // On non-zero exit, reset trigger notifications so they retry on next poll
+    if (exitCode !== 0 && apiConfig) {
+      if (triggerType === "tasks_finished" && triggerTaskIds?.length) {
+        console.log(
+          `[${role}] Session failed for tasks_finished trigger — resetting ${triggerTaskIds.length} task notifications for retry`,
+        );
+        await resetTriggerNotification(apiConfig, role, triggerTaskIds);
+      }
+      if (triggerType === "epic_progress_changed" && triggerEpicIds?.length) {
+        console.log(
+          `[${role}] Session failed for epic_progress_changed trigger — resetting ${triggerEpicIds.length} epic notifications for retry`,
+        );
+        await resetTriggerNotification(apiConfig, role, undefined, triggerEpicIds);
+      }
     }
   }
 }
@@ -1879,7 +1958,25 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             lastFinishedTaskCheck = new Date().toISOString();
           }
 
-          console.log(`[${role}] Trigger received: ${trigger.type}`);
+          // Extract trigger metadata for retry-on-failure
+          const triggerTaskIds =
+            trigger.type === "tasks_finished" && trigger.tasks
+              ? trigger.tasks.map((t) => t.id)
+              : undefined;
+          const triggerEpicIds =
+            trigger.type === "epic_progress_changed" && trigger.epics
+              ? (trigger.epics as Array<{ epic: { id: string } }>).map((e) => e.epic.id)
+              : undefined;
+
+          console.log(
+            `[${role}] Trigger received: type=${trigger.type}` +
+              (triggerTaskIds
+                ? ` taskIds=[${triggerTaskIds.map((id) => id.slice(0, 8)).join(",")}]`
+                : "") +
+              (triggerEpicIds
+                ? ` epicIds=[${triggerEpicIds.map((id) => id.slice(0, 8)).join(",")}]`
+                : ""),
+          );
 
           // Build prompt based on trigger
           const triggerPrompt = buildPromptForTrigger(trigger, prompt);
@@ -1946,29 +2043,56 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
 
           // Spawn without blocking (await to write task file, but process runs async)
-          const runningTask = await spawnClaudeProcess(
-            {
-              prompt: triggerPrompt,
-              logFile,
-              systemPrompt: taskSystemPrompt,
-              additionalArgs: effectiveAdditionalArgs,
-              role,
-              apiUrl,
-              apiKey,
-              agentId,
+          console.log(`[${role}] Spawning Claude session for trigger=${trigger.type}...`);
+          let runningTask: RunningTask;
+          try {
+            runningTask = await spawnClaudeProcess(
+              {
+                prompt: triggerPrompt,
+                logFile,
+                systemPrompt: taskSystemPrompt,
+                additionalArgs: effectiveAdditionalArgs,
+                role,
+                apiUrl,
+                apiKey,
+                agentId,
+                sessionId,
+                iteration,
+                taskId: trigger.taskId,
+              },
+              logDir,
+              metadataType,
               sessionId,
-              iteration,
-              taskId: trigger.taskId,
-            },
-            logDir,
-            metadataType,
-            sessionId,
-            isYolo,
-          );
+              isYolo,
+            );
+          } catch (spawnError) {
+            console.error(
+              `[${role}] Failed to spawn Claude session for trigger=${trigger.type}: ${spawnError}`,
+            );
+            // Reset trigger notifications so they retry on next poll
+            if (triggerTaskIds?.length) {
+              console.log(
+                `[${role}] Spawn failed — resetting ${triggerTaskIds.length} task notifications for retry`,
+              );
+              await resetTriggerNotification(apiConfig, role, triggerTaskIds);
+            }
+            if (triggerEpicIds?.length) {
+              console.log(
+                `[${role}] Spawn failed — resetting ${triggerEpicIds.length} epic notifications for retry`,
+              );
+              await resetTriggerNotification(apiConfig, role, undefined, triggerEpicIds);
+            }
+            continue;
+          }
+
+          // Attach trigger metadata for retry-on-failure in checkCompletedProcesses
+          runningTask.triggerType = trigger.type;
+          runningTask.triggerTaskIds = triggerTaskIds;
+          runningTask.triggerEpicIds = triggerEpicIds;
 
           state.activeTasks.set(runningTask.taskId, runningTask);
           console.log(
-            `[${role}] Started task ${runningTask.taskId.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active)`,
+            `[${role}] Session started: task=${runningTask.taskId.slice(0, 8)} trigger=${trigger.type} (${state.activeTasks.size}/${state.maxConcurrent} active)`,
           );
         }
       } else {

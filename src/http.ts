@@ -75,6 +75,8 @@ import {
   pauseTask,
   postMessage,
   resetEmptyPollCount,
+  resetEpicsProgressNotified,
+  resetTasksNotified,
   resumeTask,
   shouldBlockPolling,
   startTask,
@@ -1355,6 +1357,45 @@ const httpServer = createHttpServer(async (req, res) => {
         task: result.task,
       }),
     );
+    return;
+  }
+
+  // POST /api/triggers/reset-notification - Reset notifiedAt for tasks/epics so they retry on next poll
+  // Called by the runner when a Claude session fails to process a trigger
+  if (
+    req.method === "POST" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "triggers" &&
+    pathSegments[2] === "reset-notification"
+  ) {
+    if (!myAgentId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    const result: { tasksReset: number; epicsReset: number } = { tasksReset: 0, epicsReset: 0 };
+
+    if (body.taskIds && Array.isArray(body.taskIds) && body.taskIds.length > 0) {
+      result.tasksReset = resetTasksNotified(body.taskIds);
+    }
+
+    if (body.epicIds && Array.isArray(body.epicIds) && body.epicIds.length > 0) {
+      result.epicsReset = resetEpicsProgressNotified(body.epicIds);
+    }
+
+    console.log(
+      `[http] Reset notifications: ${result.tasksReset} tasks, ${result.epicsReset} epics (agent: ${myAgentId.slice(0, 8)})`,
+    );
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ success: true, ...result }));
     return;
   }
 

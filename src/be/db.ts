@@ -1501,6 +1501,24 @@ export function markTasksNotified(taskIds: string[]): number {
   return result.changes;
 }
 
+/**
+ * Reset notifiedAt for finished tasks so they can be re-processed on the next poll.
+ * Used when the runner's Claude session fails to process a tasks_finished trigger.
+ */
+export function resetTasksNotified(taskIds: string[]): number {
+  if (taskIds.length === 0) return 0;
+
+  const placeholders = taskIds.map(() => "?").join(",");
+
+  const result = getDb().run(
+    `UPDATE agent_tasks SET notifiedAt = NULL
+     WHERE id IN (${placeholders}) AND notifiedAt IS NOT NULL`,
+    [...taskIds],
+  );
+
+  return result.changes;
+}
+
 export function getInProgressSlackTasks(): AgentTask[] {
   return getDb()
     .prepare<AgentTaskRow, []>(
@@ -4485,6 +4503,24 @@ export function markEpicsProgressNotified(epicIds: string[]): number {
     `UPDATE epics SET progressNotifiedAt = ?, lastUpdatedAt = ?
      WHERE id IN (${placeholders}) AND progressNotifiedAt IS NULL OR progressNotifiedAt < ?`,
     [now, now, ...epicIds, now],
+  );
+
+  return result.changes;
+}
+
+/**
+ * Reset progressNotifiedAt for epics so they can be re-processed on the next poll.
+ * Used when the runner's Claude session fails to process an epic_progress_changed trigger.
+ */
+export function resetEpicsProgressNotified(epicIds: string[]): number {
+  if (epicIds.length === 0) return 0;
+
+  const placeholders = epicIds.map(() => "?").join(",");
+
+  const result = getDb().run(
+    `UPDATE epics SET progressNotifiedAt = NULL
+     WHERE id IN (${placeholders}) AND progressNotifiedAt IS NOT NULL`,
+    [...epicIds],
   );
 
   return result.changes;
