@@ -142,6 +142,24 @@ docker run --rm -d \
 
 **Keep test tasks trivial**: Use simple tasks like "Say hi" for E2E tests. Complex tasks (web searches, research) waste time and API credits during testing.
 
+### UI Testing
+
+Use the `qa-use` tool (`/qa-use:test-run`, `/qa-use:verify`, `/qa-use:explore`) for browser-based UI testing of the dashboard.
+
+**Worktree port check for UI**: The dashboard dev server defaults to port 5274 (see `APP_URL` in `.env`). Check before starting:
+
+```bash
+lsof -i :5274    # Check if UI port is in use
+```
+
+If occupied by another worktree, start on an alternate port and update `APP_URL`:
+
+```bash
+cd ui && pnpm run dev --port 5275
+```
+
+The UI connects to the API via `VITE_API_URL` (defaults to `http://localhost:3013`). When using alternate API ports, update accordingly in the UI `.env` or pass as env var.
+
 ---
 
 ## Bun Rules
