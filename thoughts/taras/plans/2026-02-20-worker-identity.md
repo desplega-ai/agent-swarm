@@ -517,10 +517,11 @@ const syncIdentityFilesToServer = async (agentId: string): Promise<void> => {
 
 #### Manual Verification:
 - [x] Start API server, register an agent with soul/identity content
-- [ ] Start a worker — verify SOUL.md and IDENTITY.md exist at `/workspace/` before session starts (requires Docker)
-- [ ] Edit SOUL.md via the agent (Write tool) — verify PostToolUse syncs to DB via `GET /me` (requires Docker)
-- [ ] Stop the worker — verify Stop also syncs any final changes (requires Docker)
-- [ ] Start a new session — verify SOUL.md contains the updated content (requires Docker)
+- [x] Start a worker — verify SOUL.md and IDENTITY.md exist at `/workspace/` before session starts (Docker: files present, SOUL.md 1291B, IDENTITY.md 708B)
+- [x] Edit SOUL.md inside container, sync to DB via profile API — verified "Learned Traits" section persisted to DB via `GET /me`
+- [ ] Edit SOUL.md via the agent (Write tool) — verify PostToolUse hook fires automatically (requires live Claude session in Docker)
+- [ ] Stop the worker — verify Stop hook syncs any final changes (requires live Claude session in Docker)
+- [x] Start a new session — verify SOUL.md contains the updated content (Docker: runner fetches profile, writes files with updated content)
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. This establishes the file-based editing flow that agents will use for self-evolution. Note: Phase 4 (runner profile fetch) is a prerequisite for the runner file writing in step 2 — implement them together.
 
@@ -630,8 +631,8 @@ const basePrompt = getBasePrompt({
 
 #### Manual Verification:
 - [x] Start API server, register an agent with soul/identity content
-- [ ] Start a worker, check runner logs for increased system prompt length (requires Docker)
-- [ ] Verify the system prompt contains the soul/identity sections (requires Docker)
+- [x] Start a worker, check runner logs for increased system prompt length (Docker: 5011 → 7018 chars, logs show `soul: yes, identity: yes`)
+- [x] Verify the system prompt contains the soul/identity sections (Docker: runner logs confirm identity loaded and injected into system prompt)
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. This is the critical behavioral change — verify identity is actually visible to the agent during a session.
 
@@ -694,7 +695,7 @@ if (identityMd !== undefined) {
 - [x] Update soul via REST API — verified response contains updated soulMd
 - [x] Verify the response contains the updated soulMd
 - [x] Update identity via REST API — verified response contains updated identityMd
-- [ ] Update identity via the `update-profile` MCP tool from a connected Claude session (requires Docker)
+- [ ] Update identity via the `update-profile` MCP tool from a connected Claude session (requires live Claude session in Docker)
 
 **Implementation Note**: After completing this phase, pause for manual confirmation.
 
@@ -776,6 +777,37 @@ After all phases are complete, run through this end-to-end:
    # b) /workspace/SOUL.md and /workspace/IDENTITY.md exist with correct content
    # c) Edit /workspace/SOUL.md inside the container, stop the worker, verify DB updated
    ```
+
+### E2E Test Results (2026-02-20)
+
+**Non-Docker tests (port 3013, then 3015):**
+- [x] Clean DB, start server — healthy on configured port
+- [x] MCP session init (Streamable HTTP: initialize → capture session ID → notifications/initialized → tools/call)
+- [x] Register via `join-swarm` — all 3 templates (soulMd, identityMd, claudeMd) auto-generated
+- [x] Verify defaults: soulMd has "Core Truths", "Self-Evolution"; identityMd has "Vibe", "Quirks"; claudeMd references `/workspace/SOUL.md` and `/workspace/IDENTITY.md`
+- [x] Update soul via REST API PUT — persisted and returned in response
+- [x] Update identity via REST API PUT — persisted and returned in response
+- [x] 64KB size validation — correctly rejected oversized content
+- [x] `/api/agents` list includes soulMd/identityMd fields
+- [x] SQLite schema has `soulMd TEXT` and `identityMd TEXT` columns
+- [x] UI builds clean (`cd ui && bun run build`)
+- [x] 302 tests pass, 0 failures
+
+**Docker tests (port 3015):**
+- [x] Docker image built successfully (`bun run docker:build:worker`)
+- [x] Worker container started, logs show: `soul: yes, identity: yes`
+- [x] System prompt grew from 5011 → 7018 chars (identity injected)
+- [x] `/workspace/SOUL.md` (1291B) and `/workspace/IDENTITY.md` (708B) written correctly
+- [x] SOUL.md content matches DB template (verified `cat` inside container)
+- [x] Modified SOUL.md inside container (added "Learned Traits" section), synced via profile API from within container — DB updated, verified via `GET /me` from host
+- [x] Runner generates templates for agents registered via `POST /api/agents` (bug found and fixed: runner now calls `generateDefaultSoulMd`/`generateDefaultIdentityMd` when profile is empty)
+
+**Remaining (require live Claude session in Docker):**
+- [ ] PostToolUse hook fires on Write/Edit to SOUL.md or IDENTITY.md — auto-syncs to DB
+- [ ] Stop hook syncs final identity file changes on session end
+- [ ] `update-profile` MCP tool invoked from within a Claude session
+
+These will validate naturally when a Docker worker picks up its first real task.
 
 ## References
 
