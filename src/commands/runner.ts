@@ -1704,7 +1704,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
   if (!isAiLoop) {
     // Runner-level polling mode with parallel execution support
-    const maxConcurrent = parseInt(process.env.MAX_CONCURRENT_TASKS || "1", 10);
+    const defaultConcurrent = role === "lead" ? "2" : "1";
+    const maxConcurrent = parseInt(process.env.MAX_CONCURRENT_TASKS || defaultConcurrent, 10);
     console.log(`[${role}] Mode: runner-level polling (use --ai-loop for AI-based polling)`);
     console.log(`[${role}] Max concurrent tasks: ${maxConcurrent}`);
 
