@@ -4,6 +4,7 @@ import {
   createAgentMailInboxMapping,
   deleteAgentMailInboxMapping,
   getAgentById,
+  getAgentMailInboxMapping,
   getAgentMailInboxMappingsByAgent,
 } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
@@ -112,6 +113,20 @@ export const registerRegisterAgentMailInboxTool = (server: McpServer) => {
         }
 
         if (action === "unregister") {
+          // Check ownership before allowing unregister
+          const existing = getAgentMailInboxMapping(inboxId);
+          if (existing && existing.agentId !== requestInfo.agentId) {
+            const text = `Cannot unregister inbox ${inboxId}: owned by another agent`;
+            return {
+              content: [{ type: "text", text }],
+              structuredContent: {
+                yourAgentId: requestInfo.agentId,
+                success: false,
+                message: text,
+              },
+            };
+          }
+
           const deleted = deleteAgentMailInboxMapping(inboxId);
           const text = deleted
             ? `Unregistered inbox ${inboxId}`

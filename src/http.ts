@@ -963,15 +963,8 @@ const httpServer = createHttpServer(async (req, res) => {
       return;
     }
 
-    // Dedup using svix-id header
-    const svixId = svixHeaders["svix-id"];
-    if (!svixId) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing svix-id header" }));
-      return;
-    }
-
-    // Return 200 immediately per Svix best practices
+    // Return 200 immediately — Svix best practice to avoid retries.
+    // Processing happens asynchronously below; dedup is handled in handlers.ts.
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ received: true }));
 

@@ -5285,15 +5285,14 @@ export function deleteAgentMailInboxMapping(inboxId: string): boolean {
 }
 
 /**
- * Find a task by AgentMail thread ID
- * Returns the most recent non-completed/failed task for this thread
+ * Find the most recent task by AgentMail thread ID
+ * Includes completed/failed tasks to maintain thread continuity via parentTaskId
  */
 export function findTaskByAgentMailThread(agentmailThreadId: string): AgentTask | null {
   const row = getDb()
     .prepare<AgentTaskRow, [string]>(
       `SELECT * FROM agent_tasks
        WHERE agentmailThreadId = ?
-       AND status NOT IN ('completed', 'failed')
        ORDER BY createdAt DESC
        LIMIT 1`,
     )
