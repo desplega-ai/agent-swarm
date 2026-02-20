@@ -69,6 +69,15 @@ if (await exists(mainMcp)) {
   await writeFile(targetMcp, mcpContent);
 }
 
+const mainQa = join(gitRoot, ".qa-use-tests.json");
+const targetQa = join(worktreePath, ".qa-use-tests.json");
+
+if (await exists(mainQa)) {
+  console.log("Copying .qa-use-tests.json...");
+  let qaContent = await readFile(mainQa, "utf-8");
+  await writeFile(targetQa, qaContent);
+}
+
 // --- Copy .claude directory ---
 const mainClaude = join(gitRoot, ".claude");
 const targetClaude = join(worktreePath, ".claude");
