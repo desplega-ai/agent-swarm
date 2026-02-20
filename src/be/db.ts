@@ -1501,6 +1501,25 @@ export function markTasksNotified(taskIds: string[]): number {
   return result.changes;
 }
 
+/**
+ * Reset notifiedAt for tasks, allowing them to be re-delivered on next poll.
+ * Used when a trigger was consumed but the session that should process it failed.
+ * This prevents permanent notification loss from the mark-before-process race.
+ */
+export function resetTasksNotified(taskIds: string[]): number {
+  if (taskIds.length === 0) return 0;
+
+  const placeholders = taskIds.map(() => "?").join(",");
+
+  const result = getDb().run(
+    `UPDATE agent_tasks SET notifiedAt = NULL
+     WHERE id IN (${placeholders}) AND notifiedAt IS NOT NULL`,
+    taskIds,
+  );
+
+  return result.changes;
+}
+
 export function getInProgressSlackTasks(): AgentTask[] {
   return getDb()
     .prepare<AgentTaskRow, []>(
