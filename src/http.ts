@@ -59,7 +59,6 @@ import {
   getPausedTasksForAgent,
   getPendingTaskForAgent,
   getRecentlyCancelledTasksForAgent,
-  getRecentlyFinishedWorkerTasks,
   getResolvedConfig,
   getScheduledTasks,
   getServicesByAgentId,
@@ -77,12 +76,10 @@ import {
   getUnassignedTasksCount,
   hasCapacity,
   markEpicsProgressNotified,
-  markTasksNotified,
   maskSecrets,
   pauseTask,
   postMessage,
   resetEmptyPollCount,
-  resetTasksNotified,
   resumeTask,
   shouldBlockPolling,
   startTask,
@@ -524,28 +521,11 @@ const httpServer = createHttpServer(async (req, res) => {
         if (agent.isLead) {
           // === LEAD-SPECIFIC TRIGGERS ===
 
-          // Check for recently finished worker tasks (highest lead-specific priority)
-          // Processing task completions promptly keeps the swarm moving.
-          const finishedTasks = getRecentlyFinishedWorkerTasks();
-          if (finishedTasks.length > 0) {
-            // Atomically mark as notified within this transaction.
-            // NOTE: If the consuming session fails, the runner will call
-            // POST /api/tasks/reset-notification to reset notifiedAt,
-            // allowing re-delivery on the next poll.
-            const taskIds = finishedTasks.map((t) => t.id);
-            markTasksNotified(taskIds);
-            console.log(
-              `[api/poll] tasks_finished trigger: ${taskIds.length} task(s) marked notified [${taskIds.map((id) => id.slice(0, 8)).join(", ")}] for agent ${myAgentId.slice(0, 8)}`,
-            );
-
-            return {
-              trigger: {
-                type: "tasks_finished",
-                count: finishedTasks.length,
-                tasks: finishedTasks,
-              },
-            };
-          }
+          // NOTE: tasks_finished trigger has been replaced by follow-up task creation
+          // in store-progress. When a worker completes/fails a task, a follow-up task
+          // is created and assigned to the lead, which is picked up via the normal
+          // task_assigned trigger above. This is more reliable and visible than the
+          // old poll-based notification approach.
 
           // Check for unread Slack inbox messages
           // Atomically claim messages to prevent duplicate processing
@@ -1441,51 +1421,6 @@ const httpServer = createHttpServer(async (req, res) => {
         task: result.task,
       }),
     );
-    return;
-  }
-
-  // POST /api/tasks/reset-notification - Reset notifiedAt for tasks whose trigger session failed
-  // Called by the runner when a Claude session exits non-zero after consuming a tasks_finished trigger.
-  // This prevents permanent notification loss from the mark-before-process race condition.
-  if (
-    req.method === "POST" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "tasks" &&
-    pathSegments[2] === "reset-notification"
-  ) {
-    if (!myAgentId) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
-      return;
-    }
-
-    // Only leads should reset notifications (they're the ones receiving tasks_finished triggers)
-    const agent = getAgentById(myAgentId);
-    if (!agent?.isLead) {
-      res.writeHead(403, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Only lead agents can reset task notifications" }));
-      return;
-    }
-
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = JSON.parse(Buffer.concat(chunks).toString());
-
-    if (!body.taskIds || !Array.isArray(body.taskIds) || body.taskIds.length === 0) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing or invalid 'taskIds' array" }));
-      return;
-    }
-
-    const resetCount = resetTasksNotified(body.taskIds);
-    console.log(
-      `[api] Reset notification for ${resetCount}/${body.taskIds.length} tasks (agent: ${myAgentId.slice(0, 8)}, reason: ${body.reason || "session failed"})`,
-    );
-
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ success: true, resetCount }));
     return;
   }
 
