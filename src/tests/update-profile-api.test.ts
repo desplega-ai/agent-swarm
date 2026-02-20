@@ -30,7 +30,14 @@ async function handleRequest(
   ) {
     const agentId = pathSegments[2];
 
-    let body: { role?: string; description?: string; capabilities?: string[]; claudeMd?: string };
+    let body: {
+      role?: string;
+      description?: string;
+      capabilities?: string[];
+      claudeMd?: string;
+      soulMd?: string;
+      identityMd?: string;
+    };
     try {
       body = JSON.parse(bodyText);
     } catch {
@@ -42,13 +49,15 @@ async function handleRequest(
       body.role === undefined &&
       body.description === undefined &&
       body.capabilities === undefined &&
-      body.claudeMd === undefined
+      body.claudeMd === undefined &&
+      body.soulMd === undefined &&
+      body.identityMd === undefined
     ) {
       return {
         status: 400,
         body: {
           error:
-            "At least one field (role, description, capabilities, or claudeMd) must be provided",
+            "At least one field (role, description, capabilities, claudeMd, soulMd, or identityMd) must be provided",
         },
       };
     }
@@ -68,11 +77,23 @@ async function handleRequest(
       return { status: 400, body: { error: "claudeMd must be 64KB or less" } };
     }
 
+    // Validate soulMd size if provided (max 64KB)
+    if (body.soulMd !== undefined && body.soulMd.length > 65536) {
+      return { status: 400, body: { error: "soulMd must be 64KB or less" } };
+    }
+
+    // Validate identityMd size if provided (max 64KB)
+    if (body.identityMd !== undefined && body.identityMd.length > 65536) {
+      return { status: 400, body: { error: "identityMd must be 64KB or less" } };
+    }
+
     const agent = updateAgentProfile(agentId, {
       role: body.role,
       description: body.description,
       capabilities: body.capabilities,
       claudeMd: body.claudeMd,
+      soulMd: body.soulMd,
+      identityMd: body.identityMd,
     });
 
     if (!agent) {
@@ -556,6 +577,125 @@ describe("PUT /api/agents/:id/profile", () => {
       expect(data.role).toBe("Developer");
       // claudeMd should be preserved (due to COALESCE in the SQL)
       expect(data.claudeMd).toBe("My notes");
+    });
+  });
+
+  describe("Update soulMd", () => {
+    test("should update agent soulMd successfully", async () => {
+      const agentId = "test-agent-soulmd-update";
+      createAgent({
+        id: agentId,
+        name: "Test Agent SoulMd Update",
+        isLead: false,
+        status: "idle",
+      });
+
+      const soulContent = "# SOUL.md — Test Agent\n\nYou are a coding specialist.";
+      const response = await fetch(`${baseUrl}/api/agents/${agentId}/profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ soulMd: soulContent }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = (await response.json()) as { id?: string; soulMd?: string };
+      expect(data.id).toBe(agentId);
+      expect(data.soulMd).toBe(soulContent);
+
+      // Verify in database
+      const agent = getAgentById(agentId);
+      expect(agent?.soulMd).toBe(soulContent);
+    });
+
+    test("should return 400 if soulMd exceeds 64KB", async () => {
+      const largeContent = "a".repeat(65537);
+      const response = await fetch(`${baseUrl}/api/agents/test-agent/profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ soulMd: largeContent }),
+      });
+
+      expect(response.status).toBe(400);
+      const data = (await response.json()) as { error?: string };
+      expect(data.error).toContain("64KB");
+    });
+  });
+
+  describe("Update identityMd", () => {
+    test("should update agent identityMd successfully", async () => {
+      const agentId = "test-agent-identitymd-update";
+      createAgent({
+        id: agentId,
+        name: "Test Agent IdentityMd Update",
+        isLead: false,
+        status: "idle",
+      });
+
+      const identityContent = "# IDENTITY.md — Test Agent\n\nRole: developer\nVibe: focused";
+      const response = await fetch(`${baseUrl}/api/agents/${agentId}/profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identityMd: identityContent }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = (await response.json()) as { id?: string; identityMd?: string };
+      expect(data.id).toBe(agentId);
+      expect(data.identityMd).toBe(identityContent);
+
+      // Verify in database
+      const agent = getAgentById(agentId);
+      expect(agent?.identityMd).toBe(identityContent);
+    });
+
+    test("should return 400 if identityMd exceeds 64KB", async () => {
+      const largeContent = "a".repeat(65537);
+      const response = await fetch(`${baseUrl}/api/agents/test-agent/profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identityMd: largeContent }),
+      });
+
+      expect(response.status).toBe(400);
+      const data = (await response.json()) as { error?: string };
+      expect(data.error).toContain("64KB");
+    });
+
+    test("should preserve soulMd and identityMd when updating other fields", async () => {
+      const agentId = "test-agent-identity-preserve";
+      createAgent({
+        id: agentId,
+        name: "Test Agent Identity Preserve",
+        isLead: false,
+        status: "idle",
+      });
+
+      // Set initial soul and identity
+      await fetch(`${baseUrl}/api/agents/${agentId}/profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          soulMd: "My soul",
+          identityMd: "My identity",
+        }),
+      });
+
+      // Update only the role
+      const response = await fetch(`${baseUrl}/api/agents/${agentId}/profile`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "Developer" }),
+      });
+
+      expect(response.status).toBe(200);
+      const data = (await response.json()) as {
+        role?: string;
+        soulMd?: string;
+        identityMd?: string;
+      };
+      expect(data.role).toBe("Developer");
+      expect(data.soulMd).toBe("My soul");
+      expect(data.identityMd).toBe("My identity");
     });
   });
 });
