@@ -755,6 +755,42 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     /* exists */
   }
 
+  // AgentMail-specific columns on agent_tasks
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN agentmailInboxId TEXT`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN agentmailMessageId TEXT`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN agentmailThreadId TEXT`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(
+      `CREATE INDEX IF NOT EXISTS idx_agent_tasks_agentmailThreadId ON agent_tasks(agentmailThreadId)`,
+    );
+  } catch {
+    /* exists */
+  }
+
+  // AgentMail inbox-to-agent mapping table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS agentmail_inbox_mappings (
+      id TEXT PRIMARY KEY,
+      inboxId TEXT NOT NULL UNIQUE,
+      agentId TEXT NOT NULL,
+      inboxEmail TEXT,
+      createdAt TEXT NOT NULL,
+      FOREIGN KEY (agentId) REFERENCES agents(id)
+    )
+  `);
+
   return db;
 }
 
@@ -1023,6 +1059,9 @@ type AgentTaskRow = {
   githubCommentId: number | null;
   githubAuthor: string | null;
   githubUrl: string | null;
+  agentmailInboxId: string | null;
+  agentmailMessageId: string | null;
+  agentmailThreadId: string | null;
   mentionMessageId: string | null;
   mentionChannelId: string | null;
   epicId: string | null;
@@ -1062,6 +1101,9 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     githubCommentId: row.githubCommentId ?? undefined,
     githubAuthor: row.githubAuthor ?? undefined,
     githubUrl: row.githubUrl ?? undefined,
+    agentmailInboxId: row.agentmailInboxId ?? undefined,
+    agentmailMessageId: row.agentmailMessageId ?? undefined,
+    agentmailThreadId: row.agentmailThreadId ?? undefined,
     mentionMessageId: row.mentionMessageId ?? undefined,
     mentionChannelId: row.mentionChannelId ?? undefined,
     epicId: row.epicId ?? undefined,
@@ -1914,6 +1956,9 @@ export interface CreateTaskOptions {
   githubCommentId?: number;
   githubAuthor?: string;
   githubUrl?: string;
+  agentmailInboxId?: string;
+  agentmailMessageId?: string;
+  agentmailThreadId?: string;
   mentionMessageId?: string;
   mentionChannelId?: string;
   epicId?: string;
@@ -1938,8 +1983,9 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         taskType, tags, priority, dependsOn, offeredTo, offeredAt,
         slackChannelId, slackThreadTs, slackUserId,
         githubRepo, githubEventType, githubNumber, githubCommentId, githubAuthor, githubUrl,
+        agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, epicId, parentTaskId, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -1963,6 +2009,9 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.githubCommentId ?? null,
       options?.githubAuthor ?? null,
       options?.githubUrl ?? null,
+      options?.agentmailInboxId ?? null,
+      options?.agentmailMessageId ?? null,
+      options?.agentmailThreadId ?? null,
       options?.mentionMessageId ?? null,
       options?.mentionChannelId ?? null,
       options?.epicId ?? null,
@@ -3612,7 +3661,7 @@ function rowToInboxMessage(row: InboxMessageRow): InboxMessage {
 }
 
 export interface CreateInboxMessageOptions {
-  source?: "slack";
+  source?: "slack" | "agentmail";
   slackChannelId?: string;
   slackThreadTs?: string;
   slackUserId?: string;
@@ -5167,4 +5216,87 @@ export function getMemoryStats(agentId: string): {
   }
 
   return { total: total?.count ?? 0, bySource, byScope };
+}
+
+// ============================================================================
+// AgentMail Inbox Mapping Queries
+// ============================================================================
+
+export interface AgentMailInboxMapping {
+  id: string;
+  inboxId: string;
+  agentId: string;
+  inboxEmail: string | null;
+  createdAt: string;
+}
+
+export function getAgentMailInboxMapping(inboxId: string): AgentMailInboxMapping | null {
+  return (
+    getDb()
+      .prepare<AgentMailInboxMapping, [string]>(
+        "SELECT * FROM agentmail_inbox_mappings WHERE inboxId = ?",
+      )
+      .get(inboxId) ?? null
+  );
+}
+
+export function getAgentMailInboxMappingsByAgent(agentId: string): AgentMailInboxMapping[] {
+  return getDb()
+    .prepare<AgentMailInboxMapping, [string]>(
+      "SELECT * FROM agentmail_inbox_mappings WHERE agentId = ? ORDER BY createdAt DESC",
+    )
+    .all(agentId);
+}
+
+export function getAllAgentMailInboxMappings(): AgentMailInboxMapping[] {
+  return getDb()
+    .prepare<AgentMailInboxMapping, []>(
+      "SELECT * FROM agentmail_inbox_mappings ORDER BY createdAt DESC",
+    )
+    .all();
+}
+
+export function createAgentMailInboxMapping(
+  inboxId: string,
+  agentId: string,
+  inboxEmail?: string,
+): AgentMailInboxMapping {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  const row = getDb()
+    .prepare<AgentMailInboxMapping, [string, string, string, string | null, string]>(
+      `INSERT INTO agentmail_inbox_mappings (id, inboxId, agentId, inboxEmail, createdAt)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(inboxId) DO UPDATE SET agentId = excluded.agentId, inboxEmail = excluded.inboxEmail
+       RETURNING *`,
+    )
+    .get(id, inboxId, agentId, inboxEmail ?? null, now);
+
+  if (!row) throw new Error("Failed to create AgentMail inbox mapping");
+  return row;
+}
+
+export function deleteAgentMailInboxMapping(inboxId: string): boolean {
+  const result = getDb()
+    .prepare("DELETE FROM agentmail_inbox_mappings WHERE inboxId = ?")
+    .run(inboxId);
+  return result.changes > 0;
+}
+
+/**
+ * Find a task by AgentMail thread ID
+ * Returns the most recent non-completed/failed task for this thread
+ */
+export function findTaskByAgentMailThread(agentmailThreadId: string): AgentTask | null {
+  const row = getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks
+       WHERE agentmailThreadId = ?
+       AND status NOT IN ('completed', 'failed')
+       ORDER BY createdAt DESC
+       LIMIT 1`,
+    )
+    .get(agentmailThreadId);
+  return row ? rowToAgentTask(row) : null;
 }

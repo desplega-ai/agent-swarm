@@ -8,6 +8,13 @@ import {
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createServer, hasCapability } from "@/server";
+import type { AgentMailWebhookPayload } from "./agentmail";
+import {
+  handleMessageReceived,
+  initAgentMail,
+  isAgentMailEnabled,
+  verifyAgentMailWebhook,
+} from "./agentmail";
 import { chunkContent } from "./be/chunking";
 import {
   assignTaskToEpic,
@@ -222,9 +229,10 @@ const httpServer = createHttpServer(async (req, res) => {
   }
 
   // API key authentication (if API_KEY is configured)
-  // Skip auth for GitHub webhook (it has its own signature verification)
+  // Skip auth for webhooks (they have their own signature verification)
   const isGitHubWebhook = req.url?.startsWith("/api/github/webhook");
-  if (apiKey && !isGitHubWebhook) {
+  const isAgentMailWebhook = req.url?.startsWith("/api/agentmail/webhook");
+  if (apiKey && !isGitHubWebhook && !isAgentMailWebhook) {
     const authHeader = req.headers.authorization;
     const providedKey = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
@@ -908,6 +916,83 @@ const httpServer = createHttpServer(async (req, res) => {
       }
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Internal server error", message: errorMessage }));
+    }
+    return;
+  }
+
+  // ============================================================================
+  // AgentMail Webhook Endpoint
+  // ============================================================================
+
+  // POST /api/agentmail/webhook - Handle AgentMail webhook events
+  if (
+    req.method === "POST" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "agentmail" &&
+    pathSegments[2] === "webhook"
+  ) {
+    // Check if AgentMail integration is enabled
+    if (!isAgentMailEnabled()) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "AgentMail integration not configured" }));
+      return;
+    }
+
+    // Read raw body (required for Svix signature verification)
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const rawBody = Buffer.concat(chunks).toString();
+
+    // Extract Svix headers for verification
+    const svixHeaders: Record<string, string> = {};
+    for (const key of ["svix-id", "svix-timestamp", "svix-signature"]) {
+      const value = req.headers[key];
+      if (typeof value === "string") {
+        svixHeaders[key] = value;
+      }
+    }
+
+    // Verify webhook signature
+    const verified = verifyAgentMailWebhook(rawBody, svixHeaders);
+    if (!verified) {
+      console.log("[AgentMail] Invalid webhook signature");
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid signature" }));
+      return;
+    }
+
+    // Dedup using svix-id header
+    const svixId = svixHeaders["svix-id"];
+    if (!svixId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing svix-id header" }));
+      return;
+    }
+
+    // Return 200 immediately per Svix best practices
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ received: true }));
+
+    // Process webhook asynchronously
+    const payload = verified as AgentMailWebhookPayload;
+    console.log(`[AgentMail] Received ${payload.event_type} event (${payload.event_id})`);
+
+    try {
+      switch (payload.event_type) {
+        case "message.received":
+          await handleMessageReceived(payload);
+          break;
+        default:
+          console.log(`[AgentMail] Ignoring event type: ${payload.event_type}`);
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error(`[AgentMail] Error handling ${payload.event_type} event: ${errorMessage}`);
+      if (err instanceof Error && err.stack) {
+        console.error(err.stack);
+      }
     }
     return;
   }
@@ -2361,6 +2446,9 @@ httpServer
 
     // Initialize GitHub webhook handler (if configured)
     initGitHub();
+
+    // Initialize AgentMail webhook handler (if configured)
+    initAgentMail();
 
     // Start scheduler (if enabled)
     if (hasCapability("scheduling")) {

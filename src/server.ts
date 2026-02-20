@@ -30,6 +30,7 @@ import { registerMyAgentInfoTool } from "./tools/my-agent-info";
 import { registerPollTaskTool } from "./tools/poll-task";
 import { registerPostMessageTool } from "./tools/post-message";
 import { registerReadMessagesTool } from "./tools/read-messages";
+import { registerRegisterAgentMailInboxTool } from "./tools/register-agentmail-inbox";
 // Services capability
 import { registerRegisterServiceTool } from "./tools/register-service";
 // Scheduling capability
@@ -108,6 +109,9 @@ export function createServer() {
   registerSlackDownloadFileTool(server);
   registerInboxDelegateTool(server);
   registerGetInboxMessageTool(server);
+
+  // AgentMail integration tool (always registered, self-service inbox mapping)
+  registerRegisterAgentMailInboxTool(server);
 
   // Task pool capability - task pool operations (create unassigned, claim, release, accept, reject)
   if (hasCapability("task-pool")) {
