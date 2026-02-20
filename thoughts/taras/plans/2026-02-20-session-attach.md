@@ -162,9 +162,9 @@ Also add a convenience DB function `updateTaskClaudeSessionId(taskId: string, se
 - [x] Column exists: `sqlite3 agent-swarm-db.sqlite ".schema agent_tasks" | grep claudeSessionId`
 
 #### Manual Verification:
-- [ ] Create a task via API with `parentTaskId` field — verify it's stored and returned
-- [ ] Call `PUT /api/tasks/:id/claude-session` with a session ID — verify it persists
-- [ ] GET the task — verify both `parentTaskId` and `claudeSessionId` are in the response
+- [x] Create a task via API with `parentTaskId` field — verify it's stored and returned
+- [x] Call `PUT /api/tasks/:id/claude-session` with a session ID — verify it persists
+- [x] GET the task — verify both `parentTaskId` and `claudeSessionId` are in the response
 
 **Implementation Note**: After completing this phase, pause for manual confirmation.
 
@@ -230,9 +230,9 @@ This must come BEFORE the `json.type === "result"` check so it fires on the firs
 - [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
-- [ ] Start a worker, assign it a task, check logs for `"type":"system","subtype":"init"` line
-- [ ] After task starts, query `GET /api/tasks/:id` — verify `claudeSessionId` is populated
-- [ ] Verify session ID capture is non-blocking (doesn't slow down stream processing)
+- [x] Start a worker, assign it a task, check logs for `"type":"system","subtype":"init"` line
+- [x] After task starts, query `GET /api/tasks/:id` — verify `claudeSessionId` is populated
+- [x] Verify session ID capture is non-blocking (doesn't slow down stream processing)
 
 **Implementation Note**: After completing this phase, pause for manual confirmation.
 
@@ -331,9 +331,9 @@ const task = createTaskExtended(body.task, {
 - [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
-- [ ] Create a parent task via API, note its ID
-- [ ] Create a child task via `POST /api/tasks` with `parentTaskId` set to parent's ID
-- [ ] GET the child task — verify `parentTaskId` is present
+- [x] Create a parent task via API, note its ID
+- [x] Create a child task via `POST /api/tasks` with `parentTaskId` set to parent's ID
+- [x] GET the child task — verify `parentTaskId` is present
 - [ ] Via MCP: call `send-task` with `parentTaskId` but NO `agentId` — verify task is auto-routed to the parent's worker
 - [ ] Via MCP: call `send-task` with `parentTaskId` AND explicit `agentId` — verify explicit `agentId` takes precedence
 - [ ] Via MCP: call `inbox-delegate` with `parentTaskId` — verify task is created with the field
@@ -434,11 +434,11 @@ Note: The paused task's `task` object comes from the API response which fetches 
 - [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
-- [ ] Create a task, let a worker run it, verify `claudeSessionId` is captured
-- [ ] Create a child task with `parentTaskId` pointing to the completed task
-- [ ] Assign child task to a worker — verify runner logs show `--resume <sessionId>` in the spawned command
-- [ ] Verify the child Claude session has context from the parent session (check Claude's behavior)
-- [ ] Test fallback: create a child task pointing to a task with no `claudeSessionId` — verify fresh session starts without error
+- [x] Create a task, let a worker run it, verify `claudeSessionId` is captured
+- [x] Create a child task with `parentTaskId` pointing to the completed task
+- [x] Assign child task to a worker — verify runner logs show `--resume <sessionId>` in the spawned command
+- [x] Verify the child Claude session has context from the parent session (check Claude's behavior)
+- [x] Test fallback: create a child task pointing to a task with no `claudeSessionId` — verify fresh session starts without error
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. This is the critical phase — thorough testing needed.
 
@@ -514,8 +514,8 @@ async function fetchTaskDetails(taskId: string): Promise<{
 - [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
-- [ ] Trigger PreCompact hook manually (or via a long-running session) — verify goal reminder appears in stdout
-- [ ] Verify hook doesn't block or slow down compaction on API failure
+- [x] Trigger PreCompact hook manually (or via a long-running session) — verify goal reminder appears in stdout
+- [x] Verify hook doesn't block or slow down compaction on API failure
 
 **Implementation Note**: After completing this phase, pause for manual confirmation.
 
@@ -567,7 +567,7 @@ Add a test file covering session attachment features. Follows existing `bun:test
 - [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
-- [ ] Review test file — verify coverage of happy paths, edge cases, and auto-routing logic
+- [x] Review test file — verify coverage of happy paths, edge cases, and auto-routing logic
 
 **Implementation Note**: After completing this phase, pause for manual confirmation.
 
