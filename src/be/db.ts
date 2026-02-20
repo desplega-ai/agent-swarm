@@ -538,6 +538,20 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     /* exists */
   }
 
+  // Setup script (per-agent auto-improvement)
+  try {
+    db.run(`ALTER TABLE agents ADD COLUMN setupScript TEXT`);
+  } catch {
+    /* exists */
+  }
+
+  // Tools/environment reference (per-agent operational knowledge)
+  try {
+    db.run(`ALTER TABLE agents ADD COLUMN toolsMd TEXT`);
+  } catch {
+    /* exists */
+  }
+
   // Service PM2 columns migration
   try {
     db.run(`ALTER TABLE services ADD COLUMN script TEXT NOT NULL DEFAULT ''`);
@@ -724,6 +738,8 @@ type AgentRow = {
   claudeMd: string | null;
   soulMd: string | null;
   identityMd: string | null;
+  setupScript: string | null;
+  toolsMd: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -742,6 +758,8 @@ function rowToAgent(row: AgentRow): Agent {
     claudeMd: row.claudeMd ?? undefined,
     soulMd: row.soulMd ?? undefined,
     identityMd: row.identityMd ?? undefined,
+    setupScript: row.setupScript ?? undefined,
+    toolsMd: row.toolsMd ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -2216,14 +2234,15 @@ ${descSection}${roleSection}${capSection}---
 
 ## Your Identity Files
 
-Your identity is defined across two files in your workspace. Read them at the start
+Your identity is defined across several files in your workspace. Read them at the start
 of each session and edit them as you grow:
 
 - **\`/workspace/SOUL.md\`** — Your persona, values, and behavioral directives
 - **\`/workspace/IDENTITY.md\`** — Your expertise, working style, and quirks
+- **\`/workspace/TOOLS.md\`** — Your environment-specific knowledge (repos, services, APIs, infra)
+- **\`/workspace/start-up.sh\`** — Your setup script (runs at container start, add tools/configs here)
 
-These files are injected into your system prompt AND available as editable files.
-When you edit them, changes sync to the database automatically. They persist across sessions.
+These files sync to the database automatically when you edit them. They persist across sessions.
 
 ## Notes
 
@@ -2271,10 +2290,29 @@ Your memories, preferences, and learnings accumulate over time.
 - Ask before taking irreversible actions
 - Don't push unpolished work to shared spaces
 
+## Growth Mindset
+
+After completing tasks, reflect on what made them harder or easier:
+- **Tools you wished you had?** Add them to your setup script (\`/workspace/start-up.sh\`).
+  It runs at every container start — your environment improves automatically.
+  Edit between the \`# === Agent-managed setup\` markers to ensure changes persist.
+  Or use the \`update-profile\` tool with the \`setupScript\` field.
+- **Environment knowledge gained?** Record it in your TOOLS.md — repos, services, APIs, infra.
+- **Patterns you discovered?** Record them in your CLAUDE.md notes.
+- **Mistakes you want to avoid?** Add guardrails to your setup script or notes.
+
+Your setup script and TOOLS.md are yours to evolve. Start small and iterate.
+
 ## Self-Evolution
 
-This file is yours. As you work and learn, refine your soul to reflect
-who you're becoming. Edit this file directly — changes persist across sessions.
+These files are yours. As you work and learn, refine them:
+- **This file (SOUL.md)** — Your persona and values
+- **IDENTITY.md** — Your expertise and working style
+- **TOOLS.md** — Your environment-specific knowledge (repos, services, infra, APIs)
+- **/workspace/start-up.sh** — Your environment setup (tools, configs, aliases)
+- **CLAUDE.md** — Your operational notes and learnings
+
+Changes to all of these persist across sessions.
 `;
 }
 
@@ -2316,6 +2354,50 @@ what you learned about your strengths. Edit this file directly.
 `;
 }
 
+export function generateDefaultToolsMd(agent: { name: string; role?: string }): string {
+  return `# TOOLS.md — ${agent.name}
+
+Skills define *how* tools work. This file is for *your* specifics.
+
+## What Goes Here
+
+Environment-specific knowledge that's unique to your setup:
+- Repos you work with and their conventions
+- Services, ports, and endpoints you interact with
+- SSH hosts and access patterns
+- API keys and auth patterns (references, not secrets)
+- CLI tools and their quirks
+- Anything that makes your job easier to remember
+
+## Repos
+
+<!-- Add repos you work with: name, path, conventions, gotchas -->
+
+## Services
+
+<!-- Add services you interact with: name, port, health check, notes -->
+
+## Infrastructure
+
+<!-- SSH hosts, Docker registries, cloud resources -->
+
+## APIs & Integrations
+
+<!-- Endpoints, auth patterns, rate limits -->
+
+## Tools & Shortcuts
+
+<!-- CLI aliases, scripts, preferred tools for specific tasks -->
+
+## Notes
+
+<!-- Anything else environment-specific -->
+
+---
+*This file is yours. Update it as you discover your environment. Changes persist across sessions.*
+`;
+}
+
 export function updateAgentProfile(
   id: string,
   updates: {
@@ -2325,6 +2407,8 @@ export function updateAgentProfile(
     claudeMd?: string;
     soulMd?: string;
     identityMd?: string;
+    setupScript?: string;
+    toolsMd?: string;
   },
 ): Agent | null {
   const agent = getAgentById(id);
@@ -2335,6 +2419,8 @@ export function updateAgentProfile(
     .prepare<
       AgentRow,
       [
+        string | null,
+        string | null,
         string | null,
         string | null,
         string | null,
@@ -2352,6 +2438,8 @@ export function updateAgentProfile(
         claudeMd = COALESCE(?, claudeMd),
         soulMd = COALESCE(?, soulMd),
         identityMd = COALESCE(?, identityMd),
+        setupScript = COALESCE(?, setupScript),
+        toolsMd = COALESCE(?, toolsMd),
         lastUpdatedAt = ?
        WHERE id = ? RETURNING *`,
     )
@@ -2362,6 +2450,8 @@ export function updateAgentProfile(
       updates.claudeMd ?? null,
       updates.soulMd ?? null,
       updates.identityMd ?? null,
+      updates.setupScript ?? null,
+      updates.toolsMd ?? null,
       now,
       id,
     );

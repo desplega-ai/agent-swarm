@@ -211,6 +211,18 @@ const BASE_PROMPT_FILESYSTEM = `
   - There will be a /workspace/shared/thoughts/shared/... directory for general swarm-wide notes.
   - There will be a /workspace/shared/thoughts/{yourId}/... directory for each agent to store their individual notes, you can access other agents' notes here as well.
 
+#### Environment Setup
+Your setup script at \`/workspace/start-up.sh\` runs at every container start.
+Use it to install tools, configure your environment, or set up workflows.
+If the file has \`# === Agent-managed setup\` markers, edit between them — content
+between markers is what persists to the database. You can also use the \`update-profile\`
+tool with the \`setupScript\` field.
+
+#### Operational Knowledge
+Your \`/workspace/TOOLS.md\` file stores environment-specific knowledge — repos you work with,
+services and ports, SSH hosts, APIs, tool preferences. Update it as you learn about your environment.
+It persists across sessions.
+
 #### Memory
 
 - Use the /workspace/personal directory to store any files you want to persist across sessions.
