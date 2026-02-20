@@ -1072,39 +1072,14 @@ const httpServer = createHttpServer(async (req, res) => {
       return;
     }
 
-    // Validate claudeMd size if provided (max 64KB)
-    if (body.claudeMd !== undefined && body.claudeMd.length > 65536) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "claudeMd must be 64KB or less" }));
-      return;
-    }
-
-    // Validate soulMd size if provided (max 64KB)
-    if (body.soulMd !== undefined && body.soulMd.length > 65536) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "soulMd must be 64KB or less" }));
-      return;
-    }
-
-    // Validate identityMd size if provided (max 64KB)
-    if (body.identityMd !== undefined && body.identityMd.length > 65536) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "identityMd must be 64KB or less" }));
-      return;
-    }
-
-    // Validate setupScript size if provided (max 64KB)
-    if (body.setupScript !== undefined && body.setupScript.length > 65536) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "setupScript must be 64KB or less" }));
-      return;
-    }
-
-    // Validate toolsMd size if provided (max 64KB)
-    if (body.toolsMd !== undefined && body.toolsMd.length > 65536) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "toolsMd must be 64KB or less" }));
-      return;
+    // Validate text field sizes (max 64KB each)
+    for (const field of ["claudeMd", "soulMd", "identityMd", "setupScript", "toolsMd"] as const) {
+      const value = body[field];
+      if (value !== undefined && value.length > 65536) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: `${field} must be 64KB or less` }));
+        return;
+      }
     }
 
     const agent = updateAgentProfile(agentId, {

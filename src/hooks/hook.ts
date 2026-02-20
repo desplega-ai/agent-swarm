@@ -9,9 +9,11 @@ const SERVER_NAME = pkg.config?.name ?? "agent-swarm";
 const CLAUDE_MD_PATH = `${process.env.HOME}/.claude/CLAUDE.md`;
 const CLAUDE_MD_BACKUP_PATH = `${process.env.HOME}/.claude/CLAUDE.md.bak`;
 
-// Identity file paths (workspace root)
+// Identity and workspace file paths
 const SOUL_MD_PATH = "/workspace/SOUL.md";
 const IDENTITY_MD_PATH = "/workspace/IDENTITY.md";
+const TOOLS_MD_PATH = "/workspace/TOOLS.md";
+const SETUP_SCRIPT_PATH = "/workspace/start-up.sh";
 
 type McpServerConfig = {
   url: string;
@@ -306,17 +308,12 @@ export async function handleHook(): Promise<void> {
       }
     }
 
-    const TOOLS_MD_PATH = "/workspace/TOOLS.md";
-    try {
-      const toolsMdFile = Bun.file(TOOLS_MD_PATH);
-      if (await toolsMdFile.exists()) {
-        const content = await toolsMdFile.text();
-        if (content.trim() && content.length <= 65536) {
-          updates.toolsMd = content;
-        }
+    const toolsMdFile = Bun.file(TOOLS_MD_PATH);
+    if (await toolsMdFile.exists()) {
+      const content = await toolsMdFile.text();
+      if (content.trim() && content.length <= 65536) {
+        updates.toolsMd = content;
       }
-    } catch {
-      /* skip */
     }
 
     if (Object.keys(updates).length === 0) return;
@@ -342,7 +339,6 @@ export async function handleHook(): Promise<void> {
   const syncSetupScriptToServer = async (agentId: string): Promise<void> => {
     if (!mcpConfig) return;
 
-    const SETUP_SCRIPT_PATH = "/workspace/start-up.sh";
     const file = Bun.file(SETUP_SCRIPT_PATH);
     if (!(await file.exists())) return;
 
@@ -676,42 +672,28 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
 
     case "PostToolUse":
       if (agentInfo) {
-        // Sync identity files when agent edits them
+        // Sync workspace file edits back to DB
         const toolName = msg.tool_name;
         const toolInput = msg.tool_input as { file_path?: string } | undefined;
         const editedPath = toolInput?.file_path;
 
-        if (
-          (toolName === "Write" || toolName === "Edit") &&
-          editedPath &&
-          (editedPath === SOUL_MD_PATH || editedPath === IDENTITY_MD_PATH)
-        ) {
+        if ((toolName === "Write" || toolName === "Edit") && editedPath) {
           try {
-            await syncIdentityFilesToServer(agentInfo.id);
+            // Identity files: SOUL.md, IDENTITY.md, TOOLS.md
+            if (
+              editedPath === SOUL_MD_PATH ||
+              editedPath === IDENTITY_MD_PATH ||
+              editedPath === TOOLS_MD_PATH
+            ) {
+              await syncIdentityFilesToServer(agentInfo.id);
+            }
+
+            // Setup script: start-up.sh (or start-up.*)
+            if (editedPath.startsWith("/workspace/start-up")) {
+              await syncSetupScriptToServer(agentInfo.id);
+            }
           } catch {
             // Non-blocking — don't interrupt the agent's workflow
-          }
-        }
-
-        // Sync setup script edits back to DB
-        if (
-          (toolName === "Write" || toolName === "Edit") &&
-          editedPath &&
-          editedPath.startsWith("/workspace/start-up")
-        ) {
-          try {
-            await syncSetupScriptToServer(agentInfo.id);
-          } catch {
-            // Non-blocking
-          }
-        }
-
-        // Sync TOOLS.md edits back to DB
-        if ((toolName === "Write" || toolName === "Edit") && editedPath === "/workspace/TOOLS.md") {
-          try {
-            await syncIdentityFilesToServer(agentInfo.id);
-          } catch {
-            // Non-blocking
           }
         }
 
