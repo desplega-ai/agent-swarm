@@ -353,16 +353,16 @@ Also update existing tests in `src/tests/generate-default-claude-md.test.ts` for
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] All tests pass: `bun test`
-- [ ] New template tests pass: `bun test src/tests/generate-identity-templates.test.ts`
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] All tests pass: `bun test`
+- [x] New template tests pass: `bun test src/tests/generate-identity-templates.test.ts`
 
 #### Manual Verification:
 - [ ] Start API, register a new agent via MCP `join-swarm`, check that the response includes populated `soulMd` and `identityMd`
 - [ ] Verify soul content includes "Core Truths", "Self-Evolution" sections
 - [ ] Verify identity content includes "Vibe", "Quirks", "Working Style" sections
-- [ ] Verify CLAUDE.md content includes "Session Startup" section referencing SOUL.md and IDENTITY.md
+- [ ] Verify CLAUDE.md content includes "Your Identity Files" section referencing SOUL.md and IDENTITY.md
 
 **Implementation Note**: After completing this phase, pause for manual confirmation.
 
