@@ -128,6 +128,11 @@ export const AgentSchema = z.object({
   // Personal CLAUDE.md content (max 64KB)
   claudeMd: z.string().max(65536).optional(),
 
+  // Soul: Persona, behavioral directives (injected via --append-system-prompt)
+  soulMd: z.string().max(65536).optional(),
+  // Identity: Expertise, working style, self-evolution notes (injected via --append-system-prompt)
+  identityMd: z.string().max(65536).optional(),
+
   // Concurrency limit (defaults to 1 for backwards compatibility)
   maxTasks: z.number().int().min(1).max(20).optional(),
 

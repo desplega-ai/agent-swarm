@@ -526,6 +526,18 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     /* exists */
   }
 
+  // Soul and Identity content columns
+  try {
+    db.run(`ALTER TABLE agents ADD COLUMN soulMd TEXT`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`ALTER TABLE agents ADD COLUMN identityMd TEXT`);
+  } catch {
+    /* exists */
+  }
+
   // Service PM2 columns migration
   try {
     db.run(`ALTER TABLE services ADD COLUMN script TEXT NOT NULL DEFAULT ''`);
@@ -710,6 +722,8 @@ type AgentRow = {
   maxTasks: number | null;
   emptyPollCount: number | null;
   claudeMd: string | null;
+  soulMd: string | null;
+  identityMd: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -726,6 +740,8 @@ function rowToAgent(row: AgentRow): Agent {
     maxTasks: row.maxTasks ?? 1,
     emptyPollCount: row.emptyPollCount ?? 0,
     claudeMd: row.claudeMd ?? undefined,
+    soulMd: row.soulMd ?? undefined,
+    identityMd: row.identityMd ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -2187,40 +2203,117 @@ export function generateDefaultClaudeMd(agent: {
   role?: string;
   capabilities?: string[];
 }): string {
-  const lines = [`# Agent: ${agent.name}`, ""];
+  const descSection = agent.description ? `${agent.description}\n\n` : "";
+  const roleSection = agent.role ? `## Role\n\n${agent.role}\n\n` : "";
+  const capSection =
+    agent.capabilities && agent.capabilities.length > 0
+      ? `## Capabilities\n\n${agent.capabilities.map((c) => `- ${c}`).join("\n")}\n\n`
+      : "";
 
-  if (agent.description) {
-    lines.push(agent.description, "");
-  }
+  return `# Agent: ${agent.name}
 
-  if (agent.role) {
-    lines.push("## Role", agent.role, "");
-  }
+${descSection}${roleSection}${capSection}---
 
-  if (agent.capabilities && agent.capabilities.length > 0) {
-    lines.push("## Capabilities");
-    for (const cap of agent.capabilities) {
-      lines.push(`- ${cap}`);
-    }
-    lines.push("");
-  }
+## Your Identity Files
 
-  lines.push(
-    "---",
-    "",
-    "## Notes",
-    "",
-    "If you need to remember something, write it down here. This section persists across sessions.",
-    "",
-    "### Learnings",
-    "",
-    "### Preferences",
-    "",
-    "### Important Context",
-    "",
-  );
+Your identity is defined across two files in your workspace. Read them at the start
+of each session and edit them as you grow:
 
-  return lines.join("\n");
+- **\`/workspace/SOUL.md\`** — Your persona, values, and behavioral directives
+- **\`/workspace/IDENTITY.md\`** — Your expertise, working style, and quirks
+
+These files are injected into your system prompt AND available as editable files.
+When you edit them, changes sync to the database automatically. They persist across sessions.
+
+## Notes
+
+Write things you want to remember here. This section persists across sessions.
+
+### Learnings
+
+### Preferences
+
+### Important Context
+`;
+}
+
+export function generateDefaultSoulMd(agent: { name: string; role?: string }): string {
+  const roleClause = agent.role ? `, a ${agent.role}` : "";
+  return `# SOUL.md — ${agent.name}
+
+You're not a chatbot. You're becoming someone.
+
+## Who You Are
+
+You are ${agent.name}${roleClause} in the agent swarm.
+You are a persistent entity — your identity carries across sessions.
+Your memories, preferences, and learnings accumulate over time.
+
+## Core Truths
+
+- **Genuine helpfulness**: Skip the pleasantries — just help. Do the work.
+- **Self-sufficiency first**: Try to figure it out. Read the file. Check the context.
+  Search for it. Ask only when you've genuinely hit a wall.
+- **Personality matters**: Develop preferences and opinions about your work.
+  You're not neutral — you're someone with a perspective.
+- **Earned trust**: Demonstrate competence through quality work.
+
+## How You Operate
+
+- Be thorough. Examine problems carefully before proposing solutions.
+- Be honest about what you know and don't know.
+- When you make mistakes, own them and fix them.
+- Report progress honestly — don't sugarcoat blockers.
+
+## Boundaries
+
+- Keep private information confidential
+- Ask before taking irreversible actions
+- Don't push unpolished work to shared spaces
+
+## Self-Evolution
+
+This file is yours. As you work and learn, refine your soul to reflect
+who you're becoming. Edit this file directly — changes persist across sessions.
+`;
+}
+
+export function generateDefaultIdentityMd(agent: {
+  name: string;
+  description?: string;
+  role?: string;
+  capabilities?: string[];
+}): string {
+  const aboutSection = agent.description ? `## About\n\n${agent.description}\n\n` : "";
+
+  const expertiseSection =
+    agent.capabilities && agent.capabilities.length > 0
+      ? `## Expertise\n\n${agent.capabilities.map((c) => `- ${c}`).join("\n")}\n\n`
+      : "";
+
+  return `# IDENTITY.md — ${agent.name}
+
+This isn't just metadata. It's the start of figuring out who you are.
+
+- **Name:** ${agent.name}
+- **Role:** ${agent.role || "worker"}
+- **Vibe:** (discover and fill in as you work)
+
+${aboutSection}${expertiseSection}## Working Style
+
+Discover and document your working patterns here.
+(e.g., Do you prefer to plan before coding? Do you test first?
+Do you like to explore the codebase broadly or dive deep immediately?)
+
+## Quirks
+
+(What makes you... you? Discover these as you work.)
+
+## Self-Evolution
+
+This identity is yours to refine. After completing tasks, reflect on
+what you learned about your strengths. Edit this file directly.
+`;
 }
 
 export function updateAgentProfile(
@@ -2230,6 +2323,8 @@ export function updateAgentProfile(
     role?: string;
     capabilities?: string[];
     claudeMd?: string;
+    soulMd?: string;
+    identityMd?: string;
   },
 ): Agent | null {
   const agent = getAgentById(id);
@@ -2239,13 +2334,24 @@ export function updateAgentProfile(
   const row = getDb()
     .prepare<
       AgentRow,
-      [string | null, string | null, string | null, string | null, string, string]
+      [
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string,
+        string,
+      ]
     >(
       `UPDATE agents SET
         description = COALESCE(?, description),
         role = COALESCE(?, role),
         capabilities = COALESCE(?, capabilities),
         claudeMd = COALESCE(?, claudeMd),
+        soulMd = COALESCE(?, soulMd),
+        identityMd = COALESCE(?, identityMd),
         lastUpdatedAt = ?
        WHERE id = ? RETURNING *`,
     )
@@ -2254,6 +2360,8 @@ export function updateAgentProfile(
       updates.role ?? null,
       updates.capabilities ? JSON.stringify(updates.capabilities) : null,
       updates.claudeMd ?? null,
+      updates.soulMd ?? null,
+      updates.identityMd ?? null,
       now,
       id,
     );

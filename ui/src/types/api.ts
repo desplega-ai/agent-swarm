@@ -23,6 +23,8 @@ export interface Agent {
   role?: string;
   capabilities?: string[];
   claudeMd?: string;
+  soulMd?: string;
+  identityMd?: string;
   maxTasks?: number;
   capacity?: {
     current: number;
