@@ -15,6 +15,8 @@ import type {
   Stats,
   SwarmConfig,
   SwarmConfigsResponse,
+  SwarmRepo,
+  SwarmReposResponse,
   TasksResponse,
   TaskWithLogs,
 } from "../types/api";
@@ -335,6 +337,70 @@ class ApiClient {
       headers: this.getHeaders(),
     });
     if (!res.ok) throw new Error(`Failed to delete config: ${res.status}`);
+    return res.json();
+  }
+
+  // Repos API methods
+  async fetchRepos(filters?: { autoClone?: boolean }): Promise<SwarmReposResponse> {
+    const params = new URLSearchParams();
+    if (filters?.autoClone !== undefined) params.set("autoClone", String(filters.autoClone));
+    const queryString = params.toString();
+    const url = `${this.getBaseUrl()}/api/repos${queryString ? `?${queryString}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch repos: ${res.status}`);
+    return res.json();
+  }
+
+  async createRepo(data: {
+    url: string;
+    name: string;
+    clonePath?: string;
+    defaultBranch?: string;
+    autoClone?: boolean;
+  }): Promise<SwarmRepo> {
+    const url = `${this.getBaseUrl()}/api/repos`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to create repo" }));
+      throw new Error(error.error || `Failed to create repo: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async updateRepo(
+    id: string,
+    data: Partial<{
+      url: string;
+      name: string;
+      clonePath: string;
+      defaultBranch: string;
+      autoClone: boolean;
+    }>,
+  ): Promise<SwarmRepo> {
+    const url = `${this.getBaseUrl()}/api/repos/${id}`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to update repo" }));
+      throw new Error(error.error || `Failed to update repo: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async deleteRepo(id: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/repos/${id}`;
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to delete repo: ${res.status}`);
     return res.json();
   }
 }

@@ -53,6 +53,12 @@ export const registerSendTaskTool = (server: McpServer) => {
           .describe(
             "Parent task ID for session continuity. Child task will resume the parent's Claude session. Auto-routes to the same worker unless agentId is explicitly provided.",
           ),
+        githubRepo: z
+          .string()
+          .optional()
+          .describe(
+            "GitHub repo identifier (e.g., 'desplega-ai/agent-swarm'). Links the task to a registered repo for workspace context.",
+          ),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
@@ -62,7 +68,18 @@ export const registerSendTaskTool = (server: McpServer) => {
       }),
     },
     async (
-      { agentId, task, offerMode, taskType, tags, priority, dependsOn, epicId, parentTaskId },
+      {
+        agentId,
+        task,
+        offerMode,
+        taskType,
+        tags,
+        priority,
+        dependsOn,
+        epicId,
+        parentTaskId,
+        githubRepo,
+      },
       requestInfo,
       _meta,
     ) => {
@@ -98,7 +115,8 @@ export const registerSendTaskTool = (server: McpServer) => {
         };
       }
 
-      // Validate epicId if provided
+      // Validate epicId and auto-inherit githubRepo from epic if not explicitly provided
+      let effectiveGithubRepo = githubRepo;
       if (epicId) {
         const epic = getEpicById(epicId);
         if (!epic) {
@@ -110,6 +128,9 @@ export const registerSendTaskTool = (server: McpServer) => {
               message: `Epic not found: ${epicId}`,
             },
           };
+        }
+        if (!githubRepo && epic.githubRepo) {
+          effectiveGithubRepo = epic.githubRepo;
         }
       }
 
@@ -136,6 +157,7 @@ export const registerSendTaskTool = (server: McpServer) => {
             dependsOn,
             epicId,
             parentTaskId,
+            githubRepo: effectiveGithubRepo,
           });
 
           return {
@@ -181,6 +203,7 @@ export const registerSendTaskTool = (server: McpServer) => {
             dependsOn,
             epicId,
             parentTaskId,
+            githubRepo: effectiveGithubRepo,
           });
 
           return {
@@ -200,6 +223,7 @@ export const registerSendTaskTool = (server: McpServer) => {
           dependsOn,
           epicId,
           parentTaskId,
+          githubRepo: effectiveGithubRepo,
         });
 
         return {

@@ -5,7 +5,7 @@ import {
   generateDefaultSoulMd,
   generateDefaultToolsMd,
 } from "../be/db.ts";
-import { getBasePrompt } from "../prompts/base-prompt.ts";
+import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 
 /** Task file data written to /tmp for hook to read */
@@ -44,6 +44,91 @@ async function savePm2State(role: string): Promise<void> {
     console.log(`[${role}] PM2 state saved`);
   } catch {
     // PM2 not available or no processes - silently ignore
+  }
+}
+
+/** Fetch repo config for a task's githubRepo (e.g., "desplega-ai/agent-swarm") */
+async function fetchRepoConfig(
+  apiUrl: string,
+  apiKey: string,
+  githubRepo: string,
+): Promise<{ url: string; name: string; clonePath: string; defaultBranch: string } | null> {
+  try {
+    const repoName = githubRepo.split("/").pop() || githubRepo;
+    const resp = await fetch(`${apiUrl}/api/repos?name=${encodeURIComponent(repoName)}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!resp.ok) return null;
+    const data = (await resp.json()) as {
+      repos: Array<{ url: string; name: string; clonePath: string; defaultBranch: string }>;
+    };
+    return data.repos.find((r) => r.url.includes(githubRepo)) ?? data.repos[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function isGitHubRepo(url: string): boolean {
+  return url.includes("github.com") || /^[\w.-]+\/[\w.-]+$/.test(url);
+}
+
+/** Read CLAUDE.md from a repo directory, returning null if not found */
+async function readClaudeMd(clonePath: string, role: string): Promise<string | null> {
+  const claudeMdFile = Bun.file(`${clonePath}/CLAUDE.md`);
+  if (await claudeMdFile.exists()) {
+    const content = await claudeMdFile.text();
+    console.log(`[${role}] Read CLAUDE.md from ${clonePath}/CLAUDE.md (${content.length} chars)`);
+    return content;
+  }
+  console.log(`[${role}] No CLAUDE.md found at ${clonePath}/CLAUDE.md`);
+  return null;
+}
+
+/**
+ * Ensure a repo is cloned and up-to-date for a task.
+ * Returns { clonePath, claudeMd, warning }.
+ */
+async function ensureRepoForTask(
+  repoConfig: { url: string; name: string; clonePath: string; defaultBranch: string },
+  role: string,
+): Promise<{ clonePath: string; claudeMd: string | null; warning: string | null }> {
+  const { url, name, clonePath, defaultBranch } = repoConfig;
+
+  try {
+    const gitHeadExists = await Bun.file(`${clonePath}/.git/HEAD`).exists();
+
+    let warning: string | null = null;
+
+    if (!gitHeadExists) {
+      console.log(`[${role}] Cloning ${name} to ${clonePath}...`);
+      if (isGitHubRepo(url)) {
+        await Bun.$`gh repo clone ${url} ${clonePath} -- --branch ${defaultBranch} --single-branch`.quiet();
+      } else {
+        await Bun.$`git clone --branch ${defaultBranch} --single-branch ${url} ${clonePath}`.quiet();
+      }
+      console.log(`[${role}] Cloned ${name}`);
+    } else {
+      console.log(`[${role}] Repo ${name} already cloned at ${clonePath}`);
+      const statusResult = await Bun.$`cd ${clonePath} && git status --porcelain`.quiet();
+      const statusOutput = statusResult.text().trim();
+
+      if (statusOutput === "") {
+        console.log(`[${role}] Pulling ${name} (${defaultBranch})...`);
+        await Bun.$`cd ${clonePath} && git pull origin ${defaultBranch} --ff-only`.quiet();
+        console.log(`[${role}] Pulled ${name}`);
+      } else {
+        console.warn(`[${role}] Repo ${name} has uncommitted changes, skipping pull`);
+        warning = `The repo "${name}" at ${clonePath} has uncommitted changes. A git pull was skipped to avoid losing work. You may need to commit or stash changes before pulling updates.`;
+      }
+    }
+
+    const claudeMd = await readClaudeMd(clonePath, role);
+    return { clonePath, claudeMd, warning };
+  } catch (err) {
+    const errorMsg = (err as Error).message;
+    console.warn(`[${role}] Error setting up repo ${name}: ${errorMsg}`);
+    const warning = `Failed to clone/setup repo "${name}" at ${clonePath}: ${errorMsg}. The repo may not be available. You may need to clone it manually.`;
+    return { clonePath, claudeMd: null, warning };
   }
 }
 
@@ -1420,6 +1505,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let agentProfileName: string | undefined;
   let agentDescription: string | undefined;
 
+  // Per-task repo context — set when processing a task with githubRepo
+  let currentRepoContext: BasePromptArgs["repoContext"] | undefined;
+
   // Generate base prompt (identity fields injected after profile fetch below)
   const buildSystemPrompt = () => {
     return getBasePrompt({
@@ -1431,6 +1519,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       description: agentDescription,
       soulMd: agentSoulMd,
       identityMd: agentIdentityMd,
+      repoContext: currentRepoContext,
     });
   };
 
@@ -1814,6 +1903,28 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             }
           }
 
+          // Handle repo context for tasks with githubRepo
+          const taskGithubRepo = (trigger.task as { githubRepo?: string } | undefined)?.githubRepo;
+          if (taskGithubRepo && apiUrl) {
+            const repoConfig = await fetchRepoConfig(apiUrl, apiKey, taskGithubRepo);
+            // Fall back to convention-based config if repo is not registered
+            const effectiveConfig = repoConfig ?? {
+              url: taskGithubRepo,
+              name: taskGithubRepo.split("/").pop() || taskGithubRepo,
+              clonePath: `/workspace/repos/${taskGithubRepo.split("/").pop() || taskGithubRepo}`,
+              defaultBranch: "main",
+            };
+            currentRepoContext = await ensureRepoForTask(effectiveConfig, role);
+          } else {
+            currentRepoContext = undefined;
+          }
+
+          // Rebuild system prompt with per-task repo context
+          const taskBasePrompt = buildSystemPrompt();
+          const taskSystemPrompt = additionalSystemPrompt
+            ? `${taskBasePrompt}\n\n${additionalSystemPrompt}`
+            : taskBasePrompt;
+
           iteration++;
           const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
           const taskIdSlice = trigger.taskId?.slice(0, 8) || "notask";
@@ -1839,7 +1950,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             {
               prompt: triggerPrompt,
               logFile,
-              systemPrompt: resolvedSystemPrompt,
+              systemPrompt: taskSystemPrompt,
               additionalArgs: effectiveAdditionalArgs,
               role,
               apiUrl,

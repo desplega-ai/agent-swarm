@@ -318,6 +318,11 @@ export type BasePromptArgs = {
   description?: string;
   soulMd?: string;
   identityMd?: string;
+  repoContext?: {
+    claudeMd?: string | null;
+    clonePath: string;
+    warning?: string | null;
+  };
 };
 
 export const getBasePrompt = (args: BasePromptArgs): string => {
@@ -333,6 +338,23 @@ export const getBasePrompt = (args: BasePromptArgs): string => {
     }
     if (args.identityMd) {
       prompt += `${args.identityMd}\n`;
+    }
+  }
+
+  if (args.repoContext) {
+    prompt += "\n\n## Repository Context\n\n";
+
+    if (args.repoContext.warning) {
+      prompt += `WARNING: ${args.repoContext.warning}\n\n`;
+    }
+
+    if (args.repoContext.claudeMd) {
+      prompt += `The following CLAUDE.md is from the repository cloned at \`${args.repoContext.clonePath}\`. `;
+      prompt += `**IMPORTANT: These instructions apply ONLY when working within the \`${args.repoContext.clonePath}\` directory.** `;
+      prompt += `Do NOT apply these rules to files outside that directory.\n\n`;
+      prompt += `${args.repoContext.claudeMd}\n`;
+    } else if (!args.repoContext.warning) {
+      prompt += `Repository is cloned at \`${args.repoContext.clonePath}\` but has no CLAUDE.md file.\n`;
     }
   }
 

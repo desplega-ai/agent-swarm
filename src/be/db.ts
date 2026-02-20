@@ -25,6 +25,7 @@ import type {
   SessionCost,
   SessionLog,
   SwarmConfig,
+  SwarmRepo,
 } from "../types";
 
 let db: Database | null = null;
@@ -350,6 +351,23 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       `CREATE INDEX IF NOT EXISTS idx_swarm_config_scope_id ON swarm_config(scope, scopeId)`,
     );
     database.run(`CREATE INDEX IF NOT EXISTS idx_swarm_config_key ON swarm_config(key)`);
+
+    // Swarm repos table - centralized repository management
+    database.run(`
+      CREATE TABLE IF NOT EXISTS swarm_repos (
+        id TEXT PRIMARY KEY,
+        url TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL UNIQUE,
+        clonePath TEXT NOT NULL UNIQUE,
+        defaultBranch TEXT NOT NULL DEFAULT 'main',
+        autoClone INTEGER NOT NULL DEFAULT 1,
+        createdAt TEXT NOT NULL,
+        lastUpdatedAt TEXT NOT NULL
+      )
+    `);
+
+    // Swarm repos indexes
+    database.run(`CREATE INDEX IF NOT EXISTS idx_swarm_repos_name ON swarm_repos(name)`);
 
     // Agent memory table - persistent memory system with vector search
     database.run(`
@@ -4715,6 +4733,153 @@ export function getResolvedConfig(agentId?: string, repoId?: string): SwarmConfi
   }
 
   return Array.from(configMap.values()).sort((a, b) => a.key.localeCompare(b.key));
+}
+
+// ============================================================================
+// Swarm Repos Functions (Centralized Repository Management)
+// ============================================================================
+
+type SwarmRepoRow = {
+  id: string;
+  url: string;
+  name: string;
+  clonePath: string;
+  defaultBranch: string;
+  autoClone: number; // SQLite boolean
+  createdAt: string;
+  lastUpdatedAt: string;
+};
+
+function rowToSwarmRepo(row: SwarmRepoRow): SwarmRepo {
+  return {
+    id: row.id,
+    url: row.url,
+    name: row.name,
+    clonePath: row.clonePath,
+    defaultBranch: row.defaultBranch,
+    autoClone: row.autoClone === 1,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+export function getSwarmRepos(filters?: { autoClone?: boolean; name?: string }): SwarmRepo[] {
+  const conditions: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (filters?.autoClone !== undefined) {
+    conditions.push("autoClone = ?");
+    params.push(filters.autoClone ? 1 : 0);
+  }
+  if (filters?.name) {
+    conditions.push("name = ?");
+    params.push(filters.name);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const query = `SELECT * FROM swarm_repos ${whereClause} ORDER BY name ASC`;
+
+  return getDb()
+    .prepare<SwarmRepoRow, (string | number)[]>(query)
+    .all(...params)
+    .map(rowToSwarmRepo);
+}
+
+export function getSwarmRepoById(id: string): SwarmRepo | null {
+  const row = getDb()
+    .prepare<SwarmRepoRow, [string]>("SELECT * FROM swarm_repos WHERE id = ?")
+    .get(id);
+  return row ? rowToSwarmRepo(row) : null;
+}
+
+export function getSwarmRepoByName(name: string): SwarmRepo | null {
+  const row = getDb()
+    .prepare<SwarmRepoRow, [string]>("SELECT * FROM swarm_repos WHERE name = ?")
+    .get(name);
+  return row ? rowToSwarmRepo(row) : null;
+}
+
+export function getSwarmRepoByUrl(url: string): SwarmRepo | null {
+  const row = getDb()
+    .prepare<SwarmRepoRow, [string]>("SELECT * FROM swarm_repos WHERE url = ?")
+    .get(url);
+  return row ? rowToSwarmRepo(row) : null;
+}
+
+export function createSwarmRepo(data: {
+  url: string;
+  name: string;
+  clonePath?: string;
+  defaultBranch?: string;
+  autoClone?: boolean;
+}): SwarmRepo {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const clonePath = data.clonePath || `/workspace/repos/${data.name}`;
+
+  const row = getDb()
+    .prepare<SwarmRepoRow, [string, string, string, string, string, number, string, string]>(
+      `INSERT INTO swarm_repos (id, url, name, clonePath, defaultBranch, autoClone, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      data.url,
+      data.name,
+      clonePath,
+      data.defaultBranch ?? "main",
+      data.autoClone !== false ? 1 : 0,
+      now,
+      now,
+    );
+
+  if (!row) throw new Error("Failed to create repo");
+  return rowToSwarmRepo(row);
+}
+
+export function updateSwarmRepo(
+  id: string,
+  updates: Partial<{
+    url: string;
+    name: string;
+    clonePath: string;
+    defaultBranch: string;
+    autoClone: boolean;
+  }>,
+): SwarmRepo | null {
+  const setClauses: string[] = [];
+  const params: (string | number)[] = [];
+
+  const stringFields = ["url", "name", "clonePath", "defaultBranch"] as const;
+  for (const field of stringFields) {
+    if (updates[field] !== undefined) {
+      setClauses.push(`${field} = ?`);
+      params.push(updates[field]);
+    }
+  }
+  if (updates.autoClone !== undefined) {
+    setClauses.push("autoClone = ?");
+    params.push(updates.autoClone ? 1 : 0);
+  }
+
+  if (setClauses.length === 0) return getSwarmRepoById(id);
+
+  setClauses.push("lastUpdatedAt = ?");
+  params.push(new Date().toISOString());
+  params.push(id);
+
+  const row = getDb()
+    .prepare<SwarmRepoRow, (string | number)[]>(
+      `UPDATE swarm_repos SET ${setClauses.join(", ")} WHERE id = ? RETURNING *`,
+    )
+    .get(...params);
+
+  return row ? rowToSwarmRepo(row) : null;
+}
+
+export function deleteSwarmRepo(id: string): boolean {
+  const result = getDb().run("DELETE FROM swarm_repos WHERE id = ?", [id]);
+  return result.changes > 0;
 }
 
 // ============================================================================

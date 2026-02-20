@@ -8,7 +8,7 @@ topic: "Swarm Gaps Implementation Research: Identity, Memory, Sessions, Repos, A
 tags: [research, architecture, identity, memory, sessions, repos, auto-improvement, env-management, agent-native]
 status: complete
 autonomy: verbose
-last_updated: 2026-02-19
+last_updated: 2026-02-20
 last_updated_by: Claude
 ---
 
@@ -546,17 +546,21 @@ Each gap should be planned and implemented as a separate phase using `/desplega:
    - **Plan**: [`thoughts/taras/plans/2026-02-20-worker-identity.md`](../plans/2026-02-20-worker-identity.md)
    - **PR**: [#62 `claw-worker-identity`](https://github.com/desplega-ai/agent-swarm/pull/62) (merged)
 
-3. **Phase 3 — Memory System (Gap 2)**: BLOB-based vector storage with JS cosine similarity, OpenAI embedding integration, `memory-search` + `memory-get` MCP tools, file-based auto-indexing via PostToolUse hook, session auto-summarization at Stop hook, task completion memory via store-progress.
+3. **Phase 3 — Memory System (Gap 2)** ✅: BLOB-based vector storage with JS cosine similarity, OpenAI embedding integration, `memory-search` + `memory-get` MCP tools, file-based auto-indexing via PostToolUse hook, session auto-summarization at Stop hook, task completion memory via store-progress.
    - **Plan**: [`thoughts/taras/plans/2026-02-20-memory-system.md`](../plans/2026-02-20-memory-system.md)
+   - **PR**: [#65 `claw-memory`](https://github.com/desplega-ai/agent-swarm/pull/65) (merged)
 
 4. **Phase 4 — Session Attachment (Gap 3)** ✅: `parentTaskId` + `claudeSessionId` columns on `agent_tasks`, session ID capture from stream-json, `--resume` with `-p` for child tasks, compact hook for goal reminder.
    - **Plan**: [`thoughts/taras/plans/2026-02-20-session-attach.md`](../plans/2026-02-20-session-attach.md)
    - **PR**: [#61 `claw-session-attach`](https://github.com/desplega-ai/agent-swarm/pull/61) (merged)
 
-5. **Phase 5 — Repos Knowledge (Gap 4)**: `swarm_repos` table, auto-clone on worker start, repo CLAUDE.md injection when task has linked `githubRepo`, API/UI for repo management.
+5. **Phase 5 — Repos Knowledge (Gap 4)** ✅: `swarm_repos` table, auto-clone on worker start, repo CLAUDE.md injection when task has linked `githubRepo`, API/UI for repo management.
+   - **Plan**: [`thoughts/taras/plans/2026-02-20-repos-knowledge.md`](../plans/2026-02-20-repos-knowledge.md)
+   - **PR**: [#64 `respo-knowledge`](https://github.com/desplega-ai/agent-swarm/pull/64)
 
-6. **Phase 6 — Auto-improvement (Gap 5)**: DB-stored setup script (global + per-worker), prepend to mounted startup file, self-learning instructions in system prompt.
+6. **Phase 6 — Auto-improvement (Gap 5)** ✅: DB-stored setup script (global + per-worker), prepend to mounted startup file, self-learning instructions in system prompt.
    - **Plan**: [`thoughts/taras/plans/2026-02-20-auto-improvement.md`](../plans/2026-02-20-auto-improvement.md)
+   - **PR**: [#63 `claw-auto-improvement`](https://github.com/desplega-ai/agent-swarm/pull/63) (merged)
 
 ## Historical Context (from thoughts/)
 
