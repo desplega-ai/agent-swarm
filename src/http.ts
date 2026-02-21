@@ -580,6 +580,22 @@ const httpServer = createHttpServer(async (req, res) => {
           }
         }
 
+        // Check for unread mentions (internal chat) - all agents can be woken by @mentions
+        // Uses atomic claiming via processing_since to prevent duplicate processing.
+        // Only idle agents poll, so busy workers won't be interrupted.
+        const claimedChannels = claimMentions(myAgentId);
+        if (claimedChannels.length > 0) {
+          // Recalculate inbox summary now that we've claimed
+          const inbox = getInboxSummary(myAgentId);
+          return {
+            trigger: {
+              type: "unread_mentions",
+              mentionsCount: inbox.mentionsCount,
+              claimedChannels: claimedChannels.map((c) => c.channelId), // Include for tracking
+            },
+          };
+        }
+
         if (agent.isLead) {
           // === LEAD-SPECIFIC TRIGGERS ===
 
@@ -598,20 +614,6 @@ const httpServer = createHttpServer(async (req, res) => {
                 type: "slack_inbox_message",
                 count: claimedInbox.length,
                 messages: claimedInbox,
-              },
-            };
-          }
-
-          // Check for unread mentions (internal chat) - atomically claim them
-          const claimedChannels = claimMentions(myAgentId);
-          if (claimedChannels.length > 0) {
-            // Recalculate inbox summary now that we've claimed
-            const inbox = getInboxSummary(myAgentId);
-            return {
-              trigger: {
-                type: "unread_mentions",
-                mentionsCount: inbox.mentionsCount,
-                claimedChannels: claimedChannels.map((c) => c.channelId), // Include for tracking
               },
             };
           }

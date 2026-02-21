@@ -108,17 +108,18 @@ async function handleRequest(
         };
       }
 
-      if (agent.isLead) {
-        const inbox = getInboxSummary(myAgentId);
-        if (inbox.mentionsCount > 0) {
-          return {
-            trigger: {
-              type: "unread_mentions",
-              mentionsCount: inbox.mentionsCount,
-            },
-          };
-        }
+      // Check for unread mentions - all agents can be woken by @mentions
+      const inbox = getInboxSummary(myAgentId);
+      if (inbox.mentionsCount > 0) {
+        return {
+          trigger: {
+            type: "unread_mentions",
+            mentionsCount: inbox.mentionsCount,
+          },
+        };
+      }
 
+      if (agent.isLead) {
         const unassignedCount = getUnassignedTasksCount();
         if (unassignedCount > 0) {
           return {
