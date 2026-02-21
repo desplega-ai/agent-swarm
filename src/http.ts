@@ -48,6 +48,7 @@ import {
   getAllTasks,
   getChannelById,
   getChannelMessages,
+  getConcurrentContext,
   getDb,
   getEpicById,
   getEpics,
@@ -1679,6 +1680,19 @@ const httpServer = createHttpServer(async (req, res) => {
     });
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ scheduledTasks }));
+    return;
+  }
+
+  // GET /api/concurrent-context - Get concurrent session context for lead awareness
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "concurrent-context" &&
+    !pathSegments[2]
+  ) {
+    const context = getConcurrentContext();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(context));
     return;
   }
 

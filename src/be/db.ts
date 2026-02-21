@@ -3824,6 +3824,115 @@ export function releaseStaleProcessingInbox(timeoutMinutes: number = 30): number
 }
 
 // ============================================================================
+// Concurrent Context (for lead session awareness)
+// ============================================================================
+
+export interface ConcurrentContext {
+  processingInboxMessages: Array<{
+    id: string;
+    content: string;
+    source: string;
+    slackChannelId: string | null;
+    slackThreadTs: string | null;
+    createdAt: string;
+  }>;
+  recentTaskDelegations: Array<{
+    id: string;
+    task: string;
+    agentId: string | null;
+    agentName: string | null;
+    creatorAgentId: string | null;
+    status: string;
+    createdAt: string;
+  }>;
+  activeSwarmTasks: Array<{
+    id: string;
+    task: string;
+    agentId: string | null;
+    agentName: string | null;
+    status: string;
+    createdAt: string;
+    progress: string | null;
+  }>;
+}
+
+/**
+ * Get concurrent context for lead session awareness.
+ * Returns processing inbox messages, recent task delegations by leads,
+ * and currently active (in-progress) tasks across the swarm.
+ */
+export function getConcurrentContext(): ConcurrentContext {
+  // 1. Inbox messages currently being processed (status = 'processing')
+  const processingInboxMessages = getDb()
+    .prepare<
+      {
+        id: string;
+        content: string;
+        source: string;
+        slackChannelId: string | null;
+        slackThreadTs: string | null;
+        createdAt: string;
+      },
+      []
+    >(
+      "SELECT id, content, source, slackChannelId, slackThreadTs, createdAt FROM inbox_messages WHERE status = 'processing' ORDER BY createdAt DESC",
+    )
+    .all();
+
+  // 2. Tasks created in the last 5 minutes by lead agents
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const recentTaskDelegations = getDb()
+    .prepare<
+      {
+        id: string;
+        task: string;
+        agentId: string | null;
+        agentName: string | null;
+        creatorAgentId: string | null;
+        status: string;
+        createdAt: string;
+      },
+      [string]
+    >(
+      `SELECT t.id, t.task, t.agentId, a.name as agentName, t.creatorAgentId, t.status, t.createdAt
+       FROM agent_tasks t
+       LEFT JOIN agents a ON t.agentId = a.id
+       WHERE t.createdAt > ?
+         AND t.creatorAgentId IN (SELECT id FROM agents WHERE isLead = 1)
+       ORDER BY t.createdAt DESC`,
+    )
+    .all(fiveMinutesAgo);
+
+  // 3. Currently in-progress tasks across the swarm
+  const activeSwarmTasks = getDb()
+    .prepare<
+      {
+        id: string;
+        task: string;
+        agentId: string | null;
+        agentName: string | null;
+        status: string;
+        createdAt: string;
+        progress: string | null;
+      },
+      []
+    >(
+      `SELECT t.id, t.task, t.agentId, a.name as agentName, t.status, t.createdAt, t.progress
+       FROM agent_tasks t
+       LEFT JOIN agents a ON t.agentId = a.id
+       WHERE t.status = 'in_progress'
+       ORDER BY t.createdAt DESC`,
+    )
+    .all();
+
+  return {
+    processingInboxMessages,
+    recentTaskDelegations,
+    activeSwarmTasks,
+  };
+}
+
+// ============================================================================
 // Scheduled Task Queries
 // ============================================================================
 
