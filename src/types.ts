@@ -450,3 +450,20 @@ export const AgentMemorySchema = z.object({
 export type AgentMemoryScope = z.infer<typeof AgentMemoryScopeSchema>;
 export type AgentMemorySource = z.infer<typeof AgentMemorySourceSchema>;
 export type AgentMemory = z.infer<typeof AgentMemorySchema>;
+
+// ============================================================================
+// Active Session Types (runner session tracking)
+// ============================================================================
+
+export const ActiveSessionSchema = z.object({
+  id: z.uuid(),
+  agentId: z.uuid(),
+  taskId: z.string().optional(),
+  triggerType: z.string(),
+  inboxMessageId: z.string().optional(),
+  taskDescription: z.string().optional(),
+  startedAt: z.iso.datetime(),
+  lastHeartbeatAt: z.iso.datetime(),
+});
+
+export type ActiveSession = z.infer<typeof ActiveSessionSchema>;

@@ -22,6 +22,8 @@ import {
   claimInboxMessages,
   claimMentions,
   claimOfferedTask,
+  cleanupAgentSessions,
+  cleanupStaleSessions,
   closeDb,
   completeTask,
   createAgent,
@@ -31,11 +33,14 @@ import {
   createSessionLogs,
   createSwarmRepo,
   createTaskExtended,
+  deleteActiveSession,
+  deleteActiveSessionById,
   deleteEpic,
   deleteMemoriesBySourcePath,
   deleteSwarmConfig,
   deleteSwarmRepo,
   failTask,
+  getActiveSessions,
   getActiveTaskCount,
   getAgentById,
   getAgentWithTasks,
@@ -76,6 +81,8 @@ import {
   getTasksCount,
   getUnassignedTasksCount,
   hasCapacity,
+  heartbeatActiveSession,
+  insertActiveSession,
   markEpicsProgressNotified,
   maskSecrets,
   pauseTask,
@@ -1679,6 +1686,137 @@ const httpServer = createHttpServer(async (req, res) => {
     });
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ scheduledTasks }));
+    return;
+  }
+
+  // ============================================================================
+  // Active Session Endpoints (runner session tracking)
+  // ============================================================================
+
+  // GET /api/active-sessions - List active sessions (with optional agentId filter)
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "active-sessions" &&
+    !pathSegments[2]
+  ) {
+    const agentId = queryParams.get("agentId");
+    const sessions = getActiveSessions(agentId || undefined);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ sessions }));
+    return;
+  }
+
+  // POST /api/active-sessions - Create a new active session
+  if (
+    req.method === "POST" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "active-sessions" &&
+    !pathSegments[2]
+  ) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk as Buffer);
+    }
+    let body: {
+      agentId?: string;
+      taskId?: string;
+      triggerType?: string;
+      inboxMessageId?: string;
+      taskDescription?: string;
+    };
+    try {
+      body = JSON.parse(Buffer.concat(chunks).toString());
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid JSON" }));
+      return;
+    }
+    if (!body.agentId || !body.triggerType) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "agentId and triggerType are required" }));
+      return;
+    }
+    const session = insertActiveSession({
+      agentId: body.agentId,
+      taskId: body.taskId,
+      triggerType: body.triggerType,
+      inboxMessageId: body.inboxMessageId,
+      taskDescription: body.taskDescription,
+    });
+    res.writeHead(201, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ session }));
+    return;
+  }
+
+  // DELETE /api/active-sessions/by-task/:taskId - Delete by taskId
+  if (
+    req.method === "DELETE" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "active-sessions" &&
+    pathSegments[2] === "by-task" &&
+    pathSegments[3]
+  ) {
+    const deleted = deleteActiveSession(pathSegments[3]);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ deleted }));
+    return;
+  }
+
+  // DELETE /api/active-sessions/:id - Delete by session id
+  if (
+    req.method === "DELETE" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "active-sessions" &&
+    pathSegments[2]
+  ) {
+    const deleted = deleteActiveSessionById(pathSegments[2]);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ deleted }));
+    return;
+  }
+
+  // PUT /api/active-sessions/heartbeat/:taskId - Update heartbeat for a session
+  if (
+    req.method === "PUT" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "active-sessions" &&
+    pathSegments[2] === "heartbeat" &&
+    pathSegments[3]
+  ) {
+    const updated = heartbeatActiveSession(pathSegments[3]);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ updated }));
+    return;
+  }
+
+  // POST /api/active-sessions/cleanup - Clean up stale sessions
+  if (
+    req.method === "POST" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "active-sessions" &&
+    pathSegments[2] === "cleanup" &&
+    !pathSegments[3]
+  ) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk as Buffer);
+    }
+    let body: { agentId?: string; maxAgeMinutes?: number } = {};
+    try {
+      const text = Buffer.concat(chunks).toString();
+      if (text) body = JSON.parse(text);
+    } catch {
+      // Empty body is fine — defaults apply
+    }
+    let cleaned = 0;
+    if (body.agentId) {
+      cleaned = cleanupAgentSessions(body.agentId);
+    } else {
+      cleaned = cleanupStaleSessions(body.maxAgeMinutes ?? 30);
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ cleaned }));
     return;
   }
 

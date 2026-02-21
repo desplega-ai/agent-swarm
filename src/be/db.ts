@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import type {
+  ActiveSession,
   Agent,
   AgentLog,
   AgentLogEventType,
@@ -397,6 +398,25 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     database.run(`CREATE INDEX IF NOT EXISTS idx_agent_memory_created ON agent_memory(createdAt)`);
     database.run(
       `CREATE INDEX IF NOT EXISTS idx_agent_memory_source_path ON agent_memory(sourcePath)`,
+    );
+
+    // Active sessions table - tracks running Claude sessions for concurrency awareness
+    database.run(`
+      CREATE TABLE IF NOT EXISTS active_sessions (
+        id TEXT PRIMARY KEY,
+        agentId TEXT NOT NULL,
+        taskId TEXT,
+        triggerType TEXT NOT NULL,
+        inboxMessageId TEXT,
+        taskDescription TEXT,
+        startedAt TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        lastHeartbeatAt TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE
+      )
+    `);
+
+    database.run(
+      `CREATE INDEX IF NOT EXISTS idx_active_sessions_agent ON active_sessions(agentId)`,
     );
   });
 
@@ -5327,4 +5347,86 @@ export function findTaskByAgentMailThread(agentmailThreadId: string): AgentTask 
     )
     .get(agentmailThreadId);
   return row ? rowToAgentTask(row) : null;
+}
+
+// ============================================================================
+// Active Sessions (runner session tracking for concurrency awareness)
+// ============================================================================
+
+export function insertActiveSession(session: {
+  agentId: string;
+  taskId?: string;
+  triggerType: string;
+  inboxMessageId?: string;
+  taskDescription?: string;
+}): ActiveSession {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  const row = getDb()
+    .prepare<
+      ActiveSession,
+      [string, string, string | null, string, string | null, string | null, string, string]
+    >(
+      `INSERT INTO active_sessions (id, agentId, taskId, triggerType, inboxMessageId, taskDescription, startedAt, lastHeartbeatAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       RETURNING *`,
+    )
+    .get(
+      id,
+      session.agentId,
+      session.taskId ?? null,
+      session.triggerType,
+      session.inboxMessageId ?? null,
+      session.taskDescription ?? null,
+      now,
+      now,
+    );
+
+  if (!row) throw new Error("Failed to insert active session");
+  return row;
+}
+
+export function deleteActiveSession(taskId: string): boolean {
+  const result = getDb().prepare("DELETE FROM active_sessions WHERE taskId = ?").run(taskId);
+  return result.changes > 0;
+}
+
+export function deleteActiveSessionById(id: string): boolean {
+  const result = getDb().prepare("DELETE FROM active_sessions WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
+export function getActiveSessions(agentId?: string): ActiveSession[] {
+  if (agentId) {
+    return getDb()
+      .prepare<ActiveSession, [string]>(
+        "SELECT * FROM active_sessions WHERE agentId = ? ORDER BY startedAt DESC",
+      )
+      .all(agentId);
+  }
+  return getDb()
+    .prepare<ActiveSession, []>("SELECT * FROM active_sessions ORDER BY startedAt DESC")
+    .all();
+}
+
+export function heartbeatActiveSession(taskId: string): boolean {
+  const now = new Date().toISOString();
+  const result = getDb()
+    .prepare("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?")
+    .run(now, taskId);
+  return result.changes > 0;
+}
+
+export function cleanupStaleSessions(maxAgeMinutes = 30): number {
+  const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000).toISOString();
+  const result = getDb()
+    .prepare("DELETE FROM active_sessions WHERE lastHeartbeatAt < ?")
+    .run(cutoff);
+  return result.changes;
+}
+
+export function cleanupAgentSessions(agentId: string): number {
+  const result = getDb().prepare("DELETE FROM active_sessions WHERE agentId = ?").run(agentId);
+  return result.changes;
 }

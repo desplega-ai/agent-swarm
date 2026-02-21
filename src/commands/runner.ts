@@ -672,6 +672,70 @@ async function fetchClaudeSessionId(
   }
 }
 
+/** Register an active session with the API (fire-and-forget) */
+async function registerActiveSession(
+  config: ApiConfig,
+  session: {
+    taskId: string;
+    triggerType: string;
+    inboxMessageId?: string;
+    taskDescription?: string;
+  },
+): Promise<void> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-Agent-ID": config.agentId,
+  };
+  if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
+  try {
+    await fetch(`${config.apiUrl}/api/active-sessions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        agentId: config.agentId,
+        taskId: session.taskId,
+        triggerType: session.triggerType,
+        inboxMessageId: session.inboxMessageId,
+        taskDescription: session.taskDescription,
+      }),
+    });
+  } catch {
+    // Non-blocking — session tracking is best-effort
+  }
+}
+
+/** Remove an active session by taskId (fire-and-forget) */
+async function removeActiveSession(config: ApiConfig, taskId: string): Promise<void> {
+  const headers: Record<string, string> = { "X-Agent-ID": config.agentId };
+  if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
+  try {
+    await fetch(`${config.apiUrl}/api/active-sessions/by-task/${taskId}`, {
+      method: "DELETE",
+      headers,
+    });
+  } catch {
+    // Non-blocking
+  }
+}
+
+/** Clean up all active sessions for this agent (on startup) */
+async function cleanupActiveSessions(config: ApiConfig): Promise<void> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-Agent-ID": config.agentId,
+  };
+  if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
+  try {
+    await fetch(`${config.apiUrl}/api/active-sessions/cleanup`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ agentId: config.agentId }),
+    });
+  } catch {
+    // Non-blocking
+  }
+}
+
 /** Trigger types returned by the poll API */
 interface Trigger {
   type:
@@ -1536,6 +1600,11 @@ async function checkCompletedProcesses(
   for (const { taskId, exitCode, promise } of completedTasks) {
     state.activeTasks.delete(taskId);
 
+    // Remove active session tracking
+    if (apiConfig) {
+      removeActiveSession(apiConfig, taskId);
+    }
+
     // Call the finish API to ensure task status is updated
     // This is idempotent - if the agent already marked it, this is a no-op
     if (apiConfig) {
@@ -1705,6 +1774,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       console.error(`[${role}] Failed to register: ${error}`);
       process.exit(1);
     }
+
+    // Clean up any stale active sessions from previous runs (crash recovery)
+    await cleanupActiveSessions(apiConfig);
+    console.log(`[${role}] Cleaned up stale active sessions`);
 
     // Fetch full agent profile to get soul/identity content
     try {
@@ -2064,6 +2137,23 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           runningTask.triggerType = trigger.type;
 
           state.activeTasks.set(runningTask.taskId, runningTask);
+
+          // Register active session for concurrency awareness
+          const taskDesc =
+            trigger.task && typeof trigger.task === "object" && "task" in trigger.task
+              ? String((trigger.task as { task: string }).task).slice(0, 200)
+              : undefined;
+          const inboxMsgId =
+            trigger.type === "slack_inbox_message" && trigger.messages?.[0]?.id
+              ? trigger.messages[0].id
+              : undefined;
+          registerActiveSession(apiConfig, {
+            taskId: runningTask.taskId,
+            triggerType: trigger.type,
+            inboxMessageId: inboxMsgId,
+            taskDescription: taskDesc,
+          });
+
           console.log(
             `[${role}] Started task ${runningTask.taskId.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active, trigger: ${trigger.type})`,
           );
