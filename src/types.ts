@@ -458,10 +458,10 @@ export type AgentMemory = z.infer<typeof AgentMemorySchema>;
 export const ActiveSessionSchema = z.object({
   id: z.uuid(),
   agentId: z.uuid(),
-  taskId: z.string().optional(),
+  taskId: z.string().nullable(),
   triggerType: z.string(),
-  inboxMessageId: z.string().optional(),
-  taskDescription: z.string().optional(),
+  inboxMessageId: z.string().nullable(),
+  taskDescription: z.string().nullable(),
   startedAt: z.iso.datetime(),
   lastHeartbeatAt: z.iso.datetime(),
 });

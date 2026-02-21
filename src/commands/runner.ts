@@ -1990,6 +1990,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           );
 
           state.activeTasks.set(task.id, runningTask);
+          registerActiveSession(apiConfig, {
+            taskId: task.id,
+            triggerType: "task_resumed",
+            taskDescription: task.task?.slice(0, 200),
+          });
           console.log(
             `[${role}] Resumed task ${task.id.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active)`,
           );

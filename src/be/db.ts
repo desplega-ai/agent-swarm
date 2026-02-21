@@ -405,7 +405,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       CREATE TABLE IF NOT EXISTS active_sessions (
         id TEXT PRIMARY KEY,
         agentId TEXT NOT NULL,
-        taskId TEXT,
+        taskId TEXT UNIQUE,
         triggerType TEXT NOT NULL,
         inboxMessageId TEXT,
         taskDescription TEXT,
@@ -810,6 +810,15 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       FOREIGN KEY (agentId) REFERENCES agents(id)
     )
   `);
+
+  // Migration: Add UNIQUE constraint on taskId in active_sessions to prevent duplicate sessions from retries
+  try {
+    db.run(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_active_sessions_taskId ON active_sessions(taskId)`,
+    );
+  } catch {
+    /* exists */
+  }
 
   return db;
 }
