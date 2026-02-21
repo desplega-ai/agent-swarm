@@ -9,6 +9,7 @@ import {
   getTaskById,
   hasCapacity,
 } from "@/be/db";
+import { findDuplicateTask } from "@/tools/task-dedup";
 import { createToolRegistrar } from "@/tools/utils";
 import { AgentTaskSchema } from "@/types";
 
@@ -59,6 +60,12 @@ export const registerSendTaskTool = (server: McpServer) => {
           .describe(
             "GitHub repo identifier (e.g., 'desplega-ai/agent-swarm'). Links the task to a registered repo for workspace context.",
           ),
+        allowDuplicate: z
+          .boolean()
+          .default(false)
+          .describe(
+            "If true, skip duplicate detection and create the task even if a similar one exists.",
+          ),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
@@ -79,6 +86,7 @@ export const registerSendTaskTool = (server: McpServer) => {
         epicId,
         parentTaskId,
         githubRepo,
+        allowDuplicate,
       },
       requestInfo,
       _meta,
@@ -140,6 +148,26 @@ export const registerSendTaskTool = (server: McpServer) => {
         const parentTask = getTaskById(parentTaskId);
         if (parentTask?.agentId) {
           effectiveAgentId = parentTask.agentId;
+        }
+      }
+
+      // Dedup guard: check for similar recent tasks
+      if (!allowDuplicate && requestInfo.agentId) {
+        const duplicate = findDuplicateTask({
+          taskDescription: task,
+          creatorAgentId: requestInfo.agentId,
+          targetAgentId: effectiveAgentId ?? undefined,
+        });
+        if (duplicate) {
+          const msg = `Duplicate task detected (matches task ${duplicate.task.id.slice(0, 8)}, ${duplicate.reason}). Skipping. Use allowDuplicate: true to override.`;
+          return {
+            content: [{ type: "text", text: msg }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: msg,
+            },
+          };
         }
       }
 
