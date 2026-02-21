@@ -81,7 +81,11 @@ export function findDuplicateTask(opts: {
     }
 
     // 3. Same target agent + moderately similar task — lower threshold
-    if (opts.targetAgentId && existing.agentId === opts.targetAgentId && similarity > SAME_AGENT_SIMILARITY_THRESHOLD) {
+    if (
+      opts.targetAgentId &&
+      existing.agentId === opts.targetAgentId &&
+      similarity > SAME_AGENT_SIMILARITY_THRESHOLD
+    ) {
       return {
         task: existing,
         reason: `similar task to same agent (${(similarity * 100).toFixed(0)}% match)`,
