@@ -120,6 +120,9 @@ async function handleRequest(
       }
 
       if (agent.isLead) {
+        // Lead-specific triggers would go here (inbox, epics, etc.)
+      } else {
+        // Worker-specific: check for unassigned tasks in pool
         const unassignedCount = getUnassignedTasksCount();
         if (unassignedCount > 0) {
           return {
@@ -455,7 +458,7 @@ describe("Runner-Level Polling API", () => {
       expect(data.trigger.taskId).toBe(task.id);
     });
 
-    test("should return pool_tasks_available for lead when unassigned tasks exist", async () => {
+    test("lead should NOT see pool_tasks_available (pool tasks are worker-only)", async () => {
       const leadId = "test-lead-poll";
 
       // Create lead agent
@@ -488,13 +491,12 @@ describe("Runner-Level Polling API", () => {
         status?: string;
         trigger?: unknown;
       };
-      expect(data.trigger).not.toBeNull();
-      expect(data.trigger.type).toBe("pool_tasks_available");
-      expect(data.trigger.count).toBeGreaterThan(0);
+      // Leads don't see pool_tasks_available — only workers do
+      expect(data.trigger).toBeNull();
     });
 
-    test("worker should NOT see pool_tasks_available trigger", async () => {
-      const workerId = "test-worker-no-pool";
+    test("worker should see pool_tasks_available trigger when unassigned tasks exist", async () => {
+      const workerId = "test-worker-pool";
 
       // Create worker agent (not lead)
       await fetch(`${baseUrl}/api/agents`, {
@@ -503,7 +505,7 @@ describe("Runner-Level Polling API", () => {
           "Content-Type": "application/json",
           "X-Agent-ID": workerId,
         },
-        body: JSON.stringify({ name: "Worker No Pool Access", isLead: false }),
+        body: JSON.stringify({ name: "Worker Pool Access", isLead: false }),
       });
 
       // There's already an unassigned task from previous test
@@ -520,10 +522,12 @@ describe("Runner-Level Polling API", () => {
         id?: string;
         name?: string;
         status?: string;
-        trigger?: unknown;
+        trigger?: { type: string; count?: number };
       };
-      // Worker should NOT see pool tasks
-      expect(data.trigger).toBeNull();
+      // Workers should see pool tasks so they can compete to claim them
+      expect(data.trigger).not.toBeNull();
+      expect(data.trigger!.type).toBe("pool_tasks_available");
+      expect(data.trigger!.count).toBeGreaterThan(0);
     });
   });
 });

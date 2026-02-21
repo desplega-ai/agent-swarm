@@ -2124,14 +2124,14 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
 }
 
 export function claimTask(taskId: string, agentId: string): AgentTask | null {
-  const task = getTaskById(taskId);
-  if (!task) return null;
-  if (task.status !== "unassigned") return null;
-
+  // Atomic claim: single UPDATE with WHERE guard ensures exactly-once claiming.
+  // No pre-read needed — the WHERE clause handles the race condition.
+  // Status goes directly to 'in_progress' because the claiming session is
+  // already working on the task (prevents duplicate task_assigned triggers).
   const now = new Date().toISOString();
   const row = getDb()
     .prepare<AgentTaskRow, [string, string, string]>(
-      `UPDATE agent_tasks SET agentId = ?, status = 'pending', lastUpdatedAt = ?
+      `UPDATE agent_tasks SET agentId = ?, status = 'in_progress', lastUpdatedAt = ?
        WHERE id = ? AND status = 'unassigned' RETURNING *`,
     )
     .get(agentId, now, taskId);
@@ -2143,7 +2143,7 @@ export function claimTask(taskId: string, agentId: string): AgentTask | null {
         agentId,
         taskId,
         oldValue: "unassigned",
-        newValue: "pending",
+        newValue: "in_progress",
       });
     } catch {}
   }
@@ -2154,13 +2154,14 @@ export function claimTask(taskId: string, agentId: string): AgentTask | null {
 export function releaseTask(taskId: string): AgentTask | null {
   const task = getTaskById(taskId);
   if (!task) return null;
-  if (task.status !== "pending") return null;
+  // Allow releasing both 'pending' (directly assigned) and 'in_progress' (pool-claimed) tasks
+  if (task.status !== "pending" && task.status !== "in_progress") return null;
 
   const now = new Date().toISOString();
   const row = getDb()
     .prepare<AgentTaskRow, [string, string]>(
       `UPDATE agent_tasks SET agentId = NULL, status = 'unassigned', lastUpdatedAt = ?
-       WHERE id = ? AND status = 'pending' RETURNING *`,
+       WHERE id = ? AND status IN ('pending', 'in_progress') RETURNING *`,
     )
     .get(now, taskId);
 
@@ -2170,7 +2171,7 @@ export function releaseTask(taskId: string): AgentTask | null {
         eventType: "task_released",
         agentId: task.agentId ?? undefined,
         taskId,
-        oldValue: "pending",
+        oldValue: task.status,
         newValue: "unassigned",
       });
     } catch {}

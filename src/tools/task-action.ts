@@ -117,6 +117,8 @@ export const registerTaskActionTool = (server: McpServer) => {
                 message: `You have no capacity (${activeCount}/${agent?.maxTasks ?? 1} tasks). Complete a task first.`,
               };
             }
+            // Pre-checks for informative error messages (the atomic UPDATE in
+            // claimTask is the real guard against race conditions)
             const existingTask = getTaskById(taskId);
             if (!existingTask) {
               return { success: false, message: `Task "${taskId}" not found.` };
@@ -124,7 +126,7 @@ export const registerTaskActionTool = (server: McpServer) => {
             if (existingTask.status !== "unassigned") {
               return {
                 success: false,
-                message: `Task "${taskId}" is not unassigned (status: ${existingTask.status}).`,
+                message: `Task "${taskId}" is not unassigned (status: ${existingTask.status}). It may have been claimed by another agent.`,
               };
             }
             // Check if task dependencies are met
@@ -135,9 +137,13 @@ export const registerTaskActionTool = (server: McpServer) => {
                 message: `Task "${taskId}" has unmet dependencies: ${blockedBy.join(", ")}. Cannot claim until dependencies are completed.`,
               };
             }
+            // Atomic claim — only one agent can win this race
             const claimedTask = claimTask(taskId, agentId);
             if (!claimedTask) {
-              return { success: false, message: `Failed to claim task "${taskId}".` };
+              return {
+                success: false,
+                message: `Task "${taskId}" was already claimed by another agent. Try a different task.`,
+              };
             }
             return {
               success: true,
@@ -157,10 +163,10 @@ export const registerTaskActionTool = (server: McpServer) => {
             if (existingTask.agentId !== agentId) {
               return { success: false, message: `Task "${taskId}" is not assigned to you.` };
             }
-            if (existingTask.status !== "pending") {
+            if (existingTask.status !== "pending" && existingTask.status !== "in_progress") {
               return {
                 success: false,
-                message: `Cannot release task in status "${existingTask.status}". Only 'pending' tasks can be released.`,
+                message: `Cannot release task in status "${existingTask.status}". Only 'pending' or 'in_progress' tasks can be released.`,
               };
             }
             const releasedTask = releaseTask(taskId);
