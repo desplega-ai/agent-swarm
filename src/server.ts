@@ -20,6 +20,7 @@ import { registerGetSwarmTool } from "./tools/get-swarm";
 import { registerGetTaskDetailsTool } from "./tools/get-task-details";
 import { registerGetTasksTool } from "./tools/get-tasks";
 import { registerInboxDelegateTool } from "./tools/inbox-delegate";
+import { registerInjectLearningTool } from "./tools/inject-learning";
 import { registerJoinSwarmTool } from "./tools/join-swarm";
 // Messaging capability
 import { registerListChannelsTool } from "./tools/list-channels";
@@ -178,6 +179,7 @@ export function createServer() {
   if (hasCapability("memory")) {
     registerMemorySearchTool(server);
     registerMemoryGetTool(server);
+    registerInjectLearningTool(server);
   }
 
   return server;
