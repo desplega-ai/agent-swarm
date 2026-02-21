@@ -2720,6 +2720,11 @@ export function getAllChannels(): Channel[] {
     .map(rowToChannel);
 }
 
+export function deleteChannel(id: string): boolean {
+  const result = getDb().prepare("DELETE FROM channels WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
 export function postMessage(
   channelId: string,
   agentId: string | null,

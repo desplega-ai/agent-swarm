@@ -3,6 +3,7 @@ import pkg from "../package.json";
 import { initDb } from "./be/db";
 import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerCreateChannelTool } from "./tools/create-channel";
+import { registerDeleteChannelTool } from "./tools/delete-channel";
 // Epics capability
 import {
   registerAssignTaskToEpicTool,
@@ -135,6 +136,7 @@ export function createServer() {
   if (hasCapability("messaging")) {
     registerListChannelsTool(server);
     registerCreateChannelTool(server);
+    registerDeleteChannelTool(server);
     registerPostMessageTool(server);
     registerReadMessagesTool(server);
   }
