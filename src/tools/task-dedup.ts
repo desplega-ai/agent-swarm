@@ -26,8 +26,13 @@ export function jaccardSimilarity(a: string, b: string): number {
     if (wordsB.has(w)) intersection++;
   }
   const union = new Set([...wordsA, ...wordsB]).size;
-  return union === 0 ? 0 : intersection / union;
+  return intersection / union;
 }
+
+/** Similarity above which any two task descriptions are considered duplicates */
+const HIGH_SIMILARITY_THRESHOLD = 0.8;
+/** Lower threshold used when the tasks also target the same agent */
+const SAME_AGENT_SIMILARITY_THRESHOLD = 0.6;
 
 export interface DedupMatch {
   task: AgentTask;
@@ -67,16 +72,16 @@ export function findDuplicateTask(opts: {
 
     const similarity = jaccardSimilarity(existing.task, opts.taskDescription);
 
-    // 2. Very similar task description (>0.8) — likely duplicate regardless of target
-    if (similarity > 0.8) {
+    // 2. Very similar task description — likely duplicate regardless of target
+    if (similarity > HIGH_SIMILARITY_THRESHOLD) {
       return {
         task: existing,
         reason: `similar task description (${(similarity * 100).toFixed(0)}% match)`,
       };
     }
 
-    // 3. Same target agent + moderately similar task (>0.6) — lower threshold
-    if (opts.targetAgentId && existing.agentId === opts.targetAgentId && similarity > 0.6) {
+    // 3. Same target agent + moderately similar task — lower threshold
+    if (opts.targetAgentId && existing.agentId === opts.targetAgentId && similarity > SAME_AGENT_SIMILARITY_THRESHOLD) {
       return {
         task: existing,
         reason: `similar task to same agent (${(similarity * 100).toFixed(0)}% match)`,
