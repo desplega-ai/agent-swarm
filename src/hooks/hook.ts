@@ -256,6 +256,50 @@ export async function handleHook(): Promise<void> {
     return;
   };
 
+  interface ConcurrentContextResponse {
+    processingInboxMessages: Array<{
+      id: string;
+      content: string;
+      source: string;
+      slackChannelId: string | null;
+      slackThreadTs: string | null;
+      createdAt: string;
+    }>;
+    recentTaskDelegations: Array<{
+      id: string;
+      task: string;
+      agentId: string | null;
+      agentName: string | null;
+      creatorAgentId: string | null;
+      status: string;
+      createdAt: string;
+    }>;
+    activeSwarmTasks: Array<{
+      id: string;
+      task: string;
+      agentId: string | null;
+      agentName: string | null;
+      status: string;
+      createdAt: string;
+      progress: string | null;
+    }>;
+  }
+
+  const fetchConcurrentContext = async (): Promise<ConcurrentContextResponse | undefined> => {
+    if (!mcpConfig) return undefined;
+
+    try {
+      const resp = await fetch(`${getBaseUrl()}/api/concurrent-context`, {
+        method: "GET",
+        headers: mcpConfig.headers,
+      });
+      if (!resp.ok) return undefined;
+      return (await resp.json()) as ConcurrentContextResponse;
+    } catch {
+      return undefined;
+    }
+  };
+
   /**
    * Sync CLAUDE.md content back to the server
    */
@@ -618,6 +662,60 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
           console.log("Loaded your personal CLAUDE.md configuration.");
         } catch (error) {
           console.log(`Warning: Could not load CLAUDE.md: ${(error as Error).message}`);
+        }
+      }
+
+      // For lead agents: inject concurrent session context
+      if (agentInfo.isLead) {
+        try {
+          const concurrentCtx = await fetchConcurrentContext();
+          if (concurrentCtx) {
+            const lines: string[] = [];
+
+            if (concurrentCtx.processingInboxMessages.length > 0) {
+              lines.push("=== CONCURRENT SESSION AWARENESS ===");
+              lines.push("");
+              lines.push("**Other sessions are currently processing these inbox messages:**");
+              for (const msg of concurrentCtx.processingInboxMessages) {
+                const preview =
+                  msg.content.length > 120 ? `${msg.content.slice(0, 120)}...` : msg.content;
+                lines.push(`- [${msg.source}] "${preview}" (received ${msg.createdAt})`);
+              }
+            }
+
+            if (concurrentCtx.recentTaskDelegations.length > 0) {
+              if (lines.length === 0) lines.push("=== CONCURRENT SESSION AWARENESS ===");
+              lines.push("");
+              lines.push("**Recent task delegations (last 5 min):**");
+              for (const task of concurrentCtx.recentTaskDelegations) {
+                const preview =
+                  task.task.length > 120 ? `${task.task.slice(0, 120)}...` : task.task;
+                lines.push(`- "${preview}" → ${task.agentName ?? "unassigned"} [${task.status}]`);
+              }
+            }
+
+            if (concurrentCtx.activeSwarmTasks.length > 0) {
+              if (lines.length === 0) lines.push("=== CONCURRENT SESSION AWARENESS ===");
+              lines.push("");
+              lines.push("**Currently active tasks across the swarm:**");
+              for (const task of concurrentCtx.activeSwarmTasks) {
+                const preview =
+                  task.task.length > 100 ? `${task.task.slice(0, 100)}...` : task.task;
+                lines.push(`- ${task.agentName ?? "unassigned"}: "${preview}" [${task.status}]`);
+              }
+            }
+
+            if (lines.length > 0) {
+              lines.push("");
+              lines.push(
+                "IMPORTANT: Avoid duplicating work that is already being handled by other sessions or agents.",
+              );
+              lines.push("=== END CONCURRENT SESSION AWARENESS ===");
+              console.log(lines.join("\n"));
+            }
+          }
+        } catch {
+          // Don't block session start if concurrent context fetch fails
         }
       }
       break;
