@@ -1989,6 +1989,41 @@ export interface CreateTaskOptions {
   parentTaskId?: string;
 }
 
+/**
+ * Find recent tasks within a time window for deduplication checks.
+ * Returns tasks created in the last N minutes, optionally filtered by creator or target agent.
+ */
+export function findRecentSimilarTasks(opts: {
+  windowMinutes?: number;
+  creatorAgentId?: string;
+  agentId?: string;
+  limit?: number;
+}): AgentTask[] {
+  const since = new Date(Date.now() - (opts.windowMinutes ?? 10) * 60 * 1000).toISOString();
+  const conditions: string[] = ["createdAt > ?"];
+  const params: (string | number)[] = [since];
+
+  // Exclude completed/failed/cancelled tasks — only active or recently created
+  conditions.push("status NOT IN ('completed', 'failed', 'cancelled')");
+
+  if (opts.creatorAgentId) {
+    conditions.push("creatorAgentId = ?");
+    params.push(opts.creatorAgentId);
+  }
+  if (opts.agentId) {
+    conditions.push("agentId = ?");
+    params.push(opts.agentId);
+  }
+
+  const limit = opts.limit ?? 50;
+  const query = `SELECT * FROM agent_tasks WHERE ${conditions.join(" AND ")} ORDER BY createdAt DESC LIMIT ${limit}`;
+
+  return getDb()
+    .prepare<AgentTaskRow, (string | number)[]>(query)
+    .all(...params)
+    .map(rowToAgentTask);
+}
+
 export function createTaskExtended(task: string, options?: CreateTaskOptions): AgentTask {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();

@@ -6,6 +6,7 @@ import {
   getInboxMessageById,
   markInboxMessageDelegated,
 } from "@/be/db";
+import { findDuplicateTask } from "@/tools/task-dedup";
 import { createToolRegistrar } from "@/tools/utils";
 import { AgentTaskSchema } from "@/types";
 
@@ -34,6 +35,12 @@ export const registerInboxDelegateTool = (server: McpServer) => {
           .describe(
             "Parent task ID. If the Slack message is a follow-up to a previous task, pass the parent task ID so the worker continues in the same session.",
           ),
+        allowDuplicate: z
+          .boolean()
+          .default(false)
+          .describe(
+            "If true, skip duplicate detection and create the task even if a similar one exists.",
+          ),
       }),
       outputSchema: z.object({
         success: z.boolean(),
@@ -42,7 +49,7 @@ export const registerInboxDelegateTool = (server: McpServer) => {
       }),
     },
     async (
-      { inboxMessageId, agentId, taskDescription, offerMode, parentTaskId },
+      { inboxMessageId, agentId, taskDescription, offerMode, parentTaskId, allowDuplicate },
       requestInfo,
       _meta,
     ) => {
@@ -91,8 +98,27 @@ export const registerInboxDelegateTool = (server: McpServer) => {
         };
       }
 
+      // Dedup guard: check for similar recent tasks
+      const effectiveDescription = taskDescription || inboxMsg.content;
+      if (!allowDuplicate && requestInfo.agentId) {
+        const duplicate = findDuplicateTask({
+          taskDescription: effectiveDescription,
+          creatorAgentId: requestInfo.agentId,
+          targetAgentId: agentId,
+          slackChannelId: inboxMsg.slackChannelId ?? undefined,
+          slackThreadTs: inboxMsg.slackThreadTs ?? undefined,
+        });
+        if (duplicate) {
+          const msg = `Duplicate task detected (matches task ${duplicate.task.id.slice(0, 8)}, ${duplicate.reason}). Skipping. Use allowDuplicate: true to override.`;
+          return {
+            content: [{ type: "text", text: msg }],
+            structuredContent: { success: false, message: msg },
+          };
+        }
+      }
+
       // Create task for the worker
-      const task = createTaskExtended(taskDescription || inboxMsg.content, {
+      const task = createTaskExtended(effectiveDescription, {
         agentId: offerMode ? undefined : agentId,
         offeredTo: offerMode ? agentId : undefined,
         creatorAgentId: requestInfo.agentId,
