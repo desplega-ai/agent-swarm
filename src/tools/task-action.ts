@@ -163,10 +163,10 @@ export const registerTaskActionTool = (server: McpServer) => {
             if (existingTask.agentId !== agentId) {
               return { success: false, message: `Task "${taskId}" is not assigned to you.` };
             }
-            if (existingTask.status !== "pending") {
+            if (existingTask.status !== "pending" && existingTask.status !== "in_progress") {
               return {
                 success: false,
-                message: `Cannot release task in status "${existingTask.status}". Only 'pending' tasks can be released.`,
+                message: `Cannot release task in status "${existingTask.status}". Only 'pending' or 'in_progress' tasks can be released.`,
               };
             }
             const releasedTask = releaseTask(taskId);
