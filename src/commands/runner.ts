@@ -1751,6 +1751,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       maxConcurrent,
     };
 
+    // Track tasks already signaled for cancellation to avoid repeated SIGTERM
+    const cancelledSignaled = new Set<string>();
+
     // Create API config for ping/close
     const apiConfig: ApiConfig = { apiUrl, apiKey, agentId };
 
@@ -2021,6 +2024,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       // Check for cancelled tasks and signal their subprocesses
       if (state.activeTasks.size > 0) {
         for (const [taskId, task] of state.activeTasks) {
+          if (cancelledSignaled.has(taskId)) continue; // Already sent SIGTERM
           try {
             const cancelResp = await fetch(
               `${apiUrl}/cancelled-tasks?taskId=${encodeURIComponent(taskId)}`,
@@ -2040,6 +2044,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
                   `[${role}] Task ${taskId.slice(0, 8)} was cancelled — sending SIGTERM to subprocess`,
                 );
                 task.process.kill("SIGTERM");
+                cancelledSignaled.add(taskId);
               }
             }
           } catch {

@@ -807,17 +807,10 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
       if (agentInfo && !agentInfo.isLead) {
         const heartbeatTaskFile = await readTaskFile();
         if (heartbeatTaskFile?.taskId) {
-          try {
-            await fetch(
-              `${getBaseUrl()}/api/active-sessions/heartbeat/${heartbeatTaskFile.taskId}`,
-              {
-                method: "PUT",
-                headers: mcpConfig!.headers,
-              },
-            );
-          } catch {
-            // Non-blocking — heartbeat failure should not interrupt agent work
-          }
+          void fetch(`${getBaseUrl()}/api/active-sessions/heartbeat/${heartbeatTaskFile.taskId}`, {
+            method: "PUT",
+            headers: mcpConfig!.headers,
+          }).catch(() => {});
         }
       }
 

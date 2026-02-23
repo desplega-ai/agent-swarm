@@ -181,11 +181,8 @@ export function startScheduler(intervalMs = 10000): void {
 
   console.log(`[Scheduler] Starting with ${intervalMs}ms polling interval`);
 
-  // Recover missed schedules from downtime (before normal processing)
-  void recoverMissedSchedules();
-
-  // Run immediately once, then start interval
-  void processSchedules();
+  // Recover missed schedules from downtime, then run normal processing
+  void recoverMissedSchedules().then(() => processSchedules());
 
   schedulerInterval = setInterval(async () => {
     await processSchedules();
