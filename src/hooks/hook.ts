@@ -2,6 +2,7 @@
 
 import pkg from "../../package.json";
 import type { Agent } from "../types";
+import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
 
 const SERVER_NAME = pkg.config?.name ?? "agent-swarm";
 
@@ -718,6 +719,14 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
           // Don't block session start if concurrent context fetch fails
         }
       }
+
+      // Clear stale tool loop history for this session
+      {
+        const startTaskFile = await readTaskFile();
+        if (startTaskFile?.taskId) {
+          await clearToolHistory(startTaskFile.taskId);
+        }
+      }
       break;
 
     case "PreCompact": {
@@ -751,6 +760,31 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
       if (agentInfo && !agentInfo.isLead && agentInfo.status === "busy") {
         if (await checkAndBlockIfCancelled(true)) {
           return; // Exit early - don't process other hooks
+        }
+      }
+
+      // Tool loop detection (workers only, when processing a task)
+      if (agentInfo && !agentInfo.isLead && agentInfo.status === "busy") {
+        const loopTaskFile = await readTaskFile();
+        if (loopTaskFile?.taskId && msg.tool_name && msg.tool_input) {
+          const loopResult = await checkToolLoop(
+            loopTaskFile.taskId,
+            msg.tool_name,
+            msg.tool_input as Record<string, unknown>,
+          );
+
+          if (loopResult.blocked) {
+            outputBlockResponse(
+              `LOOP DETECTED: ${loopResult.reason} ` +
+                "Stop repeating this action and try a fundamentally different approach. " +
+                "If you're truly stuck, use store-progress to report the blocker.",
+            );
+            return;
+          }
+
+          if (loopResult.severity === "warning" && loopResult.reason) {
+            console.log(`Warning: ${loopResult.reason}`);
+          }
         }
       }
 
