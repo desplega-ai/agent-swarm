@@ -2018,6 +2018,36 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       // Check for completed processes first and ensure tasks are marked as finished
       await checkCompletedProcesses(state, role, apiConfig);
 
+      // Check for cancelled tasks and signal their subprocesses
+      if (state.activeTasks.size > 0) {
+        for (const [taskId, task] of state.activeTasks) {
+          try {
+            const cancelResp = await fetch(
+              `${apiUrl}/cancelled-tasks?taskId=${encodeURIComponent(taskId)}`,
+              {
+                headers: {
+                  Authorization: `Bearer ${apiKey}`,
+                  "X-Agent-ID": agentId,
+                },
+              },
+            );
+            if (cancelResp.ok) {
+              const cancelData = (await cancelResp.json()) as {
+                cancelled: Array<{ id: string }>;
+              };
+              if (cancelData.cancelled?.some((t) => t.id === taskId)) {
+                console.log(
+                  `[${role}] Task ${taskId.slice(0, 8)} was cancelled — sending SIGTERM to subprocess`,
+                );
+                task.process.kill("SIGTERM");
+              }
+            }
+          } catch {
+            // Non-blocking — cancellation check is best-effort
+          }
+        }
+      }
+
       // Only poll if we have capacity
       if (state.activeTasks.size < state.maxConcurrent) {
         console.log(
