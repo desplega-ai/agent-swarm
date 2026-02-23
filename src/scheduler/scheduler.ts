@@ -81,36 +81,92 @@ export function calculateNextRun(schedule: ScheduledTask, fromTime: Date = new D
   throw new Error("Schedule must have cronExpression or intervalMs");
 }
 
+// Exponential backoff schedule for consecutive errors (in ms)
+const ERROR_BACKOFF_MS = [
+  60_000, // 1 minute
+  300_000, // 5 minutes
+  900_000, // 15 minutes
+  1_800_000, // 30 minutes
+  3_600_000, // 1 hour (cap)
+];
+
+const MAX_CONSECUTIVE_ERRORS = 5;
+
+function getBackoffMs(consecutiveErrors: number): number {
+  const idx = Math.min(consecutiveErrors - 1, ERROR_BACKOFF_MS.length - 1);
+  return ERROR_BACKOFF_MS[Math.max(0, idx)] ?? ERROR_BACKOFF_MS[0]!;
+}
+
 /**
  * Execute a single scheduled task by creating an agent task.
+ * Tracks consecutive errors and applies exponential backoff on failure.
  */
 async function executeSchedule(schedule: ScheduledTask): Promise<void> {
-  // Wrap in transaction to ensure atomicity of task creation and schedule update
-  const tx = getDb().transaction(() => {
-    const now = new Date().toISOString();
+  try {
+    const tx = getDb().transaction(() => {
+      const now = new Date().toISOString();
 
-    // Create the actual task
-    createTaskExtended(schedule.taskTemplate, {
-      creatorAgentId: schedule.createdByAgentId,
-      taskType: schedule.taskType,
-      tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`],
-      priority: schedule.priority,
-      agentId: schedule.targetAgentId, // null goes to pool
+      createTaskExtended(schedule.taskTemplate, {
+        creatorAgentId: schedule.createdByAgentId,
+        taskType: schedule.taskType,
+        tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`],
+        priority: schedule.priority,
+        agentId: schedule.targetAgentId,
+      });
+
+      const nextRun = calculateNextRun(schedule, new Date());
+      updateScheduledTask(schedule.id, {
+        lastRunAt: now,
+        nextRunAt: nextRun,
+        lastUpdatedAt: now,
+        // Reset error tracking on success
+        consecutiveErrors: 0,
+        lastErrorAt: null,
+        lastErrorMessage: null,
+      });
+
+      return nextRun;
     });
 
-    // Update lastRunAt and nextRunAt
-    const nextRun = calculateNextRun(schedule, new Date());
-    updateScheduledTask(schedule.id, {
-      lastRunAt: now,
-      nextRunAt: nextRun,
-      lastUpdatedAt: now,
-    });
+    const nextRun = tx();
+    console.log(`[Scheduler] Executed schedule "${schedule.name}", next run: ${nextRun}`);
+  } catch (err) {
+    const errorCount = (schedule.consecutiveErrors ?? 0) + 1;
+    const now = new Date();
+    const errorMsg = err instanceof Error ? err.message : String(err);
 
-    return nextRun;
-  });
+    console.error(
+      `[Scheduler] Error executing "${schedule.name}" (${errorCount} consecutive):`,
+      errorMsg,
+    );
 
-  const nextRun = tx();
-  console.log(`[Scheduler] Executed schedule "${schedule.name}", next run: ${nextRun}`);
+    const updates: {
+      consecutiveErrors: number;
+      lastErrorAt: string;
+      lastErrorMessage: string;
+      lastUpdatedAt: string;
+      enabled?: boolean;
+      nextRunAt?: string;
+    } = {
+      consecutiveErrors: errorCount,
+      lastErrorAt: now.toISOString(),
+      lastErrorMessage: errorMsg.slice(0, 500),
+      lastUpdatedAt: now.toISOString(),
+    };
+
+    if (errorCount >= MAX_CONSECUTIVE_ERRORS) {
+      updates.enabled = false;
+      console.warn(
+        `[Scheduler] Auto-disabled "${schedule.name}" after ${errorCount} consecutive errors`,
+      );
+    } else {
+      const backoff = getBackoffMs(errorCount);
+      updates.nextRunAt = new Date(now.getTime() + backoff).toISOString();
+      console.log(`[Scheduler] Backing off "${schedule.name}" for ${backoff / 1000}s`);
+    }
+
+    updateScheduledTask(schedule.id, updates);
+  }
 }
 
 /**

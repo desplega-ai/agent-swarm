@@ -316,6 +316,9 @@ export const ScheduledTaskSchema = z
     nextRunAt: z.iso.datetime().optional(),
     createdByAgentId: z.uuid().optional(),
     timezone: z.string().default("UTC"),
+    consecutiveErrors: z.number().int().min(0).default(0),
+    lastErrorAt: z.iso.datetime().optional(),
+    lastErrorMessage: z.string().optional(),
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
   })
