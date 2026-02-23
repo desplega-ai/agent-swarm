@@ -12,6 +12,49 @@ let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 let isProcessing = false;
 
 /**
+ * Recover missed scheduled task runs from downtime.
+ * Fires ONE catch-up run per schedule (not N missed runs).
+ * Tags the task with "recovered" so it's distinguishable.
+ */
+async function recoverMissedSchedules(): Promise<void> {
+  const now = new Date();
+  const dueSchedules = getDueScheduledTasks();
+
+  for (const schedule of dueSchedules) {
+    if (!schedule.nextRunAt) continue;
+    const missedBy = now.getTime() - new Date(schedule.nextRunAt).getTime();
+    if (missedBy < 15000) continue; // Less than 15s — normal timing jitter
+
+    console.log(
+      `[Scheduler] Recovering missed schedule "${schedule.name}" ` +
+        `(was due ${Math.round(missedBy / 1000)}s ago)`,
+    );
+
+    try {
+      const tx = getDb().transaction(() => {
+        createTaskExtended(schedule.taskTemplate, {
+          creatorAgentId: schedule.createdByAgentId,
+          taskType: schedule.taskType,
+          tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, "recovered"],
+          priority: schedule.priority,
+          agentId: schedule.targetAgentId,
+        });
+
+        const nextRun = calculateNextRun(schedule, now);
+        updateScheduledTask(schedule.id, {
+          lastRunAt: now.toISOString(),
+          nextRunAt: nextRun,
+          lastUpdatedAt: now.toISOString(),
+        });
+      });
+      tx();
+    } catch (err) {
+      console.error(`[Scheduler] Error recovering "${schedule.name}":`, err);
+    }
+  }
+}
+
+/**
  * Calculate next run time based on cron expression or interval.
  * @param schedule The scheduled task
  * @param fromTime The time to calculate from (defaults to now)
@@ -81,6 +124,9 @@ export function startScheduler(intervalMs = 10000): void {
   }
 
   console.log(`[Scheduler] Starting with ${intervalMs}ms polling interval`);
+
+  // Recover missed schedules from downtime (before normal processing)
+  void recoverMissedSchedules();
 
   // Run immediately once, then start interval
   void processSchedules();
