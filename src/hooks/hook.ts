@@ -769,6 +769,24 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
     }
 
     case "PostToolUse":
+      // Active session heartbeat (workers only, fire-and-forget)
+      if (agentInfo && !agentInfo.isLead) {
+        const heartbeatTaskFile = await readTaskFile();
+        if (heartbeatTaskFile?.taskId) {
+          try {
+            await fetch(
+              `${getBaseUrl()}/api/active-sessions/heartbeat/${heartbeatTaskFile.taskId}`,
+              {
+                method: "PUT",
+                headers: mcpConfig!.headers,
+              },
+            );
+          } catch {
+            // Non-blocking — heartbeat failure should not interrupt agent work
+          }
+        }
+      }
+
       if (agentInfo) {
         // Sync workspace file edits back to DB
         const toolName = msg.tool_name;
