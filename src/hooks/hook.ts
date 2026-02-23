@@ -2,6 +2,7 @@
 
 import pkg from "../../package.json";
 import type { Agent } from "../types";
+import { checkToolLoop, clearToolHistory } from "./tool-loop-detection";
 
 const SERVER_NAME = pkg.config?.name ?? "agent-swarm";
 
@@ -718,6 +719,14 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
           // Don't block session start if concurrent context fetch fails
         }
       }
+
+      // Clear stale tool loop history for this session
+      {
+        const startTaskFile = await readTaskFile();
+        if (startTaskFile?.taskId) {
+          await clearToolHistory(startTaskFile.taskId);
+        }
+      }
       break;
 
     case "PreCompact": {
@@ -754,6 +763,31 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
         }
       }
 
+      // Tool loop detection (workers only, when processing a task)
+      if (agentInfo && !agentInfo.isLead && agentInfo.status === "busy") {
+        const loopTaskFile = await readTaskFile();
+        if (loopTaskFile?.taskId && msg.tool_name && msg.tool_input) {
+          const loopResult = await checkToolLoop(
+            loopTaskFile.taskId,
+            msg.tool_name,
+            msg.tool_input as Record<string, unknown>,
+          );
+
+          if (loopResult.blocked) {
+            outputBlockResponse(
+              `LOOP DETECTED: ${loopResult.reason} ` +
+                "Stop repeating this action and try a fundamentally different approach. " +
+                "If you're truly stuck, use store-progress to report the blocker.",
+            );
+            return;
+          }
+
+          if (loopResult.severity === "warning" && loopResult.reason) {
+            console.log(`Warning: ${loopResult.reason}`);
+          }
+        }
+      }
+
       // Block poll-task when polling limit reached
       if (msg.tool_name?.endsWith("poll-task")) {
         const shouldBlock = await checkShouldBlockPolling();
@@ -769,6 +803,17 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
     }
 
     case "PostToolUse":
+      // Active session heartbeat (workers only, fire-and-forget)
+      if (agentInfo && !agentInfo.isLead) {
+        const heartbeatTaskFile = await readTaskFile();
+        if (heartbeatTaskFile?.taskId) {
+          void fetch(`${getBaseUrl()}/api/active-sessions/heartbeat/${heartbeatTaskFile.taskId}`, {
+            method: "PUT",
+            headers: mcpConfig!.headers,
+          }).catch(() => {});
+        }
+      }
+
       if (agentInfo) {
         // Sync workspace file edits back to DB
         const toolName = msg.tool_name;

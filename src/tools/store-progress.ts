@@ -99,10 +99,18 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
         let updatedTask = existingTask;
 
-        // Update progress if provided
+        // Update progress if provided (with deduplication)
         if (progress) {
-          const result = updateTaskProgress(taskId, progress);
-          if (result) updatedTask = result;
+          // Skip if same progress text was set within the last 5 minutes
+          const isDuplicate =
+            existingTask.progress === progress &&
+            existingTask.lastUpdatedAt &&
+            Date.now() - new Date(existingTask.lastUpdatedAt).getTime() < 5 * 60 * 1000;
+
+          if (!isDuplicate) {
+            const result = updateTaskProgress(taskId, progress);
+            if (result) updatedTask = result;
+          }
         }
 
         // Handle status change

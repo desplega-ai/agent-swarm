@@ -820,6 +820,23 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     /* exists */
   }
 
+  // Migration: Add error tracking columns to scheduled_tasks for exponential backoff
+  try {
+    db.run("ALTER TABLE scheduled_tasks ADD COLUMN consecutiveErrors INTEGER DEFAULT 0");
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run("ALTER TABLE scheduled_tasks ADD COLUMN lastErrorAt TEXT");
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run("ALTER TABLE scheduled_tasks ADD COLUMN lastErrorMessage TEXT");
+  } catch {
+    /* exists */
+  }
+
   return db;
 }
 
@@ -4017,6 +4034,9 @@ type ScheduledTaskRow = {
   nextRunAt: string | null;
   createdByAgentId: string | null;
   timezone: string;
+  consecutiveErrors: number | null;
+  lastErrorAt: string | null;
+  lastErrorMessage: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -4038,6 +4058,9 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     nextRunAt: row.nextRunAt ?? undefined,
     createdByAgentId: row.createdByAgentId ?? undefined,
     timezone: row.timezone,
+    consecutiveErrors: row.consecutiveErrors ?? 0,
+    lastErrorAt: row.lastErrorAt ?? undefined,
+    lastErrorMessage: row.lastErrorMessage ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -4149,6 +4172,9 @@ export interface UpdateScheduledTaskData {
   lastRunAt?: string;
   nextRunAt?: string;
   timezone?: string;
+  consecutiveErrors?: number;
+  lastErrorAt?: string | null;
+  lastErrorMessage?: string | null;
   lastUpdatedAt?: string;
 }
 
@@ -4210,6 +4236,18 @@ export function updateScheduledTask(
   if (data.timezone !== undefined) {
     updates.push("timezone = ?");
     params.push(data.timezone);
+  }
+  if (data.consecutiveErrors !== undefined) {
+    updates.push("consecutiveErrors = ?");
+    params.push(data.consecutiveErrors);
+  }
+  if (data.lastErrorAt !== undefined) {
+    updates.push("lastErrorAt = ?");
+    params.push(data.lastErrorAt);
+  }
+  if (data.lastErrorMessage !== undefined) {
+    updates.push("lastErrorMessage = ?");
+    params.push(data.lastErrorMessage);
   }
 
   if (updates.length === 0) {

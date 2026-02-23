@@ -107,6 +107,7 @@ describe("calculateNextRun", () => {
       priority: 50,
       enabled: true,
       timezone: "UTC",
+      consecutiveErrors: 0,
       createdAt: new Date().toISOString(),
       lastUpdatedAt: new Date().toISOString(),
     } as Parameters<typeof calculateNextRun>[0];
