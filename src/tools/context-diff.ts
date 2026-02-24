@@ -2,7 +2,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getContextVersion } from "@/be/db";
+import { getAgentById, getContextVersion } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 
 async function computeDiff(oldContent: string, newContent: string): Promise<string> {
@@ -27,7 +27,6 @@ async function computeDiff(oldContent: string, newContent: string): Promise<stri
   } finally {
     // Clean up temp files
     try {
-      await Bun.write(oldPath, "");
       const { unlink } = await import("node:fs/promises");
       await unlink(oldPath);
       await unlink(newPath);
@@ -86,6 +85,26 @@ export const registerContextDiffTool = (server: McpServer) => {
             message: `Version ${versionId} not found.`,
           },
         };
+      }
+
+      // Access control: agents can diff their own context, lead can diff any
+      if (version.agentId !== requestInfo.agentId) {
+        const callerAgent = getAgentById(requestInfo.agentId);
+        if (!callerAgent?.isLead) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Permission denied. Only the lead can diff other agents' context.",
+              },
+            ],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: "Permission denied. Only the lead can diff other agents' context.",
+            },
+          };
+        }
       }
 
       // Get the comparison version
