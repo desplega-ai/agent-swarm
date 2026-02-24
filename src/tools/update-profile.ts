@@ -128,16 +128,23 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         }
 
         // Update profile fields if provided
-        agent = updateAgentProfile(requestInfo.agentId, {
-          description,
-          role,
-          capabilities,
-          claudeMd,
-          soulMd,
-          identityMd,
-          setupScript,
-          toolsMd,
-        });
+        agent = updateAgentProfile(
+          requestInfo.agentId,
+          {
+            description,
+            role,
+            capabilities,
+            claudeMd,
+            soulMd,
+            identityMd,
+            setupScript,
+            toolsMd,
+          },
+          {
+            changeSource: "self_edit",
+            changedByAgentId: requestInfo.agentId,
+          },
+        );
 
         // Write updated files to workspace so changes are visible immediately
         if (soulMd !== undefined) {

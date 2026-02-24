@@ -170,6 +170,50 @@ export type AgentStatus = z.infer<typeof AgentStatusSchema>;
 export type Agent = z.infer<typeof AgentSchema>;
 export type AgentWithTasks = z.infer<typeof AgentWithTasksSchema>;
 
+// ============================================================================
+// Context Versioning Types
+// ============================================================================
+
+export const ChangeSourceSchema = z.enum([
+  "self_edit",
+  "lead_coaching",
+  "api",
+  "system",
+  "session_sync",
+]);
+
+export const VersionableFieldSchema = z.enum([
+  "soulMd",
+  "identityMd",
+  "toolsMd",
+  "claudeMd",
+  "setupScript",
+]);
+
+export const ContextVersionSchema = z.object({
+  id: z.uuid(),
+  agentId: z.uuid(),
+  field: VersionableFieldSchema,
+  content: z.string(),
+  version: z.number().int().min(1),
+  changeSource: ChangeSourceSchema,
+  changedByAgentId: z.uuid().nullable(),
+  changeReason: z.string().nullable(),
+  contentHash: z.string(),
+  previousVersionId: z.uuid().nullable(),
+  createdAt: z.iso.datetime(),
+});
+
+export type ChangeSource = z.infer<typeof ChangeSourceSchema>;
+export type VersionableField = z.infer<typeof VersionableFieldSchema>;
+export type ContextVersion = z.infer<typeof ContextVersionSchema>;
+
+export type VersionMeta = {
+  changeSource?: ChangeSource;
+  changedByAgentId?: string | null;
+  changeReason?: string | null;
+};
+
 // Channel Types
 export const ChannelTypeSchema = z.enum(["public", "dm"]);
 
