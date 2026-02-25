@@ -1225,7 +1225,10 @@ export const taskQueries = {
 
   setProgress: () =>
     getDb().prepare<AgentTaskRow, [string, string]>(
-      "UPDATE agent_tasks SET progress = ?, status = 'in_progress', lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
+      `UPDATE agent_tasks SET progress = ?,
+       status = CASE WHEN status IN ('completed', 'failed', 'cancelled') THEN status ELSE 'in_progress' END,
+       lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? RETURNING *`,
     ),
 
   delete: () => getDb().prepare<null, [string]>("DELETE FROM agent_tasks WHERE id = ?"),
@@ -1290,10 +1293,17 @@ export function getPendingTaskForAgent(agentId: string): AgentTask | null {
 
 export function startTask(taskId: string): AgentTask | null {
   const oldTask = getTaskById(taskId);
+  if (!oldTask) return null;
+
+  // Guard: never revive tasks that are already in a terminal state
+  if (["completed", "failed", "cancelled"].includes(oldTask.status)) {
+    return null;
+  }
+
   const row = getDb()
     .prepare<AgentTaskRow, [string]>(
       `UPDATE agent_tasks SET status = 'in_progress', lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? RETURNING *`,
+       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled') RETURNING *`,
     )
     .get(taskId);
   if (row && oldTask) {

@@ -98,9 +98,11 @@ export const registerStoreProgressTool = (server: McpServer) => {
         }
 
         let updatedTask = existingTask;
+        const isTerminal = ["completed", "failed", "cancelled"].includes(existingTask.status);
 
         // Update progress if provided (with deduplication)
-        if (progress) {
+        // Skip for tasks already in a terminal state to prevent zombie revival
+        if (progress && !isTerminal) {
           // Skip if same progress text was set within the last 5 minutes
           const isDuplicate =
             existingTask.progress === progress &&
