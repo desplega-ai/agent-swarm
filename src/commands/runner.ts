@@ -339,6 +339,9 @@ async function getPausedTasksFromAPI(config: ApiConfig): Promise<
     progress?: string;
     claudeSessionId?: string;
     parentTaskId?: string;
+    finishedAt?: string;
+    output?: string;
+    status?: string;
   }>
 > {
   const headers: Record<string, string> = {
@@ -366,6 +369,9 @@ async function getPausedTasksFromAPI(config: ApiConfig): Promise<
         progress?: string;
         claudeSessionId?: string;
         parentTaskId?: string;
+        finishedAt?: string;
+        output?: string;
+        status?: string;
       }>;
     };
     return data.tasks || [];
@@ -1914,6 +1920,14 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         console.log(`[${role}] Found ${pausedTasks.length} paused task(s) to resume`);
 
         for (const task of pausedTasks) {
+          // Defensive: skip tasks that already have completion data (zombie prevention)
+          if (task.finishedAt || task.output) {
+            console.warn(
+              `[${role}] Skipping zombie task ${task.id.slice(0, 8)} — already has completion data (finishedAt: ${!!task.finishedAt}, output: ${!!task.output})`,
+            );
+            continue;
+          }
+
           // Wait if at capacity (though unlikely on fresh startup)
           while (state.activeTasks.size >= state.maxConcurrent) {
             await checkCompletedProcesses(state, role, apiConfig);
