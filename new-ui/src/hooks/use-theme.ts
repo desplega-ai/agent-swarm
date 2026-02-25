@@ -1,4 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import type { ReactNode } from "react";
+import React from "react";
 
 type Theme = "dark" | "light";
 
@@ -10,35 +12,46 @@ interface ThemeContextValue {
 
 const STORAGE_KEY = "agent-swarm-mode";
 
-export const ThemeContext = createContext<ThemeContextValue | null>(null);
+const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
-export function useThemeProvider() {
-  const [theme, setThemeState] = useState<Theme>(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored === "light" || stored === "dark") return stored;
-    } catch {
-      // ignore
-    }
-    return "dark";
-  });
+function getStoredTheme(): Theme {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored === "light" || stored === "dark") return stored;
+  } catch {
+    // ignore
+  }
+  return "dark";
+}
+
+export function ThemeProvider({ children }: { children: ReactNode }) {
+  const [theme, setThemeState] = useState<Theme>(getStoredTheme);
 
   useEffect(() => {
     const root = document.documentElement;
-    root.classList.remove("dark", "light");
-    root.classList.add(theme);
-    localStorage.setItem(STORAGE_KEY, theme);
+    if (theme === "light") {
+      root.classList.add("light");
+      root.classList.remove("dark");
+    } else {
+      root.classList.add("dark");
+      root.classList.remove("light");
+    }
   }, [theme]);
 
-  const setTheme = useCallback((t: Theme) => {
-    setThemeState(t);
+  const setTheme = useCallback((newTheme: Theme) => {
+    localStorage.setItem(STORAGE_KEY, newTheme);
+    setThemeState(newTheme);
   }, []);
 
   const toggleTheme = useCallback(() => {
-    setThemeState((prev) => (prev === "dark" ? "light" : "dark"));
-  }, []);
+    setTheme(theme === "dark" ? "light" : "dark");
+  }, [theme, setTheme]);
 
-  return { theme, setTheme, toggleTheme };
+  return React.createElement(
+    ThemeContext.Provider,
+    { value: { theme, setTheme, toggleTheme } },
+    children,
+  );
 }
 
 export function useTheme(): ThemeContextValue {

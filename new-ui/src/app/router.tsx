@@ -1,5 +1,6 @@
-import { createBrowserRouter, Outlet } from "react-router-dom";
-import { lazy, Suspense } from "react";
+import { createBrowserRouter } from "react-router-dom";
+import { lazy } from "react";
+import { RootLayout } from "@/components/layout/root-layout";
 
 const DashboardPage = lazy(() => import("@/pages/dashboard/page"));
 const AgentsPage = lazy(() => import("@/pages/agents/page"));
@@ -15,22 +16,6 @@ const ScheduleDetailPage = lazy(() => import("@/pages/schedules/[id]/page"));
 const UsagePage = lazy(() => import("@/pages/usage/page"));
 const ConfigPage = lazy(() => import("@/pages/config/page"));
 const ReposPage = lazy(() => import("@/pages/repos/page"));
-
-function RootLayout() {
-  return (
-    <div className="min-h-screen bg-hive-body text-hive-text-primary">
-      <Suspense
-        fallback={
-          <div className="flex items-center justify-center h-screen">
-            <div className="text-hive-text-secondary">Loading...</div>
-          </div>
-        }
-      >
-        <Outlet />
-      </Suspense>
-    </div>
-  );
-}
 
 export const router = createBrowserRouter([
   {
