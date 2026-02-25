@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useParams } from "react-router-dom";
 import { useChannels, useMessages, usePostMessage } from "@/api/hooks/use-channels";
 import { useAgents } from "@/api/hooks/use-agents";
 import { formatRelativeTime, cn } from "@/lib/utils";
@@ -135,6 +136,7 @@ function MessageInput({
 }
 
 export default function ChatPage() {
+  const { channelId: urlChannelId } = useParams<{ channelId?: string }>();
   const { data: channels, isLoading: channelsLoading } = useChannels();
   const { data: agents } = useAgents();
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
@@ -143,10 +145,12 @@ export default function ChatPage() {
   agents?.forEach((a) => agentMap.set(a.id, a.name));
 
   useEffect(() => {
-    if (!activeChannelId && channels && channels.length > 0) {
+    if (urlChannelId && channels?.some((c) => c.id === urlChannelId)) {
+      setActiveChannelId(urlChannelId);
+    } else if (!activeChannelId && channels && channels.length > 0) {
       setActiveChannelId(channels[0].id);
     }
-  }, [channels, activeChannelId]);
+  }, [channels, activeChannelId, urlChannelId]);
 
   const activeChannel = channels?.find((c) => c.id === activeChannelId);
 

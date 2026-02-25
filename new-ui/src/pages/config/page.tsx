@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useConfig } from "@/hooks/use-config";
-import { useConfigs, useUpsertConfig, useDeleteConfig } from "@/api/hooks/use-swarm-config";
+import { useConfigs, useUpsertConfig, useDeleteConfig } from "@/api/hooks/use-config-api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -76,6 +76,21 @@ function ConfigEntryDialog({
         }
       : emptyConfigForm,
   );
+
+  useEffect(() => {
+    setForm(
+      editEntry
+        ? {
+            scope: editEntry.scope,
+            scopeId: editEntry.scopeId ?? "",
+            key: editEntry.key,
+            value: editEntry.isSecret ? "" : editEntry.value,
+            isSecret: editEntry.isSecret,
+            description: editEntry.description ?? "",
+          }
+        : emptyConfigForm,
+    );
+  }, [editEntry]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
