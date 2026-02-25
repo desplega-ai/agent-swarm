@@ -1,9 +1,30 @@
 import { useCallback, useMemo, useRef } from "react";
 import { AgGridReact } from "ag-grid-react";
-import { AllCommunityModule, type ColDef, type RowClickedEvent, ModuleRegistry } from "ag-grid-community";
+import {
+  ClientSideRowModelModule,
+  ModuleRegistry,
+  PaginationModule,
+  TextFilterModule,
+  NumberFilterModule,
+  QuickFilterModule,
+  ColumnAutoSizeModule,
+  CsvExportModule,
+  ValidationModule,
+  type ColDef,
+  type RowClickedEvent,
+} from "ag-grid-community";
 import { cn } from "@/lib/utils";
 
-ModuleRegistry.registerModules([AllCommunityModule]);
+ModuleRegistry.registerModules([
+  ClientSideRowModelModule,
+  PaginationModule,
+  TextFilterModule,
+  NumberFilterModule,
+  QuickFilterModule,
+  ColumnAutoSizeModule,
+  CsvExportModule,
+  ValidationModule,
+]);
 
 interface DataGridProps<TData> {
   rowData: TData[] | undefined;
