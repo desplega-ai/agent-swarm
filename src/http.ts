@@ -1176,6 +1176,9 @@ const httpServer = createHttpServer(async (req, res) => {
       identityMd?: string;
       setupScript?: string;
       toolsMd?: string;
+      changeSource?: string;
+      changedByAgentId?: string;
+      changeReason?: string;
     };
     try {
       body = JSON.parse(bodyText);
@@ -1230,16 +1233,33 @@ const httpServer = createHttpServer(async (req, res) => {
       }
     }
 
-    const agent = updateAgentProfile(agentId, {
-      role: body.role,
-      description: body.description,
-      capabilities: body.capabilities,
-      claudeMd: body.claudeMd,
-      soulMd: body.soulMd,
-      identityMd: body.identityMd,
-      setupScript: body.setupScript,
-      toolsMd: body.toolsMd,
-    });
+    // Build version metadata if provided
+    const validChangeSources = ["self_edit", "lead_coaching", "api", "system", "session_sync"];
+    const versionMeta =
+      body.changeSource || body.changedByAgentId || body.changeReason
+        ? {
+            changeSource: validChangeSources.includes(body.changeSource ?? "")
+              ? (body.changeSource as import("./types").ChangeSource)
+              : undefined,
+            changedByAgentId: body.changedByAgentId ?? null,
+            changeReason: body.changeReason ?? null,
+          }
+        : undefined;
+
+    const agent = updateAgentProfile(
+      agentId,
+      {
+        role: body.role,
+        description: body.description,
+        capabilities: body.capabilities,
+        claudeMd: body.claudeMd,
+        soulMd: body.soulMd,
+        identityMd: body.identityMd,
+        setupScript: body.setupScript,
+        toolsMd: body.toolsMd,
+      },
+      versionMeta,
+    );
 
     if (!agent) {
       res.writeHead(404, { "Content-Type": "application/json" });

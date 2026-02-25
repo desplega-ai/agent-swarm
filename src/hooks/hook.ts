@@ -322,7 +322,7 @@ export async function handleHook(): Promise<void> {
           ...mcpConfig.headers,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ claudeMd: content }),
+        body: JSON.stringify({ claudeMd: content, changeSource: "session_sync" }),
       });
     } catch {
       // Silently fail - don't block shutdown
@@ -332,7 +332,10 @@ export async function handleHook(): Promise<void> {
   /**
    * Sync SOUL.md and IDENTITY.md content back to the server
    */
-  const syncIdentityFilesToServer = async (agentId: string): Promise<void> => {
+  const syncIdentityFilesToServer = async (
+    agentId: string,
+    changeSource: "self_edit" | "session_sync" = "session_sync",
+  ): Promise<void> => {
     if (!mcpConfig) return;
 
     const updates: Record<string, string> = {};
@@ -370,7 +373,7 @@ export async function handleHook(): Promise<void> {
           ...mcpConfig.headers,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(updates),
+        body: JSON.stringify({ ...updates, changeSource }),
       });
     } catch {
       // Silently fail
@@ -381,7 +384,10 @@ export async function handleHook(): Promise<void> {
    * Sync setup script content back to the server.
    * Extracts only agent-managed content between markers to avoid duplicating operator content.
    */
-  const syncSetupScriptToServer = async (agentId: string): Promise<void> => {
+  const syncSetupScriptToServer = async (
+    agentId: string,
+    changeSource: "self_edit" | "session_sync" = "session_sync",
+  ): Promise<void> => {
     if (!mcpConfig) return;
 
     const file = Bun.file(SETUP_SCRIPT_PATH);
@@ -413,7 +419,7 @@ export async function handleHook(): Promise<void> {
           ...mcpConfig.headers,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ setupScript: content }),
+        body: JSON.stringify({ setupScript: content, changeSource }),
       });
     } catch {
       /* silently fail */
@@ -828,12 +834,12 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
               editedPath === IDENTITY_MD_PATH ||
               editedPath === TOOLS_MD_PATH
             ) {
-              await syncIdentityFilesToServer(agentInfo.id);
+              await syncIdentityFilesToServer(agentInfo.id, "self_edit");
             }
 
             // Setup script: start-up.sh (or start-up.*)
             if (editedPath.startsWith("/workspace/start-up")) {
-              await syncSetupScriptToServer(agentInfo.id);
+              await syncSetupScriptToServer(agentInfo.id, "self_edit");
             }
           } catch {
             // Non-blocking — don't interrupt the agent's workflow

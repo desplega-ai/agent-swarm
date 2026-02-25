@@ -2,6 +2,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import pkg from "../package.json";
 import { initDb } from "./be/db";
 import { registerCancelTaskTool } from "./tools/cancel-task";
+import { registerContextDiffTool } from "./tools/context-diff";
+import { registerContextHistoryTool } from "./tools/context-history";
 import { registerCreateChannelTool } from "./tools/create-channel";
 import { registerDeleteChannelTool } from "./tools/delete-channel";
 // Epics capability
@@ -145,6 +147,8 @@ export function createServer() {
   // Profiles capability - agent profile management
   if (hasCapability("profiles")) {
     registerUpdateProfileTool(server);
+    registerContextHistoryTool(server);
+    registerContextDiffTool(server);
   }
 
   // Services capability - PM2/background service registry

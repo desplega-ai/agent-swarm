@@ -12,9 +12,11 @@ import type {
   AgentTaskSource,
   AgentTaskStatus,
   AgentWithTasks,
+  ChangeSource,
   Channel,
   ChannelMessage,
   ChannelType,
+  ContextVersion,
   Epic,
   EpicStatus,
   EpicWithProgress,
@@ -27,6 +29,8 @@ import type {
   SessionLog,
   SwarmConfig,
   SwarmRepo,
+  VersionableField,
+  VersionMeta,
 } from "../types";
 
 let db: Database | null = null;
@@ -837,6 +841,36 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     /* exists */
   }
 
+  // Migration: Create context_versions table for tracking changes to agent identity files
+  db.run(`
+    CREATE TABLE IF NOT EXISTS context_versions (
+      id TEXT PRIMARY KEY,
+      agentId TEXT NOT NULL,
+      field TEXT NOT NULL,
+      content TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      changeSource TEXT NOT NULL,
+      changedByAgentId TEXT,
+      changeReason TEXT,
+      contentHash TEXT NOT NULL,
+      previousVersionId TEXT,
+      createdAt TEXT NOT NULL,
+      FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE,
+      FOREIGN KEY (changedByAgentId) REFERENCES agents(id) ON DELETE SET NULL,
+      FOREIGN KEY (previousVersionId) REFERENCES context_versions(id) ON DELETE SET NULL
+    )
+  `);
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_cv_agent_field ON context_versions(agentId, field, version DESC)`,
+  );
+  db.run(
+    `CREATE INDEX IF NOT EXISTS idx_cv_agent_created ON context_versions(agentId, createdAt DESC)`,
+  );
+  db.run(`CREATE INDEX IF NOT EXISTS idx_cv_hash ON context_versions(agentId, field, contentHash)`);
+
+  // Backfill: Seed v1 for existing agents that don't have any context versions yet
+  seedContextVersions();
+
   return db;
 }
 
@@ -851,6 +885,198 @@ export function closeDb(): void {
   if (db) {
     db.close();
     db = null;
+  }
+}
+
+// ============================================================================
+// Context Versioning
+// ============================================================================
+
+const VERSIONABLE_FIELDS: VersionableField[] = [
+  "soulMd",
+  "identityMd",
+  "toolsMd",
+  "claudeMd",
+  "setupScript",
+];
+
+function computeContentHash(content: string): string {
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(content);
+  return hasher.digest("hex");
+}
+
+type ContextVersionRow = {
+  id: string;
+  agentId: string;
+  field: string;
+  content: string;
+  version: number;
+  changeSource: string;
+  changedByAgentId: string | null;
+  changeReason: string | null;
+  contentHash: string;
+  previousVersionId: string | null;
+  createdAt: string;
+};
+
+function rowToContextVersion(row: ContextVersionRow): ContextVersion {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    field: row.field as VersionableField,
+    content: row.content,
+    version: row.version,
+    changeSource: row.changeSource as ChangeSource,
+    changedByAgentId: row.changedByAgentId,
+    changeReason: row.changeReason,
+    contentHash: row.contentHash,
+    previousVersionId: row.previousVersionId,
+    createdAt: row.createdAt,
+  };
+}
+
+export function createContextVersion(params: {
+  agentId: string;
+  field: VersionableField;
+  content: string;
+  version: number;
+  changeSource: ChangeSource;
+  changedByAgentId?: string | null;
+  changeReason?: string | null;
+  contentHash: string;
+  previousVersionId?: string | null;
+}): ContextVersion {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  const row = getDb()
+    .prepare<
+      ContextVersionRow,
+      [
+        string,
+        string,
+        string,
+        string,
+        number,
+        string,
+        string | null,
+        string | null,
+        string,
+        string | null,
+        string,
+      ]
+    >(
+      `INSERT INTO context_versions (id, agentId, field, content, version, changeSource, changedByAgentId, changeReason, contentHash, previousVersionId, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      params.agentId,
+      params.field,
+      params.content,
+      params.version,
+      params.changeSource,
+      params.changedByAgentId ?? null,
+      params.changeReason ?? null,
+      params.contentHash,
+      params.previousVersionId ?? null,
+      now,
+    );
+
+  if (!row) throw new Error("Failed to create context version");
+  return rowToContextVersion(row);
+}
+
+export function getLatestContextVersion(
+  agentId: string,
+  field: VersionableField,
+): ContextVersion | null {
+  const row = getDb()
+    .prepare<ContextVersionRow, [string, string]>(
+      `SELECT * FROM context_versions WHERE agentId = ? AND field = ? ORDER BY version DESC LIMIT 1`,
+    )
+    .get(agentId, field);
+
+  return row ? rowToContextVersion(row) : null;
+}
+
+export function getContextVersion(id: string): ContextVersion | null {
+  const row = getDb()
+    .prepare<ContextVersionRow, [string]>(`SELECT * FROM context_versions WHERE id = ?`)
+    .get(id);
+
+  return row ? rowToContextVersion(row) : null;
+}
+
+export function getContextVersionHistory(params: {
+  agentId: string;
+  field?: VersionableField;
+  limit?: number;
+}): ContextVersion[] {
+  const limit = params.limit ?? 10;
+
+  if (params.field) {
+    const rows = getDb()
+      .prepare<ContextVersionRow, [string, string, number]>(
+        `SELECT * FROM context_versions WHERE agentId = ? AND field = ? ORDER BY version DESC LIMIT ?`,
+      )
+      .all(params.agentId, params.field, limit);
+    return rows.map(rowToContextVersion);
+  }
+
+  const rows = getDb()
+    .prepare<ContextVersionRow, [string, number]>(
+      `SELECT * FROM context_versions WHERE agentId = ? ORDER BY createdAt DESC LIMIT ?`,
+    )
+    .all(params.agentId, limit);
+  return rows.map(rowToContextVersion);
+}
+
+/**
+ * Seed v1 context versions for existing agents that don't have any versions yet.
+ * Called during migration.
+ */
+function seedContextVersions(): void {
+  const database = getDb();
+  const agents = database
+    .prepare<
+      {
+        id: string;
+        soulMd: string | null;
+        identityMd: string | null;
+        toolsMd: string | null;
+        claudeMd: string | null;
+        setupScript: string | null;
+      },
+      []
+    >(`SELECT id, soulMd, identityMd, toolsMd, claudeMd, setupScript FROM agents`)
+    .all();
+
+  for (const agent of agents) {
+    for (const field of VERSIONABLE_FIELDS) {
+      const content = agent[field];
+      if (!content) continue;
+
+      // Check if a version already exists for this agent+field
+      const existing = database
+        .prepare<{ id: string }, [string, string]>(
+          `SELECT id FROM context_versions WHERE agentId = ? AND field = ? LIMIT 1`,
+        )
+        .get(agent.id, field);
+      if (existing) continue;
+
+      const id = crypto.randomUUID();
+      const hash = computeContentHash(content);
+      const now = new Date().toISOString();
+
+      database
+        .prepare(
+          `INSERT INTO context_versions (id, agentId, field, content, version, changeSource, contentHash, createdAt)
+           VALUES (?, ?, ?, ?, 1, 'system', ?, ?)`,
+        )
+        .run(id, agent.id, field, content, hash, now);
+    }
   }
 }
 
@@ -2632,53 +2858,89 @@ export function updateAgentProfile(
     setupScript?: string;
     toolsMd?: string;
   },
+  meta?: VersionMeta,
 ): Agent | null {
-  const agent = getAgentById(id);
-  if (!agent) return null;
+  const database = getDb();
 
-  const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<
-      AgentRow,
-      [
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        string,
-        string,
-      ]
-    >(
-      `UPDATE agents SET
-        description = COALESCE(?, description),
-        role = COALESCE(?, role),
-        capabilities = COALESCE(?, capabilities),
-        claudeMd = COALESCE(?, claudeMd),
-        soulMd = COALESCE(?, soulMd),
-        identityMd = COALESCE(?, identityMd),
-        setupScript = COALESCE(?, setupScript),
-        toolsMd = COALESCE(?, toolsMd),
-        lastUpdatedAt = ?
-       WHERE id = ? RETURNING *`,
-    )
-    .get(
-      updates.description ?? null,
-      updates.role ?? null,
-      updates.capabilities ? JSON.stringify(updates.capabilities) : null,
-      updates.claudeMd ?? null,
-      updates.soulMd ?? null,
-      updates.identityMd ?? null,
-      updates.setupScript ?? null,
-      updates.toolsMd ?? null,
-      now,
-      id,
-    );
+  return database.transaction(() => {
+    // Get current agent state for version comparison
+    const current = database
+      .prepare<AgentRow, [string]>("SELECT * FROM agents WHERE id = ?")
+      .get(id);
+    if (!current) return null;
 
-  return row ? rowToAgent(row) : null;
+    // Create context versions for changed fields
+    for (const field of VERSIONABLE_FIELDS) {
+      const newValue = updates[field];
+      if (newValue === undefined || newValue === null) continue;
+
+      const currentValue = current[field] ?? "";
+      const newHash = computeContentHash(newValue);
+      const currentHash = computeContentHash(currentValue);
+
+      if (newHash === currentHash) continue; // No actual change
+
+      const latestVersion = getLatestContextVersion(id, field);
+      const version = (latestVersion?.version ?? 0) + 1;
+
+      createContextVersion({
+        agentId: id,
+        field,
+        content: newValue,
+        version,
+        changeSource: meta?.changeSource ?? "api",
+        changedByAgentId: meta?.changedByAgentId ?? null,
+        changeReason: meta?.changeReason ?? null,
+        contentHash: newHash,
+        previousVersionId: latestVersion?.id ?? null,
+      });
+    }
+
+    // Proceed with existing UPDATE logic
+    const now = new Date().toISOString();
+    const row = database
+      .prepare<
+        AgentRow,
+        [
+          string | null,
+          string | null,
+          string | null,
+          string | null,
+          string | null,
+          string | null,
+          string | null,
+          string | null,
+          string,
+          string,
+        ]
+      >(
+        `UPDATE agents SET
+          description = COALESCE(?, description),
+          role = COALESCE(?, role),
+          capabilities = COALESCE(?, capabilities),
+          claudeMd = COALESCE(?, claudeMd),
+          soulMd = COALESCE(?, soulMd),
+          identityMd = COALESCE(?, identityMd),
+          setupScript = COALESCE(?, setupScript),
+          toolsMd = COALESCE(?, toolsMd),
+          lastUpdatedAt = ?
+         WHERE id = ? RETURNING *`,
+      )
+      .get(
+        updates.description ?? null,
+        updates.role ?? null,
+        updates.capabilities ? JSON.stringify(updates.capabilities) : null,
+        updates.claudeMd ?? null,
+        updates.soulMd ?? null,
+        updates.identityMd ?? null,
+        updates.setupScript ?? null,
+        updates.toolsMd ?? null,
+        now,
+        id,
+      );
+
+    return row ? rowToAgent(row) : null;
+  })();
 }
 
 export function updateAgentName(id: string, newName: string): Agent | null {
