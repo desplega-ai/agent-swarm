@@ -53,7 +53,7 @@ export default function ServicesPage() {
       {services && services.length > 0 ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {services.map((svc) => (
-            <Card key={svc.id} className="hover:border-border transition-colors">
+            <Card key={svc.id} className="hover:border-muted-foreground/30 transition-colors">
               <CardContent className="p-4 space-y-3">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-2">

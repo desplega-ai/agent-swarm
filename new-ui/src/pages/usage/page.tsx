@@ -29,7 +29,7 @@ import {
 } from "recharts";
 import { DollarSign, Coins, Activity, TrendingUp } from "lucide-react";
 
-const CHART_COLORS = ["oklch(0.646 0.222 41.116)", "oklch(0.6 0.118 184.704)", "oklch(0.398 0.07 227.392)", "oklch(0.828 0.189 84.429)", "oklch(0.769 0.188 70.08)"];
+const CHART_COLORS = ["var(--color-chart-1)", "var(--color-chart-2)", "var(--color-chart-3)", "var(--color-chart-4)", "var(--color-chart-5)"];
 
 export default function UsagePage() {
   const { data: monthlyStats, isLoading: statsLoading } = useMonthlyUsageStats();
@@ -182,16 +182,16 @@ export default function UsagePage() {
             {dailyData.length > 0 ? (
               <ResponsiveContainer width="100%" height={250}>
                 <LineChart data={dailyData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="oklch(1 0 0 / 10%)" />
-                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: "oklch(0.552 0.016 285.938)" }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }} />
                   <YAxis
-                    tick={{ fontSize: 10, fill: "oklch(0.552 0.016 285.938)" }}
+                    tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
                     tickFormatter={(v) => `$${v}`}
                   />
                   <Tooltip
                     contentStyle={{
-                      background: "oklch(0.21 0.006 285.885)",
-                      border: "1px solid oklch(1 0 0 / 10%)",
+                      background: "var(--color-card)",
+                      border: "1px solid var(--color-border)",
                       borderRadius: 8,
                       fontSize: 12,
                     }}
@@ -200,7 +200,7 @@ export default function UsagePage() {
                   <Line
                     type="monotone"
                     dataKey="cost"
-                    stroke="oklch(0.769 0.188 70.08)"
+                    stroke="var(--color-primary)"
                     strokeWidth={2}
                     dot={false}
                   />
@@ -239,8 +239,8 @@ export default function UsagePage() {
                   </Pie>
                   <Tooltip
                     contentStyle={{
-                      background: "oklch(0.21 0.006 285.885)",
-                      border: "1px solid oklch(1 0 0 / 10%)",
+                      background: "var(--color-card)",
+                      border: "1px solid var(--color-border)",
                       borderRadius: 8,
                       fontSize: 12,
                     }}
@@ -265,19 +265,19 @@ export default function UsagePage() {
           <CardContent>
             <ResponsiveContainer width="100%" height={250}>
               <BarChart data={agentCosts.slice(0, 10)}>
-                <CartesianGrid strokeDasharray="3 3" stroke="oklch(1 0 0 / 10%)" />
-                <XAxis dataKey="name" tick={{ fontSize: 10, fill: "oklch(0.552 0.016 285.938)" }} />
-                <YAxis tick={{ fontSize: 10, fill: "oklch(0.552 0.016 285.938)" }} tickFormatter={(v) => `$${v}`} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+                <XAxis dataKey="name" tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }} />
+                <YAxis tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }} tickFormatter={(v) => `$${v}`} />
                 <Tooltip
                   contentStyle={{
-                    background: "oklch(0.21 0.006 285.885)",
-                    border: "1px solid oklch(1 0 0 / 10%)",
+                    background: "var(--color-card)",
+                    border: "1px solid var(--color-border)",
                     borderRadius: 8,
                     fontSize: 12,
                   }}
                   formatter={(value) => [`$${Number(value).toFixed(3)}`, "Cost"]}
                 />
-                <Bar dataKey="cost" fill="oklch(0.769 0.188 70.08)" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="cost" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
