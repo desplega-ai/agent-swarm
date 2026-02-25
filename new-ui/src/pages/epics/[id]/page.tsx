@@ -83,7 +83,7 @@ export default function EpicDetailPage() {
       </button>
 
       <div className="flex items-center gap-3 flex-wrap">
-        <h1 className="font-display text-2xl font-bold">{epic.name}</h1>
+        <h1 className="text-xl font-semibold">{epic.name}</h1>
         <StatusBadge status={epic.status} size="md" />
         {epic.tags?.map((tag) => (
           <Badge key={tag} variant="secondary" className="text-xs">
@@ -97,7 +97,7 @@ export default function EpicDetailPage() {
         <div className="flex items-center gap-2">
           <div className="flex-1 h-3 rounded-full bg-muted overflow-hidden">
             <div
-              className="h-full rounded-full bg-amber-500 transition-all"
+              className="h-full rounded-full bg-primary transition-all"
               style={{ width: `${progressPct}%` }}
             />
           </div>
@@ -106,7 +106,7 @@ export default function EpicDetailPage() {
         {stats && (
           <div className="flex gap-3 text-xs text-muted-foreground">
             <span className="text-emerald-400">{stats.completed} completed</span>
-            <span className="text-amber-400">{stats.inProgress} in progress</span>
+            <span className="text-primary">{stats.inProgress} in progress</span>
             <span className="text-yellow-400">{stats.pending} pending</span>
             {stats.failed > 0 && <span className="text-red-400">{stats.failed} failed</span>}
             <span>{stats.total} total</span>
@@ -139,7 +139,7 @@ export default function EpicDetailPage() {
                   <p className="text-sm">
                     <Link
                       to={`/agents/${epic.leadAgentId}`}
-                      className="text-amber-400 hover:underline"
+                      className="text-primary hover:underline"
                     >
                       {epic.leadAgentId.slice(0, 8)}...
                     </Link>

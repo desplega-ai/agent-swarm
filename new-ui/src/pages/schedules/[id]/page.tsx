@@ -56,7 +56,7 @@ export default function ScheduleDetailPage() {
       </button>
 
       <div className="flex items-center gap-3 flex-wrap">
-        <h1 className="font-display text-2xl font-bold">{schedule.name}</h1>
+        <h1 className="text-xl font-semibold">{schedule.name}</h1>
         <Badge
           variant={schedule.enabled ? "default" : "secondary"}
           className={
@@ -85,12 +85,12 @@ export default function ScheduleDetailPage() {
               <div className="flex items-center gap-1.5 mt-0.5">
                 {schedule.cronExpression ? (
                   <>
-                    <Clock className="h-4 w-4 text-amber-400" />
+                    <Clock className="h-4 w-4 text-muted-foreground" />
                     <code className="text-sm font-mono">{schedule.cronExpression}</code>
                   </>
                 ) : schedule.intervalMs ? (
                   <>
-                    <Timer className="h-4 w-4 text-amber-400" />
+                    <Timer className="h-4 w-4 text-muted-foreground" />
                     <span className="text-sm">Every {formatInterval(schedule.intervalMs)}</span>
                   </>
                 ) : (
@@ -116,7 +116,7 @@ export default function ScheduleDetailPage() {
                 {schedule.targetAgentId ? (
                   <Link
                     to={`/agents/${schedule.targetAgentId}`}
-                    className="text-amber-400 hover:underline"
+                    className="text-primary hover:underline"
                   >
                     {agentMap.get(schedule.targetAgentId) ??
                       schedule.targetAgentId.slice(0, 8) + "..."}

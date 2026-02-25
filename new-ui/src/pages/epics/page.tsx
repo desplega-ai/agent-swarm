@@ -68,7 +68,7 @@ export default function EpicsPage() {
             <div className="flex items-center gap-2">
               <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-amber-500 transition-all"
+                  className="h-full rounded-full bg-primary transition-all"
                   style={{ width: `${pct}%` }}
                 />
               </div>
@@ -107,7 +107,7 @@ export default function EpicsPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-2xl font-bold">Epics</h1>
+      <h1 className="text-xl font-semibold">Epics</h1>
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">

@@ -3,20 +3,22 @@
 /* Import AG Grid Quartz theme at the grid layer */
 @import "ag-grid-community/styles/ag-theme-quartz.css" layer(grid);
 
-/* Override AG Grid variables with beehive colors */
+/* Neutral theme overrides — maps to shadcn/ui CSS vars */
 .ag-theme-quartz {
-  --ag-background-color: var(--color-hive-surface);
-  --ag-header-background-color: var(--color-hive-earth);
-  --ag-odd-row-background-color: var(--color-hive-body);
-  --ag-row-hover-color: rgba(245, 166, 35, 0.05);
-  --ag-border-color: var(--color-hive-border);
-  --ag-header-foreground-color: var(--color-hive-text-secondary);
-  --ag-foreground-color: var(--color-hive-text-primary);
-  --ag-selected-row-background-color: rgba(245, 166, 35, 0.1);
-  --ag-font-family: var(--font-sans);
+  --ag-background-color: var(--color-background);
+  --ag-foreground-color: var(--color-foreground);
+  --ag-header-background-color: var(--color-muted);
+  --ag-header-foreground-color: var(--color-muted-foreground);
+  --ag-odd-row-background-color: transparent;
+  --ag-row-hover-color: var(--color-accent);
+  --ag-selected-row-background-color: var(--color-accent);
+  --ag-border-color: var(--color-border);
+  --ag-secondary-border-color: var(--color-border);
+  --ag-row-border-color: var(--color-border);
+  --ag-header-column-separator-color: var(--color-border);
+  --ag-font-family: "Space Grotesk", system-ui, sans-serif;
   --ag-font-size: 13px;
-  --ag-row-border-color: var(--color-hive-border);
-  --ag-header-column-separator-color: var(--color-hive-border);
-  --ag-range-selection-border-color: var(--color-hive-amber);
-  --ag-input-focus-border-color: var(--color-hive-amber);
+  --ag-header-column-resize-handle-color: var(--color-border);
+  --ag-range-selection-border-color: var(--color-primary);
+  --ag-input-focus-border-color: var(--color-primary);
 }

@@ -33,7 +33,7 @@ function ChannelSidebar({
             className={cn(
               "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
               activeChannelId === ch.id
-                ? "bg-amber-500/15 text-amber-400"
+                ? "bg-primary/15 text-primary"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
           >
@@ -68,7 +68,7 @@ function MessageBubble({
 
   return (
     <div className="group flex gap-3 px-4 py-2 hover:bg-muted/30">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-xs font-bold text-amber-400">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold text-muted-foreground">
         {initials}
       </div>
       <div className="min-w-0 flex-1">
@@ -126,7 +126,7 @@ function MessageInput({
           size="icon"
           onClick={handleSend}
           disabled={!content.trim() || postMessage.isPending}
-          className="shrink-0 bg-amber-600 hover:bg-amber-700"
+          className="shrink-0 bg-primary hover:bg-primary/90"
         >
           <Send className="h-4 w-4" />
         </Button>
@@ -167,7 +167,7 @@ export default function ChatPage() {
   if (channelsLoading) {
     return (
       <div className="space-y-4">
-        <h1 className="font-display text-2xl font-bold">Chat</h1>
+        <h1 className="text-xl font-semibold">Chat</h1>
         <Skeleton className="h-[500px] w-full" />
       </div>
     );
@@ -175,7 +175,7 @@ export default function ChatPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-2xl font-bold">Chat</h1>
+      <h1 className="text-xl font-semibold">Chat</h1>
       <div className="flex h-[calc(100vh-12rem)] overflow-hidden rounded-lg border border-border bg-background">
         <ChannelSidebar
           channels={channels ?? []}

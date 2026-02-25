@@ -56,6 +56,10 @@ In production, configure `apiUrl` in the config panel or pass `?apiUrl=...&apiKe
 
 ## Theme
 
-The UI uses a "beehive" theme with amber/gold/honey colors.
-Dark mode is default. Toggle via theme button.
-CSS variables are defined in `src/styles/globals.css`.
+"Mission Control" design — clean, information-dense, professional.
+- **Base:** Zinc-neutral palette (shadcn/ui v4 oklch tokens)
+- **Accent:** Amber as brand `--primary` only — interactive elements, active states
+- **Dark mode** is default. Toggle via header button.
+- **Typography:** Space Grotesk (sans) + Space Mono (mono). No display fonts.
+- **Status colors:** Semantic — emerald (success), amber (active/busy), red (error), zinc (inactive)
+- CSS variables defined in `src/styles/globals.css`. AG Grid themed via `src/styles/ag-grid.css`.

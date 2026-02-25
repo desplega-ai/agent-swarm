@@ -74,7 +74,7 @@ export default function TasksPage() {
         width: 80,
         cellRenderer: (params: { value: number }) => {
           const p = params.value ?? 50;
-          const color = p >= 80 ? "text-red-400" : p >= 60 ? "text-amber-400" : "text-muted-foreground";
+          const color = p >= 80 ? "text-red-400" : p >= 60 ? "text-primary" : "text-muted-foreground";
           return <span className={`font-mono ${color}`}>{p}</span>;
         },
       },
@@ -117,7 +117,7 @@ export default function TasksPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-2xl font-bold">Tasks</h1>
+      <h1 className="text-xl font-semibold">Tasks</h1>
 
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-sm">

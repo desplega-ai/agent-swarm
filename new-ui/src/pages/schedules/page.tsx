@@ -39,7 +39,7 @@ export default function SchedulesPage() {
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <h1 className="font-display text-2xl font-bold">Schedules</h1>
+        <h1 className="text-xl font-semibold">Schedules</h1>
         <Skeleton className="h-64 w-full" />
       </div>
     );
@@ -47,7 +47,7 @@ export default function SchedulesPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-2xl font-bold">Schedules</h1>
+      <h1 className="text-xl font-semibold">Schedules</h1>
 
       {schedules && schedules.length > 0 ? (
         <div className="rounded-lg border border-border">

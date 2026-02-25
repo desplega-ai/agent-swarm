@@ -36,7 +36,7 @@ export default function ServicesPage() {
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <h1 className="font-display text-2xl font-bold">Services</h1>
+        <h1 className="text-xl font-semibold">Services</h1>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-36" />
@@ -48,12 +48,12 @@ export default function ServicesPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-2xl font-bold">Services</h1>
+      <h1 className="text-xl font-semibold">Services</h1>
 
       {services && services.length > 0 ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {services.map((svc) => (
-            <Card key={svc.id} className="hover:border-amber-500/30 transition-colors">
+            <Card key={svc.id} className="hover:border-border transition-colors">
               <CardContent className="p-4 space-y-3">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-2">
@@ -80,7 +80,7 @@ export default function ServicesPage() {
                     <span className="text-muted-foreground/60">Agent:</span>
                     <Link
                       to={`/agents/${svc.agentId}`}
-                      className="text-amber-400 hover:underline"
+                      className="text-primary hover:underline"
                     >
                       {agentMap.get(svc.agentId) ?? svc.agentId.slice(0, 8) + "..."}
                     </Link>
@@ -98,7 +98,7 @@ export default function ServicesPage() {
                         href={svc.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-amber-400 hover:underline inline-flex items-center gap-0.5"
+                        className="text-primary hover:underline inline-flex items-center gap-0.5"
                       >
                         {svc.url}
                         <ExternalLink className="h-3 w-3" />

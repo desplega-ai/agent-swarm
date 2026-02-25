@@ -12,7 +12,7 @@ function AgentCard({ agent }: { agent: AgentWithTasks }) {
   const currentTask = agent.tasks?.find((t) => t.status === "in_progress");
 
   return (
-    <Card className="border-border/50 hover:border-amber-500/30 transition-colors">
+    <Card className="border-border/50 hover:border-border transition-colors">
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
@@ -54,7 +54,7 @@ const eventColors: Record<string, string> = {
   agent_joined: "text-emerald-400",
   agent_left: "text-zinc-400",
   task_created: "text-blue-400",
-  task_status_change: "text-amber-400",
+  task_status_change: "text-primary",
   task_completed: "text-emerald-400",
   task_failed: "text-red-400",
   task_cancelled: "text-zinc-400",
@@ -99,7 +99,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-display text-2xl font-bold">Dashboard</h1>
+      <h1 className="text-xl font-semibold">Dashboard</h1>
 
       {/* Stats Bar */}
       <StatsBar
@@ -115,7 +115,7 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <Users className="h-4 w-4 text-amber-500" />
+              <Users className="h-4 w-4 text-muted-foreground" />
               Agents
               {agents && (
                 <span className="ml-auto text-xs text-muted-foreground font-normal">
@@ -139,7 +139,7 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <ListTodo className="h-4 w-4 text-amber-500" />
+              <ListTodo className="h-4 w-4 text-muted-foreground" />
               Active Tasks
               {tasksData && (
                 <span className="ml-auto text-xs text-muted-foreground font-normal">
@@ -177,7 +177,7 @@ export default function DashboardPage() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
-            <Activity className="h-4 w-4 text-amber-500" />
+            <Activity className="h-4 w-4 text-muted-foreground" />
             Activity Feed
           </CardTitle>
         </CardHeader>

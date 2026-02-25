@@ -123,7 +123,7 @@ export default function AgentDetailPage() {
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <h1 className="font-display text-2xl font-bold">{agent.name}</h1>
+            <h1 className="text-xl font-semibold">{agent.name}</h1>
             <Button size="icon" variant="ghost" onClick={startEditing}>
               <Pencil className="h-4 w-4" />
             </Button>

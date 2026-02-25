@@ -175,7 +175,7 @@ function ConfigEntryDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" className="bg-amber-600 hover:bg-amber-700">
+            <Button type="submit" className="bg-primary hover:bg-primary/90">
               {editEntry ? "Update" : "Add"}
             </Button>
           </DialogFooter>
@@ -239,7 +239,7 @@ function SwarmConfigSection() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Swarm Configuration</h2>
-        <Button onClick={handleAdd} size="sm" className="gap-1 bg-amber-600 hover:bg-amber-700">
+        <Button onClick={handleAdd} size="sm" className="gap-1 bg-primary hover:bg-primary/90">
           <Plus className="h-3.5 w-3.5" /> Add Entry
         </Button>
       </div>
@@ -404,12 +404,12 @@ export default function ConfigPage() {
   if (!isConfigured) {
     return (
       <div className="flex min-h-[80vh] items-center justify-center">
-        <Card className="w-full max-w-md border-amber-500/20">
+        <Card className="w-full max-w-md border-border">
           <CardHeader className="text-center">
             <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center">
-              <Hexagon className="h-10 w-10 text-amber-500" />
+              <Hexagon className="h-10 w-10 text-primary" />
             </div>
-            <CardTitle className="font-display text-xl">Agent Swarm</CardTitle>
+            <CardTitle className="text-xl font-semibold">Agent Swarm</CardTitle>
             <CardDescription>
               Connect to your Agent Swarm API server to get started.
             </CardDescription>
@@ -458,7 +458,7 @@ export default function ConfigPage() {
             <Button
               onClick={handleConnect}
               disabled={status === "loading" || !apiUrl}
-              className="w-full bg-amber-600 text-white hover:bg-amber-700"
+              className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
             >
               {status === "loading" ? (
                 <>
@@ -478,10 +478,10 @@ export default function ConfigPage() {
   // Configured: show connection settings + swarm config CRUD
   return (
     <div className="space-y-8">
-      <h1 className="font-display text-2xl font-bold">Settings</h1>
+      <h1 className="text-xl font-semibold">Settings</h1>
 
       {/* Connection Settings */}
-      <Card className="border-amber-500/20">
+      <Card className="border-border">
         <CardHeader>
           <CardTitle className="text-lg">Connection</CardTitle>
           <CardDescription>API server connection settings.</CardDescription>
@@ -528,7 +528,7 @@ export default function ConfigPage() {
             <Button
               onClick={handleConnect}
               disabled={status === "loading" || !apiUrl}
-              className="bg-amber-600 text-white hover:bg-amber-700"
+              className="bg-primary text-primary-foreground hover:bg-primary/90"
             >
               {status === "loading" ? (
                 <>

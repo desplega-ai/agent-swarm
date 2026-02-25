@@ -132,7 +132,7 @@ function RepoDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" className="bg-amber-600 hover:bg-amber-700">
+            <Button type="submit" className="bg-primary hover:bg-primary/90">
               {editRepo ? "Update" : "Add"}
             </Button>
           </DialogFooter>
@@ -179,7 +179,7 @@ export default function ReposPage() {
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <h1 className="font-display text-2xl font-bold">Repos</h1>
+        <h1 className="text-xl font-semibold">Repos</h1>
         <Skeleton className="h-64 w-full" />
       </div>
     );
@@ -188,8 +188,8 @@ export default function ReposPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="font-display text-2xl font-bold">Repos</h1>
-        <Button onClick={handleAdd} className="gap-1 bg-amber-600 hover:bg-amber-700">
+        <h1 className="text-xl font-semibold">Repos</h1>
+        <Button onClick={handleAdd} className="gap-1 bg-primary hover:bg-primary/90">
           <Plus className="h-4 w-4" /> Add Repo
         </Button>
       </div>

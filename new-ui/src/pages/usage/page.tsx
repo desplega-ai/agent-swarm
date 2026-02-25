@@ -29,7 +29,7 @@ import {
 } from "recharts";
 import { DollarSign, Coins, Activity, TrendingUp } from "lucide-react";
 
-const CHART_COLORS = ["#f59e0b", "#8b5cf6", "#10b981", "#ef4444", "#3b82f6"];
+const CHART_COLORS = ["oklch(0.646 0.222 41.116)", "oklch(0.6 0.118 184.704)", "oklch(0.398 0.07 227.392)", "oklch(0.828 0.189 84.429)", "oklch(0.769 0.188 70.08)"];
 
 export default function UsagePage() {
   const { data: monthlyStats, isLoading: statsLoading } = useMonthlyUsageStats();
@@ -108,7 +108,7 @@ export default function UsagePage() {
   if (statsLoading || costsLoading) {
     return (
       <div className="space-y-4">
-        <h1 className="font-display text-2xl font-bold">Usage</h1>
+        <h1 className="text-xl font-semibold">Usage</h1>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
             <Skeleton key={i} className="h-28" />
@@ -121,14 +121,14 @@ export default function UsagePage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-display text-2xl font-bold">Usage</h1>
+      <h1 className="text-xl font-semibold">Usage</h1>
 
       {/* Summary Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm text-muted-foreground">Monthly Cost</CardTitle>
-            <DollarSign className="h-4 w-4 text-amber-400" />
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold font-mono">
@@ -139,7 +139,7 @@ export default function UsagePage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm text-muted-foreground">Monthly Tokens</CardTitle>
-            <Coins className="h-4 w-4 text-amber-400" />
+            <Coins className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold font-mono">
@@ -150,7 +150,7 @@ export default function UsagePage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm text-muted-foreground">Sessions</CardTitle>
-            <Activity className="h-4 w-4 text-amber-400" />
+            <Activity className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold font-mono">{monthlyStats?.sessionCount ?? 0}</p>
@@ -159,7 +159,7 @@ export default function UsagePage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm text-muted-foreground">Avg Cost/Session</CardTitle>
-            <TrendingUp className="h-4 w-4 text-amber-400" />
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold font-mono">
@@ -182,16 +182,16 @@ export default function UsagePage() {
             {dailyData.length > 0 ? (
               <ResponsiveContainer width="100%" height={250}>
                 <LineChart data={dailyData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#888" }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="oklch(1 0 0 / 10%)" />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: "oklch(0.552 0.016 285.938)" }} />
                   <YAxis
-                    tick={{ fontSize: 10, fill: "#888" }}
+                    tick={{ fontSize: 10, fill: "oklch(0.552 0.016 285.938)" }}
                     tickFormatter={(v) => `$${v}`}
                   />
                   <Tooltip
                     contentStyle={{
-                      background: "#18181b",
-                      border: "1px solid #333",
+                      background: "oklch(0.21 0.006 285.885)",
+                      border: "1px solid oklch(1 0 0 / 10%)",
                       borderRadius: 8,
                       fontSize: 12,
                     }}
@@ -200,7 +200,7 @@ export default function UsagePage() {
                   <Line
                     type="monotone"
                     dataKey="cost"
-                    stroke="#f59e0b"
+                    stroke="oklch(0.769 0.188 70.08)"
                     strokeWidth={2}
                     dot={false}
                   />
@@ -239,8 +239,8 @@ export default function UsagePage() {
                   </Pie>
                   <Tooltip
                     contentStyle={{
-                      background: "#18181b",
-                      border: "1px solid #333",
+                      background: "oklch(0.21 0.006 285.885)",
+                      border: "1px solid oklch(1 0 0 / 10%)",
                       borderRadius: 8,
                       fontSize: 12,
                     }}
@@ -265,19 +265,19 @@ export default function UsagePage() {
           <CardContent>
             <ResponsiveContainer width="100%" height={250}>
               <BarChart data={agentCosts.slice(0, 10)}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#888" }} />
-                <YAxis tick={{ fontSize: 10, fill: "#888" }} tickFormatter={(v) => `$${v}`} />
+                <CartesianGrid strokeDasharray="3 3" stroke="oklch(1 0 0 / 10%)" />
+                <XAxis dataKey="name" tick={{ fontSize: 10, fill: "oklch(0.552 0.016 285.938)" }} />
+                <YAxis tick={{ fontSize: 10, fill: "oklch(0.552 0.016 285.938)" }} tickFormatter={(v) => `$${v}`} />
                 <Tooltip
                   contentStyle={{
-                    background: "#18181b",
-                    border: "1px solid #333",
+                    background: "oklch(0.21 0.006 285.885)",
+                    border: "1px solid oklch(1 0 0 / 10%)",
                     borderRadius: 8,
                     fontSize: 12,
                   }}
                   formatter={(value) => [`$${Number(value).toFixed(3)}`, "Cost"]}
                 />
-                <Bar dataKey="cost" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="cost" fill="oklch(0.769 0.188 70.08)" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>

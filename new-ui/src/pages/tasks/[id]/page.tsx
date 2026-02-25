@@ -17,7 +17,7 @@ function LogTimeline({ logs }: { logs: AgentLog[] }) {
       {logs.map((log) => (
         <div key={log.id} className="flex gap-3 text-sm">
           <div className="flex flex-col items-center">
-            <div className="h-2 w-2 rounded-full bg-amber-500/60 mt-1.5" />
+            <div className="h-2 w-2 rounded-full bg-primary/60 mt-1.5" />
             <div className="flex-1 w-px bg-border/50" />
           </div>
           <div className="pb-3">
@@ -86,7 +86,7 @@ export default function TaskDetailPage() {
           {task.agentId && (
             <span>
               Agent:{" "}
-              <Link to={`/agents/${task.agentId}`} className="text-amber-400 hover:underline">
+              <Link to={`/agents/${task.agentId}`} className="text-primary hover:underline">
                 {task.agentId.slice(0, 8)}...
               </Link>
             </span>

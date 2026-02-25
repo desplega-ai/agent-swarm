@@ -29,8 +29,8 @@ export function AppHeader() {
             className={cn(
               "size-2 rounded-full",
               isHealthy
-                ? "bg-terminal-green animate-heartbeat"
-                : "bg-terminal-red",
+                ? "bg-emerald-500"
+                : "bg-red-500",
             )}
           />
           <span className="hidden sm:inline">

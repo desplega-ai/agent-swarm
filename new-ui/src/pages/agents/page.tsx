@@ -91,7 +91,7 @@ export default function AgentsPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-2xl font-bold">Agents</h1>
+      <h1 className="text-xl font-semibold">Agents</h1>
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">
