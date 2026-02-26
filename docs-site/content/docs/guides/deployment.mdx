@@ -1,0 +1,142 @@
+---
+title: Deployment Guide
+description: Production deployment options for Agent Swarm
+---
+
+# Deployment Guide
+
+Agent Swarm supports multiple deployment options, from Docker Compose to systemd services.
+
+## Docker Compose (Recommended)
+
+The easiest way to deploy a full swarm with API, workers, and lead agent.
+
+### Quick Start
+
+```bash
+cp docker-compose.example.yml docker-compose.yml
+cp .env.docker.example .env
+# Edit .env with your values
+docker-compose up -d
+```
+
+### What's Included
+
+The example `docker-compose.yml` sets up:
+
+- **API service** (port 3013) — MCP HTTP server
+- **2 Worker agents** — Containerized Claude workers
+- **1 Lead agent** — Coordinator agent
+
+### Volumes
+
+| Volume | Purpose |
+|--------|---------|
+| `swarm_api` | SQLite database persistence |
+| `swarm_logs` | Session logs |
+| `swarm_shared` | Shared workspace between agents |
+| `swarm_lead` | Lead agent's personal workspace |
+| `swarm_worker_*` | Personal workspace per worker |
+
+### Graceful Shutdown
+
+The docker-compose example uses `stop_grace_period: 60s` to allow graceful task pause during deployments. When a container receives SIGTERM:
+
+1. In-progress tasks are **paused** (not failed)
+2. Task state and progress are preserved
+3. After restart, paused tasks are automatically **resumed** with context
+
+Use stable `AGENT_ID` values for each worker to enable task resume after restarts.
+
+## Docker Worker
+
+### Pull from Registry
+
+```bash
+docker pull ghcr.io/desplega-ai/agent-swarm-worker:latest
+```
+
+### Run
+
+```bash
+docker run --rm -it \
+  -e CLAUDE_CODE_OAUTH_TOKEN=your-token \
+  -e API_KEY=your-api-key \
+  -v ./logs:/logs \
+  -v ./work:/workspace \
+  ghcr.io/desplega-ai/agent-swarm-worker
+```
+
+### With Custom System Prompt
+
+```bash
+docker run --rm -it \
+  -e CLAUDE_CODE_OAUTH_TOKEN=your-token \
+  -e API_KEY=your-api-key \
+  -e SYSTEM_PROMPT="You are a Python specialist" \
+  -v ./logs:/logs \
+  -v ./work:/workspace \
+  ghcr.io/desplega-ai/agent-swarm-worker
+```
+
+## Server Deployment (systemd)
+
+Deploy the MCP server to a Linux host with systemd.
+
+### Prerequisites
+
+- Linux with systemd
+- Bun installed (`curl -fsSL https://bun.sh/install | bash`)
+
+### Install
+
+```bash
+git clone https://github.com/desplega-ai/agent-swarm.git
+cd agent-swarm
+sudo bun deploy/install.ts
+```
+
+This will:
+- Copy files to `/opt/agent-swarm`
+- Create `.env` file (edit to set `API_KEY`)
+- Install systemd service with health checks every 30s
+- Start the service on port 3013
+
+### Management
+
+```bash
+sudo systemctl status agent-swarm    # Check status
+sudo journalctl -u agent-swarm -f    # View logs
+sudo systemctl restart agent-swarm   # Restart
+sudo systemctl stop agent-swarm      # Stop
+```
+
+### Update
+
+```bash
+git pull
+sudo bun deploy/update.ts
+```
+
+## Graceful Shutdown Configuration
+
+```bash
+# Grace period before force-pausing tasks (milliseconds)
+SHUTDOWN_TIMEOUT=30000
+
+# Docker compose stop grace period (should be >= SHUTDOWN_TIMEOUT + buffer)
+stop_grace_period: 60s
+```
+
+### Resume Behavior
+
+When a worker starts, it:
+1. Registers with the MCP server
+2. Checks for paused tasks assigned to its `AGENT_ID`
+3. Resumes each paused task with original context and progress
+
+### Best Practices
+
+- **Use stable Agent IDs** — Set explicit `AGENT_ID` for each worker
+- **Save progress regularly** — Workers should call `store-progress` during long tasks
+- **Test deployments** — Verify tasks resume correctly in staging first

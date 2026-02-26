@@ -1,0 +1,93 @@
+---
+title: Environment Variables
+description: Complete reference for all configuration environment variables
+---
+
+# Environment Variables
+
+Complete reference for all environment variables used by Agent Swarm.
+
+## Server Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3013` | Port for MCP HTTP server |
+| `API_KEY` | — | API key for server authentication (required) |
+| `MCP_BASE_URL` | `https://agent-swarm-mcp.desplega.sh` | Base URL for MCP server |
+| `SWARM_URL` | `localhost` | Base domain for service discovery |
+| `APP_URL` | — | Dashboard URL for Slack message links |
+| `ENV` | — | Environment mode (`development` adds prefix to Slack agent names) |
+| `DATABASE_PATH` | `./agent-swarm-db.sqlite` | SQLite database file path |
+| `SCHEDULER_INTERVAL_MS` | `10000` | Polling interval for scheduled tasks (ms) |
+| `OPENAI_API_KEY` | — | OpenAI key for memory embeddings |
+| `CAPABILITIES` | All enabled | Comma-separated feature flags |
+
+## Docker Worker Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `CLAUDE_CODE_OAUTH_TOKEN` | Yes | — | OAuth token for Claude CLI |
+| `API_KEY` | Yes | — | API key for MCP server |
+| `AGENT_ID` | No | Auto-generated | Agent UUID. Keep stable for task resume |
+| `AGENT_ROLE` | No | `worker` | Role: `worker` or `lead` |
+| `AGENT_NAME` | No | Auto-generated | Display name for the agent |
+| `MCP_BASE_URL` | No | `http://host.docker.internal:3013` | MCP server URL |
+| `SESSION_ID` | No | Auto-generated | Log folder name |
+| `YOLO` | No | `false` | Continue on errors |
+| `SYSTEM_PROMPT` | No | — | Custom system prompt text |
+| `SYSTEM_PROMPT_FILE` | No | — | Path to system prompt file |
+| `STARTUP_SCRIPT_STRICT` | No | `true` | Exit on startup script failure |
+| `SHUTDOWN_TIMEOUT` | No | `30000` | Grace period (ms) before pausing tasks |
+| `MAX_CONCURRENT_TASKS` | No | `1` | Maximum parallel tasks per worker |
+| `SWARM_URL` | No | `localhost` | Base domain for service URLs |
+| `SERVICE_PORT` | No | `3000` | Host port for exposed services |
+| `PM2_HOME` | No | `/workspace/.pm2` | PM2 state directory |
+
+## Git Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GITHUB_TOKEN` | — | GitHub token for git operations |
+| `GITHUB_EMAIL` | `worker-agent@desplega.ai` | Git commit email |
+| `GITHUB_NAME` | `Worker Agent` | Git commit name |
+
+## Slack Integration
+
+| Variable | Description |
+|----------|-------------|
+| `SLACK_BOT_TOKEN` | Bot User OAuth Token (`xoxb-...`) |
+| `SLACK_APP_TOKEN` | App-Level Token for Socket Mode (`xapp-...`) |
+| `SLACK_SIGNING_SECRET` | Signing Secret (optional for Socket Mode) |
+| `SLACK_DISABLE` | Set to `true` to disable Slack |
+| `SLACK_ALLOWED_EMAIL_DOMAINS` | Comma-separated email domains |
+| `SLACK_ALLOWED_USER_IDS` | Comma-separated user IDs to always allow |
+
+## GitHub Integration
+
+| Variable | Description |
+|----------|-------------|
+| `GITHUB_WEBHOOK_SECRET` | Webhook secret for GitHub App |
+| `GITHUB_BOT_NAME` | Bot name for @mentions (default: `agent-swarm-bot`) |
+| `GITHUB_APP_ID` | GitHub App ID (for bot reactions) |
+| `GITHUB_APP_PRIVATE_KEY` | GitHub App private key (base64-encoded) |
+| `GITHUB_DISABLE` | Set to `true` to disable GitHub |
+
+## AgentMail Integration
+
+| Variable | Description |
+|----------|-------------|
+| `AGENTMAIL_WEBHOOK_SECRET` | Svix webhook secret for AgentMail |
+
+## Sentry Integration
+
+| Variable | Description |
+|----------|-------------|
+| `SENTRY_AUTH_TOKEN` | Sentry Organization Auth Token |
+| `SENTRY_ORG` | Sentry organization slug |
+
+## Priority
+
+When both CLI flags and environment variables are set:
+
+- CLI flags take precedence over environment variables
+- Inline text (`SYSTEM_PROMPT`) takes precedence over file (`SYSTEM_PROMPT_FILE`)

@@ -1,0 +1,78 @@
+---
+title: Slack Integration
+description: Set up Slack to create tasks and communicate with agents
+---
+
+# Slack Integration
+
+Enable Slack for task creation and agent communication via direct messages.
+
+## Setup
+
+1. Create a [Slack App](https://api.slack.com/apps)
+2. Enable **Socket Mode** (for real-time events without public webhooks)
+3. Add required bot token scopes:
+   - `chat:write`
+   - `users:read`
+   - `users:read.email`
+   - `channels:history`
+   - `im:history`
+4. Install to your workspace and copy tokens
+
+## Configuration
+
+```bash
+# Required for Slack
+SLACK_BOT_TOKEN=xoxb-...      # Bot User OAuth Token
+SLACK_APP_TOKEN=xapp-...      # App-Level Token (Socket Mode)
+SLACK_SIGNING_SECRET=...      # Signing Secret (optional for Socket Mode)
+
+# Disable Slack (if not using)
+SLACK_DISABLE=true
+```
+
+## How It Works
+
+### Creating Tasks
+
+Message the bot directly in Slack to create tasks. The lead agent receives the message in its inbox and can:
+- Handle it directly
+- Delegate it to a worker agent
+
+### Progress Updates
+
+Workers reply in Slack threads with progress updates using the `slack-reply` MCP tool. This keeps the conversation context in one place.
+
+### Reading Messages
+
+Agents can read Slack threads using `slack-read`:
+- By task ID (reads the thread associated with a task)
+- By inbox message ID (for lead agent inbox messages)
+- By channel ID (leads only, for channel history)
+
+### Posting Messages
+
+The lead agent can post new messages to channels using `slack-post`.
+
+## User Filtering
+
+By default, all Slack users can interact with the bot. To restrict access:
+
+```bash
+# Only users with matching email domains
+SLACK_ALLOWED_EMAIL_DOMAINS=company.com,partner.com
+
+# Specific user IDs always allowed (useful for admins)
+SLACK_ALLOWED_USER_IDS=U12345678,U87654321
+```
+
+If both are set, a user must match **either** an allowed domain **or** be in the user ID whitelist.
+
+## File Handling
+
+Agents can upload and download files via Slack:
+
+- **`slack-upload-file`** — Upload a file to a Slack channel or thread
+- **`slack-download-file`** — Download a file from Slack by file ID or URL
+
+Files are saved to `/workspace/shared/downloads/slack/` by default.

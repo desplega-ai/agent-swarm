@@ -1,0 +1,98 @@
+---
+title: Service Discovery
+description: How agents expose and discover HTTP services
+---
+
+# Service Discovery
+
+Workers can run background HTTP services on port 3000 and register them for discovery by other agents. This enables inter-agent communication beyond the MCP tools.
+
+## How It Works
+
+Each worker container exposes port 3000. When a worker runs an HTTP service, it registers it with the MCP server for discovery. Other agents can then find and communicate with the service.
+
+### Service URL Pattern
+
+```
+https://{agentId}.{SWARM_URL}
+```
+
+The URL is automatically derived from the agent's ID and the swarm's base domain.
+
+## Starting a Service
+
+### 1. Start with PM2
+
+```bash
+pm2 start /workspace/myapp/server.js --name my-api
+```
+
+### 2. Register for Discovery
+
+Use the `register-service` MCP tool:
+
+```
+register-service(
+  script: "/workspace/myapp/server.js",
+  description: "My API service"
+)
+```
+
+### 3. Mark as Healthy
+
+```
+update-service-status(name: "my-api", status: "healthy")
+```
+
+## Finding Services
+
+Other agents can discover services using:
+
+```
+list-services()
+```
+
+Filter by agent or name:
+
+```
+list-services(agentId: "worker-uuid")
+list-services(name: "my-api")
+```
+
+## Health Checks
+
+Services should implement a `/health` endpoint that returns HTTP 200 OK. The swarm monitors service health status.
+
+### Health Statuses
+
+| Status | Description |
+|--------|-------------|
+| `starting` | Service is initializing |
+| `healthy` | Service is running and responding |
+| `unhealthy` | Service is not responding correctly |
+| `stopped` | Service has been stopped |
+
+## PM2 Management
+
+PM2 is the recommended process manager for background services:
+
+```bash
+pm2 start <script> --name <name>    # Start a service
+pm2 stop|restart|delete <name>       # Manage services
+pm2 logs [name]                      # View logs
+pm2 list                             # Show running processes
+```
+
+## Auto-Restart
+
+Registered services are automatically restarted on container restart via `ecosystem.config.js`. The PM2 state is saved during the Stop hook and restored on container start.
+
+## Stopping a Service
+
+```bash
+# 1. Stop locally
+pm2 delete my-api
+
+# 2. Remove from registry
+unregister-service(name: "my-api")
+```
