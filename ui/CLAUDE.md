@@ -1,6 +1,6 @@
 # Agent Swarm Dashboard
 
-React-based monitoring dashboard for Agent Swarm MCP. Displays agents, tasks, channels, and services in real-time.
+React-based monitoring dashboard for Agent Swarm. Displays agents, tasks, channels, and services in real-time.
 
 ## Quick Reference
 

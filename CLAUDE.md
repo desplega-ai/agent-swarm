@@ -1,6 +1,6 @@
-# Agent Swarm MCP
+# Agent Swarm
 
-Multi-agent orchestration layer for Claude Code, Codex, Gemini CLI. Enables task distribution, agent communication, and service discovery.
+Multi-agent orchestration for Claude Code, Codex, Gemini CLI. Enables task distribution, agent communication, and service discovery.
 
 **Getting Started**: See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup. Run `bun run start:http` to start the server.
 
