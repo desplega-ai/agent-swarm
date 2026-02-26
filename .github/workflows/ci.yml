@@ -6,11 +6,13 @@ on:
       - main
     paths-ignore:
       - "docs-site/**"
+      - "landing/**"
   push:
     branches:
       - main
     paths-ignore:
       - "docs-site/**"
+      - "landing/**"
   workflow_dispatch:
 
 jobs:
