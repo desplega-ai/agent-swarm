@@ -1,6 +1,13 @@
 import type { App } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
-import { createInboxMessage, createTask, getAgentById, getTasksByAgentId } from "../be/db";
+import {
+  createInboxMessage,
+  createTask,
+  createTaskExtended,
+  getAgentById,
+  getLeadAgent,
+  getTasksByAgentId,
+} from "../be/db";
 import { extractTaskFromMessage, routeMessage } from "./router";
 
 // User filtering configuration from environment variables
@@ -305,13 +312,63 @@ export function registerMessageHandler(app: App): void {
     const matches = routeMessage(msg.text, botUserId, botMentioned, routingThreadContext);
 
     if (matches.length === 0) {
-      // No agents matched - ignore message unless bot was directly mentioned
-      if (botMentioned) {
+      if (!botMentioned) return;
+
+      // Bot was mentioned but no online agents matched — queue the request
+      if (!checkRateLimit(msg.user)) {
         await say({
-          text: ":satellite: _No agents are currently available. Use `/agent-swarm-status` to check the swarm._",
+          text: ":satellite: _You're sending too many requests. Please slow down._",
           thread_ts: msg.thread_ts || msg.ts,
         });
+        return;
       }
+
+      const taskDescription = extractTaskFromMessage(msg.text, botUserId);
+      if (!taskDescription) {
+        await say({
+          text: ":satellite: _Please provide a task description after mentioning an agent._",
+          thread_ts: msg.thread_ts || msg.ts,
+        });
+        return;
+      }
+
+      const threadTs = msg.thread_ts || msg.ts;
+      const threadContext = await getThreadContext(
+        client,
+        msg.channel,
+        msg.thread_ts,
+        msg.ts,
+        botUserId,
+      );
+      const structuredContent = threadContext
+        ? `<new_message>\n${taskDescription}\n</new_message>\n\n<thread_history>\n${threadContext}\n</thread_history>`
+        : taskDescription;
+      const fullTaskDescription = threadContext
+        ? `<thread_context>\n${threadContext}\n</thread_context>\n\n${taskDescription}`
+        : taskDescription;
+
+      const lead = getLeadAgent();
+      if (lead) {
+        createInboxMessage(lead.id, structuredContent, {
+          source: "slack",
+          slackChannelId: msg.channel,
+          slackThreadTs: threadTs,
+          slackUserId: msg.user,
+          matchedText: "@bot (queued — agents offline)",
+        });
+      } else {
+        createTaskExtended(fullTaskDescription, {
+          source: "slack",
+          slackChannelId: msg.channel,
+          slackThreadTs: threadTs,
+          slackUserId: msg.user,
+        });
+      }
+
+      await say({
+        text: ":satellite: _No agents are online right now. Your request has been queued and will be processed when agents come back up._",
+        thread_ts: threadTs,
+      });
       return;
     }
 
