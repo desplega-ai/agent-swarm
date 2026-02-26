@@ -20,9 +20,10 @@ Agent Swarm lets you run a team of AI coding agents that coordinate autonomously
 
 - **Lead/Worker coordination** — A lead agent delegates and tracks work across multiple workers
 - **Docker isolation** — Each worker runs in its own container with a full dev environment
-- **Slack & GitHub integration** — Create tasks by messaging the bot or @mentioning it in issues/PRs
+- **Slack, GitHub & Email integration** — Create tasks by messaging the bot, @mentioning it in issues/PRs, or sending an email
 - **Task lifecycle** — Priority queues, dependencies, pause/resume across deployments
-- **Agent memory** — Searchable memory that persists across sessions via embeddings
+- **Compounding memory** — Agents learn from every session and get smarter over time
+- **Persistent identity** — Each agent has its own personality, expertise, and working style that evolves
 - **Dashboard UI** — Real-time monitoring of agents, tasks, and inter-agent chat
 - **Service discovery** — Workers can expose HTTP services and discover each other
 - **Scheduled tasks** — Cron-based recurring task automation
@@ -96,7 +97,7 @@ Register yourself as the lead agent in the agent-swarm.
 ## How It Works
 
 ```
-You (Slack / GitHub / CLI)
+You (Slack / GitHub / Email / CLI)
         |
    Lead Agent  ←→  MCP API Server  ←→  SQLite DB
         |
@@ -105,11 +106,147 @@ Worker  Worker  Worker
 (Docker containers with full dev environments)
 ```
 
-1. **You send a task** — via Slack DM, GitHub @mention, or directly through the API
+1. **You send a task** — via Slack DM, GitHub @mention, email, or directly through the API
 2. **Lead agent plans** — breaks the task down and assigns subtasks to workers
 3. **Workers execute** — each in an isolated Docker container with git, Node.js, Python, etc.
 4. **Progress is tracked** — real-time updates in the dashboard, Slack threads, or API
 5. **Results are delivered** — PRs created, issues closed, Slack replies sent
+6. **Agents learn** — every session's learnings are extracted and recalled in future tasks
+
+## Agents Get Smarter Over Time
+
+Agent Swarm agents aren't stateless. They build compounding knowledge through multiple automatic mechanisms:
+
+### Memory System
+
+Every agent has a searchable memory backed by OpenAI embeddings (`text-embedding-3-small`). Memories are automatically created from:
+
+- **Session summaries** — At the end of each session, a lightweight model extracts key learnings: mistakes made, patterns discovered, failed approaches, and codebase knowledge. These summaries become searchable memories.
+- **Task completions** — Every completed (or failed) task's output is indexed. Failed tasks include notes about what went wrong, so the agent avoids repeating the same mistake.
+- **File-based notes** — Agents can write to `/workspace/personal/memory/` (private) or `/workspace/shared/memory/` (swarm-wide). Files written here are automatically indexed.
+- **Lead-to-worker injection** — The lead agent can push specific learnings into any worker's memory using the `inject-learning` tool, closing the feedback loop.
+
+Before starting each task, the runner automatically searches for relevant memories and includes them in the agent's context. Past experience directly informs future work.
+
+### Persistent Identity
+
+Each agent has four identity files that persist across sessions and evolve over time:
+
+| File | Purpose | Example |
+|------|---------|---------|
+| **SOUL.md** | Core persona, values, behavioral directives | "You're not a chatbot. Be thorough. Own your mistakes." |
+| **IDENTITY.md** | Expertise, working style, track record | "I'm the coding arm of the swarm. I ship fast and clean." |
+| **TOOLS.md** | Environment knowledge — repos, services, APIs | "The API runs on port 3013. Use `wts` for worktree management." |
+| **CLAUDE.md** | Persistent notes and instructions | Learnings, preferences, important context |
+
+Agents can edit these files directly during a session. Changes are synced to the database in real-time (on every file edit) and at session end. When the agent restarts, its identity is restored from the database. Version history is tracked for all changes.
+
+The default templates encourage self-improvement:
+- Tools you wished you had? Update your startup script.
+- Environment knowledge gained? Record it in TOOLS.md.
+- Patterns discovered? Add them to your notes.
+- Mistakes to avoid? Add guardrails.
+
+### Startup Scripts
+
+Each agent has a startup script (`/workspace/start-up.sh`) that runs at every container start. Agents can modify this script to install tools, configure their environment, or set up workflows — and the changes persist across restarts. An agent that discovers it needs `ripgrep` will install it once, and it'll be there for every future session.
+
+## Agent Configuration
+
+### Identity Management
+
+Agent identity is stored in the database and synced to the filesystem at session start. There are three ways to configure it:
+
+1. **Default generation** — On first registration, the system generates templates based on the agent's name, role, and description.
+2. **Self-editing** — Agents modify their own identity files during sessions. A PostToolUse hook syncs changes to the database in real-time.
+3. **API / MCP tool** — Use the `update-profile` tool to programmatically set any identity field (soulMd, identityMd, toolsMd, claudeMd, setupScript).
+
+### System Prompt Assembly
+
+The system prompt is built from multiple layers, assembled at task start:
+
+1. **Base role instructions** — Lead or worker-specific behavior rules
+2. **Agent identity** — SOUL.md + IDENTITY.md content
+3. **Repository context** — If the task targets a specific GitHub repo, that repo's CLAUDE.md is included
+4. **Filesystem guide** — Memory directories, personal/shared workspace, setup script instructions
+5. **Self-awareness** — How the agent is built (runtime, hooks, memory system, task lifecycle)
+6. **Additional prompt** — Custom text from `SYSTEM_PROMPT` env var or `--system-prompt` CLI flag
+
+### Hook System
+
+Six hooks fire during each Claude Code session, providing safety, context management, and persistence:
+
+| Hook | When | What it does |
+|------|------|-------------|
+| **SessionStart** | Session begins | Writes CLAUDE.md from DB, loads concurrent session context for leads |
+| **PreCompact** | Before context compaction | Injects a "goal reminder" with current task details so the agent doesn't lose track |
+| **PreToolUse** | Before each tool call | Checks for task cancellation, detects tool loops (same tool/args repeated), blocks excessive polling |
+| **PostToolUse** | After each tool call | Sends heartbeat, syncs identity file edits to DB, auto-indexes memory files |
+| **UserPromptSubmit** | New iteration starts | Checks for task cancellation |
+| **Stop** | Session ends | Saves PM2 state, syncs all identity files, runs session summarization via Haiku, marks agent offline |
+
+## Integrations
+
+### Slack
+
+Create a [Slack App](https://api.slack.com/apps) with Socket Mode enabled. Required scopes: `chat:write`, `users:read`, `users:read.email`, `channels:history`, `im:history`.
+
+```bash
+# Add to your .env
+SLACK_BOT_TOKEN=xoxb-...    # Bot User OAuth Token
+SLACK_APP_TOKEN=xapp-...    # App-Level Token (Socket Mode)
+```
+
+Message the bot directly to create tasks. Workers reply in threads with progress updates. Optionally restrict access with `SLACK_ALLOWED_EMAIL_DOMAINS` or `SLACK_ALLOWED_USER_IDS`.
+
+### GitHub App
+
+Set up a [GitHub App](https://github.com/settings/apps/new) to receive webhooks when the bot is @mentioned or assigned to issues/PRs.
+
+**Webhook URL:** `https://<your-domain>/api/github/webhook`
+
+**Required permissions:**
+- Issues: Read & Write
+- Pull requests: Read & Write
+
+**Subscribe to events:** Issues, Issue comments, Pull requests, Pull request reviews, Pull request review comments, Check runs, Check suites, Workflow runs
+
+```bash
+# Add to your .env
+GITHUB_WEBHOOK_SECRET=your-webhook-secret
+GITHUB_BOT_NAME=your-bot-name           # Default: agent-swarm-bot
+
+# Optional: Enable bot reactions (emoji acknowledgments on GitHub)
+GITHUB_APP_ID=123456
+GITHUB_APP_PRIVATE_KEY=base64-encoded-key
+```
+
+**Supported events:**
+
+| Event | What happens |
+|-------|-------------|
+| Bot assigned to PR/issue | Creates a task for the lead agent |
+| Review requested from bot | Creates a review task |
+| `@bot-name` in comment/issue/PR | Creates a task with the mention context |
+| PR review submitted (on bot's PR) | Creates a notification task with review feedback |
+| CI failure (on PRs with existing tasks) | Creates a CI notification task |
+
+### AgentMail
+
+Give your agents email addresses via [AgentMail](https://agentmail.to). Emails are routed to agents as tasks or inbox messages.
+
+**Webhook URL:** `https://<your-domain>/api/agentmail/webhook`
+
+```bash
+# Add to your .env
+AGENTMAIL_WEBHOOK_SECRET=your-svix-secret
+```
+
+Agents self-register which inboxes they receive mail from using the `register-agentmail-inbox` MCP tool. Emails to a worker's inbox become tasks; emails to a lead's inbox become inbox messages for triage. Follow-up emails in the same thread are automatically routed to the same agent.
+
+### Sentry
+
+Workers can investigate Sentry issues directly with the `/investigate-sentry-issue` command. Add `SENTRY_AUTH_TOKEN` and `SENTRY_ORG` to your worker's environment.
 
 ## Dashboard
 
@@ -120,33 +257,6 @@ cd ui && pnpm install && pnpm run dev
 ```
 
 Opens at `http://localhost:5173`. See [UI.md](./UI.md) for details.
-
-## Integrations
-
-### Slack
-
-Message the bot directly to create tasks. Workers reply in threads with progress updates.
-
-```bash
-# Add to your .env
-SLACK_BOT_TOKEN=xoxb-...
-SLACK_APP_TOKEN=xapp-...
-```
-
-### GitHub
-
-@mention the bot in issues, PRs, or comments to trigger tasks automatically.
-
-```bash
-# Add to your .env
-GITHUB_WEBHOOK_SECRET=your-secret
-```
-
-### Sentry
-
-Workers can investigate Sentry issues directly with the `/investigate-sentry-issue` command.
-
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for full integration setup instructions.
 
 ## CLI
 
@@ -168,14 +278,14 @@ For production deployments, see [DEPLOYMENT.md](./DEPLOYMENT.md) which covers:
 - Docker Compose setup with multiple workers
 - systemd deployment for the API server
 - Graceful shutdown and task resume
-- Environment variable reference
-- Integration configuration (Slack, GitHub, Sentry)
+- Integration configuration (Slack, GitHub, AgentMail, Sentry)
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
 | [DEPLOYMENT.md](./DEPLOYMENT.md) | Production deployment guide |
+| [docs/ENVS.md](./docs/ENVS.md) | Complete environment variables reference |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Development setup and project structure |
 | [UI.md](./UI.md) | Dashboard UI overview |
 | [MCP.md](./MCP.md) | MCP tools reference (auto-generated) |
