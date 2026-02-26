@@ -79,6 +79,8 @@ class ApiClient {
       claudeMd?: string;
       soulMd?: string;
       identityMd?: string;
+      toolsMd?: string;
+      setupScript?: string;
     },
   ): Promise<AgentWithTasks> {
     const url = `${this.getBaseUrl()}/api/agents/${id}/profile`;

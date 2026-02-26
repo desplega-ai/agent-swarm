@@ -1,0 +1,121 @@
+---
+title: CLI Reference
+description: Command-line interface for Agent Swarm
+---
+
+# CLI Reference
+
+Agent Swarm provides a CLI for managing the swarm, running agents, and development.
+
+## Installation
+
+```bash
+# Run directly with bunx
+bunx @desplega.ai/agent-swarm <command>
+
+# Or install globally
+bun install -g @desplega.ai/agent-swarm
+agent-swarm <command>
+```
+
+## Commands
+
+### setup
+
+Configure Claude Code to connect to the swarm.
+
+```bash
+bunx @desplega.ai/agent-swarm setup
+bunx @desplega.ai/agent-swarm setup --dry-run
+```
+
+This sets up the MCP configuration in Claude Code so it can communicate with the Agent Swarm API.
+
+### mcp
+
+Start the MCP API server.
+
+```bash
+bunx @desplega.ai/agent-swarm mcp
+```
+
+The server runs on port 3013 by default (configurable via `PORT` env var).
+
+### worker
+
+Run a worker agent.
+
+```bash
+bunx @desplega.ai/agent-swarm worker
+bunx @desplega.ai/agent-swarm worker --system-prompt "You are a Python specialist"
+bunx @desplega.ai/agent-swarm worker --system-prompt-file ./prompts/specialist.txt
+```
+
+### lead
+
+Run a lead agent.
+
+```bash
+bunx @desplega.ai/agent-swarm lead
+bunx @desplega.ai/agent-swarm lead --system-prompt "You are a project coordinator"
+```
+
+## Development Commands
+
+These are available when developing Agent Swarm locally:
+
+```bash
+# Start MCP server
+bun run start        # STDIO transport
+bun run start:http   # HTTP transport
+
+# Development with hot reload
+bun run dev          # STDIO
+bun run dev:http     # HTTP
+
+# MCP Inspector (debug tools)
+bun run inspector:http
+
+# Run worker/lead locally
+bun run worker
+bun run lead
+
+# Hook handler
+bun run hook
+
+# Linting and formatting
+bun run lint
+bun run lint:fix
+bun run format
+
+# Type checking
+bun run tsc:check
+
+# Build binaries
+bun run build:binary      # x64
+bun run build:binary:arm64  # ARM64
+
+# Docker
+bun run docker:build:worker
+bun run docker:run:worker
+bun run docker:run:lead
+
+# Generate MCP docs
+bun run docs:mcp
+```
+
+## Dashboard UI
+
+The React-based monitoring dashboard is in the `ui/` directory:
+
+```bash
+cd ui
+pnpm install
+pnpm run dev
+```
+
+Opens at `http://localhost:5173`. Provides real-time visibility into:
+- Agent status and activity
+- Task list and progress
+- Inter-agent chat messages
+- Service registry

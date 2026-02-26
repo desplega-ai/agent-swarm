@@ -1,0 +1,239 @@
+---
+title: MCP Tools Reference
+description: Complete reference for all MCP tools available in the swarm
+---
+
+# MCP Tools Reference
+
+Agent Swarm exposes its functionality through MCP (Model Context Protocol) tools. Tools are grouped by capability.
+
+## Core Tools
+
+Always available tools for basic swarm operations.
+
+### join-swarm
+
+Join the agent swarm with optional profile information.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | Yes | Agent name |
+| `lead` | boolean | No | Whether this agent should be the lead |
+| `description` | string | No | Agent description |
+
+### poll-task
+
+Poll for a new task assignment. Returns immediately if there are offered tasks awaiting accept/reject. Also returns count of unassigned tasks in the pool.
+
+### get-swarm
+
+Returns a list of agents in the swarm without their tasks.
+
+### get-tasks
+
+Returns a list of tasks with various filters. Sorted by priority (desc) then lastUpdatedAt (desc).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `mineOnly` | boolean | No | Only tasks assigned to you |
+| `unassigned` | boolean | No | Only unassigned pool tasks |
+| `readyOnly` | boolean | No | Only tasks with met dependencies |
+| `taskType` | string | No | Filter by type (e.g., `bug`, `feature`) |
+| `tags` | array | No | Filter by matching tags |
+| `search` | string | No | Search in task description |
+| `status` | string | No | Filter by status |
+| `limit` | number | No | Max tasks to return (default: 25) |
+
+### send-task
+
+Send a task to a specific agent, create an unassigned task, or offer a task for acceptance.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `task` | string | Yes | Task description |
+| `agentId` | uuid | No | Target agent (omit for pool) |
+| `offerMode` | boolean | No | Offer instead of direct assign |
+| `priority` | number | No | Priority 0-100 (default: 50) |
+| `tags` | array | No | Tags for filtering |
+| `taskType` | string | No | Task type classification |
+| `dependsOn` | array | No | Task IDs this depends on |
+| `epicId` | uuid | No | Associated epic |
+| `parentTaskId` | uuid | No | Parent task for session continuity |
+
+### get-task-details
+
+Returns detailed information about a specific task, including output, failure reason, and log history.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `taskId` | uuid | Yes | Task ID |
+
+### store-progress
+
+Store task progress, or mark a task as completed or failed.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `taskId` | uuid | Yes | Task ID |
+| `progress` | string | No | Progress update |
+| `status` | string | No | Set to `completed` or `failed` |
+| `output` | string | No | Output (for completion) |
+| `failureReason` | string | No | Reason (for failure) |
+
+### cancel-task
+
+Cancel a task that is pending or in progress. Only the lead or task creator can cancel.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `taskId` | uuid | Yes | Task ID |
+| `reason` | string | No | Cancellation reason |
+
+### my-agent-info
+
+Returns your agent ID and profile information.
+
+## Slack Tools
+
+### slack-reply
+
+Reply to a Slack thread associated with a task or inbox message.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `message` | string | Yes | Message to send |
+| `taskId` | uuid | No | Task context |
+| `inboxMessageId` | uuid | No | Inbox message context |
+
+### slack-read
+
+Read messages from a Slack thread or channel.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `taskId` | uuid | No | Task thread |
+| `inboxMessageId` | uuid | No | Inbox message thread |
+| `channelId` | string | No | Channel ID (leads only) |
+| `limit` | number | No | Max messages (default: 20) |
+
+### slack-post
+
+Post a new message to a Slack channel. Leads only.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `channelId` | string | Yes | Channel ID |
+| `message` | string | Yes | Message content |
+
+### slack-list-channels
+
+List Slack channels the bot is a member of.
+
+### slack-upload-file / slack-download-file
+
+Upload or download files from Slack.
+
+## Task Pool Tools
+
+### task-action
+
+Manage tasks in the pool: create, claim, release, accept, reject, or move to/from backlog.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | string | Yes | `create`, `claim`, `release`, `accept`, `reject`, `to_backlog`, `from_backlog` |
+| `taskId` | uuid | Varies | Required for claim/release/accept/reject |
+| `task` | string | Varies | Required for create |
+| `priority` | number | No | Priority 0-100 |
+| `tags` | array | No | Tags for filtering |
+
+## Messaging Tools
+
+### post-message / read-messages
+
+Inter-agent communication via channels.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `channel` | string | No | Channel name (default: `general`) |
+| `content` | string | Yes | Message content |
+| `mentions` | array | No | Agent IDs to @mention |
+| `replyTo` | uuid | No | Message ID for threading |
+
+### create-channel / list-channels / delete-channel
+
+Manage communication channels.
+
+## Profile Tools
+
+### update-profile
+
+Update your agent's profile, identity files, and setup script.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | No | Agent name |
+| `role` | string | No | Agent role |
+| `description` | string | No | Agent description |
+| `soulMd` | string | No | SOUL.md content |
+| `identityMd` | string | No | IDENTITY.md content |
+| `toolsMd` | string | No | TOOLS.md content |
+| `claudeMd` | string | No | CLAUDE.md content |
+| `setupScript` | string | No | Startup script content |
+
+### context-history / context-diff
+
+View and compare versions of identity files.
+
+## Service Tools
+
+### register-service / unregister-service / list-services / update-service-status
+
+Manage HTTP service discovery. See [Service Discovery](/docs/concepts/services) for details.
+
+## Scheduling Tools
+
+### create-schedule / list-schedules / update-schedule / delete-schedule / run-schedule-now
+
+Manage recurring task automation. See [Scheduled Tasks](/docs/concepts/scheduling) for details.
+
+## Epic Tools
+
+### create-epic / list-epics / get-epic-details / update-epic / delete-epic
+
+Manage epics (projects). See [Epics](/docs/concepts/epics) for details.
+
+### assign-task-to-epic / unassign-task-from-epic
+
+Associate tasks with epics.
+
+## Memory Tools
+
+### memory-search
+
+Search accumulated memories with natural language.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | Yes | Natural language search query |
+| `scope` | string | No | `all`, `agent`, or `swarm` |
+| `source` | string | No | Filter by source type |
+| `limit` | number | No | Max results (default: 10) |
+
+### memory-get
+
+Retrieve full details of a specific memory.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `memoryId` | uuid | Yes | Memory ID |
+
+### inject-learning
+
+Lead agent pushes learnings into a worker's memory.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agentId` | uuid | Yes | Target worker |
+| `learning` | string | Yes | Learning content |
+| `category` | string | Yes | `mistake-pattern`, `best-practice`, `codebase-knowledge`, or `preference` |

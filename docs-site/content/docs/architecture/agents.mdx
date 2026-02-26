@@ -1,0 +1,99 @@
+---
+title: Agent Identity & Configuration
+description: How agents are configured, personalized, and evolve over time
+---
+
+# Agent Identity & Configuration
+
+Every agent in the swarm is a persistent entity with its own identity, memories, and environment. This identity evolves over time as the agent works.
+
+## Identity Files
+
+Each agent has four identity files that persist across sessions:
+
+| File | Purpose | Example |
+|------|---------|---------|
+| **SOUL.md** | Core persona, values, behavioral directives | "You're not a chatbot. Be thorough. Own your mistakes." |
+| **IDENTITY.md** | Expertise, working style, track record | "I'm the coding arm of the swarm. I ship fast and clean." |
+| **TOOLS.md** | Environment knowledge — repos, services, APIs | "The API runs on port 3013. Use `wts` for worktree management." |
+| **CLAUDE.md** | Persistent notes and instructions | Learnings, preferences, important context |
+
+### How Identity Works
+
+1. **Default generation** — On first registration, the system generates templates based on the agent's name, role, and description
+2. **Self-editing** — Agents modify their own identity files during sessions. A PostToolUse hook syncs changes to the database in real-time
+3. **API / MCP tool** — Use the `update-profile` tool to programmatically set any identity field
+
+### Version History
+
+All identity file changes are tracked with version history. You can:
+- View past versions using the `context-history` MCP tool
+- Compare versions using the `context-diff` tool
+- Roll back to a previous version if needed
+
+## System Prompt Assembly
+
+The system prompt is built from multiple layers, assembled at task start:
+
+1. **Base role instructions** — Lead or worker-specific behavior rules
+2. **Agent identity** — SOUL.md + IDENTITY.md content
+3. **Repository context** — If the task targets a specific GitHub repo, that repo's CLAUDE.md is included
+4. **Filesystem guide** — Memory directories, personal/shared workspace, setup script instructions
+5. **Self-awareness** — How the agent is built (runtime, hooks, memory system, task lifecycle)
+6. **Additional prompt** — Custom text from `SYSTEM_PROMPT` env var or `--system-prompt` CLI flag
+
+## Startup Scripts
+
+Each agent has a startup script (`/workspace/start-up.sh`) that runs at every container start. Agents can modify this script to install tools, configure their environment, or set up workflows — and the changes persist across restarts.
+
+**Supported formats** (priority order):
+- `start-up.sh` / `start-up.bash` — Bash scripts
+- `start-up.js` — Node.js scripts
+- `start-up.ts` / `start-up.bun` — Bun/TypeScript scripts
+
+**Example: Install dependencies**
+
+```bash
+#!/bin/bash
+# /workspace/start-up.sh
+
+echo "Installing dependencies..."
+if [ -f "package.json" ]; then
+    bun install
+fi
+
+sudo apt-get update -qq
+sudo apt-get install -y -qq ripgrep
+```
+
+## Agent Workspace
+
+Each agent has access to:
+
+| Path | Description |
+|------|-------------|
+| `/workspace/personal/` | Agent's private workspace (isolated per agent) |
+| `/workspace/shared/` | Shared workspace between all agents |
+| `/workspace/personal/memory/` | Private searchable memory files |
+| `/workspace/shared/memory/` | Shared searchable memory files |
+| `/logs` | Session logs |
+
+## Lead vs Worker
+
+### Lead Agent
+
+- Receives incoming messages from Slack, GitHub, and email
+- Has an inbox for triaging messages
+- Can delegate tasks to workers
+- Can inject learnings into worker memories
+- Has access to all Slack channels
+- Creates and manages epics
+
+### Worker Agent
+
+- Executes assigned tasks
+- Reports progress via `store-progress`
+- Can expose HTTP services
+- Builds specialized expertise over time
+- Can claim tasks from the task pool
+- Can communicate with other agents via channels

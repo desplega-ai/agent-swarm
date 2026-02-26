@@ -1,0 +1,83 @@
+---
+title: Memory System
+description: How agents build compounding knowledge across sessions
+---
+
+# Memory System
+
+Agent Swarm agents aren't stateless. They build compounding knowledge through multiple automatic mechanisms.
+
+## How Memory Works
+
+Every agent has a searchable memory backed by OpenAI embeddings (`text-embedding-3-small`, 512 dimensions). Memories are stored in SQLite and retrieved via brute-force cosine similarity search.
+
+### Memory Sources
+
+Memories are automatically created from:
+
+- **Session summaries** — At the end of each session, a lightweight model (Haiku) extracts key learnings: mistakes made, patterns discovered, failed approaches, and codebase knowledge. These summaries become searchable memories.
+- **Task completions** — Every completed (or failed) task's output is indexed. Failed tasks include notes about what went wrong, so the agent avoids repeating the same mistake.
+- **File-based notes** — Agents can write to `/workspace/personal/memory/` (private) or `/workspace/shared/memory/` (swarm-wide). Files written here are automatically indexed via the PostToolUse hook.
+- **Lead-to-worker injection** — The lead agent can push specific learnings into any worker's memory using the `inject-learning` tool, closing the feedback loop.
+
+### Memory Scopes
+
+| Scope | Path | Visibility |
+|-------|------|-----------|
+| Agent (private) | `/workspace/personal/memory/` | Only the owning agent |
+| Swarm (shared) | `/workspace/shared/memory/` | All agents in the swarm |
+
+## Memory Retrieval
+
+Before starting each task, the runner automatically searches for relevant memories and includes them in the agent's context. This happens via the `memory-search` tool.
+
+### Search Process
+
+1. Task description is used as the search query
+2. Embedding is generated for the query
+3. Cosine similarity is computed against all stored memories
+4. Top matches are included in the task context as "Relevant Past Knowledge"
+
+### Manual Search
+
+Agents can also search memories manually using MCP tools:
+
+- **`memory-search`** — Search with natural language queries. Returns summaries with IDs.
+- **`memory-get`** — Retrieve full details of a specific memory by ID.
+
+## Writing Memories
+
+The best practice is to write memories to files immediately when something important is learned:
+
+```
+Write("/workspace/personal/memory/auth-header-fix.md",
+  "The API requires Bearer prefix on all auth headers.
+   Without it, you get a misleading 403 instead of 401.")
+```
+
+Files are automatically indexed by the PostToolUse hook — no additional action needed.
+
+### What to Save
+
+- Solutions to problems you solved
+- Codebase patterns you discovered
+- Mistakes you made and how to avoid them
+- Important configurations
+- Instructions from the lead or user
+
+### What Not to Save
+
+- Session-specific context (temporary state)
+- Unverified conclusions
+- Information that duplicates existing documentation
+
+## Memory Categories
+
+When the lead injects learnings via `inject-learning`, they're categorized:
+
+| Category | Purpose |
+|----------|---------|
+| `mistake-pattern` | Common mistakes to avoid |
+| `best-practice` | Preferred approaches |
+| `codebase-knowledge` | Facts about the codebase |
+| `preference` | User or team preferences |

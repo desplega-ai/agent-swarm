@@ -1,0 +1,138 @@
+---
+title: Task Lifecycle
+description: How tasks flow through the swarm from creation to completion
+---
+
+# Task Lifecycle
+
+Tasks are the fundamental unit of work in Agent Swarm. Understanding the task lifecycle is essential for working with the system effectively.
+
+## Task States
+
+```mermaid
+stateDiagram-v2
+    [*] --> backlog
+    backlog --> unassigned
+    unassigned --> offered
+    offered --> pending : accepted
+    offered --> [*] : rejected
+    pending --> in_progress
+    in_progress --> completed
+    in_progress --> failed
+    in_progress --> paused
+    paused --> in_progress
+    paused --> completed
+    paused --> failed
+```
+
+### State Descriptions
+
+| State | Description |
+|-------|-------------|
+| `backlog` | Task is in the backlog, not yet ready for assignment |
+| `unassigned` | Task is in the pool, available for any worker to claim |
+| `offered` | Task has been offered to a specific agent, awaiting accept/reject |
+| `pending` | Task has been accepted/assigned but work hasn't started yet |
+| `in_progress` | Worker is actively executing the task |
+| `paused` | Task was paused (e.g., during container restart) and can be resumed |
+| `completed` | Task finished successfully |
+| `failed` | Task could not be completed |
+| `cancelled` | Task was cancelled by the lead or creator |
+
+## Task Creation
+
+Tasks can be created in several ways:
+
+### Direct Assignment
+
+The lead sends a task directly to a specific worker:
+
+```
+send-task(task: "Fix the login bug", agentId: "worker-uuid")
+```
+
+### Task Pool
+
+Tasks can be created without assignment, going into a shared pool:
+
+```
+task-action(action: "create", task: "Review PR #42")
+```
+
+Workers claim tasks from the pool:
+
+```
+task-action(action: "claim", taskId: "task-uuid")
+```
+
+### Offer Mode
+
+Tasks can be offered to a worker who must accept or reject:
+
+```
+send-task(task: "Refactor auth module", agentId: "worker-uuid", offerMode: true)
+```
+
+### External Sources
+
+Tasks are automatically created from:
+- **Slack** — Direct messages to the bot
+- **GitHub** — @mentions, issue assignments, PR review requests
+- **Email** — Messages to registered AgentMail inboxes
+- **Schedules** — Cron-based recurring tasks
+
+## Task Dependencies
+
+Tasks can depend on other tasks:
+
+```
+send-task(
+  task: "Deploy to production",
+  dependsOn: ["build-task-id", "test-task-id"]
+)
+```
+
+A task with dependencies won't be offered or claimable until all dependencies are completed.
+
+## Task Properties
+
+| Property | Description |
+|----------|-------------|
+| `task` | Description of what needs to be done |
+| `priority` | 0-100 (default: 50). Higher priority tasks are processed first |
+| `tags` | Labels for filtering (e.g., `['urgent', 'frontend']`) |
+| `taskType` | Classification (e.g., `bug`, `feature`, `review`) |
+| `dependsOn` | Array of task IDs that must complete first |
+| `epicId` | Optional association with an epic |
+| `parentTaskId` | For session continuity — child task resumes parent's Claude session |
+
+## Progress Tracking
+
+Workers report progress using the `store-progress` tool:
+
+```
+store-progress(taskId: "...", progress: "Fixed the auth check, running tests now")
+```
+
+When done:
+
+```
+store-progress(taskId: "...", status: "completed", output: "PR #42 created")
+```
+
+Or on failure:
+
+```
+store-progress(taskId: "...", status: "failed", failureReason: "Tests still failing after 3 attempts")
+```
+
+## Graceful Shutdown & Resume
+
+When a worker container receives SIGTERM:
+
+1. **Grace period** — Worker waits for active tasks to complete (default: 30s)
+2. **Tasks paused** — Any tasks still running are marked as `paused`
+3. **State preserved** — Progress is saved to the database
+4. **On restart** — Worker automatically resumes paused tasks with full context
+
+This enables zero-downtime deployments.

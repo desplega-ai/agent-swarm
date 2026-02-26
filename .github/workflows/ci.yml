@@ -4,15 +4,21 @@ on:
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - "docs-site/**"
+      - "landing/**"
   push:
     branches:
       - main
+    paths-ignore:
+      - "docs-site/**"
+      - "landing/**"
   workflow_dispatch:
 
 jobs:
   lint-and-typecheck:
     name: Lint and Type Check
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -34,7 +40,7 @@ jobs:
 
   test:
     name: Run Tests
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -53,7 +59,7 @@ jobs:
 
   docker-build:
     name: Docker Build Test
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     if: github.event_name == 'pull_request'
 
     strategy:
