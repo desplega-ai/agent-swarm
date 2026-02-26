@@ -4,9 +4,13 @@ on:
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - 'landing/**'
   push:
     branches:
       - main
+    paths-ignore:
+      - 'landing/**'
   workflow_dispatch:
 
 jobs:
