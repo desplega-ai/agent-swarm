@@ -13,14 +13,13 @@ repo: desplega-ai/agent-swarm
 
 This plan implements the "artifacts" feature — agents can serve HTML pages, interactive apps, and rich content via public URLs using localtunnel tunnels to `lt.desplega.ai`. The feature enables agents to produce visual deliverables (dashboards, approval flows, data viewers) beyond text-only Slack/task outputs.
 
-**Repos involved:**
-- `desplega-ai/agent-swarm` — SDK, CLI, capability gate, prompt, hooks (bulk of work)
-- `desplega-ai/localtunnel` — client patch (add `username` option)
-- `desplega-ai/localtunnel-server` — bug fix (`maxSockets` → `maxTcpSockets`)
+**Repo:** `desplega-ai/agent-swarm` (all work is in this repo)
 
-**Implementation order:** Phase 1 → 2 → 3 → 4 → 5 → 6 → 7
+> **Upstream dependencies:** The `maxSockets` bug fix in `desplega-ai/localtunnel-server` has already been merged. The custom username feature in the localtunnel client (`"hi"` → `"swarm"`) is deferred to post-MVP — we'll use the default `"hi"` username for now.
 
-Phases 1-2 are upstream dependency fixes in the localtunnel repos. Phases 3-7 are the core implementation in agent-swarm. Each phase is independently deployable and testable.
+**Implementation order:** Phase 1 → 2 → 3 → 4 → 5
+
+All 5 phases are in agent-swarm. Each phase is independently deployable and testable.
 
 ---
 
@@ -30,18 +29,19 @@ Phases 1-2 are upstream dependency fixes in the localtunnel repos. Phases 3-7 ar
 - Client (`@desplega.ai/localtunnel` v2.2.0) supports deterministic subdomains and `--auth` flag
 - Server (`desplega-ai/localtunnel-server` v0.1.3) supports HTTP Basic Auth (timing-safe) and 409 conflict handling
 - Agent IDs (UUIDs) work as subdomains — tested and confirmed (36-char with hyphens, 8-char prefix, 32-char no-hyphens all work)
-- Auth uses hardcoded username `"hi"` — needs patching to support custom username
-- `maxSockets` bug in server: `ClientManager.js` passes `maxSockets` but `TunnelAgent.js` reads `maxTcpSockets`
+- Auth uses hardcoded username `"hi"` — acceptable for MVP (deferred to post-MVP)
+- ~~`maxSockets` bug in server~~ — **already merged** (fixed `ClientManager.js` to pass `maxTcpSockets`)
 - No artifact-related code exists in agent-swarm yet
 
 ## Desired End State
 
 - Agents can serve artifacts via `createArtifactServer()` from `src/artifact-sdk/`
-- CLI provides `artifact serve|list|stop|open` commands
+- CLI provides `artifact serve|list|stop` commands
 - Multiple artifacts per worker, each with dynamic port and unique subdomain (`{agentId}-{name}.lt.desplega.ai`)
 - Browser SDK (`/@swarm/sdk.js`) enables HTML artifacts to call swarm API
 - Proxy middleware (`/@swarm/api/*`) routes browser requests to MCP server
-- `artifacts` capability gates the feature (prompt section + tools)
+- `/artifacts` skill provides detailed usage docs, examples, and references (base prompt just mentions the skill)
+- Artifact content stored in persisted paths (`/workspace/personal/artifacts/` by default)
 - Stop hook auto-closes tunnels on session end
 - Docker image includes `@desplega.ai/localtunnel` globally
 
@@ -50,229 +50,39 @@ Phases 1-2 are upstream dependency fixes in the localtunnel repos. Phases 3-7 ar
 - No npm publishing of `artifact-sdk` — it lives in-repo
 - No raw TCP/UDP tunneling — HTTP only
 - No multi-agent artifact sharing (each agent owns its artifacts)
-- No persistent artifact storage (artifacts live as long as the server process)
 - No WebSocket support in the browser SDK (REST-only proxy for MVP)
 - No HMAC-derived per-agent passwords (using shared API_KEY for MVP)
+- No custom auth username for MVP — using default `"hi"` (deferred to post-MVP)
+- No `artifact open` command — agents run headless in Docker, no browser to open
 
 ---
 
-## Phase 1: Localtunnel Client — Add `username` Option
+## Pre-MVP: Upstream Dependencies (Completed / Deferred)
 
-**Goal:** Patch `@desplega.ai/localtunnel` to accept a custom `username` option so we can use `swarm` instead of the hardcoded `"hi"`.
+### ~~Localtunnel Server — `maxSockets` Bug~~ ✅ MERGED
 
-**Repo:** `desplega-ai/localtunnel`
+The property name mismatch (`maxSockets` → `maxTcpSockets`) in `desplega-ai/localtunnel-server` has already been fixed and merged. No action needed.
 
-### Files to modify
+### Localtunnel Client — Custom Username ⏳ DEFERRED (post-MVP)
 
-**`lib/Tunnel.js`** — Tunnel class constructor and `_init` method
-
-Currently the client hardcodes username as `"hi"` when building the registration URL. We need to:
-
-1. Accept `username` in the options object (alongside existing `auth` option)
-2. Pass `username` as a query parameter during tunnel registration
-3. Include the custom username in the returned URL
-
-```javascript
-// In the constructor or _init method:
-const opts = this._opt;
-const username = opts.username || 'hi';  // backward compatible default
-
-// When building registration URL query params:
-params.append('username', username);
-
-// When constructing the returned URL with embedded credentials:
-// Instead of: `https://hi:${password}@${subdomain}.${host}`
-// Use: `https://${username}:${password}@${subdomain}.${host}`
-```
-
-**`bin/lt.js`** (or CLI entry) — Add `--username` CLI flag
-
-```javascript
-// Add to yargs config:
-.option('username', {
-    describe: 'Username for Basic Auth (default: hi)',
-    type: 'string',
-    default: 'hi',
-})
-```
-
-### Success Criteria
-
-#### Automated Verification
-- [ ] `bun test` (or existing test suite) passes
-- [ ] TypeScript types updated if applicable
-
-#### Manual Verification
-
-**Test 1: Custom username via programmatic API**
-```bash
-# Clone and prepare
-cd /workspace/repos
-git clone https://github.com/desplega-ai/localtunnel.git localtunnel-client
-cd localtunnel-client
-npm install
-
-# Start a test HTTP server
-python3 -c "
-from http.server import HTTPServer, SimpleHTTPRequestHandler
-import os
-os.chdir('/tmp')
-open('/tmp/index.html', 'w').write('<h1>Username test</h1>')
-HTTPServer(('', 9901), SimpleHTTPRequestHandler).serve_forever()
-" &
-TEST_PID=$!
-
-# Create tunnel with custom username
-node -e "
-const localtunnel = require('./');
-(async () => {
-  const tunnel = await localtunnel({
-    port: 9901,
-    subdomain: 'test-username-$(date +%s)',
-    host: 'https://lt.desplega.ai',
-    auth: 'test-password-123',
-    username: 'swarm',
-  });
-  console.log('URL:', tunnel.url);
-  // Expected: URL contains 'swarm:test-password-123@'
-  // NOT 'hi:test-password-123@'
-})();
-"
-
-# Verify auth works with custom username
-curl -u "swarm:test-password-123" -H "Bypass-Tunnel-Reminder: true" \
-  "https://test-username-TIMESTAMP.lt.desplega.ai"
-# Expected: HTTP 200, body contains "<h1>Username test</h1>"
-
-# Verify wrong username is rejected
-curl -u "wrong:test-password-123" -H "Bypass-Tunnel-Reminder: true" \
-  "https://test-username-TIMESTAMP.lt.desplega.ai"
-# Expected: HTTP 401 Unauthorized
-
-# Cleanup
-kill $TEST_PID
-```
-
-**Test 2: Default username backward compatibility**
-```bash
-# Same setup but without username option
-node -e "
-const localtunnel = require('./');
-(async () => {
-  const tunnel = await localtunnel({
-    port: 9901,
-    subdomain: 'test-default-$(date +%s)',
-    host: 'https://lt.desplega.ai',
-    auth: 'test-password-456',
-    // No username specified — should default to 'hi'
-  });
-  console.log('URL:', tunnel.url);
-  // Expected: URL contains 'hi:test-password-456@'
-})();
-"
-```
-
-**Test 3: CLI flag**
-```bash
-./bin/lt.js --port 9901 --subdomain test-cli-$(date +%s) \
-  --host https://lt.desplega.ai --auth test-pass --username swarm
-# Expected: URL printed with 'swarm' in credentials
-```
+Adding a `username` option to `@desplega.ai/localtunnel` so we can use `"swarm"` instead of `"hi"` is deferred. For MVP, we use the default username `"hi"` — it works fine, just looks less polished in the auth prompt. Can be revisited after the core feature is working.
 
 ---
 
-## Phase 2: Localtunnel Server — Fix `maxSockets` Bug
+## Phase 1: Artifact SDK — Core Module
 
-**Goal:** Fix the property name mismatch where `ClientManager.js` passes `maxSockets` but `TunnelAgent.js` reads `maxTcpSockets`.
-
-**Repo:** `desplega-ai/localtunnel-server`
-
-### Files to modify
-
-**`lib/ClientManager.js`** — Line ~43-46
-
-```javascript
-// Current (buggy):
-const agent = new TunnelAgent({ clientId: id, maxSockets: 10 });
-
-// Fix:
-const agent = new TunnelAgent({ clientId: id, maxTcpSockets: 10 });
-```
-
-**Or alternatively, `lib/TunnelAgent.js`** — Constructor
-
-```javascript
-// Current: reads opts.maxTcpSockets
-// Alternative fix: also accept opts.maxSockets as fallback
-const maxSockets = opts.maxTcpSockets || opts.maxSockets || 10;
-```
-
-The first approach (fix in ClientManager) is cleaner — fix the caller, not the callee.
-
-### Success Criteria
-
-#### Automated Verification
-- [ ] Existing test suite passes
-- [ ] E2E tests pass (if available in CI)
-
-#### Manual Verification
-
-**Test 1: Verify fix via code inspection**
-```bash
-cd /workspace/repos
-git clone https://github.com/desplega-ai/localtunnel-server.git
-cd localtunnel-server
-
-# Before fix: confirm the bug exists
-grep -n "maxSockets" lib/ClientManager.js
-# Expected: line with `maxSockets: 10` (should be `maxTcpSockets`)
-
-grep -n "maxTcpSockets" lib/TunnelAgent.js
-# Expected: constructor reads `opts.maxTcpSockets`
-
-# After fix: verify property names match
-grep -n "maxTcpSockets" lib/ClientManager.js
-# Expected: line with `maxTcpSockets: 10`
-```
-
-**Test 2: Verify max connections respected (integration)**
-```bash
-# Start a local test server instance
-npm install
-PORT=9902 node server.js &
-SERVER_PID=$!
-
-# Create a tunnel against local server
-cd /workspace/repos/localtunnel-client
-node -e "
-const lt = require('./');
-(async () => {
-  const tunnel = await lt({ port: 8888, host: 'http://localhost:9902' });
-  console.log('Tunnel URL:', tunnel.url);
-  // Now make >10 concurrent requests to test maxTcpSockets is respected
-  const promises = Array.from({length: 15}, (_, i) =>
-    fetch(tunnel.url.replace('https://', 'http://'), {
-      headers: { 'Bypass-Tunnel-Reminder': 'true' }
-    }).then(r => console.log('Request', i, r.status))
-      .catch(e => console.log('Request', i, 'failed:', e.message))
-  );
-  await Promise.all(promises);
-  tunnel.close();
-})();
-"
-# Expected: All 15 requests should complete (queued, not rejected)
-# With the bug, maxTcpSockets defaults to undefined → falls back to Node default
-
-kill $SERVER_PID
-```
-
----
-
-## Phase 3: Artifact SDK — Core Module
-
-**Goal:** Create `src/artifact-sdk/` in the agent-swarm repo with `createArtifactServer()`, dynamic port allocation, localtunnel integration, and service registry.
+**Goal:** Create `src/artifact-sdk/` in the agent-swarm repo with `createArtifactServer()`, dynamic port allocation, localtunnel integration, and service registry. Artifact content defaults to the persisted path `/workspace/personal/artifacts/`.
 
 **Repo:** `desplega-ai/agent-swarm`
+
+### Persisted Artifact Storage
+
+Artifact content (HTML, JS, static files) must be stored in a persisted directory so it survives container restarts. Default: `/workspace/personal/artifacts/<artifact-name>/`.
+
+- `/workspace/personal/` is a Docker volume — persists across sessions
+- Each artifact gets a subdirectory: `/workspace/personal/artifacts/pr-review-42/`
+- Agents can also use `/workspace/shared/artifacts/` for cross-agent visibility
+- The SDK and CLI default to `/workspace/personal/artifacts/` when no explicit path is given
 
 ### Dependencies to add
 
@@ -329,7 +139,7 @@ export async function createTunnel(opts: TunnelOptions) {
     port: opts.port,
     subdomain: opts.subdomain,
     auth: opts.auth,
-    username: opts.username || 'swarm',
+    username: opts.username || 'hi',  // default 'hi' for MVP (custom username deferred)
     // host defaults to lt.desplega.ai in our fork
   });
   return tunnel;
@@ -485,7 +295,6 @@ export function createArtifactServer(opts: ArtifactServerOptions): ArtifactServe
         port: actualPort,
         subdomain,
         auth: authPassword,
-        username: 'swarm',
       });
 
       artifact.url = tunnel.url;
@@ -707,9 +516,9 @@ bun run /tmp/test-artifact-e2e.ts
 
 ---
 
-## Phase 4: CLI `artifact` Command
+## Phase 2: CLI `artifact` Command
 
-**Goal:** Add `artifact serve|list|stop|open` subcommands to the agent-swarm CLI.
+**Goal:** Add `artifact serve|list|stop` subcommands to the agent-swarm CLI.
 
 **Repo:** `desplega-ai/agent-swarm`
 
@@ -717,11 +526,10 @@ bun run /tmp/test-artifact-e2e.ts
 
 **`src/commands/artifact.ts`** — NEW: Artifact command module
 
-Implements 4 subcommands:
+Implements 3 subcommands:
 - `serve <path> --name <name> [--port <port>] [--no-auth] [--subdomain <sub>]`
 - `list` — queries service registry for `metadata.type === "artifact"`
 - `stop <name>` — stops PM2 process, closes tunnel, unregisters service
-- `open <name>` — looks up URL, opens in browser via `xdg-open`
 
 ```typescript
 // Pattern follows existing commands — export an async function
@@ -730,7 +538,6 @@ export async function runArtifact(subcommand: string, args: Record<string, any>)
     case 'serve': return artifactServe(args);
     case 'list': return artifactList(args);
     case 'stop': return artifactStop(args);
-    case 'open': return artifactOpen(args);
     default: console.error(`Unknown artifact subcommand: ${subcommand}`);
   }
 }
@@ -751,11 +558,6 @@ For `stop`:
 1. Find artifact in service registry by name
 2. `pm2 delete artifact-<name>` (via child_process)
 3. Call `DELETE /api/services/:id` to unregister
-
-For `open`:
-1. Look up artifact URL from service registry
-2. Embed credentials: `https://swarm:${API_KEY}@<subdomain>.lt.desplega.ai`
-3. Execute `xdg-open <url>` (Linux)
 
 **`src/cli.tsx`** — Add dispatch for `artifact` command
 
@@ -782,13 +584,13 @@ case "artifact":
 ```bash
 cd /workspace/repos/agent-swarm
 
-# Create test content
-mkdir -p /tmp/cli-test-artifact
-echo '<h1>CLI Artifact Test</h1>' > /tmp/cli-test-artifact/index.html
+# Create test content in persisted path
+mkdir -p /workspace/personal/artifacts/cli-test
+echo '<h1>CLI Artifact Test</h1>' > /workspace/personal/artifacts/cli-test/index.html
 
 # Run the CLI command
 AGENT_ID=test-cli-agent API_KEY=test-key \
-  bun run src/cli.tsx artifact serve /tmp/cli-test-artifact --name cli-test
+  bun run src/cli.tsx artifact serve /workspace/personal/artifacts/cli-test --name cli-test
 
 # Expected output:
 # Artifact "cli-test" live at https://test-cli-agent-cli-test.lt.desplega.ai (port <dynamic>)
@@ -852,7 +654,7 @@ curl -H "Bypass-Tunnel-Reminder: true" \
 
 ---
 
-## Phase 5: Browser SDK + API Proxy
+## Phase 3: Browser SDK + API Proxy
 
 **Goal:** Build the browser-side SDK (`/@swarm/sdk.js`) and the `/@swarm/api/*` proxy middleware that allows HTML artifacts to call swarm API endpoints.
 
@@ -1026,44 +828,38 @@ bun run /tmp/test-sdk-e2e.ts
 
 ---
 
-## Phase 6: Capability Gate + Base Prompt
+## Phase 4: Artifacts Skill + Base Prompt Mention
 
-**Goal:** Add `"artifacts"` capability that gates the artifact tools and injects usage instructions into the agent's system prompt.
+**Goal:** Create a `/artifacts` skill (Claude Code skill) that provides detailed artifact usage documentation, code examples, and reference files. The base prompt only mentions the skill exists — all detailed instructions live in the skill.
 
 **Repo:** `desplega-ai/agent-swarm`
 
-### Files to modify
+### Why a skill instead of a prompt section?
 
-**`src/server.ts`** — Register artifact-related tools (if any MCP tools needed)
+Putting all artifact documentation inline in `BASE_PROMPT_ARTIFACTS` would bloat the system prompt for every session, even when agents aren't using artifacts. A skill is loaded on-demand when the agent invokes `/artifacts`, keeping the base prompt lean.
 
-Currently, artifacts are served via CLI/SDK, not MCP tools. However, we may want to add:
-- `artifact-serve` tool — allows agents to create artifacts from within Claude sessions
-- `artifact-list` tool — query active artifacts
-- `artifact-stop` tool — stop an artifact
+### Files to create
 
-For MVP, skip MCP tool registration and use CLI only. The capability gate is still needed for the prompt section.
+**`skills/artifacts/skill.md`** — Skill definition (loaded when `/artifacts` is invoked)
 
-**`src/prompts/base-prompt.ts`** — Add `BASE_PROMPT_ARTIFACTS` section
+```markdown
+# Artifacts — Serving Interactive Web Content
 
-```typescript
-const BASE_PROMPT_ARTIFACTS = `
-### Artifacts — Serving Interactive Content
+## Quick Start
 
-You can serve HTML pages, interactive apps, and rich content via public URLs using the artifact system.
-
-**Quick start — static content:**
-\`\`\`bash
-# Create your HTML content
+### Static content
+```bash
+# Create your content in a persisted directory
 mkdir -p /workspace/personal/artifacts/my-report
 echo '<h1>My Report</h1>' > /workspace/personal/artifacts/my-report/index.html
 
-# Serve it via localtunnel (auto-assigns a free port)
+# Serve it (auto-assigns a free port, creates tunnel)
 artifact serve /workspace/personal/artifacts/my-report --name "my-report"
-# → https://{your-agent-id}-my-report.lt.desplega.ai
-\`\`\`
+# → https://{agentId}-my-report.lt.desplega.ai
+```
 
-**Programmatic — custom server:**
-\`\`\`typescript
+### Programmatic (custom Hono server)
+```typescript
 import { createArtifactServer } from '../artifact-sdk';
 import { Hono } from 'hono';
 
@@ -1072,28 +868,130 @@ app.get('/', (c) => c.html('<h1>Dashboard</h1>'));
 
 const server = createArtifactServer({ name: 'dashboard', app });
 await server.start();
-// Share server.url via Slack or task output
-\`\`\`
+console.log(`Live at: ${server.url}`);
+```
 
-**Commands:**
-- \`artifact serve <path> --name <name>\` — Start serving content
-- \`artifact list\` — List active artifacts
-- \`artifact stop <name>\` — Stop an artifact
-- \`artifact open <name>\` — Open in browser
+## CLI Commands
+- `artifact serve <path> --name <name>` — Start serving content
+- `artifact list` — List active artifacts with ports and URLs
+- `artifact stop <name>` — Stop an artifact and close its tunnel
 
-**Multiple artifacts:** You can serve multiple artifacts simultaneously. Each gets its own port and subdomain.
+## Multiple Artifacts
+Each artifact gets its own port (auto-assigned) and subdomain. You can serve multiple simultaneously.
 
-**Browser SDK:** HTML served via artifacts can use \`<script src="/@swarm/sdk.js"></script>\` to interact with the swarm API (create tasks, send messages, read data).
+## Browser SDK
+HTML artifacts can interact with the swarm API:
+```html
+<script src="/@swarm/sdk.js"></script>
+<script>
+  const swarm = new SwarmSDK();
+  await swarm.createTask({ task: 'Do something' });
+  const agents = await swarm.getSwarm();
+</script>
+```
 
-**Auth:** Artifacts are protected by HTTP Basic Auth (username: swarm, password: API key). Credentials are auto-configured.
+## Auth
+Artifacts are protected by HTTP Basic Auth (username: `hi`, password: API key). Credentials are auto-configured.
+
+## Storage
+Always store artifact content in persisted directories:
+- `/workspace/personal/artifacts/` — per-agent, persists across sessions (default)
+- `/workspace/shared/artifacts/` — shared across swarm
+
+See the `examples/` directory for complete working examples.
+```
+
+**`skills/artifacts/examples/`** — Reference examples directory
+
+```
+skills/artifacts/
+├── skill.md                              # Main skill documentation
+└── examples/
+    ├── static-report.sh                  # Minimal static HTML artifact
+    ├── hono-dashboard.ts                 # Custom Hono app with API routes
+    ├── approval-flow.ts                  # Interactive approval form with Browser SDK
+    └── multi-artifact.ts                 # Multiple artifacts from one agent
+```
+
+Each example file is a complete, copy-pasteable script that agents can reference or adapt.
+
+**Example: `skills/artifacts/examples/static-report.sh`**
+```bash
+#!/bin/bash
+# Serve a static HTML report as an artifact
+ARTIFACT_DIR="/workspace/personal/artifacts/my-report"
+mkdir -p "$ARTIFACT_DIR"
+
+cat > "$ARTIFACT_DIR/index.html" << 'HTML'
+<!DOCTYPE html>
+<html>
+<head><title>Agent Report</title></head>
+<body>
+  <h1>Analysis Report</h1>
+  <p>Generated by agent on $(date)</p>
+</body>
+</html>
+HTML
+
+artifact serve "$ARTIFACT_DIR" --name "my-report"
+```
+
+**Example: `skills/artifacts/examples/approval-flow.ts`**
+```typescript
+import { createArtifactServer } from '../artifact-sdk';
+import { Hono } from 'hono';
+
+const app = new Hono();
+app.get('/', (c) => c.html(`
+<!DOCTYPE html>
+<html>
+<head><title>Approval Required</title></head>
+<body>
+  <h1>PR #42 — Review Required</h1>
+  <p>Agent wants to merge this PR. Please review.</p>
+  <button id="approve">Approve</button>
+  <button id="reject">Reject</button>
+  <script src="/@swarm/sdk.js"></script>
+  <script>
+    const swarm = new SwarmSDK();
+    document.getElementById('approve').onclick = async () => {
+      await swarm.createTask({ task: 'Merge PR #42 — human approved' });
+      document.body.innerHTML = '<h1>Approved! Task created.</h1>';
+    };
+    document.getElementById('reject').onclick = async () => {
+      await swarm.createTask({ task: 'PR #42 rejected by human — needs changes' });
+      document.body.innerHTML = '<h1>Rejected. Agent notified.</h1>';
+    };
+  </script>
+</body>
+</html>
+`));
+
+const server = createArtifactServer({ name: 'approval-pr-42', app });
+await server.start();
+console.log(`Approval artifact at: ${server.url}`);
+```
+
+### Files to modify
+
+**`src/prompts/base-prompt.ts`** — Add a brief mention (not the full docs)
+
+Add to `BASE_PROMPT_SERVICES` or as a separate small section:
+
+```typescript
+const BASE_PROMPT_ARTIFACTS_MENTION = `
+### Artifacts
+
+Agents can serve interactive web content (HTML pages, dashboards, approval flows) via public URLs using localtunnel.
+Use the \`/artifacts\` skill for detailed instructions, examples, and API reference.
+Artifact content should be stored in \`/workspace/personal/artifacts/\` (persisted across sessions).
 `;
 ```
 
-In `getBasePrompt()` function, add gating (around line 393-395 where services is gated):
-
+Gate it the same way as services:
 ```typescript
 if (!args.capabilities || args.capabilities.includes("artifacts")) {
-  prompt += BASE_PROMPT_ARTIFACTS;
+  prompt += BASE_PROMPT_ARTIFACTS_MENTION;
 }
 ```
 
@@ -1102,16 +1000,29 @@ if (!args.capabilities || args.capabilities.includes("artifacts")) {
 #### Automated Verification
 - [ ] `bun run typecheck` passes
 - [ ] `bun run lint` passes
-- [ ] `bun test` passes
+- [ ] Skill file validates (correct markdown format)
 
 #### Manual Verification
 
-**Test 1: Prompt includes artifacts section when capability enabled**
+**Test 1: Skill file exists and is properly formatted**
 ```bash
 cd /workspace/repos/agent-swarm
 
-# Create a test script that calls getBasePrompt
-cat > /tmp/test-prompt.ts << 'EOF'
+# Verify skill structure
+ls -la skills/artifacts/
+# Expected: skill.md, examples/ directory
+
+ls -la skills/artifacts/examples/
+# Expected: static-report.sh, hono-dashboard.ts, approval-flow.ts, multi-artifact.ts
+
+# Verify skill.md contains key sections
+grep -c "Quick Start\|CLI Commands\|Browser SDK\|Storage\|Auth" skills/artifacts/skill.md
+# Expected: 5 (all sections present)
+```
+
+**Test 2: Base prompt mentions artifacts skill (brief)**
+```bash
+cat > /tmp/test-prompt-skill.ts << 'EOF'
 import { getBasePrompt } from './src/prompts/base-prompt';
 
 const prompt = getBasePrompt({
@@ -1121,28 +1032,30 @@ const prompt = getBasePrompt({
   capabilities: ['core', 'artifacts', 'services'],
 });
 
-// Check artifacts section is present
-const hasArtifacts = prompt.includes('artifact serve');
-const hasSDK = prompt.includes('/@swarm/sdk.js');
-const hasCommands = prompt.includes('artifact list');
+// Check brief mention is present
+const hasMention = prompt.includes('/artifacts');
+const hasPersonalPath = prompt.includes('/workspace/personal/artifacts/');
+console.log(`Has /artifacts skill mention: ${hasMention}`);
+console.log(`Has persisted path mention: ${hasPersonalPath}`);
+console.assert(hasMention, 'Prompt should mention /artifacts skill');
+console.assert(hasPersonalPath, 'Prompt should mention persisted path');
 
-console.log(`Has artifact serve: ${hasArtifacts}`);
-console.log(`Has SDK reference: ${hasSDK}`);
-console.log(`Has artifact commands: ${hasCommands}`);
-console.assert(hasArtifacts, 'Prompt should include artifact serve');
-console.assert(hasSDK, 'Prompt should include SDK reference');
-console.assert(hasCommands, 'Prompt should include artifact commands');
+// Check it does NOT contain the full detailed docs
+const hasFullDocs = prompt.includes('createArtifactServer');
+console.log(`Has full docs inline: ${hasFullDocs}`);
+console.assert(!hasFullDocs, 'Prompt should NOT contain full artifact docs — those go in the skill');
 
-console.log('PASS: Artifacts section in prompt');
+console.log('PASS: Base prompt mentions skill without bloating');
 EOF
 
-bun run /tmp/test-prompt.ts
+cd /workspace/repos/agent-swarm
+bun run /tmp/test-prompt-skill.ts
 # Expected: all assertions pass
 ```
 
-**Test 2: Prompt excludes artifacts section when capability disabled**
+**Test 3: Base prompt excludes mention when capability not set**
 ```bash
-cat > /tmp/test-prompt-no-cap.ts << 'EOF'
+cat > /tmp/test-prompt-no-artifact.ts << 'EOF'
 import { getBasePrompt } from './src/prompts/base-prompt';
 
 const prompt = getBasePrompt({
@@ -1152,20 +1065,19 @@ const prompt = getBasePrompt({
   capabilities: ['core', 'services'],  // No 'artifacts'
 });
 
-const hasArtifacts = prompt.includes('artifact serve');
-console.log(`Has artifact serve: ${hasArtifacts}`);
-console.assert(!hasArtifacts, 'Prompt should NOT include artifact serve without capability');
-console.log('PASS: Artifacts section excluded when capability not set');
+const hasMention = prompt.includes('/artifacts');
+console.assert(!hasMention, 'Prompt should NOT mention artifacts without capability');
+console.log('PASS: Artifacts mention excluded without capability');
 EOF
 
 cd /workspace/repos/agent-swarm
-bun run /tmp/test-prompt-no-cap.ts
-# Expected: assertion passes — artifacts section not in prompt
+bun run /tmp/test-prompt-no-artifact.ts
+# Expected: assertion passes
 ```
 
 ---
 
-## Phase 7: Hook Integration + Docker
+## Phase 5: Hook Integration + Docker
 
 **Goal:** Add tunnel cleanup to the Stop hook and install `@desplega.ai/localtunnel` in the Docker image.
 
@@ -1274,13 +1186,13 @@ docker run --rm agent-swarm-artifact-test which lt
 # This test runs inside a worker container (or locally with env vars)
 cd /workspace/repos/agent-swarm
 
-# 1. Create content
-mkdir -p /tmp/lifecycle-test
-echo '<h1>Lifecycle Test</h1>' > /tmp/lifecycle-test/index.html
+# 1. Create content in persisted path
+mkdir -p /workspace/personal/artifacts/lifecycle
+echo '<h1>Lifecycle Test</h1>' > /workspace/personal/artifacts/lifecycle/index.html
 
 # 2. Start artifact
 AGENT_ID=lifecycle-test API_KEY=test-key \
-  bun run src/cli.tsx artifact serve /tmp/lifecycle-test --name lifecycle &
+  bun run src/cli.tsx artifact serve /workspace/personal/artifacts/lifecycle --name lifecycle &
 SERVE_PID=$!
 sleep 3  # wait for tunnel
 
@@ -1325,22 +1237,21 @@ echo "PASS: Full lifecycle test"
 
 | Phase | Test | Critical Path |
 |-------|------|---------------|
-| 1 | Custom username in localtunnel client | auth header contains "swarm" instead of "hi" |
-| 2 | maxSockets fix applied | property name matches what TunnelAgent reads |
-| 3 | Dynamic port allocation | two artifacts get different ports |
-| 3 | Static content serving | HTTP 200 with correct body |
-| 3 | Multiple artifacts | independent ports and URLs |
-| 3 | E2E tunnel connectivity | public URL returns correct response |
-| 4 | CLI `artifact serve` | tunnel URL accessible |
-| 4 | CLI `artifact list` | shows running artifacts |
-| 4 | CLI `artifact stop` | tunnel closed, service unregistered |
-| 5 | SDK endpoint | serves JavaScript with SwarmSDK class |
-| 5 | API proxy | forwards requests to MCP server |
-| 6 | Prompt with capability | artifacts section present |
-| 6 | Prompt without capability | artifacts section absent |
-| 7 | Stop hook cleanup | PM2 artifact processes deleted |
-| 7 | Docker build | image builds, `lt` binary available |
-| 7 | Full lifecycle | serve → access → list → stop → verify closed |
+| 1 | Dynamic port allocation | two artifacts get different ports |
+| 1 | Static content serving | HTTP 200 with correct body from persisted path |
+| 1 | Multiple artifacts | independent ports and URLs |
+| 1 | E2E tunnel connectivity | public URL returns correct response |
+| 2 | CLI `artifact serve` | tunnel URL accessible |
+| 2 | CLI `artifact list` | shows running artifacts |
+| 2 | CLI `artifact stop` | tunnel closed, service unregistered |
+| 3 | SDK endpoint | serves JavaScript with SwarmSDK class |
+| 3 | API proxy | forwards requests to MCP server |
+| 4 | Skill file exists | skill.md + examples/ present with correct structure |
+| 4 | Prompt mentions skill | brief `/artifacts` mention in prompt, no full docs inline |
+| 4 | Prompt gated by capability | mention absent without `artifacts` capability |
+| 5 | Stop hook cleanup | PM2 artifact processes deleted |
+| 5 | Docker build | image builds, `lt` binary available |
+| 5 | Full lifecycle | serve → access → list → stop → verify closed |
 
 ---
 
