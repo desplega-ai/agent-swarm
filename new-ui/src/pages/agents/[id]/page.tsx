@@ -92,7 +92,7 @@ export default function AgentDetailPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
       <button
         type="button"
         onClick={() => navigate("/agents")}
@@ -123,7 +123,7 @@ export default function AgentDetailPage() {
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <h1 className="font-display text-2xl font-bold">{agent.name}</h1>
+            <h1 className="text-xl font-semibold">{agent.name}</h1>
             <Button size="icon" variant="ghost" onClick={startEditing}>
               <Pencil className="h-4 w-4" />
             </Button>
@@ -159,7 +159,7 @@ export default function AgentDetailPage() {
                   <span className="text-xs text-muted-foreground uppercase tracking-wide">Capabilities</span>
                   <div className="flex flex-wrap gap-1 mt-1">
                     {agent.capabilities.map((cap) => (
-                      <Badge key={cap} variant="secondary" className="text-xs">
+                      <Badge key={cap} variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
                         {cap}
                       </Badge>
                     ))}

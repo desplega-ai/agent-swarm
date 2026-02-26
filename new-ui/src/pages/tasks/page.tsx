@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -7,6 +7,7 @@ import { useTasks } from "@/api/hooks/use-tasks";
 import { useAgents } from "@/api/hooks/use-agents";
 import { formatSmartTime } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -19,8 +20,9 @@ import type { AgentTask, AgentTaskStatus } from "@/api/types";
 
 export default function TasksPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>(searchParams.get("status") ?? "all");
   const [agentFilter, setAgentFilter] = useState<string>("all");
 
   const { data: agents } = useAgents();
@@ -74,7 +76,7 @@ export default function TasksPage() {
         width: 80,
         cellRenderer: (params: { value: number }) => {
           const p = params.value ?? 50;
-          const color = p >= 80 ? "text-red-400" : p >= 60 ? "text-amber-400" : "text-muted-foreground";
+          const color = p >= 80 ? "text-red-400" : p >= 60 ? "text-primary" : "text-muted-foreground";
           return <span className={`font-mono ${color}`}>{p}</span>;
         },
       },
@@ -83,14 +85,14 @@ export default function TasksPage() {
         headerName: "Tags",
         width: 200,
         cellRenderer: (params: { value: string[] }) => (
-          <div className="flex flex-wrap gap-1">
+          <div className="flex flex-wrap gap-1 items-center">
             {params.value?.slice(0, 3).map((tag) => (
-              <span key={tag} className="rounded-full bg-muted px-1.5 py-0.5 text-[10px]">
+              <Badge key={tag} variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
                 {tag}
-              </span>
+              </Badge>
             ))}
             {(params.value?.length ?? 0) > 3 && (
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-[9px] text-muted-foreground font-medium">
                 +{(params.value?.length ?? 0) - 3}
               </span>
             )}
@@ -116,8 +118,8 @@ export default function TasksPage() {
   );
 
   return (
-    <div className="space-y-4">
-      <h1 className="font-display text-2xl font-bold">Tasks</h1>
+    <div className="flex flex-col flex-1 min-h-0 gap-4">
+      <h1 className="text-xl font-semibold">Tasks</h1>
 
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-sm">

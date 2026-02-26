@@ -54,7 +54,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                   <RotateCcw className="h-4 w-4" />
                   Try Again
                 </Button>
-                <Button asChild className="gap-1.5 bg-amber-600 hover:bg-amber-700">
+                <Button asChild className="gap-1.5 bg-primary hover:bg-primary/90">
                   <Link to="/">
                     <Home className="h-4 w-4" />
                     Go Home

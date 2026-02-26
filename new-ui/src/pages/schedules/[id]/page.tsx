@@ -46,7 +46,7 @@ export default function ScheduleDetailPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
       <button
         type="button"
         onClick={() => navigate("/schedules")}
@@ -56,7 +56,7 @@ export default function ScheduleDetailPage() {
       </button>
 
       <div className="flex items-center gap-3 flex-wrap">
-        <h1 className="font-display text-2xl font-bold">{schedule.name}</h1>
+        <h1 className="text-xl font-semibold">{schedule.name}</h1>
         <Badge
           variant={schedule.enabled ? "default" : "secondary"}
           className={
@@ -65,7 +65,11 @@ export default function ScheduleDetailPage() {
         >
           {schedule.enabled ? "Enabled" : "Disabled"}
         </Badge>
-        {schedule.taskType && <Badge variant="outline">{schedule.taskType}</Badge>}
+        {schedule.taskType && (
+          <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
+            {schedule.taskType}
+          </Badge>
+        )}
       </div>
 
       {schedule.description && (
@@ -85,12 +89,12 @@ export default function ScheduleDetailPage() {
               <div className="flex items-center gap-1.5 mt-0.5">
                 {schedule.cronExpression ? (
                   <>
-                    <Clock className="h-4 w-4 text-amber-400" />
+                    <Clock className="h-4 w-4 text-muted-foreground" />
                     <code className="text-sm font-mono">{schedule.cronExpression}</code>
                   </>
                 ) : schedule.intervalMs ? (
                   <>
-                    <Timer className="h-4 w-4 text-amber-400" />
+                    <Timer className="h-4 w-4 text-muted-foreground" />
                     <span className="text-sm">Every {formatInterval(schedule.intervalMs)}</span>
                   </>
                 ) : (
@@ -116,7 +120,7 @@ export default function ScheduleDetailPage() {
                 {schedule.targetAgentId ? (
                   <Link
                     to={`/agents/${schedule.targetAgentId}`}
-                    className="text-amber-400 hover:underline"
+                    className="text-primary hover:underline"
                   >
                     {agentMap.get(schedule.targetAgentId) ??
                       schedule.targetAgentId.slice(0, 8) + "..."}
@@ -139,7 +143,7 @@ export default function ScheduleDetailPage() {
                 <span className="text-xs text-muted-foreground uppercase tracking-wide">Tags</span>
                 <div className="flex flex-wrap gap-1 mt-1">
                   {schedule.tags.map((tag) => (
-                    <Badge key={tag} variant="secondary" className="text-xs">
+                    <Badge key={tag} variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
                       {tag}
                     </Badge>
                   ))}

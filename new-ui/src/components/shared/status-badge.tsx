@@ -6,72 +6,39 @@ type Status = AgentStatus | AgentTaskStatus | EpicStatus | ServiceStatus;
 
 interface StatusConfig {
   label: string;
-  className: string;
+  dot: string;
+  text: string;
   pulse?: boolean;
 }
 
 const statusConfig: Record<string, StatusConfig> = {
   // Agent statuses
-  idle: { label: "Idle", className: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" },
-  busy: {
-    label: "Busy",
-    className: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-    pulse: true,
-  },
-  offline: { label: "Offline", className: "bg-red-500/15 text-red-400 border-red-500/30" },
+  idle: { label: "IDLE", dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" },
+  busy: { label: "BUSY", dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", pulse: true },
+  offline: { label: "OFFLINE", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
 
   // Task statuses
-  backlog: { label: "Backlog", className: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30" },
-  unassigned: {
-    label: "Unassigned",
-    className: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30",
-  },
-  offered: {
-    label: "Offered",
-    className: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-    pulse: true,
-  },
-  reviewing: {
-    label: "Reviewing",
-    className: "bg-blue-500/15 text-blue-400 border-blue-500/30",
-  },
-  pending: { label: "Pending", className: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30" },
-  in_progress: {
-    label: "In Progress",
-    className: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-    pulse: true,
-  },
-  paused: { label: "Paused", className: "bg-blue-500/15 text-blue-400 border-blue-500/30" },
-  completed: {
-    label: "Completed",
-    className: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  },
-  failed: { label: "Failed", className: "bg-red-500/15 text-red-400 border-red-500/30" },
-  cancelled: {
-    label: "Cancelled",
-    className: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30",
-  },
+  backlog: { label: "BACKLOG", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
+  unassigned: { label: "UNASSIGNED", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
+  offered: { label: "OFFERED", dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", pulse: true },
+  reviewing: { label: "REVIEWING", dot: "bg-blue-500", text: "text-blue-600 dark:text-blue-400" },
+  pending: { label: "PENDING", dot: "bg-yellow-500", text: "text-yellow-600 dark:text-yellow-400" },
+  in_progress: { label: "IN PROGRESS", dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", pulse: true },
+  paused: { label: "PAUSED", dot: "bg-blue-500", text: "text-blue-600 dark:text-blue-400" },
+  completed: { label: "COMPLETED", dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" },
+  failed: { label: "FAILED", dot: "bg-red-500", text: "text-red-600 dark:text-red-400" },
+  cancelled: { label: "CANCELLED", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
 
   // Epic statuses
-  draft: { label: "Draft", className: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30" },
-  active: {
-    label: "Active",
-    className: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-    pulse: true,
-  },
+  draft: { label: "DRAFT", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
+  active: { label: "ACTIVE", dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", pulse: true },
 
   // Service statuses
-  starting: {
-    label: "Starting",
-    className: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
-  },
-  healthy: {
-    label: "Healthy",
-    className: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  },
-  unhealthy: { label: "Unhealthy", className: "bg-red-500/15 text-red-400 border-red-500/30" },
-  stopped: { label: "Stopped", className: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30" },
-};
+  starting: { label: "STARTING", dot: "bg-yellow-500", text: "text-yellow-600 dark:text-yellow-400" },
+  healthy: { label: "HEALTHY", dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" },
+  unhealthy: { label: "UNHEALTHY", dot: "bg-red-500", text: "text-red-600 dark:text-red-400" },
+  stopped: { label: "STOPPED", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
+} satisfies Record<string, StatusConfig>;
 
 interface StatusBadgeProps {
   status: Status;
@@ -82,21 +49,27 @@ interface StatusBadgeProps {
 export function StatusBadge({ status, size = "sm", className }: StatusBadgeProps) {
   const config = statusConfig[status] ?? {
     label: status,
-    className: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30",
+    dot: "bg-zinc-400",
+    text: "text-zinc-500 dark:text-zinc-400",
   };
 
   return (
     <Badge
       variant="outline"
       className={cn(
-        "font-mono font-semibold tracking-wide uppercase border",
-        config.className,
-        config.pulse && "animate-pulse",
-        size === "sm" ? "text-[10px] px-1.5 py-0" : "text-xs px-2 py-0.5",
+        "gap-1.5 font-medium leading-none items-center",
+        size === "sm" ? "text-[9px] px-1.5 py-0 h-5" : "text-[10px] px-2 py-0 h-6",
         className,
       )}
     >
-      {config.label}
+      <span
+        className={cn(
+          "h-1.5 w-1.5 rounded-full shrink-0",
+          config.dot,
+          config.pulse && "animate-pulse",
+        )}
+      />
+      <span className={config.text}>{config.label}</span>
     </Badge>
   );
 }

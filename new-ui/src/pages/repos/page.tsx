@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useState, useMemo, useCallback } from "react";
+import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
 import { useRepos, useCreateRepo, useUpdateRepo, useDeleteRepo } from "@/api/hooks/use-repos";
+import { DataGrid } from "@/components/shared/data-grid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
   DialogContent,
@@ -15,14 +16,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { GitBranch, Plus, Pencil, Trash2, FolderGit2 } from "lucide-react";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { GitBranch, Plus, Pencil, Trash2, FolderGit2, ExternalLink } from "lucide-react";
 import type { SwarmRepo } from "@/api/types";
 
 interface RepoFormData {
@@ -132,7 +135,7 @@ function RepoDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" className="bg-amber-600 hover:bg-amber-700">
+            <Button type="submit" className="bg-primary hover:bg-primary/90">
               {editRepo ? "Update" : "Add"}
             </Button>
           </DialogFooter>
@@ -150,7 +153,7 @@ export default function ReposPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRepo, setEditingRepo] = useState<SwarmRepo | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SwarmRepo | null>(null);
 
   function handleAdd() {
     setEditingRepo(null);
@@ -171,117 +174,174 @@ export default function ReposPage() {
     setEditingRepo(null);
   }
 
-  function handleDelete(id: string) {
-    deleteRepo.mutate(id);
-    setDeleteConfirm(null);
+  function handleDelete() {
+    if (deleteTarget) {
+      deleteRepo.mutate(deleteTarget.id);
+      setDeleteTarget(null);
+    }
   }
 
-  if (isLoading) {
+  const columnDefs = useMemo<ColDef<SwarmRepo>[]>(
+    () => [
+      {
+        field: "name",
+        headerName: "Name",
+        width: 180,
+        cellRenderer: (params: { value: string }) => (
+          <span className="font-semibold">{params.value}</span>
+        ),
+      },
+      {
+        field: "url",
+        headerName: "URL",
+        flex: 1,
+        minWidth: 250,
+        cellRenderer: (params: ICellRendererParams<SwarmRepo>) => {
+          const url = params.value as string;
+          if (!url) return "—";
+          return (
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1 text-primary hover:underline"
+            >
+              <span className="truncate">{url}</span>
+              <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
+            </a>
+          );
+        },
+      },
+      {
+        field: "clonePath",
+        headerName: "Clone Path",
+        width: 200,
+        cellRenderer: (params: { value: string }) => (
+          <span className="font-mono text-xs text-muted-foreground">{params.value || "—"}</span>
+        ),
+      },
+      {
+        field: "defaultBranch",
+        headerName: "Branch",
+        width: 120,
+        cellRenderer: (params: { value: string }) => (
+          <span className="inline-flex items-center gap-1 text-sm">
+            <GitBranch className="h-3 w-3" />
+            {params.value}
+          </span>
+        ),
+      },
+      {
+        field: "autoClone",
+        headerName: "Auto-Clone",
+        width: 110,
+        cellRenderer: (params: { value: boolean }) => (
+          <Badge
+            variant="outline"
+            className={
+              params.value
+                ? "text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center bg-emerald-500/15 text-emerald-500 border-emerald-500/30"
+                : "text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center"
+            }
+          >
+            {params.value ? "ON" : "OFF"}
+          </Badge>
+        ),
+      },
+      {
+        headerName: "",
+        width: 100,
+        sortable: false,
+        filter: false,
+        cellRenderer: (params: ICellRendererParams<SwarmRepo>) => {
+          const repo = params.data;
+          if (!repo) return null;
+          return (
+            <div className="flex items-center gap-1">
+              <Button
+                size="icon"
+                variant="outline"
+                className="h-7 w-7 border-border/60"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleEdit(repo);
+                }}
+              >
+                <Pencil className="h-3 w-3" />
+              </Button>
+              <Button
+                size="icon"
+                variant="outline"
+                className="h-7 w-7 border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeleteTarget(repo);
+                }}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </div>
+          );
+        },
+      },
+    ],
+    [],
+  );
+
+  const onRowClicked = useCallback(
+    (event: RowClickedEvent<SwarmRepo>) => {
+      // Skip if click originated from a button (action column)
+      const target = event.event?.target as HTMLElement;
+      if (target?.closest("button")) return;
+      if (event.data) {
+        setEditingRepo(event.data);
+        setDialogOpen(true);
+      }
+    },
+    [],
+  );
+
+  if (!isLoading && (!repos || repos.length === 0)) {
     return (
-      <div className="space-y-4">
-        <h1 className="font-display text-2xl font-bold">Repos</h1>
-        <Skeleton className="h-64 w-full" />
+      <div className="flex flex-col flex-1 min-h-0 gap-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold">Repos</h1>
+          <Button onClick={handleAdd} size="sm" className="gap-1 bg-primary hover:bg-primary/90">
+            <Plus className="h-3.5 w-3.5" /> Add Repo
+          </Button>
+        </div>
+        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+          <FolderGit2 className="h-8 w-8 mb-2" />
+          <p className="text-sm">No repositories registered</p>
+        </div>
+
+        <RepoDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          editRepo={editingRepo}
+          onSubmit={handleSubmit}
+        />
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col flex-1 min-h-0 gap-4">
       <div className="flex items-center justify-between">
-        <h1 className="font-display text-2xl font-bold">Repos</h1>
-        <Button onClick={handleAdd} className="gap-1 bg-amber-600 hover:bg-amber-700">
-          <Plus className="h-4 w-4" /> Add Repo
+        <h1 className="text-xl font-semibold">Repos</h1>
+        <Button onClick={handleAdd} size="sm" className="gap-1 bg-primary hover:bg-primary/90">
+          <Plus className="h-3.5 w-3.5" /> Add Repo
         </Button>
       </div>
 
-      {repos && repos.length > 0 ? (
-        <div className="rounded-lg border border-border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>URL</TableHead>
-                <TableHead>Clone Path</TableHead>
-                <TableHead>Branch</TableHead>
-                <TableHead>Auto-Clone</TableHead>
-                <TableHead className="w-[100px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {repos.map((repo) => (
-                <TableRow key={repo.id}>
-                  <TableCell className="font-medium">
-                    <div className="flex items-center gap-1.5">
-                      <FolderGit2 className="h-3.5 w-3.5 text-muted-foreground" />
-                      {repo.name}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground max-w-[250px] truncate">
-                    {repo.url}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground font-mono text-xs">
-                    {repo.clonePath}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1 text-sm">
-                      <GitBranch className="h-3 w-3" />
-                      {repo.defaultBranch}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={repo.autoClone ? "default" : "secondary"}
-                      className={
-                        repo.autoClone
-                          ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                          : ""
-                      }
-                    >
-                      {repo.autoClone ? "Yes" : "No"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        onClick={() => handleEdit(repo)}
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      {deleteConfirm === repo.id ? (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7 text-red-400 hover:text-red-300"
-                          onClick={() => handleDelete(repo.id)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      ) : (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7"
-                          onClick={() => setDeleteConfirm(repo.id)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      ) : (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <FolderGit2 className="h-8 w-8 mb-2" />
-          <p className="text-sm">No repositories registered</p>
-        </div>
-      )}
+      <DataGrid
+        rowData={repos ?? []}
+        columnDefs={columnDefs}
+        onRowClicked={onRowClicked}
+        loading={isLoading}
+        emptyMessage="No repositories registered"
+      />
 
       <RepoDialog
         open={dialogOpen}
@@ -289,6 +349,23 @@ export default function ReposPage() {
         editRepo={editingRepo}
         onSubmit={handleSubmit}
       />
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Repository</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{deleteTarget?.name}</strong>? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleDelete}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

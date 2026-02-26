@@ -1,19 +1,13 @@
-import { useMemo } from "react";
+import { useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import type { ColDef, RowClickedEvent } from "ag-grid-community";
+import { DataGrid } from "@/components/shared/data-grid";
 import { useScheduledTasks } from "@/api/hooks/use-schedules";
 import { useAgents } from "@/api/hooks/use-agents";
 import { formatSmartTime } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Clock, Timer } from "lucide-react";
+import { Clock } from "lucide-react";
+import type { ScheduledTask } from "@/api/types";
 
 function formatInterval(ms: number): string {
   const seconds = ms / 1000;
@@ -36,92 +30,98 @@ export default function SchedulesPage() {
     return m;
   }, [agents]);
 
-  if (isLoading) {
+  const columnDefs = useMemo<ColDef<ScheduledTask>[]>(
+    () => [
+      {
+        field: "name",
+        headerName: "Name",
+        width: 200,
+        cellRenderer: (params: { value: string }) => (
+          <span className="font-semibold">{params.value}</span>
+        ),
+      },
+      {
+        headerName: "Schedule",
+        width: 160,
+        valueGetter: (params) => {
+          if (params.data?.cronExpression) return params.data.cronExpression;
+          if (params.data?.intervalMs) return `every ${formatInterval(params.data.intervalMs)}`;
+          return "—";
+        },
+        cellRenderer: (params: { value: string }) => (
+          <span className="font-mono text-xs text-muted-foreground">{params.value}</span>
+        ),
+      },
+      {
+        field: "targetAgentId",
+        headerName: "Target Agent",
+        width: 150,
+        valueFormatter: (params) =>
+          params.value ? (agentMap.get(params.value) ?? params.value.slice(0, 8) + "...") : "Pool",
+      },
+      {
+        field: "nextRunAt",
+        headerName: "Next Run",
+        width: 150,
+        valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : "—"),
+      },
+      {
+        field: "lastRunAt",
+        headerName: "Last Run",
+        width: 150,
+        valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : "Never"),
+      },
+      {
+        field: "enabled",
+        headerName: "Enabled",
+        width: 100,
+        cellRenderer: (params: { value: boolean }) => (
+          <Badge
+            variant="outline"
+            className={
+              params.value
+                ? "text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center bg-emerald-500/15 text-emerald-500 border-emerald-500/30"
+                : "text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center"
+            }
+          >
+            {params.value ? "ON" : "OFF"}
+          </Badge>
+        ),
+      },
+    ],
+    [agentMap],
+  );
+
+  const onRowClicked = useCallback(
+    (event: RowClickedEvent<ScheduledTask>) => {
+      if (event.data) navigate(`/schedules/${event.data.id}`);
+    },
+    [navigate],
+  );
+
+  if (!isLoading && (!schedules || schedules.length === 0)) {
     return (
-      <div className="space-y-4">
-        <h1 className="font-display text-2xl font-bold">Schedules</h1>
-        <Skeleton className="h-64 w-full" />
+      <div className="flex flex-col flex-1 min-h-0 gap-4">
+        <h1 className="text-xl font-semibold">Schedules</h1>
+        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+          <Clock className="h-8 w-8 mb-2" />
+          <p className="text-sm">No scheduled tasks</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
-      <h1 className="font-display text-2xl font-bold">Schedules</h1>
+    <div className="flex flex-col flex-1 min-h-0 gap-4">
+      <h1 className="text-xl font-semibold">Schedules</h1>
 
-      {schedules && schedules.length > 0 ? (
-        <div className="rounded-lg border border-border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Schedule</TableHead>
-                <TableHead>Target Agent</TableHead>
-                <TableHead>Next Run</TableHead>
-                <TableHead>Last Run</TableHead>
-                <TableHead className="w-[80px]">Enabled</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {schedules.map((schedule) => (
-                <TableRow
-                  key={schedule.id}
-                  className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => navigate(`/schedules/${schedule.id}`)}
-                >
-                  <TableCell className="font-medium">{schedule.name}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                      {schedule.cronExpression ? (
-                        <>
-                          <Clock className="h-3.5 w-3.5" />
-                          <code className="text-xs">{schedule.cronExpression}</code>
-                        </>
-                      ) : schedule.intervalMs ? (
-                        <>
-                          <Timer className="h-3.5 w-3.5" />
-                          <span>every {formatInterval(schedule.intervalMs)}</span>
-                        </>
-                      ) : (
-                        "—"
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    {schedule.targetAgentId
-                      ? agentMap.get(schedule.targetAgentId) ??
-                        schedule.targetAgentId.slice(0, 8) + "..."
-                      : "Pool"}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {schedule.nextRunAt ? formatSmartTime(schedule.nextRunAt) : "—"}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {schedule.lastRunAt ? formatSmartTime(schedule.lastRunAt) : "Never"}
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={schedule.enabled ? "default" : "secondary"}
-                      className={
-                        schedule.enabled
-                          ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                          : ""
-                      }
-                    >
-                      {schedule.enabled ? "On" : "Off"}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      ) : (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-          <Clock className="h-8 w-8 mb-2" />
-          <p className="text-sm">No scheduled tasks</p>
-        </div>
-      )}
+      <DataGrid
+        rowData={schedules ?? []}
+        columnDefs={columnDefs}
+        onRowClicked={onRowClicked}
+        loading={isLoading}
+        emptyMessage="No scheduled tasks"
+      />
     </div>
   );
 }

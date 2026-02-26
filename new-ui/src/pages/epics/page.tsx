@@ -65,10 +65,10 @@ export default function EpicsPage() {
         cellRenderer: (params: { value: number; data: EpicWithProgress | undefined }) => {
           const pct = params.value ?? 0;
           return (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full h-full">
               <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-amber-500 transition-all"
+                  className="h-full rounded-full bg-primary transition-all"
                   style={{ width: `${pct}%` }}
                 />
               </div>
@@ -106,8 +106,8 @@ export default function EpicsPage() {
   const epics = (epicsData?.epics ?? []) as unknown as EpicWithProgress[];
 
   return (
-    <div className="space-y-4">
-      <h1 className="font-display text-2xl font-bold">Epics</h1>
+    <div className="flex flex-col flex-1 min-h-0 gap-4">
+      <h1 className="text-xl font-semibold">Epics</h1>
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">

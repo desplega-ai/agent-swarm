@@ -1,11 +1,12 @@
 import { useState, useMemo, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { useAgents } from "@/api/hooks/use-agents";
 import { formatSmartTime } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -13,19 +14,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search } from "lucide-react";
+import { Search, Crown } from "lucide-react";
 import type { AgentWithTasks, AgentStatus } from "@/api/types";
 
 export default function AgentsPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { data: agents, isLoading } = useAgents();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>(searchParams.get("status") ?? "all");
 
   const filteredAgents = useMemo(() => {
     if (!agents) return [];
-    if (statusFilter === "all") return agents;
-    return agents.filter((a) => a.status === statusFilter);
+    const filtered = statusFilter === "all" ? [...agents] : agents.filter((a) => a.status === statusFilter);
+    return filtered.sort((a, b) => (b.isLead ? 1 : 0) - (a.isLead ? 1 : 0));
   }, [agents, statusFilter]);
 
   const columnDefs = useMemo<ColDef<AgentWithTasks>[]>(
@@ -34,8 +36,13 @@ export default function AgentsPage() {
         field: "name",
         headerName: "Name",
         width: 200,
-        cellRenderer: (params: { value: string }) => (
-          <span className="font-semibold">{params.value}</span>
+        cellRenderer: (params: { value: string; data: AgentWithTasks | undefined }) => (
+          <span className="flex items-center gap-1.5 font-semibold">
+            {params.value}
+            {params.data?.isLead && (
+              <Crown className="h-3.5 w-3.5 text-primary shrink-0" />
+            )}
+          </span>
         ),
       },
       { field: "role", headerName: "Role", width: 150 },
@@ -54,12 +61,12 @@ export default function AgentsPage() {
         cellRenderer: (params: { value: string[] | undefined }) => (
           <div className="flex flex-wrap gap-1">
             {params.value?.slice(0, 3).map((cap) => (
-              <span key={cap} className="rounded-full bg-muted px-1.5 py-0.5 text-[10px]">
+              <Badge key={cap} variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
                 {cap}
-              </span>
+              </Badge>
             ))}
             {(params.value?.length ?? 0) > 3 && (
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-[9px] text-muted-foreground font-medium">
                 +{(params.value?.length ?? 0) - 3}
               </span>
             )}
@@ -90,8 +97,8 @@ export default function AgentsPage() {
   );
 
   return (
-    <div className="space-y-4">
-      <h1 className="font-display text-2xl font-bold">Agents</h1>
+    <div className="flex flex-col flex-1 min-h-0 gap-4">
+      <h1 className="text-xl font-semibold">Agents</h1>
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">

@@ -49,6 +49,33 @@ src/
 - API hooks are in `@/api/hooks/`
 - Pages use default exports for React.lazy compatibility
 
+## Data Tables (AG Grid)
+
+**Always use AG Grid** (`DataGrid` component from `@/components/shared/data-grid`) for tabular data. Never use HTML `<Table>` components for data lists.
+
+**Key patterns:**
+- Import types: `ColDef`, `ICellRendererParams`, `RowClickedEvent` from `ag-grid-community`
+- The `DataGrid` wrapper calls `sizeColumnsToFit()` on grid ready — columns fill available width
+- Set `width` on columns for initial sizing. Use `flex: 1` + `minWidth` for columns that should stretch
+- For pages in the main layout, use `flex flex-col flex-1 min-h-0 gap-4` as the page wrapper — DataGrid fills remaining height
+- For config-style pages that scroll, use `domLayout="autoHeight"` on the DataGrid
+- Cell vertical centering is handled globally via CSS (`.ag-cell-value { display: flex; align-items: center; }` in `ag-grid.css`)
+
+**Cell renderers:**
+- Interactive elements (buttons, links) in cells MUST call `e.stopPropagation()` to prevent row click
+- Use `variant="outline"` for action buttons so they're visually distinct/clickable
+- Delete buttons: use `AlertDialog` popup for confirmation, not click-again patterns
+- Style delete buttons: `border-red-500/30 text-red-400 hover:bg-red-500/10`
+
+**Badge style (consistent across all chips/tags):**
+```
+text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase
+```
+Use `Badge variant="outline"` with this className for all tags, status indicators, and chips.
+
+**Theme awareness:**
+- Never hardcode dark-mode colors (e.g. `bg-zinc-950`, `text-zinc-400`). Always use CSS variable classes: `bg-background`, `bg-muted`, `text-foreground`, `text-muted-foreground`, `border-border`, etc.
+
 ## API Proxy
 
 Dev server proxies `/api/*` and `/health` to `http://localhost:3013` (the API server).
@@ -56,6 +83,10 @@ In production, configure `apiUrl` in the config panel or pass `?apiUrl=...&apiKe
 
 ## Theme
 
-The UI uses a "beehive" theme with amber/gold/honey colors.
-Dark mode is default. Toggle via theme button.
-CSS variables are defined in `src/styles/globals.css`.
+"Mission Control" design — clean, information-dense, professional.
+- **Base:** Zinc-neutral palette (shadcn/ui v4 oklch tokens)
+- **Accent:** Amber as brand `--primary` only — interactive elements, active states
+- **Dark mode** is default. Toggle via header button.
+- **Typography:** Space Grotesk (sans) + Space Mono (mono). No display fonts.
+- **Status colors:** Semantic — emerald (success), amber (active/busy), red (error), zinc (inactive)
+- CSS variables defined in `src/styles/globals.css`. AG Grid themed via `src/styles/ag-grid.css`.
