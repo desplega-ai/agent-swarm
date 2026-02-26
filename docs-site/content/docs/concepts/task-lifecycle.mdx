@@ -9,27 +9,20 @@ Tasks are the fundamental unit of work in Agent Swarm. Understanding the task li
 
 ## Task States
 
-```
-                  +---------+
-                  | backlog |
-                  +----+----+
-                       |
-                       v
-+----------+     +------------+     +---------+     +-------------+
-| unassigned| --> |  offered   | --> | pending | --> | in_progress |
-+----------+     +------------+     +---------+     +------+------+
-                       |                                   |
-                       v                              +----+----+
-                   (rejected)                         |         |
-                                                      v         v
-                                                 +---------+ +--------+
-                                                 |completed| | failed |
-                                                 +---------+ +--------+
-                                                      ^         ^
-                                                      |         |
-                                                 +----+----+    |
-                                                 | paused  |----+
-                                                 +---------+
+```mermaid
+stateDiagram-v2
+    [*] --> backlog
+    backlog --> unassigned
+    unassigned --> offered
+    offered --> pending : accepted
+    offered --> [*] : rejected
+    pending --> in_progress
+    in_progress --> completed
+    in_progress --> failed
+    in_progress --> paused
+    paused --> in_progress
+    paused --> completed
+    paused --> failed
 ```
 
 ### State Descriptions

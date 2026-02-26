@@ -9,14 +9,17 @@ Agent Swarm follows a hub-and-spoke architecture where a central MCP API server 
 
 ## System Diagram
 
-```
-You (Slack / GitHub / Email / CLI)
-        |
-   Lead Agent  <->  MCP API Server  <->  SQLite DB
-        |
-   +----+----+
-Worker  Worker  Worker
-(Docker containers with full dev environments)
+```mermaid
+graph TD
+    User["You (Slack / GitHub / Email / CLI)"] --> Lead["Lead Agent"]
+    Lead <--> API["MCP API Server"]
+    API <--> DB["SQLite DB"]
+    Lead --> W1["Worker"]
+    Lead --> W2["Worker"]
+    Lead --> W3["Worker"]
+    W1 -.- D1["Docker container"]
+    W2 -.- D2["Docker container"]
+    W3 -.- D3["Docker container"]
 ```
 
 ## Core Components

@@ -23,14 +23,17 @@ Built by [desplega.sh](https://desplega.sh) — build by builders, for builders.
 
 ## How It Works
 
-```
-You (Slack / GitHub / Email / CLI)
-        |
-   Lead Agent  <->  MCP API Server  <->  SQLite DB
-        |
-   +----+----+
-Worker  Worker  Worker
-(Docker containers with full dev environments)
+```mermaid
+graph TD
+    User["You (Slack / GitHub / Email / CLI)"] --> Lead["Lead Agent"]
+    Lead <--> API["MCP API Server"]
+    API <--> DB["SQLite DB"]
+    Lead --> W1["Worker"]
+    Lead --> W2["Worker"]
+    Lead --> W3["Worker"]
+    W1 -.- D1["Docker container"]
+    W2 -.- D2["Docker container"]
+    W3 -.- D3["Docker container"]
 ```
 
 1. **You send a task** — via Slack DM, GitHub @mention, email, or directly through the API
@@ -42,12 +45,7 @@ Worker  Worker  Worker
 
 ## Supported AI Assistants
 
-Agent Swarm works with:
-
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (primary)
-- [Codex](https://openai.com/codex)
-- [Gemini CLI](https://ai.google.dev/gemini-api/docs)
-- Other AI coding assistants that support MCP
+Agent Swarm currently supports **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** as the AI coding assistant. Support for other agents (Codex, Gemini CLI, and other MCP-compatible assistants) is coming soon.
 
 ## Next Steps
 

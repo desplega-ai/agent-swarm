@@ -4,9 +4,13 @@ on:
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - "docs-site/**"
   push:
     branches:
       - main
+    paths-ignore:
+      - "docs-site/**"
   workflow_dispatch:
 
 jobs:
