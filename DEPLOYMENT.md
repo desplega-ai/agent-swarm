@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This guide covers all deployment options for Agent Swarm MCP.
+This guide covers all deployment options for Agent Swarm.
 
 ## Table of Contents
 

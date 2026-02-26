@@ -1,4 +1,4 @@
-# Agent Swarm MCP
+# Agent Swarm
 
 <p align="center">
   <img src="assets/agent-swarm.png" alt="Agent Swarm" width="800">
@@ -12,266 +12,174 @@ https://github.com/user-attachments/assets/bd308567-d21e-44a5-87ec-d25aeb1de3d3
   </a>
 </p>
 
-> Agent orchestration layer MCP for Claude Code, Codex, Gemini CLI, and more!
+> Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants.
 
-## Table of Contents
+Agent Swarm lets you run a team of AI coding agents that coordinate autonomously. A **lead agent** receives tasks (from you, Slack, or GitHub), breaks them down, and delegates to **worker agents** running in Docker containers. Workers execute tasks, report progress, and ship code — all without manual intervention.
 
-- [What is Agent Swarm?](#what-is-agent-swarm)
-- [Quick Start](#quick-start)
-- [CLI Commands](#cli-commands)
-- [Deployment](#deployment)
-- [Documentation](#documentation)
-- [License](#license)
+## Key Features
 
----
-
-## What is Agent Swarm?
-
-Agent Swarm MCP enables multi-agent coordination for AI coding assistants. It provides:
-
-- **Task Management** - Assign, track, and coordinate tasks across agents
-- **Agent Communication** - Channel-based messaging between agents
-- **Service Discovery** - Register and discover background services
-- **Docker Workers** - Run isolated Claude workers in containers
-- **Lead/Worker Pattern** - Coordinate work with a lead agent and multiple workers
-- **Dashboard UI** - Real-time monitoring dashboard for agents, tasks, and channels
-
----
-
-## Dashboard UI
-
-A React-based monitoring dashboard is available in the `ui/` directory. See [UI.md](./UI.md) for details.
-
-```bash
-cd ui
-pnpm install
-pnpm run dev
-```
-
-The dashboard runs at `http://localhost:5173` by default.
-
----
-
-## GitHub Integration
-
-Agent Swarm can receive tasks from GitHub via webhooks. When someone mentions `@agent-swarm-bot` (or your configured bot name) in an issue, PR, or comment, a task is automatically created for the lead agent.
-
-### Setup
-
-1. Create a GitHub App at https://github.com/settings/apps/new
-2. Set the webhook URL to `https://your-server.com/api/github/webhook`
-3. Generate a webhook secret and add to `.env`:
-   ```bash
-   GITHUB_WEBHOOK_SECRET=your-secret
-   GITHUB_BOT_NAME=agent-swarm-bot  # optional, default: agent-swarm-bot
-   ```
-4. Enable webhook events: Issues, Issue comment, Pull request, Pull request review comment
-5. Install the app on your repositories
-
-### Agent Commands
-
-| Command | Description |
-|---------|-------------|
-| `/implement-issue` | Read issue, implement changes, create PR |
-| `/review-pr` | Analyze and review a pull request |
-| `/create-pr` | Create PR from current branch changes |
-| `/close-issue` | Close issue with summary comment |
-| `/respond-github` | Comment on an issue or PR |
-
----
-
-## Sentry Integration
-
-Docker workers include `sentry-cli` pre-installed, enabling agents to investigate and triage Sentry issues directly. This is useful for debugging errors reported via Slack alerts.
-
-### Setup
-
-1. Create an Organization Auth Token at `https://sentry.io/settings/{org}/auth-tokens/` with scopes:
-   - `event:read` - Read issues and events
-   - `project:read` - Read project data
-   - `org:read` - Read organization info
-
-2. Add to `.env.docker`:
-   ```bash
-   SENTRY_AUTH_TOKEN=your-auth-token
-   SENTRY_ORG=your-org-slug
-   ```
-
-3. Verify authentication in a worker:
-   ```bash
-   sentry-cli info
-   ```
-
-### Agent Commands
-
-| Command | Description |
-|---------|-------------|
-| `/investigate-sentry-issue <url-or-id>` | Investigate a Sentry issue, get stacktrace, and triage |
-
-### Usage
-
-Workers can use the `/investigate-sentry-issue` command to:
-- Get issue details and stacktraces
-- Analyze breadcrumbs and context
-- Resolve, mute, or unresolve issues
-
-Example:
-```
-/investigate-sentry-issue https://sentry.io/organizations/myorg/issues/123456/
-```
-
-Or just the issue ID:
-```
-/investigate-sentry-issue 123456
-```
-
----
+- **Lead/Worker coordination** — A lead agent delegates and tracks work across multiple workers
+- **Docker isolation** — Each worker runs in its own container with a full dev environment
+- **Slack & GitHub integration** — Create tasks by messaging the bot or @mentioning it in issues/PRs
+- **Task lifecycle** — Priority queues, dependencies, pause/resume across deployments
+- **Agent memory** — Searchable memory that persists across sessions via embeddings
+- **Dashboard UI** — Real-time monitoring of agents, tasks, and inter-agent chat
+- **Service discovery** — Workers can expose HTTP services and discover each other
+- **Scheduled tasks** — Cron-based recurring task automation
 
 ## Quick Start
 
-The recommended setup: run the API locally, run a Docker worker, and connect Claude Code as the lead agent.
-
 ### Prerequisites
 
-- [Bun](https://bun.sh) (or Node.js 22+)
-- [Docker](https://docker.com)
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
+- [Docker](https://docker.com) and Docker Compose
+- A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) OAuth token (`claude setup-token`)
 
-### 1. Clone & Install
+### Option A: Docker Compose (recommended)
+
+The fastest way to get a full swarm running — API server, lead agent, and 2 workers.
+
+```bash
+git clone https://github.com/desplega-ai/agent-swarm.git
+cd agent-swarm
+
+# Configure environment
+cp .env.docker.example .env
+# Edit .env — set API_KEY and CLAUDE_CODE_OAUTH_TOKEN at minimum
+
+# Start everything
+docker compose -f docker-compose.example.yml --env-file .env up -d
+```
+
+The API runs on port `3013`. The dashboard is available separately (see [Dashboard](#dashboard)).
+
+### Option B: Local API + Docker Workers
+
+Run the API locally and connect Docker workers to it.
 
 ```bash
 git clone https://github.com/desplega-ai/agent-swarm.git
 cd agent-swarm
 bun install
-```
 
-### 2. Configure Environment
-
-**For the API server:**
-
-```bash
+# 1. Configure and start the API server
 cp .env.example .env
-```
-
-Required in `.env`:
-- `API_KEY` - Secret key for API authentication (can be left empty, e.g. for local-only setups)
-
-**For Docker workers:**
-
-```bash
-cp .env.docker.example .env.docker
-```
-
-Required in `.env.docker`:
-- `API_KEY` - Same key as the API server
-- `CLAUDE_CODE_OAUTH_TOKEN` - Run `claude setup-token` to get this
-
-> See `.env.example` and `.env.docker.example` for additional optional variables.
-
-### 3. Start the API Server
-
-```bash
+# Edit .env — set API_KEY
 bun run start:http
 ```
 
-The MCP server runs at `http://localhost:3013`.
-
-### 4. Run a Docker Worker
-
-In a new terminal:
+In a new terminal, start a worker:
 
 ```bash
+# 2. Configure and run a Docker worker
+cp .env.docker.example .env.docker
+# Edit .env.docker — set API_KEY (same as above) and CLAUDE_CODE_OAUTH_TOKEN
 bun run docker:build:worker
 mkdir -p ./logs ./work/shared ./work/worker-1
 bun run docker:run:worker
 ```
 
-The worker joins the swarm and waits for tasks.
+### Option C: Claude Code as Lead Agent
 
-#### Note
-
-We automatically build a Docker image for Claude Code workers: `ghcr.io/desplega-ai/agent-swarm-worker:latest`.
-
-### 5. Connect Claude Code as Lead
-
-In your project directory:
+Use Claude Code directly as the lead agent — no Docker required for the lead.
 
 ```bash
+# After starting the API server (Option B, step 1):
 bunx @desplega.ai/agent-swarm setup
 ```
 
-This configures Claude Code to connect to the swarm. Then start Claude Code normally and mention the following:
+This configures Claude Code to connect to the swarm. Start Claude Code and tell it:
 
 ```
-Register yourself as the lead agent in the agent-swarm MCP.
+Register yourself as the lead agent in the agent-swarm.
 ```
 
-This will be a one-time setup, to make sure you are registered as the lead agent in the swarm, using the provided API key and agent ID (optional).
+## How It Works
 
-#### Notes
+```
+You (Slack / GitHub / CLI)
+        |
+   Lead Agent  ←→  MCP API Server  ←→  SQLite DB
+        |
+   ┌────┼────┐
+Worker  Worker  Worker
+(Docker containers with full dev environments)
+```
 
-- The `setup` command will automatically back-up the updated files, in case you want to revert later (using `--restore`). 
-- Use `--dry-run` to preview changes without applying them.
+1. **You send a task** — via Slack DM, GitHub @mention, or directly through the API
+2. **Lead agent plans** — breaks the task down and assigns subtasks to workers
+3. **Workers execute** — each in an isolated Docker container with git, Node.js, Python, etc.
+4. **Progress is tracked** — real-time updates in the dashboard, Slack threads, or API
+5. **Results are delivered** — PRs created, issues closed, Slack replies sent
 
----
+## Dashboard
 
-## CLI Commands
+A React-based monitoring dashboard for real-time visibility into your swarm.
 
-> We will be publishing the package to npm as `@desplega.ai/agent-swarm` on each new tag bump of the [`package.json`](./package.json).
+```bash
+cd ui && pnpm install && pnpm run dev
+```
 
+Opens at `http://localhost:5173`. See [UI.md](./UI.md) for details.
+
+## Integrations
+
+### Slack
+
+Message the bot directly to create tasks. Workers reply in threads with progress updates.
+
+```bash
+# Add to your .env
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_APP_TOKEN=xapp-...
+```
+
+### GitHub
+
+@mention the bot in issues, PRs, or comments to trigger tasks automatically.
+
+```bash
+# Add to your .env
+GITHUB_WEBHOOK_SECRET=your-secret
+```
+
+### Sentry
+
+Workers can investigate Sentry issues directly with the `/investigate-sentry-issue` command.
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for full integration setup instructions.
+
+## CLI
+
+```bash
+bunx @desplega.ai/agent-swarm <command>
+```
 
 | Command | Description |
 |---------|-------------|
-| `setup` | Initialize agent-swarm in a project |
-| `mcp` | Start the MCP HTTP server |
-| `worker` | Run Claude as a worker agent |
-| `lead` | Run Claude as a lead agent |
-| `hook` | Handle Claude Code hook events |
-| `help` | Show help message |
-
-### Examples
-
-```bash
-# Setup wizard
-bunx @desplega.ai/agent-swarm setup
-
-# Start MCP & API server on custom port
-bunx @desplega.ai/agent-swarm mcp --port 8080 --key my-api-key
-
-# Run worker with custom system prompt (not in docker!!! beware)
-bunx @desplega.ai/agent-swarm worker --system-prompt "You are a Python specialist"
-
-# Run lead agent in the background (without human-in-the-loop mode via MCP client)
-bunx @desplega.ai/agent-swarm lead
-```
-
----
+| `setup` | Configure Claude Code to connect to the swarm |
+| `mcp`   | Start the MCP API server |
+| `worker` | Run a worker agent |
+| `lead`  | Run a lead agent |
 
 ## Deployment
 
-For production deployments, see [`docker-compose.example.yml`](./docker-compose.example.yml) which sets up:
+For production deployments, see [DEPLOYMENT.md](./DEPLOYMENT.md) which covers:
 
-- API service (MCP HTTP server)
-- Multiple worker agents
-- Lead agent
-- Shared volumes for logs and workspaces
-
-Full deployment options are documented in [DEPLOYMENT.md](./DEPLOYMENT.md).
-
----
+- Docker Compose setup with multiple workers
+- systemd deployment for the API server
+- Graceful shutdown and task resume
+- Environment variable reference
+- Integration configuration (Slack, GitHub, Sentry)
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
+| [DEPLOYMENT.md](./DEPLOYMENT.md) | Production deployment guide |
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | Development setup and project structure |
 | [UI.md](./UI.md) | Dashboard UI overview |
-| [DEPLOYMENT.md](./DEPLOYMENT.md) | Docker, Docker Compose, systemd deployment |
-| [CONTRIBUTING.md](./CONTRIBUTING.md) | Development setup, code quality, project structure |
 | [MCP.md](./MCP.md) | MCP tools reference (auto-generated) |
-| [FAQ.md](./FAQ.md) | Frequently asked questions |
-
----
 
 ## License
 
-[MIT License](./LICENSE) - 2025-2026 desplega.ai
+[MIT](./LICENSE) — 2025-2026 [desplega.ai](https://desplega.ai)
