@@ -58,6 +58,8 @@ pr: "#95"
 
 **Acceptance criteria**: All 50 tools have `annotations` set. Descriptions reviewed for searchability. PR with changes.
 
+**Status (2026-02-26)**: DONE. 36 tools annotated with readOnlyHint (20), destructiveHint (7), idempotentHint (6), openWorldHint (6). 14 write-only tools skipped (no specific hints apply). Type-check and lint clean.
+
 ### 1.3 Configure Explicit `defer_loading` (if supported)
 
 **Goal**: Explicitly mark non-core tools for deferred loading instead of relying on auto-enable.
@@ -82,6 +84,8 @@ pr: "#95"
 3. If the SDK does NOT support `defer_loading`, document the gap and investigate alternatives (e.g., Claude Code `--tool-search` flag, `.claude/settings.json` config)
 
 **Acceptance criteria**: Non-core tools marked for deferred loading OR documented gap with workaround.
+
+**Status (2026-02-26)**: `defer_loading` is NOT supported in `@modelcontextprotocol/sdk@^1.25.1`. The `ToolSchema` only supports `description`, `inputSchema`, `outputSchema`, and `annotations` (with `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`, `title`). No lazy/deferred loading mechanism exists in the MCP protocol spec at this version. Tool Search is a Claude Code client-side feature that auto-activates when tool token count exceeds ~10K. With our ~14K tokens across 50 tools, Tool Search should already be active. The annotations added in Phase 1.2 improve Tool Search discoverability.
 
 ### 1.4 Measure Baseline and Post-Change Token Counts
 
