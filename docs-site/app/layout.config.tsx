@@ -1,8 +1,14 @@
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
+import Image from "next/image";
 
 export const baseOptions: BaseLayoutProps = {
   nav: {
-    title: "Agent Swarm",
+    title: (
+      <>
+        <Image src="/logo.png" alt="Agent Swarm" width={28} height={28} />
+        Agent Swarm
+      </>
+    ),
   },
   links: [
     {
