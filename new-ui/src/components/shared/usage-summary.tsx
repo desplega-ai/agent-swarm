@@ -63,41 +63,47 @@ function isAggregatedProps(props: UsageSummaryProps): props is UsageSummaryAggre
 
 export function UsageSummary(props: UsageSummaryProps) {
   const daysBack = props.daysBack ?? 30;
+  const totals = isAggregatedProps(props) ? props.totals : undefined;
+  const costs = isAggregatedProps(props) ? undefined : props.costs;
 
   // Compute stats from either pre-aggregated or raw data
   const stats = useMemo(() => {
-    if (isAggregatedProps(props)) {
+    if (totals) {
       return {
-        totalCost: props.totals.totalCostUsd,
-        totalTokens: props.totals.totalInputTokens + props.totals.totalOutputTokens,
-        sessions: props.totals.totalSessions,
-        totalDuration: props.totals.totalDurationMs,
-        avgCost: props.totals.avgCostPerSession,
+        totalCost: totals.totalCostUsd,
+        totalTokens: totals.totalInputTokens + totals.totalOutputTokens,
+        sessions: totals.totalSessions,
+        totalDuration: totals.totalDurationMs,
+        avgCost: totals.avgCostPerSession,
       };
     }
     // Legacy: compute from raw costs
-    const totalCost = props.costs.reduce((s, c) => s + c.totalCostUsd, 0);
-    const totalTokens = props.costs.reduce((s, c) => s + c.inputTokens + c.outputTokens, 0);
-    const totalDuration = props.costs.reduce((s, c) => s + c.durationMs, 0);
+    const c = costs ?? [];
+    const totalCost = c.reduce((s, x) => s + x.totalCostUsd, 0);
+    const totalTokens = c.reduce((s, x) => s + x.inputTokens + x.outputTokens, 0);
+    const totalDuration = c.reduce((s, x) => s + x.durationMs, 0);
     return {
       totalCost,
       totalTokens,
-      sessions: props.costs.length,
+      sessions: c.length,
       totalDuration,
-      avgCost: props.costs.length > 0 ? totalCost / props.costs.length : 0,
+      avgCost: c.length > 0 ? totalCost / c.length : 0,
     };
-  }, [props]);
+  }, [totals, costs]);
+
+  const aggregatedDailyData = isAggregatedProps(props) ? props.dailyData : undefined;
 
   // Compute daily chart data
   const dailyData = useMemo(() => {
-    if (isAggregatedProps(props)) {
+    if (aggregatedDailyData) {
       // Use pre-aggregated daily data, just format dates for display
-      return props.dailyData.map((d) => ({
+      return aggregatedDailyData.map((d) => ({
         date: d.date.slice(5),
         cost: Math.round(d.costUsd * 1000) / 1000,
       }));
     }
     // Legacy: compute from raw costs
+    const c = costs ?? [];
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysBack);
 
@@ -106,10 +112,10 @@ export function UsageSummary(props: UsageSummaryProps) {
       dayMap.set(d.toISOString().slice(0, 10), 0);
     }
 
-    for (const c of props.costs) {
-      const day = c.createdAt.slice(0, 10);
+    for (const x of c) {
+      const day = x.createdAt.slice(0, 10);
       if (dayMap.has(day)) {
-        dayMap.set(day, (dayMap.get(day) ?? 0) + c.totalCostUsd);
+        dayMap.set(day, (dayMap.get(day) ?? 0) + x.totalCostUsd);
       }
     }
 
@@ -117,11 +123,9 @@ export function UsageSummary(props: UsageSummaryProps) {
       date: date.slice(5),
       cost: Math.round(cost * 1000) / 1000,
     }));
-  }, [props, daysBack]);
+  }, [aggregatedDailyData, costs, daysBack]);
 
-  const isEmpty = isAggregatedProps(props)
-    ? props.totals.totalSessions === 0
-    : props.costs.length === 0;
+  const isEmpty = totals ? totals.totalSessions === 0 : (costs ?? []).length === 0;
 
   if (isEmpty) {
     return (

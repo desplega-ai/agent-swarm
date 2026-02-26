@@ -4044,10 +4044,11 @@ export function getSessionCostsFiltered(opts: {
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const limit = opts.limit ?? 100;
+  params.push(limit);
 
   return getDb()
     .prepare<SessionCostRow, (string | number)[]>(
-      `SELECT * FROM session_costs ${where} ORDER BY createdAt DESC LIMIT ${limit}`,
+      `SELECT * FROM session_costs ${where} ORDER BY createdAt DESC LIMIT ?`,
     )
     .all(...params)
     .map(rowToSessionCost);
@@ -4226,8 +4227,9 @@ export function getDashboardCostSummary(): DashboardCostSummary {
     .prepare<CostRow, []>(
       `SELECT
         COALESCE(SUM(CASE WHEN createdAt >= date('now') THEN totalCostUsd ELSE 0 END), 0) as costToday,
-        COALESCE(SUM(CASE WHEN createdAt >= date('now', 'start of month') THEN totalCostUsd ELSE 0 END), 0) as costMtd
-      FROM session_costs`,
+        COALESCE(SUM(totalCostUsd), 0) as costMtd
+      FROM session_costs
+      WHERE createdAt >= date('now', 'start of month')`,
     )
     .get();
 

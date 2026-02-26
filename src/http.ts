@@ -823,11 +823,22 @@ const httpServer = createHttpServer(async (req, res) => {
     pathSegments[2] === "summary"
   ) {
     const summaryParams = parseQueryParams(req.url || "");
+    const rawGroupBy = summaryParams.get("groupBy");
+    const validGroupBy = ["day", "agent", "both"] as const;
+    if (rawGroupBy && !validGroupBy.includes(rawGroupBy as (typeof validGroupBy)[number])) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: `Invalid groupBy value '${rawGroupBy}'. Must be one of: ${validGroupBy.join(", ")}`,
+        }),
+      );
+      return;
+    }
     const summary = getSessionCostSummary({
       startDate: summaryParams.get("startDate") || undefined,
       endDate: summaryParams.get("endDate") || undefined,
       agentId: summaryParams.get("agentId") || undefined,
-      groupBy: (summaryParams.get("groupBy") as "day" | "agent" | "both") || "both",
+      groupBy: (rawGroupBy as "day" | "agent" | "both") || "both",
     });
 
     res.writeHead(200, { "Content-Type": "application/json" });
