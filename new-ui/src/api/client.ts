@@ -97,12 +97,18 @@ class ApiClient {
   async fetchTasks(filters?: {
     status?: string;
     agentId?: string;
+    epicId?: string;
     search?: string;
+    limit?: number;
+    offset?: number;
   }): Promise<TasksResponse> {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
     if (filters?.agentId) params.set("agentId", filters.agentId);
+    if (filters?.epicId) params.set("epicId", filters.epicId);
     if (filters?.search) params.set("search", filters.search);
+    if (filters?.limit != null) params.set("limit", String(filters.limit));
+    if (filters?.offset != null) params.set("offset", String(filters.offset));
     const queryString = params.toString();
     const url = `${this.getBaseUrl()}/api/tasks${queryString ? `?${queryString}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });

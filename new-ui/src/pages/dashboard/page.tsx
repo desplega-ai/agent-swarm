@@ -23,45 +23,46 @@ import {
   Radio,
   Server,
   Timer,
+  Loader2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { AgentWithTasks, AgentLog } from "@/api/types";
 
 // --- Agent Tile (Command Center style) ---
 
-function AgentTile({ agent }: { agent: AgentWithTasks }) {
-  const currentTask = agent.tasks?.find((t) => t.status === "in_progress");
-
+function AgentTile({ agent, currentTaskText }: { agent: AgentWithTasks; currentTaskText?: string }) {
   return (
     <Link
       to={`/agents/${agent.id}`}
       className={cn(
-        "flex items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50",
+        "flex items-center gap-2.5 md:items-start md:gap-3 rounded-lg border px-3 py-2 md:p-3 transition-colors hover:bg-muted/50",
         agent.isLead ? "border-primary/30" : "border-border/50",
       )}
     >
-      <div className="relative mt-0.5">
-        <div
-          className={cn(
-            "h-2.5 w-2.5 rounded-full",
-            agent.status === "busy" && "bg-amber-500",
-            agent.status === "idle" && "bg-emerald-500",
-            agent.status === "offline" && "bg-zinc-500",
-            agent.status === "busy" && "animate-pulse",
-          )}
-        />
+      <div className="relative shrink-0 mt-0 md:mt-0.5">
+        {agent.status === "busy" ? (
+          <Loader2 className="h-3 w-3 animate-spin text-amber-500" />
+        ) : (
+          <div
+            className={cn(
+              "h-2.5 w-2.5 rounded-full",
+              agent.status === "idle" && "bg-emerald-500",
+              agent.status === "offline" && "bg-zinc-500",
+            )}
+          />
+        )}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="text-sm font-semibold truncate">{agent.name}</span>
           {agent.isLead && <Crown className="h-3 w-3 text-primary shrink-0" />}
+          {agent.role && (
+            <span className="hidden md:inline text-[11px] text-muted-foreground">· {agent.role}</span>
+          )}
         </div>
-        {agent.role && (
-          <p className="text-[11px] text-muted-foreground truncate">{agent.role}</p>
-        )}
-        {currentTask && (
-          <p className="mt-1 text-[11px] text-muted-foreground/80 line-clamp-1">
-            {currentTask.task}
+        {currentTaskText && (
+          <p className="hidden md:block mt-1 text-[11px] text-muted-foreground/80 line-clamp-1">
+            {currentTaskText}
           </p>
         )}
       </div>
@@ -84,14 +85,16 @@ function ActiveTaskRow({
       to={`/tasks/${task.id}`}
       className="flex items-center gap-3 px-3 py-2.5 hover:bg-muted/50 transition-colors border-b border-border/30 last:border-0"
     >
-      <div
-        className={cn(
-          "h-2 w-2 rounded-full shrink-0",
-          task.status === "in_progress" && "bg-amber-500 animate-pulse",
-          task.status === "pending" && "bg-yellow-500",
-          task.status === "offered" && "bg-amber-500 animate-pulse",
-        )}
-      />
+      {task.status === "in_progress" || task.status === "offered" ? (
+        <Loader2 className="h-3 w-3 animate-spin text-amber-500 shrink-0" />
+      ) : (
+        <div
+          className={cn(
+            "h-2 w-2 rounded-full shrink-0",
+            task.status === "pending" && "bg-yellow-500",
+          )}
+        />
+      )}
       <div className="min-w-0 flex-1">
         <p className="text-sm truncate">{task.task}</p>
         <p className="text-[11px] text-muted-foreground">
@@ -299,6 +302,17 @@ export default function DashboardPage() {
     return m;
   }, [agents]);
 
+  // Map agentId → current task text from active tasks
+  const agentTaskMap = useMemo(() => {
+    const m = new Map<string, string>();
+    tasksData?.tasks.forEach((t) => {
+      if (t.agentId && t.status === "in_progress") {
+        m.set(t.agentId, t.task);
+      }
+    });
+    return m;
+  }, [tasksData]);
+
   // Sort agents: lead first, then busy, then idle, then offline
   const sortedAgents = useMemo(() => {
     if (!agents) return [];
@@ -310,7 +324,7 @@ export default function DashboardPage() {
   }, [agents]);
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 overflow-hidden gap-4">
+    <div className="flex flex-col flex-1 min-h-0 overflow-y-auto md:overflow-hidden gap-3 md:gap-4">
       {/* Stats Strip */}
       <div className="shrink-0">
         <StatsBar
@@ -323,7 +337,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Agent Grid + Active Tasks */}
-      <div className="grid gap-4 md:grid-cols-2 shrink-0">
+      <div className="grid gap-3 md:gap-4 md:grid-cols-2 md:shrink-0">
         {/* Agent Status Grid */}
         <div className="space-y-3">
           <div className="flex items-center gap-2">
@@ -334,11 +348,18 @@ export default function DashboardPage() {
             )}
           </div>
           {sortedAgents.length > 0 ? (
-            <div className="grid gap-2 sm:grid-cols-2">
-              {sortedAgents.map((agent) => (
-                <AgentTile key={agent.id} agent={agent} />
-              ))}
-            </div>
+            <>
+              <div className="grid gap-2 md:grid-cols-2">
+                {sortedAgents.slice(0, 6).map((agent) => (
+                  <AgentTile key={agent.id} agent={agent} currentTaskText={agentTaskMap.get(agent.id)} />
+                ))}
+              </div>
+              {sortedAgents.length > 6 && (
+                <Link to="/agents" className="block text-center text-xs text-primary hover:underline pt-1">
+                  View all {sortedAgents.length} agents
+                </Link>
+              )}
+            </>
           ) : (
             <div className="flex items-center justify-center py-8 text-sm text-muted-foreground rounded-lg border border-dashed border-border">
               No agents connected
@@ -360,13 +381,18 @@ export default function DashboardPage() {
           <div className="rounded-lg border border-border">
             {tasksData && tasksData.tasks.length > 0 ? (
               <div>
-                {tasksData.tasks.map((task) => (
+                {tasksData.tasks.slice(0, 5).map((task) => (
                   <ActiveTaskRow
                     key={task.id}
                     task={task}
                     agentName={task.agentId ? agentMap.get(task.agentId) ?? null : null}
                   />
                 ))}
+                {tasksData.tasks.length > 5 && (
+                  <Link to="/tasks?status=in_progress" className="block text-center text-xs text-primary hover:underline py-2.5 border-t border-border/30">
+                    View all {tasksData.tasks.length} active tasks
+                  </Link>
+                )}
               </div>
             ) : (
               <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">

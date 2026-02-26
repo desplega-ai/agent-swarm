@@ -1304,11 +1304,17 @@ const httpServer = createHttpServer(async (req, res) => {
   ) {
     const status = queryParams.get("status") as import("./types").AgentTaskStatus | null;
     const agentId = queryParams.get("agentId");
+    const epicId = queryParams.get("epicId");
     const search = queryParams.get("search");
+    const limit = queryParams.get("limit") ? Number(queryParams.get("limit")) : undefined;
+    const offset = queryParams.get("offset") ? Number(queryParams.get("offset")) : undefined;
     const filters = {
       status: status || undefined,
       agentId: agentId || undefined,
+      epicId: epicId || undefined,
       search: search || undefined,
+      limit,
+      offset,
     };
     const tasks = getAllTasks(filters);
     const total = getTasksCount(filters);

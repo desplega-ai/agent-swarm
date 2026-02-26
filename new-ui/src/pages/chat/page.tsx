@@ -14,6 +14,13 @@ import { useAutoScroll } from "@/hooks/use-auto-scroll";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -46,7 +53,7 @@ function ChannelSidebar({
   onSelect: (id: string) => void;
 }) {
   return (
-    <div className="w-48 shrink-0 border-r border-border bg-muted/30 overflow-y-auto">
+    <div className="w-48 shrink-0 border-r border-border bg-muted/30 overflow-y-auto h-full">
       <div className="p-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
         Channels
       </div>
@@ -110,7 +117,10 @@ function MessageBubble({
   const hasReplies = threadCount && threadCount > 0;
 
   return (
-    <div className="group relative flex gap-3 px-4 py-2 hover:bg-muted/20">
+    <div
+      className={cn("group relative flex gap-3 px-4 py-2 hover:bg-muted/20", onOpenThread && "md:cursor-default cursor-pointer")}
+      onClick={onOpenThread ? () => { if (window.innerWidth < 768) onOpenThread(); } : undefined}
+    >
       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground mt-0.5">
         {initials}
       </div>
@@ -286,7 +296,7 @@ function ThreadPanel({
   useAutoScroll(scrollEl, [threadMessages]);
 
   return (
-    <div className="w-80 shrink-0 border-l border-border flex flex-col min-h-0 bg-background">
+    <div className="absolute inset-0 md:relative md:inset-auto md:w-80 shrink-0 border-l border-border flex flex-col min-h-0 bg-background z-10">
       {/* Thread header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
@@ -403,15 +413,40 @@ export default function ChatPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-3 overflow-hidden">
-      <h1 className="text-xl font-semibold shrink-0">Chat</h1>
+      <div className="flex items-center gap-3 shrink-0">
+        <h1 className="text-xl font-semibold">Chat</h1>
 
-      <div className="flex flex-1 min-h-0 overflow-hidden rounded-lg border border-border bg-background">
-        {/* Channel sidebar */}
-        <ChannelSidebar
-          channels={channels ?? []}
-          activeChannelId={activeChannelId}
-          onSelect={setActiveChannelId}
-        />
+        {/* Mobile channel selector */}
+        {channels && channels.length > 0 && (
+          <div className="md:hidden flex-1">
+            <Select
+              value={activeChannelId ?? ""}
+              onValueChange={(v) => setActiveChannelId(v)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select channel" />
+              </SelectTrigger>
+              <SelectContent>
+                {channels.map((ch) => (
+                  <SelectItem key={ch.id} value={ch.id}>
+                    {ch.type === "dm" ? "🔒 " : "# "}{ch.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+      </div>
+
+      <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden rounded-lg border border-border bg-background">
+        {/* Channel sidebar — hidden on mobile */}
+        <div className="hidden md:flex shrink-0">
+          <ChannelSidebar
+            channels={channels ?? []}
+            activeChannelId={activeChannelId}
+            onSelect={setActiveChannelId}
+          />
+        </div>
 
         {/* Main message area */}
         <div className="flex flex-1 flex-col min-w-0 min-h-0">

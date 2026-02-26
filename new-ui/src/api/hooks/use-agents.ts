@@ -2,10 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
 import type { AgentWithTasks } from "../types";
 
-export function useAgents() {
+export function useAgents(includeTasks = false) {
   return useQuery({
-    queryKey: ["agents"],
-    queryFn: () => api.fetchAgents(true),
+    queryKey: ["agents", includeTasks],
+    queryFn: () => api.fetchAgents(includeTasks),
     select: (data) => data.agents as AgentWithTasks[],
   });
 }

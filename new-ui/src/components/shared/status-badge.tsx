@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { Loader2 } from "lucide-react";
 import type { AgentStatus, AgentTaskStatus, EpicStatus, ServiceStatus } from "@/api/types";
 
 type Status = AgentStatus | AgentTaskStatus | EpicStatus | ServiceStatus;
@@ -8,22 +9,22 @@ interface StatusConfig {
   label: string;
   dot: string;
   text: string;
-  pulse?: boolean;
+  spinner?: boolean;
 }
 
 const statusConfig: Record<string, StatusConfig> = {
   // Agent statuses
   idle: { label: "IDLE", dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" },
-  busy: { label: "BUSY", dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", pulse: true },
+  busy: { label: "BUSY", dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", spinner: true },
   offline: { label: "OFFLINE", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
 
   // Task statuses
   backlog: { label: "BACKLOG", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
   unassigned: { label: "UNASSIGNED", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
-  offered: { label: "OFFERED", dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", pulse: true },
+  offered: { label: "OFFERED", dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", spinner: true },
   reviewing: { label: "REVIEWING", dot: "bg-blue-500", text: "text-blue-600 dark:text-blue-400" },
   pending: { label: "PENDING", dot: "bg-yellow-500", text: "text-yellow-600 dark:text-yellow-400" },
-  in_progress: { label: "IN PROGRESS", dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", pulse: true },
+  in_progress: { label: "IN PROGRESS", dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", spinner: true },
   paused: { label: "PAUSED", dot: "bg-blue-500", text: "text-blue-600 dark:text-blue-400" },
   completed: { label: "COMPLETED", dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" },
   failed: { label: "FAILED", dot: "bg-red-500", text: "text-red-600 dark:text-red-400" },
@@ -31,7 +32,7 @@ const statusConfig: Record<string, StatusConfig> = {
 
   // Epic statuses
   draft: { label: "DRAFT", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
-  active: { label: "ACTIVE", dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", pulse: true },
+  active: { label: "ACTIVE", dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", spinner: true },
 
   // Service statuses
   starting: { label: "STARTING", dot: "bg-yellow-500", text: "text-yellow-600 dark:text-yellow-400" },
@@ -62,13 +63,11 @@ export function StatusBadge({ status, size = "sm", className }: StatusBadgeProps
         className,
       )}
     >
-      <span
-        className={cn(
-          "h-1.5 w-1.5 rounded-full shrink-0",
-          config.dot,
-          config.pulse && "animate-pulse",
-        )}
-      />
+      {config.spinner ? (
+        <Loader2 className={cn("h-3 w-3 shrink-0 animate-spin", config.text)} />
+      ) : (
+        <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", config.dot)} />
+      )}
       <span className={config.text}>{config.label}</span>
     </Badge>
   );

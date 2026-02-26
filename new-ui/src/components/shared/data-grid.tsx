@@ -34,6 +34,7 @@ interface DataGridProps<TData> {
   loading?: boolean;
   emptyMessage?: string;
   paginationPageSize?: number;
+  pagination?: boolean;
   className?: string;
   domLayout?: "normal" | "autoHeight";
 }
@@ -46,6 +47,7 @@ export function DataGrid<TData>({
   loading,
   emptyMessage = "No data to display",
   paginationPageSize = 20,
+  pagination: paginationEnabled = true,
   className,
   domLayout = "normal",
 }: DataGridProps<TData>) {
@@ -56,6 +58,7 @@ export function DataGrid<TData>({
       resizable: true,
       sortable: true,
       suppressMovable: true,
+      minWidth: 80,
     }),
     [],
   );
@@ -92,9 +95,9 @@ export function DataGrid<TData>({
         defaultColDef={defaultColDef}
         quickFilterText={quickFilterText}
         onRowClicked={onRowClicked}
-        pagination
+        pagination={paginationEnabled}
         paginationPageSize={paginationPageSize}
-        paginationPageSizeSelector={[10, 20, 50, 100]}
+        paginationPageSizeSelector={paginationEnabled ? [10, 20, 50, 100] : undefined}
         domLayout={domLayout}
         loading={loading}
         overlayNoRowsTemplate={overlayNoRowsTemplate}

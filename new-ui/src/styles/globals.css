@@ -94,12 +94,23 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+html,
+body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
 body {
   margin: 0;
   background: var(--color-background);
   color: var(--color-foreground);
   font-family: var(--font-sans);
   min-height: 100vh;
+}
+
+#root {
+  max-width: 100vw;
+  overflow-x: hidden;
 }
 
 /* Scrollbar */

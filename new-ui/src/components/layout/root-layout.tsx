@@ -18,11 +18,11 @@ export function RootLayout() {
   return (
     <ConfigGuard>
       <ShortcutProvider>
-        <SidebarProvider className="h-svh overflow-hidden">
+        <SidebarProvider className="h-svh max-w-full overflow-hidden">
           <AppSidebar />
-          <SidebarInset>
+          <SidebarInset className="min-w-0">
             <AppHeader />
-            <main className="flex flex-1 flex-col min-h-0 overflow-hidden p-4 md:p-6">
+            <main className="flex flex-1 flex-col min-h-0 min-w-0 overflow-hidden p-4 md:p-6">
               <ErrorBoundary>
                 <Suspense fallback={<PageSkeleton />}>
                   <Outlet />

@@ -35,7 +35,8 @@ export default function AgentsPage() {
       {
         field: "name",
         headerName: "Name",
-        width: 200,
+        width: 250,
+        minWidth: 180,
         cellRenderer: (params: { value: string; data: AgentWithTasks | undefined }) => (
           <span className="flex items-center gap-1.5 font-semibold">
             {params.value}
@@ -57,27 +58,23 @@ export default function AgentsPage() {
       {
         field: "capabilities",
         headerName: "Capabilities",
-        width: 250,
+        flex: 1,
+        minWidth: 250,
         cellRenderer: (params: { value: string[] | undefined }) => (
-          <div className="flex flex-wrap gap-1">
-            {params.value?.slice(0, 3).map((cap) => (
-              <Badge key={cap} variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
+          <div className="flex gap-1 items-center justify-center">
+            {params.value?.slice(0, 2).map((cap) => (
+              <Badge key={cap} variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase shrink-0">
                 {cap}
               </Badge>
             ))}
-            {(params.value?.length ?? 0) > 3 && (
-              <span className="text-[9px] text-muted-foreground font-medium">
-                +{(params.value?.length ?? 0) - 3}
+            {(params.value?.length ?? 0) > 2 && (
+              <span className="text-[9px] text-muted-foreground font-medium shrink-0">
+                +{(params.value?.length ?? 0) - 2}
               </span>
             )}
           </div>
         ),
         sortable: false,
-      },
-      {
-        headerName: "Tasks",
-        width: 100,
-        valueGetter: (params) => params.data?.tasks?.length ?? 0,
       },
       {
         field: "lastUpdatedAt",

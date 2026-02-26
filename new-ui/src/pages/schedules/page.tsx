@@ -35,14 +35,16 @@ export default function SchedulesPage() {
       {
         field: "name",
         headerName: "Name",
-        width: 200,
+        flex: 1,
+        minWidth: 200,
         cellRenderer: (params: { value: string }) => (
           <span className="font-semibold">{params.value}</span>
         ),
       },
       {
         headerName: "Schedule",
-        width: 160,
+        width: 200,
+        minWidth: 160,
         valueGetter: (params) => {
           if (params.data?.cronExpression) return params.data.cronExpression;
           if (params.data?.intervalMs) return `every ${formatInterval(params.data.intervalMs)}`;
@@ -55,7 +57,8 @@ export default function SchedulesPage() {
       {
         field: "targetAgentId",
         headerName: "Target Agent",
-        width: 150,
+        width: 180,
+        minWidth: 150,
         valueFormatter: (params) =>
           params.value ? (agentMap.get(params.value) ?? params.value.slice(0, 8) + "...") : "Pool",
       },

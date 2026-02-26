@@ -4,7 +4,10 @@ import { api } from "../client";
 export interface TaskFilters {
   status?: string;
   agentId?: string;
+  epicId?: string;
   search?: string;
+  limit?: number;
+  offset?: number;
 }
 
 export function useTasks(filters?: TaskFilters) {

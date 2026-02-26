@@ -30,9 +30,9 @@ const variantStyles = {
 function StatItem({ icon: Icon, label, value, variant = "default", to }: StatItemProps) {
   const content = (
     <>
-      <Icon className={cn("h-3.5 w-3.5", variantStyles[variant])} />
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className={cn("text-sm font-bold font-mono tabular-nums", variantStyles[variant])}>
+      <Icon className={cn("h-3.5 w-3.5 shrink-0", variantStyles[variant])} />
+      <span className="hidden sm:inline text-xs text-muted-foreground">{label}</span>
+      <span className={cn("text-xs sm:text-sm font-bold font-mono tabular-nums shrink-0", variantStyles[variant])}>
         {value}
       </span>
     </>
@@ -40,14 +40,18 @@ function StatItem({ icon: Icon, label, value, variant = "default", to }: StatIte
 
   if (to) {
     return (
-      <Link to={to} className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 transition-colors">
+      <Link
+        to={to}
+        className="flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 hover:bg-muted/50 transition-colors"
+        title={label}
+      >
         {content}
       </Link>
     );
   }
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5">
+    <div className="flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5" title={label}>
       {content}
     </div>
   );
@@ -63,13 +67,13 @@ interface StatsBarProps {
 }
 
 function formatCostCompact(usd: number): string {
-  if (usd < 0.01) return "$0.00";
+  if (usd < 0.01) return "$0";
   return `$${usd.toFixed(2)}`;
 }
 
 export function StatsBar({ agents, tasks, healthy, costToday, costMtd }: StatsBarProps) {
   return (
-    <div className="flex flex-wrap items-center gap-0 rounded-lg border border-border bg-muted/30 divide-x divide-border">
+    <div className="grid grid-cols-3 sm:flex sm:items-center gap-0 rounded-lg border border-border bg-muted/30 sm:divide-x divide-border">
       <StatItem icon={Bot} label="Agents" value={agents?.total ?? 0} to="/agents" />
       <StatItem
         icon={Zap}

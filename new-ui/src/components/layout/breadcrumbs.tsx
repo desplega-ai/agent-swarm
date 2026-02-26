@@ -13,6 +13,14 @@ const routeLabels: Record<string, string> = {
   repos: "Repos",
 };
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function formatSegment(segment: string): string {
+  if (routeLabels[segment]) return routeLabels[segment];
+  if (UUID_REGEX.test(segment)) return segment.slice(0, 8) + "...";
+  return segment;
+}
+
 export function Breadcrumbs() {
   const location = useLocation();
   const segments = location.pathname.split("/").filter(Boolean);
@@ -21,24 +29,24 @@ export function Breadcrumbs() {
 
   const crumbs = segments.map((segment, index) => {
     const path = `/${segments.slice(0, index + 1).join("/")}`;
-    const label = routeLabels[segment] ?? segment;
+    const label = formatSegment(segment);
     const isLast = index === segments.length - 1;
 
     return { path, label, isLast };
   });
 
   return (
-    <nav className="flex items-center gap-1 text-sm text-muted-foreground">
-      <Link to="/" className="hover:text-foreground transition-colors">
+    <nav className="flex items-center gap-1 text-sm text-muted-foreground min-w-0">
+      <Link to="/" className="hover:text-foreground transition-colors shrink-0">
         Home
       </Link>
       {crumbs.map((crumb) => (
-        <span key={crumb.path} className="flex items-center gap-1">
-          <ChevronRight className="size-3" />
+        <span key={crumb.path} className="flex items-center gap-1 min-w-0">
+          <ChevronRight className="size-3 shrink-0" />
           {crumb.isLast ? (
-            <span className="text-foreground font-medium">{crumb.label}</span>
+            <span className="text-foreground font-medium truncate">{crumb.label}</span>
           ) : (
-            <Link to={crumb.path} className="hover:text-foreground transition-colors">
+            <Link to={crumb.path} className="hover:text-foreground transition-colors truncate">
               {crumb.label}
             </Link>
           )}

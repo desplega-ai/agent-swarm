@@ -1,17 +1,28 @@
-import { useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { useEpic } from "@/api/hooks/use-epics";
+import { useTasks } from "@/api/hooks/use-tasks";
+import { useAgents } from "@/api/hooks/use-agents";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { JsonViewer } from "@/components/shared/json-viewer";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatSmartTime } from "@/lib/utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { formatSmartTime, formatElapsed } from "@/lib/utils";
 import { cn } from "@/lib/utils";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Search, GitBranch } from "lucide-react";
 import type { AgentTask, AgentTaskStatus } from "@/api/types";
 
 // --- Kanban column ---
@@ -39,15 +50,15 @@ function KanbanColumn({
   onTaskClick: (id: string) => void;
 }) {
   return (
-    <div className="flex flex-col flex-1 min-w-[180px] max-w-[300px]">
-      <div className="flex items-center gap-2 px-1 mb-2">
+    <div className="flex flex-col flex-1 min-w-[180px] max-w-[300px] min-h-0">
+      <div className="flex items-center gap-2 px-1 mb-2 shrink-0">
         <div className={cn("h-2 w-2 rounded-full", dotColor)} />
         <span className="text-[10px] font-semibold text-muted-foreground tracking-wider">{title}</span>
         <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center">
           {tasks.length}
         </Badge>
       </div>
-      <div className={cn("flex-1 rounded-lg border p-2 space-y-2 min-h-[100px] max-h-[500px] overflow-y-auto", bgColor, borderColor)}>
+      <div className={cn("flex-1 rounded-lg border p-2 space-y-2 min-h-0 overflow-y-auto", bgColor, borderColor)}>
         {tasks.length === 0 ? (
           <p className="text-[11px] text-muted-foreground/60 text-center py-4">No tasks</p>
         ) : (
@@ -93,7 +104,7 @@ function KanbanBoard({ tasks, onTaskClick }: { tasks: AgentTask[]; onTaskClick: 
   }, [tasks]);
 
   return (
-    <div className="flex gap-3 overflow-x-auto pb-2">
+    <div className="flex gap-3 overflow-x-auto pb-2 flex-1 min-h-0">
       {KANBAN_COLUMNS.map((col) => (
         <KanbanColumn
           key={col.key}
@@ -109,10 +120,40 @@ function KanbanBoard({ tasks, onTaskClick }: { tasks: AgentTask[]; onTaskClick: 
   );
 }
 
+const PAGE_SIZE = 100;
+
 export default function EpicDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: epic, isLoading } = useEpic(id!);
+
+  // Task tab filters
+  const [taskSearch, setTaskSearch] = useState("");
+  const [taskStatus, setTaskStatus] = useState("all");
+  const [taskPage, setTaskPage] = useState(0);
+
+  const taskFilters = useMemo(() => {
+    const f: { epicId?: string; status?: string; search?: string; limit: number; offset: number } = {
+      epicId: id,
+      limit: PAGE_SIZE,
+      offset: taskPage * PAGE_SIZE,
+    };
+    if (taskStatus !== "all") f.status = taskStatus;
+    if (taskSearch) f.search = taskSearch;
+    return f;
+  }, [id, taskStatus, taskSearch, taskPage]);
+
+  const { data: tasksData, isLoading: tasksLoading } = useTasks(taskFilters);
+  const { data: agents } = useAgents();
+
+  const agentMap = useMemo(() => {
+    const m = new Map<string, string>();
+    agents?.forEach((a) => m.set(a.id, a.name));
+    return m;
+  }, [agents]);
+
+  const taskTotal = tasksData?.total ?? 0;
+  const taskTotalPages = Math.max(1, Math.ceil(taskTotal / PAGE_SIZE));
 
   const taskColDefs = useMemo<ColDef<AgentTask>[]>(
     () => [
@@ -120,7 +161,7 @@ export default function EpicDetailPage() {
         field: "task",
         headerName: "Description",
         flex: 1,
-        minWidth: 300,
+        minWidth: 250,
         cellRenderer: (params: { value: string }) => (
           <span className="truncate">{params.value}</span>
         ),
@@ -133,8 +174,52 @@ export default function EpicDetailPage() {
           <StatusBadge status={params.value} />
         ),
       },
-      { field: "taskType", headerName: "Type", width: 100 },
-      { field: "priority", headerName: "Priority", width: 80 },
+      {
+        field: "taskType",
+        headerName: "Type",
+        width: 110,
+        cellRenderer: (params: { value: string | undefined }) =>
+          params.value ? (
+            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
+              {params.value}
+            </Badge>
+          ) : null,
+      },
+      {
+        field: "agentId",
+        headerName: "Agent",
+        width: 150,
+        valueFormatter: (params) =>
+          params.value ? (agentMap.get(params.value) ?? params.value.slice(0, 8) + "...") : "Unassigned",
+      },
+      {
+        headerName: "Elapsed",
+        width: 100,
+        valueGetter: (params) => {
+          const task = params.data;
+          if (!task) return "";
+          const start = task.acceptedAt ?? task.createdAt;
+          const end = task.finishedAt;
+          const isActive = !end && (task.status === "in_progress" || task.status === "pending" || task.status === "offered");
+          return isActive ? formatElapsed(start) : end ? formatElapsed(start, end) : "—";
+        },
+      },
+      {
+        field: "dependsOn",
+        headerName: "Deps",
+        width: 90,
+        cellRenderer: (params: { value: string[] | undefined }) => {
+          const deps = params.value;
+          if (!deps || deps.length === 0) return null;
+          return (
+            <div className="flex items-center gap-1 text-muted-foreground">
+              <GitBranch className="h-3 w-3 shrink-0" />
+              <span className="text-[10px] font-mono">{deps.length}</span>
+            </div>
+          );
+        },
+        sortable: false,
+      },
       {
         field: "createdAt",
         headerName: "Created",
@@ -142,7 +227,7 @@ export default function EpicDetailPage() {
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
     ],
-    [],
+    [agentMap],
   );
 
   const onTaskClicked = useCallback(
@@ -215,7 +300,7 @@ export default function EpicDetailPage() {
       <Tabs defaultValue="overview" className="flex flex-col flex-1 min-h-0">
         <TabsList className="shrink-0">
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="tasks">Tasks ({epic.tasks?.length ?? 0})</TabsTrigger>
+          <TabsTrigger value="tasks">Tasks ({taskTotal})</TabsTrigger>
           <TabsTrigger value="board">Board</TabsTrigger>
         </TabsList>
 
@@ -257,16 +342,74 @@ export default function EpicDetailPage() {
           {epic.plan && <JsonViewer data={epic.plan} title="Implementation Plan" />}
         </TabsContent>
 
-        <TabsContent value="tasks" className="flex flex-col flex-1 min-h-0 mt-4">
+        <TabsContent value="tasks" className="flex flex-col flex-1 min-h-0 mt-4 gap-3">
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search tasks..."
+                value={taskSearch}
+                onChange={(e) => { setTaskSearch(e.target.value); setTaskPage(0); }}
+                className="pl-9"
+              />
+            </div>
+            <Select value={taskStatus} onValueChange={(v) => { setTaskStatus(v); setTaskPage(0); }}>
+              <SelectTrigger className="w-[160px]">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="in_progress">In Progress</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="failed">Failed</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           <DataGrid
-            rowData={epic.tasks ?? []}
+            rowData={tasksData?.tasks ?? []}
             columnDefs={taskColDefs}
             onRowClicked={onTaskClicked}
+            loading={tasksLoading}
             emptyMessage="No tasks in this epic"
+            pagination={false}
           />
+
+          <div className="flex items-center justify-between shrink-0 text-sm text-muted-foreground">
+            <span>
+              {taskTotal > 0
+                ? `${taskPage * PAGE_SIZE + 1}–${Math.min((taskPage + 1) * PAGE_SIZE, taskTotal)} of ${taskTotal}`
+                : "0 tasks"}
+            </span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                disabled={taskPage === 0}
+                onClick={() => setTaskPage(taskPage - 1)}
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+              <span className="px-2 text-xs">
+                Page {taskPage + 1} of {taskTotalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                disabled={taskPage >= taskTotalPages - 1}
+                onClick={() => setTaskPage(taskPage + 1)}
+              >
+                <ArrowLeft className="h-4 w-4 rotate-180" />
+              </Button>
+            </div>
+          </div>
         </TabsContent>
 
-        <TabsContent value="board" className="flex-1 min-h-0 mt-4 overflow-y-auto">
+        <TabsContent value="board" className="flex flex-col flex-1 min-h-0 mt-4 overflow-hidden">
           <KanbanBoard
             tasks={epic.tasks ?? []}
             onTaskClick={(taskId) => navigate(`/tasks/${taskId}`)}

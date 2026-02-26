@@ -6,6 +6,7 @@ import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatSmartTime, formatRelativeTime } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -17,6 +18,7 @@ import {
   Terminal,
   ChevronDown,
   ChevronRight,
+  GitBranch,
 } from "lucide-react";
 import type { AgentLog } from "@/api/types";
 import { useMemo, useState } from "react";
@@ -195,6 +197,122 @@ export default function TaskDetailPage() {
   const hasOutput = !!task.output;
   const hasEvents = task.logs && task.logs.length > 0;
 
+  const detailsContent = (
+    <div className="space-y-1">
+      {task.agentId && (
+        <MetaRow icon={User} label="Agent">
+          <Link to={`/agents/${task.agentId}`} className="text-primary hover:underline text-xs">
+            {agentName ?? task.agentId.slice(0, 8) + "..."}
+          </Link>
+        </MetaRow>
+      )}
+      <MetaRow icon={Calendar} label="Created">
+        <span className="text-xs">{formatSmartTime(task.createdAt)}</span>
+      </MetaRow>
+      {task.finishedAt && (
+        <MetaRow icon={Clock} label="Finished">
+          <span className="text-xs">{formatSmartTime(task.finishedAt)}</span>
+        </MetaRow>
+      )}
+
+      {task.dependsOn && task.dependsOn.length > 0 && (
+        <>
+          <Separator className="my-2" />
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <GitBranch className="h-3 w-3 text-muted-foreground" />
+              <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                Dependencies ({task.dependsOn.length})
+              </span>
+            </div>
+            {task.dependsOn.map((depId) => (
+              <Link
+                key={depId}
+                to={`/tasks/${depId}`}
+                className="flex items-center gap-1.5 text-xs text-primary hover:underline font-mono"
+              >
+                #{depId.slice(0, 8)}
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
+
+      {task.progress && (
+        <>
+          <Separator className="my-2" />
+          <div className="space-y-1">
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Progress</span>
+            <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed max-h-32 overflow-auto">
+              {task.progress}
+            </p>
+          </div>
+        </>
+      )}
+
+      {hasEvents && (
+        <>
+          <Separator className="my-2" />
+          <div className="space-y-2">
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Activity</span>
+            <LogTimeline logs={task.logs!} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+
+  const outcomeContent = (
+    <div className="space-y-2">
+      {isFailed && task.failureReason && (
+        <CollapsibleCard
+          title="Failure Reason"
+          icon={AlertTriangle}
+          iconColor="text-red-400"
+          borderColor="border-red-500/30"
+          bgColor="bg-red-500/5"
+          defaultOpen
+        >
+          <pre className="whitespace-pre-wrap text-xs text-red-300/80 font-mono leading-relaxed max-h-64 overflow-auto">
+            {task.failureReason}
+          </pre>
+        </CollapsibleCard>
+      )}
+
+      {hasOutput && (
+        <CollapsibleCard
+          title="Output"
+          icon={isCompleted ? CheckCircle2 : Terminal}
+          iconColor={isCompleted ? "text-emerald-400" : "text-muted-foreground"}
+          borderColor={isCompleted ? "border-emerald-500/30" : "border-border"}
+          bgColor={isCompleted ? "bg-emerald-500/5" : "bg-muted/20"}
+          defaultOpen
+        >
+          <pre className="whitespace-pre-wrap text-xs font-mono leading-relaxed max-h-[60vh] overflow-auto text-foreground/80">
+            {task.output}
+          </pre>
+        </CollapsibleCard>
+      )}
+
+      {!isFailed && !hasOutput && (
+        <div className="flex items-center justify-center py-8 text-muted-foreground">
+          <p className="text-xs">No output available</p>
+        </div>
+      )}
+    </div>
+  );
+
+  const sessionLogsContent = hasSessionLogs ? (
+    <SessionLogViewer logs={sessionLogs} className="flex-1 min-h-0" />
+  ) : (
+    <div className="flex-1 flex items-center justify-center min-h-0">
+      <div className="text-center text-muted-foreground">
+        <Terminal className="h-8 w-8 mx-auto mb-2 opacity-30" />
+        <p className="text-xs">No session data available</p>
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       {/* Breadcrumb — fixed */}
@@ -233,52 +351,35 @@ export default function TaskDetailPage() {
 
       <Separator className="shrink-0" />
 
-      {/* Two-column layout — fills remaining height */}
-      <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
+      {/* Mobile: tabbed layout */}
+      <div className="md:hidden flex flex-col flex-1 min-h-0">
+        <Tabs defaultValue="details" className="flex flex-col flex-1 min-h-0">
+          <TabsList className="shrink-0 mx-1 mt-2">
+            <TabsTrigger value="details">Details</TabsTrigger>
+            <TabsTrigger value="outcome">Outcome</TabsTrigger>
+            <TabsTrigger value="logs">Session Logs</TabsTrigger>
+          </TabsList>
+          <TabsContent value="details" className="flex-1 overflow-y-auto px-1 py-3">
+            {detailsContent}
+          </TabsContent>
+          <TabsContent value="outcome" className="flex-1 overflow-y-auto px-1 py-3">
+            {outcomeContent}
+          </TabsContent>
+          <TabsContent value="logs" className="flex flex-col flex-1 min-h-0 px-1 py-3">
+            {sessionLogsContent}
+          </TabsContent>
+        </Tabs>
+      </div>
+
+      {/* Desktop: two-column layout */}
+      <div className="hidden md:flex flex-1 min-h-0 overflow-hidden">
         {/* Left sidebar: metadata */}
-        <div className="md:w-52 lg:w-60 shrink-0 md:border-r border-border py-3 px-1 md:pr-3 space-y-1 overflow-y-auto min-h-0">
-          {task.agentId && (
-            <MetaRow icon={User} label="Agent">
-              <Link to={`/agents/${task.agentId}`} className="text-primary hover:underline text-xs">
-                {agentName ?? task.agentId.slice(0, 8) + "..."}
-              </Link>
-            </MetaRow>
-          )}
-          <MetaRow icon={Calendar} label="Created">
-            <span className="text-xs">{formatSmartTime(task.createdAt)}</span>
-          </MetaRow>
-          {task.finishedAt && (
-            <MetaRow icon={Clock} label="Finished">
-              <span className="text-xs">{formatSmartTime(task.finishedAt)}</span>
-            </MetaRow>
-          )}
-
-          {task.progress && (
-            <>
-              <Separator className="my-2" />
-              <div className="space-y-1">
-                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Progress</span>
-                <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed max-h-32 overflow-auto">
-                  {task.progress}
-                </p>
-              </div>
-            </>
-          )}
-
-          {hasEvents && (
-            <>
-              <Separator className="my-2" />
-              <div className="space-y-2">
-                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Activity</span>
-                <LogTimeline logs={task.logs!} />
-              </div>
-            </>
-          )}
+        <div className="w-52 lg:w-60 shrink-0 border-r border-border py-3 px-1 pr-3 space-y-1 overflow-y-auto min-h-0">
+          {detailsContent}
         </div>
 
         {/* Right content: output/error (collapsible) + session logs (fills remaining) */}
-        <div className="flex flex-col flex-1 min-h-0 overflow-hidden py-3 md:pl-3 px-1 gap-2">
-          {/* Failure reason — collapsible, collapsed by default */}
+        <div className="flex flex-col flex-1 min-h-0 overflow-hidden py-3 pl-3 px-1 gap-2">
           {isFailed && task.failureReason && (
             <CollapsibleCard
               title="Failure Reason"
@@ -293,7 +394,6 @@ export default function TaskDetailPage() {
             </CollapsibleCard>
           )}
 
-          {/* Output — collapsible, collapsed by default */}
           {hasOutput && (
             <CollapsibleCard
               title="Output"
@@ -308,7 +408,6 @@ export default function TaskDetailPage() {
             </CollapsibleCard>
           )}
 
-          {/* Session logs — fills all remaining space */}
           {hasSessionLogs ? (
             <SessionLogViewer logs={sessionLogs} className="flex-1 min-h-0" />
           ) : (

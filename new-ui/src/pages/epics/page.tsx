@@ -84,7 +84,6 @@ export default function EpicsPage() {
         width: 80,
         valueGetter: (params) => params.data?.taskStats?.total ?? 0,
       },
-      { field: "priority", headerName: "Priority", width: 80 },
       {
         field: "createdAt",
         headerName: "Created",

@@ -1591,6 +1591,7 @@ export function findTaskByGitHub(githubRepo: string, githubNumber: number): Agen
 export interface TaskFilters {
   status?: AgentTaskStatus;
   agentId?: string;
+  epicId?: string;
   search?: string;
   // New filters
   unassigned?: boolean;
@@ -1599,6 +1600,7 @@ export interface TaskFilters {
   taskType?: string;
   tags?: string[];
   limit?: number;
+  offset?: number;
 }
 
 export function getAllTasks(filters?: TaskFilters): AgentTask[] {
@@ -1613,6 +1615,11 @@ export function getAllTasks(filters?: TaskFilters): AgentTask[] {
   if (filters?.agentId) {
     conditions.push("agentId = ?");
     params.push(filters.agentId);
+  }
+
+  if (filters?.epicId) {
+    conditions.push("epicId = ?");
+    params.push(filters.epicId);
   }
 
   if (filters?.search) {
@@ -1646,7 +1653,8 @@ export function getAllTasks(filters?: TaskFilters): AgentTask[] {
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const limit = filters?.limit ?? 25;
-  const query = `SELECT * FROM agent_tasks ${whereClause} ORDER BY lastUpdatedAt DESC, priority DESC LIMIT ${limit}`;
+  const offset = filters?.offset ?? 0;
+  const query = `SELECT * FROM agent_tasks ${whereClause} ORDER BY lastUpdatedAt DESC, priority DESC LIMIT ${limit} OFFSET ${offset}`;
 
   let tasks = getDb()
     .prepare<AgentTaskRow, (string | AgentTaskStatus)[]>(query)
@@ -1680,6 +1688,11 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
   if (filters?.agentId) {
     conditions.push("agentId = ?");
     params.push(filters.agentId);
+  }
+
+  if (filters?.epicId) {
+    conditions.push("epicId = ?");
+    params.push(filters.epicId);
   }
 
   if (filters?.search) {
