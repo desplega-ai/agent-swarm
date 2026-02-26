@@ -3938,8 +3938,8 @@ const sessionCostQueries = {
     ),
 
   getByTaskId: () =>
-    getDb().prepare<SessionCostRow, [string]>(
-      "SELECT * FROM session_costs WHERE taskId = ? ORDER BY createdAt DESC",
+    getDb().prepare<SessionCostRow, [string, number]>(
+      "SELECT * FROM session_costs WHERE taskId = ? ORDER BY createdAt DESC LIMIT ?",
     ),
 
   getByAgentId: () =>
@@ -4006,8 +4006,8 @@ export function createSessionCost(input: CreateSessionCostInput): SessionCost {
   };
 }
 
-export function getSessionCostsByTaskId(taskId: string): SessionCost[] {
-  return sessionCostQueries.getByTaskId().all(taskId).map(rowToSessionCost);
+export function getSessionCostsByTaskId(taskId: string, limit = 500): SessionCost[] {
+  return sessionCostQueries.getByTaskId().all(taskId, limit).map(rowToSessionCost);
 }
 
 export function getSessionCostsByAgentId(agentId: string, limit = 100): SessionCost[] {
@@ -4016,6 +4016,222 @@ export function getSessionCostsByAgentId(agentId: string, limit = 100): SessionC
 
 export function getAllSessionCosts(limit = 100): SessionCost[] {
   return sessionCostQueries.getAll().all(limit).map(rowToSessionCost);
+}
+
+// --- Date-filtered session costs (P1) ---
+
+export function getSessionCostsFiltered(opts: {
+  agentId?: string;
+  startDate?: string;
+  endDate?: string;
+  limit?: number;
+}): SessionCost[] {
+  const conditions: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (opts.agentId) {
+    conditions.push("agentId = ?");
+    params.push(opts.agentId);
+  }
+  if (opts.startDate) {
+    conditions.push("createdAt >= ?");
+    params.push(opts.startDate);
+  }
+  if (opts.endDate) {
+    conditions.push("createdAt <= ?");
+    params.push(opts.endDate);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const limit = opts.limit ?? 100;
+
+  return getDb()
+    .prepare<SessionCostRow, (string | number)[]>(
+      `SELECT * FROM session_costs ${where} ORDER BY createdAt DESC LIMIT ${limit}`,
+    )
+    .all(...params)
+    .map(rowToSessionCost);
+}
+
+// --- Aggregation queries (P0) ---
+
+export interface SessionCostSummaryTotals {
+  totalCostUsd: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCacheReadTokens: number;
+  totalCacheWriteTokens: number;
+  totalDurationMs: number;
+  totalSessions: number;
+  avgCostPerSession: number;
+}
+
+export interface SessionCostDailyRow {
+  date: string;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  sessions: number;
+}
+
+export interface SessionCostByAgentRow {
+  agentId: string;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  sessions: number;
+  durationMs: number;
+}
+
+export function getSessionCostSummary(opts: {
+  startDate?: string;
+  endDate?: string;
+  agentId?: string;
+  groupBy?: "day" | "agent" | "both";
+}): {
+  totals: SessionCostSummaryTotals;
+  daily: SessionCostDailyRow[];
+  byAgent: SessionCostByAgentRow[];
+} {
+  const conditions: string[] = [];
+  const params: string[] = [];
+
+  if (opts.startDate) {
+    conditions.push("createdAt >= ?");
+    params.push(opts.startDate);
+  }
+  if (opts.endDate) {
+    conditions.push("createdAt <= ?");
+    params.push(opts.endDate);
+  }
+  if (opts.agentId) {
+    conditions.push("agentId = ?");
+    params.push(opts.agentId);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  // Totals
+  type TotalsRow = {
+    totalCostUsd: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalCacheReadTokens: number;
+    totalCacheWriteTokens: number;
+    totalDurationMs: number;
+    totalSessions: number;
+  };
+
+  const totalsRow = getDb()
+    .prepare<TotalsRow, string[]>(
+      `SELECT
+        COALESCE(SUM(totalCostUsd), 0) as totalCostUsd,
+        COALESCE(SUM(inputTokens), 0) as totalInputTokens,
+        COALESCE(SUM(outputTokens), 0) as totalOutputTokens,
+        COALESCE(SUM(cacheReadTokens), 0) as totalCacheReadTokens,
+        COALESCE(SUM(cacheWriteTokens), 0) as totalCacheWriteTokens,
+        COALESCE(SUM(durationMs), 0) as totalDurationMs,
+        COUNT(*) as totalSessions
+      FROM session_costs ${where}`,
+    )
+    .get(...params);
+
+  const totals: SessionCostSummaryTotals = totalsRow
+    ? {
+        ...totalsRow,
+        avgCostPerSession:
+          totalsRow.totalSessions > 0 ? totalsRow.totalCostUsd / totalsRow.totalSessions : 0,
+      }
+    : {
+        totalCostUsd: 0,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        totalCacheReadTokens: 0,
+        totalCacheWriteTokens: 0,
+        totalDurationMs: 0,
+        totalSessions: 0,
+        avgCostPerSession: 0,
+      };
+
+  // Daily breakdown
+  const groupBy = opts.groupBy ?? "both";
+  let daily: SessionCostDailyRow[] = [];
+  if (groupBy === "day" || groupBy === "both") {
+    daily = getDb()
+      .prepare<
+        {
+          date: string;
+          costUsd: number;
+          inputTokens: number;
+          outputTokens: number;
+          sessions: number;
+        },
+        string[]
+      >(
+        `SELECT
+          DATE(createdAt) as date,
+          COALESCE(SUM(totalCostUsd), 0) as costUsd,
+          COALESCE(SUM(inputTokens), 0) as inputTokens,
+          COALESCE(SUM(outputTokens), 0) as outputTokens,
+          COUNT(*) as sessions
+        FROM session_costs ${where}
+        GROUP BY DATE(createdAt)
+        ORDER BY date ASC`,
+      )
+      .all(...params);
+  }
+
+  // Per-agent breakdown
+  let byAgent: SessionCostByAgentRow[] = [];
+  if (groupBy === "agent" || groupBy === "both") {
+    byAgent = getDb()
+      .prepare<
+        {
+          agentId: string;
+          costUsd: number;
+          inputTokens: number;
+          outputTokens: number;
+          sessions: number;
+          durationMs: number;
+        },
+        string[]
+      >(
+        `SELECT
+          agentId,
+          COALESCE(SUM(totalCostUsd), 0) as costUsd,
+          COALESCE(SUM(inputTokens), 0) as inputTokens,
+          COALESCE(SUM(outputTokens), 0) as outputTokens,
+          COUNT(*) as sessions,
+          COALESCE(SUM(durationMs), 0) as durationMs
+        FROM session_costs ${where}
+        GROUP BY agentId
+        ORDER BY costUsd DESC`,
+      )
+      .all(...params);
+  }
+
+  return { totals, daily, byAgent };
+}
+
+// --- Dashboard cost summary (P4) ---
+
+export interface DashboardCostSummary {
+  costToday: number;
+  costMtd: number;
+}
+
+export function getDashboardCostSummary(): DashboardCostSummary {
+  type CostRow = { costToday: number; costMtd: number };
+  const row = getDb()
+    .prepare<CostRow, []>(
+      `SELECT
+        COALESCE(SUM(CASE WHEN createdAt >= date('now') THEN totalCostUsd ELSE 0 END), 0) as costToday,
+        COALESCE(SUM(CASE WHEN createdAt >= date('now', 'start of month') THEN totalCostUsd ELSE 0 END), 0) as costMtd
+      FROM session_costs`,
+    )
+    .get();
+
+  return row ?? { costToday: 0, costMtd: 0 };
 }
 
 // ============================================================================

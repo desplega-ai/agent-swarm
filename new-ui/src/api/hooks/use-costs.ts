@@ -6,7 +6,10 @@ import type { SessionCost, UsageStats } from "../types";
 export interface SessionCostFilters {
   agentId?: string;
   taskId?: string;
+  startDate?: string;
+  endDate?: string;
   limit?: number;
+  enabled?: boolean;
 }
 
 export function useSessionCosts(filters?: SessionCostFilters) {
@@ -14,6 +17,7 @@ export function useSessionCosts(filters?: SessionCostFilters) {
     queryKey: ["session-costs", filters],
     queryFn: () => api.fetchSessionCosts(filters),
     select: (data) => data.costs,
+    enabled: filters?.enabled !== false,
   });
 }
 
@@ -93,5 +97,26 @@ export function useTaskUsage(taskId: string) {
     queryFn: () => api.fetchSessionCosts({ taskId }),
     select: (data) => aggregateUsage(data.costs),
     enabled: !!taskId,
+  });
+}
+
+// --- New hooks using server-side aggregation ---
+
+export function useUsageSummary(filters?: {
+  startDate?: string;
+  endDate?: string;
+  agentId?: string;
+  groupBy?: "day" | "agent" | "both";
+}) {
+  return useQuery({
+    queryKey: ["usage-summary", filters],
+    queryFn: () => api.fetchUsageSummary(filters),
+  });
+}
+
+export function useDashboardCosts() {
+  return useQuery({
+    queryKey: ["dashboard-costs"],
+    queryFn: () => api.fetchDashboardCosts(),
   });
 }

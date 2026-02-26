@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useSessionCosts } from "@/api/hooks/use-costs";
+import { useUsageSummary } from "@/api/hooks/use-costs";
 import { useAgents } from "@/api/hooks/use-agents";
 import { formatCurrency, formatCompactNumber } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -20,40 +20,17 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import type { SessionCost } from "@/api/types";
 
 type DateRange = "7d" | "30d" | "90d" | "all";
 
 const DAYS_MAP: Record<DateRange, number | null> = { "7d": 7, "30d": 30, "90d": 90, all: null };
 
-function getDateRangeStart(range: DateRange): Date | null {
+function getStartDateISO(range: DateRange): string | undefined {
   const days = DAYS_MAP[range];
-  if (days == null) return null;
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - days);
-}
-
-function buildAgentData(costs: SessionCost[], agentMap: Map<string, string>) {
-  const agentTotals = new Map<string, { cost: number; sessions: number; tokens: number }>();
-  for (const c of costs) {
-    const prev = agentTotals.get(c.agentId) ?? { cost: 0, sessions: 0, tokens: 0 };
-    agentTotals.set(c.agentId, {
-      cost: prev.cost + c.totalCostUsd,
-      sessions: prev.sessions + 1,
-      tokens: prev.tokens + c.inputTokens + c.outputTokens,
-    });
-  }
-
-  return Array.from(agentTotals.entries())
-    .map(([agentId, d]) => ({
-      agentId,
-      name: agentMap.get(agentId) ?? agentId.slice(0, 8) + "...",
-      cost: Math.round(d.cost * 1000) / 1000,
-      sessions: d.sessions,
-      tokens: d.tokens,
-      avgCost: d.sessions > 0 ? d.cost / d.sessions : 0,
-    }))
-    .sort((a, b) => b.cost - a.cost);
+  if (days == null) return undefined;
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
 }
 
 const tooltipStyle = {
@@ -68,7 +45,14 @@ export default function UsagePage() {
   const [dateRange, setDateRange] = useState<DateRange>("30d");
   const [agentFilter, setAgentFilter] = useState("all");
 
-  const { data: allCosts, isLoading } = useSessionCosts({ limit: 2000 });
+  const startDate = getStartDateISO(dateRange);
+  const agentId = agentFilter !== "all" ? agentFilter : undefined;
+
+  const { data: summary, isLoading } = useUsageSummary({
+    startDate,
+    agentId,
+    groupBy: "both",
+  });
   const { data: agents } = useAgents();
 
   const agentMap = useMemo(() => {
@@ -77,17 +61,17 @@ export default function UsagePage() {
     return m;
   }, [agents]);
 
-  const filteredCosts = useMemo(() => {
-    if (!allCosts) return [];
-    const rangeStart = getDateRangeStart(dateRange);
-    return allCosts.filter((c) => {
-      if (rangeStart && new Date(c.createdAt) < rangeStart) return false;
-      if (agentFilter !== "all" && c.agentId !== agentFilter) return false;
-      return true;
-    });
-  }, [allCosts, dateRange, agentFilter]);
-
-  const agentData = useMemo(() => buildAgentData(filteredCosts, agentMap), [filteredCosts, agentMap]);
+  const agentData = useMemo(() => {
+    if (!summary?.byAgent) return [];
+    return summary.byAgent.map((a) => ({
+      agentId: a.agentId,
+      name: agentMap.get(a.agentId) ?? a.agentId.slice(0, 8) + "...",
+      cost: Math.round(a.costUsd * 1000) / 1000,
+      sessions: a.sessions,
+      tokens: a.inputTokens + a.outputTokens,
+      avgCost: a.sessions > 0 ? a.costUsd / a.sessions : 0,
+    }));
+  }, [summary, agentMap]);
 
   if (isLoading) {
     return (
@@ -136,8 +120,14 @@ export default function UsagePage() {
         </div>
       </div>
 
-      {/* Shared stats + daily chart */}
-      <UsageSummary costs={filteredCosts} daysBack={DAYS_MAP[dateRange] ?? 90} />
+      {/* Shared stats + daily chart — using pre-aggregated data */}
+      {summary && (
+        <UsageSummary
+          totals={summary.totals}
+          dailyData={summary.daily}
+          daysBack={DAYS_MAP[dateRange] ?? 90}
+        />
+      )}
 
       {/* Cost by Agent — bar chart + table */}
       {agentData.length > 0 && (
