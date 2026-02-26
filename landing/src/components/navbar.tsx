@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Github, BookOpen, Menu, X } from "lucide-react";
+import { Github, BookOpen, LayoutDashboard, Menu, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 export function Navbar() {
@@ -54,13 +54,20 @@ export function Navbar() {
           </a>
           <div className="w-px h-5 bg-zinc-200" />
           <a
-            href="https://github.com/desplega-ai/agent-swarm#readme"
-            target="_blank"
-            rel="noopener noreferrer"
+            href="https://docs.agent-swarm.dev"
             className="flex items-center gap-1.5 text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
           >
             <BookOpen className="w-4 h-4" />
             Docs
+          </a>
+          <a
+            href="https://app.agent-swarm.dev"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-sm font-medium text-amber-700 hover:text-amber-900 transition-colors"
+          >
+            <LayoutDashboard className="w-4 h-4" />
+            Dashboard
           </a>
           <a
             href="https://github.com/desplega-ai/agent-swarm"
@@ -94,8 +101,11 @@ export function Navbar() {
               <a href="#how-it-works" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">How It Works</a>
               <a href="#architecture" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Architecture</a>
               <div className="h-px bg-zinc-200" />
-              <a href="https://github.com/desplega-ai/agent-swarm#readme" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm font-medium text-zinc-600 py-2">
+              <a href="https://docs.agent-swarm.dev" className="flex items-center gap-2 text-sm font-medium text-zinc-600 py-2">
                 <BookOpen className="w-4 h-4" /> Docs
+              </a>
+              <a href="https://app.agent-swarm.dev" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm font-medium text-amber-700 py-2">
+                <LayoutDashboard className="w-4 h-4" /> Dashboard
               </a>
               <a href="https://github.com/desplega-ai/agent-swarm" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white">
                 <Github className="w-4 h-4" /> View on GitHub

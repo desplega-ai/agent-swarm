@@ -1,4 +1,4 @@
-import { Github, BookOpen, ExternalLink } from "lucide-react";
+import { Github, BookOpen, ExternalLink, LayoutDashboard } from "lucide-react";
 
 export function Footer() {
   return (
@@ -37,13 +37,20 @@ export function Footer() {
               GitHub
             </a>
             <a
-              href="https://github.com/desplega-ai/agent-swarm#readme"
-              target="_blank"
-              rel="noopener noreferrer"
+              href="https://docs.agent-swarm.dev"
               className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
             >
               <BookOpen className="w-4 h-4" />
               Docs
+            </a>
+            <a
+              href="https://app.agent-swarm.dev"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
+            >
+              <LayoutDashboard className="w-4 h-4" />
+              Dashboard
             </a>
             <a
               href="https://desplega.sh"

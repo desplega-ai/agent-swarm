@@ -9,6 +9,15 @@
 https://github.com/user-attachments/assets/bd308567-d21e-44a5-87ec-d25aeb1de3d3
 
 <p align="center">
+  <a href="https://agent-swarm.dev">
+    <img src="https://img.shields.io/badge/Website-agent--swarm.dev-000?style=for-the-badge" alt="Website">
+  </a>
+  <a href="https://docs.agent-swarm.dev">
+    <img src="https://img.shields.io/badge/Docs-docs.agent--swarm.dev-amber?style=for-the-badge" alt="Docs">
+  </a>
+  <a href="https://app.agent-swarm.dev">
+    <img src="https://img.shields.io/badge/Dashboard-app.agent--swarm.dev-blue?style=for-the-badge" alt="Dashboard">
+  </a>
   <a href="https://discord.gg/KZgfyyDVZa">
     <img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join Discord">
   </a>
@@ -284,8 +293,10 @@ For production deployments, see [DEPLOYMENT.md](./DEPLOYMENT.md) which covers:
 
 ## Documentation
 
-| Document | Description |
+| Resource | Description |
 |----------|-------------|
+| [docs.agent-swarm.dev](https://docs.agent-swarm.dev) | Full documentation site |
+| [app.agent-swarm.dev](https://app.agent-swarm.dev) | Hosted dashboard — connect your deployed swarm |
 | [DEPLOYMENT.md](./DEPLOYMENT.md) | Production deployment guide |
 | [docs/ENVS.md](./docs/ENVS.md) | Complete environment variables reference |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Development setup and project structure |

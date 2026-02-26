@@ -29,22 +29,20 @@ export function CTA() {
 
           <div className="flex flex-wrap justify-center gap-4">
             <a
-              href="https://github.com/desplega-ai/agent-swarm"
-              target="_blank"
-              rel="noopener noreferrer"
+              href="https://docs.agent-swarm.dev/docs/getting-started"
               className="group inline-flex items-center gap-2 rounded-xl bg-amber-600 px-7 py-3.5 text-sm font-semibold text-white hover:bg-amber-500 transition-all shadow-xl shadow-amber-600/20"
             >
-              <Github className="w-4 h-4" />
-              Star on GitHub
+              Get Started
               <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
             </a>
             <a
-              href="https://github.com/desplega-ai/agent-swarm#readme"
+              href="https://github.com/desplega-ai/agent-swarm"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 rounded-xl bg-white/10 backdrop-blur-sm px-7 py-3.5 text-sm font-semibold text-white border border-white/10 hover:bg-white/15 transition-all"
             >
-              Read the Docs
+              <Github className="w-4 h-4" />
+              Star on GitHub
             </a>
           </div>
         </motion.div>

@@ -164,22 +164,20 @@ export function Hero() {
               className="flex flex-wrap gap-4"
             >
               <a
-                href="https://github.com/desplega-ai/agent-swarm"
-                target="_blank"
-                rel="noopener noreferrer"
+                href="https://docs.agent-swarm.dev/docs/getting-started"
                 className="group inline-flex items-center gap-2 rounded-xl bg-zinc-900 px-6 py-3 text-sm font-semibold text-white hover:bg-zinc-800 transition-all shadow-xl shadow-zinc-900/20 hover:shadow-zinc-900/30"
               >
-                <Github className="w-4 h-4" />
                 Get Started
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
               </a>
               <a
-                href="https://github.com/desplega-ai/agent-swarm#readme"
+                href="https://github.com/desplega-ai/agent-swarm"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-zinc-700 border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 transition-all shadow-sm"
               >
-                Read the Docs
+                <Github className="w-4 h-4" />
+                GitHub
               </a>
             </motion.div>
 
