@@ -6,25 +6,7 @@ export function Footer() {
       <div className="mx-auto max-w-6xl px-6 py-12">
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-3">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center">
-              <svg
-                viewBox="0 0 24 24"
-                className="w-4 h-4 text-white"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <circle cx="12" cy="12" r="3" />
-                <circle cx="5" cy="6" r="2" />
-                <circle cx="19" cy="6" r="2" />
-                <circle cx="5" cy="18" r="2" />
-                <circle cx="19" cy="18" r="2" />
-                <line x1="9.5" y1="10.5" x2="6.5" y2="7.5" />
-                <line x1="14.5" y1="10.5" x2="17.5" y2="7.5" />
-                <line x1="9.5" y1="13.5" x2="6.5" y2="16.5" />
-                <line x1="14.5" y1="13.5" x2="17.5" y2="16.5" />
-              </svg>
-            </div>
+            <img src="/logo.png" alt="Agent Swarm" className="w-7 h-7 rounded-lg" />
             <div>
               <div className="text-sm font-semibold text-zinc-900">
                 Agent Swarm
@@ -55,7 +37,7 @@ export function Footer() {
               GitHub
             </a>
             <a
-              href="https://docs.agent-swarm.dev"
+              href="https://github.com/desplega-ai/agent-swarm#readme"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"

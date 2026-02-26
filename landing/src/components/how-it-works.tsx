@@ -7,25 +7,28 @@ const steps = [
     number: "01",
     title: "Deploy the Swarm",
     description:
-      "Spin up the MCP server and connect it to Claude Code. Register your lead agent and workers — each with their own identity, capabilities, and workspace.",
+      "Clone the repo, configure your environment, and run docker compose up. The API server, lead agent, and workers start in isolated containers — each with their own identity, capabilities, and workspace.",
     visual: (
       <div className="font-mono text-xs leading-relaxed text-zinc-600">
-        <div className="text-zinc-400"># Start the swarm server</div>
+        <div className="text-zinc-400"># Clone and configure</div>
         <div>
-          <span className="text-amber-600">$</span> bun run dev:http
+          <span className="text-amber-600">$</span> git clone github.com/desplega-ai/agent-swarm
         </div>
-        <div className="mt-2 text-zinc-400"># Connect via MCP</div>
         <div>
-          <span className="text-amber-600">$</span> claude --mcp agent-swarm
+          <span className="text-amber-600">$</span> cp .env.docker.example .env
+        </div>
+        <div className="mt-2 text-zinc-400"># Start the swarm</div>
+        <div>
+          <span className="text-amber-600">$</span> docker compose up -d
         </div>
         <div className="mt-2 text-emerald-600">
-          ✓ Lead agent &ldquo;Orchestrator&rdquo; registered
+          ✓ API server running on :3013
         </div>
         <div className="text-emerald-600">
-          ✓ Worker &ldquo;Picateclas&rdquo; online
+          ✓ Lead agent online
         </div>
         <div className="text-emerald-600">
-          ✓ Worker &ldquo;Codebot&rdquo; online
+          ✓ 2 workers connected
         </div>
       </div>
     ),

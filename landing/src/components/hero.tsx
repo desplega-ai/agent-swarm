@@ -174,7 +174,7 @@ export function Hero() {
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
               </a>
               <a
-                href="https://docs.agent-swarm.dev"
+                href="https://github.com/desplega-ai/agent-swarm#readme"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-zinc-700 border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 transition-all shadow-sm"

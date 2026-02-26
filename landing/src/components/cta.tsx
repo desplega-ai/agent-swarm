@@ -39,7 +39,7 @@ export function CTA() {
               <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
             </a>
             <a
-              href="https://docs.agent-swarm.dev"
+              href="https://github.com/desplega-ai/agent-swarm#readme"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 rounded-xl bg-white/10 backdrop-blur-sm px-7 py-3.5 text-sm font-semibold text-white border border-white/10 hover:bg-white/15 transition-all"
