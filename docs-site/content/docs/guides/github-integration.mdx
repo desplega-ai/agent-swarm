@@ -1,0 +1,71 @@
+---
+title: GitHub App Integration
+description: Set up GitHub webhooks for automated task creation
+---
+
+# GitHub App Integration
+
+Enable GitHub webhooks for automated task creation from PR reviews, issue assignments, and @mentions.
+
+## Setup
+
+1. Create a [GitHub App](https://github.com/settings/apps/new)
+2. Set webhook URL: `https://your-server.com/api/github/webhook`
+3. Generate a webhook secret
+
+### Required Permissions
+
+- **Issues**: Read & Write
+- **Pull requests**: Read & Write
+
+### Subscribe to Events
+
+- Issues
+- Issue comments
+- Pull requests
+- Pull request reviews
+- Pull request review comments
+- Check runs
+- Check suites
+- Workflow runs
+
+## Configuration
+
+```bash
+# Required for GitHub webhooks
+GITHUB_WEBHOOK_SECRET=your-webhook-secret
+
+# Optional: Bot name for @mentions (default: agent-swarm-bot)
+GITHUB_BOT_NAME=your-bot-name
+
+# Optional: Enable bot reactions (requires GitHub App)
+GITHUB_APP_ID=123456
+GITHUB_APP_PRIVATE_KEY=base64-encoded-key
+
+# Optional: Disable GitHub integration
+GITHUB_DISABLE=true
+```
+
+## Supported Events
+
+| Event | What happens |
+|-------|-------------|
+| Bot assigned to PR/issue | Creates a task for the lead agent |
+| Review requested from bot | Creates a review task |
+| `@bot-name` in comment/issue/PR | Creates a task with the mention context |
+| PR review submitted (on bot's PR) | Creates a notification task with review feedback |
+| CI failure (on PRs with existing tasks) | Creates a CI notification task |
+
+## Bot Reactions
+
+If GitHub App credentials are provided (`GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`), the bot can react to comments and issues with emoji to acknowledge receipt.
+
+## Worker Git Configuration
+
+Workers need git credentials to create PRs and push code:
+
+```bash
+GITHUB_TOKEN=your-github-token    # For git operations
+GITHUB_EMAIL=worker@desplega.ai   # Git commit email
+GITHUB_NAME=Worker Agent           # Git commit name
+```

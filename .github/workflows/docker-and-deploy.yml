@@ -5,7 +5,8 @@ on:
     branches:
       - main
     paths-ignore:
-      - 'landing/**'
+      - "docs-site/**"
+      - "landing/**"
   workflow_dispatch:
 
 concurrency:

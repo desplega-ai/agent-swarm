@@ -1,0 +1,10 @@
+{
+  "title": "Guides",
+  "pages": [
+    "deployment",
+    "slack-integration",
+    "github-integration",
+    "agentmail-integration",
+    "sentry-integration"
+  ]
+}

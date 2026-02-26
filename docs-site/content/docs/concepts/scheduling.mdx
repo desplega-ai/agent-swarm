@@ -1,0 +1,99 @@
+---
+title: Scheduled Tasks
+description: Automate recurring tasks with cron-based scheduling
+---
+
+# Scheduled Tasks
+
+Agent Swarm supports cron-based scheduling to automate recurring tasks. Schedules automatically create tasks at specified intervals.
+
+## Creating a Schedule
+
+```
+create-schedule(
+  name: "daily-standup",
+  taskTemplate: "Generate a daily standup report summarizing yesterday's completed tasks",
+  cronExpression: "0 9 * * *",
+  timezone: "America/New_York"
+)
+```
+
+Or use interval-based scheduling:
+
+```
+create-schedule(
+  name: "health-check",
+  taskTemplate: "Check all services are healthy and report any issues",
+  intervalMs: 3600000
+)
+```
+
+## Schedule Properties
+
+| Property | Description |
+|----------|-------------|
+| `name` | Unique name for the schedule |
+| `taskTemplate` | Task description created each time |
+| `cronExpression` | Cron expression (e.g., `0 9 * * *` for daily at 9 AM) |
+| `intervalMs` | Alternative: interval in milliseconds |
+| `timezone` | Timezone for cron schedules (default: UTC) |
+| `targetAgentId` | Agent to assign tasks to (omit for task pool) |
+| `priority` | Task priority 0-100 (default: 50) |
+| `tags` | Tags applied to created tasks |
+| `taskType` | Type classification for created tasks |
+| `enabled` | Whether the schedule is active (default: true) |
+
+## Managing Schedules
+
+### List Schedules
+
+```
+list-schedules()
+list-schedules(enabled: true)
+list-schedules(name: "daily")
+```
+
+### Update a Schedule
+
+```
+update-schedule(name: "daily-standup", cronExpression: "0 10 * * *")
+update-schedule(name: "daily-standup", enabled: false)
+```
+
+### Delete a Schedule
+
+```
+delete-schedule(name: "daily-standup")
+```
+
+### Run Immediately
+
+Trigger a scheduled task now without waiting for the next interval:
+
+```
+run-schedule-now(name: "daily-standup")
+```
+
+This creates a task immediately but does not affect the regular schedule timing.
+
+## Cron Expression Examples
+
+| Expression | Description |
+|-----------|-------------|
+| `0 9 * * *` | Every day at 9:00 AM |
+| `0 9 * * 1-5` | Weekdays at 9:00 AM |
+| `*/30 * * * *` | Every 30 minutes |
+| `0 0 * * 0` | Every Sunday at midnight |
+| `0 9,17 * * *` | At 9 AM and 5 PM daily |
+
+## How Scheduling Works
+
+The MCP server runs a scheduler that polls for due schedules at a configurable interval (default: 10 seconds, set via `SCHEDULER_INTERVAL_MS`).
+
+When a schedule is due:
+1. A new task is created with the schedule's `taskTemplate`
+2. If `targetAgentId` is set, the task is assigned to that agent
+3. Otherwise, the task goes into the unassigned pool
+4. The schedule's `lastRunAt` is updated
+
+Only the schedule creator or the lead agent can update or delete schedules.

@@ -1,0 +1,47 @@
+---
+title: Sentry Integration
+description: Enable agents to investigate and triage Sentry issues
+---
+
+# Sentry Integration
+
+Docker workers include `sentry-cli` pre-installed, enabling agents to investigate and triage Sentry issues directly.
+
+## Setup
+
+1. Create an Organization Auth Token at `https://sentry.io/settings/{org}/auth-tokens/` with scopes:
+   - `event:read` — Read issues and events
+   - `project:read` — Read project data
+   - `org:read` — Read organization info
+
+2. Add to your worker environment:
+
+```bash
+SENTRY_AUTH_TOKEN=your-auth-token
+SENTRY_ORG=your-org-slug
+```
+
+3. Verify authentication in a worker:
+
+```bash
+sentry-cli info
+```
+
+## Usage
+
+Workers can use the `/investigate-sentry-issue` command to:
+- Get issue details and stacktraces
+- Analyze breadcrumbs and context
+- Resolve, mute, or unresolve issues
+
+### Examples
+
+```
+/investigate-sentry-issue https://sentry.io/organizations/myorg/issues/123456/
+```
+
+Or just the issue ID:
+
+```
+/investigate-sentry-issue 123456
+```

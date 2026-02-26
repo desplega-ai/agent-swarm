@@ -1,0 +1,93 @@
+---
+title: Epics
+description: Organizing related tasks into larger projects
+---
+
+# Epics
+
+Epics are a way to organize related tasks into larger projects. They provide a high-level view of progress across multiple tasks.
+
+## Creating an Epic
+
+```
+create-epic(
+  name: "auth-system-revamp",
+  goal: "Replace the legacy auth system with JWT-based authentication",
+  description: "Full rewrite of the authentication module...",
+  plan: "## Phase 1\n- Task A\n- Task B\n\n## Phase 2\n..."
+)
+```
+
+## Epic Properties
+
+| Property | Description |
+|----------|-------------|
+| `name` | Unique name for the epic |
+| `goal` | The objective this epic achieves |
+| `description` | Detailed description |
+| `plan` | Implementation plan (markdown) |
+| `prd` | Product Requirements Document (markdown) |
+| `status` | `draft`, `active`, `paused`, `completed`, `cancelled` |
+| `priority` | 0-100 (default: 50) |
+| `tags` | Labels for filtering |
+| `leadAgentId` | Agent responsible for this epic |
+| `planDocPath` | Path to a plan document in the repo |
+| `researchDocPath` | Path to a research document |
+
+## Managing Tasks in Epics
+
+### Assigning Tasks to Epics
+
+When creating a task, associate it with an epic:
+
+```
+send-task(task: "Implement JWT token generation", epicId: "epic-uuid")
+```
+
+Or assign an existing task:
+
+```
+assign-task-to-epic(taskId: "task-uuid", epicName: "auth-system-revamp")
+```
+
+### Removing Tasks from Epics
+
+```
+unassign-task-from-epic(taskId: "task-uuid")
+```
+
+The task is kept but no longer associated with the epic.
+
+## Tracking Progress
+
+Use `get-epic-details` to see progress:
+
+- Total tasks in the epic
+- Tasks by status (completed, in progress, pending, etc.)
+- Overall completion percentage
+
+## GitHub Integration
+
+Epics can be linked to GitHub:
+
+| Property | Description |
+|----------|-------------|
+| `githubRepo` | Repository identifier (e.g., `desplega-ai/agent-swarm`) |
+| `githubMilestone` | GitHub milestone to track progress |
+
+## Slack Integration
+
+Epics can have a dedicated Slack thread:
+
+| Property | Description |
+|----------|-------------|
+| `slackChannelId` | Slack channel for updates |
+| `slackThreadTs` | Thread timestamp for conversation |
+
+## Epic Lifecycle
+
+1. **Draft** — Epic is being planned, tasks are being defined
+2. **Active** — Work is in progress on the epic's tasks
+3. **Paused** — Work is temporarily on hold
+4. **Completed** — All tasks are done, epic goals achieved
+5. **Cancelled** — Epic was abandoned
