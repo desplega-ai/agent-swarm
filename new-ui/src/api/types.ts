@@ -25,6 +25,8 @@ export interface Agent {
   claudeMd?: string;
   soulMd?: string;
   identityMd?: string;
+  toolsMd?: string;
+  setupScript?: string;
   maxTasks?: number;
   capacity?: {
     current: number;

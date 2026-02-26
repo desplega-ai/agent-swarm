@@ -16,6 +16,7 @@ const ScheduleDetailPage = lazy(() => import("@/pages/schedules/[id]/page"));
 const UsagePage = lazy(() => import("@/pages/usage/page"));
 const ConfigPage = lazy(() => import("@/pages/config/page"));
 const ReposPage = lazy(() => import("@/pages/repos/page"));
+const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
 
 export const router = createBrowserRouter([
   {
@@ -37,6 +38,7 @@ export const router = createBrowserRouter([
       { path: "usage", element: <UsagePage /> },
       { path: "config", element: <ConfigPage /> },
       { path: "repos", element: <ReposPage /> },
+      { path: "*", element: <NotFoundPage /> },
     ],
   },
 ]);
