@@ -1,5 +1,7 @@
 # Agent Swarm
 
+> Built by [desplega.sh](https://desplega.sh) — build by builders for builders!
+
 <p align="center">
   <img src="assets/agent-swarm.png" alt="Agent Swarm" width="800">
 </p>
@@ -7,7 +9,7 @@
 https://github.com/user-attachments/assets/bd308567-d21e-44a5-87ec-d25aeb1de3d3
 
 <p align="center">
-  <a href="https://discord.gg/3XtmPdXm">
+  <a href="https://discord.gg/KZgfyyDVZa">
     <img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join Discord">
   </a>
 </p>

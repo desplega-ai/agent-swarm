@@ -30,16 +30,13 @@ import type { AgentWithTasks, AgentLog } from "@/api/types";
 
 // --- Agent Tile (Command Center style) ---
 
-function AgentTile({ agent, currentTaskText }: { agent: AgentWithTasks; currentTaskText?: string }) {
+function AgentRow({ agent, currentTaskText }: { agent: AgentWithTasks; currentTaskText?: string }) {
   return (
     <Link
       to={`/agents/${agent.id}`}
-      className={cn(
-        "flex items-center gap-2.5 md:items-start md:gap-3 rounded-lg border px-3 py-2 md:p-3 transition-colors hover:bg-muted/50",
-        agent.isLead ? "border-primary/30" : "border-border/50",
-      )}
+      className="flex items-center gap-3 px-3 py-2.5 hover:bg-muted/50 transition-colors border-b border-border/30 last:border-0"
     >
-      <div className="relative shrink-0 mt-0 md:mt-0.5">
+      <div className="shrink-0">
         {agent.status === "busy" ? (
           <Loader2 className="h-3 w-3 animate-spin text-amber-500" />
         ) : (
@@ -56,14 +53,9 @@ function AgentTile({ agent, currentTaskText }: { agent: AgentWithTasks; currentT
         <div className="flex items-center gap-1.5">
           <span className="text-sm font-semibold truncate">{agent.name}</span>
           {agent.isLead && <Crown className="h-3 w-3 text-primary shrink-0" />}
-          {agent.role && (
-            <span className="hidden md:inline text-[11px] text-muted-foreground">· {agent.role}</span>
-          )}
         </div>
         {currentTaskText && (
-          <p className="hidden md:block mt-1 text-[11px] text-muted-foreground/80 line-clamp-1">
-            {currentTaskText}
-          </p>
+          <p className="text-[11px] text-muted-foreground/80 truncate">{currentTaskText}</p>
         )}
       </div>
       <StatusBadge status={agent.status} />
@@ -347,24 +339,24 @@ export default function DashboardPage() {
               <span className="text-xs text-muted-foreground">{agents.length} total</span>
             )}
           </div>
-          {sortedAgents.length > 0 ? (
-            <>
-              <div className="grid gap-2 md:grid-cols-2">
-                {sortedAgents.slice(0, 6).map((agent) => (
-                  <AgentTile key={agent.id} agent={agent} currentTaskText={agentTaskMap.get(agent.id)} />
+          <div className="rounded-lg border border-border">
+            {sortedAgents.length > 0 ? (
+              <div>
+                {sortedAgents.slice(0, 3).map((agent) => (
+                  <AgentRow key={agent.id} agent={agent} currentTaskText={agentTaskMap.get(agent.id)} />
                 ))}
+                {sortedAgents.length > 3 && (
+                  <Link to="/agents" className="block text-center text-xs text-primary hover:underline py-2.5 border-t border-border/30">
+                    View all {sortedAgents.length} agents
+                  </Link>
+                )}
               </div>
-              {sortedAgents.length > 6 && (
-                <Link to="/agents" className="block text-center text-xs text-primary hover:underline pt-1">
-                  View all {sortedAgents.length} agents
-                </Link>
-              )}
-            </>
-          ) : (
-            <div className="flex items-center justify-center py-8 text-sm text-muted-foreground rounded-lg border border-dashed border-border">
-              No agents connected
-            </div>
-          )}
+            ) : (
+              <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
+                No agents connected
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Active Tasks Panel */}
@@ -381,14 +373,14 @@ export default function DashboardPage() {
           <div className="rounded-lg border border-border">
             {tasksData && tasksData.tasks.length > 0 ? (
               <div>
-                {tasksData.tasks.slice(0, 5).map((task) => (
+                {tasksData.tasks.slice(0, 3).map((task) => (
                   <ActiveTaskRow
                     key={task.id}
                     task={task}
                     agentName={task.agentId ? agentMap.get(task.agentId) ?? null : null}
                   />
                 ))}
-                {tasksData.tasks.length > 5 && (
+                {tasksData.tasks.length > 3 && (
                   <Link to="/tasks?status=in_progress" className="block text-center text-xs text-primary hover:underline py-2.5 border-t border-border/30">
                     View all {tasksData.tasks.length} active tasks
                   </Link>
