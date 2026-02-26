@@ -45,7 +45,7 @@ src/
   be/           # Backend utilities (DB, storage)
   github/       # GitHub webhook handlers
   slack/        # Slack integration
-ui/             # Dashboard (separate React app)
+new-ui/          # Dashboard (Next.js app)
 ```
 
 ## Code Style
@@ -57,7 +57,7 @@ ui/             # Dashboard (separate React app)
 
 ## Related
 
-- [UI Dashboard](./ui/CLAUDE.md) - React monitoring dashboard
+- [UI Dashboard](./new-ui/) - Next.js monitoring dashboard
 - [MCP.md](./MCP.md) - MCP tools reference
 - [DEPLOYMENT.md](./DEPLOYMENT.md) - Production deployment
 - [CONTRIBUTING.md](./CONTRIBUTING.md) - Development setup
