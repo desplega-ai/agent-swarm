@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
       packages: write
 
     steps:
@@ -49,8 +50,11 @@ jobs:
             type=raw,value=${{ steps.version.outputs.version }}
             type=sha
 
+      - uses: depot/setup-action@v1
+
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        # uses: docker/build-push-action@v5
+        uses: depot/build-push-action@v1
         with:
           context: .
           file: ./Dockerfile
