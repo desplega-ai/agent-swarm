@@ -1,16 +1,16 @@
 import { useState, useMemo, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
-import { useAgent, useUpdateAgentName } from "@/api/hooks/use-agents";
+import { useAgent, useUpdateAgentName, useUpdateAgentProfile } from "@/api/hooks/use-agents";
 import { useTasks } from "@/api/hooks/use-tasks";
 import { useSessionCosts } from "@/api/hooks/use-costs";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { UsageSummary } from "@/components/shared/usage-summary";
-import { JsonViewer } from "@/components/shared/json-viewer";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,16 +22,108 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatSmartTime, formatElapsed } from "@/lib/utils";
-import { Check, Pencil, X, ArrowLeft, Search, GitBranch } from "lucide-react";
-import type { AgentTask, AgentTaskStatus } from "@/api/types";
+import { Check, Pencil, X, ArrowLeft, Search, GitBranch, ChevronDown, ChevronRight } from "lucide-react";
+import type { Agent, AgentTask, AgentTaskStatus } from "@/api/types";
 
 const PAGE_SIZE = 100;
+
+type MdField = "soulMd" | "identityMd" | "claudeMd" | "toolsMd" | "setupScript";
+
+function EditableMarkdownField({
+  title,
+  field,
+  agent,
+  onSave,
+  saving,
+}: {
+  title: string;
+  field: MdField;
+  agent: Agent;
+  onSave: (field: MdField, value: string) => void;
+  saving: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const value = agent[field] ?? "";
+
+  function startEditing() {
+    setDraft(value);
+    setEditing(true);
+    setExpanded(true);
+  }
+
+  function cancel() {
+    setEditing(false);
+  }
+
+  function save() {
+    onSave(field, draft);
+    setEditing(false);
+  }
+
+  return (
+    <div className="rounded-md border border-border/50">
+      <div className="flex w-full items-center gap-2 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="flex flex-1 items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          {title}
+          {!value && (
+            <span className="text-xs font-normal italic text-muted-foreground/60">empty</span>
+          )}
+        </button>
+        {!editing && (
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={startEditing}>
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+      {expanded && (
+        <div className="border-t border-border/50">
+          {editing ? (
+            <div className="p-3 space-y-2">
+              <Textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                className="min-h-40 font-mono text-xs"
+                autoFocus
+              />
+              <div className="flex items-center gap-2">
+                <Button size="sm" onClick={save} disabled={saving}>
+                  <Check className="h-3.5 w-3.5 mr-1" />
+                  Save
+                </Button>
+                <Button size="sm" variant="ghost" onClick={cancel}>
+                  <X className="h-3.5 w-3.5 mr-1" />
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : value ? (
+            <pre className="overflow-auto bg-muted/30 p-3 text-xs font-mono leading-relaxed text-foreground/80 max-h-96">
+              {value}
+            </pre>
+          ) : (
+            <p className="px-3 py-4 text-sm text-muted-foreground/60 italic">
+              No content — click Edit to add
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: agent, isLoading } = useAgent(id!);
   const updateName = useUpdateAgentName();
+  const updateProfile = useUpdateAgentProfile();
 
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
@@ -68,6 +160,12 @@ export default function AgentDetailPage() {
       updateName.mutate({ id, name: editName.trim() });
     }
     setEditing(false);
+  }
+
+  function saveField(field: MdField, value: string) {
+    if (id) {
+      updateProfile.mutate({ id, profile: { [field]: value } });
+    }
   }
 
   const taskColDefs = useMemo<ColDef<AgentTask>[]>(
@@ -242,9 +340,11 @@ export default function AgentDetailPage() {
             </CardContent>
           </Card>
 
-          {agent.soulMd && <JsonViewer data={agent.soulMd} title="SOUL.md" />}
-          {agent.identityMd && <JsonViewer data={agent.identityMd} title="IDENTITY.md" />}
-          {agent.claudeMd && <JsonViewer data={agent.claudeMd} title="CLAUDE.md" />}
+          <EditableMarkdownField title="SOUL.md" field="soulMd" agent={agent} onSave={saveField} saving={updateProfile.isPending} />
+          <EditableMarkdownField title="IDENTITY.md" field="identityMd" agent={agent} onSave={saveField} saving={updateProfile.isPending} />
+          <EditableMarkdownField title="CLAUDE.md" field="claudeMd" agent={agent} onSave={saveField} saving={updateProfile.isPending} />
+          <EditableMarkdownField title="TOOLS.md" field="toolsMd" agent={agent} onSave={saveField} saving={updateProfile.isPending} />
+          <EditableMarkdownField title="Setup Script" field="setupScript" agent={agent} onSave={saveField} saving={updateProfile.isPending} />
         </TabsContent>
 
         <TabsContent value="tasks" className="flex flex-col flex-1 min-h-0 mt-4 gap-3">

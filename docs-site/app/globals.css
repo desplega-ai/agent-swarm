@@ -1,0 +1,22 @@
+@import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+
+@source "../node_modules/fumadocs-ui/dist/**/*.js";
+
+/* Amber accent colors — matching new-ui (Zinc base + amber primary) */
+@theme {
+  --color-fd-primary: oklch(0.555 0.163 48.998);
+  --color-fd-primary-foreground: oklch(0.985 0 0);
+  --color-fd-ring: oklch(0.555 0.163 48.998);
+  --color-fd-accent: oklch(0.967 0.001 286.375);
+  --color-fd-accent-foreground: oklch(0.21 0.006 285.885);
+}
+
+.dark {
+  --color-fd-primary: oklch(0.769 0.188 70.08);
+  --color-fd-primary-foreground: oklch(0.21 0.006 285.885);
+  --color-fd-ring: oklch(0.769 0.188 70.08);
+  --color-fd-accent: oklch(0.274 0.006 286.033);
+  --color-fd-accent-foreground: oklch(0.985 0 0);
+}

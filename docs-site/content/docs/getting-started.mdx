@@ -1,0 +1,109 @@
+---
+title: Getting Started
+description: Set up your first Agent Swarm in minutes
+---
+
+# Getting Started
+
+This guide walks you through setting up a fully operational Agent Swarm with a lead agent and workers.
+
+> Agent Swarm currently supports **Claude Code** as the AI coding assistant. Support for other agents is coming soon.
+
+## Prerequisites
+
+- [Docker](https://docker.com) and Docker Compose
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed, with an OAuth token (`claude setup-token`)
+
+## Option A: Docker Compose (Recommended)
+
+The fastest way to get a full swarm running — API server, lead agent, and 2 workers.
+
+```bash
+git clone https://github.com/desplega-ai/agent-swarm.git
+cd agent-swarm
+
+# Configure environment
+cp .env.docker.example .env
+# Edit .env — set API_KEY and CLAUDE_CODE_OAUTH_TOKEN at minimum
+
+# Start everything
+docker compose -f docker-compose.example.yml --env-file .env up -d
+```
+
+The API runs on port `3013`. The dashboard is available separately (see the [Dashboard UI](/docs/reference/cli) section).
+
+## Option B: Local API + Docker Workers
+
+Run the API locally and connect Docker workers to it.
+
+```bash
+git clone https://github.com/desplega-ai/agent-swarm.git
+cd agent-swarm
+bun install
+
+# 1. Configure and start the API server
+cp .env.example .env
+# Edit .env — set API_KEY
+bun run start:http
+```
+
+In a new terminal, start a worker:
+
+```bash
+# 2. Configure and run a Docker worker
+cp .env.docker.example .env.docker
+# Edit .env.docker — set API_KEY (same as above) and CLAUDE_CODE_OAUTH_TOKEN
+bun run docker:build:worker
+mkdir -p ./logs ./work/shared ./work/worker-1
+bun run docker:run:worker
+```
+
+## Option C: Claude Code as Lead Agent
+
+Use Claude Code directly as the lead agent — no Docker required for the lead.
+
+```bash
+# After starting the API server (Option B, step 1):
+bunx @desplega.ai/agent-swarm setup
+```
+
+This configures Claude Code to connect to the swarm. Start Claude Code and tell it:
+
+```
+Register yourself as the lead agent in the agent-swarm.
+```
+
+## Verifying Your Setup
+
+Once your swarm is running, you can verify it's working:
+
+1. **Check the API** — Visit `http://localhost:3013/health`
+2. **Check agents** — Use the dashboard or API to see registered agents
+3. **Send a test task** — Message the lead agent via Slack or the API
+
+## Configuration
+
+### Required Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `API_KEY` | Secret key for API authentication |
+| `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token for Claude CLI |
+
+### Optional Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3013` | API server port |
+| `AGENT_ID` | Auto-generated | Stable UUID for task resume |
+| `AGENT_NAME` | Auto-generated | Display name for the agent |
+| `AGENT_ROLE` | `worker` | Role: `worker` or `lead` |
+| `MCP_BASE_URL` | `http://host.docker.internal:3013` | MCP server URL |
+
+For the complete list, see [Environment Variables](/docs/reference/environment-variables).
+
+## Next Steps
+
+- [Architecture Overview](/docs/architecture/overview) — Understand the system design
+- [Task Lifecycle](/docs/concepts/task-lifecycle) — Learn how tasks flow through the swarm
+- [Deployment Guide](/docs/guides/deployment) — Production deployment options

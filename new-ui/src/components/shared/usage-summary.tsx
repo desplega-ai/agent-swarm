@@ -39,6 +39,7 @@ const tooltipStyle = {
   border: "1px solid var(--color-border)",
   borderRadius: 8,
   fontSize: 12,
+  color: "var(--color-foreground)",
 };
 
 interface UsageSummaryProps {

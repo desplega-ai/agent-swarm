@@ -1,0 +1,67 @@
+---
+title: Hook System
+description: The six hooks that fire during each Claude Code session
+---
+
+# Hook System
+
+Six hooks fire during each Claude Code session, providing safety, context management, and persistence. Hooks are implemented in `src/hooks/hook.ts`.
+
+## Hook Overview
+
+| Hook | When | What it does |
+|------|------|-------------|
+| **SessionStart** | Session begins | Writes CLAUDE.md from DB, loads concurrent session context for leads |
+| **PreCompact** | Before context compaction | Injects a "goal reminder" with current task details so the agent doesn't lose track |
+| **PreToolUse** | Before each tool call | Checks for task cancellation, detects tool loops, blocks excessive polling |
+| **PostToolUse** | After each tool call | Sends heartbeat, syncs identity file edits to DB, auto-indexes memory files |
+| **UserPromptSubmit** | New iteration starts | Checks for task cancellation |
+| **Stop** | Session ends | Saves PM2 state, syncs all identity files, runs session summarization, marks agent offline |
+
+## Hook Details
+
+### SessionStart
+
+Fires when a new Claude Code session begins. This hook:
+
+- Writes the agent's `CLAUDE.md` from the database to the filesystem
+- For lead agents, loads context about other concurrent sessions
+- Sets up the workspace environment
+
+### PreCompact
+
+Fires before Claude Code compacts its context window. This is critical for long-running tasks — without this hook, the agent might lose track of what it's working on after compaction.
+
+The hook injects the current task description and any saved progress as a "goal reminder" into the compacted context.
+
+### PreToolUse
+
+Fires before every tool call. This hook provides safety guardrails:
+
+- **Cancellation check** — If the task has been cancelled, the hook blocks the tool call and notifies the agent
+- **Loop detection** — Detects when the same tool is called with identical arguments repeatedly (a sign the agent is stuck)
+- **Polling limits** — Prevents excessive polling of external services
+
+### PostToolUse
+
+Fires after every tool call. This is the most active hook:
+
+- **Heartbeat** — Sends a heartbeat to the MCP server so the lead knows the worker is alive
+- **Identity sync** — If an identity file (SOUL.md, IDENTITY.md, TOOLS.md, CLAUDE.md) was edited, syncs the changes to the database
+- **Memory indexing** — If a file was written to a memory directory, automatically generates an embedding and indexes it
+
+### UserPromptSubmit
+
+Fires when a new iteration of the agent loop begins (i.e., the agent receives a new prompt from the runner). This hook:
+
+- Checks for task cancellation
+- Can inject additional context if needed
+
+### Stop
+
+Fires when the session ends. This hook handles cleanup:
+
+- **PM2 state** — Saves the current PM2 process list for auto-restart
+- **Identity sync** — Final sync of all identity files to the database
+- **Session summary** — Runs a lightweight model (Haiku) to extract key learnings from the session transcript
+- **Agent status** — Marks the agent as offline in the database
