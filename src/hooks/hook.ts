@@ -909,6 +909,25 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
     }
 
     case "Stop":
+      // Clean up any artifact tunnels managed by PM2
+      try {
+        const pm2ListOutput = await Bun.$`pm2 jlist 2>/dev/null || echo "[]"`.text();
+        const pm2Processes = JSON.parse(pm2ListOutput.trim());
+        const artifactProcesses = (pm2Processes as { name?: string }[]).filter((p) =>
+          p.name?.startsWith("artifact-"),
+        );
+
+        for (const proc of artifactProcesses) {
+          try {
+            await Bun.$`pm2 delete ${proc.name!}`.quiet();
+          } catch {
+            // Process might already be stopped
+          }
+        }
+      } catch {
+        // Non-fatal: PM2 might not be available
+      }
+
       // Save PM2 processes before shutdown (for container restart persistence)
       try {
         await Bun.$`pm2 save`.quiet();
