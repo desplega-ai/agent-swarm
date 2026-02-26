@@ -21,6 +21,7 @@ export function useMessages(channelId: string, filters?: MessageFilters) {
     queryFn: () => api.fetchMessages(channelId, filters),
     select: (data) => data.messages,
     enabled: !!channelId,
+    refetchInterval: 5000,
   });
 }
 

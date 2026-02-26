@@ -62,12 +62,12 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="border-b border-sidebar-border">
-        <NavLink to="/" className="flex items-center gap-2 px-2 py-2">
+      <SidebarHeader className="h-14 justify-center border-b border-sidebar-border">
+        <NavLink to="/" className="flex items-center gap-2 group-data-[collapsible=icon]:justify-center">
           <img
             src="/logo.png"
             alt="Agent Swarm"
-            className="h-8 w-8 rounded"
+            className="h-8 w-8 min-h-[32px] min-w-[32px] shrink-0 rounded"
           />
           <span className="text-lg font-semibold tracking-tight text-sidebar-foreground group-data-[collapsible=icon]:hidden">
             Agent Swarm

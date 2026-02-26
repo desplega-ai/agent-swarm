@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import type { ColDef, ICellRendererParams } from "ag-grid-community";
 import { useConfig } from "@/hooks/use-config";
 import { useConfigs, useUpsertConfig, useDeleteConfig } from "@/api/hooks/use-config-api";
 import { useAgents } from "@/api/hooks/use-agents";
+import { DataGrid } from "@/components/shared/data-grid";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,14 +28,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Loader2, CheckCircle2, XCircle, Hexagon, Plus, Pencil, Trash2, Eye, EyeOff, Settings, Copy, Check } from "lucide-react";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Loader2, CheckCircle2, XCircle, Hexagon, Plus, Pencil, Trash2, Eye, EyeOff, Copy, Check } from "lucide-react";
 import type { SwarmConfig, SwarmConfigScope } from "@/api/types";
 
 interface ConfigFormData {
@@ -223,7 +227,7 @@ function SwarmConfigSection() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editEntry, setEditEntry] = useState<SwarmConfig | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SwarmConfig | null>(null);
   const [revealedSecrets, setRevealedSecrets] = useState<Set<string>>(new Set());
   const [scopeFilter, setScopeFilter] = useState<string>("all");
 
@@ -249,9 +253,11 @@ function SwarmConfigSection() {
     setEditEntry(null);
   }
 
-  function handleDelete(id: string) {
-    deleteConfig.mutate(id);
-    setDeleteConfirm(null);
+  function handleDelete() {
+    if (deleteTarget) {
+      deleteConfig.mutate(deleteTarget.id);
+      setDeleteTarget(null);
+    }
   }
 
   function toggleReveal(id: string) {
@@ -265,6 +271,116 @@ function SwarmConfigSection() {
 
   const filteredConfigs =
     scopeFilter === "all" ? configs : configs?.filter((c) => c.scope === scopeFilter);
+
+  const columnDefs = useMemo<ColDef<SwarmConfig>[]>(
+    () => [
+      {
+        field: "scope",
+        headerName: "Scope",
+        width: 100,
+        cellRenderer: (params: { value: string }) => (
+          <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
+            {params.value}
+          </Badge>
+        ),
+      },
+      {
+        headerName: "Agent / Scope ID",
+        width: 150,
+        valueGetter: (params) => {
+          const d = params.data;
+          if (!d) return "—";
+          if (d.scope === "agent" && d.scopeId)
+            return agentMap.get(d.scopeId) ?? d.scopeId.slice(0, 8) + "...";
+          if (d.scope === "repo" && d.scopeId)
+            return d.scopeId.slice(0, 8) + "...";
+          return "—";
+        },
+      },
+      {
+        field: "key",
+        headerName: "Key",
+        width: 180,
+        cellRenderer: (params: { value: string }) => (
+          <span className="font-mono">{params.value}</span>
+        ),
+      },
+      {
+        field: "value",
+        headerName: "Value",
+        flex: 1,
+        minWidth: 200,
+        cellRenderer: (params: ICellRendererParams<SwarmConfig>) => {
+          const cfg = params.data;
+          if (!cfg) return null;
+          if (cfg.isSecret) {
+            const revealed = revealedSecrets.has(cfg.id);
+            return (
+              <div className="flex items-center gap-1 font-mono">
+                <span>{revealed ? cfg.value : "••••••••"}</span>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-6 w-6"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleReveal(cfg.id);
+                  }}
+                >
+                  {revealed ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                </Button>
+              </div>
+            );
+          }
+          return <span className="font-mono">{cfg.value}</span>;
+        },
+      },
+      {
+        field: "description",
+        headerName: "Description",
+        width: 200,
+        cellRenderer: (params: { value: string | null }) => (
+          <span className="text-muted-foreground">{params.value ?? "—"}</span>
+        ),
+      },
+      {
+        headerName: "",
+        width: 100,
+        sortable: false,
+        cellRenderer: (params: ICellRendererParams<SwarmConfig>) => {
+          const cfg = params.data;
+          if (!cfg) return null;
+          return (
+            <div className="flex items-center gap-1">
+              <Button
+                size="icon"
+                variant="outline"
+                className="h-7 w-7 border-border/60"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleEdit(cfg);
+                }}
+              >
+                <Pencil className="h-3 w-3" />
+              </Button>
+              <Button
+                size="icon"
+                variant="outline"
+                className="h-7 w-7 border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeleteTarget(cfg);
+                }}
+              >
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </div>
+          );
+        },
+      },
+    ],
+    [agentMap, revealedSecrets, deleteTarget],
+  );
 
   return (
     <div className="space-y-4">
@@ -289,105 +405,13 @@ function SwarmConfigSection() {
         </Select>
       </div>
 
-      {isLoading ? (
-        <div className="text-sm text-muted-foreground py-4 text-center">Loading configs...</div>
-      ) : filteredConfigs && filteredConfigs.length > 0 ? (
-        <div className="rounded-lg border border-border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Scope</TableHead>
-                <TableHead>Agent / Scope ID</TableHead>
-                <TableHead>Key</TableHead>
-                <TableHead>Value</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead className="w-[100px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredConfigs.map((cfg) => (
-                <TableRow key={cfg.id}>
-                  <TableCell>
-                    <Badge variant="outline" className="text-[10px]">
-                      {cfg.scope}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {cfg.scope === "agent" && cfg.scopeId
-                      ? agentMap.get(cfg.scopeId) ?? cfg.scopeId.slice(0, 8) + "..."
-                      : cfg.scope === "repo" && cfg.scopeId
-                        ? cfg.scopeId.slice(0, 8) + "..."
-                        : "—"}
-                  </TableCell>
-                  <TableCell className="font-mono text-sm">{cfg.key}</TableCell>
-                  <TableCell className="font-mono text-sm max-w-[200px] truncate">
-                    {cfg.isSecret ? (
-                      <div className="flex items-center gap-1">
-                        <span>
-                          {revealedSecrets.has(cfg.id) ? cfg.value : "••••••••"}
-                        </span>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-6 w-6"
-                          onClick={() => toggleReveal(cfg.id)}
-                        >
-                          {revealedSecrets.has(cfg.id) ? (
-                            <EyeOff className="h-3 w-3" />
-                          ) : (
-                            <Eye className="h-3 w-3" />
-                          )}
-                        </Button>
-                      </div>
-                    ) : (
-                      cfg.value
-                    )}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">
-                    {cfg.description ?? "—"}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        onClick={() => handleEdit(cfg)}
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      {deleteConfirm === cfg.id ? (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7 text-red-400 hover:text-red-300"
-                          onClick={() => handleDelete(cfg.id)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      ) : (
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7"
-                          onClick={() => setDeleteConfirm(cfg.id)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      ) : (
-        <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-          <Settings className="h-6 w-6 mb-2" />
-          <p className="text-sm">No configuration entries</p>
-        </div>
-      )}
+      <DataGrid
+        rowData={filteredConfigs ?? []}
+        columnDefs={columnDefs}
+        loading={isLoading}
+        emptyMessage="No configuration entries"
+        domLayout="autoHeight"
+      />
 
       <ConfigEntryDialog
         open={dialogOpen}
@@ -395,6 +419,23 @@ function SwarmConfigSection() {
         editEntry={editEntry}
         onSubmit={handleSubmit}
       />
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Config Entry</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong className="font-mono">{deleteTarget?.key}</strong>? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleDelete}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

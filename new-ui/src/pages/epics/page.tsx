@@ -65,7 +65,7 @@ export default function EpicsPage() {
         cellRenderer: (params: { value: number; data: EpicWithProgress | undefined }) => {
           const pct = params.value ?? 0;
           return (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full h-full">
               <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
                 <div
                   className="h-full rounded-full bg-primary transition-all"

@@ -1,11 +1,12 @@
 import { useState, useMemo, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { useAgents } from "@/api/hooks/use-agents";
 import { formatSmartTime } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -18,9 +19,10 @@ import type { AgentWithTasks, AgentStatus } from "@/api/types";
 
 export default function AgentsPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { data: agents, isLoading } = useAgents();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>(searchParams.get("status") ?? "all");
 
   const filteredAgents = useMemo(() => {
     if (!agents) return [];
@@ -59,12 +61,12 @@ export default function AgentsPage() {
         cellRenderer: (params: { value: string[] | undefined }) => (
           <div className="flex flex-wrap gap-1">
             {params.value?.slice(0, 3).map((cap) => (
-              <span key={cap} className="rounded-full bg-muted px-1.5 py-0.5 text-[10px]">
+              <Badge key={cap} variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
                 {cap}
-              </span>
+              </Badge>
             ))}
             {(params.value?.length ?? 0) > 3 && (
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-[9px] text-muted-foreground font-medium">
                 +{(params.value?.length ?? 0) - 3}
               </span>
             )}

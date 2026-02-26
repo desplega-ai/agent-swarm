@@ -159,7 +159,7 @@ export default function AgentDetailPage() {
                   <span className="text-xs text-muted-foreground uppercase tracking-wide">Capabilities</span>
                   <div className="flex flex-wrap gap-1 mt-1">
                     {agent.capabilities.map((cap) => (
-                      <Badge key={cap} variant="secondary" className="text-xs">
+                      <Badge key={cap} variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
                         {cap}
                       </Badge>
                     ))}

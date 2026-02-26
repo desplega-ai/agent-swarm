@@ -5,6 +5,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { useStats, useHealth, useLogs } from "@/api/hooks/use-stats";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useTasks } from "@/api/hooks/use-tasks";
+import { useSessionCosts } from "@/api/hooks/use-costs";
 import { formatRelativeTime, cn } from "@/lib/utils";
 import {
   Users,
@@ -122,32 +123,141 @@ const eventIcons: Record<string, { icon: LucideIcon; color: string }> = {
   service_registered: { icon: Server, color: "text-purple-400 bg-purple-400/10" },
 };
 
-function ActivityItem({ log }: { log: AgentLog }) {
+function statusColor(status: string | null | undefined): string {
+  switch (status) {
+    case "completed": return "text-emerald-400";
+    case "failed": case "cancelled": return "text-red-400";
+    case "in_progress": case "busy": return "text-amber-400";
+    case "idle": return "text-emerald-400";
+    case "offline": return "text-zinc-400";
+    default: return "text-primary";
+  }
+}
+
+function ActivityItem({
+  log,
+  agentMap,
+}: {
+  log: AgentLog;
+  agentMap: Map<string, string>;
+}) {
   const config = eventIcons[log.eventType] ?? {
     icon: Activity,
     color: "text-zinc-400 bg-zinc-400/10",
   };
   const Icon = config.icon;
 
+  const agentName = log.agentId ? agentMap.get(log.agentId) ?? log.agentId.slice(0, 8) : null;
+
+  const agentLink = log.agentId ? (
+    <Link to={`/agents/${log.agentId}`} className="font-semibold text-primary hover:underline">
+      {agentName}
+    </Link>
+  ) : null;
+
+  const taskLink = log.taskId ? (
+    <Link
+      to={`/tasks/${log.taskId}`}
+      className="font-mono text-[11px] text-primary/80 bg-primary/10 px-1 py-0.5 rounded hover:underline"
+    >
+      #{log.taskId.slice(0, 8)}
+    </Link>
+  ) : null;
+
+  const renderContent = () => {
+    switch (log.eventType) {
+      case "agent_joined":
+        return <>{agentLink} joined the swarm</>;
+      case "agent_left":
+        return <>{agentLink} left the swarm</>;
+      case "agent_status_change":
+        return (
+          <>
+            {agentLink} is now{" "}
+            <span className={cn("font-semibold", statusColor(log.newValue))}>
+              {log.newValue}
+            </span>
+          </>
+        );
+      case "task_created":
+        return (
+          <>
+            New task {taskLink} created
+            {log.newValue && (
+              <span className="block mt-0.5 text-[11px] text-muted-foreground/80 italic border-l-2 border-muted-foreground/20 pl-2 line-clamp-1">
+                {log.newValue}
+              </span>
+            )}
+          </>
+        );
+      case "task_status_change":
+        return (
+          <>
+            Task {taskLink}{" "}
+            {log.oldValue && (
+              <span className={cn("font-medium", statusColor(log.oldValue))}>{log.oldValue}</span>
+            )}
+            {log.oldValue && " → "}
+            <span className={cn("font-semibold", statusColor(log.newValue))}>{log.newValue}</span>
+          </>
+        );
+      case "task_progress":
+        return (
+          <>
+            {taskLink}
+            {log.newValue && (
+              <span className="block mt-0.5 text-[11px] text-muted-foreground/80 italic border-l-2 border-muted-foreground/20 pl-2 line-clamp-1">
+                {log.newValue}
+              </span>
+            )}
+          </>
+        );
+      case "task_offered":
+        return <>{agentLink} was offered task {taskLink}</>;
+      case "task_accepted":
+        return <>{agentLink} accepted task {taskLink}</>;
+      case "task_rejected":
+        return <>{agentLink} rejected task {taskLink}</>;
+      case "task_claimed":
+        return <>{agentLink} claimed task {taskLink}</>;
+      case "task_released":
+        return <>{agentLink} released task {taskLink}</>;
+      case "channel_message": {
+        let channelId: string | undefined;
+        if (log.metadata) {
+          try { channelId = JSON.parse(log.metadata).channelId; } catch { /* ignore */ }
+        }
+        return (
+          <>
+            {agentLink ?? <span className="font-semibold text-muted-foreground">Human</span>}{" "}
+            in{" "}
+            {channelId ? (
+              <Link to={`/chat?channel=${channelId}`} className="font-semibold text-blue-400 hover:underline">
+                #chat
+              </Link>
+            ) : (
+              <span className="font-semibold text-blue-400">#chat</span>
+            )}
+          </>
+        );
+      }
+      default:
+        return <span className="font-medium">{String(log.eventType).replace(/_/g, " ")}</span>;
+    }
+  };
+
   return (
     <div className="flex items-start gap-3 py-2">
       <div
         className={cn(
-          "flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
+          "flex h-7 w-7 shrink-0 items-center justify-center rounded-full mt-0.5",
           config.color,
         )}
       >
         <Icon className="h-3.5 w-3.5" />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="text-sm">
-          <span className="font-medium">{log.eventType.replace(/_/g, " ")}</span>
-          {log.metadata && (
-            <span className="text-muted-foreground">
-              {" "}&mdash; {typeof log.metadata === "string" ? log.metadata : ""}
-            </span>
-          )}
-        </p>
+        <p className="text-sm">{renderContent()}</p>
         <p className="text-[11px] text-muted-foreground">
           {formatRelativeTime(log.createdAt)}
         </p>
@@ -164,8 +274,24 @@ export default function DashboardPage() {
   const { data: agents } = useAgents();
   const { data: tasksData } = useTasks({ status: "in_progress" });
   const { data: logs } = useLogs(15);
+  const { data: costs } = useSessionCosts({ limit: 500 });
 
   const isHealthy = !!health && !healthError;
+
+  const { costToday, costMtd } = useMemo(() => {
+    if (!costs) return { costToday: 0, costMtd: 0 };
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    let today = 0;
+    let mtd = 0;
+    for (const c of costs) {
+      const d = new Date(c.createdAt);
+      if (d >= startOfMonth) mtd += c.totalCostUsd;
+      if (d >= startOfDay) today += c.totalCostUsd;
+    }
+    return { costToday: today, costMtd: mtd };
+  }, [costs]);
 
   const agentMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -184,16 +310,20 @@ export default function DashboardPage() {
   }, [agents]);
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden gap-4">
       {/* Stats Strip */}
-      <StatsBar
-        agents={stats?.agents}
-        tasks={stats?.tasks}
-        healthy={isHealthy}
-      />
+      <div className="shrink-0">
+        <StatsBar
+          agents={stats?.agents}
+          tasks={stats?.tasks}
+          healthy={isHealthy}
+          costToday={costToday}
+          costMtd={costMtd}
+        />
+      </div>
 
       {/* Agent Grid + Active Tasks */}
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2 shrink-0">
         {/* Agent Status Grid */}
         <div className="space-y-3">
           <div className="flex items-center gap-2">
@@ -247,21 +377,23 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Activity Feed */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
+      {/* Activity Feed — fills remaining height, scrollable */}
+      <div className="flex flex-col flex-1 min-h-0 gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <Activity className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-semibold">Activity</h2>
-          <Link to="/tasks" className="ml-auto text-xs text-primary hover:underline">
-            View all
-          </Link>
         </div>
-        <div className="rounded-lg border border-border">
+        <div className="rounded-lg border border-border flex-1 min-h-0 overflow-y-auto">
           {logs && logs.length > 0 ? (
             <div className="divide-y divide-border/50 px-3">
               {logs.map((log) => (
-                <ActivityItem key={log.id} log={log} />
+                <ActivityItem key={log.id} log={log} agentMap={agentMap} />
               ))}
+              <div className="py-3 text-center">
+                <Link to="/tasks" className="text-xs text-primary hover:underline">
+                  View all activity
+                </Link>
+              </div>
             </div>
           ) : (
             <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">

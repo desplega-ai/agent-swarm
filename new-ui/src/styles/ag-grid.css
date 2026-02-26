@@ -22,3 +22,9 @@
   --ag-range-selection-border-color: var(--color-primary);
   --ag-input-focus-border-color: var(--color-primary);
 }
+
+/* Vertically center cell content in all AG Grid cells */
+.ag-theme-quartz .ag-cell-value {
+  display: flex;
+  align-items: center;
+}

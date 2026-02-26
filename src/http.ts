@@ -1868,11 +1868,13 @@ const httpServer = createHttpServer(async (req, res) => {
     const status = queryParams.get("status") as EpicStatus | null;
     const search = queryParams.get("search");
     const leadAgentId = queryParams.get("leadAgentId");
-    const epics = getEpics({
+    const rawEpics = getEpics({
       status: status || undefined,
       search: search || undefined,
       leadAgentId: leadAgentId || undefined,
     });
+    // Enrich each epic with progress data for the UI
+    const epics = rawEpics.map((e) => getEpicWithProgress(e.id) ?? e);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ epics, total: epics.length }));
     return;

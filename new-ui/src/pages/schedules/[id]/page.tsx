@@ -65,7 +65,11 @@ export default function ScheduleDetailPage() {
         >
           {schedule.enabled ? "Enabled" : "Disabled"}
         </Badge>
-        {schedule.taskType && <Badge variant="outline">{schedule.taskType}</Badge>}
+        {schedule.taskType && (
+          <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
+            {schedule.taskType}
+          </Badge>
+        )}
       </div>
 
       {schedule.description && (
@@ -139,7 +143,7 @@ export default function ScheduleDetailPage() {
                 <span className="text-xs text-muted-foreground uppercase tracking-wide">Tags</span>
                 <div className="flex flex-wrap gap-1 mt-1">
                   {schedule.tags.map((tag) => (
-                    <Badge key={tag} variant="secondary" className="text-xs">
+                    <Badge key={tag} variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
                       {tag}
                     </Badge>
                   ))}

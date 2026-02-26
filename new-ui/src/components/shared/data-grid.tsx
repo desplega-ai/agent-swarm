@@ -72,11 +72,15 @@ export function DataGrid<TData>({
     gridRef.current?.api?.sizeColumnsToFit();
   }, [loading]);
 
+  const onGridSizeChanged = useCallback(() => {
+    gridRef.current?.api?.sizeColumnsToFit();
+  }, []);
+
   return (
     <div
       className={cn(
         "ag-theme-quartz w-full",
-        domLayout === "normal" && "flex-1 min-h-[500px]",
+        domLayout === "normal" && "h-[500px] flex-1",
         onRowClicked && "[&_.ag-row]:cursor-pointer",
         className,
       )}
@@ -95,6 +99,7 @@ export function DataGrid<TData>({
         loading={loading}
         overlayNoRowsTemplate={overlayNoRowsTemplate}
         onGridReady={onGridReady}
+        onGridSizeChanged={onGridSizeChanged}
         animateRows={false}
         suppressCellFocus
       />
