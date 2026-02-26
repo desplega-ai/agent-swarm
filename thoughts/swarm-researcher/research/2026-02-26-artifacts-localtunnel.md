@@ -9,7 +9,7 @@ status: "complete"
 
 ## TL;DR
 
-**Artifacts** are a way for swarm agents to serve HTML pages, interactive apps, and rich content via public URLs. Each agent already exposes port 3000 — by combining this with our localtunnel infrastructure (`lt.desplega.ai`), agents can publish content that anyone with credentials can access from a browser.
+**Artifacts** are a way for swarm agents to serve HTML pages, interactive apps, and rich content via public URLs. By combining dynamically allocated local ports with our localtunnel infrastructure (`lt.desplega.ai`), agents can publish multiple artifacts simultaneously — each on its own port and subdomain — that anyone with credentials can access from a browser.
 
 Our localtunnel forks already have the two key features needed: **deterministic subdomains** (with 409 conflict handling) and **HTTP Basic Auth** (per-tunnel, timing-safe). The infrastructure is ready to use today.
 
@@ -22,7 +22,7 @@ Our localtunnel forks already have the two key features needed: **deterministic 
 Artifacts are publicly accessible web content served by swarm agents. Instead of agents only communicating through Slack messages and task outputs (text), artifacts let agents produce rich, interactive deliverables:
 
 ```
-Agent Container (port 3000)
+Agent Container (dynamic port per artifact)
     |
     | localtunnel client
     v
@@ -58,10 +58,10 @@ The artifact system adds a new command to the `agent-swarm` CLI (`src/cli.tsx`).
 # Serve a static directory
 artifact serve ./dist --name "pr-review-42"
 
-# Serve a custom server script (must listen on port 3000)
+# Serve a custom server script (auto-assigns a free port)
 artifact serve ./server.js --name "approval-flow"
 
-# Serve with explicit port (if not using default 3000)
+# Serve with explicit port (otherwise auto-assigned)
 artifact serve ./app.js --name "dashboard" --port 8080
 
 # Serve without auth (for public content)
@@ -71,21 +71,24 @@ artifact serve ./dist --name "docs-preview" --no-auth
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--name` | Required | Human-readable name for the artifact |
-| `--port` | `3000` | Local port the server listens on |
+| `--port` | auto | Local port (default: auto-assign a free port) |
 | `--no-auth` | `false` | Disable Basic Auth on the tunnel |
 | `--subdomain` | Agent UUID | Custom subdomain (overrides default) |
 
 **What happens under the hood:**
 
-1. If path points to a directory → starts a static file server (e.g., `sirv` or `serve-handler`) on port 3000
+1. If path points to a directory → starts a static file server (e.g., `sirv` or `serve-handler`) on an auto-assigned free port
 2. If path points to a `.js`/`.ts` file → starts it via PM2 (`pm2 start <script> --name artifact-<name>`)
-3. Creates a localtunnel: `localtunnel({ port, subdomain: agentId, auth: API_KEY })`
+3. Creates a localtunnel: `localtunnel({ port, subdomain: '${agentId}-${name}', auth: API_KEY })`
+   - Each artifact gets its own subdomain: `{agentId}-{name}.lt.desplega.ai`
+   - A single worker can serve multiple artifacts simultaneously on different ports/subdomains
 4. Registers in service registry via `register-service` MCP tool with metadata:
    ```json
    {
      "type": "artifact",
      "artifactName": "pr-review-42",
-     "publicUrl": "https://{agentId}.lt.desplega.ai",
+     "port": 49152,
+     "publicUrl": "https://{agentId}-pr-review-42.lt.desplega.ai",
      "auth": { "username": "swarm", "password": "***" }
    }
    ```
@@ -95,10 +98,10 @@ artifact serve ./dist --name "docs-preview" --no-auth
 
 ```bash
 $ artifact list
-NAME              AGENT        URL                                                    STATUS
-pr-review-42      researcher   https://1699...cf73.lt.desplega.ai                    healthy
-approval-flow     lead         https://d454...f9c3.lt.desplega.ai                    healthy
-dashboard         picateclas   https://a8b2...80f.lt.desplega.ai                     unhealthy
+NAME              AGENT        PORT   URL                                                        STATUS
+pr-review-42      researcher   49152  https://1699...cf73-pr-review-42.lt.desplega.ai             healthy
+approval-flow     lead         49153  https://d454...f9c3-approval-flow.lt.desplega.ai            healthy
+dashboard         picateclas   49200  https://a8b2...80f-dashboard.lt.desplega.ai                 unhealthy
 ```
 
 Queries `list-services` MCP tool, filtering for services with `metadata.type === "artifact"`.
@@ -128,12 +131,12 @@ Looks up the artifact URL from the service registry, embeds credentials, and ope
 
 The SDK has two sides: a **server-side TypeScript API** (used by agents to create artifacts programmatically) and a **browser-side JS SDK** (injected into served HTML for interactivity).
 
-#### Server-Side SDK (`@desplega.ai/artifact-sdk`)
+#### Server-Side SDK (`src/artifact-sdk/`)
 
-This is a TypeScript library that agents import in their artifact server scripts.
+This is a TypeScript module that lives **inside the agent-swarm repo** — no npm publishing required. Since agents already run inside agent-swarm's Docker container, the SDK is available as a direct import.
 
 ```typescript
-import { createArtifactServer } from '@desplega.ai/artifact-sdk';
+import { createArtifactServer } from '../artifact-sdk';
 
 // Minimal example — serve static HTML
 const server = createArtifactServer({
@@ -143,13 +146,13 @@ const server = createArtifactServer({
 });
 
 await server.start();
-// → Starts on port 3000, creates tunnel, registers service
-// → Logs: "Artifact live at https://{agentId}.lt.desplega.ai"
+// → Finds a free port, starts server, creates tunnel, registers service
+// → Logs: "Artifact live at https://{agentId}-pr-review-42.lt.desplega.ai"
 ```
 
 ```typescript
 // Advanced example — custom Hono app with swarm API proxy
-import { createArtifactServer } from '@desplega.ai/artifact-sdk';
+import { createArtifactServer } from '../artifact-sdk';
 import { Hono } from 'hono';
 
 const app = new Hono();
@@ -184,18 +187,19 @@ await server.start();
 
 ```typescript
 interface ArtifactServerOptions {
-  name: string;                    // Artifact name for registry
+  name: string;                    // Artifact name (used in subdomain + registry)
   static?: string;                 // Path to static directory (mutually exclusive with app)
   app?: HonoApp;                   // Custom Hono application
-  port?: number;                   // Local port (default: 3000)
+  port?: number;                   // Local port (default: 0 = auto-assign free port)
   auth?: boolean;                  // Enable Basic Auth (default: true)
-  subdomain?: string;              // Custom subdomain (default: AGENT_ID env)
+  subdomain?: string;              // Custom subdomain (default: `${AGENT_ID}-${name}`)
 }
 
 interface ArtifactServer {
   start(): Promise<void>;          // Start server + tunnel + register
   stop(): Promise<void>;           // Stop everything + unregister
   url: string;                     // Public URL (available after start)
+  port: number;                    // Actual port the server is listening on
   tunnel: LocaltunnelInstance;     // Raw tunnel object
 }
 ```
@@ -207,8 +211,8 @@ interface ArtifactServer {
    - `/@swarm/sdk.js` → serves the browser SDK bundle
    - `/@swarm/api/*` → proxies to the swarm MCP server HTTP API (`$MCP_BASE_URL`)
    - `/@swarm/config` → returns `{ agentId, artifactName }` as JSON
-3. Starts HTTP server on the specified port
-4. Creates localtunnel with `{ port, subdomain: AGENT_ID, auth: API_KEY }`
+3. Starts HTTP server on port 0 (OS picks a free port) — or a user-specified port
+4. Creates localtunnel with `{ port: server.port, subdomain: '${AGENT_ID}-${name}', auth: API_KEY }`
 5. Registers via `POST $MCP_BASE_URL/api/services` (or `register-service` tool)
 6. Sets up SIGTERM handler for graceful shutdown
 
@@ -315,7 +319,7 @@ artifact serve . --name "pr-review-42"
 **Option B — Programmatic (inside a task script):**
 ```javascript
 // The agent writes and runs this script
-import { createArtifactServer } from '@desplega.ai/artifact-sdk';
+import { createArtifactServer } from '../artifact-sdk';
 
 const server = createArtifactServer({
   name: 'pr-review-42',
@@ -328,15 +332,22 @@ console.log(`Live at: ${server.url}`);
 
 **Option C — Custom server with interactivity:**
 ```javascript
-import { createArtifactServer } from '@desplega.ai/artifact-sdk';
+import { createArtifactServer } from '../artifact-sdk';
 import { Hono } from 'hono';
 
 const app = new Hono();
 app.get('/', (c) => c.html(myGeneratedHtml));
 app.post('/api/approve', async (c) => { /* handle approval */ });
 
+// Each artifact auto-assigns a free port and gets its own subdomain
 const server = createArtifactServer({ name: 'approval-flow', app });
 await server.start();
+// → Listening on port 49153, tunnel at https://{agentId}-approval-flow.lt.desplega.ai
+
+// Workers can serve multiple artifacts simultaneously:
+const dashboard = createArtifactServer({ name: 'dashboard', static: './dashboard-dist' });
+await dashboard.start();
+// → Listening on port 49154, tunnel at https://{agentId}-dashboard.lt.desplega.ai
 ```
 
 #### Step 3: Share the URL
@@ -368,6 +379,13 @@ src/
 ├── commands/
 │   ├── artifact.ts            # NEW: artifact serve/list/stop/open
 │   └── runner.ts              # No changes (artifacts are independent processes)
+├── artifact-sdk/              # NEW: in-repo SDK (no npm publishing needed)
+│   ├── index.ts               # Public exports
+│   ├── server.ts              # createArtifactServer() — auto-assigns free port
+│   ├── tunnel.ts              # Localtunnel wrapper — per-artifact subdomains
+│   ├── port.ts                # Dynamic port allocation (getPort())
+│   ├── proxy.ts               # /@swarm/api/* proxy middleware
+│   └── browser-sdk.ts         # Browser SDK (bundled to sdk.js)
 ├── hooks/
 │   └── hook.ts                # Add tunnel cleanup to Stop hook
 ├── tools/
@@ -377,18 +395,11 @@ src/
 ├── server.ts                  # Add 'artifacts' capability gate
 └── http.ts                    # Add /@swarm/api proxy routes (or separate server)
 
-packages/
-└── artifact-sdk/              # NEW: @desplega.ai/artifact-sdk npm package
-    ├── src/
-    │   ├── server.ts          # createArtifactServer()
-    │   ├── tunnel.ts          # Localtunnel wrapper
-    │   ├── proxy.ts           # /@swarm/api/* proxy middleware
-    │   └── browser-sdk.ts     # Browser SDK (bundled to sdk.js)
-    └── package.json
-
 Dockerfile.worker              # Install @desplega.ai/localtunnel globally
 docker-entrypoint.sh           # Optional: auto-start tunnel on container boot
 ```
+
+> **Why in-repo?** Agents run inside agent-swarm's Docker container, so the SDK code is already available at runtime. No npm publishing, no version drift, no extra install step. Agents import directly: `import { createArtifactServer } from '../artifact-sdk'`.
 
 #### Specific integration points:
 
@@ -396,10 +407,11 @@ docker-entrypoint.sh           # Optional: auto-start tunnel on container boot
 |-----------|------|--------|
 | **CLI command** | `src/cli.tsx` | Add `case "artifact":` dispatch to `src/commands/artifact.ts` |
 | **Capability** | `src/server.ts:72` | Add `"artifacts"` to default capabilities string |
+| **Artifact SDK** | `src/artifact-sdk/` | In-repo module — no npm publishing needed. Direct import by agents |
 | **Base prompt** | `src/prompts/base-prompt.ts` | Add `BASE_PROMPT_ARTIFACTS` with usage instructions, gated by `hasCapability("artifacts")` |
-| **Stop hook** | `src/hooks/hook.ts` (Stop case) | Call `tunnel.close()` for any running artifact tunnels |
+| **Stop hook** | `src/hooks/hook.ts` (Stop case) | Call `tunnel.close()` for all running artifact tunnels (multiple per worker) |
 | **Service registry** | `src/tools/register-service.ts` | No changes — already supports metadata for custom service types |
-| **Docker** | `Dockerfile.worker` | `npm install -g @desplega.ai/localtunnel` |
+| **Docker** | `Dockerfile.worker` | `npm install -g @desplega.ai/localtunnel` (client binary only) |
 | **Entrypoint** | `docker-entrypoint.sh` | Optional: auto-create tunnel when PM2 starts a registered artifact service |
 | **PM2 ecosystem** | `src/http.ts` (`/ecosystem`) | Already generates PM2 config from registered services — artifacts auto-restart on container boot |
 
@@ -697,7 +709,7 @@ const agent = new TunnelAgent({ clientId: id, maxTcpSockets: maxSockets });
 ### Phase 1: Foundation (MVP)
 1. **Patch localtunnel client** — add `username` option to `@desplega.ai/localtunnel` so we can use `swarm` instead of `hi`
 2. **Fix the `maxSockets` property name bug** in `desplega-ai/localtunnel-server`
-3. **Create `@desplega.ai/artifact-sdk`** package with `createArtifactServer()`, static serving, and tunnel management
+3. **Create `src/artifact-sdk/`** in-repo module with `createArtifactServer()`, dynamic port allocation, static serving, and tunnel management
 4. **Add `artifact` CLI command** to `src/cli.tsx` with `serve`, `list`, `stop` subcommands
 
 ### Phase 2: Interactivity
