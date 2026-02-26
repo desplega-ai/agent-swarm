@@ -33,5 +33,5 @@
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
   },
-  "exclude": ["ui", "new-ui", "node_modules", "scripts", "src/tests", "work", "logs"]
+  "exclude": ["ui", "new-ui", "node_modules", "scripts", "src/tests", "work", "logs", "plugin"]
 }
