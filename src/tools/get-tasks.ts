@@ -27,6 +27,8 @@ export const registerGetTasksTool = (server: McpServer) => {
       title: "Get tasks",
       description:
         "Returns a list of tasks in the swarm with various filters. Sorted by priority (desc) then lastUpdatedAt (desc).",
+      annotations: { readOnlyHint: true },
+
       inputSchema: z.object({
         status: AgentTaskStatusSchema.optional().describe(
           "Filter by task status (unassigned, offered, pending, in_progress, completed, failed).",

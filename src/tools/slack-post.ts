@@ -12,6 +12,8 @@ export const registerSlackPostTool = (server: McpServer) => {
       title: "Post new message to Slack channel",
       description:
         "Post a new message to a Slack channel. This creates a new message (not a thread reply). Requires lead privileges.",
+      annotations: { openWorldHint: true },
+
       inputSchema: z.object({
         channelId: z.string().min(1).describe("The Slack channel ID to post to."),
         message: z.string().min(1).max(4000).describe("The message content to post."),

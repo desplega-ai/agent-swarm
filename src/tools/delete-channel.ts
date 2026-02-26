@@ -12,6 +12,8 @@ export const registerDeleteChannelTool = (server: McpServer) => {
       title: "Delete Channel",
       description:
         "Deletes a channel and all its messages. Only the lead agent can delete channels. The default 'general' channel cannot be deleted.",
+      annotations: { destructiveHint: true },
+
       inputSchema: z.object({
         channelId: z.string().uuid().optional().describe("The ID of the channel to delete."),
         name: z.string().optional().describe("Channel name (alternative to channelId)."),

@@ -10,6 +10,8 @@ export const registerUnregisterServiceTool = (server: McpServer) => {
       title: "Unregister Service",
       description:
         "Remove a service from the registry. Use this after stopping a PM2 process. You can only unregister your own services.",
+      annotations: { destructiveHint: true },
+
       inputSchema: z.object({
         serviceId: z.uuid().optional().describe("Service ID to unregister."),
         name: z

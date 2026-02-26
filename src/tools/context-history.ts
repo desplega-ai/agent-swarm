@@ -11,6 +11,8 @@ export const registerContextHistoryTool = (server: McpServer) => {
       title: "Context History",
       description:
         "View version history for an agent's context files (soulMd, identityMd, toolsMd, claudeMd, setupScript). Returns metadata for each version without full content.",
+      annotations: { readOnlyHint: true },
+
       inputSchema: z.object({
         agentId: z
           .string()

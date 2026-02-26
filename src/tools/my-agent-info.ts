@@ -10,6 +10,8 @@ export const registerMyAgentInfoTool = (server: McpServer) => {
     {
       title: "Get your agent info",
       description: "Returns your agent ID based on the X-Agent-ID header.",
+      annotations: { readOnlyHint: true },
+
       inputSchema: z.object({}),
       outputSchema: z.object({
         success: z.boolean(),

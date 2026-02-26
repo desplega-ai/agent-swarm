@@ -10,6 +10,8 @@ export const registerDeleteConfigTool = (server: McpServer) => {
       title: "Delete Config",
       description:
         "Delete a swarm configuration entry by its ID. Use list-config to find config IDs first.",
+      annotations: { destructiveHint: true },
+
       inputSchema: z.object({
         id: z.string().uuid().describe("The config entry ID to delete."),
       }),

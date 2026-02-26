@@ -11,6 +11,8 @@ export const registerListServicesTool = (server: McpServer) => {
       title: "List Services",
       description:
         "Query services registered by agents in the swarm. Use this to discover services exposed by other agents.",
+      annotations: { readOnlyHint: true },
+
       inputSchema: z.object({
         agentId: z.uuid().optional().describe("Filter by specific agent ID."),
         name: z.string().optional().describe("Filter by service name (partial match)."),
