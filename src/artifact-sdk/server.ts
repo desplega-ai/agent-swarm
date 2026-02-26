@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
+import { BROWSER_SDK_JS } from "./browser-sdk";
 import { getAvailablePort } from "./port";
 import { createTunnel } from "./tunnel";
-import { BROWSER_SDK_JS } from "./browser-sdk";
 
 export interface ArtifactServerOptions {
   name: string;
@@ -69,7 +69,7 @@ export function createArtifactServer(opts: ArtifactServerOptions): ArtifactServe
   });
 
   // CORS preflight
-  app.options("/@swarm/api/*", (c) => {
+  app.options("/@swarm/api/*", (_c) => {
     return new Response(null, {
       status: 204,
       headers: {

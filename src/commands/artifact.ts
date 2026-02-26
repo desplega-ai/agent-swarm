@@ -1,6 +1,5 @@
-import { createArtifactServer } from "../artifact-sdk";
 import { Hono } from "hono";
-import { serveStatic } from "hono/bun";
+import { createArtifactServer } from "../artifact-sdk";
 
 interface ArtifactArgs {
   additionalArgs: string[];
@@ -16,7 +15,6 @@ export async function runArtifact(subcommand: string, args: ArtifactArgs) {
       return artifactList();
     case "stop":
       return artifactStop(args);
-    case "help":
     default:
       printHelp();
   }

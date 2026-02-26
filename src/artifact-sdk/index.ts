@@ -1,2 +1,2 @@
+export type { ArtifactServer, ArtifactServerOptions } from "./server";
 export { createArtifactServer } from "./server";
-export type { ArtifactServerOptions, ArtifactServer } from "./server";
