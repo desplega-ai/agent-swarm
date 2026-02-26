@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useConfig } from "@/hooks/use-config";
 import { useConfigs, useUpsertConfig, useDeleteConfig } from "@/api/hooks/use-config-api";
+import { useAgents } from "@/api/hooks/use-agents";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,7 +33,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Loader2, CheckCircle2, XCircle, Hexagon, Plus, Pencil, Trash2, Eye, EyeOff, Settings } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, Hexagon, Plus, Pencil, Trash2, Eye, EyeOff, Settings, Copy, Check } from "lucide-react";
 import type { SwarmConfig, SwarmConfigScope } from "@/api/types";
 
 interface ConfigFormData {
@@ -64,33 +65,25 @@ function ConfigEntryDialog({
   editEntry: SwarmConfig | null;
   onSubmit: (data: ConfigFormData) => void;
 }) {
-  const [form, setForm] = useState<ConfigFormData>(
-    editEntry
-      ? {
-          scope: editEntry.scope,
-          scopeId: editEntry.scopeId ?? "",
-          key: editEntry.key,
-          value: editEntry.isSecret ? "" : editEntry.value,
-          isSecret: editEntry.isSecret,
-          description: editEntry.description ?? "",
-        }
-      : emptyConfigForm,
-  );
+  const { data: agents } = useAgents();
+  const [form, setForm] = useState<ConfigFormData>(emptyConfigForm);
 
   useEffect(() => {
-    setForm(
-      editEntry
-        ? {
-            scope: editEntry.scope,
-            scopeId: editEntry.scopeId ?? "",
-            key: editEntry.key,
-            value: editEntry.isSecret ? "" : editEntry.value,
-            isSecret: editEntry.isSecret,
-            description: editEntry.description ?? "",
-          }
-        : emptyConfigForm,
-    );
-  }, [editEntry]);
+    if (open) {
+      setForm(
+        editEntry
+          ? {
+              scope: editEntry.scope,
+              scopeId: editEntry.scopeId ?? "",
+              key: editEntry.key,
+              value: editEntry.isSecret ? "" : editEntry.value,
+              isSecret: editEntry.isSecret,
+              description: editEntry.description ?? "",
+            }
+          : emptyConfigForm,
+      );
+    }
+  }, [editEntry, open]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -113,7 +106,7 @@ function ConfigEntryDialog({
               <Label>Scope</Label>
               <Select
                 value={form.scope}
-                onValueChange={(v) => setForm({ ...form, scope: v as SwarmConfigScope })}
+                onValueChange={(v) => setForm({ ...form, scope: v as SwarmConfigScope, scopeId: "" })}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -125,11 +118,42 @@ function ConfigEntryDialog({
                 </SelectContent>
               </Select>
             </div>
-            {form.scope !== "global" && (
+            {form.scope === "agent" && (
+              <div className="space-y-2">
+                <Label>Agent</Label>
+                {agents && agents.length > 0 ? (
+                  <Select
+                    value={form.scopeId}
+                    onValueChange={(v) => setForm({ ...form, scopeId: v })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select agent..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {agents.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          <span>{a.name}</span>
+                          <span className="ml-2 text-xs text-muted-foreground font-mono">
+                            {a.id.slice(0, 8)}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    placeholder="Agent UUID"
+                    value={form.scopeId}
+                    onChange={(e) => setForm({ ...form, scopeId: e.target.value })}
+                  />
+                )}
+              </div>
+            )}
+            {form.scope === "repo" && (
               <div className="space-y-2">
                 <Label>Scope ID</Label>
                 <Input
-                  placeholder={form.scope === "agent" ? "Agent UUID" : "Repo UUID"}
+                  placeholder="Repo UUID"
                   value={form.scopeId}
                   onChange={(e) => setForm({ ...form, scopeId: e.target.value })}
                 />
@@ -187,8 +211,15 @@ function ConfigEntryDialog({
 
 function SwarmConfigSection() {
   const { data: configs, isLoading } = useConfigs();
+  const { data: agents } = useAgents();
   const upsertConfig = useUpsertConfig();
   const deleteConfig = useDeleteConfig();
+
+  const agentMap = useMemo(() => {
+    const m = new Map<string, string>();
+    agents?.forEach((a) => m.set(a.id, a.name));
+    return m;
+  }, [agents]);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editEntry, setEditEntry] = useState<SwarmConfig | null>(null);
@@ -266,6 +297,7 @@ function SwarmConfigSection() {
             <TableHeader>
               <TableRow>
                 <TableHead>Scope</TableHead>
+                <TableHead>Agent / Scope ID</TableHead>
                 <TableHead>Key</TableHead>
                 <TableHead>Value</TableHead>
                 <TableHead>Description</TableHead>
@@ -279,6 +311,13 @@ function SwarmConfigSection() {
                     <Badge variant="outline" className="text-[10px]">
                       {cfg.scope}
                     </Badge>
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    {cfg.scope === "agent" && cfg.scopeId
+                      ? agentMap.get(cfg.scopeId) ?? cfg.scopeId.slice(0, 8) + "..."
+                      : cfg.scope === "repo" && cfg.scopeId
+                        ? cfg.scopeId.slice(0, 8) + "..."
+                        : "—"}
                   </TableCell>
                   <TableCell className="font-mono text-sm">{cfg.key}</TableCell>
                   <TableCell className="font-mono text-sm max-w-[200px] truncate">
@@ -366,8 +405,16 @@ export default function ConfigPage() {
 
   const [apiUrl, setApiUrl] = useState(config.apiUrl);
   const [apiKey, setApiKey] = useState(config.apiKey);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
+
+  function handleCopyApiKey() {
+    navigator.clipboard.writeText(apiKey);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
 
   async function handleConnect() {
     setStatus("loading");
@@ -428,17 +475,38 @@ export default function ConfigPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="api-key">API Key</Label>
-              <Input
-                id="api-key"
-                type="password"
-                placeholder="Enter your API key"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                disabled={status === "loading"}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleConnect();
-                }}
-              />
+              <div className="flex gap-1">
+                <Input
+                  id="api-key"
+                  type={showApiKey ? "text" : "password"}
+                  placeholder="Enter your API key"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  disabled={status === "loading"}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleConnect();
+                  }}
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="shrink-0"
+                  onClick={() => setShowApiKey(!showApiKey)}
+                >
+                  {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="shrink-0"
+                  onClick={handleCopyApiKey}
+                  disabled={!apiKey}
+                >
+                  {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                </Button>
+              </div>
             </div>
 
             {status === "error" && (
@@ -477,7 +545,7 @@ export default function ConfigPage() {
 
   // Configured: show connection settings + swarm config CRUD
   return (
-    <div className="space-y-8">
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-8">
       <h1 className="text-xl font-semibold">Settings</h1>
 
       {/* Connection Settings */}
@@ -500,13 +568,34 @@ export default function ConfigPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="api-key-cfg">API Key</Label>
-              <Input
-                id="api-key-cfg"
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                disabled={status === "loading"}
-              />
+              <div className="flex gap-1">
+                <Input
+                  id="api-key-cfg"
+                  type={showApiKey ? "text" : "password"}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  disabled={status === "loading"}
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="shrink-0"
+                  onClick={() => setShowApiKey(!showApiKey)}
+                >
+                  {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="shrink-0"
+                  onClick={handleCopyApiKey}
+                  disabled={!apiKey}
+                >
+                  {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                </Button>
+              </div>
             </div>
           </div>
 

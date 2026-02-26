@@ -5,7 +5,7 @@ import { useAgents } from "@/api/hooks/use-agents";
 import { formatRelativeTime, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
+
 import { Skeleton } from "@/components/ui/skeleton";
 import { Hash, Lock, Send, MessageSquare } from "lucide-react";
 import type { Channel, ChannelMessage } from "@/api/types";
@@ -166,17 +166,17 @@ export default function ChatPage() {
 
   if (channelsLoading) {
     return (
-      <div className="space-y-4">
+      <div className="flex flex-col flex-1 min-h-0 gap-4">
         <h1 className="text-xl font-semibold">Chat</h1>
-        <Skeleton className="h-[500px] w-full" />
+        <Skeleton className="flex-1 min-h-0 w-full" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col flex-1 min-h-0 gap-4">
       <h1 className="text-xl font-semibold">Chat</h1>
-      <div className="flex h-[calc(100vh-12rem)] overflow-hidden rounded-lg border border-border bg-background">
+      <div className="flex flex-1 min-h-0 overflow-hidden rounded-lg border border-border bg-background">
         <ChannelSidebar
           channels={channels ?? []}
           activeChannelId={activeChannelId}
@@ -196,7 +196,7 @@ export default function ChatPage() {
                 )}
               </div>
 
-              <ScrollArea className="flex-1">
+              <div className="flex-1 min-h-0 overflow-y-auto">
                 <div className="py-4">
                   {messagesLoading ? (
                     <div className="space-y-4 p-4">
@@ -222,7 +222,7 @@ export default function ChatPage() {
                   )}
                   <div ref={messagesEndRef} />
                 </div>
-              </ScrollArea>
+              </div>
 
               <MessageInput channelId={activeChannelId!} channelName={activeChannel.name} />
             </>

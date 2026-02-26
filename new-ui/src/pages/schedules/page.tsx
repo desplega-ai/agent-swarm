@@ -38,7 +38,7 @@ export default function SchedulesPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-4">
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
         <h1 className="text-xl font-semibold">Schedules</h1>
         <Skeleton className="h-64 w-full" />
       </div>
@@ -46,7 +46,7 @@ export default function SchedulesPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
       <h1 className="text-xl font-semibold">Schedules</h1>
 
       {schedules && schedules.length > 0 ? (

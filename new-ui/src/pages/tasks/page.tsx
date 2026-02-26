@@ -116,7 +116,7 @@ export default function TasksPage() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col flex-1 min-h-0 gap-4">
       <h1 className="text-xl font-semibold">Tasks</h1>
 
       <div className="flex items-center gap-3 flex-wrap">

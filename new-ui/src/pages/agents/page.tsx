@@ -13,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search } from "lucide-react";
+import { Search, Crown } from "lucide-react";
 import type { AgentWithTasks, AgentStatus } from "@/api/types";
 
 export default function AgentsPage() {
@@ -24,8 +24,8 @@ export default function AgentsPage() {
 
   const filteredAgents = useMemo(() => {
     if (!agents) return [];
-    if (statusFilter === "all") return agents;
-    return agents.filter((a) => a.status === statusFilter);
+    const filtered = statusFilter === "all" ? [...agents] : agents.filter((a) => a.status === statusFilter);
+    return filtered.sort((a, b) => (b.isLead ? 1 : 0) - (a.isLead ? 1 : 0));
   }, [agents, statusFilter]);
 
   const columnDefs = useMemo<ColDef<AgentWithTasks>[]>(
@@ -34,8 +34,13 @@ export default function AgentsPage() {
         field: "name",
         headerName: "Name",
         width: 200,
-        cellRenderer: (params: { value: string }) => (
-          <span className="font-semibold">{params.value}</span>
+        cellRenderer: (params: { value: string; data: AgentWithTasks | undefined }) => (
+          <span className="flex items-center gap-1.5 font-semibold">
+            {params.value}
+            {params.data?.isLead && (
+              <Crown className="h-3.5 w-3.5 text-primary shrink-0" />
+            )}
+          </span>
         ),
       },
       { field: "role", headerName: "Role", width: 150 },
@@ -90,7 +95,7 @@ export default function AgentsPage() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col flex-1 min-h-0 gap-4">
       <h1 className="text-xl font-semibold">Agents</h1>
 
       <div className="flex items-center gap-3">

@@ -106,7 +106,7 @@ export default function EpicsPage() {
   const epics = (epicsData?.epics ?? []) as unknown as EpicWithProgress[];
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col flex-1 min-h-0 gap-4">
       <h1 className="text-xl font-semibold">Epics</h1>
 
       <div className="flex items-center gap-3">

@@ -1,15 +1,15 @@
-import { useRef, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTask, useTaskSessionLogs } from "@/api/hooks/use-tasks";
+import { useAgents } from "@/api/hooks/use-agents";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAutoScroll } from "@/hooks/use-auto-scroll";
 import { formatSmartTime, formatRelativeTime } from "@/lib/utils";
-import { ArrowLeft, ArrowDown } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import type { AgentLog } from "@/api/types";
+import { useMemo } from "react";
 
 function LogTimeline({ logs }: { logs: AgentLog[] }) {
   return (
@@ -38,14 +38,16 @@ export default function TaskDetailPage() {
   const navigate = useNavigate();
   const { data: task, isLoading } = useTask(id!);
   const { data: sessionLogs } = useTaskSessionLogs(id!);
+  const { data: agents } = useAgents();
 
-  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const { isFollowing, scrollToBottom } = useAutoScroll(scrollEl, [sessionLogs]);
+  const agentName = useMemo(() => {
+    if (!task?.agentId || !agents) return null;
+    return agents.find((a) => a.id === task.agentId)?.name ?? null;
+  }, [task, agents]);
 
   if (isLoading) {
     return (
-      <div className="space-y-4">
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
         <Skeleton className="h-8 w-64" />
         <Skeleton className="h-48 w-full" />
       </div>
@@ -56,8 +58,11 @@ export default function TaskDetailPage() {
     return <p className="text-muted-foreground">Task not found.</p>;
   }
 
+  const hasSessionLogs = sessionLogs && sessionLogs.length > 0;
+  const hasRightColumn = hasSessionLogs || task.output || task.failureReason;
+
   return (
-    <div className="space-y-4">
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
       <button
         type="button"
         onClick={() => navigate("/tasks")}
@@ -87,7 +92,7 @@ export default function TaskDetailPage() {
             <span>
               Agent:{" "}
               <Link to={`/agents/${task.agentId}`} className="text-primary hover:underline">
-                {task.agentId.slice(0, 8)}...
+                {agentName ?? task.agentId.slice(0, 8) + "..."}
               </Link>
             </span>
           )}
@@ -96,99 +101,79 @@ export default function TaskDetailPage() {
         </div>
       </div>
 
-      {/* Description */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm text-muted-foreground">Description</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed">{task.task}</pre>
-        </CardContent>
-      </Card>
+      {/* Two-column layout */}
+      <div className={hasRightColumn ? "grid gap-4 md:grid-cols-[1fr_1.5fr]" : ""}>
+        {/* Left column: Description + Progress + Event History */}
+        <div className="space-y-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm text-muted-foreground">Description</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed">{task.task}</pre>
+            </CardContent>
+          </Card>
 
-      {/* Output / Progress / Failure */}
-      <div className="grid gap-4 md:grid-cols-2">
-        {task.progress && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">Progress</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed max-h-48 overflow-auto">
-                {task.progress}
-              </pre>
-            </CardContent>
-          </Card>
-        )}
-        {task.output && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-muted-foreground">Output</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed max-h-48 overflow-auto">
-                {task.output}
-              </pre>
-            </CardContent>
-          </Card>
-        )}
-        {task.failureReason && (
-          <Card className="border-red-500/30">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm text-red-400">Failure Reason</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed text-red-300">
-                {task.failureReason}
-              </pre>
-            </CardContent>
-          </Card>
+          {task.progress && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm text-muted-foreground">Progress</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed max-h-48 overflow-auto">
+                  {task.progress}
+                </pre>
+              </CardContent>
+            </Card>
+          )}
+
+          {task.logs && task.logs.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm text-muted-foreground">Event History</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <LogTimeline logs={task.logs} />
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Right column: Output / Error + Session Logs */}
+        {hasRightColumn && (
+          <div className="space-y-4">
+            {task.output && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm text-muted-foreground">Output</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed max-h-48 overflow-auto">
+                    {task.output}
+                  </pre>
+                </CardContent>
+              </Card>
+            )}
+
+            {task.failureReason && (
+              <Card className="border-red-500/30">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm text-red-400">Failure Reason</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed text-red-300">
+                    {task.failureReason}
+                  </pre>
+                </CardContent>
+              </Card>
+            )}
+
+            {hasSessionLogs && (
+              <SessionLogViewer logs={sessionLogs} className="h-[500px]" />
+            )}
+          </div>
         )}
       </div>
-
-      {/* Session Logs */}
-      {sessionLogs && sessionLogs.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm text-muted-foreground">Session Logs</CardTitle>
-              {!isFollowing && (
-                <Button size="sm" variant="outline" onClick={scrollToBottom} className="gap-1">
-                  <ArrowDown className="h-3 w-3" />
-                  Follow
-                </Button>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div
-              ref={(el) => {
-                scrollRef.current = el;
-                setScrollEl(el);
-              }}
-              className="h-80 overflow-auto rounded-md bg-zinc-950 p-3 font-mono text-xs leading-relaxed text-zinc-300"
-            >
-              {sessionLogs.map((log) => (
-                <div key={log.id} className="hover:bg-zinc-900/50">
-                  {log.content}
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Task Log Timeline */}
-      {task.logs && task.logs.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground">Event History</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <LogTimeline logs={task.logs} />
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }

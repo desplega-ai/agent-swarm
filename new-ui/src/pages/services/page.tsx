@@ -35,7 +35,7 @@ export default function ServicesPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-4">
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
         <h1 className="text-xl font-semibold">Services</h1>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -47,7 +47,7 @@ export default function ServicesPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
       <h1 className="text-xl font-semibold">Services</h1>
 
       {services && services.length > 0 ? (

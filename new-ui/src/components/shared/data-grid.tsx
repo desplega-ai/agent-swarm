@@ -69,13 +69,14 @@ export function DataGrid<TData>({
     if (loading) {
       gridRef.current?.api?.showLoadingOverlay();
     }
+    gridRef.current?.api?.sizeColumnsToFit();
   }, [loading]);
 
   return (
     <div
       className={cn(
         "ag-theme-quartz w-full",
-        domLayout === "normal" && "h-[600px]",
+        domLayout === "normal" && "flex-1 min-h-[500px]",
         onRowClicked && "[&_.ag-row]:cursor-pointer",
         className,
       )}

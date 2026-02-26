@@ -1,18 +1,16 @@
 import {
-  Activity,
   Bot,
   CheckCircle2,
   Clock,
+  Heart,
   Loader2,
-  Milestone,
   XCircle,
   Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { cn, formatCompactNumber } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
-interface StatCardProps {
+interface StatItemProps {
   icon: LucideIcon;
   label: string;
   value: number | string;
@@ -21,31 +19,20 @@ interface StatCardProps {
 
 const variantStyles = {
   default: "text-foreground",
-  success: "text-emerald-600 dark:text-emerald-400",
-  warning: "text-amber-600 dark:text-amber-400",
-  danger: "text-red-600 dark:text-red-400",
+  success: "text-emerald-500",
+  warning: "text-amber-500",
+  danger: "text-red-500",
 } as const;
 
-function StatCard({ icon: Icon, label, value, variant = "default" }: StatCardProps) {
+function StatItem({ icon: Icon, label, value, variant = "default" }: StatItemProps) {
   return (
-    <Card>
-      <CardContent className="p-4">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <Icon className="h-4 w-4" />
-          <span className="text-xs uppercase tracking-wider">{label}</span>
-        </div>
-        <div className="mt-2">
-          <span
-            className={cn(
-              "font-mono tabular-nums text-2xl font-bold",
-              variantStyles[variant],
-            )}
-          >
-            {typeof value === "number" ? formatCompactNumber(value) : value}
-          </span>
-        </div>
-      </CardContent>
-    </Card>
+    <div className="flex items-center gap-2 px-3 py-1.5">
+      <Icon className={cn("h-3.5 w-3.5", variantStyles[variant])} />
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className={cn("text-sm font-bold font-mono tabular-nums", variantStyles[variant])}>
+        {value}
+      </span>
+    </div>
   );
 }
 
@@ -56,50 +43,37 @@ interface StatsBarProps {
   healthy?: boolean;
 }
 
-export function StatsBar({ agents, tasks, epics, healthy }: StatsBarProps) {
+export function StatsBar({ agents, tasks, healthy }: StatsBarProps) {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
-      <StatCard
-        icon={Bot}
-        label="Agents"
-        value={agents?.total ?? 0}
-      />
-      <StatCard
+    <div className="flex flex-wrap items-center gap-0 rounded-lg border border-border bg-muted/30 divide-x divide-border">
+      <StatItem icon={Bot} label="Agents" value={agents?.total ?? 0} />
+      <StatItem
         icon={Zap}
         label="Busy"
         value={agents?.busy ?? 0}
         variant={(agents?.busy ?? 0) > 0 ? "warning" : "default"}
       />
-      <StatCard
-        icon={Clock}
-        label="Pending"
-        value={tasks?.pending ?? 0}
-      />
-      <StatCard
+      <StatItem icon={Clock} label="Pending" value={tasks?.pending ?? 0} />
+      <StatItem
         icon={Loader2}
         label="Running"
         value={tasks?.in_progress ?? 0}
         variant={(tasks?.in_progress ?? 0) > 0 ? "warning" : "default"}
       />
-      <StatCard
+      <StatItem
         icon={CheckCircle2}
         label="Done"
         value={tasks?.completed ?? 0}
         variant="success"
       />
-      <StatCard
+      <StatItem
         icon={XCircle}
         label="Failed"
         value={tasks?.failed ?? 0}
         variant={(tasks?.failed ?? 0) > 0 ? "danger" : "default"}
       />
-      <StatCard
-        icon={Milestone}
-        label="Epics"
-        value={epics?.active ?? 0}
-      />
-      <StatCard
-        icon={Activity}
+      <StatItem
+        icon={Heart}
         label="Health"
         value={healthy ? "OK" : "ERR"}
         variant={healthy ? "success" : "danger"}
