@@ -102,6 +102,7 @@ import {
   updateMemoryEmbedding,
   updateSwarmRepo,
   updateTaskClaudeSessionId,
+  upsertService,
   upsertSwarmConfig,
 } from "./be/db";
 import { getEmbedding, serializeEmbedding } from "./be/embedding";
@@ -1695,6 +1696,53 @@ const httpServer = createHttpServer(async (req, res) => {
     });
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ services }));
+    return;
+  }
+
+  // POST /api/services - Register or update a service (used by runner for tunnel registration)
+  if (
+    req.method === "POST" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "services" &&
+    !pathSegments[2]
+  ) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk as Buffer);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString()) as {
+      agentId: string;
+      name: string;
+      script: string;
+      port?: number;
+      url?: string;
+      description?: string;
+      healthCheckPath?: string;
+      metadata?: Record<string, unknown>;
+    };
+
+    if (!body.agentId || !body.name || !body.script) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "agentId, name, and script are required" }));
+      return;
+    }
+
+    try {
+      const service = upsertService(body.agentId, body.name, {
+        script: body.script,
+        port: body.port ?? 3000,
+        url: body.url,
+        description: body.description,
+        healthCheckPath: body.healthCheckPath ?? "/health",
+        metadata: body.metadata,
+      });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ service }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: message }));
+    }
     return;
   }
 

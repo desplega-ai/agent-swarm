@@ -5,6 +5,7 @@ import {
   generateDefaultSoulMd,
   generateDefaultToolsMd,
 } from "../be/db.ts";
+import { startTunnel, stopTunnel } from "../be/tunnel.ts";
 import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt.ts";
 import {
   parseStderrForErrors,
@@ -478,6 +479,9 @@ function setupShutdownHandlers(
         }
       }
     }
+
+    // Close localtunnel before exiting
+    await stopTunnel(role);
 
     if (apiConfig) {
       await closeAgent(apiConfig, role);
@@ -1907,6 +1911,36 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         console.log(`[${role}] Wrote TOOLS.md to workspace`);
       } catch (err) {
         console.warn(`[${role}] Could not write TOOLS.md: ${(err as Error).message}`);
+      }
+    }
+
+    // ========== Start localtunnel for public access ==========
+    if (apiKey) {
+      const tunnelUrl = await startTunnel({ agentId, apiKey, role });
+      if (tunnelUrl) {
+        // Register tunnel as a service so other agents can discover it
+        try {
+          await fetch(`${apiUrl}/api/services`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              agentId,
+              name: agentId,
+              script: "localtunnel",
+              port: 3000,
+              url: tunnelUrl,
+              description: "Localtunnel public endpoint",
+              healthCheckPath: "/health",
+              metadata: { tunnel: true },
+            }),
+          });
+          console.log(`[${role}] Registered tunnel service at ${tunnelUrl}`);
+        } catch {
+          console.warn(`[${role}] Could not register tunnel service — continuing without`);
+        }
       }
     }
 
