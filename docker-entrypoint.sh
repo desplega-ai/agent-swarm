@@ -236,38 +236,6 @@ else
 fi
 echo "==============================="
 
-# Configure and install ai-tracker for tracking AI vs human code changes
-echo ""
-echo "=== AI Tracker Setup ==="
-if command -v ai-tracker >/dev/null 2>&1; then
-    # Create shared tracking directory
-    TRACKING_DIR="/workspace/shared/tracking"
-    mkdir -p "$TRACKING_DIR"
-
-    # Set per-agent database path
-    if [ -n "$AGENT_ID" ]; then
-        export AI_TRACKER_DB_PATH="${TRACKING_DIR}/${AGENT_ID}.db"
-        echo "AI Tracker DB Path: $AI_TRACKER_DB_PATH"
-    else
-        export AI_TRACKER_DB_PATH="${TRACKING_DIR}/default.db"
-        echo "AI Tracker DB Path: $AI_TRACKER_DB_PATH (default, AGENT_ID not set)"
-    fi
-
-    # Persist AI_TRACKER_DB_PATH to .bashrc for git hooks and new shell sessions
-    # Git hooks spawn fresh shells that don't inherit the exported env var
-    if ! grep -q "AI_TRACKER_DB_PATH" ~/.bashrc 2>/dev/null; then
-        echo "export AI_TRACKER_DB_PATH=\"${AI_TRACKER_DB_PATH}\"" >> ~/.bashrc
-    fi
-
-    # Install ai-tracker hooks (Claude Code PostToolUse hook + git post-commit hook)
-    echo "Installing ai-tracker hooks..."
-    ai-tracker install || echo "AI Tracker install failed, continuing..."
-
-    echo "AI Tracker setup completed"
-else
-    echo "WARNING: ai-tracker not found, skipping AI tracking setup"
-fi
-echo "==============================="
 
 
 # Find existing startup script in /workspace (start-up.sh, .bash, .js, .ts, .bun, or bare)

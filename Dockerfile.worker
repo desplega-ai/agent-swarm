@@ -3,7 +3,7 @@
 # Multi-stage build: compiles to standalone binary with full dev environment
 
 # Stage 1: Build the binary
-FROM oven/bun:latest AS builder
+FROM oven/bun:1.3.9 AS builder
 WORKDIR /build
 COPY package.json bun.lock* ./
 RUN bun install --frozen-lockfile
@@ -17,7 +17,13 @@ FROM ubuntu:24.04
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Use pipefail so pipe failures are caught
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 # Install comprehensive development tools
+# NOTE: intentionally NOT using --no-install-recommends here — this is a full
+# dev environment where agents build arbitrary projects; recommended packages
+# (setuptools, wheel, less, dev headers, etc.) prevent subtle breakage.
 RUN apt-get update && apt-get install -y \
     # Essential tools
     curl wget ca-certificates gnupg lsb-release \
@@ -39,7 +45,7 @@ RUN apt-get update && apt-get install -y \
 
 # Install Node.js 22.x (LTS)
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y nodejs \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI
@@ -47,7 +53,7 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
     && apt-get update \
-    && apt-get install -y gh \
+    && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Bun (for running JS/TS projects)
@@ -74,13 +80,10 @@ ENV PATH="/home/worker/.bun/bin:$PATH"
 RUN HOME=/home/worker curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/home/worker/.local/bin:$PATH"
 
-# Setup .claude directory
-RUN mkdir -p /home/worker/.claude/commands
-RUN mkdir -p /home/worker/.claude/agents
-RUN echo '{"hasCompletedOnboarding":true,"bypassPermissionsModeAccepted":true}' > /home/worker/.claude.json
-
-# Settings with hooks pointing to compiled binary
-RUN echo '{ \
+# Setup .claude directory and settings
+RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
+    && echo '{"hasCompletedOnboarding":true,"bypassPermissionsModeAccepted":true}' > /home/worker/.claude.json \
+    && echo '{ \
   "permissions": { "allow": ["mcp__agent-swarm__*"] }, \
   "enableAllProjectMcpServers": true, \
   "enabledMcpjsonServers": ["agent-swarm"], \
@@ -99,37 +102,22 @@ USER root
 COPY --from=builder /build/agent-swarm /usr/local/bin/agent-swarm
 RUN chmod +x /usr/local/bin/agent-swarm
 
-# Install step (at the end to leverage caching)
-
-# Install PM2 globally for process management
-RUN npm install -g pm2
-
-# Install ai-tracker for tracking AI vs human code changes
-RUN pip3 install --break-system-packages cc-ai-tracker
-
-# Install wts (git worktree manager) globally for agents
-RUN npm install -g @desplega.ai/wts@latest
-
-# Install sentry-cli for issue investigation
-RUN npm install -g @sentry/cli
-
-# Install localtunnel client for artifact tunneling
-RUN npm install -g @desplega.ai/localtunnel
-
-# Install qa-use (QA tool) globally
-RUN npm install -g @desplega.ai/qa-use@latest
-
-# Install qa-use dependencies
-RUN qa-use install-deps
+# Install global tools (pinned versions, consolidated to reduce layers)
+RUN npm install -g \
+    pm2@6.0.14 \
+    @sentry/cli@3.2.2 \
+    @desplega.ai/wts@latest \
+    @desplega.ai/localtunnel \
+    @desplega.ai/qa-use@latest \
+    && qa-use install-deps
 
 # Copy commands
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/
 COPY --chown=worker:worker plugin/agents/* /home/worker/.claude/agents/
 COPY --chown=worker:worker plugin/skills/ /home/worker/.claude/skills/
 
-# Create directories
+# Create directories and copy entrypoint
 RUN mkdir -p /workspace /logs && chown worker:worker /workspace /logs
-
 COPY --chown=worker:worker docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 

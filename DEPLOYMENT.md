@@ -178,7 +178,7 @@ The Docker worker image uses a multi-stage build:
 - **Build tools**: gcc, g++, make, cmake
 - **Process manager**: PM2 (for background services)
 - **CLI tools**: GitHub CLI (`gh`), sqlite3
-- **Agent tools**: `wts` (git worktree manager), `cc-ai-tracker` (code change tracking)
+- **Agent tools**: `wts` (git worktree manager)
 - **Utilities**: git, git-lfs, vim, nano, jq, curl, wget, ssh
 - **Sudo access**: Worker can install packages with `sudo apt-get install`
 
