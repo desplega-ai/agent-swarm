@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { checkUserAccess, type UserFilterConfig } from "./handlers";
+import type { SlackFile } from "./files";
+import {
+  buildAttachmentText,
+  buildEffectiveText,
+  checkUserAccess,
+  formatFileSize,
+  type UserFilterConfig,
+} from "./handlers";
 
 describe("checkUserAccess", () => {
   describe("when filtering is disabled (empty config)", () => {
@@ -161,5 +168,111 @@ describe("checkUserAccess", () => {
       expect(checkUserAccess("U3", "c@vendor.net", config)).toBe(true);
       expect(checkUserAccess("U4", "d@other.io", config)).toBe(false);
     });
+  });
+});
+
+// Helper to create a minimal SlackFile for testing
+function makeFile(overrides: Partial<SlackFile> = {}): SlackFile {
+  return {
+    id: "F0TEST123",
+    name: "test_file.txt",
+    mimetype: "text/plain",
+    filetype: "txt",
+    size: 1024,
+    url_private: "https://files.slack.com/private",
+    url_private_download: "https://files.slack.com/download",
+    ...overrides,
+  };
+}
+
+describe("formatFileSize", () => {
+  test("formats bytes", () => {
+    expect(formatFileSize(0)).toBe("0 B");
+    expect(formatFileSize(512)).toBe("512 B");
+    expect(formatFileSize(1023)).toBe("1023 B");
+  });
+
+  test("formats kilobytes", () => {
+    expect(formatFileSize(1024)).toBe("1.0 KB");
+    expect(formatFileSize(1536)).toBe("1.5 KB");
+    expect(formatFileSize(1024 * 100)).toBe("100.0 KB");
+  });
+
+  test("formats megabytes", () => {
+    expect(formatFileSize(1024 * 1024)).toBe("1.0 MB");
+    expect(formatFileSize(1024 * 1024 * 2.5)).toBe("2.5 MB");
+  });
+
+  test("formats gigabytes", () => {
+    expect(formatFileSize(1024 * 1024 * 1024)).toBe("1.0 GB");
+    expect(formatFileSize(1024 * 1024 * 1024 * 1.5)).toBe("1.5 GB");
+  });
+});
+
+describe("buildAttachmentText", () => {
+  test("formats a single file", () => {
+    const files = [
+      makeFile({ id: "F001", name: "voice.m4a", mimetype: "audio/mp4", size: 156000 }),
+    ];
+    expect(buildAttachmentText(files)).toBe("[File: voice.m4a (audio/mp4, 152.3 KB) id=F001]");
+  });
+
+  test("formats multiple files", () => {
+    const files = [
+      makeFile({ id: "F001", name: "photo.png", mimetype: "image/png", size: 2048000 }),
+      makeFile({ id: "F002", name: "doc.pdf", mimetype: "application/pdf", size: 512000 }),
+    ];
+    const result = buildAttachmentText(files);
+    expect(result).toContain("[File: photo.png (image/png,");
+    expect(result).toContain("[File: doc.pdf (application/pdf,");
+    expect(result).toContain("id=F001");
+    expect(result).toContain("id=F002");
+    expect(result.split("\n")).toHaveLength(2);
+  });
+
+  test("handles empty array", () => {
+    expect(buildAttachmentText([])).toBe("");
+  });
+});
+
+describe("buildEffectiveText", () => {
+  test("returns text as-is when no files", () => {
+    expect(buildEffectiveText("hello world")).toBe("hello world");
+    expect(buildEffectiveText("hello world", undefined)).toBe("hello world");
+    expect(buildEffectiveText("hello world", [])).toBe("hello world");
+  });
+
+  test("returns attachment text when no text", () => {
+    const files = [makeFile({ id: "F001", name: "voice.m4a", mimetype: "audio/mp4", size: 1024 })];
+    const result = buildEffectiveText(undefined, files);
+    expect(result).toBe("[File: voice.m4a (audio/mp4, 1.0 KB) id=F001]");
+  });
+
+  test("returns attachment text when text is empty string", () => {
+    const files = [makeFile({ id: "F001", name: "voice.m4a", mimetype: "audio/mp4", size: 1024 })];
+    const result = buildEffectiveText("", files);
+    expect(result).toBe("[File: voice.m4a (audio/mp4, 1.0 KB) id=F001]");
+  });
+
+  test("returns attachment text when text is whitespace only", () => {
+    const files = [makeFile({ id: "F001", name: "voice.m4a", mimetype: "audio/mp4", size: 1024 })];
+    const result = buildEffectiveText("   ", files);
+    expect(result).toBe("[File: voice.m4a (audio/mp4, 1.0 KB) id=F001]");
+  });
+
+  test("combines text and files when both present", () => {
+    const files = [
+      makeFile({ id: "F001", name: "screenshot.png", mimetype: "image/png", size: 2048 }),
+    ];
+    const result = buildEffectiveText("<@UBOT> fix this bug", files);
+    expect(result).toContain("<@UBOT> fix this bug");
+    expect(result).toContain("[File: screenshot.png (image/png,");
+    expect(result).toContain("\n\n");
+  });
+
+  test("returns empty string when neither text nor files", () => {
+    expect(buildEffectiveText(undefined)).toBe("");
+    expect(buildEffectiveText(undefined, [])).toBe("");
+    expect(buildEffectiveText("")).toBe("");
   });
 });
