@@ -825,7 +825,9 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
         void fetch(`${getBaseUrl()}/api/agents/${agentInfo.id}/activity`, {
           method: "PUT",
           headers: mcpConfig!.headers,
-        }).catch(() => {});
+        }).catch((e) => {
+          console.debug("Failed to update agent activity timestamp:", e);
+        });
       }
 
       if (agentInfo) {
