@@ -1601,6 +1601,7 @@ export interface TaskFilters {
   tags?: string[];
   limit?: number;
   offset?: number;
+  includeHeartbeat?: boolean;
 }
 
 export function getAllTasks(filters?: TaskFilters): AgentTask[] {
@@ -1649,6 +1650,11 @@ export function getAllTasks(filters?: TaskFilters): AgentTask[] {
     for (const tag of filters.tags) {
       params.push(`%"${tag}"%`);
     }
+  }
+
+  // Exclude heartbeat tasks by default
+  if (!filters?.includeHeartbeat) {
+    conditions.push("(IFNULL(taskType, '') != 'heartbeat' AND tags NOT LIKE '%\"heartbeat\"%')");
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -1720,6 +1726,11 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
     for (const tag of filters.tags) {
       params.push(`%"${tag}"%`);
     }
+  }
+
+  // Exclude heartbeat tasks by default
+  if (!filters?.includeHeartbeat) {
+    conditions.push("(IFNULL(taskType, '') != 'heartbeat' AND tags NOT LIKE '%\"heartbeat\"%')");
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";

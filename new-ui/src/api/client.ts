@@ -103,6 +103,7 @@ class ApiClient {
     agentId?: string;
     epicId?: string;
     search?: string;
+    includeHeartbeat?: boolean;
     limit?: number;
     offset?: number;
   }): Promise<TasksResponse> {
@@ -111,6 +112,7 @@ class ApiClient {
     if (filters?.agentId) params.set("agentId", filters.agentId);
     if (filters?.epicId) params.set("epicId", filters.epicId);
     if (filters?.search) params.set("search", filters.search);
+    if (filters?.includeHeartbeat) params.set("includeHeartbeat", "true");
     if (filters?.limit != null) params.set("limit", String(filters.limit));
     if (filters?.offset != null) params.set("offset", String(filters.offset));
     const queryString = params.toString();
