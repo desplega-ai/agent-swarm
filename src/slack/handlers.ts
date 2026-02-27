@@ -8,6 +8,7 @@ import {
   getLeadAgent,
   getTasksByAgentId,
 } from "../be/db";
+import type { SlackFile } from "./files";
 import { extractTaskFromMessage, routeMessage } from "./router";
 
 // User filtering configuration from environment variables
@@ -139,6 +140,7 @@ interface MessageEvent {
   channel: string;
   ts: string;
   thread_ts?: string;
+  files?: SlackFile[];
 }
 
 interface ThreadMessage {
@@ -230,6 +232,45 @@ function getTaskLink(taskId: string): string {
   return `\`${shortId}\``;
 }
 
+/**
+ * Format a file size in bytes to a human-readable string.
+ */
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+/**
+ * Build a text representation of file attachments for inclusion in messages.
+ * Each file is formatted as: [File: filename.ext (mimetype, size) id=FILE_ID]
+ */
+export function buildAttachmentText(files: SlackFile[]): string {
+  return files
+    .map((f) => `[File: ${f.name} (${f.mimetype}, ${formatFileSize(f.size)}) id=${f.id}]`)
+    .join("\n");
+}
+
+/**
+ * Build the effective message text from the original text and any file attachments.
+ * - Text only: returns the text as-is
+ * - Files only: returns the attachment metadata
+ * - Both: returns text followed by attachment metadata
+ */
+export function buildEffectiveText(text: string | undefined, files?: SlackFile[]): string {
+  const hasText = !!text?.trim();
+  const hasFiles = files && files.length > 0;
+
+  if (hasText && hasFiles) {
+    return `${text}\n\n${buildAttachmentText(files)}`;
+  }
+  if (hasFiles) {
+    return buildAttachmentText(files);
+  }
+  return text || "";
+}
+
 // Message deduplication (prevents duplicate event processing)
 const processedMessages = new Set<string>();
 const MESSAGE_DEDUP_TTL = 60_000; // 1 minute
@@ -282,7 +323,11 @@ export function registerMessageHandler(app: App): void {
     }
 
     const msg = event as MessageEvent;
-    if (!msg.text || !msg.user) return;
+    const hasText = !!msg.text?.trim();
+    const hasFiles = !!(msg.files && msg.files.length > 0);
+
+    // Require either text or files, and always require a user
+    if ((!hasText && !hasFiles) || !msg.user) return;
 
     // Deduplicate events (Slack can send same event twice)
     const messageKey = `${msg.channel}:${msg.ts}`;
@@ -296,20 +341,24 @@ export function registerMessageHandler(app: App): void {
       return;
     }
 
+    // Build effective text that includes attachment metadata
+    const effectiveText = buildEffectiveText(msg.text, msg.files);
+
     // Get bot's user ID
     const authResult = await client.auth.test();
     const botUserId = authResult.user_id as string;
 
-    // Check if bot was mentioned
-    const botMentioned = msg.text.includes(`<@${botUserId}>`);
+    // Check if bot was mentioned (in original text only)
+    const botMentioned = !!msg.text?.includes(`<@${botUserId}>`);
 
     // Build thread context for routing (if we're in a thread)
     const routingThreadContext = msg.thread_ts
       ? { channelId: msg.channel, threadTs: msg.thread_ts }
       : undefined;
 
-    // Route message to agents
-    const matches = routeMessage(msg.text, botUserId, botMentioned, routingThreadContext);
+    // Route message to agents (use original text for routing to preserve mention/name matching)
+    const routingText = msg.text || effectiveText;
+    const matches = routeMessage(routingText, botUserId, botMentioned, routingThreadContext);
 
     if (matches.length === 0) {
       if (!botMentioned) return;
@@ -323,7 +372,7 @@ export function registerMessageHandler(app: App): void {
         return;
       }
 
-      const taskDescription = extractTaskFromMessage(msg.text, botUserId);
+      const taskDescription = extractTaskFromMessage(effectiveText, botUserId);
       if (!taskDescription) {
         await say({
           text: ":satellite: _Please provide a task description after mentioning an agent._",
@@ -381,8 +430,8 @@ export function registerMessageHandler(app: App): void {
       return;
     }
 
-    // Extract task description
-    const taskDescription = extractTaskFromMessage(msg.text, botUserId);
+    // Extract task description (using effective text which includes attachment metadata)
+    const taskDescription = extractTaskFromMessage(effectiveText, botUserId);
     if (!taskDescription) {
       await say({
         text: ":satellite: _Please provide a task description after mentioning an agent._",
