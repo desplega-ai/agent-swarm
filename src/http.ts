@@ -96,6 +96,7 @@ import {
   searchMemoriesByVector,
   shouldBlockPolling,
   startTask,
+  updateAgentActivity,
   updateAgentMaxTasks,
   updateAgentName,
   updateAgentProfile,
@@ -1325,6 +1326,21 @@ const httpServer = createHttpServer(async (req, res) => {
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(agentWithCapacity(agent)));
+    return;
+  }
+
+  // PUT /api/agents/:id/activity - Update agent last activity timestamp
+  if (
+    req.method === "PUT" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "agents" &&
+    pathSegments[2] &&
+    pathSegments[3] === "activity"
+  ) {
+    const agentId = pathSegments[2];
+    updateAgentActivity(agentId);
+    res.writeHead(204);
+    res.end();
     return;
   }
 

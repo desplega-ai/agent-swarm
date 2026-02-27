@@ -155,6 +155,9 @@ export const AgentSchema = z.object({
   // Polling limit tracking (consecutive empty polls)
   emptyPollCount: z.number().int().min(0).optional(),
 
+  // Last session activity timestamp (updated on tool calls, task updates, etc.)
+  lastActivityAt: z.iso.datetime().optional(),
+
   createdAt: z.iso.datetime().default(() => new Date().toISOString()),
   lastUpdatedAt: z.iso.datetime().default(() => new Date().toISOString()),
 });

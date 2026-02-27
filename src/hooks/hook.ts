@@ -820,6 +820,16 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
         }
       }
 
+      // Update agent last activity timestamp (fire-and-forget)
+      if (agentInfo) {
+        void fetch(`${getBaseUrl()}/api/agents/${agentInfo.id}/activity`, {
+          method: "PUT",
+          headers: mcpConfig!.headers,
+        }).catch((e) => {
+          console.debug("Failed to update agent activity timestamp:", e);
+        });
+      }
+
       if (agentInfo) {
         // Sync workspace file edits back to DB
         const toolName = msg.tool_name;
