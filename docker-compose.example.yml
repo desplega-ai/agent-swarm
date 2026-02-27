@@ -8,6 +8,33 @@
 #  - Deploys 2 worker agents and 1 lead agent by default
 #  - Uses volumes for persistent storage of logs, db and agent workspaces
 
+x-codex-worker-common: &codex-worker-common
+  profiles:
+    - codex
+  build:
+    context: .
+    dockerfile: Dockerfile.worker.codex
+  image: "agent-swarm-worker-codex:latest"
+  stop_grace_period: 60s
+  depends_on:
+    api:
+      condition: service_healthy
+  environment: &codex-worker-env
+    API_KEY: ${API_KEY}
+    OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    CODEX_API_KEY: ${CODEX_API_KEY:-}
+    AGENT_ROLE: worker
+    MCP_BASE_URL: http://api:3013
+    CODEX_HOME: /workspace/personal/codex-home
+    CODEX_LOOP_SLEEP_SECONDS: ${CODEX_LOOP_SLEEP_SECONDS:-8}
+    CODEX_APPROVAL_POLICY: ${CODEX_APPROVAL_POLICY:-never}
+    GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+    GITHUB_EMAIL: ${GITHUB_EMAIL:-}
+    GITHUB_NAME: ${GITHUB_NAME:-}
+  volumes:
+    - swarm_logs:/logs
+  restart: unless-stopped
+
 services:
   api:
     image: "ghcr.io/desplega-ai/agent-swarm:latest"
@@ -150,6 +177,93 @@ services:
 
     restart: unless-stopped
 
+  # Codex external worker clients (Milestone 2 + 4).
+  # Start with: docker compose --profile codex up -d
+
+  worker-planner-1:
+    <<: *codex-worker-common
+    environment:
+      <<: *codex-worker-env
+      AGENT_ID: ${CODEX_AGENT_ID_PLANNER_1:-6c77e4b8-96cb-4d6d-a30d-c3c2f7e7ef01}
+      AGENT_NAME: worker-planner-1
+      CODEX_ROLE_PROFILE: planner
+      CODEX_MODEL: ${CODEX_MODEL_PLANNER:-gpt-5.2}
+      CODEX_MODEL_REASONING_EFFORT: ${CODEX_MODEL_REASONING_EFFORT_PLANNER:-xhigh}
+      CODEX_SANDBOX: ${CODEX_SANDBOX_PLANNER:-read-only}
+    volumes:
+      - swarm_logs:/logs
+      - codex_worker_planner_1:/workspace
+
+  worker-builder-large-1:
+    <<: *codex-worker-common
+    environment:
+      <<: *codex-worker-env
+      AGENT_ID: ${CODEX_AGENT_ID_BUILDER_LARGE_1:-f5f0b7a9-4c98-44ca-a6aa-7806d8ca2ec1}
+      AGENT_NAME: worker-builder-large-1
+      CODEX_ROLE_PROFILE: builder_large
+      CODEX_MODEL: ${CODEX_MODEL_BUILDER_LARGE:-gpt-5.3-codex}
+      CODEX_MODEL_REASONING_EFFORT: ${CODEX_MODEL_REASONING_EFFORT_BUILDER_LARGE:-xhigh}
+      CODEX_SANDBOX: ${CODEX_SANDBOX_BUILDER_LARGE:-workspace-write}
+    volumes:
+      - swarm_logs:/logs
+      - codex_worker_builder_large_1:/workspace
+
+  worker-builder-large-2:
+    <<: *codex-worker-common
+    environment:
+      <<: *codex-worker-env
+      AGENT_ID: ${CODEX_AGENT_ID_BUILDER_LARGE_2:-f7994fd9-96dc-41fb-9934-790f5f5e7f12}
+      AGENT_NAME: worker-builder-large-2
+      CODEX_ROLE_PROFILE: builder_large
+      CODEX_MODEL: ${CODEX_MODEL_BUILDER_LARGE:-gpt-5.3-codex}
+      CODEX_MODEL_REASONING_EFFORT: ${CODEX_MODEL_REASONING_EFFORT_BUILDER_LARGE:-xhigh}
+      CODEX_SANDBOX: ${CODEX_SANDBOX_BUILDER_LARGE:-workspace-write}
+    volumes:
+      - swarm_logs:/logs
+      - codex_worker_builder_large_2:/workspace
+
+  worker-builder-tight-1:
+    <<: *codex-worker-common
+    environment:
+      <<: *codex-worker-env
+      AGENT_ID: ${CODEX_AGENT_ID_BUILDER_TIGHT_1:-2bc5f3df-f5f6-4b9f-a9be-8ce0832961dc}
+      AGENT_NAME: worker-builder-tight-1
+      CODEX_ROLE_PROFILE: builder_tight
+      CODEX_MODEL: ${CODEX_MODEL_BUILDER_TIGHT:-gpt-5.3-codex}
+      CODEX_MODEL_REASONING_EFFORT: ${CODEX_MODEL_REASONING_EFFORT_BUILDER_TIGHT:-high}
+      CODEX_SANDBOX: ${CODEX_SANDBOX_BUILDER_TIGHT:-workspace-write}
+    volumes:
+      - swarm_logs:/logs
+      - codex_worker_builder_tight_1:/workspace
+
+  worker-review-broad-1:
+    <<: *codex-worker-common
+    environment:
+      <<: *codex-worker-env
+      AGENT_ID: ${CODEX_AGENT_ID_REVIEW_BROAD_1:-8a6cf02a-1cd7-43f6-90bf-f8e3c168f361}
+      AGENT_NAME: worker-review-broad-1
+      CODEX_ROLE_PROFILE: review_broad
+      CODEX_MODEL: ${CODEX_MODEL_REVIEW_BROAD:-gpt-5.2}
+      CODEX_MODEL_REASONING_EFFORT: ${CODEX_MODEL_REASONING_EFFORT_REVIEW_BROAD:-xhigh}
+      CODEX_SANDBOX: ${CODEX_SANDBOX_REVIEW_BROAD:-read-only}
+    volumes:
+      - swarm_logs:/logs
+      - codex_worker_review_broad_1:/workspace
+
+  worker-review-perf-1:
+    <<: *codex-worker-common
+    environment:
+      <<: *codex-worker-env
+      AGENT_ID: ${CODEX_AGENT_ID_REVIEW_PERF_1:-8383a754-0bb1-4c56-9c8f-11f651a7cf61}
+      AGENT_NAME: worker-review-perf-1
+      CODEX_ROLE_PROFILE: review_perf
+      CODEX_MODEL: ${CODEX_MODEL_REVIEW_PERF:-gpt-5.3-codex}
+      CODEX_MODEL_REASONING_EFFORT: ${CODEX_MODEL_REASONING_EFFORT_REVIEW_PERF:-xhigh}
+      CODEX_SANDBOX: ${CODEX_SANDBOX_REVIEW_PERF:-read-only}
+    volumes:
+      - swarm_logs:/logs
+      - codex_worker_review_perf_1:/workspace
+
 volumes:
   swarm_api:
   swarm_logs:
@@ -157,3 +271,9 @@ volumes:
   swarm_lead:
   swarm_worker_1:
   swarm_worker_2:
+  codex_worker_planner_1:
+  codex_worker_builder_large_1:
+  codex_worker_builder_large_2:
+  codex_worker_builder_tight_1:
+  codex_worker_review_broad_1:
+  codex_worker_review_perf_1:

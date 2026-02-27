@@ -22,6 +22,17 @@ These variables configure the MCP API server (`bun run start:http` or the `api` 
 
 ---
 
+## Local Codex Sessions
+
+`bunx @desplega.ai/agent-swarm setup-codex` writes `./.codex/config.toml` and references these variables when Codex connects to MCP.
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `API_KEY` | Yes | — | Bearer token sent to the swarm MCP server. Must match the API server's `API_KEY` when auth is enabled. |
+| `AGENT_ID` | Yes | — | Stable UUID forwarded as the `X-Agent-ID` header for lead/worker identity. |
+
+---
+
 ## Docker Worker / Lead Agent
 
 These variables configure containerized agents (`ghcr.io/desplega-ai/agent-swarm-worker`).
@@ -95,6 +106,62 @@ These variables configure containerized agents (`ghcr.io/desplega-ai/agent-swarm
 |----------|-------------|
 | `SENTRY_AUTH_TOKEN` | Sentry Organization Auth Token for `sentry-cli`. Scopes needed: `event:read`, `project:read`, `org:read`. |
 | `SENTRY_ORG` | Sentry organization slug. |
+
+---
+
+## Docker Codex Worker / Role Pool
+
+These variables configure Codex-based external workers (`Dockerfile.worker.codex`, `docker-entrypoint-codex.sh`, `scripts/codex/worker-loop.sh`).
+
+### Required
+
+| Variable | Description |
+|----------|-------------|
+| `API_KEY` | Must match the API server's `API_KEY`. Used for MCP auth in Codex config. |
+| `AGENT_ID` | Stable UUID for worker identity. Keep fixed per container for task continuity. |
+| `OPENAI_API_KEY` | API key consumed by `printenv OPENAI_API_KEY | codex login --with-api-key` at container start. |
+
+### Auth Compatibility
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CODEX_API_KEY` | — | Optional alias. If set and `OPENAI_API_KEY` is empty, entrypoint maps it to `OPENAI_API_KEY` before login. |
+
+### Core Runtime
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_BASE_URL` | `http://host.docker.internal:3013` | API URL used to write Codex MCP server config (`${MCP_BASE_URL}/mcp`). |
+| `CODEX_HOME` | `/workspace/personal/codex-home` | Persistent Codex state path. Must live on a persistent volume for auth/session reuse. |
+| `CODEX_LOOP_SLEEP_SECONDS` | `8` | Delay between `codex exec` loop iterations. |
+| `CODEX_APPROVAL_POLICY` | `never` | Approval mode for unattended loops. |
+
+### Role Routing & Model Pinning
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CODEX_ROLE_PROFILE` | `builder_large` | Role defaults: `planner`, `builder_large`, `builder_tight`, `review_broad`, `review_perf`. |
+| `CODEX_MODEL` | Profile-dependent | Model pin (for example `gpt-5.2`, `gpt-5.3-codex`). |
+| `CODEX_MODEL_REASONING_EFFORT` | Profile-dependent | Reasoning level (`high`, `xhigh`, etc.). |
+| `CODEX_SANDBOX` | Profile-dependent | Sandbox mode (`workspace-write` for builders; `read-only` for planner/review by default). |
+
+### Compose Role Overrides (`.env` keys used by `docker-compose.example.yml`)
+
+| Variable | Description |
+|----------|-------------|
+| `CODEX_AGENT_ID_PLANNER_1` | Stable AGENT_ID override for `worker-planner-1`. |
+| `CODEX_AGENT_ID_BUILDER_LARGE_1` | Stable AGENT_ID override for `worker-builder-large-1`. |
+| `CODEX_AGENT_ID_BUILDER_LARGE_2` | Stable AGENT_ID override for `worker-builder-large-2`. |
+| `CODEX_AGENT_ID_BUILDER_TIGHT_1` | Stable AGENT_ID override for `worker-builder-tight-1`. |
+| `CODEX_AGENT_ID_REVIEW_BROAD_1` | Stable AGENT_ID override for `worker-review-broad-1`. |
+| `CODEX_AGENT_ID_REVIEW_PERF_1` | Stable AGENT_ID override for `worker-review-perf-1`. |
+| `CODEX_MODEL_*` / `CODEX_MODEL_REASONING_EFFORT_*` / `CODEX_SANDBOX_*` | Per-role pin overrides used by compose defaults. |
+
+### Workflow Guardrails (Codex workers)
+
+- Use one dedicated `/workspace` volume per worker service; no shared checkout among Codex workers.
+- Before editing for a claimed task, create branch `swarm/<agent_id>/<task_id>`.
+- `docs/dispatch/*` remains lead-owned by default; workers propose dispatch text updates via `store-progress`.
 
 ---
 

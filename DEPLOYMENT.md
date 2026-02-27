@@ -6,6 +6,8 @@ This guide covers all deployment options for Agent Swarm.
 
 - [Docker Compose (Recommended)](#docker-compose-recommended)
 - [Docker Worker](#docker-worker)
+- [Docker Codex Workers](#docker-codex-workers)
+- [Codex Worker Task Contract](#codex-worker-task-contract)
 - [Server Deployment (systemd)](#server-deployment-systemd)
 - [Graceful Shutdown & Task Resume](#graceful-shutdown--task-resume)
 - [Environment Variables](#environment-variables)
@@ -35,8 +37,11 @@ cp .env.docker.example .env
 # Edit .env with your values
 vim .env
 
-# Start the swarm
+# Start the default (API + Claude lead/workers) stack
 docker-compose up -d
+
+# Optional: add Codex role-based workers
+docker compose --profile codex up -d
 ```
 
 > **Note:** `.env.example` contains API server settings, `.env.docker.example` contains Docker worker settings. For docker-compose, you need both sets of variables in a single `.env` file.
@@ -48,6 +53,7 @@ The example `docker-compose.yml` sets up:
 - **API service** (port 3013) - MCP HTTP server
 - **2 Worker agents** - Containerized Claude workers
 - **1 Lead agent** - Coordinator agent
+- **6 optional Codex workers** (`--profile codex`) - External worker clients with role-pinned model/sandbox settings
 
 ### Configuration
 
@@ -58,10 +64,23 @@ Edit your `.env` file:
 API_KEY=your-secret-api-key
 CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token  # Run `claude setup-token` to get this
 
+# Required only for Codex profile workers
+OPENAI_API_KEY=your-openai-api-key
+# Optional alias (mapped to OPENAI_API_KEY if OPENAI_API_KEY is empty)
+CODEX_API_KEY=
+
 # Agent IDs (optional, auto-generated if not set)
 AGENT_ID=worker-1-uuid
 AGENT_ID_2=worker-2-uuid
 AGENT_ID_LEAD=lead-agent-uuid
+
+# Optional Codex role worker IDs (recommended: stable UUIDs)
+CODEX_AGENT_ID_PLANNER_1=
+CODEX_AGENT_ID_BUILDER_LARGE_1=
+CODEX_AGENT_ID_BUILDER_LARGE_2=
+CODEX_AGENT_ID_BUILDER_TIGHT_1=
+CODEX_AGENT_ID_REVIEW_BROAD_1=
+CODEX_AGENT_ID_REVIEW_PERF_1=
 
 # GitHub integration (optional)
 GITHUB_TOKEN=your-github-token
@@ -78,6 +97,7 @@ GITHUB_NAME=Your Name
 | `swarm_shared` | Shared workspace between agents (`/workspace/shared`) |
 | `swarm_lead` | Lead agent's personal workspace (`/workspace/personal`) |
 | `swarm_worker_*` | Personal workspace per worker (`/workspace/personal`) |
+| `codex_worker_*` | Dedicated full `/workspace` volume per Codex worker (no shared checkout between Codex workers) |
 
 ### Graceful Shutdown
 
@@ -237,6 +257,73 @@ if (!process.env.API_KEY) {
 
 ---
 
+## Docker Codex Workers
+
+Run Codex as external worker clients (`codex exec` loop) without changing existing Claude worker flows.
+
+### Build Codex Worker Image
+
+```bash
+docker build -f Dockerfile.worker.codex -t agent-swarm-worker-codex:latest .
+# or
+bun run docker:build:worker:codex
+```
+
+### Start Role-Based Codex Pool
+
+```bash
+# Start API + default Claude workers
+docker compose up -d
+
+# Add Codex workers (planner/builders/reviewers)
+docker compose --profile codex up -d
+```
+
+Codex services added by the compose example:
+- `worker-planner-1`
+- `worker-builder-large-1`, `worker-builder-large-2`
+- `worker-builder-tight-1`
+- `worker-review-broad-1`
+- `worker-review-perf-1`
+
+Routing default: lead should publish tasks to pool/offers (no required `agentId` binding). If your swarm build supports direct assignment, treat it as optional.
+
+### Codex Auth & Persistence
+
+- Entrypoint performs non-interactive login once per container start:
+  - `printenv OPENAI_API_KEY | codex login --with-api-key`
+- If `CODEX_API_KEY` is set and `OPENAI_API_KEY` is empty, it is mapped automatically.
+- `CODEX_HOME` defaults to `/workspace/personal/codex-home` and persists on each worker's dedicated `/workspace` volume.
+- Secrets are never echoed in startup logs.
+
+### Role-Based Routing Controls
+
+Each Codex service sets env-based model/sandbox pins:
+- `CODEX_ROLE_PROFILE` (`planner`, `builder_large`, `builder_tight`, `review_broad`, `review_perf`)
+- `CODEX_MODEL`
+- `CODEX_MODEL_REASONING_EFFORT`
+- `CODEX_SANDBOX` (`workspace-write` for builders, `read-only` for reviewers/planner by default)
+
+---
+
+## Codex Worker Task Contract
+
+Codex workers must follow this workflow contract:
+
+1. Claim/poll a task via MCP tools (pool/offers-first routing by default).
+2. Before edits, create/switch branch: `swarm/<agent_id>/<task_id>`.
+3. Work only in the worker's own `/workspace` volume (no shared checkout).
+4. Treat `docs/dispatch/*` as lead-owned by default.
+   - Workers propose dispatch text/deltas via `store-progress`.
+   - Lead applies dispatch doc edits unless explicitly delegated.
+5. `store-progress` output must include:
+   - changed files (or `no code changes`)
+   - commands run + results
+   - status (`PASS`/`WARN`/`FAIL`)
+   - risks, TODOs, blockers
+
+---
+
 ## Server Deployment (systemd)
 
 Deploy the MCP server to a Linux host with systemd.
@@ -364,6 +451,28 @@ When a worker starts, it:
 | `GITHUB_NAME` | No | Git commit name (default: `Worker Agent`) |
 | `SENTRY_AUTH_TOKEN` | No | Sentry Organization Auth Token for issue investigation |
 | `SENTRY_ORG` | No | Sentry organization slug |
+
+### Docker Codex Worker Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `API_KEY` | Yes | API key for MCP server (same value as server). |
+| `AGENT_ID` | Yes | Stable UUID per Codex worker container. |
+| `OPENAI_API_KEY` | Yes* | OpenAI API key for Codex login. |
+| `CODEX_API_KEY` | No | Optional alias mapped to `OPENAI_API_KEY` when `OPENAI_API_KEY` is unset. |
+| `MCP_BASE_URL` | No | MCP server URL (default `http://host.docker.internal:3013`; compose uses `http://api:3013`). |
+| `CODEX_HOME` | No | Persistent Codex state path (default `/workspace/personal/codex-home`). |
+| `CODEX_ROLE_PROFILE` | No | Role profile: `planner`, `builder_large`, `builder_tight`, `review_broad`, `review_perf`. |
+| `CODEX_MODEL` | No | Model pin for the role (for example `gpt-5.3-codex`). |
+| `CODEX_MODEL_REASONING_EFFORT` | No | Reasoning level (`high`, `xhigh`, etc). |
+| `CODEX_SANDBOX` | No | Sandbox mode (`workspace-write`, `read-only`, `danger-full-access`). |
+| `CODEX_APPROVAL_POLICY` | No | Codex approval behavior (default `never` for unattended worker loops). |
+| `CODEX_LOOP_SLEEP_SECONDS` | No | Delay between `codex exec` loop cycles (default `8`). |
+| `GITHUB_TOKEN` | No | GitHub token for git operations inside worker containers. |
+| `GITHUB_EMAIL` | No | Git commit email. |
+| `GITHUB_NAME` | No | Git commit name. |
+
+\* `OPENAI_API_KEY` is only optional when `CODEX_API_KEY` is set.
 
 ### Server Variables
 

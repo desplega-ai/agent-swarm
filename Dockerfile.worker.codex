@@ -1,0 +1,61 @@
+# Agent Swarm Codex Worker Dockerfile
+# External Codex worker client: runs `codex exec` in a resilient loop.
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates curl wget gnupg lsb-release \
+    git git-lfs openssh-client \
+    jq ripgrep unzip zip tar gzip \
+    vim nano tree \
+    build-essential make cmake gcc g++ \
+    python3 python3-pip python3-venv \
+    sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 22.x (LTS)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update \
+    && apt-get install -y gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# Codex CLI + PM2
+RUN npm install -g @openai/codex@latest pm2
+
+# Non-root execution user
+RUN useradd -m -s /bin/bash -G sudo worker \
+    && echo "worker ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+COPY docker-entrypoint-codex.sh /docker-entrypoint-codex.sh
+COPY scripts/codex/worker-loop.sh /scripts/codex/worker-loop.sh
+
+RUN chmod +x /docker-entrypoint-codex.sh /scripts/codex/worker-loop.sh \
+    && mkdir -p /workspace /logs \
+    && chown -R worker:worker /workspace /logs /scripts/codex
+
+USER worker
+WORKDIR /workspace
+ENV HOME=/home/worker
+
+VOLUME ["/workspace", "/logs"]
+
+ENV AGENT_ROLE=worker
+ENV MCP_BASE_URL=http://host.docker.internal:3013
+ENV CODEX_HOME=/workspace/personal/codex-home
+ENV CODEX_ROLE_PROFILE=builder_large
+ENV CODEX_MODEL=gpt-5.3-codex
+ENV CODEX_MODEL_REASONING_EFFORT=xhigh
+ENV CODEX_SANDBOX=workspace-write
+ENV CODEX_LOOP_SLEEP_SECONDS=8
+ENV CODEX_APPROVAL_POLICY=never
+
+ENTRYPOINT ["/docker-entrypoint-codex.sh"]
