@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Search, ChevronLeft, ChevronRight, GitBranch, X } from "lucide-react";
 import type { AgentTask, AgentTaskStatus } from "@/api/types";
 
@@ -29,6 +30,7 @@ export default function TasksPage() {
   const statusFilter = searchParams.get("status") ?? "all";
   const agentFilter = searchParams.get("agent") ?? "all";
   const searchParam = searchParams.get("search") ?? "";
+  const includeHeartbeat = searchParams.get("heartbeat") === "true";
   const page = searchParams.has("page") ? Number(searchParams.get("page")) : 0;
 
   // Single setter that updates one key while preserving others
@@ -59,21 +61,22 @@ export default function TasksPage() {
   }, [agents]);
 
   const filters = useMemo(() => {
-    const f: { status?: string; agentId?: string; search?: string; limit: number; offset: number } = {
+    const f: { status?: string; agentId?: string; search?: string; includeHeartbeat?: boolean; limit: number; offset: number } = {
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     };
     if (statusFilter !== "all") f.status = statusFilter;
     if (agentFilter !== "all") f.agentId = agentFilter;
     if (searchParam) f.search = searchParam;
+    if (includeHeartbeat) f.includeHeartbeat = true;
     return f;
-  }, [statusFilter, agentFilter, searchParam, page]);
+  }, [statusFilter, agentFilter, searchParam, includeHeartbeat, page]);
 
   const { data: tasksData, isLoading } = useTasks(filters);
 
   const total = tasksData?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const hasActiveFilters = statusFilter !== "all" || agentFilter !== "all" || searchParam !== "" || page !== 0;
+  const hasActiveFilters = statusFilter !== "all" || agentFilter !== "all" || searchParam !== "" || includeHeartbeat || page !== 0;
 
   const clearFilters = useCallback(() => {
     setSearchParams(new URLSearchParams());
@@ -221,6 +224,14 @@ export default function TasksPage() {
             ))}
           </SelectContent>
         </Select>
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+          <Switch
+            size="sm"
+            checked={includeHeartbeat}
+            onCheckedChange={(checked) => setParam("heartbeat", checked ? "true" : "")}
+          />
+          Heartbeat
+        </label>
         {hasActiveFilters && (
           <Button variant="ghost" size="sm" className="ml-auto text-xs text-muted-foreground" onClick={clearFilters}>
             <X className="h-3 w-3 mr-1" />

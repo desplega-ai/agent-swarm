@@ -43,6 +43,10 @@ export const registerGetTasksTool = (server: McpServer) => {
         taskType: z.string().optional().describe("Filter by task type (e.g., 'bug', 'feature')."),
         tags: z.array(z.string()).optional().describe("Filter by any matching tag."),
         search: z.string().optional().describe("Search in task description."),
+        includeHeartbeat: z
+          .boolean()
+          .optional()
+          .describe("Include heartbeat/system tasks in results (excluded by default)."),
         limit: z
           .number()
           .int()
@@ -57,7 +61,18 @@ export const registerGetTasksTool = (server: McpServer) => {
       }),
     },
     async (
-      { status, mineOnly, unassigned, offeredToMe, readyOnly, taskType, tags, search, limit },
+      {
+        status,
+        mineOnly,
+        unassigned,
+        offeredToMe,
+        readyOnly,
+        taskType,
+        tags,
+        search,
+        includeHeartbeat,
+        limit,
+      },
       requestInfo,
       _meta,
     ) => {
@@ -73,6 +88,7 @@ export const registerGetTasksTool = (server: McpServer) => {
         taskType,
         tags,
         search,
+        includeHeartbeat,
         limit,
       });
 
