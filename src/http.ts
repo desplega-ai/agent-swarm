@@ -1362,6 +1362,7 @@ const httpServer = createHttpServer(async (req, res) => {
     const agentId = queryParams.get("agentId");
     const epicId = queryParams.get("epicId");
     const search = queryParams.get("search");
+    const includeHeartbeat = queryParams.get("includeHeartbeat") === "true";
     const limit = queryParams.get("limit") ? Number(queryParams.get("limit")) : undefined;
     const offset = queryParams.get("offset") ? Number(queryParams.get("offset")) : undefined;
     const filters = {
@@ -1369,6 +1370,7 @@ const httpServer = createHttpServer(async (req, res) => {
       agentId: agentId || undefined,
       epicId: epicId || undefined,
       search: search || undefined,
+      includeHeartbeat: includeHeartbeat || undefined,
       limit,
       offset,
     };

@@ -6,6 +6,7 @@ export interface TaskFilters {
   agentId?: string;
   epicId?: string;
   search?: string;
+  includeHeartbeat?: boolean;
   limit?: number;
   offset?: number;
 }
