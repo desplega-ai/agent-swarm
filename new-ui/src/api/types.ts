@@ -219,6 +219,45 @@ export interface SessionCostsResponse {
   costs: SessionCost[];
 }
 
+export interface UsageSummaryTotals {
+  totalCostUsd: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalCacheReadTokens: number;
+  totalCacheWriteTokens: number;
+  totalDurationMs: number;
+  totalSessions: number;
+  avgCostPerSession: number;
+}
+
+export interface UsageSummaryDailyRow {
+  date: string;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  sessions: number;
+}
+
+export interface UsageSummaryByAgentRow {
+  agentId: string;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  sessions: number;
+  durationMs: number;
+}
+
+export interface UsageSummaryResponse {
+  totals: UsageSummaryTotals;
+  daily: UsageSummaryDailyRow[];
+  byAgent: UsageSummaryByAgentRow[];
+}
+
+export interface DashboardCostResponse {
+  costToday: number;
+  costMtd: number;
+}
+
 export interface UsageStats {
   totalCostUsd: number;
   totalTokens: number;

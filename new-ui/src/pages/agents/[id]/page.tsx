@@ -127,6 +127,7 @@ export default function AgentDetailPage() {
 
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
+  const [activeTab, setActiveTab] = useState("profile");
 
   // Task tab filters
   const [taskSearch, setTaskSearch] = useState("");
@@ -145,7 +146,7 @@ export default function AgentDetailPage() {
   }, [id, taskStatus, taskSearch, taskPage]);
 
   const { data: tasksData, isLoading: tasksLoading } = useTasks(taskFilters);
-  const { data: agentCosts } = useSessionCosts({ agentId: id, limit: 1000 });
+  const { data: agentCosts } = useSessionCosts({ agentId: id, limit: 1000, enabled: activeTab === "usage" });
 
   const taskTotal = tasksData?.total ?? 0;
   const taskTotalPages = Math.max(1, Math.ceil(taskTotal / PAGE_SIZE));
@@ -299,7 +300,7 @@ export default function AgentDetailPage() {
         <StatusBadge status={agent.status} size="md" />
       </div>
 
-      <Tabs defaultValue="profile" className="flex flex-col flex-1 min-h-0">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0">
         <TabsList className="shrink-0">
           <TabsTrigger value="profile">Profile</TabsTrigger>
           <TabsTrigger value="tasks">Tasks ({taskTotal})</TabsTrigger>

@@ -5,7 +5,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { useStats, useHealth, useLogs } from "@/api/hooks/use-stats";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useTasks } from "@/api/hooks/use-tasks";
-import { useSessionCosts } from "@/api/hooks/use-costs";
+import { useDashboardCosts } from "@/api/hooks/use-costs";
 import { formatRelativeTime, cn } from "@/lib/utils";
 import {
   Users,
@@ -269,24 +269,12 @@ export default function DashboardPage() {
   const { data: agents } = useAgents();
   const { data: tasksData } = useTasks({ status: "in_progress" });
   const { data: logs } = useLogs(15);
-  const { data: costs } = useSessionCosts({ limit: 500 });
+  const { data: dashboardCosts } = useDashboardCosts();
 
   const isHealthy = !!health && !healthError;
 
-  const { costToday, costMtd } = useMemo(() => {
-    if (!costs) return { costToday: 0, costMtd: 0 };
-    const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    let today = 0;
-    let mtd = 0;
-    for (const c of costs) {
-      const d = new Date(c.createdAt);
-      if (d >= startOfMonth) mtd += c.totalCostUsd;
-      if (d >= startOfDay) today += c.totalCostUsd;
-    }
-    return { costToday: today, costMtd: mtd };
-  }, [costs]);
+  const costToday = dashboardCosts?.costToday ?? 0;
+  const costMtd = dashboardCosts?.costMtd ?? 0;
 
   const agentMap = useMemo(() => {
     const m = new Map<string, string>();

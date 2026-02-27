@@ -54,6 +54,7 @@ import {
   getChannelById,
   getChannelMessages,
   getConcurrentContext,
+  getDashboardCostSummary,
   getDb,
   getEpicById,
   getEpics,
@@ -69,8 +70,10 @@ import {
   getResolvedConfig,
   getScheduledTasks,
   getServicesByAgentId,
+  getSessionCostSummary,
   getSessionCostsByAgentId,
   getSessionCostsByTaskId,
+  getSessionCostsFiltered,
   getSessionLogsByTaskId,
   getSwarmConfigById,
   getSwarmConfigs,
@@ -812,6 +815,50 @@ const httpServer = createHttpServer(async (req, res) => {
     return;
   }
 
+  // GET /api/session-costs/summary - Aggregated session cost summary
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "session-costs" &&
+    pathSegments[2] === "summary"
+  ) {
+    const summaryParams = parseQueryParams(req.url || "");
+    const rawGroupBy = summaryParams.get("groupBy");
+    const validGroupBy = ["day", "agent", "both"] as const;
+    if (rawGroupBy && !validGroupBy.includes(rawGroupBy as (typeof validGroupBy)[number])) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: `Invalid groupBy value '${rawGroupBy}'. Must be one of: ${validGroupBy.join(", ")}`,
+        }),
+      );
+      return;
+    }
+    const summary = getSessionCostSummary({
+      startDate: summaryParams.get("startDate") || undefined,
+      endDate: summaryParams.get("endDate") || undefined,
+      agentId: summaryParams.get("agentId") || undefined,
+      groupBy: (rawGroupBy as "day" | "agent" | "both") || "both",
+    });
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(summary));
+    return;
+  }
+
+  // GET /api/session-costs/dashboard - Cost today and month-to-date
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "session-costs" &&
+    pathSegments[2] === "dashboard"
+  ) {
+    const dashboardCosts = getDashboardCostSummary();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(dashboardCosts));
+    return;
+  }
+
   // GET /api/session-costs - Query session costs with filters
   if (
     req.method === "GET" &&
@@ -822,12 +869,21 @@ const httpServer = createHttpServer(async (req, res) => {
     const costsQueryParams = parseQueryParams(req.url || "");
     const agentId = costsQueryParams.get("agentId");
     const taskId = costsQueryParams.get("taskId");
+    const startDate = costsQueryParams.get("startDate");
+    const endDate = costsQueryParams.get("endDate");
     const limitParam = costsQueryParams.get("limit");
     const limit = limitParam ? parseInt(limitParam, 10) : 100;
 
     let costs: SessionCost[];
     if (taskId) {
-      costs = getSessionCostsByTaskId(taskId);
+      costs = getSessionCostsByTaskId(taskId, limit);
+    } else if (startDate || endDate) {
+      costs = getSessionCostsFiltered({
+        agentId: agentId || undefined,
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
+        limit,
+      });
     } else if (agentId) {
       costs = getSessionCostsByAgentId(agentId, limit);
     } else {

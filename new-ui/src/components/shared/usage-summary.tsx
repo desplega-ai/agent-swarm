@@ -10,7 +10,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { DollarSign, Coins, Activity, Clock, TrendingUp } from "lucide-react";
-import type { SessionCost } from "@/api/types";
+import type { SessionCost, UsageSummaryTotals, UsageSummaryDailyRow } from "@/api/types";
 
 function StatCard({
   label,
@@ -42,26 +42,68 @@ const tooltipStyle = {
   color: "var(--color-foreground)",
 };
 
-interface UsageSummaryProps {
+// New interface: accepts pre-aggregated data from server
+interface UsageSummaryAggregatedProps {
+  totals: UsageSummaryTotals;
+  dailyData: UsageSummaryDailyRow[];
+  daysBack?: number;
+}
+
+// Legacy interface: accepts raw costs (used by agent detail page)
+interface UsageSummaryRawProps {
   costs: SessionCost[];
   daysBack?: number;
 }
 
-export function UsageSummary({ costs, daysBack = 30 }: UsageSummaryProps) {
+type UsageSummaryProps = UsageSummaryAggregatedProps | UsageSummaryRawProps;
+
+function isAggregatedProps(props: UsageSummaryProps): props is UsageSummaryAggregatedProps {
+  return "totals" in props;
+}
+
+export function UsageSummary(props: UsageSummaryProps) {
+  const daysBack = props.daysBack ?? 30;
+  const totals = isAggregatedProps(props) ? props.totals : undefined;
+  const costs = isAggregatedProps(props) ? undefined : props.costs;
+
+  // Compute stats from either pre-aggregated or raw data
   const stats = useMemo(() => {
-    const totalCost = costs.reduce((s, c) => s + c.totalCostUsd, 0);
-    const totalTokens = costs.reduce((s, c) => s + c.inputTokens + c.outputTokens, 0);
-    const totalDuration = costs.reduce((s, c) => s + c.durationMs, 0);
+    if (totals) {
+      return {
+        totalCost: totals.totalCostUsd,
+        totalTokens: totals.totalInputTokens + totals.totalOutputTokens,
+        sessions: totals.totalSessions,
+        totalDuration: totals.totalDurationMs,
+        avgCost: totals.avgCostPerSession,
+      };
+    }
+    // Legacy: compute from raw costs
+    const c = costs ?? [];
+    const totalCost = c.reduce((s, x) => s + x.totalCostUsd, 0);
+    const totalTokens = c.reduce((s, x) => s + x.inputTokens + x.outputTokens, 0);
+    const totalDuration = c.reduce((s, x) => s + x.durationMs, 0);
     return {
       totalCost,
       totalTokens,
-      sessions: costs.length,
+      sessions: c.length,
       totalDuration,
-      avgCost: costs.length > 0 ? totalCost / costs.length : 0,
+      avgCost: c.length > 0 ? totalCost / c.length : 0,
     };
-  }, [costs]);
+  }, [totals, costs]);
 
+  const aggregatedDailyData = isAggregatedProps(props) ? props.dailyData : undefined;
+
+  // Compute daily chart data
   const dailyData = useMemo(() => {
+    if (aggregatedDailyData) {
+      // Use pre-aggregated daily data, just format dates for display
+      return aggregatedDailyData.map((d) => ({
+        date: d.date.slice(5),
+        cost: Math.round(d.costUsd * 1000) / 1000,
+      }));
+    }
+    // Legacy: compute from raw costs
+    const c = costs ?? [];
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysBack);
 
@@ -70,10 +112,10 @@ export function UsageSummary({ costs, daysBack = 30 }: UsageSummaryProps) {
       dayMap.set(d.toISOString().slice(0, 10), 0);
     }
 
-    for (const c of costs) {
-      const day = c.createdAt.slice(0, 10);
+    for (const x of c) {
+      const day = x.createdAt.slice(0, 10);
       if (dayMap.has(day)) {
-        dayMap.set(day, (dayMap.get(day) ?? 0) + c.totalCostUsd);
+        dayMap.set(day, (dayMap.get(day) ?? 0) + x.totalCostUsd);
       }
     }
 
@@ -81,9 +123,11 @@ export function UsageSummary({ costs, daysBack = 30 }: UsageSummaryProps) {
       date: date.slice(5),
       cost: Math.round(cost * 1000) / 1000,
     }));
-  }, [costs, daysBack]);
+  }, [aggregatedDailyData, costs, daysBack]);
 
-  if (costs.length === 0) {
+  const isEmpty = totals ? totals.totalSessions === 0 : (costs ?? []).length === 0;
+
+  if (isEmpty) {
     return (
       <p className="text-sm text-muted-foreground py-8 text-center">No usage data available</p>
     );

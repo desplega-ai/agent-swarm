@@ -3,6 +3,7 @@ import type {
   AgentWithTasks,
   ChannelMessage,
   ChannelsResponse,
+  DashboardCostResponse,
   EpicsResponse,
   EpicWithTasks,
   LogsResponse,
@@ -19,6 +20,7 @@ import type {
   SwarmReposResponse,
   TasksResponse,
   TaskWithLogs,
+  UsageSummaryResponse,
 } from "./types";
 import { getConfig } from "@/lib/config";
 
@@ -230,16 +232,45 @@ class ApiClient {
   async fetchSessionCosts(filters?: {
     agentId?: string;
     taskId?: string;
+    startDate?: string;
+    endDate?: string;
     limit?: number;
   }): Promise<SessionCostsResponse> {
     const params = new URLSearchParams();
     if (filters?.agentId) params.set("agentId", filters.agentId);
     if (filters?.taskId) params.set("taskId", filters.taskId);
+    if (filters?.startDate) params.set("startDate", filters.startDate);
+    if (filters?.endDate) params.set("endDate", filters.endDate);
     if (filters?.limit) params.set("limit", String(filters.limit));
     const queryString = params.toString();
     const url = `${this.getBaseUrl()}/api/session-costs${queryString ? `?${queryString}` : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch session costs: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchUsageSummary(filters?: {
+    startDate?: string;
+    endDate?: string;
+    agentId?: string;
+    groupBy?: "day" | "agent" | "both";
+  }): Promise<UsageSummaryResponse> {
+    const params = new URLSearchParams();
+    if (filters?.startDate) params.set("startDate", filters.startDate);
+    if (filters?.endDate) params.set("endDate", filters.endDate);
+    if (filters?.agentId) params.set("agentId", filters.agentId);
+    if (filters?.groupBy) params.set("groupBy", filters.groupBy);
+    const queryString = params.toString();
+    const url = `${this.getBaseUrl()}/api/session-costs/summary${queryString ? `?${queryString}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch usage summary: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchDashboardCosts(): Promise<DashboardCostResponse> {
+    const url = `${this.getBaseUrl()}/api/session-costs/dashboard`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch dashboard costs: ${res.status}`);
     return res.json();
   }
 
