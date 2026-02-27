@@ -7,6 +7,7 @@ import { runClaude } from "./claude.ts";
 import { runHook } from "./commands/hook.ts";
 import { runLead } from "./commands/lead.ts";
 import { Setup } from "./commands/setup.tsx";
+import { SetupCodex } from "./commands/setup-codex.tsx";
 import { runWorker } from "./commands/worker.ts";
 
 // Get CLI name from bin field (assumes single key)
@@ -143,6 +144,12 @@ function Help() {
         </Box>
         <Box>
           <Box width={12}>
+            <Text color="green">setup-codex</Text>
+          </Box>
+          <Text>Set up Codex MCP project configuration</Text>
+        </Box>
+        <Box>
+          <Box width={12}>
             <Text color="green">hook</Text>
           </Box>
           <Text>Handle Claude Code hook events (stdin)</Text>
@@ -204,6 +211,16 @@ function Help() {
             <Text color="yellow">-y, --yes</Text>
           </Box>
           <Text>Non-interactive mode (use env vars)</Text>
+        </Box>
+      </Box>
+
+      <Box marginTop={1} flexDirection="column">
+        <Text bold>Options for 'setup-codex':</Text>
+        <Box>
+          <Box width={24}>
+            <Text color="yellow">--dry-run</Text>
+          </Box>
+          <Text>Show what would be changed without writing</Text>
         </Box>
       </Box>
 
@@ -290,6 +307,8 @@ function Help() {
         <Text dimColor> {binName} setup</Text>
         <Text dimColor> {binName} setup --dry-run</Text>
         <Text dimColor> {binName} setup -y</Text>
+        <Text dimColor> {binName} setup-codex</Text>
+        <Text dimColor> {binName} setup-codex --dry-run</Text>
         <Text dimColor> {binName} mcp</Text>
         <Text dimColor> {binName} mcp --port 8080</Text>
         <Text dimColor> {binName} mcp -p 8080 -k my-secret-key</Text>
@@ -562,6 +581,8 @@ function App({ args }: { args: ParsedArgs }) {
   switch (command) {
     case "setup":
       return <Setup dryRun={dryRun} restore={restore} yes={yes} />;
+    case "setup-codex":
+      return <SetupCodex dryRun={dryRun} />;
     case "mcp":
       return <McpServer port={port} apiKey={key} />;
     case "claude":

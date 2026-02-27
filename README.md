@@ -105,6 +105,42 @@ This configures Claude Code to connect to the swarm. Start Claude Code and tell 
 Register yourself as the lead agent in the agent-swarm.
 ```
 
+### Option D: Codex as Lead or Worker
+
+Use Codex directly with the swarm MCP server.
+
+```bash
+# After starting the API server (Option B, step 1):
+bunx @desplega.ai/agent-swarm setup-codex
+```
+
+This command writes `./.codex/config.toml` with:
+
+```toml
+[mcp_servers.agent-swarm]
+url = "http://localhost:3013/mcp"
+bearer_token_env_var = "API_KEY"
+env_http_headers = { "X-Agent-ID" = "AGENT_ID" }
+```
+
+If `./.codex/config.toml` already exists, it creates numbered backups (`.bak`, `.bak.1`, ...). It also updates `.gitignore` safely to ignore only Codex config data.
+
+Then launch Codex with:
+
+```bash
+export API_KEY="your-swarm-api-key"
+export AGENT_ID="$(uuidgen)"
+codex
+```
+
+For an always-on Codex worker pool, run:
+
+```bash
+docker compose --profile codex up -d
+```
+
+Recommended routing is pool/offers-first (lead sends tasks without requiring `agentId`); use direct assignment only if your running swarm build supports it.
+
 ## How It Works
 
 ```
@@ -278,6 +314,7 @@ bunx @desplega.ai/agent-swarm <command>
 | Command | Description |
 |---------|-------------|
 | `setup` | Configure Claude Code to connect to the swarm |
+| `setup-codex` | Configure Codex to connect to the swarm |
 | `mcp`   | Start the MCP API server |
 | `worker` | Run a worker agent |
 | `lead`  | Run a lead agent |
