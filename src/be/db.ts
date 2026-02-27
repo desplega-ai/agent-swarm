@@ -627,6 +627,13 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     /* exists */
   }
 
+  // Last session activity timestamp (for stall detection)
+  try {
+    db.run(`ALTER TABLE agents ADD COLUMN lastActivityAt TEXT`);
+  } catch {
+    /* exists */
+  }
+
   // Service PM2 columns migration
   try {
     db.run(`ALTER TABLE services ADD COLUMN script TEXT NOT NULL DEFAULT ''`);
@@ -1099,6 +1106,7 @@ type AgentRow = {
   identityMd: string | null;
   setupScript: string | null;
   toolsMd: string | null;
+  lastActivityAt: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -1119,6 +1127,7 @@ function rowToAgent(row: AgentRow): Agent {
     identityMd: row.identityMd ?? undefined,
     setupScript: row.setupScript ?? undefined,
     toolsMd: row.toolsMd ?? undefined,
+    lastActivityAt: row.lastActivityAt ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -1195,6 +1204,14 @@ export function updateAgentMaxTasks(id: string, maxTasks: number): Agent | null 
     )
     .get(maxTasks, id);
   return row ? rowToAgent(row) : null;
+}
+
+export function updateAgentActivity(id: string): void {
+  getDb()
+    .prepare<null, [string]>(
+      `UPDATE agents SET lastActivityAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`,
+    )
+    .run(id);
 }
 
 // ============================================================================
