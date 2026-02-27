@@ -23,6 +23,7 @@ fi
 
 ROLE_PROFILE="${CODEX_ROLE_PROFILE:-builder_large}"
 MCP_URL="${MCP_BASE_URL:-http://host.docker.internal:3013}"
+export AGENT_NAME="${AGENT_NAME:-codex-worker-${AGENT_ID}}"
 export CODEX_HOME="${CODEX_HOME:-/workspace/personal/codex-home}"
 
 apply_role_defaults() {
@@ -91,6 +92,7 @@ fi
 
 echo "=== Codex Worker Bootstrap ==="
 echo "Agent ID: ${AGENT_ID}"
+echo "Agent Name: ${AGENT_NAME}"
 echo "Role Profile: ${ROLE_PROFILE}"
 echo "Model: ${CODEX_MODEL}"
 echo "Reasoning Effort: ${CODEX_MODEL_REASONING_EFFORT}"

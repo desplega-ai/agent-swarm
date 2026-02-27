@@ -110,8 +110,14 @@ export function SetupCodex({ dryRun = false }: SetupCodexProps) {
 
     const runSetup = async () => {
       const cwd = process.cwd();
-      const codexDirPath = join(cwd, ".codex");
+      const gitRoot = await getGitRoot(cwd);
+      const projectRoot = gitRoot ?? cwd;
+      const codexDirPath = join(projectRoot, ".codex");
       const codexConfigPath = join(codexDirPath, "config.toml");
+
+      if (gitRoot && gitRoot !== cwd) {
+        addLog(`Using git root: ${toDisplayPath(cwd, gitRoot)}`);
+      }
 
       if (!(await fileExists(codexDirPath))) {
         if (!dryRun) {
@@ -131,7 +137,6 @@ export function SetupCodex({ dryRun = false }: SetupCodexProps) {
       }
       addLog("Write .codex/config.toml", true);
 
-      const gitRoot = await getGitRoot(cwd);
       if (!gitRoot) {
         addLog("Not a git repository (skipping .gitignore update)");
         setState((current) => ({ ...current, step: "done" }));

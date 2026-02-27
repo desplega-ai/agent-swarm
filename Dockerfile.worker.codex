@@ -29,7 +29,8 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     && rm -rf /var/lib/apt/lists/*
 
 # Codex CLI + PM2
-RUN npm install -g @openai/codex@latest pm2
+ARG CODEX_CLI_VERSION=0.106.0
+RUN npm install -g "@openai/codex@${CODEX_CLI_VERSION}" pm2
 
 # Non-root execution user
 RUN useradd -m -s /bin/bash -G sudo worker \

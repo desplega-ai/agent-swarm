@@ -294,6 +294,7 @@ Routing default: lead should publish tasks to pool/offers (no required `agentId`
   - `printenv OPENAI_API_KEY | codex login --with-api-key`
 - If `CODEX_API_KEY` is set and `OPENAI_API_KEY` is empty, it is mapped automatically.
 - `CODEX_HOME` defaults to `/workspace/personal/codex-home` and persists on each worker's dedicated `/workspace` volume.
+- Worker loop uses a lightweight `/api/poll` trigger precheck and only starts `codex exec` when work is available.
 - Secrets are never echoed in startup logs.
 
 ### Role-Based Routing Controls
@@ -311,6 +312,10 @@ Each Codex service sets env-based model/sandbox pins:
 Codex workers must follow this workflow contract:
 
 1. Claim/poll a task via MCP tools (pool/offers-first routing by default).
+   - Register with `join-swarm(name=<AGENT_NAME>, lead=false, ...)` if not already present.
+   - Run `poll-task` once.
+   - If `offeredTasks` are returned, use `task-action(action="accept", taskId=...)`.
+   - If no task is assigned and `availableCount > 0`, list ready pool tasks with `get-tasks(unassigned=true, readyOnly=true)` and claim with `task-action(action="claim", taskId=...)`.
 2. Before edits, create/switch branch: `swarm/<agent_id>/<task_id>`.
 3. Work only in the worker's own `/workspace` volume (no shared checkout).
 4. Treat `docs/dispatch/*` as lead-owned by default.

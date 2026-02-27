@@ -123,9 +123,17 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
+| `agentId` | `uuid` | No | - | The agent to assign/offer task to. Omit to create unassigned task for pool. |
 | `task` | `string` | Yes | - | The task description to send. |
+| `offerMode` | `boolean` | No | false | If true, offer the task instead of direct assign (agent must accept/reject). |
+| `taskType` | `string` | No | - | Task type (e.g., 'bug', 'feature', 'review'). |
+| `tags` | `array` | No | - | Tags for filtering (e.g., ['urgent', 'frontend']). |
+| `priority` | `integer` | No | - | Priority 0-100 (default: 50). |
 | `dependsOn` | `array` | No | - | Task IDs this task depends on. |
 | `epicId` | `string` | No | - | Epic to associate this task with. |
+| `parentTaskId` | `uuid` | No | - | Parent task ID for session continuity; auto-routes to same worker unless `agentId` provided. |
+| `githubRepo` | `string` | No | - | GitHub repo identifier (e.g., `desplega-ai/agent-swarm`) for workspace context. |
+| `allowDuplicate` | `boolean` | No | false | If true, skip duplicate detection and force task creation. |
 
 ### get-task-details
 
@@ -670,4 +678,3 @@ Allows the lead agent to push learnings into a worker's memory. The learning wil
 Register an AgentMail inbox ID to route incoming emails to this agent. When emails arrive at this inbox, they will be routed to you as tasks (for workers) or inbox messages (for leads). Use action 'register' to add a mapping, 'unregister' to remove one, or 'list' to see your current mappings.
 
 *No parameters*
-

@@ -160,6 +160,7 @@ These variables configure Codex-based external workers (`Dockerfile.worker.codex
 ### Workflow Guardrails (Codex workers)
 
 - Use one dedicated `/workspace` volume per worker service; no shared checkout among Codex workers.
+- Acquire tasks deterministically: `poll-task` once, accept offers with `task-action(action="accept", ...)`, or claim ready pool tasks via `get-tasks(unassigned=true, readyOnly=true)` + `task-action(action="claim", ...)`.
 - Before editing for a claimed task, create branch `swarm/<agent_id>/<task_id>`.
 - `docs/dispatch/*` remains lead-owned by default; workers propose dispatch text updates via `store-progress`.
 
