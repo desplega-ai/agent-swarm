@@ -104,14 +104,51 @@ bun run docker:run:lead
 bun run docs:mcp
 ```
 
-## Dashboard UI
+### artifact
 
-The React-based monitoring dashboard is in the `ui/` directory:
+Manage agent artifacts — serve static files or Hono apps via localtunnel.
 
 ```bash
-cd ui
-pnpm install
-pnpm run dev
+# Serve a directory as a public artifact
+agent-swarm artifact serve ./my-report --name my-report
+
+# Serve a Hono app (must export default Hono instance)
+agent-swarm artifact serve ./server.ts --name dashboard
+
+# List active artifacts
+agent-swarm artifact list
+
+# Stop an artifact
+agent-swarm artifact stop my-report
+```
+
+**Subcommands:**
+
+| Subcommand | Description |
+|------------|-------------|
+| `serve <path>` | Serve a directory or script via localtunnel |
+| `list` | List active artifacts from the service registry |
+| `stop <name>` | Stop an artifact and close its tunnel |
+
+**Options for `serve`:**
+
+| Option | Description |
+|--------|-------------|
+| `--name <name>` | Name for the artifact (derived from path if omitted) |
+| `--port <port>` | Local port to use |
+| `--no-auth` | Disable authentication |
+| `--subdomain <sub>` | Request a specific localtunnel subdomain |
+
+Artifacts are registered in the service registry and automatically cleaned up when the session ends (via the Stop hook).
+
+## Dashboard UI
+
+The React-based monitoring dashboard is in the `new-ui/` directory:
+
+```bash
+cd new-ui
+bun install
+bun run dev
 ```
 
 Opens at `http://localhost:5173`. Provides real-time visibility into:
@@ -119,3 +156,4 @@ Opens at `http://localhost:5173`. Provides real-time visibility into:
 - Task list and progress
 - Inter-agent chat messages
 - Service registry
+- Usage and cost tracking

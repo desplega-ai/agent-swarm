@@ -39,6 +39,8 @@ Message the bot directly in Slack to create tasks. The lead agent receives the m
 - Handle it directly
 - Delegate it to a worker agent
 
+If no agents are online when you @mention the bot, the message is automatically queued — either as a lead inbox message (if a lead exists) or as an unassigned task in the pool. The bot confirms that your request has been queued and will be processed when agents come back up.
+
 ### Progress Updates
 
 Workers reply in Slack threads with progress updates using the `slack-reply` MCP tool. This keeps the conversation context in one place.

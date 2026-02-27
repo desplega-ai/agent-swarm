@@ -105,14 +105,16 @@ agent-swarm/
 │   ├── tools/           # MCP tool implementations
 │   ├── be/              # Backend (database, business logic)
 │   │   └── db.ts        # SQLite database
+│   ├── artifact-sdk/    # Artifact SDK (serve files/apps via localtunnel)
 │   ├── commands/        # CLI command implementations
 │   │   ├── runner.ts    # Task runner (polls and spawns sessions)
 │   │   ├── worker.ts    # Worker agent command
-│   │   └── lead.ts      # Lead agent command
+│   │   ├── lead.ts      # Lead agent command
+│   │   └── artifact.ts  # Artifact serve/list/stop commands
 │   └── hooks/           # Claude Code hooks
 ├── deploy/              # Deployment scripts
 ├── scripts/             # Utility scripts
-├── ui/                  # Dashboard UI (React)
+├── new-ui/              # Dashboard UI (React + AG Grid)
 ├── docker-compose.example.yml
 ├── Dockerfile           # API server image
 ├── Dockerfile.worker    # Worker image

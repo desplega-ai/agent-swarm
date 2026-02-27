@@ -13,13 +13,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Agent-swarm.dev landing page
 - Agent artifacts feature via localtunnel — SDK, CLI command, `/artifacts` skill, and Docker support
 - Depot build system for Docker images
+- Slack offline message queuing — @mentions when no agents are online are now queued as tasks
+- `AGENTMAIL_DISABLE` env var to skip AgentMail integration
 
 ### Changed
 - Server-side aggregation for usage pages (performance improvement)
 - Removed old `ui/` directory in favor of `new-ui/`
 
 ### Fixed
-- Usage pages performance issues
+- Usage pages performance issues (5 review fixes: full table scan, SQL parameterization, useMemo deps, groupBy validation, test coverage)
 - CI path filtering to skip workflows for docs-site and landing directory changes
 
 ## [1.28.0] - 2026-02-17
