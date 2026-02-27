@@ -4,6 +4,7 @@ import { Features } from "@/components/features";
 import { HowItWorks } from "@/components/how-it-works";
 import { Architecture } from "@/components/architecture";
 import { CTA } from "@/components/cta";
+import { Waitlist } from "@/components/waitlist";
 import { Footer } from "@/components/footer";
 
 export default function Home() {
@@ -15,6 +16,7 @@ export default function Home() {
       <HowItWorks />
       <Architecture />
       <CTA />
+      <Waitlist />
       <Footer />
     </main>
   );
