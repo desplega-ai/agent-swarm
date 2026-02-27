@@ -76,12 +76,14 @@
     "bun": ">=1.0.26"
   },
   "dependencies": {
+    "@desplega.ai/localtunnel": "^2.2.0",
     "@inkjs/ui": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@slack/bolt": "^4.6.0",
     "@types/react": "^19.2.7",
     "cron-parser": "^5.4.0",
     "date-fns": "^4.1.0",
+    "hono": "^4.12.3",
     "ink": "^6.5.1",
     "openai": "^6.22.0",
     "react": "^19.2.3",

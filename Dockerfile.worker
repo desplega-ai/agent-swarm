@@ -113,6 +113,9 @@ RUN npm install -g @desplega.ai/wts@latest
 # Install sentry-cli for issue investigation
 RUN npm install -g @sentry/cli
 
+# Install localtunnel client for artifact tunneling
+RUN npm install -g @desplega.ai/localtunnel
+
 # Install qa-use (QA tool) globally
 RUN npm install -g @desplega.ai/qa-use@latest
 
@@ -122,7 +125,7 @@ RUN qa-use install-deps
 # Copy commands
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/
 COPY --chown=worker:worker plugin/agents/* /home/worker/.claude/agents/
-COPY --chown=worker:worker plugin/skills/* /home/worker/.claude/skills/
+COPY --chown=worker:worker plugin/skills/ /home/worker/.claude/skills/
 
 # Create directories
 RUN mkdir -p /workspace /logs && chown worker:worker /workspace /logs
