@@ -10,6 +10,8 @@ export const registerGetEpicDetailsTool = (server: McpServer) => {
       title: "Get Epic Details",
       description:
         "Get detailed information about a specific epic, including progress and associated tasks.",
+      annotations: { readOnlyHint: true },
+
       inputSchema: z.object({
         epicId: z.string().uuid().optional().describe("The ID of the epic"),
         name: z.string().optional().describe("The name of the epic (alternative to ID)"),

@@ -11,6 +11,8 @@ export const registerGetInboxMessageTool = (server: McpServer) => {
       title: "Get inbox message details",
       description:
         "Returns detailed information about a specific inbox message, including full content and Slack context. Only accessible to the lead agent who owns the message.",
+      annotations: { readOnlyHint: true },
+
       inputSchema: z.object({
         inboxMessageId: z.uuid().describe("The ID of the inbox message to retrieve."),
       }),

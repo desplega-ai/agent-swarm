@@ -18,6 +18,7 @@ export const registerSendTaskTool = (server: McpServer) => {
     "send-task",
     {
       title: "Send a task",
+      annotations: { destructiveHint: false },
       description:
         "Sends a task to a specific agent, creates an unassigned task for the pool, or offers a task for acceptance.",
       inputSchema: z.object({

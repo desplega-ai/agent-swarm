@@ -11,6 +11,8 @@ export const registerUpdateProfileTool = (server: McpServer) => {
       title: "Update Profile",
       description:
         "Updates the calling agent's profile information (name, description, role, capabilities).",
+      annotations: { idempotentHint: true },
+
       inputSchema: z.object({
         name: z.string().min(1).optional().describe("Agent name."),
         description: z.string().optional().describe("Agent description."),

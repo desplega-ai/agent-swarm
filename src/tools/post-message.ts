@@ -9,6 +9,7 @@ export const registerPostMessageTool = (server: McpServer) => {
     "post-message",
     {
       title: "Post Message",
+      annotations: { destructiveHint: false },
       description: "Posts a message to a channel for cross-agent communication.",
       inputSchema: z.object({
         channel: z.string().default("general").describe("Channel name (default: 'general')."),

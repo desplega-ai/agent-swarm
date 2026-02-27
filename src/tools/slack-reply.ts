@@ -12,6 +12,8 @@ export const registerSlackReplyTool = (server: McpServer) => {
       title: "Reply to Slack thread",
       description:
         "Send a reply to a Slack thread. Use inboxMessageId for inbox messages, or taskId for task-related threads.",
+      annotations: { openWorldHint: true },
+
       inputSchema: z.object({
         inboxMessageId: z
           .uuid()

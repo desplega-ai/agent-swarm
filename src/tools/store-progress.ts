@@ -39,6 +39,8 @@ export const registerStoreProgressTool = (server: McpServer) => {
       title: "Store task progress",
       description:
         "Stores the progress of a specific task. Can also mark task as completed or failed, which will set the agent back to idle.",
+      annotations: { idempotentHint: true },
+
       inputSchema: z.object({
         taskId: z.uuid().describe("The ID of the task to update progress for."),
         progress: z.string().optional().describe("The progress update to store."),

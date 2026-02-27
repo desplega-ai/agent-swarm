@@ -33,6 +33,7 @@ export const registerTaskActionTool = (server: McpServer) => {
     "task-action",
     {
       title: "Task Pool Actions",
+      annotations: { destructiveHint: false },
       description:
         "Perform task pool operations: create unassigned tasks, claim/release tasks from pool, accept/reject offered tasks.",
       inputSchema: z.object({

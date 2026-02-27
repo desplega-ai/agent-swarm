@@ -11,6 +11,8 @@ export const registerListConfigTool = (server: McpServer) => {
       title: "List Config",
       description:
         "List raw config entries with optional filters. Unlike get-config, this returns raw entries without scope resolution — useful for seeing exactly what's configured at each scope level.",
+      annotations: { readOnlyHint: true },
+
       inputSchema: z.object({
         scope: SwarmConfigScopeSchema.optional().describe(
           "Filter by scope: 'global', 'agent', or 'repo'.",

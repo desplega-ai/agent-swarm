@@ -12,6 +12,8 @@ export const registerMemorySearchTool = (server: McpServer) => {
       title: "Search memories",
       description:
         "Search your accumulated memories using natural language. Returns summaries with IDs — use memory-get to retrieve full content.",
+      annotations: { readOnlyHint: true },
+
       inputSchema: z.object({
         query: z.string().min(1).describe("Natural language search query."),
         scope: z

@@ -11,6 +11,8 @@ export const registerMemoryGetTool = (server: McpServer) => {
       title: "Get memory details",
       description:
         "Retrieve the full content of a specific memory by its ID. Use memory-search to find memory IDs first.",
+      annotations: { readOnlyHint: true },
+
       inputSchema: z.object({
         memoryId: z.uuid().describe("The ID of the memory to retrieve."),
       }),

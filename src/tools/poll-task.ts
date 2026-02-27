@@ -26,6 +26,8 @@ export const registerPollTaskTool = (server: McpServer) => {
       title: "Poll for a task",
       description:
         "Poll for a new task assignment. Returns immediately if there are offered tasks awaiting accept/reject. Also returns count of unassigned tasks in the pool.",
+      annotations: { readOnlyHint: true },
+
       inputSchema: z.object({}),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),

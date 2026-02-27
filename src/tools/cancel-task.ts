@@ -18,6 +18,8 @@ export const registerCancelTaskTool = (server: McpServer) => {
       title: "Cancel Task",
       description:
         "Cancel a task that is pending or in progress. Only the lead or task creator can cancel tasks. The worker will be notified via hooks.",
+      annotations: { destructiveHint: true },
+
       inputSchema: z.object({
         taskId: z.uuid().describe("The ID of the task to cancel."),
         reason: z.string().optional().describe("Reason for cancellation."),

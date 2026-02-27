@@ -43,6 +43,8 @@ export const registerContextDiffTool = (server: McpServer) => {
       title: "Context Diff",
       description:
         "Compare two versions of a context file. Shows a unified diff between the specified version and its predecessor (or a specific comparison version).",
+      annotations: { readOnlyHint: true },
+
       inputSchema: z.object({
         versionId: z.string().uuid().describe('The "newer" version ID to diff.'),
         compareToVersionId: z

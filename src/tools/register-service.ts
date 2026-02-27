@@ -13,6 +13,8 @@ export const registerRegisterServiceTool = (server: McpServer) => {
       title: "Register Service",
       description:
         "Register a background service (e.g., PM2 process) for discovery by other agents. The service URL is automatically derived from your agent ID (https://{AGENT_ID}.{SWARM_URL}). Each agent can only run one service on port 3000.",
+      annotations: { idempotentHint: true },
+
       inputSchema: z.object({
         script: z.string().min(1).describe("Path to the script to run (required for PM2 restart)."),
         description: z.string().optional().describe("What this service does."),

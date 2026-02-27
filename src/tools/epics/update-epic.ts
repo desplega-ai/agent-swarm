@@ -9,6 +9,7 @@ export const registerUpdateEpicTool = (server: McpServer) => {
     "update-epic",
     {
       title: "Update Epic",
+      annotations: { idempotentHint: true },
       description:
         "Update an existing epic. Only the creator, lead agent, or swarm lead can update.",
       inputSchema: z.object({

@@ -14,6 +14,7 @@ export const registerRegisterAgentMailInboxTool = (server: McpServer) => {
     "register-agentmail-inbox",
     {
       title: "Register AgentMail Inbox",
+      annotations: { idempotentHint: true },
       description:
         "Register an AgentMail inbox ID to route incoming emails to this agent. When emails arrive at this inbox, they will be routed to you as tasks (for workers) or inbox messages (for leads). Use action 'register' to add a mapping, 'unregister' to remove one, or 'list' to see your current mappings.",
       inputSchema: z.object({

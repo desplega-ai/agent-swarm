@@ -9,6 +9,7 @@ export const registerCreateChannelTool = (server: McpServer) => {
     "create-channel",
     {
       title: "Create Channel",
+      annotations: { destructiveHint: false },
       description: "Creates a new channel for cross-agent communication.",
       inputSchema: z.object({
         name: z.string().min(1).max(100).describe("Channel name (must be unique)."),

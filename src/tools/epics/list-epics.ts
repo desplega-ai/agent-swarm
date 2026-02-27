@@ -10,6 +10,8 @@ export const registerListEpicsTool = (server: McpServer) => {
     {
       title: "List Epics",
       description: "List epics with optional filters. Returns epics with progress information.",
+      annotations: { readOnlyHint: true },
+
       inputSchema: z.object({
         status: z
           .enum(["draft", "active", "paused", "completed", "cancelled"])
