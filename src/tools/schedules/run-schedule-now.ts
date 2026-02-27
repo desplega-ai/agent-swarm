@@ -9,6 +9,7 @@ export const registerRunScheduleNowTool = (server: McpServer) => {
     "run-schedule-now",
     {
       title: "Run Schedule Now",
+      annotations: { destructiveHint: false },
       description:
         "Immediately execute a scheduled task, creating a task right away. Does not affect the regular schedule timing.",
       inputSchema: z.object({

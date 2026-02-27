@@ -8,6 +8,7 @@ export const registerCreateEpicTool = (server: McpServer) => {
     "create-epic",
     {
       title: "Create Epic",
+      annotations: { destructiveHint: false },
       description: "Create a new epic (project) to organize related tasks.",
       inputSchema: z.object({
         name: z.string().min(1).max(200).describe("Unique name for the epic"),

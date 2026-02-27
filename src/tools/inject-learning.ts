@@ -16,6 +16,7 @@ export const registerInjectLearningTool = (server: McpServer) => {
     "inject-learning",
     {
       title: "Inject learning into worker memory",
+      annotations: { destructiveHint: false },
       description:
         "Allows the lead agent to push learnings into a worker's memory. The learning will be stored as a searchable memory entry that the worker can recall in future sessions.",
       inputSchema: z.object({
