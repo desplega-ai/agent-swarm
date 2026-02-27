@@ -93,6 +93,52 @@ Cancel a task that is pending or in progress. Only the lead or task creator can 
 
 Returns your agent ID and profile information.
 
+## Config Tools
+
+Manage swarm-wide, agent-specific, or repo-specific configuration values. Scope resolution follows: repo > agent > global.
+
+### set-config
+
+Set or update a configuration value. Upserts by (scope, scopeId, key).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scope` | string | Yes | `global`, `agent`, or `repo` |
+| `key` | string | Yes | Configuration key |
+| `value` | string | Yes | Configuration value |
+| `scopeId` | uuid | No | Agent ID or repo ID (required for `agent`/`repo` scopes) |
+| `isSecret` | boolean | No | Mask value in API responses |
+| `description` | string | No | Human-readable description |
+
+### get-config
+
+Get resolved configuration values with scope resolution. Returns one entry per unique key with the most-specific scope winning.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `key` | string | No | Filter by specific key |
+| `agentId` | uuid | No | Agent ID for scope resolution |
+| `repoId` | uuid | No | Repo ID for scope resolution |
+| `includeSecrets` | boolean | No | Include actual secret values |
+
+### list-config
+
+List raw config entries without scope resolution. Useful for seeing exactly what's configured at each scope level.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scope` | string | No | Filter by scope |
+| `scopeId` | uuid | No | Filter by agent/repo ID |
+| `key` | string | No | Filter by key |
+
+### delete-config
+
+Delete a configuration entry by its ID.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | uuid | Yes | Config entry ID |
+
 ## Slack Tools
 
 ### slack-reply
@@ -129,9 +175,59 @@ Post a new message to a Slack channel. Leads only.
 
 List Slack channels the bot is a member of.
 
-### slack-upload-file / slack-download-file
+### slack-upload-file
 
-Upload or download files from Slack.
+Upload a file to a Slack channel or thread (max 1 GB).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `filePath` | string | No | Path to file (either filePath or content required) |
+| `content` | string | No | Base64-encoded file content |
+| `filename` | string | No | Name for the file in Slack |
+| `taskId` | uuid | No | Task context for thread |
+| `inboxMessageId` | uuid | No | Inbox message context |
+| `channelId` | string | No | Direct channel (leads only) |
+| `initialComment` | string | No | Message to post with the file |
+
+### slack-download-file
+
+Download a file from Slack by file ID or URL.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `fileId` | string | No | Slack file ID |
+| `url` | string | No | Direct download URL |
+| `savePath` | string | No | Where to save (default: `/workspace/shared/downloads/slack/`) |
+
+### inbox-delegate
+
+Delegate an inbox message to a worker agent by creating a task. The task inherits Slack context for replies.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `inboxMessageId` | uuid | Yes | Inbox message to delegate |
+| `agentId` | uuid | Yes | Worker to delegate to |
+| `taskDescription` | string | No | Custom task description |
+| `offerMode` | boolean | No | Offer instead of direct assign |
+| `parentTaskId` | uuid | No | Parent task for session continuity |
+
+### get-inbox-message
+
+Returns detailed information about a specific inbox message. Lead only.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `inboxMessageId` | uuid | Yes | Inbox message ID |
+
+### register-agentmail-inbox
+
+Register an AgentMail inbox ID to route incoming emails to this agent.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | string | Yes | `register`, `unregister`, or `list` |
+| `inboxId` | string | No | AgentMail inbox ID (required for register/unregister) |
+| `inboxEmail` | string | No | Email address for reference |
 
 ## Task Pool Tools
 
@@ -181,9 +277,24 @@ Update your agent's profile, identity files, and setup script.
 | `claudeMd` | string | No | CLAUDE.md content |
 | `setupScript` | string | No | Startup script content |
 
-### context-history / context-diff
+### context-history
 
-View and compare versions of identity files.
+View version history for an agent's context files (soulMd, identityMd, toolsMd, claudeMd, setupScript).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agentId` | uuid | No | Agent ID (default: your own) |
+| `field` | string | No | Filter by field name |
+| `limit` | number | No | Max versions (default: 10) |
+
+### context-diff
+
+Compare two versions of a context file. Shows a unified diff.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `versionId` | uuid | Yes | The newer version ID |
+| `compareToVersionId` | uuid | No | The older version (default: previous) |
 
 ## Service Tools
 
