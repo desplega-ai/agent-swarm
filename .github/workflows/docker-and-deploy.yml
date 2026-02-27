@@ -19,7 +19,7 @@ env:
 
 jobs:
   build-and-push-server:
-    runs-on: depot-ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: read
       id-token: write
@@ -64,7 +64,7 @@ jobs:
           no-cache: true
 
   build-and-push-worker:
-    runs-on: depot-ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: read
       id-token: write
@@ -110,7 +110,7 @@ jobs:
 
   deploy:
     name: Deploy
-    runs-on: depot-ubuntu-latest
+    runs-on: self-hosted
 
     needs:
       - build-and-push-server
