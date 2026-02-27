@@ -1,9 +1,18 @@
-# Agent Swarm
-
-> Built by [desplega.sh](https://desplega.sh) — build by builders for builders!
-
 <p align="center">
   <img src="assets/agent-swarm.png" alt="Agent Swarm" width="800">
+</p>
+
+<p align="center">
+  <a href="https://github.com/desplega-ai/agent-swarm/stargazers"><img src="https://img.shields.io/github/stars/desplega-ai/agent-swarm?style=flat-square&color=yellow" alt="GitHub Stars"></a>
+  <a href="https://github.com/desplega-ai/agent-swarm/blob/main/LICENSE"><img src="https://img.shields.io/github/license/desplega-ai/agent-swarm?style=flat-square" alt="MIT License"></a>
+  <a href="https://github.com/desplega-ai/agent-swarm/pulls"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square" alt="PRs Welcome"></a>
+  <a href="https://discord.gg/KZgfyyDVZa"><img src="https://img.shields.io/badge/Discord-Join%20us-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://docs.agent-swarm.dev"><img src="https://img.shields.io/badge/docs-agent--swarm.dev-blue?style=flat-square" alt="Docs"></a>
+</p>
+
+<p align="center">
+  <b>Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants.</b><br/>
+  <sub>Built by <a href="https://desplega.sh">desplega.sh</a> — by builders, for builders.</sub>
 </p>
 
 https://github.com/user-attachments/assets/bd308567-d21e-44a5-87ec-d25aeb1de3d3
@@ -21,9 +30,12 @@ https://github.com/user-attachments/assets/bd308567-d21e-44a5-87ec-d25aeb1de3d3
   <a href="https://discord.gg/KZgfyyDVZa">
     <img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join Discord">
   </a>
+  <a href="https://x.com/swarm_lead">
+    <img src="https://img.shields.io/badge/𝕏-@swarm__lead-000?style=for-the-badge&logo=x&logoColor=white" alt="Follow on X">
+  </a>
 </p>
 
-> Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants.
+> **What if your AI agents remembered everything, learned from every mistake, and got better with every task?**
 
 Agent Swarm lets you run a team of AI coding agents that coordinate autonomously. A **lead agent** receives tasks (from you, Slack, or GitHub), breaks them down, and delegates to **worker agents** running in Docker containers. Workers execute tasks, report progress, and ship code — all without manual intervention.
 
@@ -302,6 +314,29 @@ For production deployments, see [DEPLOYMENT.md](./DEPLOYMENT.md) which covers:
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Development setup and project structure |
 | [UI.md](./UI.md) | Dashboard UI overview |
 | [MCP.md](./MCP.md) | MCP tools reference (auto-generated) |
+
+## Contributing
+
+We love contributions! Whether it's bug reports, feature requests, docs improvements, or code — all are welcome.
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) to get started. The quickest way to contribute:
+
+1. Fork the repo
+2. Create a branch (`git checkout -b my-feature`)
+3. Make your changes
+4. Open a PR
+
+Join our [Discord](https://discord.gg/KZgfyyDVZa) if you have questions or want to discuss ideas.
+
+## Star History
+
+<a href="https://star-history.com/#desplega-ai/agent-swarm&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=desplega-ai/agent-swarm&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=desplega-ai/agent-swarm&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=desplega-ai/agent-swarm&type=Date" />
+ </picture>
+</a>
 
 ## License
 
