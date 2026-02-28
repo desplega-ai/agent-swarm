@@ -11,15 +11,15 @@ export interface X402Config {
   maxAutoApprove: number;
   /** Daily spending limit in USD. Default: $10.00 */
   dailyLimit: number;
-  /** Facilitator URL for payment verification/settlement */
-  facilitatorUrl: string;
   /** Network to use (CAIP-2 format). Default: eip155:84532 (Base Sepolia) */
   network: string;
 }
 
+/** Safe subset of config without sensitive fields (no private key). */
+export type X402SafeConfig = Omit<X402Config, "evmPrivateKey">;
+
 const DEFAULT_MAX_AUTO_APPROVE = 1.0;
 const DEFAULT_DAILY_LIMIT = 10.0;
-const DEFAULT_FACILITATOR_URL = "https://x402.org/facilitator";
 const DEFAULT_NETWORK = "eip155:84532"; // Base Sepolia (testnet)
 
 /**
@@ -31,7 +31,6 @@ const DEFAULT_NETWORK = "eip155:84532"; // Base Sepolia (testnet)
  * Optional env vars:
  *   X402_MAX_AUTO_APPROVE — max USD per request (default: 1.00)
  *   X402_DAILY_LIMIT — daily USD limit (default: 10.00)
- *   X402_FACILITATOR_URL — facilitator endpoint (default: https://x402.org/facilitator)
  *   X402_NETWORK — CAIP-2 network ID (default: eip155:84532)
  */
 export function loadX402Config(): X402Config {
@@ -63,7 +62,6 @@ export function loadX402Config(): X402Config {
     evmPrivateKey: evmPrivateKey as `0x${string}`,
     maxAutoApprove,
     dailyLimit,
-    facilitatorUrl: process.env.X402_FACILITATOR_URL || DEFAULT_FACILITATOR_URL,
     network: process.env.X402_NETWORK || DEFAULT_NETWORK,
   };
 }

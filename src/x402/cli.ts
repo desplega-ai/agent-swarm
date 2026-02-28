@@ -11,12 +11,10 @@
  *   EVM_PRIVATE_KEY         Required. Wallet private key (0x-prefixed).
  *   X402_MAX_AUTO_APPROVE   Max USD per request (default: 1.00).
  *   X402_DAILY_LIMIT        Daily USD limit (default: 10.00).
- *   X402_FACILITATOR_URL    Facilitator endpoint.
  *   X402_NETWORK            CAIP-2 network ID (default: eip155:84532).
  */
 
 import { createX402Client } from "./client.ts";
-import { loadX402Config } from "./config.ts";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -87,16 +85,13 @@ async function main() {
 
     case "check": {
       try {
-        const config = loadX402Config();
+        const client = createX402Client();
         console.log("x402 Configuration");
         console.log("==================");
-        console.log(
-          `Private key:     ${config.evmPrivateKey.slice(0, 6)}...${config.evmPrivateKey.slice(-4)} (set)`,
-        );
-        console.log(`Max per request: $${config.maxAutoApprove.toFixed(2)}`);
-        console.log(`Daily limit:     $${config.dailyLimit.toFixed(2)}`);
-        console.log(`Facilitator:     ${config.facilitatorUrl}`);
-        console.log(`Network:         ${config.network}`);
+        console.log(`Wallet address:  ${client.walletAddress}`);
+        console.log(`Max per request: $${client.config.maxAutoApprove.toFixed(2)}`);
+        console.log(`Daily limit:     $${client.config.dailyLimit.toFixed(2)}`);
+        console.log(`Network:         ${client.config.network}`);
         console.log("\nx402 is configured and ready.");
       } catch (error) {
         console.error(
@@ -117,7 +112,6 @@ async function main() {
       console.log("  EVM_PRIVATE_KEY         Required. Wallet private key (0x-prefixed)");
       console.log("  X402_MAX_AUTO_APPROVE   Max USD per request (default: 1.00)");
       console.log("  X402_DAILY_LIMIT        Daily USD limit (default: 10.00)");
-      console.log("  X402_FACILITATOR_URL    Facilitator URL");
       console.log("  X402_NETWORK            CAIP-2 network ID (default: eip155:84532)");
       break;
   }

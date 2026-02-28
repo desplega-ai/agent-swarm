@@ -24,5 +24,5 @@ export {
   createX402Fetch,
   type X402PaymentClient,
 } from "./client.ts";
-export { loadX402Config, type X402Config } from "./config.ts";
+export { loadX402Config, type X402Config, type X402SafeConfig } from "./config.ts";
 export { type SpendingRecord, SpendingTracker } from "./spending-tracker.ts";

@@ -24,7 +24,7 @@ import { wrapFetchWithPayment } from "@x402/fetch";
 import { createPublicClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { base, baseSepolia } from "viem/chains";
-import { loadX402Config, type X402Config } from "./config.ts";
+import { loadX402Config, type X402Config, type X402SafeConfig } from "./config.ts";
 import { SpendingTracker } from "./spending-tracker.ts";
 
 export interface X402PaymentClient {
@@ -36,8 +36,10 @@ export interface X402PaymentClient {
   spendingTracker: SpendingTracker;
   /** Get a summary of today's spending */
   getSpendingSummary: () => ReturnType<SpendingTracker["getSummary"]>;
-  /** The resolved configuration */
-  config: X402Config;
+  /** The wallet address derived from the private key */
+  walletAddress: `0x${string}`;
+  /** Safe config subset (no private key) */
+  config: X402SafeConfig;
 }
 
 /**
@@ -78,7 +80,10 @@ export function createX402Client(configOverrides?: Partial<X402Config>): X402Pay
   // Create spending tracker
   const spendingTracker = new SpendingTracker(config.maxAutoApprove, config.dailyLimit);
 
-  // Register a spending-limit hook that blocks over-budget payments
+  // Register a spending-limit hook that blocks over-budget payments.
+  // NOTE: This check has a TOCTOU race — concurrent requests could both pass the
+  // limit check before either records its payment. Acceptable for agent workloads
+  // (typically sequential), but not suitable for high-concurrency scenarios.
   client.onBeforePaymentCreation(async (context) => {
     const { selectedRequirements } = context;
 
@@ -105,12 +110,16 @@ export function createX402Client(configOverrides?: Partial<X402Config>): X402Pay
   // Wrap fetch with payment handling
   const paidFetch = wrapFetchWithPayment(globalThis.fetch, client);
 
+  // Expose a safe config subset — never leak the private key
+  const { evmPrivateKey: _key, ...safeConfig } = config;
+
   return {
     fetch: paidFetch as (input: string | URL | Request, init?: RequestInit) => Promise<Response>,
     x402Client: client,
     spendingTracker,
     getSpendingSummary: () => spendingTracker.getSummary(),
-    config,
+    walletAddress: account.address,
+    config: safeConfig,
   };
 }
 
@@ -132,5 +141,12 @@ export function createX402Fetch(
  * USDC uses 6 decimal places, so 1000000 = $1.00
  */
 function usdcToUsd(rawValue: string): number {
-  return Number(BigInt(rawValue)) / 1_000_000;
+  try {
+    return Number(BigInt(rawValue)) / 1_000_000;
+  } catch {
+    // If the value can't be parsed as BigInt, fall back to parseFloat
+    const parsed = Number.parseFloat(rawValue);
+    if (Number.isNaN(parsed)) return 0;
+    return parsed / 1_000_000;
+  }
 }
