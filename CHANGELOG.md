@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.30.1] - 2026-02-28
+
+### Added
+- Agent `lastActivityAt` timestamp for stall detection (#105)
+- Slack attachment handling — voice memos, images, and file uploads are now processed as messages (#103)
+- `includeHeartbeat` filter for `get-tasks` — heartbeat/system tasks are excluded by default (#102)
+- Tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`) on all 36 MCP tools for improved Tool Search discoverability (#95)
+
+### Changed
+- Pinned Dockerfile builder to `bun:1.3.9` for reproducible builds
+- Dockerfile improvements: `pipefail`, consolidated `RUN` layers, `--no-install-recommends` for Node.js and GitHub CLI
+- Removed `cc-ai-tracker` from worker image agent tools
+- README optimized for GitHub star conversion: badges, hero, issue/PR templates (#104)
+
 ## [1.28.1] - 2026-02-27
 
 ### Added

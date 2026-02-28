@@ -70,6 +70,15 @@ SLACK_ALLOWED_USER_IDS=U12345678,U87654321
 
 If both are set, a user must match **either** an allowed domain **or** be in the user ID whitelist.
 
+## Attachment Handling
+
+Slack messages with file attachments (voice memos, images, documents) are automatically recognized and processed. When a user sends a file — even without any text — the bot detects it and includes attachment metadata (filename, MIME type, size, Slack file ID) in the task description.
+
+This means agents can:
+- Receive voice messages or image uploads as tasks
+- Access file metadata to decide whether to download and process attachments
+- Use `slack-download-file` to retrieve the actual file content
+
 ## File Handling
 
 Agents can upload and download files via Slack:
