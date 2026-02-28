@@ -1,6 +1,6 @@
 {
   "name": "@desplega.ai/agent-swarm",
-  "version": "1.30.1",
+  "version": "1.31.0",
   "description": "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants",
   "license": "MIT",
   "author": "desplega.sh <contact@desplega.sh>",
@@ -79,8 +79,12 @@
     "@desplega.ai/localtunnel": "^2.2.0",
     "@inkjs/ui": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.25.1",
+    "@openfort/openfort-node": "^0.9.1",
     "@slack/bolt": "^4.6.0",
     "@types/react": "^19.2.7",
+    "@x402/core": "^2.5.0",
+    "@x402/evm": "^2.5.0",
+    "@x402/fetch": "^2.5.0",
     "cron-parser": "^5.4.0",
     "date-fns": "^4.1.0",
     "hono": "^4.12.3",
@@ -89,6 +93,7 @@
     "react": "^19.2.3",
     "react-devtools-core": "^7.0.1",
     "svix": "^1.62.0",
+    "viem": "^2.46.3",
     "zod": "^4.2.1"
   }
 }
