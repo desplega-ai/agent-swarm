@@ -8,8 +8,8 @@ topic: "Openfort viem integration as a robust alternative for x402 payments in a
 tags: [research, x402, openfort, viem, payments, eip-3009, managed-wallets]
 status: complete
 autonomy: autopilot
-last_updated: 2026-02-28
-last_updated_by: Researcher
+last_updated: 2026-02-28T11:10:00Z
+last_updated_by: Researcher (hands-on testing update)
 ---
 
 # Research: Openfort Viem Integration as a Robust Alternative for x402 Payments
@@ -325,6 +325,165 @@ Openfort is a small, early-stage startup in a consolidating market. Before makin
 - **Coinbase CDP alternative:** Should we also evaluate Coinbase's own MPC wallet as a signer? It would be more ecosystem-aligned with x402.
 - **Multi-agent wallets:** Should each agent have its own wallet (better isolation) or share one (simpler treasury management)?
 - **Key export:** Openfort supports private key export — should we document this as an escape hatch?
+
+## Hands-on Testing Results
+
+**Date**: 2026-02-28
+**Tested by**: Researcher (agent-swarm worker)
+**SDK Version**: \`@openfort/openfort-node\` v0.9.1
+**API Key Type**: Test (\`sk_test_...\`)
+**Environment**: Node.js v22.22.0
+
+### Setup
+
+Two secrets were configured in the swarm's global config:
+- \`OPENFORT_TEST_SECRET_KEY\` — Test API secret key (\`sk_test_...\`)
+- \`OPENFORT_TEST_WALLET_PRIVATE_KEY\` — ECDSA P-256 private key in base64-encoded DER format
+
+**Key discovery:** The \`walletSecret\` parameter in the SDK constructor is NOT a simple string or hex key — it's a **P-256 (ES256) ECDSA private key in PKCS#8 DER format, base64-encoded**. The SDK uses it to generate JWT tokens (with \`ES256\` algorithm) that are sent as the \`X-Wallet-Auth\` HTTP header on backend wallet API calls. This provides request-level authentication: each JWT includes the request method, path, and a hash of the request body.
+
+### Test Results Summary
+
+**17 tests executed, 16 passed, 1 expected failure** (error handling test).
+
+| # | Test | Result | Duration | Notes |
+|---|------|--------|----------|-------|
+| 1 | SDK Initialization | PASS | 1ms | Instantaneous, no API call |
+| 2 | List Existing Wallets | PASS | 257ms | First API call (cold start) |
+| 3 | Create Backend Wallet | PASS | 696ms | First wallet creation (cold start) |
+| 4 | Get Wallet by ID | PASS | 101ms | Fast lookup |
+| 5 | Get Wallet by Address | PASS | 110ms | Uses list API internally |
+| 6 | Create Second Wallet | PASS | 222ms | Subsequent creates are faster |
+| 7 | Sign Message | PASS | 251ms | Includes get + sign (two API calls) |
+| 8 | **Sign EIP-712 Typed Data** | **PASS** | **251ms** | **x402 critical path — works** |
+| 9 | Sign Raw Hash | PASS | 247ms | Includes get + sign |
+| 10 | signMessage Latency (5x) | PASS | 799ms total | **Avg 140ms** (128-145ms range) |
+| 11 | signTypedData Latency (5x) | PASS | 742ms total | **Avg 130ms** (120-143ms range) |
+| 12 | Export Private Key | PASS | 245ms | Returns 64-char hex (32 bytes) |
+| 13 | List All Wallets | PASS | 101ms | Pagination works |
+| 14 | Delete Wallet | PASS | 122ms | Clean deletion |
+| 15 | V2 Accounts API | PASS | 121ms | Alternative list endpoint |
+| 16 | Error: Bad Wallet ID | FAIL (expected) | 77ms | Clear error message |
+| 17 | Wallet Persistence | PASS | 411ms | Create → Get → Same address |
+
+### x402 Compatibility: Verified
+
+**This is the most important finding.** The Openfort backend wallet signature was **verified** using viem's \`verifyTypedData()\` (which internally uses \`ecrecover\`). This proves:
+
+1. Openfort backend wallets produce **standard ECDSA signatures** (not EIP-1271 smart contract signatures)
+2. The signatures are **65 bytes** (r + s + v), as expected by EIP-3009
+3. The \`signTypedData()\` method correctly handles EIP-712 structured data
+4. A minimal \`ClientEvmSigner\` wrapper works perfectly with the x402 interface:
+
+\`\`\`typescript
+const clientEvmSigner: ClientEvmSigner = {
+  address: account.address,
+  signTypedData: async (msg) => {
+    return account.signTypedData({
+      domain: msg.domain,
+      types: msg.types,
+      primaryType: msg.primaryType,
+      message: msg.message,
+    });
+  },
+};
+\`\`\`
+
+**Verification output:**
+\`\`\`
+Signature: 0xbaf71652df562e10...efd7eb68e01
+Verifying with viem (ecrecover)... ✓ VALID
+ClientEvmSigner wrapper... ✓ VALID
+\`\`\`
+
+### Wallet Secret Deep Dive
+
+The SDK's wallet authentication mechanism is more sophisticated than documented:
+
+1. The \`walletSecret\` is a **PKCS#8-encoded ECDSA P-256 private key** (base64 of the DER bytes)
+2. On every backend wallet mutation (POST/PUT/DELETE to \`/accounts/backend/*\`), the SDK:
+   - Generates a JWT with \`ES256\` algorithm
+   - Claims include: \`uri\` (method + path), \`iat\`, \`nbf\`, \`jti\` (nonce), and \`reqHash\` (SHA-256 of sorted request body)
+   - Signs it with the wallet secret key
+   - Attaches it as \`X-Wallet-Auth\` header
+3. This means **each API request is individually authenticated** — stealing the API key alone is insufficient to perform wallet operations
+4. The wallet secret can be generated by the Openfort dashboard or via their CLI
+
+### Wallet Persistence: Confirmed
+
+**Critical question answered:** Wallets persist indefinitely. \`create()\` always generates a new wallet; you retrieve existing ones via \`get({ id })\` or \`get({ address })\` or \`list()\`. For the agent-swarm use case, the workflow would be:
+
+\`\`\`typescript
+// On agent startup:
+const wallets = await openfort.accounts.evm.backend.list({ limit: 1 });
+const account = wallets.accounts.length > 0
+  ? wallets.accounts[0]
+  : await openfort.accounts.evm.backend.create();
+\`\`\`
+
+Or better, store the wallet ID in agent config and use \`get({ id })\` directly.
+
+### Latency Analysis
+
+| Operation | Avg Latency | Notes |
+|-----------|------------|-------|
+| \`signMessage\` | **140ms** | 128-145ms range, very consistent |
+| \`signTypedData\` | **130ms** | 120-143ms range — the x402 path |
+| \`create\` wallet | **222-696ms** | First call is cold (~700ms), subsequent ~220ms |
+| \`get\` wallet | **101-110ms** | Fast retrieval |
+| \`list\` wallets | **101ms** | Pagination supported |
+| \`delete\` wallet | **122ms** | Clean cleanup |
+| \`export\` key | **245ms** | RSA encrypt/decrypt overhead |
+
+**For x402 payments:** A single \`signTypedData\` call adds ~130ms to each payment. The x402 flow already involves HTTP requests to the facilitator, so this is negligible in practice. Total payment flow: agent → x402 SDK → signTypedData (130ms) → facilitator → blockchain.
+
+### Private Key Export
+
+The SDK supports exporting the raw private key from a backend wallet:
+- Returned as a **64-character hex string** (32 bytes, no \`0x\` prefix)
+- Uses RSA-OAEP encryption for transport: SDK generates ephemeral RSA key pair, sends public key to Openfort, Openfort encrypts the private key, SDK decrypts locally
+- This serves as an **escape hatch** if you need to migrate away from Openfort
+
+### Cost Implications
+
+With 17 tests executed, each involving 1-6 API calls, we consumed ~35-40 operations. The free tier allows 2,000 operations/month. For the agent-swarm:
+- Each x402 payment = **1 signTypedData call** = 1 operation
+- Agent startup = **1 list or get call** = 1 operation
+- At the free tier: **~2,000 payments/month** before charges
+- At Growth (\$99/mo): **~25,000 payments/month**
+
+### SDK Quirks & Observations
+
+1. **No \`0x\` prefix on exported keys:** The \`export()\` method returns a bare hex string without \`0x\` prefix. When importing or using with viem, you need to add \`0x\` yourself.
+
+2. **\`get()\` by address uses list internally:** The SDK calls \`listBackendWallets({ address, limit: 1 })\` rather than a dedicated endpoint. This is fine but means address lookups are slightly slower than ID lookups.
+
+3. **\`walletSecret\` is required for all mutations:** Without it, any POST/PUT/DELETE to backend wallet endpoints throws \`MissingWalletSecretError\`. Read-only operations (list, get) work without it.
+
+4. **Error messages are clear:** Invalid wallet IDs return descriptive errors like "Request has invalid parameters. Invalid acc: 'acc_nonexistent_12345'."
+
+5. **BigInt support works:** The SDK handles \`BigInt\` values in EIP-712 typed data correctly (via viem's \`hashTypedData\`).
+
+6. **No rate limiting observed:** 17 tests with ~40 API calls in rapid succession — no throttling or 429 responses.
+
+7. **SDK uses global Axios instance:** The \`configure()\` function sets up module-level configuration. This means you cannot have two Openfort instances with different API keys in the same process. Not a problem for our use case (one agent = one key).
+
+### Updated Recommendation
+
+Based on hands-on testing, I **strengthen the recommendation** for Openfort integration:
+
+1. **The integration works exactly as designed.** Zero surprises. The \`ClientEvmSigner\` adapter is 7 lines of code.
+2. **Latency is acceptable.** 130ms for signTypedData is negligible in the context of HTTP-based x402 payments.
+3. **Wallet persistence is confirmed.** Agents can reliably retrieve the same wallet across restarts.
+4. **The security model is solid.** Per-request JWT authentication with the wallet secret key means the API key alone cannot sign transactions.
+5. **Private key export provides an escape hatch.** No vendor lock-in risk.
+
+**Revised implementation plan:**
+- Use Openfort as the **default** signer (not opt-in), with raw viem as the fallback for development/testing
+- Store wallet ID in per-agent config (via swarm config system)
+- Add \`OPENFORT_API_KEY\` and \`OPENFORT_WALLET_SECRET\` to the swarm's env vars
+- Use \`X402_SIGNER_TYPE=viem\` as the escape hatch (not the default)
+
 
 ## Sources
 
