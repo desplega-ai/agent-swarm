@@ -22,6 +22,7 @@
  */
 
 import { x402Client } from "@x402/core/client";
+import type { ClientEvmSigner } from "@x402/evm";
 import { toClientEvmSigner } from "@x402/evm";
 import { registerExactEvmScheme } from "@x402/evm/exact/client";
 import { wrapFetchWithPayment } from "@x402/fetch";
@@ -29,7 +30,7 @@ import { createPublicClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { base, baseSepolia } from "viem/chains";
 import { loadX402Config, type X402Config, type X402SafeConfig } from "./config.ts";
-import { type ClientEvmSigner, createOpenfortSigner } from "./openfort-signer.ts";
+import { createOpenfortSigner } from "./openfort-signer.ts";
 import { SpendingTracker } from "./spending-tracker.ts";
 
 export interface X402PaymentClient {
@@ -107,9 +108,7 @@ export async function createX402Client(
 
   // Create and configure x402 client
   const client = new x402Client();
-  registerExactEvmScheme(client, {
-    signer: signer as Parameters<typeof registerExactEvmScheme>[1]["signer"],
-  });
+  registerExactEvmScheme(client, { signer });
 
   // Create spending tracker
   const spendingTracker = new SpendingTracker(config.maxAutoApprove, config.dailyLimit);

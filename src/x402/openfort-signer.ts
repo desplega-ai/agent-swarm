@@ -13,20 +13,19 @@
  */
 
 import Openfort, { type EvmAccount } from "@openfort/openfort-node";
-import type { Address, Hex, TypedData, TypedDataDefinition } from "viem";
+import type { ClientEvmSigner } from "@x402/evm";
+import type { Address } from "viem";
+import { createPublicClient, http } from "viem";
+import { baseSepolia } from "viem/chains";
 
-/** The signer interface x402's EVM scheme expects. */
-export interface ClientEvmSigner {
-  address: Address;
-  signTypedData: (
-    parameters: TypedDataDefinition<TypedData | Record<string, unknown>, string>,
-  ) => Promise<Hex>;
-}
+export type { ClientEvmSigner } from "@x402/evm";
 
 export interface OpenfortSignerConfig {
   apiKey: string;
   walletSecret: string;
   walletAddress?: string;
+  /** viem chain for readContract (defaults to baseSepolia) */
+  chain?: Parameters<typeof createPublicClient>[0]["chain"];
 }
 
 /**
@@ -43,24 +42,31 @@ export async function createOpenfortSigner(config: OpenfortSignerConfig): Promis
   let account: EvmAccount;
 
   if (config.walletAddress) {
-    // Retrieve existing wallet by address
     account = await openfort.accounts.evm.backend.get({
       address: config.walletAddress as Address,
     });
   } else {
-    // Try to reuse an existing backend wallet, or create a new one
     const { accounts } = await openfort.accounts.evm.backend.list({ limit: 1 });
-    if (accounts && accounts.length > 0) {
-      account = accounts[0];
+    if (accounts.length > 0) {
+      account = accounts[0] as EvmAccount;
     } else {
       account = await openfort.accounts.evm.backend.create();
     }
   }
 
+  // readContract is required by ClientEvmSigner for on-chain reads (e.g. ERC-20 allowance checks)
+  const publicClient = createPublicClient({
+    chain: config.chain ?? baseSepolia,
+    transport: http(),
+  });
+
   return {
     address: account.address,
-    signTypedData: async (parameters) => {
-      return account.signTypedData(parameters);
+    signTypedData: async (message) => {
+      return account.signTypedData(message);
+    },
+    readContract: async (args) => {
+      return publicClient.readContract(args);
     },
   };
 }
