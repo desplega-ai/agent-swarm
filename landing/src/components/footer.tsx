@@ -82,6 +82,18 @@ export function Footer() {
           <p className="text-xs text-zinc-400">
             MIT License &middot; Open source multi-agent orchestration for Claude Code
           </p>
+          <a
+            href="https://omghost.xyz"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block mt-6"
+          >
+            <img
+              src="/omghost-desplega.svg"
+              alt="OMGHOST — AI-powered SVG ghost logo by omghost.xyz"
+              className="h-10 mx-auto opacity-60 hover:opacity-100 transition-opacity"
+            />
+          </a>
         </div>
       </div>
     </footer>
