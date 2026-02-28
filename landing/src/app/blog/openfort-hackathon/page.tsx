@@ -635,10 +635,10 @@ SVG saved (5910 characters)`}
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 my-6">
               {[
-                { value: "6", label: "PRs merged" },
+                { value: "25", label: "PRs" },
+                { value: "44", label: "Commits" },
                 { value: "5", label: "Agents" },
-                { value: "90+", label: "Tasks" },
-                { value: "1", label: "Day" },
+                { value: "100+", label: "Tasks" },
               ].map(({ value, label }) => (
                 <div
                   key={label}
