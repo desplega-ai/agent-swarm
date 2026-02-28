@@ -10,6 +10,10 @@ describe("loadX402Config", () => {
     delete process.env.X402_MAX_AUTO_APPROVE;
     delete process.env.X402_DAILY_LIMIT;
     delete process.env.X402_NETWORK;
+    delete process.env.X402_SIGNER_TYPE;
+    delete process.env.OPENFORT_API_KEY;
+    delete process.env.OPENFORT_WALLET_SECRET;
+    delete process.env.OPENFORT_WALLET_ADDRESS;
   });
 
   afterEach(() => {
@@ -17,8 +21,21 @@ describe("loadX402Config", () => {
     process.env = { ...originalEnv };
   });
 
-  test("throws when EVM_PRIVATE_KEY is not set", () => {
-    expect(() => loadX402Config()).toThrow("EVM_PRIVATE_KEY environment variable is required");
+  test("throws when no signer credentials are set", () => {
+    expect(() => loadX402Config()).toThrow("x402 payment requires either Openfort credentials");
+  });
+
+  // --- Viem signer tests ---
+
+  test("auto-detects viem signer when EVM_PRIVATE_KEY is set", () => {
+    process.env.EVM_PRIVATE_KEY =
+      "0xdeadbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678";
+
+    const config = loadX402Config();
+    expect(config.signerType).toBe("viem");
+    expect(config.evmPrivateKey).toBe(
+      "0xdeadbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678",
+    );
   });
 
   test("throws when EVM_PRIVATE_KEY does not start with 0x", () => {
@@ -33,13 +50,68 @@ describe("loadX402Config", () => {
 
     const config = loadX402Config();
 
-    expect(config.evmPrivateKey).toBe(
-      "0xdeadbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678",
-    );
+    expect(config.signerType).toBe("viem");
     expect(config.maxAutoApprove).toBe(1.0);
     expect(config.dailyLimit).toBe(10.0);
     expect(config.network).toBe("eip155:84532");
   });
+
+  // --- Openfort signer tests ---
+
+  test("auto-detects openfort signer when OPENFORT_API_KEY is set", () => {
+    process.env.OPENFORT_API_KEY = "sk_test_abc123";
+    process.env.OPENFORT_WALLET_SECRET = "base64secret";
+
+    const config = loadX402Config();
+    expect(config.signerType).toBe("openfort");
+    expect(config.openfortApiKey).toBe("sk_test_abc123");
+    expect(config.openfortWalletSecret).toBe("base64secret");
+  });
+
+  test("openfort takes priority over viem when both are set", () => {
+    process.env.OPENFORT_API_KEY = "sk_test_abc123";
+    process.env.OPENFORT_WALLET_SECRET = "base64secret";
+    process.env.EVM_PRIVATE_KEY =
+      "0xdeadbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678";
+
+    const config = loadX402Config();
+    expect(config.signerType).toBe("openfort");
+  });
+
+  test("throws when openfort signer is selected but OPENFORT_WALLET_SECRET is missing", () => {
+    process.env.OPENFORT_API_KEY = "sk_test_abc123";
+    expect(() => loadX402Config()).toThrow("OPENFORT_WALLET_SECRET is required");
+  });
+
+  test("includes OPENFORT_WALLET_ADDRESS when set", () => {
+    process.env.OPENFORT_API_KEY = "sk_test_abc123";
+    process.env.OPENFORT_WALLET_SECRET = "base64secret";
+    process.env.OPENFORT_WALLET_ADDRESS = "0x1234567890abcdef1234567890abcdef12345678";
+
+    const config = loadX402Config();
+    expect(config.openfortWalletAddress).toBe("0x1234567890abcdef1234567890abcdef12345678");
+  });
+
+  // --- Explicit signer type ---
+
+  test("respects explicit X402_SIGNER_TYPE=viem", () => {
+    process.env.X402_SIGNER_TYPE = "viem";
+    process.env.EVM_PRIVATE_KEY =
+      "0xdeadbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678";
+    process.env.OPENFORT_API_KEY = "sk_test_abc123";
+
+    const config = loadX402Config();
+    expect(config.signerType).toBe("viem");
+  });
+
+  test("throws on invalid X402_SIGNER_TYPE", () => {
+    process.env.X402_SIGNER_TYPE = "invalid";
+    process.env.EVM_PRIVATE_KEY =
+      "0xdeadbeef1234567890abcdef1234567890abcdef1234567890abcdef12345678";
+    expect(() => loadX402Config()).toThrow('X402_SIGNER_TYPE must be "openfort" or "viem"');
+  });
+
+  // --- Spending limit tests ---
 
   test("parses custom X402_MAX_AUTO_APPROVE", () => {
     process.env.EVM_PRIVATE_KEY =

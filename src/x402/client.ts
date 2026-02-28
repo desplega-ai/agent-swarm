@@ -4,15 +4,19 @@
  * A reusable payment client that wraps fetch() with automatic x402 payment handling
  * and configurable spending limits.
  *
+ * Supports two signer backends:
+ *   - Openfort (default) — managed backend wallet, no raw keys in env
+ *   - viem — raw EVM_PRIVATE_KEY for local signing
+ *
  * Usage:
  *   import { createX402Fetch, createX402Client } from "@/x402";
  *
  *   // Quick: get a paid fetch function
- *   const paidFetch = createX402Fetch();
+ *   const paidFetch = await createX402Fetch();
  *   const response = await paidFetch("https://api.example.com/paid-endpoint");
  *
  *   // Advanced: get the full client with spending info
- *   const client = createX402Client();
+ *   const client = await createX402Client();
  *   const response = await client.fetch("https://api.example.com/paid-endpoint");
  *   console.log(client.getSpendingSummary());
  */
@@ -25,6 +29,7 @@ import { createPublicClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { base, baseSepolia } from "viem/chains";
 import { loadX402Config, type X402Config, type X402SafeConfig } from "./config.ts";
+import { type ClientEvmSigner, createOpenfortSigner } from "./openfort-signer.ts";
 import { SpendingTracker } from "./spending-tracker.ts";
 
 export interface X402PaymentClient {
@@ -36,9 +41,9 @@ export interface X402PaymentClient {
   spendingTracker: SpendingTracker;
   /** Get a summary of today's spending */
   getSpendingSummary: () => ReturnType<SpendingTracker["getSummary"]>;
-  /** The wallet address derived from the private key */
+  /** The wallet address used for payments */
   walletAddress: `0x${string}`;
-  /** Safe config subset (no private key) */
+  /** Safe config subset (no secrets) */
   config: X402SafeConfig;
 }
 
@@ -51,31 +56,60 @@ function getChainForNetwork(network: string) {
 }
 
 /**
+ * Create a signer based on the config's signerType.
+ */
+async function buildSigner(
+  config: X402Config,
+): Promise<{ signer: ClientEvmSigner; walletAddress: `0x${string}` }> {
+  if (config.signerType === "openfort") {
+    if (!config.openfortApiKey || !config.openfortWalletSecret) {
+      throw new Error("Openfort signer requires OPENFORT_API_KEY and OPENFORT_WALLET_SECRET.");
+    }
+
+    const signer = await createOpenfortSigner({
+      apiKey: config.openfortApiKey,
+      walletSecret: config.openfortWalletSecret,
+      walletAddress: config.openfortWalletAddress,
+    });
+
+    return { signer, walletAddress: signer.address };
+  }
+
+  // viem signer (raw private key)
+  if (!config.evmPrivateKey) {
+    throw new Error("Viem signer requires EVM_PRIVATE_KEY.");
+  }
+
+  const account = privateKeyToAccount(config.evmPrivateKey);
+  const chain = getChainForNetwork(config.network);
+  const publicClient = createPublicClient({ chain, transport: http() });
+  const signer = toClientEvmSigner(account, publicClient);
+
+  return { signer, walletAddress: account.address };
+}
+
+/**
  * Create a full x402 payment client with spending controls.
+ *
+ * NOTE: This is async because Openfort signer requires API calls to create/retrieve wallets.
  *
  * @param configOverrides - Optional config overrides (otherwise loaded from env vars)
  * @returns An X402PaymentClient with fetch, spending tracker, and config
  */
-export function createX402Client(configOverrides?: Partial<X402Config>): X402PaymentClient {
+export async function createX402Client(
+  configOverrides?: Partial<X402Config>,
+): Promise<X402PaymentClient> {
   const envConfig = loadX402Config();
   const config = { ...envConfig, ...configOverrides };
 
-  // Create account from private key
-  const account = privateKeyToAccount(config.evmPrivateKey);
-
-  // Create a public client for readContract capability
-  const chain = getChainForNetwork(config.network);
-  const publicClient = createPublicClient({
-    chain,
-    transport: http(),
-  });
-
-  // Compose a ClientEvmSigner with readContract support
-  const signer = toClientEvmSigner(account, publicClient);
+  // Build the signer (async for Openfort, instant for viem)
+  const { signer, walletAddress } = await buildSigner(config);
 
   // Create and configure x402 client
   const client = new x402Client();
-  registerExactEvmScheme(client, { signer });
+  registerExactEvmScheme(client, {
+    signer: signer as Parameters<typeof registerExactEvmScheme>[1]["signer"],
+  });
 
   // Create spending tracker
   const spendingTracker = new SpendingTracker(config.maxAutoApprove, config.dailyLimit);
@@ -110,15 +144,20 @@ export function createX402Client(configOverrides?: Partial<X402Config>): X402Pay
   // Wrap fetch with payment handling
   const paidFetch = wrapFetchWithPayment(globalThis.fetch, client);
 
-  // Expose a safe config subset — never leak the private key
-  const { evmPrivateKey: _key, ...safeConfig } = config;
+  // Expose a safe config subset — never leak secrets
+  const {
+    evmPrivateKey: _key,
+    openfortApiKey: _apiKey,
+    openfortWalletSecret: _secret,
+    ...safeConfig
+  } = config;
 
   return {
     fetch: paidFetch as (input: string | URL | Request, init?: RequestInit) => Promise<Response>,
     x402Client: client,
     spendingTracker,
     getSpendingSummary: () => spendingTracker.getSummary(),
-    walletAddress: account.address,
+    walletAddress,
     config: safeConfig,
   };
 }
@@ -130,10 +169,10 @@ export function createX402Client(configOverrides?: Partial<X402Config>): X402Pay
  * @param configOverrides - Optional config overrides
  * @returns A fetch function that automatically handles x402 payments
  */
-export function createX402Fetch(
+export async function createX402Fetch(
   configOverrides?: Partial<X402Config>,
-): (input: string | URL | Request, init?: RequestInit) => Promise<Response> {
-  return createX402Client(configOverrides).fetch;
+): Promise<(input: string | URL | Request, init?: RequestInit) => Promise<Response>> {
+  return (await createX402Client(configOverrides)).fetch;
 }
 
 /**
