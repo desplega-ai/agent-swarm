@@ -67,10 +67,12 @@ async function buildSigner(
       throw new Error("Openfort signer requires OPENFORT_API_KEY and OPENFORT_WALLET_SECRET.");
     }
 
+    const chain = getChainForNetwork(config.network);
     const signer = await createOpenfortSigner({
       apiKey: config.openfortApiKey,
       walletSecret: config.openfortWalletSecret,
       walletAddress: config.openfortWalletAddress,
+      chain,
     });
 
     return { signer, walletAddress: signer.address };
