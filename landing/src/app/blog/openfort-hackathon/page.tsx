@@ -255,9 +255,14 @@ export default function OpenfortHackathonPost() {
             <Callout>
               <strong>Key stat:</strong> ~130ms signing latency per transaction.
               The wallet address on Base mainnet:{" "}
-              <code className="text-[12px] font-mono bg-amber-100/60 px-1.5 py-0.5 rounded">
+              <a
+                href="https://basescan.org/address/0x69436bfe16c82a9a5ef74fd3de634c9c822c271b"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[12px] font-mono bg-amber-100/60 px-1.5 py-0.5 rounded text-amber-800 hover:text-amber-950 underline underline-offset-2 decoration-amber-300"
+              >
                 0x6943...271b
-              </code>
+              </a>
               . Payments in USDC.
             </Callout>
 
@@ -485,9 +490,24 @@ const client = createX402Client({ signer });`}
                   className="max-w-full h-auto max-h-80"
                 />
               </div>
-              <div className="bg-zinc-50 px-4 py-2.5 flex items-center justify-between text-[11px] text-zinc-500 font-mono">
-                <span>Token: 44d2b0e5-858d-4808-b96e-b01e6f3afedb</span>
-                <span>Base mainnet (eip155:8453)</span>
+              <div className="bg-zinc-50 px-4 py-2.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1.5 text-[11px] text-zinc-500 font-mono">
+                <a
+                  href="https://basescan.org/tx/0xcc1803cc29ca20f7c74a286b9e6721173027d81ce64269c0d19f8afeec128b2e"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-zinc-800 underline underline-offset-2 decoration-zinc-300 transition-colors"
+                >
+                  tx: 0xcc18...8b2e
+                </a>
+                <a
+                  href="https://basescan.org/address/0x69436bfe16c82a9a5ef74fd3de634c9c822c271b"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-zinc-800 underline underline-offset-2 decoration-zinc-300 transition-colors"
+                >
+                  wallet: 0x6943...271b
+                </a>
+                <span>Base mainnet</span>
               </div>
             </div>
 
@@ -605,6 +625,14 @@ SVG saved (5910 characters)`}
                 {
                   href: "https://facilitator.payai.network",
                   label: "PayAI Facilitator",
+                },
+                {
+                  href: "https://basescan.org/address/0x69436bfe16c82a9a5ef74fd3de634c9c822c271b",
+                  label: "Wallet on Basescan",
+                },
+                {
+                  href: "https://basescan.org/tx/0xcc1803cc29ca20f7c74a286b9e6721173027d81ce64269c0d19f8afeec128b2e",
+                  label: "Purchase Tx",
                 },
                 {
                   href: "https://github.com/desplega-ai/agent-swarm",
