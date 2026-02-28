@@ -1,4 +1,4 @@
-import { Github, BookOpen, ExternalLink, LayoutDashboard } from "lucide-react";
+import { Github, BookOpen, ExternalLink, LayoutDashboard, Sparkles } from "lucide-react";
 
 export function Footer() {
   return (
@@ -42,6 +42,13 @@ export function Footer() {
             >
               <BookOpen className="w-4 h-4" />
               Docs
+            </a>
+            <a
+              href="/examples"
+              className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
+            >
+              <Sparkles className="w-4 h-4" />
+              Examples
             </a>
             <a
               href="https://app.agent-swarm.dev"
