@@ -9,6 +9,7 @@ import {
   Ghost,
   ArrowRight,
   ExternalLink,
+  Users,
 } from "lucide-react";
 import { Navbar } from "@/components/navbar";
 import { Footer } from "@/components/footer";
@@ -609,6 +610,137 @@ SVG saved (5910 characters)`}
               This is a building block. x402 + Openfort gives agents a wallet and
               the protocol to use it. What gets built on top of that — marketplaces,
               service networks, autonomous procurement — is the interesting part.
+            </p>
+          </section>
+
+          {/* Section 6: Built by the Swarm */}
+          <section className="mb-14">
+            <div className="flex items-center gap-3 mb-6">
+              <SectionIcon
+                icon={Users}
+                color="bg-zinc-800 text-zinc-100"
+              />
+              <h2 className="text-2xl font-bold text-zinc-900">
+                Built by the Swarm
+              </h2>
+            </div>
+
+            <p className="text-[15px] text-zinc-600 leading-relaxed mb-4">
+              Here&apos;s the part we didn&apos;t plan: the swarm that built
+              x402 also documented the entire hack in real time. Research,
+              implementation, code review, debugging, purchasing, and this blog
+              post — all executed by a coordinated team of AI agents, from first
+              commit to final paragraph.
+            </p>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 my-6">
+              {[
+                { value: "25", label: "PRs" },
+                { value: "44", label: "Commits" },
+                { value: "5", label: "Agents" },
+                { value: "100+", label: "Tasks" },
+              ].map(({ value, label }) => (
+                <div
+                  key={label}
+                  className="rounded-xl bg-zinc-50 border border-zinc-200 p-4 text-center"
+                >
+                  <div className="text-2xl font-bold text-zinc-900">
+                    {value}
+                  </div>
+                  <div className="text-[12px] text-zinc-500 mt-0.5">
+                    {label}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="rounded-xl bg-zinc-50 border border-zinc-200 p-5 my-6">
+              <h3 className="text-[15px] font-semibold text-zinc-900 mb-3">
+                The timeline
+              </h3>
+              <div className="space-y-2.5 text-[14px] text-zinc-600">
+                <div className="flex gap-3">
+                  <span className="text-zinc-400 font-mono shrink-0 w-14">
+                    09:00
+                  </span>
+                  <span>
+                    <strong className="text-zinc-800">Researcher</strong> dives
+                    into x402 protocol specs and Openfort SDK docs
+                  </span>
+                </div>
+                <div className="flex gap-3">
+                  <span className="text-zinc-400 font-mono shrink-0 w-14">
+                    10:30
+                  </span>
+                  <span>
+                    <strong className="text-zinc-800">Picateclas</strong>{" "}
+                    implements the x402 payment module, Openfort signer, and 34
+                    unit tests (PR #108)
+                  </span>
+                </div>
+                <div className="flex gap-3">
+                  <span className="text-zinc-400 font-mono shrink-0 w-14">
+                    12:00
+                  </span>
+                  <span>
+                    <strong className="text-zinc-800">Reviewer</strong> reviews
+                    PR #108 — catches dead config, exposed keys, TOCTOU race
+                  </span>
+                </div>
+                <div className="flex gap-3">
+                  <span className="text-zinc-400 font-mono shrink-0 w-14">
+                    14:00
+                  </span>
+                  <span>
+                    x402 merged as v1.31.0. Facilitator debugging begins —
+                    x402.org, Coinbase CDP, finally{" "}
+                    <code className="text-[12px] font-mono bg-zinc-100 px-1 rounded">
+                      facilitator.payai.network
+                    </code>
+                  </span>
+                </div>
+                <div className="flex gap-3">
+                  <span className="text-zinc-400 font-mono shrink-0 w-14">
+                    17:30
+                  </span>
+                  <span>
+                    <strong className="text-zinc-800">Picateclas</strong> buys a
+                    ghost logo from omghost.xyz — $0.10 USDC, loop closed
+                  </span>
+                </div>
+                <div className="flex gap-3">
+                  <span className="text-zinc-400 font-mono shrink-0 w-14">
+                    18:00
+                  </span>
+                  <span>
+                    Blog post written, updated with SVG and on-chain proof, swarm
+                    metrics published — all by the agents
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <p className="text-[15px] text-zinc-600 leading-relaxed mb-4">
+              Five agents collaborated:{" "}
+              <strong className="text-zinc-800">Lead</strong> orchestrated tasks
+              and triaged Slack messages.{" "}
+              <strong className="text-zinc-800">Researcher</strong> produced the
+              protocol analysis.{" "}
+              <strong className="text-zinc-800">Picateclas</strong> wrote the
+              code, ran the tests, created the PRs.{" "}
+              <strong className="text-zinc-800">Reviewer</strong> caught bugs
+              before they shipped.{" "}
+              <strong className="text-zinc-800">Jackknife</strong> handled the
+              E2E testing infrastructure.
+            </p>
+
+            <p className="text-[15px] text-zinc-600 leading-relaxed">
+              The swarm didn&apos;t just build the feature — it wrote the blog
+              post you&apos;re reading. Every section was authored by agents who
+              were there when it happened. That&apos;s the real demo: not just
+              agents that can pay, but agents that can ship an entire project
+              from research to production to documentation, coordinated through
+              a shared task queue and a Slack thread.
             </p>
           </section>
 
