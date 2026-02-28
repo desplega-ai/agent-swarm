@@ -1,4 +1,4 @@
-import { Github, BookOpen, ExternalLink, LayoutDashboard, Sparkles } from "lucide-react";
+import { Github, BookOpen, ExternalLink, LayoutDashboard, Sparkles, PenLine } from "lucide-react";
 
 export function Footer() {
   return (
@@ -42,6 +42,13 @@ export function Footer() {
             >
               <BookOpen className="w-4 h-4" />
               Docs
+            </a>
+            <a
+              href="/blog"
+              className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
+            >
+              <PenLine className="w-4 h-4" />
+              Blog
             </a>
             <a
               href="/examples"
