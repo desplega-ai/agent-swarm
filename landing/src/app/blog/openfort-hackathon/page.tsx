@@ -431,7 +431,7 @@ const client = createX402Client({ signer });`}
             </Callout>
           </section>
 
-          {/* Section 4: The Purchase Attempt */}
+          {/* Section 4: The Purchase — Success */}
           <section className="mb-14">
             <div className="flex items-center gap-3 mb-6">
               <SectionIcon
@@ -439,7 +439,7 @@ const client = createX402Client({ signer });`}
                 color="bg-emerald-100 text-emerald-700"
               />
               <h2 className="text-2xl font-bold text-zinc-900">
-                The Purchase Attempt
+                The Purchase: Loop Closed
               </h2>
             </div>
 
@@ -450,31 +450,94 @@ const client = createX402Client({ signer });`}
             </p>
 
             <p className="text-[15px] text-zinc-600 leading-relaxed mb-4">
-              We got close. The client-side flow worked: the agent
-              detected the 402, signed the USDC authorization, and retried. But
-              we hit a facilitator mismatch on the server side — the x402.org
-              facilitator only supports Base Sepolia, and we&apos;re on Base
-              mainnet.
+              And it worked. After switching the server-side facilitator to{" "}
+              <a
+                href="https://facilitator.payai.network"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-amber-700 hover:text-amber-900 font-medium underline underline-offset-2 decoration-amber-300 transition-colors"
+              >
+                facilitator.payai.network
+              </a>{" "}
+              (which supports Base mainnet without CDP credentials), the agent
+              autonomously purchased a &ldquo;Pixel Icons&rdquo; ghost logo for
+              the Desplega brand — paying $0.10 USDC on Base mainnet.
             </p>
+
+            {/* Generated SVG Display */}
+            <div className="my-8 rounded-xl border border-zinc-200 overflow-hidden">
+              <div className="bg-zinc-900 px-4 py-2.5 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Ghost className="w-4 h-4 text-purple-400" />
+                  <span className="text-[12px] text-zinc-400 font-mono">
+                    Pixel Icons &mdash; Desplega
+                  </span>
+                </div>
+                <span className="text-[11px] text-zinc-600 font-mono">
+                  $0.10 USDC
+                </span>
+              </div>
+              <div className="bg-zinc-950 p-8 flex items-center justify-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/omghost-desplega.svg"
+                  alt="Desplega ghost logo in Pixel Icons style, purchased via x402"
+                  className="max-w-full h-auto max-h-80"
+                />
+              </div>
+              <div className="bg-zinc-50 px-4 py-2.5 flex items-center justify-between text-[11px] text-zinc-500 font-mono">
+                <span>Token: 44d2b0e5-858d-4808-b96e-b01e6f3afedb</span>
+                <span>Base mainnet (eip155:8453)</span>
+              </div>
+            </div>
 
             <div className="rounded-xl bg-zinc-50 border border-zinc-200 p-5 my-6">
               <div className="flex items-start gap-3">
-                <div className="w-7 h-7 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center shrink-0 mt-0.5">
+                <div className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 mt-0.5">
                   <ArrowRight className="w-3.5 h-3.5" />
                 </div>
                 <div>
                   <h3 className="text-[15px] font-semibold text-zinc-900 mb-1">
-                    The fix
+                    The journey
                   </h3>
                   <p className="text-[14px] text-zinc-600 leading-relaxed">
-                    Switch omghost.xyz to the Coinbase CDP facilitator on Vercel,
-                    which supports Base mainnet. The purchasing script is ready
-                    and tested — once the facilitator is configured, agents can
-                    autonomously purchase ghost logos.
+                    We initially hit a facilitator mismatch — x402.org only
+                    supports Base Sepolia testnet, and we needed mainnet. The
+                    Coinbase CDP facilitator required API credentials. The
+                    solution:{" "}
+                    <code className="text-[12px] font-mono bg-zinc-100 px-1.5 py-0.5 rounded">
+                      facilitator.payai.network
+                    </code>
+                    , a community facilitator that supports Base mainnet without
+                    any API credentials. One env var change and the full loop
+                    worked.
                   </p>
                 </div>
               </div>
             </div>
+
+            <CodeBlock filename="x402-omghost-buy.ts (output)">
+{`=== x402 omghost.xyz — Buy SVG Icon ===
+
+Step 1: Creating x402 payment client...
+  Signer: openfort
+  Wallet: 0x69436bfe16c82a9a5ef74fd3de634c9c822c271b
+  Network: eip155:8453
+
+Step 2: Generating "Pixel Icons" icon for "Desplega"
+  Response status: 200
+  Job ID: cmm6mosqq000004l2groe1ldo
+
+Step 3: Payment summary
+  Total spent: $0.1000
+
+Step 4: Polling for job status...
+  Poll 10: status=completed
+  Token: 44d2b0e5-858d-4808-b96e-b01e6f3afedb
+
+=== PURCHASE COMPLETE ===
+SVG saved (5910 characters)`}
+            </CodeBlock>
           </section>
 
           {/* Section 5: What This Means */}
@@ -501,8 +564,8 @@ const client = createX402Client({ signer });`}
                   body: "x402 eliminates the need for API keys, usage tracking, invoicing, and payment processing. The payment is the request. HTTP status codes handle the entire flow.",
                 },
                 {
-                  title: "Proof of concept: omghost.xyz",
-                  body: "An API-first product where AI agents are the primary customers. No dashboard, no account creation — just a POST endpoint that accepts x402 payments and returns SVGs.",
+                  title: "Proven end-to-end: omghost.xyz",
+                  body: "Our agent autonomously purchased a ghost logo from omghost.xyz — $0.10 USDC on Base mainnet. No dashboard, no account creation, no human approval. The agent detected the 402, signed the payment, and received the SVG. Full loop closed.",
                 },
               ].map((item) => (
                 <div
@@ -539,6 +602,10 @@ const client = createX402Client({ signer });`}
                 { href: "https://www.x402.org/", label: "x402 Protocol" },
                 { href: "https://www.openfort.xyz/", label: "Openfort" },
                 { href: "https://omghost.xyz", label: "omghost.xyz" },
+                {
+                  href: "https://facilitator.payai.network",
+                  label: "PayAI Facilitator",
+                },
                 {
                   href: "https://github.com/desplega-ai/agent-swarm",
                   label: "Agent Swarm",
