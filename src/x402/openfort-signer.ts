@@ -63,7 +63,18 @@ export async function createOpenfortSigner(config: OpenfortSignerConfig): Promis
   return {
     address: account.address,
     signTypedData: async (message) => {
-      return account.signTypedData(message);
+      const sig = await account.signTypedData(message);
+      // Normalize v-value: Openfort produces v=0/1 (EIP-2098) but
+      // USDC's transferWithAuthorization expects v=27/28 (legacy).
+      // Fix the last byte of the 65-byte hex signature.
+      if (sig.length === 132) {
+        // 0x + 128 hex chars = 65 bytes
+        const v = parseInt(sig.slice(130, 132), 16);
+        if (v < 27) {
+          return (sig.slice(0, 130) + (v + 27).toString(16).padStart(2, "0")) as `0x${string}`;
+        }
+      }
+      return sig;
     },
     readContract: async (args) => {
       return publicClient.readContract(args);

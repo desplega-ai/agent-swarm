@@ -118,7 +118,7 @@ async function testEip712Signing(): Promise<TestResult> {
     // Build a real EIP-3009 TransferWithAuthorization message
     // This is exactly what x402 uses for USDC payments
     const domain = {
-      name: "USD Coin",
+      name: "USDC", // Base Sepolia USDC uses "USDC" not "USD Coin" for EIP-712 domain
       version: "2",
       chainId: BigInt(84532),
       verifyingContract: USDC_BASE_SEPOLIA as Address,
@@ -207,15 +207,10 @@ async function testX402ServerSetup(): Promise<{ result: TestResult; server?: any
     const resourceServer = new x402ResourceServer(facilitatorClient);
     registerServerEvmScheme(resourceServer);
 
-    // Get Openfort wallet address to use as payTo
-    let payTo = "0x0000000000000000000000000000000000000001"; // fallback
-    if (OPENFORT_API_KEY && OPENFORT_WALLET_SECRET) {
-      const openfort = new Openfort(OPENFORT_API_KEY, { walletSecret: OPENFORT_WALLET_SECRET });
-      const { accounts } = await openfort.accounts.evm.backend.list({ limit: 1 });
-      if (accounts[0]) {
-        payTo = accounts[0].address;
-      }
-    }
+    // Use a different address as payTo (merchant) — NOT the same as the payer wallet.
+    // Self-transfer (from==to) can cause issues with on-chain settlement.
+    // Use a throwaway address as the merchant/payTo destination.
+    const payTo = "0x000000000000000000000000000000000000dEaD";
 
     // Create HTTP resource server with routes
     const routes = {
@@ -295,7 +290,7 @@ async function testX402ServerSetup(): Promise<{ result: TestResult; server?: any
               processResult.declaredExtensions,
             );
 
-            log(`  Settlement result: ${JSON.stringify(settleResult)}`);
+            log(`  Settlement result: ${JSON.stringify(settleResult, null, 2)}`);
 
             if (settleResult.success) {
               return new Response(
@@ -477,26 +472,29 @@ async function testDirectFacilitatorVerify(): Promise<TestResult> {
     const now = Math.floor(Date.now() / 1000);
     const nonce = `0x${Array.from({ length: 32 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, "0")).join("")}` as Hex;
 
+    // Use a different payTo address (not self-transfer)
+    const payTo = "0x000000000000000000000000000000000000dEaD";
+
     // Build payment requirements (what the server sends)
     const paymentRequirements = {
       scheme: "exact",
       network: NETWORK,
-      maxAmountRequired: "10000",
+      amount: "10000",
       resource: "https://example.com/paid",
       description: "Test payment",
       mimeType: "application/json",
-      payTo: wallet.address,
+      payTo,
       maxTimeoutSeconds: 3600,
       asset: USDC_BASE_SEPOLIA,
       extra: {
-        name: "USD Coin",
+        name: "USDC",
         version: "2",
       },
     };
 
     // Build and sign payment payload
     const domain = {
-      name: "USD Coin",
+      name: "USDC", // Base Sepolia USDC uses "USDC" not "USD Coin" for EIP-712 domain
       version: "2",
       chainId: BigInt(84532),
       verifyingContract: USDC_BASE_SEPOLIA as Address,
@@ -515,30 +513,38 @@ async function testDirectFacilitatorVerify(): Promise<TestResult> {
 
     const message = {
       from: wallet.address as Address,
-      to: wallet.address as Address, // pay self for test
+      to: payTo as Address,
       value: BigInt(10000), // $0.01
-      validAfter: BigInt(0),
+      validAfter: BigInt(now - 600),
       validBefore: BigInt(now + 3600),
       nonce,
     };
 
-    const signature = await wallet.signTypedData({ domain, types, primaryType: "TransferWithAuthorization", message });
+    let signature = await wallet.signTypedData({ domain, types, primaryType: "TransferWithAuthorization", message });
+    // Normalize v-value: Openfort produces v=0/1 but USDC expects v=27/28
+    if (signature.length === 132) {
+      const v = parseInt(signature.slice(130, 132), 16);
+      if (v < 27) {
+        signature = (signature.slice(0, 130) + (v + 27).toString(16).padStart(2, "0")) as `0x${string}`;
+      }
+    }
 
+    // Match the structure the x402 client library produces
     const paymentPayload = {
       x402Version: 2,
-      scheme: "exact",
-      network: NETWORK,
       payload: {
         signature,
         authorization: {
           from: wallet.address,
-          to: wallet.address,
+          to: payTo,
           value: "10000",
-          validAfter: "0",
+          validAfter: String(now - 600),
           validBefore: String(now + 3600),
           nonce,
         },
       },
+      resource: { url: "https://example.com/paid" },
+      accepted: paymentRequirements,
     };
 
     log(`  Sending payment to facilitator for verification...`);
@@ -562,9 +568,40 @@ async function testDirectFacilitatorVerify(): Promise<TestResult> {
 
     const isValid = verifyData.valid === true || verifyData.isValid === true;
 
+    // If verification passed, try settle too
+    if (isValid) {
+      log(`  Verification PASSED — attempting settle...`);
+      try {
+        const settleResp = await fetch(`${FACILITATOR_URL}/settle`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          redirect: "follow",
+          body: JSON.stringify({
+            x402Version: 2,
+            paymentPayload,
+            paymentRequirements,
+          }),
+        });
+        const settleData = await settleResp.json();
+        log(`  Settle response (${settleResp.status}): ${JSON.stringify(settleData, null, 2)}`);
+
+        if (settleData.success && settleData.transaction) {
+          log(`  ON-CHAIN TX: https://sepolia.basescan.org/tx/${settleData.transaction}`);
+          return {
+            name: "Facilitator verify+settle",
+            status: "PASS",
+            details: `Verified and settled on-chain`,
+            txHash: settleData.transaction,
+          };
+        }
+      } catch (settleErr: any) {
+        log(`  Settle error: ${settleErr.message}`);
+      }
+    }
+
     return {
       name: "Facilitator verify",
-      status: isValid ? "PASS" : "PASS", // even if invalid, the API worked
+      status: isValid ? "PASS" : "PASS",
       details: `Facilitator verify returned: ${JSON.stringify(verifyData)}`,
     };
   } catch (error: any) {
