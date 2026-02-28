@@ -47,6 +47,7 @@ Fires before every tool call. This hook provides safety guardrails:
 Fires after every tool call. This is the most active hook:
 
 - **Heartbeat** — Sends a heartbeat to the MCP server so the lead knows the worker is alive
+- **Activity tracking** — Updates the agent's `lastActivityAt` timestamp (fire-and-forget) for stall detection
 - **Identity sync** — If an identity file (SOUL.md, IDENTITY.md, TOOLS.md, CLAUDE.md) was edited, syncs the changes to the database with `changeSource: "self_edit"` tracking to distinguish agent edits from session-end syncs
 - **Memory indexing** — If a file was written to a memory directory, automatically generates an embedding and indexes it
 
