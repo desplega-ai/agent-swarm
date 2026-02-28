@@ -1,0 +1,129 @@
+#!/usr/bin/env bun
+/**
+ * x402 CLI — Test x402 payments from the command line.
+ *
+ * Usage:
+ *   bun src/x402/cli.ts fetch <url>         Make a paid request to a URL
+ *   bun src/x402/cli.ts status              Show spending summary
+ *   bun src/x402/cli.ts check               Check if x402 is configured
+ *
+ * Environment:
+ *   EVM_PRIVATE_KEY         Required. Wallet private key (0x-prefixed).
+ *   X402_MAX_AUTO_APPROVE   Max USD per request (default: 1.00).
+ *   X402_DAILY_LIMIT        Daily USD limit (default: 10.00).
+ *   X402_FACILITATOR_URL    Facilitator endpoint.
+ *   X402_NETWORK            CAIP-2 network ID (default: eip155:84532).
+ */
+
+import { createX402Client } from "./client.ts";
+import { loadX402Config } from "./config.ts";
+
+const args = process.argv.slice(2);
+const command = args[0];
+
+async function main() {
+  switch (command) {
+    case "fetch": {
+      const url = args[1];
+      if (!url) {
+        console.error("Usage: x402 fetch <url>");
+        process.exit(1);
+      }
+
+      const method = (args[2] || "GET").toUpperCase();
+      console.log(`Making ${method} request to ${url} with x402 payment support...\n`);
+
+      const client = createX402Client();
+      const summary = client.getSpendingSummary();
+      console.log(
+        `Spending limits: $${summary.maxPerRequest.toFixed(2)}/request, ` +
+          `$${summary.dailyLimit.toFixed(2)}/day ` +
+          `($${summary.dailyRemaining.toFixed(2)} remaining)\n`,
+      );
+
+      const response = await client.fetch(url, { method });
+
+      console.log(`Status: ${response.status} ${response.statusText}`);
+      console.log("Headers:");
+      for (const [key, value] of response.headers.entries()) {
+        if (key.toLowerCase().startsWith("payment") || key.toLowerCase() === "content-type") {
+          console.log(`  ${key}: ${value}`);
+        }
+      }
+
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("json")) {
+        const body = await response.json();
+        console.log("\nResponse body:");
+        console.log(JSON.stringify(body, null, 2));
+      } else {
+        const body = await response.text();
+        console.log(`\nResponse body (${body.length} chars):`);
+        console.log(body.slice(0, 2000));
+        if (body.length > 2000) console.log("... (truncated)");
+      }
+
+      const updatedSummary = client.getSpendingSummary();
+      console.log(
+        `\nSpending: $${updatedSummary.todaySpent.toFixed(2)} today ` +
+          `(${updatedSummary.todayCount} payments, ` +
+          `$${updatedSummary.dailyRemaining.toFixed(2)} remaining)`,
+      );
+      break;
+    }
+
+    case "status": {
+      const client = createX402Client();
+      const summary = client.getSpendingSummary();
+      console.log("x402 Spending Status");
+      console.log("====================");
+      console.log(`Per-request limit: $${summary.maxPerRequest.toFixed(2)}`);
+      console.log(`Daily limit:       $${summary.dailyLimit.toFixed(2)}`);
+      console.log(`Today spent:       $${summary.todaySpent.toFixed(2)}`);
+      console.log(`Today remaining:   $${summary.dailyRemaining.toFixed(2)}`);
+      console.log(`Today payments:    ${summary.todayCount}`);
+      break;
+    }
+
+    case "check": {
+      try {
+        const config = loadX402Config();
+        console.log("x402 Configuration");
+        console.log("==================");
+        console.log(
+          `Private key:     ${config.evmPrivateKey.slice(0, 6)}...${config.evmPrivateKey.slice(-4)} (set)`,
+        );
+        console.log(`Max per request: $${config.maxAutoApprove.toFixed(2)}`);
+        console.log(`Daily limit:     $${config.dailyLimit.toFixed(2)}`);
+        console.log(`Facilitator:     ${config.facilitatorUrl}`);
+        console.log(`Network:         ${config.network}`);
+        console.log("\nx402 is configured and ready.");
+      } catch (error) {
+        console.error(
+          `x402 configuration error: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        process.exit(1);
+      }
+      break;
+    }
+
+    default:
+      console.log("x402 CLI — Test x402 payments\n");
+      console.log("Commands:");
+      console.log("  fetch <url> [method]  Make a paid request (default: GET)");
+      console.log("  status               Show spending summary");
+      console.log("  check                Check if x402 is configured");
+      console.log("\nEnvironment variables:");
+      console.log("  EVM_PRIVATE_KEY         Required. Wallet private key (0x-prefixed)");
+      console.log("  X402_MAX_AUTO_APPROVE   Max USD per request (default: 1.00)");
+      console.log("  X402_DAILY_LIMIT        Daily USD limit (default: 10.00)");
+      console.log("  X402_FACILITATOR_URL    Facilitator URL");
+      console.log("  X402_NETWORK            CAIP-2 network ID (default: eip155:84532)");
+      break;
+  }
+}
+
+main().catch((error) => {
+  console.error("Error:", error instanceof Error ? error.message : String(error));
+  process.exit(1);
+});
