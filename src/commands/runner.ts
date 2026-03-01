@@ -6,6 +6,7 @@ import {
   generateDefaultToolsMd,
 } from "../be/db.ts";
 import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt.ts";
+import { resolveCredentialPools } from "../utils/credentials.ts";
 import {
   parseStderrForErrors,
   SessionErrorTracker,
@@ -181,44 +182,6 @@ async function closeAgent(config: ApiConfig, role: string): Promise<void> {
     console.log(`[${role}] Agent marked as offline`);
   } catch {
     // Silently fail - server might not be running
-  }
-}
-
-/** Env vars that may contain comma-separated credential pools */
-const CREDENTIAL_POOL_VARS = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"] as const;
-
-/**
- * If a value contains commas, split and randomly select one credential.
- * Single values (no commas) are returned as-is for backward compatibility.
- */
-function selectRandomCredential(value: string): {
-  selected: string;
-  index: number;
-  total: number;
-} {
-  const credentials = value
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (credentials.length <= 1) {
-    return { selected: value, index: 0, total: 1 };
-  }
-  const index = Math.floor(Math.random() * credentials.length);
-  return { selected: credentials[index]!, index, total: credentials.length };
-}
-
-/**
- * For credential env vars that contain comma-separated values,
- * randomly select one to distribute load across subscriptions.
- */
-function resolveCredentialPools(env: Record<string, string | undefined>): void {
-  for (const envVar of CREDENTIAL_POOL_VARS) {
-    const val = env[envVar];
-    if (val?.includes(",")) {
-      const { selected, index, total } = selectRandomCredential(val);
-      env[envVar] = selected;
-      console.log(`[credentials] Selected ${envVar} credential ${index + 1}/${total}`);
-    }
   }
 }
 
