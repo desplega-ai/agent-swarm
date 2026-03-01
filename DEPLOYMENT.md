@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This guide covers all deployment options for Agent Swarm MCP.
+This guide covers all deployment options for Agent Swarm.
 
 ## Table of Contents
 
@@ -178,7 +178,7 @@ The Docker worker image uses a multi-stage build:
 - **Build tools**: gcc, g++, make, cmake
 - **Process manager**: PM2 (for background services)
 - **CLI tools**: GitHub CLI (`gh`), sqlite3
-- **Agent tools**: `wts` (git worktree manager), `cc-ai-tracker` (code change tracking)
+- **Agent tools**: `wts` (git worktree manager)
 - **Utilities**: git, git-lfs, vim, nano, jq, curl, wget, ssh
 - **Sudo access**: Worker can install packages with `sudo apt-get install`
 
@@ -337,6 +337,8 @@ When a worker starts, it:
 
 ## Environment Variables
 
+> For the complete reference of all environment variables, see [docs/ENVS.md](./docs/ENVS.md).
+
 ### Docker Worker Variables
 
 | Variable | Required | Description |
@@ -375,6 +377,8 @@ When a worker starts, it:
 | `ENV` | Environment mode (`development` adds prefix to Slack agent names) | - |
 | `SCHEDULER_INTERVAL_MS` | Polling interval for scheduled tasks | `10000` |
 | `DATABASE_PATH` | SQLite database file path | `./agent-swarm-db.sqlite` |
+| `OPENAI_API_KEY` | OpenAI key for memory embeddings (optional) | - |
+| `CAPABILITIES` | Comma-separated feature flags | All enabled |
 
 ---
 

@@ -11,6 +11,8 @@ export const registerGetConfigTool = (server: McpServer) => {
       title: "Get Config",
       description:
         "Get resolved configuration values with scope resolution (repo > agent > global). Returns one entry per unique key with the most-specific scope winning. Use includeSecrets=true to see secret values.",
+      annotations: { readOnlyHint: true },
+
       inputSchema: z.object({
         agentId: z
           .string()

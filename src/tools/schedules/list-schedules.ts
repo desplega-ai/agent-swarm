@@ -10,6 +10,8 @@ export const registerListSchedulesTool = (server: McpServer) => {
       title: "List Scheduled Tasks",
       description:
         "View all scheduled tasks with optional filters. Use this to discover existing schedules.",
+      annotations: { readOnlyHint: true },
+
       inputSchema: z.object({
         enabled: z.boolean().optional().describe("Filter by enabled status"),
         name: z.string().optional().describe("Filter by name (partial match)"),

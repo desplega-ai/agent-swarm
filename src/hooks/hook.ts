@@ -322,7 +322,7 @@ export async function handleHook(): Promise<void> {
           ...mcpConfig.headers,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ claudeMd: content }),
+        body: JSON.stringify({ claudeMd: content, changeSource: "session_sync" }),
       });
     } catch {
       // Silently fail - don't block shutdown
@@ -332,7 +332,10 @@ export async function handleHook(): Promise<void> {
   /**
    * Sync SOUL.md and IDENTITY.md content back to the server
    */
-  const syncIdentityFilesToServer = async (agentId: string): Promise<void> => {
+  const syncIdentityFilesToServer = async (
+    agentId: string,
+    changeSource: "self_edit" | "session_sync" = "session_sync",
+  ): Promise<void> => {
     if (!mcpConfig) return;
 
     const updates: Record<string, string> = {};
@@ -370,7 +373,7 @@ export async function handleHook(): Promise<void> {
           ...mcpConfig.headers,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(updates),
+        body: JSON.stringify({ ...updates, changeSource }),
       });
     } catch {
       // Silently fail
@@ -381,7 +384,10 @@ export async function handleHook(): Promise<void> {
    * Sync setup script content back to the server.
    * Extracts only agent-managed content between markers to avoid duplicating operator content.
    */
-  const syncSetupScriptToServer = async (agentId: string): Promise<void> => {
+  const syncSetupScriptToServer = async (
+    agentId: string,
+    changeSource: "self_edit" | "session_sync" = "session_sync",
+  ): Promise<void> => {
     if (!mcpConfig) return;
 
     const file = Bun.file(SETUP_SCRIPT_PATH);
@@ -413,7 +419,7 @@ export async function handleHook(): Promise<void> {
           ...mcpConfig.headers,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ setupScript: content }),
+        body: JSON.stringify({ setupScript: content, changeSource }),
       });
     } catch {
       /* silently fail */
@@ -814,6 +820,16 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
         }
       }
 
+      // Update agent last activity timestamp (fire-and-forget)
+      if (agentInfo) {
+        void fetch(`${getBaseUrl()}/api/agents/${agentInfo.id}/activity`, {
+          method: "PUT",
+          headers: mcpConfig!.headers,
+        }).catch((e) => {
+          console.debug("Failed to update agent activity timestamp:", e);
+        });
+      }
+
       if (agentInfo) {
         // Sync workspace file edits back to DB
         const toolName = msg.tool_name;
@@ -828,12 +844,12 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
               editedPath === IDENTITY_MD_PATH ||
               editedPath === TOOLS_MD_PATH
             ) {
-              await syncIdentityFilesToServer(agentInfo.id);
+              await syncIdentityFilesToServer(agentInfo.id, "self_edit");
             }
 
             // Setup script: start-up.sh (or start-up.*)
             if (editedPath.startsWith("/workspace/start-up")) {
-              await syncSetupScriptToServer(agentInfo.id);
+              await syncSetupScriptToServer(agentInfo.id, "self_edit");
             }
           } catch {
             // Non-blocking — don't interrupt the agent's workflow
@@ -903,6 +919,25 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
     }
 
     case "Stop":
+      // Clean up any artifact tunnels managed by PM2
+      try {
+        const pm2ListOutput = await Bun.$`pm2 jlist 2>/dev/null || echo "[]"`.text();
+        const pm2Processes = JSON.parse(pm2ListOutput.trim());
+        const artifactProcesses = (pm2Processes as { name?: string }[]).filter((p) =>
+          p.name?.startsWith("artifact-"),
+        );
+
+        for (const proc of artifactProcesses) {
+          try {
+            await Bun.$`pm2 delete ${proc.name!}`.quiet();
+          } catch {
+            // Process might already be stopped
+          }
+        }
+      } catch {
+        // Non-fatal: PM2 might not be available
+      }
+
       // Save PM2 processes before shutdown (for container restart persistence)
       try {
         await Bun.$`pm2 save`.quiet();

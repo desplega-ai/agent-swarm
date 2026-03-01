@@ -600,9 +600,18 @@ function App({ args }: { args: ParsedArgs }) {
 
 const args = parseArgs(process.argv.slice(2));
 
-// Handle hook command separately (no UI needed)
+// Handle non-UI commands separately
 if (args.command === "hook") {
   runHook();
+} else if (args.command === "artifact") {
+  // Pass all args after "artifact" directly
+  const artifactArgs = process.argv.slice(process.argv.indexOf("artifact") + 1);
+  const { runArtifact } = await import("./commands/artifact");
+  await runArtifact(artifactArgs[0] || "help", {
+    additionalArgs: artifactArgs.slice(1),
+    port: args.port,
+    key: args.key,
+  });
 } else {
   render(<App args={args} />);
 }

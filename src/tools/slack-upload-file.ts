@@ -85,6 +85,8 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
       title: "Upload file to Slack",
       description:
         "Upload a file (image, document, etc.) to a Slack channel or thread. Use inboxMessageId or taskId for context, or provide channelId directly (leads only). Maximum file size is 1 GB.",
+      annotations: { openWorldHint: true },
+
       inputSchema: z.object({
         inboxMessageId: z
           .uuid()

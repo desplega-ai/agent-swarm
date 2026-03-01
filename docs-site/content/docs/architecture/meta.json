@@ -1,0 +1,4 @@
+{
+  "title": "Architecture",
+  "pages": ["overview", "agents", "memory", "hooks"]
+}

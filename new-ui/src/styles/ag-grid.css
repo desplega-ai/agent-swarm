@@ -1,0 +1,30 @@
+@layer resets, grid, application;
+
+/* Import AG Grid Quartz theme at the grid layer */
+@import "ag-grid-community/styles/ag-theme-quartz.css" layer(grid);
+
+/* Neutral theme overrides — maps to shadcn/ui CSS vars */
+.ag-theme-quartz {
+  --ag-background-color: var(--color-background);
+  --ag-foreground-color: var(--color-foreground);
+  --ag-header-background-color: var(--color-muted);
+  --ag-header-foreground-color: var(--color-muted-foreground);
+  --ag-odd-row-background-color: transparent;
+  --ag-row-hover-color: var(--color-accent);
+  --ag-selected-row-background-color: var(--color-accent);
+  --ag-border-color: var(--color-border);
+  --ag-secondary-border-color: var(--color-border);
+  --ag-row-border-color: var(--color-border);
+  --ag-header-column-separator-color: var(--color-border);
+  --ag-font-family: "Space Grotesk", system-ui, sans-serif;
+  --ag-font-size: 13px;
+  --ag-header-column-resize-handle-color: var(--color-border);
+  --ag-range-selection-border-color: var(--color-primary);
+  --ag-input-focus-border-color: var(--color-primary);
+}
+
+/* Vertically center cell content in all AG Grid cells */
+.ag-theme-quartz .ag-cell-value {
+  display: flex;
+  align-items: center;
+}

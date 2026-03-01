@@ -12,6 +12,8 @@ export const registerSlackDownloadFileTool = (server: McpServer) => {
       title: "Download file from Slack",
       description:
         "Download a file from Slack by file ID or URL. Files are saved to /workspace/shared/downloads/slack/ by default.",
+      annotations: { readOnlyHint: true, openWorldHint: true },
+
       inputSchema: z.object({
         fileId: z
           .string()

@@ -10,6 +10,8 @@ export const registerDeleteEpicTool = (server: McpServer) => {
       title: "Delete Epic",
       description:
         "Delete an epic. Only the creator or swarm lead can delete. Tasks are unassigned, not deleted.",
+      annotations: { destructiveHint: true },
+
       inputSchema: z.object({
         epicId: z.string().uuid().optional().describe("The ID of the epic to delete"),
         name: z.string().optional().describe("Epic name (alternative to ID)"),

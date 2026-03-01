@@ -8,6 +8,7 @@ export const registerAssignTaskToEpicTool = (server: McpServer) => {
     "assign-task-to-epic",
     {
       title: "Assign Task to Epic",
+      annotations: { idempotentHint: true },
       description: "Assign an existing task to an epic.",
       inputSchema: z.object({
         taskId: z.string().uuid().describe("The ID of the task to assign"),

@@ -9,9 +9,7 @@ description: Start an Agent Swarm Worker
 If the `agent-swarm` MCP server is not configured or disabled, return immediately with the following message:
 
 ```
-⚠️ The Agent Swarm MCP server is not configured or disabled. Please set up the MCP server to use the Agent Swarm features.
-
-I can not serve you, my lord, if the MCP server is not properly configured. Go ask your admin to set it up properly. GTFO.
+⚠️ The Agent Swarm MCP server is not configured or disabled. Please run `bunx @desplega.ai/agent-swarm setup` to configure it.
 ```
 
 ## Agent Swarm Worker Setup

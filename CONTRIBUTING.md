@@ -1,6 +1,6 @@
 # Contributing to Agent Swarm
 
-Thanks for your interest in contributing to Agent Swarm MCP!
+Thanks for your interest in contributing to Agent Swarm!
 
 ## Table of Contents
 

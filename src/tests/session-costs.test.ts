@@ -7,8 +7,11 @@ import {
   createSessionCost,
   createTaskExtended,
   getAllSessionCosts,
+  getDashboardCostSummary,
+  getSessionCostSummary,
   getSessionCostsByAgentId,
   getSessionCostsByTaskId,
+  getSessionCostsFiltered,
   initDb,
 } from "../be/db";
 import type { SessionCost } from "../types";
@@ -77,6 +80,43 @@ async function handleRequest(
     }
   }
 
+  // GET /api/session-costs/summary - Aggregated usage summary
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "session-costs" &&
+    pathSegments[2] === "summary"
+  ) {
+    const rawGroupBy = queryParams.get("groupBy");
+    const validGroupBy = ["day", "agent", "both"] as const;
+    if (rawGroupBy && !validGroupBy.includes(rawGroupBy as (typeof validGroupBy)[number])) {
+      return {
+        status: 400,
+        body: {
+          error: `Invalid groupBy value '${rawGroupBy}'. Must be one of: ${validGroupBy.join(", ")}`,
+        },
+      };
+    }
+    const summary = getSessionCostSummary({
+      startDate: queryParams.get("startDate") || undefined,
+      endDate: queryParams.get("endDate") || undefined,
+      agentId: queryParams.get("agentId") || undefined,
+      groupBy: (rawGroupBy as "day" | "agent" | "both") || "both",
+    });
+    return { status: 200, body: summary };
+  }
+
+  // GET /api/session-costs/dashboard - Cost today and MTD
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "session-costs" &&
+    pathSegments[2] === "dashboard"
+  ) {
+    const dashboardCosts = getDashboardCostSummary();
+    return { status: 200, body: dashboardCosts };
+  }
+
   // GET /api/session-costs - Query session costs with filters
   if (
     req.method === "GET" &&
@@ -86,12 +126,21 @@ async function handleRequest(
   ) {
     const agentId = queryParams.get("agentId");
     const taskId = queryParams.get("taskId");
+    const startDate = queryParams.get("startDate");
+    const endDate = queryParams.get("endDate");
     const limitParam = queryParams.get("limit");
     const limit = limitParam ? parseInt(limitParam, 10) : 100;
 
     let costs: SessionCost[];
     if (taskId) {
-      costs = getSessionCostsByTaskId(taskId);
+      costs = getSessionCostsByTaskId(taskId, limit);
+    } else if (startDate || endDate) {
+      costs = getSessionCostsFiltered({
+        agentId: agentId || undefined,
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
+        limit,
+      });
     } else if (agentId) {
       costs = getSessionCostsByAgentId(agentId, limit);
     } else {
@@ -720,6 +769,223 @@ describe("Session Costs API", () => {
       expect(data.success).toBe(true);
       expect(data.cost.inputTokens).toBe(150000);
       expect(data.cost.outputTokens).toBe(50000);
+    });
+  });
+
+  describe("Database: getSessionCostsFiltered", () => {
+    test("should filter by date range", () => {
+      const agent = createAgent({ name: "Filter DB Agent", isLead: false, status: "idle" });
+
+      createSessionCost({
+        sessionId: "filtered-db-1",
+        agentId: agent.id,
+        totalCostUsd: 0.1,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
+
+      // All records created today, so filtering with today's date should return them
+      const today = new Date().toISOString().slice(0, 10);
+      const results = getSessionCostsFiltered({
+        agentId: agent.id,
+        startDate: today,
+      });
+
+      expect(results.length).toBeGreaterThanOrEqual(1);
+      expect(results.every((r) => r.agentId === agent.id)).toBe(true);
+    });
+
+    test("should return empty for future date range", () => {
+      const results = getSessionCostsFiltered({
+        startDate: "2099-01-01",
+      });
+
+      expect(results.length).toBe(0);
+    });
+
+    test("should respect limit parameter", () => {
+      const agent = createAgent({ name: "Filter Limit Agent", isLead: false, status: "idle" });
+
+      for (let i = 0; i < 5; i++) {
+        createSessionCost({
+          sessionId: `filter-limit-${i}`,
+          agentId: agent.id,
+          totalCostUsd: 0.01,
+          durationMs: 1000,
+          numTurns: 1,
+          model: "opus",
+        });
+      }
+
+      const results = getSessionCostsFiltered({ agentId: agent.id, limit: 2 });
+      expect(results.length).toBe(2);
+    });
+  });
+
+  describe("Database: getSessionCostSummary", () => {
+    test("should return totals, daily, and byAgent", () => {
+      const agent = createAgent({ name: "Summary DB Agent", isLead: false, status: "idle" });
+
+      createSessionCost({
+        sessionId: "summary-db-1",
+        agentId: agent.id,
+        totalCostUsd: 0.5,
+        inputTokens: 1000,
+        outputTokens: 500,
+        cacheReadTokens: 100,
+        cacheWriteTokens: 50,
+        durationMs: 5000,
+        numTurns: 3,
+        model: "opus",
+      });
+
+      const today = new Date().toISOString().slice(0, 10);
+      const summary = getSessionCostSummary({
+        agentId: agent.id,
+        startDate: today,
+        groupBy: "both",
+      });
+
+      expect(summary.totals.totalCostUsd).toBeGreaterThanOrEqual(0.5);
+      expect(summary.totals.totalSessions).toBeGreaterThanOrEqual(1);
+      expect(summary.totals.totalInputTokens).toBeGreaterThanOrEqual(1000);
+      expect(summary.totals.avgCostPerSession).toBeGreaterThan(0);
+      expect(summary.daily.length).toBeGreaterThanOrEqual(1);
+      expect(summary.byAgent.length).toBeGreaterThanOrEqual(1);
+    });
+
+    test("should return only daily when groupBy=day", () => {
+      const summary = getSessionCostSummary({ groupBy: "day" });
+
+      expect(summary.totals).toBeDefined();
+      expect(summary.daily.length).toBeGreaterThanOrEqual(1);
+      expect(summary.byAgent.length).toBe(0);
+    });
+
+    test("should return only byAgent when groupBy=agent", () => {
+      const summary = getSessionCostSummary({ groupBy: "agent" });
+
+      expect(summary.totals).toBeDefined();
+      expect(summary.daily.length).toBe(0);
+      expect(summary.byAgent.length).toBeGreaterThanOrEqual(1);
+    });
+
+    test("should return empty results for future date range", () => {
+      const summary = getSessionCostSummary({
+        startDate: "2099-01-01",
+        groupBy: "both",
+      });
+
+      expect(summary.totals.totalSessions).toBe(0);
+      expect(summary.totals.totalCostUsd).toBe(0);
+      expect(summary.daily.length).toBe(0);
+      expect(summary.byAgent.length).toBe(0);
+    });
+  });
+
+  describe("Database: getDashboardCostSummary", () => {
+    test("should return costToday and costMtd", () => {
+      const result = getDashboardCostSummary();
+
+      expect(typeof result.costToday).toBe("number");
+      expect(typeof result.costMtd).toBe("number");
+      // costMtd should be >= costToday since MTD includes today
+      expect(result.costMtd).toBeGreaterThanOrEqual(result.costToday);
+    });
+  });
+
+  describe("GET /api/session-costs with date filtering", () => {
+    test("should filter by startDate", async () => {
+      const agent = createAgent({ name: "Date Filter Agent", isLead: false, status: "idle" });
+
+      createSessionCost({
+        sessionId: "date-filter-1",
+        agentId: agent.id,
+        totalCostUsd: 0.05,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
+
+      const today = new Date().toISOString().slice(0, 10);
+      const response = await fetch(
+        `${baseUrl}/api/session-costs?agentId=${agent.id}&startDate=${today}`,
+      );
+
+      expect(response.status).toBe(200);
+      const data = (await response.json()) as { costs: SessionCost[] };
+      expect(data.costs.length).toBeGreaterThanOrEqual(1);
+    });
+
+    test("should return empty for future startDate", async () => {
+      const response = await fetch(`${baseUrl}/api/session-costs?startDate=2099-01-01`);
+
+      expect(response.status).toBe(200);
+      const data = (await response.json()) as { costs: SessionCost[] };
+      expect(data.costs.length).toBe(0);
+    });
+  });
+
+  describe("GET /api/session-costs/summary", () => {
+    test("should return aggregated summary", async () => {
+      const response = await fetch(`${baseUrl}/api/session-costs/summary`);
+
+      expect(response.status).toBe(200);
+      const data = (await response.json()) as {
+        totals: { totalCostUsd: number; totalSessions: number };
+        daily: unknown[];
+        byAgent: unknown[];
+      };
+      expect(data.totals).toBeDefined();
+      expect(data.totals.totalSessions).toBeGreaterThan(0);
+      expect(data.daily.length).toBeGreaterThan(0);
+      expect(data.byAgent.length).toBeGreaterThan(0);
+    });
+
+    test("should filter by startDate and endDate", async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      const response = await fetch(
+        `${baseUrl}/api/session-costs/summary?startDate=${today}&endDate=${today}`,
+      );
+
+      expect(response.status).toBe(200);
+      const data = (await response.json()) as {
+        totals: { totalSessions: number };
+      };
+      expect(data.totals.totalSessions).toBeGreaterThanOrEqual(0);
+    });
+
+    test("should respect groupBy=day", async () => {
+      const response = await fetch(`${baseUrl}/api/session-costs/summary?groupBy=day`);
+
+      expect(response.status).toBe(200);
+      const data = (await response.json()) as {
+        daily: unknown[];
+        byAgent: unknown[];
+      };
+      expect(data.daily.length).toBeGreaterThan(0);
+      expect(data.byAgent.length).toBe(0);
+    });
+
+    test("should reject invalid groupBy", async () => {
+      const response = await fetch(`${baseUrl}/api/session-costs/summary?groupBy=invalid`);
+
+      expect(response.status).toBe(400);
+      const data = (await response.json()) as { error: string };
+      expect(data.error).toContain("Invalid groupBy");
+    });
+  });
+
+  describe("GET /api/session-costs/dashboard", () => {
+    test("should return costToday and costMtd", async () => {
+      const response = await fetch(`${baseUrl}/api/session-costs/dashboard`);
+
+      expect(response.status).toBe(200);
+      const data = (await response.json()) as { costToday: number; costMtd: number };
+      expect(typeof data.costToday).toBe("number");
+      expect(typeof data.costMtd).toBe("number");
+      expect(data.costMtd).toBeGreaterThanOrEqual(data.costToday);
     });
   });
 });

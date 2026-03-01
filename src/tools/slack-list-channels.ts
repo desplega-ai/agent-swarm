@@ -19,6 +19,8 @@ export const registerSlackListChannelsTool = (server: McpServer) => {
       title: "List Slack channels",
       description:
         "List Slack channels the bot is a member of. Use this to discover available channels for reading messages.",
+      annotations: { readOnlyHint: true, openWorldHint: true },
+
       inputSchema: z.object({
         types: z
           .array(z.enum(["public", "private", "dm", "mpim"]))

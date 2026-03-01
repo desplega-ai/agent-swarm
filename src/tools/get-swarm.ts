@@ -10,6 +10,8 @@ export const registerGetSwarmTool = (server: McpServer) => {
     {
       title: "Get the agent swarm",
       description: "Returns a list of agents in the swarm without their tasks.",
+      annotations: { readOnlyHint: true },
+
       inputSchema: z.object({
         a: z.string().optional(),
       }),

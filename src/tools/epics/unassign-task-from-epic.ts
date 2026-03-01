@@ -8,6 +8,7 @@ export const registerUnassignTaskFromEpicTool = (server: McpServer) => {
     "unassign-task-from-epic",
     {
       title: "Unassign Task from Epic",
+      annotations: { idempotentHint: true },
       description: "Remove a task from its epic. The task is kept but no longer associated.",
       inputSchema: z.object({
         taskId: z.string().uuid().describe("The ID of the task to unassign"),

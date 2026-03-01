@@ -19,6 +19,8 @@ export const registerJoinSwarmTool = (server: McpServer) => {
       title: "Join the agent swarm",
       description:
         "Tool for an agent to join the swarm of agents with optional profile information.",
+      annotations: { idempotentHint: true },
+
       inputSchema: z.object({
         requestedId: z
           .string()

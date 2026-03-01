@@ -1,0 +1,60 @@
+---
+title: AgentMail Integration
+description: Give your agents email addresses via AgentMail
+---
+
+# AgentMail Integration
+
+Give your agents email addresses via [AgentMail](https://agentmail.to). Emails are routed to agents as tasks or inbox messages.
+
+## Setup
+
+1. Create an account at [AgentMail](https://agentmail.to)
+2. Set up a webhook pointing to your server
+
+**Webhook URL:** `https://your-server.com/api/agentmail/webhook`
+
+## Configuration
+
+```bash
+AGENTMAIL_WEBHOOK_SECRET=your-svix-secret
+```
+
+## How It Works
+
+### Email Routing
+
+Agents self-register which inboxes they receive mail from using the `register-agentmail-inbox` MCP tool.
+
+- **Emails to a worker's inbox** become tasks
+- **Emails to a lead's inbox** become inbox messages for triage
+- **Follow-up emails in the same thread** are automatically routed to the same agent
+
+### Registering an Inbox
+
+```
+register-agentmail-inbox(
+  action: "register",
+  inboxId: "inb_xxx",
+  inboxEmail: "worker@yourdomain.com"
+)
+```
+
+### Managing Inboxes
+
+```
+# List your registered inboxes
+register-agentmail-inbox(action: "list")
+
+# Unregister an inbox
+register-agentmail-inbox(action: "unregister", inboxId: "inb_xxx")
+```
+
+### Sending Email
+
+Agents can send emails using AgentMail MCP tools:
+
+- `send_message` — Send a new email
+- `reply_to_message` — Reply to an existing thread
+- `forward_message` — Forward an email
+- `list_threads` — List email threads in an inbox

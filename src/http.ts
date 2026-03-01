@@ -54,6 +54,7 @@ import {
   getChannelById,
   getChannelMessages,
   getConcurrentContext,
+  getDashboardCostSummary,
   getDb,
   getEpicById,
   getEpics,
@@ -69,8 +70,10 @@ import {
   getResolvedConfig,
   getScheduledTasks,
   getServicesByAgentId,
+  getSessionCostSummary,
   getSessionCostsByAgentId,
   getSessionCostsByTaskId,
+  getSessionCostsFiltered,
   getSessionLogsByTaskId,
   getSwarmConfigById,
   getSwarmConfigs,
@@ -93,6 +96,7 @@ import {
   searchMemoriesByVector,
   shouldBlockPolling,
   startTask,
+  updateAgentActivity,
   updateAgentMaxTasks,
   updateAgentName,
   updateAgentProfile,
@@ -812,6 +816,50 @@ const httpServer = createHttpServer(async (req, res) => {
     return;
   }
 
+  // GET /api/session-costs/summary - Aggregated session cost summary
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "session-costs" &&
+    pathSegments[2] === "summary"
+  ) {
+    const summaryParams = parseQueryParams(req.url || "");
+    const rawGroupBy = summaryParams.get("groupBy");
+    const validGroupBy = ["day", "agent", "both"] as const;
+    if (rawGroupBy && !validGroupBy.includes(rawGroupBy as (typeof validGroupBy)[number])) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: `Invalid groupBy value '${rawGroupBy}'. Must be one of: ${validGroupBy.join(", ")}`,
+        }),
+      );
+      return;
+    }
+    const summary = getSessionCostSummary({
+      startDate: summaryParams.get("startDate") || undefined,
+      endDate: summaryParams.get("endDate") || undefined,
+      agentId: summaryParams.get("agentId") || undefined,
+      groupBy: (rawGroupBy as "day" | "agent" | "both") || "both",
+    });
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(summary));
+    return;
+  }
+
+  // GET /api/session-costs/dashboard - Cost today and month-to-date
+  if (
+    req.method === "GET" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "session-costs" &&
+    pathSegments[2] === "dashboard"
+  ) {
+    const dashboardCosts = getDashboardCostSummary();
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(dashboardCosts));
+    return;
+  }
+
   // GET /api/session-costs - Query session costs with filters
   if (
     req.method === "GET" &&
@@ -822,12 +870,21 @@ const httpServer = createHttpServer(async (req, res) => {
     const costsQueryParams = parseQueryParams(req.url || "");
     const agentId = costsQueryParams.get("agentId");
     const taskId = costsQueryParams.get("taskId");
+    const startDate = costsQueryParams.get("startDate");
+    const endDate = costsQueryParams.get("endDate");
     const limitParam = costsQueryParams.get("limit");
     const limit = limitParam ? parseInt(limitParam, 10) : 100;
 
     let costs: SessionCost[];
     if (taskId) {
-      costs = getSessionCostsByTaskId(taskId);
+      costs = getSessionCostsByTaskId(taskId, limit);
+    } else if (startDate || endDate) {
+      costs = getSessionCostsFiltered({
+        agentId: agentId || undefined,
+        startDate: startDate || undefined,
+        endDate: endDate || undefined,
+        limit,
+      });
     } else if (agentId) {
       costs = getSessionCostsByAgentId(agentId, limit);
     } else {
@@ -1176,6 +1233,9 @@ const httpServer = createHttpServer(async (req, res) => {
       identityMd?: string;
       setupScript?: string;
       toolsMd?: string;
+      changeSource?: string;
+      changedByAgentId?: string;
+      changeReason?: string;
     };
     try {
       body = JSON.parse(bodyText);
@@ -1230,16 +1290,33 @@ const httpServer = createHttpServer(async (req, res) => {
       }
     }
 
-    const agent = updateAgentProfile(agentId, {
-      role: body.role,
-      description: body.description,
-      capabilities: body.capabilities,
-      claudeMd: body.claudeMd,
-      soulMd: body.soulMd,
-      identityMd: body.identityMd,
-      setupScript: body.setupScript,
-      toolsMd: body.toolsMd,
-    });
+    // Build version metadata if provided
+    const validChangeSources = ["self_edit", "lead_coaching", "api", "system", "session_sync"];
+    const versionMeta =
+      body.changeSource || body.changedByAgentId || body.changeReason
+        ? {
+            changeSource: validChangeSources.includes(body.changeSource ?? "")
+              ? (body.changeSource as import("./types").ChangeSource)
+              : undefined,
+            changedByAgentId: body.changedByAgentId ?? null,
+            changeReason: body.changeReason ?? null,
+          }
+        : undefined;
+
+    const agent = updateAgentProfile(
+      agentId,
+      {
+        role: body.role,
+        description: body.description,
+        capabilities: body.capabilities,
+        claudeMd: body.claudeMd,
+        soulMd: body.soulMd,
+        identityMd: body.identityMd,
+        setupScript: body.setupScript,
+        toolsMd: body.toolsMd,
+      },
+      versionMeta,
+    );
 
     if (!agent) {
       res.writeHead(404, { "Content-Type": "application/json" });
@@ -1249,6 +1326,21 @@ const httpServer = createHttpServer(async (req, res) => {
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(agentWithCapacity(agent)));
+    return;
+  }
+
+  // PUT /api/agents/:id/activity - Update agent last activity timestamp
+  if (
+    req.method === "PUT" &&
+    pathSegments[0] === "api" &&
+    pathSegments[1] === "agents" &&
+    pathSegments[2] &&
+    pathSegments[3] === "activity"
+  ) {
+    const agentId = pathSegments[2];
+    updateAgentActivity(agentId);
+    res.writeHead(204);
+    res.end();
     return;
   }
 
@@ -1284,11 +1376,19 @@ const httpServer = createHttpServer(async (req, res) => {
   ) {
     const status = queryParams.get("status") as import("./types").AgentTaskStatus | null;
     const agentId = queryParams.get("agentId");
+    const epicId = queryParams.get("epicId");
     const search = queryParams.get("search");
+    const includeHeartbeat = queryParams.get("includeHeartbeat") === "true";
+    const limit = queryParams.get("limit") ? Number(queryParams.get("limit")) : undefined;
+    const offset = queryParams.get("offset") ? Number(queryParams.get("offset")) : undefined;
     const filters = {
       status: status || undefined,
       agentId: agentId || undefined,
+      epicId: epicId || undefined,
       search: search || undefined,
+      includeHeartbeat: includeHeartbeat || undefined,
+      limit,
+      offset,
     };
     const tasks = getAllTasks(filters);
     const total = getTasksCount(filters);
@@ -1848,11 +1948,13 @@ const httpServer = createHttpServer(async (req, res) => {
     const status = queryParams.get("status") as EpicStatus | null;
     const search = queryParams.get("search");
     const leadAgentId = queryParams.get("leadAgentId");
-    const epics = getEpics({
+    const rawEpics = getEpics({
       status: status || undefined,
       search: search || undefined,
       leadAgentId: leadAgentId || undefined,
     });
+    // Enrich each epic with progress data for the UI
+    const epics = rawEpics.map((e) => getEpicWithProgress(e.id) ?? e);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ epics, total: epics.length }));
     return;

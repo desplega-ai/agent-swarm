@@ -11,6 +11,8 @@ export const registerUpdateServiceStatusTool = (server: McpServer) => {
       title: "Update Service Status",
       description:
         "Update the health status of a registered service. Use this after a service becomes healthy or needs to be marked as stopped/unhealthy.",
+      annotations: { idempotentHint: true },
+
       inputSchema: z.object({
         serviceId: z.uuid().optional().describe("Service ID to update."),
         name: z.string().optional().describe("Service name to update (alternative to serviceId)."),

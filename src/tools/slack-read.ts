@@ -37,6 +37,8 @@ export const registerSlackReadTool = (server: McpServer) => {
       title: "Read Slack thread/channel history",
       description:
         "Read messages from a Slack thread or channel. Use inboxMessageId or taskId to read from a thread you have context for, or provide channelId directly for channel history (leads only).",
+      annotations: { readOnlyHint: true, openWorldHint: true },
+
       inputSchema: z.object({
         inboxMessageId: z.uuid().optional().describe("Read thread history for an inbox message."),
         taskId: z.uuid().optional().describe("Read thread history for a task."),

@@ -11,6 +11,8 @@ export const registerSetConfigTool = (server: McpServer) => {
       title: "Set Config",
       description:
         "Set or update a swarm configuration value. Upserts by (scope, scopeId, key). Use scope='global' for server-wide settings, 'agent' for agent-specific, or 'repo' for repo-specific. Set isSecret=true to mask the value in API responses.",
+      annotations: { idempotentHint: true },
+
       inputSchema: z.object({
         scope: SwarmConfigScopeSchema.describe("Config scope: 'global', 'agent', or 'repo'."),
         scopeId: z

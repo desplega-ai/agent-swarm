@@ -10,6 +10,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
     "create-schedule",
     {
       title: "Create Scheduled Task",
+      annotations: { destructiveHint: false },
       description:
         "Create a new scheduled task that will automatically create agent tasks at specified intervals. Either cronExpression or intervalMs must be provided.",
       inputSchema: z.object({

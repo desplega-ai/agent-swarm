@@ -328,6 +328,14 @@ Your service URL will be: \`https://{agentId}.{swarmUrl}\` (based on your agent 
 **Health Checks:** Implement a \`/health\` endpoint returning 200 OK for monitoring.
 `;
 
+const BASE_PROMPT_ARTIFACTS = `
+### Artifacts
+
+Agents can serve interactive web content (HTML pages, dashboards, approval flows) via public URLs using localtunnel.
+Use the \`/artifacts\` skill for detailed instructions, examples, and API reference.
+Artifact content should be stored in \`/workspace/personal/artifacts/\` (persisted across sessions).
+`;
+
 export type BasePromptArgs = {
   role: string;
   agentId: string;
@@ -392,6 +400,10 @@ export const getBasePrompt = (args: BasePromptArgs): string => {
 
   if (!args.capabilities || args.capabilities.includes("services")) {
     prompt += BASE_PROMPT_SERVICES;
+  }
+
+  if (!args.capabilities || args.capabilities.includes("artifacts")) {
+    prompt += BASE_PROMPT_ARTIFACTS;
   }
 
   if (args.capabilities) {

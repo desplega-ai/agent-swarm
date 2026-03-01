@@ -15,6 +15,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
     "update-schedule",
     {
       title: "Update Scheduled Task",
+      annotations: { idempotentHint: true },
       description:
         "Update an existing scheduled task. Only the creator or lead agent can update schedules.",
       inputSchema: z.object({

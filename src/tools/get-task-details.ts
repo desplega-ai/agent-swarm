@@ -11,6 +11,8 @@ export const registerGetTaskDetailsTool = (server: McpServer) => {
       title: "Get task details",
       description:
         "Returns detailed information about a specific task, including output, failure reason, and log history.",
+      annotations: { readOnlyHint: true },
+
       inputSchema: z.object({
         taskId: z.uuid().describe("The ID of the task to get details for."),
       }),

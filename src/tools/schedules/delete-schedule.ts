@@ -15,6 +15,8 @@ export const registerDeleteScheduleTool = (server: McpServer) => {
       title: "Delete Scheduled Task",
       description:
         "Delete a scheduled task permanently. Only the creator or lead agent can delete schedules.",
+      annotations: { destructiveHint: true },
+
       inputSchema: z.object({
         scheduleId: z.string().uuid().optional().describe("Schedule ID to delete"),
         name: z.string().optional().describe("Schedule name to delete (alternative to ID)"),

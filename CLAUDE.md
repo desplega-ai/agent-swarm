@@ -1,6 +1,6 @@
-# Agent Swarm MCP
+# Agent Swarm
 
-Multi-agent orchestration layer for Claude Code, Codex, Gemini CLI. Enables task distribution, agent communication, and service discovery.
+Multi-agent orchestration for Claude Code, Codex, Gemini CLI. Enables task distribution, agent communication, and service discovery.
 
 **Getting Started**: See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup. Run `bun run start:http` to start the server.
 
@@ -45,7 +45,7 @@ src/
   be/           # Backend utilities (DB, storage)
   github/       # GitHub webhook handlers
   slack/        # Slack integration
-ui/             # Dashboard (separate React app)
+new-ui/          # Dashboard (Next.js app)
 ```
 
 ## Code Style
@@ -57,7 +57,7 @@ ui/             # Dashboard (separate React app)
 
 ## Related
 
-- [UI Dashboard](./ui/CLAUDE.md) - React monitoring dashboard
+- [UI Dashboard](./new-ui/) - Next.js monitoring dashboard
 - [MCP.md](./MCP.md) - MCP tools reference
 - [DEPLOYMENT.md](./DEPLOYMENT.md) - Production deployment
 - [CONTRIBUTING.md](./CONTRIBUTING.md) - Development setup

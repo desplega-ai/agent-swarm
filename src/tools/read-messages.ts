@@ -21,6 +21,8 @@ export const registerReadMessagesTool = (server: McpServer) => {
       title: "Read Messages",
       description:
         "Reads messages from a channel. If no channel is specified, returns unread messages from ALL channels. Supports filtering by unread, mentions, and time range. Automatically marks messages as read.",
+      annotations: { readOnlyHint: true },
+
       inputSchema: z.object({
         channel: z
           .string()

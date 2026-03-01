@@ -15,6 +15,7 @@ export const registerInboxDelegateTool = (server: McpServer) => {
     "inbox-delegate",
     {
       title: "Delegate inbox message to worker",
+      annotations: { destructiveHint: false },
       description:
         "Delegate an inbox message to a worker agent by creating a task. The task inherits Slack context for replies.",
       inputSchema: z.object({
