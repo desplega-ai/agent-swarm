@@ -45,22 +45,22 @@ export function Architecture() {
               <span className="text-xs font-mono text-zinc-400">agent-swarm architecture</span>
             </div>
 
-            <div className="p-8">
+            <div className="p-4 sm:p-8">
               {/* Slack / CLI layer */}
               <div className="mb-6">
                 <div className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
                   Interface Layer
                 </div>
-                <div className="flex gap-3">
-                  <div className="flex-1 rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-center">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-center">
                     <div className="text-sm font-semibold text-zinc-700">Slack</div>
                     <div className="text-xs text-zinc-400 mt-1">Mentions &amp; threads</div>
                   </div>
-                  <div className="flex-1 rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-center">
+                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-center">
                     <div className="text-sm font-semibold text-zinc-700">Claude Code</div>
                     <div className="text-xs text-zinc-400 mt-1">CLI sessions</div>
                   </div>
-                  <div className="flex-1 rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-center">
+                  <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-center">
                     <div className="text-sm font-semibold text-zinc-700">Dashboard</div>
                     <div className="text-xs text-zinc-400 mt-1">Web UI</div>
                   </div>
@@ -104,26 +104,28 @@ export function Architecture() {
                 <div className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
                   Agent Layer
                 </div>
-                <div className="grid grid-cols-4 gap-3">
-                  <div className="col-span-4 sm:col-span-1 rounded-xl border-2 border-amber-500/30 bg-amber-50 p-4 text-center">
+                <div className="space-y-3 sm:space-y-0 sm:grid sm:grid-cols-4 sm:gap-3">
+                  <div className="rounded-xl border-2 border-amber-500/30 bg-amber-50 p-4 text-center">
                     <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-500 to-amber-700 mx-auto mb-2 flex items-center justify-center">
                       <span className="text-white text-xs font-bold">L</span>
                     </div>
                     <div className="text-xs font-semibold text-zinc-700">Lead</div>
                     <div className="text-xs text-zinc-400 mt-0.5">Orchestrator</div>
                   </div>
-                  {["Worker 1", "Worker 2", "Worker 3"].map((w) => (
-                    <div
-                      key={w}
-                      className="rounded-xl border border-zinc-200 bg-white p-4 text-center"
-                    >
-                      <div className="w-8 h-8 rounded-full bg-zinc-100 border border-zinc-200 mx-auto mb-2 flex items-center justify-center">
-                        <span className="text-zinc-500 text-xs font-bold">W</span>
+                  <div className="grid grid-cols-3 gap-3 sm:col-span-3 sm:contents">
+                    {["Worker 1", "Worker 2", "Worker 3"].map((w) => (
+                      <div
+                        key={w}
+                        className="rounded-xl border border-zinc-200 bg-white p-4 text-center"
+                      >
+                        <div className="w-8 h-8 rounded-full bg-zinc-100 border border-zinc-200 mx-auto mb-2 flex items-center justify-center">
+                          <span className="text-zinc-500 text-xs font-bold">W</span>
+                        </div>
+                        <div className="text-xs font-semibold text-zinc-700">{w}</div>
+                        <div className="text-xs text-zinc-400 mt-0.5">Specialist</div>
                       </div>
-                      <div className="text-xs font-semibold text-zinc-700">{w}</div>
-                      <div className="text-xs text-zinc-400 mt-0.5">Specialist</div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -137,16 +139,16 @@ export function Architecture() {
                 <div className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
                   Persistence Layer
                 </div>
-                <div className="flex gap-3">
-                  <div className="flex-1 rounded-xl border border-violet-200 bg-violet-50/50 p-4 text-center">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="rounded-xl border border-violet-200 bg-violet-50/50 p-4 text-center">
                     <div className="text-sm font-semibold text-violet-700">SQLite + Embeddings</div>
                     <div className="text-xs text-violet-500 mt-1">Searchable memory</div>
                   </div>
-                  <div className="flex-1 rounded-xl border border-blue-200 bg-blue-50/50 p-4 text-center">
+                  <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 text-center">
                     <div className="text-sm font-semibold text-blue-700">SOUL.md / IDENTITY.md</div>
                     <div className="text-xs text-blue-500 mt-1">Agent personality</div>
                   </div>
-                  <div className="flex-1 rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 text-center">
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 text-center">
                     <div className="text-sm font-semibold text-emerald-700">Git Worktrees</div>
                     <div className="text-xs text-emerald-500 mt-1">Isolated workspaces</div>
                   </div>

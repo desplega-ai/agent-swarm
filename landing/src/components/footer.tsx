@@ -26,7 +26,7 @@ export function Footer() {
             </div>
           </div>
 
-          <div className="flex items-center gap-6">
+          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
             <a
               href="https://github.com/desplega-ai/agent-swarm"
               target="_blank"
