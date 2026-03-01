@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- x402 payments guide page and environment variables reference in documentation site
+
+## [1.31.0] - 2026-02-28
+
+### Added
+- x402 payment capability for agents — automatic USDC micropayments for x402-gated APIs (#108)
+- Dual signer support: Openfort (managed wallet in TEE) and viem (raw private key)
+- Openfort backend wallet signer with v-value normalization for USDC settlement
+- x402 CLI for testing payments (`check`, `fetch`, `status` commands)
+- Spending tracker with per-request and daily limits
+- Real testnet E2E tests with x402.org facilitator on Base Sepolia
+- Landing site: x402 example page, blog section with Openfort hackathon post and swarm metrics post
+
+### Fixed
+- Openfort signature v-value normalization (v=0/1 to v=27/28) for on-chain USDC settlement
+- Network chain passthrough to Openfort signer (was hardcoded to baseSepolia)
+
 ## [1.30.1] - 2026-02-28
 
 ### Added
