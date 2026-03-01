@@ -5,6 +5,7 @@
     "slack-integration",
     "github-integration",
     "agentmail-integration",
-    "sentry-integration"
+    "sentry-integration",
+    "x402-payments"
   ]
 }
