@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- x402 Payments guide page in documentation site
+- x402 payments guide page and environment variables reference in documentation site
 
 ## [1.31.0] - 2026-02-28
 
@@ -18,7 +18,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - x402 CLI for testing payments (`check`, `fetch`, `status` commands)
 - Spending tracker with per-request and daily limits
 - Real testnet E2E tests with x402.org facilitator on Base Sepolia
-- Docs site: x402 payments guide and environment variables reference
 - Landing site: x402 example page, blog section with Openfort hackathon post and swarm metrics post
 
 ### Fixed
