@@ -86,6 +86,33 @@ Complete reference for all environment variables used by Agent Swarm.
 | `SENTRY_AUTH_TOKEN` | Sentry Organization Auth Token |
 | `SENTRY_ORG` | Sentry organization slug |
 
+## x402 Payments
+
+Environment variables for the [x402 payment module](/docs/guides/x402-payments), enabling agents to make USDC micropayments on x402-gated APIs.
+
+### Common
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `X402_SIGNER_TYPE` | Auto-detected | Signer backend: `"openfort"` or `"viem"`. Auto-detects based on which credentials are set |
+| `X402_MAX_AUTO_APPROVE` | `1.00` | Maximum USD amount to auto-approve per request |
+| `X402_DAILY_LIMIT` | `10.00` | Daily spending limit in USD |
+| `X402_NETWORK` | `eip155:84532` | CAIP-2 network ID. `eip155:84532` = Base Sepolia (testnet), `eip155:8453` = Base mainnet |
+
+### Openfort Signer
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENFORT_API_KEY` | Yes | Openfort API key (`sk_test_` or `sk_live_` prefixed) |
+| `OPENFORT_WALLET_SECRET` | Yes | P-256 ECDSA key for wallet authentication (base64 encoded) |
+| `OPENFORT_WALLET_ADDRESS` | No | Reuse existing wallet address instead of creating a new one |
+
+### Viem Signer
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `EVM_PRIVATE_KEY` | Yes | Wallet private key (`0x`-prefixed hex). Use a burner wallet with minimal funds |
+
 ## Priority
 
 When both CLI flags and environment variables are set:
