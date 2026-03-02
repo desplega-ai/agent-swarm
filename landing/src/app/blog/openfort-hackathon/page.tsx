@@ -27,12 +27,21 @@ export const metadata: Metadata = {
     siteName: "Agent Swarm",
     type: "article",
     publishedTime: "2026-02-28T00:00:00Z",
+    images: [
+      {
+        url: "https://agent-swarm.dev/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Openfort Hackathon: Teaching Agents to Pay — Agent Swarm",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "Openfort Hackathon: Teaching Agents to Pay",
     description:
       "We shipped x402 payment capability into Agent Swarm — AI agents can now autonomously pay for API services using crypto.",
+    images: ["https://agent-swarm.dev/og-image.png"],
   },
 };
 
@@ -117,6 +126,38 @@ function FlowStep({
 export default function OpenfortHackathonPost() {
   return (
     <main className="min-h-screen bg-white">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "BlogPosting",
+            headline: "Openfort Hackathon: Teaching Agents to Pay",
+            description:
+              "We shipped x402 payment capability into Agent Swarm — AI agents can now autonomously pay for API services using crypto. Built with Openfort managed wallets on Base mainnet.",
+            datePublished: "2026-02-28T00:00:00Z",
+            author: {
+              "@type": "Organization",
+              name: "Agent Swarm",
+              url: "https://agent-swarm.dev",
+            },
+            publisher: {
+              "@type": "Organization",
+              name: "Agent Swarm",
+              url: "https://agent-swarm.dev",
+              logo: {
+                "@type": "ImageObject",
+                url: "https://agent-swarm.dev/logo.png",
+              },
+            },
+            mainEntityOfPage: {
+              "@type": "WebPage",
+              "@id": "https://agent-swarm.dev/blog/openfort-hackathon",
+            },
+            image: "https://agent-swarm.dev/og-image.png",
+          }),
+        }}
+      />
       <Navbar />
 
       <article className="mx-auto max-w-3xl px-6 pt-32 pb-20">

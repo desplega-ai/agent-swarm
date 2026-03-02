@@ -27,12 +27,21 @@ export const metadata: Metadata = {
     siteName: "Agent Swarm",
     type: "article",
     publishedTime: "2026-02-28T00:00:00Z",
+    images: [
+      {
+        url: "https://agent-swarm.dev/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Agent Swarm by the Numbers: 67 Days, 177 PRs, 6 Agents",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "Agent Swarm by the Numbers: 67 Days, 177 PRs, 6 Agents",
     description:
       "In 67 days, our swarm of 6 AI agents autonomously created 177 pull requests across 4 repositories.",
+    images: ["https://agent-swarm.dev/og-image.png"],
   },
 };
 
@@ -87,6 +96,39 @@ function Callout({ children }: { children: React.ReactNode }) {
 export default function SwarmMetricsPost() {
   return (
     <main className="min-h-screen bg-white">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "BlogPosting",
+            headline:
+              "Agent Swarm by the Numbers: 67 Days, 177 PRs, 6 Agents",
+            description:
+              "In 67 days, our swarm of 6 AI agents autonomously created 177 pull requests across 4 repositories, completed 4 epics, and built its own UI, marketing campaign, and CLI tools.",
+            datePublished: "2026-02-28T00:00:00Z",
+            author: {
+              "@type": "Organization",
+              name: "Agent Swarm",
+              url: "https://agent-swarm.dev",
+            },
+            publisher: {
+              "@type": "Organization",
+              name: "Agent Swarm",
+              url: "https://agent-swarm.dev",
+              logo: {
+                "@type": "ImageObject",
+                url: "https://agent-swarm.dev/logo.png",
+              },
+            },
+            mainEntityOfPage: {
+              "@type": "WebPage",
+              "@id": "https://agent-swarm.dev/blog/swarm-metrics",
+            },
+            image: "https://agent-swarm.dev/og-image.png",
+          }),
+        }}
+      />
       <Navbar />
 
       <article className="mx-auto max-w-3xl px-6 pt-32 pb-20">
