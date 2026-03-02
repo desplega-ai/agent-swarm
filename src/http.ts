@@ -1377,6 +1377,7 @@ const httpServer = createHttpServer(async (req, res) => {
     const status = queryParams.get("status") as import("./types").AgentTaskStatus | null;
     const agentId = queryParams.get("agentId");
     const epicId = queryParams.get("epicId");
+    const scheduleId = queryParams.get("scheduleId");
     const search = queryParams.get("search");
     const includeHeartbeat = queryParams.get("includeHeartbeat") === "true";
     const limit = queryParams.get("limit") ? Number(queryParams.get("limit")) : undefined;
@@ -1385,6 +1386,7 @@ const httpServer = createHttpServer(async (req, res) => {
       status: status || undefined,
       agentId: agentId || undefined,
       epicId: epicId || undefined,
+      scheduleId: scheduleId || undefined,
       search: search || undefined,
       includeHeartbeat: includeHeartbeat || undefined,
       limit,
