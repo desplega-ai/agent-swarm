@@ -60,6 +60,7 @@ export const AgentTaskSourceSchema = z.enum([
   "github",
   "agentmail",
   "system",
+  "schedule",
 ]);
 export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 
@@ -122,6 +123,9 @@ export const AgentTaskSchema = z.object({
   // Session attachment (optional)
   parentTaskId: z.uuid().optional(),
   claudeSessionId: z.string().optional(),
+
+  // Schedule linking (optional — set when task was created by a schedule)
+  scheduleId: z.uuid().optional(),
 });
 
 export const AgentStatusSchema = z.enum(["idle", "busy", "offline"]);
