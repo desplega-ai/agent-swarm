@@ -6,6 +6,7 @@ import {
   generateDefaultToolsMd,
 } from "../be/db.ts";
 import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt.ts";
+import { resolveCredentialPools } from "../utils/credentials.ts";
 import {
   parseStderrForErrors,
   SessionErrorTracker,
@@ -187,6 +188,7 @@ async function closeAgent(config: ApiConfig, role: string): Promise<void> {
 /**
  * Fetch resolved config from the API and merge into a base env object.
  * Falls back to baseEnv on any error (network, parse, etc).
+ * Credential env vars with comma-separated values get one randomly selected.
  */
 async function fetchResolvedEnv(
   apiUrl: string,
@@ -194,37 +196,37 @@ async function fetchResolvedEnv(
   agentId: string,
   baseEnv: Record<string, string | undefined> = process.env,
 ): Promise<Record<string, string | undefined>> {
-  if (!apiUrl || !agentId) return { ...baseEnv };
+  const env: Record<string, string | undefined> = { ...baseEnv };
 
-  try {
-    const headers: Record<string, string> = { "X-Agent-ID": agentId };
-    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  if (apiUrl && agentId) {
+    try {
+      const headers: Record<string, string> = { "X-Agent-ID": agentId };
+      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
-    const url = `${apiUrl}/api/config/resolved?agentId=${encodeURIComponent(agentId)}&includeSecrets=true`;
-    const response = await fetch(url, { headers });
+      const url = `${apiUrl}/api/config/resolved?agentId=${encodeURIComponent(agentId)}&includeSecrets=true`;
+      const response = await fetch(url, { headers });
 
-    if (!response.ok) {
-      console.warn(`[env-reload] Failed to fetch config: ${response.status}`);
-      return { ...baseEnv };
+      if (!response.ok) {
+        console.warn(`[env-reload] Failed to fetch config: ${response.status}`);
+      } else {
+        const data = (await response.json()) as {
+          configs: Array<{ key: string; value: string }>;
+        };
+
+        if (data.configs?.length) {
+          for (const config of data.configs) {
+            env[config.key] = config.value;
+          }
+          console.log(`[env-reload] Loaded ${data.configs.length} config entries from API`);
+        }
+      }
+    } catch (error) {
+      console.warn(`[env-reload] Could not fetch config, using current env: ${error}`);
     }
-
-    const data = (await response.json()) as {
-      configs: Array<{ key: string; value: string }>;
-    };
-
-    if (!data.configs?.length) return { ...baseEnv };
-
-    const merged: Record<string, string | undefined> = { ...baseEnv };
-    for (const config of data.configs) {
-      merged[config.key] = config.value;
-    }
-
-    console.log(`[env-reload] Loaded ${data.configs.length} config entries from API`);
-    return merged;
-  } catch (error) {
-    console.warn(`[env-reload] Could not fetch config, using current env: ${error}`);
-    return { ...baseEnv };
   }
+
+  resolveCredentialPools(env);
+  return env;
 }
 
 /**
