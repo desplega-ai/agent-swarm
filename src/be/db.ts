@@ -848,6 +848,20 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     /* exists */
   }
 
+  // Migration: Add model column to agent_tasks for per-task model selection
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN model TEXT`);
+  } catch {
+    /* exists */
+  }
+
+  // Migration: Add model column to scheduled_tasks for per-schedule model selection
+  try {
+    db.run(`ALTER TABLE scheduled_tasks ADD COLUMN model TEXT`);
+  } catch {
+    /* exists */
+  }
+
   // Migration: Create context_versions table for tracking changes to agent identity files
   db.run(`
     CREATE TABLE IF NOT EXISTS context_versions (
@@ -1361,6 +1375,7 @@ type AgentTaskRow = {
   epicId: string | null;
   parentTaskId: string | null;
   claudeSessionId: string | null;
+  model: string | null;
   createdAt: string;
   lastUpdatedAt: string;
   finishedAt: string | null;
@@ -1403,6 +1418,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     epicId: row.epicId ?? undefined,
     parentTaskId: row.parentTaskId ?? undefined,
     claudeSessionId: row.claudeSessionId ?? undefined,
+    model: (row.model as "haiku" | "sonnet" | "opus" | null) ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     finishedAt: row.finishedAt ?? undefined,
@@ -2310,6 +2326,7 @@ export interface CreateTaskOptions {
   mentionChannelId?: string;
   epicId?: string;
   parentTaskId?: string;
+  model?: string;
 }
 
 /**
@@ -2366,8 +2383,8 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         slackChannelId, slackThreadTs, slackUserId,
         githubRepo, githubEventType, githubNumber, githubCommentId, githubAuthor, githubUrl,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
-        mentionMessageId, mentionChannelId, epicId, parentTaskId, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        mentionMessageId, mentionChannelId, epicId, parentTaskId, model, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -2398,6 +2415,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.mentionChannelId ?? null,
       options?.epicId ?? null,
       options?.parentTaskId ?? null,
+      options?.model ?? null,
       now,
       now,
     );
@@ -4568,6 +4586,7 @@ type ScheduledTaskRow = {
   consecutiveErrors: number | null;
   lastErrorAt: string | null;
   lastErrorMessage: string | null;
+  model: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -4592,6 +4611,7 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     consecutiveErrors: row.consecutiveErrors ?? 0,
     lastErrorAt: row.lastErrorAt ?? undefined,
     lastErrorMessage: row.lastErrorMessage ?? undefined,
+    model: (row.model as "haiku" | "sonnet" | "opus" | null) ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -4652,6 +4672,7 @@ export interface CreateScheduledTaskData {
   nextRunAt?: string;
   createdByAgentId?: string;
   timezone?: string;
+  model?: string;
 }
 
 export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTask {
@@ -4663,8 +4684,8 @@ export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTas
       `INSERT INTO scheduled_tasks (
         id, name, description, cronExpression, intervalMs, taskTemplate,
         taskType, tags, priority, targetAgentId, enabled, nextRunAt,
-        createdByAgentId, timezone, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        createdByAgentId, timezone, model, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -4681,6 +4702,7 @@ export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTas
       data.nextRunAt ?? null,
       data.createdByAgentId ?? null,
       data.timezone ?? "UTC",
+      data.model ?? null,
       now,
       now,
     );
@@ -4706,6 +4728,7 @@ export interface UpdateScheduledTaskData {
   consecutiveErrors?: number;
   lastErrorAt?: string | null;
   lastErrorMessage?: string | null;
+  model?: string | null;
   lastUpdatedAt?: string;
 }
 
@@ -4779,6 +4802,10 @@ export function updateScheduledTask(
   if (data.lastErrorMessage !== undefined) {
     updates.push("lastErrorMessage = ?");
     params.push(data.lastErrorMessage);
+  }
+  if (data.model !== undefined) {
+    updates.push("model = ?");
+    params.push(data.model);
   }
 
   if (updates.length === 0) {

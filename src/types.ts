@@ -122,6 +122,9 @@ export const AgentTaskSchema = z.object({
   // Session attachment (optional)
   parentTaskId: z.uuid().optional(),
   claudeSessionId: z.string().optional(),
+
+  // Model selection (optional — defaults to "opus" via runner)
+  model: z.enum(["haiku", "sonnet", "opus"]).optional(),
 });
 
 export const AgentStatusSchema = z.enum(["idle", "busy", "offline"]);
@@ -366,6 +369,7 @@ export const ScheduledTaskSchema = z
     consecutiveErrors: z.number().int().min(0).default(0),
     lastErrorAt: z.iso.datetime().optional(),
     lastErrorMessage: z.string().optional(),
+    model: z.enum(["haiku", "sonnet", "opus"]).optional(),
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
   })
