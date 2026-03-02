@@ -54,6 +54,55 @@ export default function RootLayout({
           rel="stylesheet"
         />
         <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@graph": [
+                {
+                  "@type": "Organization",
+                  "@id": "https://agent-swarm.dev/#organization",
+                  name: "Agent Swarm",
+                  url: "https://agent-swarm.dev",
+                  logo: {
+                    "@type": "ImageObject",
+                    url: "https://agent-swarm.dev/logo.png",
+                  },
+                  sameAs: [
+                    "https://github.com/desplega-ai/agent-swarm",
+                  ],
+                },
+                {
+                  "@type": "WebSite",
+                  "@id": "https://agent-swarm.dev/#website",
+                  url: "https://agent-swarm.dev",
+                  name: "Agent Swarm",
+                  publisher: {
+                    "@id": "https://agent-swarm.dev/#organization",
+                  },
+                },
+                {
+                  "@type": "SoftwareApplication",
+                  name: "Agent Swarm",
+                  applicationCategory: "DeveloperApplication",
+                  operatingSystem: "Linux, macOS",
+                  description:
+                    "Open-source multi-agent orchestration for AI coding assistants. A lead agent delegates tasks to Docker-isolated workers with persistent memory.",
+                  url: "https://agent-swarm.dev",
+                  offers: {
+                    "@type": "Offer",
+                    price: "0",
+                    priceCurrency: "USD",
+                  },
+                  license: "https://opensource.org/licenses/MIT",
+                  codeRepository:
+                    "https://github.com/desplega-ai/agent-swarm",
+                },
+              ],
+            }),
+          }}
+        />
+        <script
           async
           src="https://plausible.io/js/pa-TeCPVGp2RFHbVWD8FlfFb.js"
         />
