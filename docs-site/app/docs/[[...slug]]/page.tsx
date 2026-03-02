@@ -51,8 +51,34 @@ export async function generateMetadata(props: {
   const page = source.getPage(params.slug);
   if (!page) notFound();
 
+  const title = page.data.title;
+  const description = page.data.description;
+  const slug = params.slug?.join("/") ?? "";
+  const url = `https://docs.agent-swarm.dev/docs${slug ? `/${slug}` : ""}`;
+
   return {
-    title: page.data.title,
-    description: page.data.description,
+    title,
+    description,
+    openGraph: {
+      title: `${title} | Agent Swarm`,
+      description,
+      url,
+      siteName: "Agent Swarm Docs",
+      type: "article",
+      images: [
+        {
+          url: "https://agent-swarm.dev/og-image.png",
+          width: 1200,
+          height: 630,
+          alt: `${title} — Agent Swarm Documentation`,
+        },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${title} | Agent Swarm`,
+      description,
+      images: ["https://agent-swarm.dev/og-image.png"],
+    },
   };
 }

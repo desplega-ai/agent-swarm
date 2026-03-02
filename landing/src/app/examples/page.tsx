@@ -12,12 +12,21 @@ export const metadata: Metadata = {
     url: "https://agent-swarm.dev/examples",
     siteName: "Agent Swarm",
     type: "website",
+    images: [
+      {
+        url: "https://agent-swarm.dev/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Examples — Real Agent Swarm Sessions",
+      },
+    ],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: "Examples — Real Agent Swarm Sessions",
     description:
       "Real session transcripts showing autonomous AI agent coordination in action.",
+    images: ["https://agent-swarm.dev/og-image.png"],
   },
 };
 
