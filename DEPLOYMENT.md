@@ -57,6 +57,7 @@ Edit your `.env` file:
 # Required
 API_KEY=your-secret-api-key
 CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token  # Run `claude setup-token` to get this
+# Multiple tokens for load balancing: CLAUDE_CODE_OAUTH_TOKEN=token1,token2,token3
 
 # Agent IDs (optional, auto-generated if not set)
 AGENT_ID=worker-1-uuid
@@ -343,7 +344,7 @@ When a worker starts, it:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `CLAUDE_CODE_OAUTH_TOKEN` | Yes | OAuth token for Claude CLI (run `claude setup-token`) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Yes | OAuth token for Claude CLI (run `claude setup-token`). Supports comma-separated values for [multi-credential load balancing](./docs/ENVS.md#multi-credential-support). |
 | `API_KEY` | Yes | API key for MCP server |
 | `AGENT_ID` | No | Agent UUID (assigned on join if not set). **Keep stable for task resume.** |
 | `AGENT_ROLE` | No | Role: `worker` (default) or `lead` |
