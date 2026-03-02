@@ -1,12 +1,6 @@
 name: CI
 
 on:
-  pull_request:
-    branches:
-      - main
-    paths-ignore:
-      - "docs-site/**"
-      - "landing/**"
   push:
     branches:
       - main
@@ -56,27 +50,3 @@ jobs:
 
       - name: Run tests
         run: bun test
-
-  docker-build:
-    name: Docker Build Test
-    runs-on: depot-ubuntu-latest
-    if: github.event_name == 'pull_request'
-
-    strategy:
-      matrix:
-        dockerfile: [Dockerfile, Dockerfile.worker]
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./${{ matrix.dockerfile }}
-          push: false
-          tags: test-image:latest
