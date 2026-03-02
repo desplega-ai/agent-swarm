@@ -30,7 +30,8 @@ These variables configure containerized agents (`ghcr.io/desplega-ai/agent-swarm
 
 | Variable | Description |
 |----------|-------------|
-| `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token for Claude Code. Run `claude setup-token` to generate one. Container exits without it. |
+| `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token for Claude Code. Run `claude setup-token` to generate one. Container exits without it. Supports **comma-separated values** for multi-subscription load balancing (see below). |
+| `ANTHROPIC_API_KEY` | Alternative to `CLAUDE_CODE_OAUTH_TOKEN`. Also supports comma-separated values. |
 | `API_KEY` | Must match the API server's `API_KEY`. Container exits without it. |
 
 ### Agent Identity
@@ -57,6 +58,24 @@ These variables configure containerized agents (`ghcr.io/desplega-ai/agent-swarm
 | `MAX_CONCURRENT_TASKS` | `1` (worker), `2` (lead) | Maximum parallel tasks the agent processes. |
 | `SHUTDOWN_TIMEOUT` | `30000` | Grace period (ms) before force-pausing tasks during shutdown. |
 | `AI_LOOP` | `false` | Use legacy AI-based polling instead of runner-level polling. |
+
+### Multi-Credential Support
+
+To distribute load across multiple Claude subscriptions, provide multiple credentials as comma-separated values:
+
+```bash
+# Multiple OAuth tokens — one is randomly selected per session
+CLAUDE_CODE_OAUTH_TOKEN=token1,token2,token3
+
+# Also works with API keys
+ANTHROPIC_API_KEY=sk-key1,sk-key2
+```
+
+**How it works:**
+- When a session is spawned, the runner splits the credential value by commas and randomly selects one
+- Each session gets a single credential, distributing load across subscriptions
+- A log line indicates which credential index was selected (never the credential itself): `[credentials] Selected CLAUDE_CODE_OAUTH_TOKEN credential 2/3`
+- Backward compatible: single values (no commas) work unchanged
 
 ### System Prompt
 
