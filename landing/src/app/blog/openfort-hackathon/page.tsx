@@ -486,8 +486,8 @@ const client = createX402Client({ signer });`}
               <div className="bg-zinc-950 p-8 flex items-center justify-center">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src="/omghost-desplega.svg"
-                  alt="Desplega ghost logo in Pixel Icons style, purchased via x402"
+                  src="/omghost-openfort.svg"
+                  alt="Openfort ghost logo in Pixel Icons style, purchased via x402"
                   className="max-w-full h-auto max-h-80"
                 />
               </div>
