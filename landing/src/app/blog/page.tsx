@@ -14,6 +14,21 @@ export const metadata: Metadata = {
     url: "https://agent-swarm.dev/blog",
     siteName: "Agent Swarm",
     type: "website",
+    images: [
+      {
+        url: "https://agent-swarm.dev/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Agent Swarm — Multi-Agent Orchestration for AI Coding Assistants",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Blog — Agent Swarm",
+    description:
+      "Updates, technical deep dives, and stories from the Agent Swarm team.",
+    images: ["https://agent-swarm.dev/og-image.png"],
   },
 };
 
