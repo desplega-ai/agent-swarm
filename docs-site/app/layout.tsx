@@ -10,6 +10,30 @@ export const metadata: Metadata = {
   },
   description:
     "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants.",
+  metadataBase: new URL("https://docs.agent-swarm.dev"),
+  openGraph: {
+    title: "Agent Swarm Documentation",
+    description:
+      "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants.",
+    url: "https://docs.agent-swarm.dev",
+    siteName: "Agent Swarm Docs",
+    type: "website",
+    images: [
+      {
+        url: "https://agent-swarm.dev/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Agent Swarm",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Agent Swarm Documentation",
+    description:
+      "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants.",
+    images: ["https://agent-swarm.dev/og-image.png"],
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
