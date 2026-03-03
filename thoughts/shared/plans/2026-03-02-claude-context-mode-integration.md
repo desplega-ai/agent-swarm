@@ -4,7 +4,7 @@ author: Reviewer
 repository: desplega-ai/agent-swarm
 topic: "Integration Plan: Add claude-context-mode as Default Context Management"
 tags: [plan, context-window, mcp, plugin, context-mode, optimization]
-status: proposed
+status: implemented
 related_plans: thoughts/shared/plans/2026-02-26-mcp-tool-context-reduction.md
 ---
 
@@ -205,6 +205,17 @@ These hook systems are **complementary, not conflicting**:
 
 **Action item**: Check if `pretooluse.mjs` matches `Agent` tool calls (used by agent-swarm for subagents). If not, may need to add `Agent` to the matcher list or fork the hook.
 
+#### Phase 2 Findings (2026-03-03)
+
+**Confirmed: context-mode does NOT handle the `Agent` tool.** The `hooks.json` only registers matchers for 5 tools: `Bash`, `WebFetch`, `Read`, `Grep`, and `Task`. The `pretooluse.mjs` script has no conditional logic for `Agent`.
+
+**Impact**: Agent-swarm's subagent calls (via the `Agent` tool) will pass through context-mode's hooks unmodified. The subagent routing/prompt injection that context-mode applies to `Task` will NOT apply to `Agent` calls. This means subagents won't automatically receive context-mode instructions via the hook.
+
+**Mitigation**: This is acceptable for now because:
+1. The base prompt enhancement (Phase 3.2) ensures all agents are aware of context-mode tools regardless.
+2. Each agent session loads the context-mode SKILL.md via the plugin system, so subagents spawned within the same session already have context-mode behavioral instructions.
+3. If tighter subagent routing is needed in the future, we can either: (a) submit a PR to claude-context-mode adding `Agent` to the matcher list, or (b) add our own `Agent` matcher in agent-swarm's hooks that mirrors context-mode's routing injection.
+
 ---
 
 ## Phase 3: Behavioral Configuration
@@ -287,15 +298,15 @@ The change is fully reversible since context-mode is an additive plugin with no 
 
 ## Implementation Checklist
 
-- [ ] **Phase 1.1**: Add context-mode marketplace installation to `docker-entrypoint.sh`
-- [ ] **Phase 1.2**: Add `mcp__context-mode__*` to permissions allow list in `Dockerfile.worker`
-- [ ] **Phase 1.2**: Add `context-mode` to `enabledMcpjsonServers` in `Dockerfile.worker`
-- [ ] **Phase 2**: Verify hook coexistence (especially `Agent` vs `Task` tool matching)
-- [ ] **Phase 3.1**: Verify SKILL.md loads correctly via plugin system
-- [ ] **Phase 3.2**: (Optional) Add context-mode mention to base prompt
-- [ ] **Phase 4.1**: Run functional tests for hooks and MCP servers
-- [ ] **Phase 4.2**: Run integration test with research task
-- [ ] **Phase 4.3**: Document rollback procedure
+- [x] **Phase 1.1**: Add context-mode marketplace installation to `docker-entrypoint.sh` *(implemented in commit 73692e6)*
+- [x] **Phase 1.2**: Add `mcp__context-mode__*` to permissions allow list in `Dockerfile.worker` *(implemented in commit 73692e6)*
+- [x] **Phase 1.2**: Add `context-mode` to `enabledMcpjsonServers` in `Dockerfile.worker` *(implemented in commit 73692e6)*
+- [x] **Phase 2**: Verify hook coexistence (especially `Agent` vs `Task` tool matching) — **Confirmed: `Agent` tool NOT matched by context-mode hooks. Acceptable; see findings above.**
+- [x] **Phase 3.1**: Verify SKILL.md loads correctly via plugin system — **Confirmed: marketplace install auto-loads SKILL.md via Claude Code's plugin system.**
+- [x] **Phase 3.2**: Add context-mode awareness note to `src/prompts/base-prompt.ts`
+- [ ] **Phase 4.1**: Run functional tests for hooks and MCP servers *(requires deployed container; manual validation post-deploy)*
+- [ ] **Phase 4.2**: Run integration test with research task *(requires deployed container; manual validation post-deploy)*
+- [x] **Phase 4.3**: Document rollback procedure *(already documented in plan — remove from docker-entrypoint.sh + Dockerfile.worker, rebuild)*
 
 ---
 
