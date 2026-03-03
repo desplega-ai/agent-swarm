@@ -124,6 +124,9 @@ export const AgentTaskSchema = z.object({
   parentTaskId: z.uuid().optional(),
   claudeSessionId: z.string().optional(),
 
+  // Model selection (optional — defaults to "opus" via runner)
+  model: z.enum(["haiku", "sonnet", "opus"]).optional(),
+
   // Schedule linking (optional — set when task was created by a schedule)
   scheduleId: z.uuid().optional(),
 });
@@ -370,6 +373,7 @@ export const ScheduledTaskSchema = z
     consecutiveErrors: z.number().int().min(0).default(0),
     lastErrorAt: z.iso.datetime().optional(),
     lastErrorMessage: z.string().optional(),
+    model: z.enum(["haiku", "sonnet", "opus"]).optional(),
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
   })
