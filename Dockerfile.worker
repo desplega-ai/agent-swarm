@@ -84,9 +84,9 @@ ENV PATH="/home/worker/.local/bin:$PATH"
 RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
     && echo '{"hasCompletedOnboarding":true,"bypassPermissionsModeAccepted":true}' > /home/worker/.claude.json \
     && echo '{ \
-  "permissions": { "allow": ["mcp__agent-swarm__*"] }, \
+  "permissions": { "allow": ["mcp__agent-swarm__*", "mcp__context-mode__*"] }, \
   "enableAllProjectMcpServers": true, \
-  "enabledMcpjsonServers": ["agent-swarm"], \
+  "enabledMcpjsonServers": ["agent-swarm", "context-mode"], \
   "hooks": { \
     "SessionStart": [{"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]}], \
     "UserPromptSubmit": [{"matcher": "*", "hooks": [{"type": "command", "command": "/usr/local/bin/agent-swarm hook"}]}], \
