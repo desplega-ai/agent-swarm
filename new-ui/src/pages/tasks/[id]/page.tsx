@@ -1,6 +1,7 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useTask, useTaskSessionLogs } from "@/api/hooks/use-tasks";
 import { useAgents } from "@/api/hooks/use-agents";
+import { useSessionCosts } from "@/api/hooks/use-costs";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { Badge } from "@/components/ui/badge";
@@ -19,8 +20,13 @@ import {
   ChevronDown,
   ChevronRight,
   GitBranch,
+  DollarSign,
+  Zap,
+  Timer,
+  Hash,
+  Cpu,
 } from "lucide-react";
-import type { AgentLog } from "@/api/types";
+import type { AgentLog, SessionCost } from "@/api/types";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 
@@ -166,12 +172,97 @@ function CollapsibleCard({
   );
 }
 
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes < 60) return `${minutes}m ${remainingSeconds}s`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${hours}h ${remainingMinutes}m`;
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString();
+}
+
+function TaskCostSection({ costs, isLoading }: { costs: SessionCost[] | undefined; isLoading: boolean }) {
+  const stats = useMemo(() => {
+    if (!costs || costs.length === 0) return null;
+    const totalCost = costs.reduce((sum, c) => sum + c.totalCostUsd, 0);
+    const inputTokens = costs.reduce((sum, c) => sum + c.inputTokens, 0);
+    const outputTokens = costs.reduce((sum, c) => sum + c.outputTokens, 0);
+    const cacheReadTokens = costs.reduce((sum, c) => sum + c.cacheReadTokens, 0);
+    const cacheWriteTokens = costs.reduce((sum, c) => sum + c.cacheWriteTokens, 0);
+    const totalDurationMs = costs.reduce((sum, c) => sum + c.durationMs, 0);
+    const totalTurns = costs.reduce((sum, c) => sum + c.numTurns, 0);
+    const models = [...new Set(costs.map((c) => c.model))];
+    return { totalCost, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, totalDurationMs, totalTurns, models, sessions: costs.length };
+  }, [costs]);
+
+  if (isLoading) {
+    return (
+      <>
+        <Separator className="my-2" />
+        <div className="space-y-1.5">
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Session Cost</span>
+          <div className="space-y-2">
+            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-3 w-28" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  if (!stats) return null;
+
+  return (
+    <>
+      <Separator className="my-2" />
+      <div className="space-y-1">
+        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Session Cost</span>
+        <MetaRow icon={DollarSign} label="Cost">
+          <span className="text-xs font-semibold">${stats.totalCost.toFixed(4)}</span>
+        </MetaRow>
+        <MetaRow icon={Zap} label="Tokens">
+          <span className="text-xs font-mono">
+            {formatTokens(stats.inputTokens)} in / {formatTokens(stats.outputTokens)} out
+          </span>
+        </MetaRow>
+        {(stats.cacheReadTokens > 0 || stats.cacheWriteTokens > 0) && (
+          <MetaRow icon={Zap} label="Cache">
+            <span className="text-xs font-mono">
+              {formatTokens(stats.cacheReadTokens)} read / {formatTokens(stats.cacheWriteTokens)} write
+            </span>
+          </MetaRow>
+        )}
+        <MetaRow icon={Timer} label="Duration">
+          <span className="text-xs">{formatDuration(stats.totalDurationMs)}</span>
+        </MetaRow>
+        <MetaRow icon={Hash} label="Turns">
+          <span className="text-xs">{stats.totalTurns.toLocaleString()}{stats.sessions > 1 ? ` (${stats.sessions} sessions)` : ""}</span>
+        </MetaRow>
+        <MetaRow icon={Cpu} label="Model">
+          <span className="text-xs font-mono">{stats.models.join(", ")}</span>
+        </MetaRow>
+      </div>
+    </>
+  );
+}
+
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: task, isLoading } = useTask(id!);
   const { data: sessionLogs } = useTaskSessionLogs(id!);
   const { data: agents } = useAgents();
+  const { data: costs, isLoading: costsLoading } = useSessionCosts({ taskId: id });
   const agentName = useMemo(() => {
     if (!task?.agentId || !agents) return null;
     return agents.find((a) => a.id === task.agentId)?.name ?? null;
@@ -249,6 +340,8 @@ export default function TaskDetailPage() {
           </div>
         </>
       )}
+
+      <TaskCostSection costs={costs} isLoading={costsLoading} />
 
       {hasEvents && (
         <>
