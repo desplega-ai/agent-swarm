@@ -41,6 +41,7 @@ create-schedule(
 | `priority` | Task priority 0-100 (default: 50) |
 | `tags` | Tags applied to created tasks |
 | `taskType` | Type classification for created tasks |
+| `model` | Model for created tasks: `haiku`, `sonnet`, or `opus` (falls back to global config) |
 | `enabled` | Whether the schedule is active (default: true) |
 
 ## Managing Schedules
@@ -92,8 +93,9 @@ The MCP server runs a scheduler that polls for due schedules at a configurable i
 
 When a schedule is due:
 1. A new task is created with the schedule's `taskTemplate`
-2. If `targetAgentId` is set, the task is assigned to that agent
-3. Otherwise, the task goes into the unassigned pool
-4. The schedule's `lastRunAt` is updated
+2. The task is linked back to its schedule via a `scheduleId` field (use the `scheduleId` filter in `get-tasks` to find all tasks from a schedule)
+3. If `targetAgentId` is set, the task is assigned to that agent; otherwise it goes into the unassigned pool
+4. If `model` is set, the task inherits that model setting
+5. The schedule's `lastRunAt` is updated
 
 Only the schedule creator or the lead agent can update or delete schedules.

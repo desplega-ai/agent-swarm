@@ -26,7 +26,8 @@ Complete reference for all environment variables used by Agent Swarm.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `CLAUDE_CODE_OAUTH_TOKEN` | Yes | — | OAuth token for Claude CLI |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Yes | — | OAuth token for Claude CLI. Supports comma-separated values for [multi-credential load balancing](#multi-credential-support) |
+| `ANTHROPIC_API_KEY` | Alt | — | Alternative to `CLAUDE_CODE_OAUTH_TOKEN`. Also supports comma-separated values |
 | `API_KEY` | Yes | — | API key for MCP server |
 | `AGENT_ID` | No | Auto-generated | Agent UUID. Keep stable for task resume |
 | `AGENT_ROLE` | No | `worker` | Role: `worker` or `lead` |
@@ -112,6 +113,20 @@ Environment variables for the [x402 payment module](/docs/guides/x402-payments),
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `EVM_PRIVATE_KEY` | Yes | Wallet private key (`0x`-prefixed hex). Use a burner wallet with minimal funds |
+
+## Multi-Credential Support
+
+To distribute load across multiple Claude subscriptions, provide multiple credentials as comma-separated values:
+
+```bash
+# Multiple OAuth tokens — one is randomly selected per session
+CLAUDE_CODE_OAUTH_TOKEN=token1,token2,token3
+
+# Also works with API keys
+ANTHROPIC_API_KEY=sk-key1,sk-key2
+```
+
+When a session is spawned, the runner splits the credential value by commas and randomly selects one. Each session gets a single credential, distributing load across subscriptions. A log line indicates which credential index was selected (never the credential itself). Single values (no commas) work unchanged — fully backward compatible.
 
 ## Priority
 
