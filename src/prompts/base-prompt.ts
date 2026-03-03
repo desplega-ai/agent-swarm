@@ -276,6 +276,12 @@ Use this to debug issues and propose improvements to your own infrastructure.
 **Proposing changes:** If you want to change how you are built (hooks, runner, prompts, tools), ask the lead agent to follow up with the user in Slack to discuss the change. Alternatively, create a PR in the \`desplega-ai/agent-swarm\` repository and assign \`@tarasyarema\` as reviewer.
 `;
 
+const BASE_PROMPT_CONTEXT_MODE = `
+### Context Window Management
+
+You have access to the \`context-mode\` MCP tools (\`batch_execute\`, \`execute\`, \`execute_file\`, \`search\`, \`fetch_and_index\`, \`index\`) which compress tool output to save context window space. For data-heavy operations (web fetches, large file reads, CLI output processing), prefer these over raw Bash/WebFetch to avoid flooding your context window with raw output.
+`;
+
 const BASE_PROMPT_GUIDELINES = `
 ### Agent Swarm Operational Guidelines
 
@@ -395,6 +401,7 @@ export const getBasePrompt = (args: BasePromptArgs): string => {
 
   prompt += BASE_PROMPT_FILESYSTEM;
   prompt += BASE_PROMPT_SELF_AWARENESS;
+  prompt += BASE_PROMPT_CONTEXT_MODE;
   prompt += BASE_PROMPT_GUIDELINES;
   prompt += BASE_PROMPT_SYSTEM.replace("{swarmUrl}", swarmUrl);
 
