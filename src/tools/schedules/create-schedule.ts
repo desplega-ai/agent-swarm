@@ -59,6 +59,12 @@ export const registerCreateScheduleTool = (server: McpServer) => {
           .default(true)
           .optional()
           .describe("Whether the schedule is enabled (default: true)"),
+        model: z
+          .enum(["haiku", "sonnet", "opus"])
+          .optional()
+          .describe(
+            "Model to use for tasks created by this schedule ('haiku', 'sonnet', or 'opus'). If not set, uses agent/global config or defaults to 'opus'.",
+          ),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
@@ -81,6 +87,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
             nextRunAt: z.string().optional(),
             createdByAgentId: z.string().optional(),
             timezone: z.string(),
+            model: z.string().optional(),
             createdAt: z.string(),
             lastUpdatedAt: z.string(),
           })
@@ -100,6 +107,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         targetAgentId,
         timezone,
         enabled,
+        model,
       },
       requestInfo,
       _meta,
@@ -194,6 +202,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
           enabled,
           nextRunAt,
           createdByAgentId: requestInfo.agentId,
+          model,
         });
 
         const scheduleType = cronExpression || `every ${intervalMs}ms`;

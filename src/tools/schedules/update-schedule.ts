@@ -32,6 +32,11 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         targetAgentId: z.string().uuid().nullable().optional().describe("New target agent ID"),
         timezone: z.string().optional().describe("New timezone"),
         enabled: z.boolean().optional().describe("Enable or disable the schedule"),
+        model: z
+          .enum(["haiku", "sonnet", "opus"])
+          .nullable()
+          .optional()
+          .describe("Model to use for tasks created by this schedule. Set to null to clear."),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
@@ -54,6 +59,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
             nextRunAt: z.string().optional(),
             createdByAgentId: z.string().optional(),
             timezone: z.string(),
+            model: z.string().optional(),
             createdAt: z.string(),
             lastUpdatedAt: z.string(),
           })
@@ -75,6 +81,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         targetAgentId,
         timezone,
         enabled,
+        model,
       },
       requestInfo,
       _meta,
@@ -182,6 +189,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         if (targetAgentId !== undefined) updateData.targetAgentId = targetAgentId;
         if (timezone !== undefined) updateData.timezone = timezone;
         if (enabled !== undefined) updateData.enabled = enabled;
+        if (model !== undefined) updateData.model = model;
 
         // Recalculate nextRunAt if cron/interval/timezone changes or schedule is re-enabled
         const needsNextRunRecalc =
