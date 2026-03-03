@@ -80,47 +80,27 @@ const httpServer = createHttpServer(async (req, res) => {
   const queryParams = parseQueryParams(req.url || "");
   const myAgentId = req.headers["x-agent-id"] as string | undefined;
 
-  // ── Agent registration ──
-  if (await handleAgentRegister(req, res, pathSegments, myAgentId)) return;
+  // ── Route handlers (order matters — first match wins) ──
+  const handlers: (() => Promise<boolean>)[] = [
+    () => handleAgentRegister(req, res, pathSegments, myAgentId),
+    () => handlePoll(req, res, pathSegments, myAgentId),
+    () => handleSessionData(req, res, pathSegments, queryParams, myAgentId),
+    () => handleEcosystem(req, res, myAgentId),
+    () => handleWebhooks(req, res, pathSegments),
+    () => handleAgentsRest(req, res, pathSegments, queryParams, myAgentId),
+    () => handleTasks(req, res, pathSegments, queryParams, myAgentId),
+    () => handleStats(req, res, pathSegments, queryParams),
+    () => handleActiveSessions(req, res, pathSegments, queryParams, myAgentId),
+    () => handleEpics(req, res, pathSegments, queryParams, myAgentId),
+    () => handleConfig(req, res, pathSegments, queryParams),
+    () => handleRepos(req, res, pathSegments, queryParams),
+    () => handleMemory(req, res, pathSegments, myAgentId),
+    () => handleMcp(req, res, transports),
+  ];
 
-  // ── Polling ──
-  if (await handlePoll(req, res, pathSegments, myAgentId)) return;
-
-  // ── Session logs & costs ──
-  if (await handleSessionData(req, res, pathSegments, queryParams, myAgentId)) return;
-
-  // ── Ecosystem ──
-  if (await handleEcosystem(req, res, myAgentId)) return;
-
-  // ── Webhooks (GitHub + AgentMail) ──
-  if (await handleWebhooks(req, res, pathSegments)) return;
-
-  // ── Agents REST API ──
-  if (await handleAgentsRest(req, res, pathSegments, queryParams, myAgentId)) return;
-
-  // ── Tasks ──
-  if (await handleTasks(req, res, pathSegments, queryParams, myAgentId)) return;
-
-  // ── Stats, logs, services ──
-  if (await handleStats(req, res, pathSegments, queryParams)) return;
-
-  // ── Active sessions ──
-  if (await handleActiveSessions(req, res, pathSegments, queryParams, myAgentId)) return;
-
-  // ── Epics & channels ──
-  if (await handleEpics(req, res, pathSegments, queryParams, myAgentId)) return;
-
-  // ── Config ──
-  if (await handleConfig(req, res, pathSegments, queryParams)) return;
-
-  // ── Repos ──
-  if (await handleRepos(req, res, pathSegments, queryParams)) return;
-
-  // ── Memory ──
-  if (await handleMemory(req, res, pathSegments, myAgentId)) return;
-
-  // ── MCP ──
-  if (await handleMcp(req, res, transports)) return;
+  for (const handler of handlers) {
+    if (await handler()) return;
+  }
 
   // ── 404 ──
   res.writeHead(404);
