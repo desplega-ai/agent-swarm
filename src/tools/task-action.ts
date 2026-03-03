@@ -59,6 +59,13 @@ export const registerTaskActionTool = (server: McpServer) => {
         taskId: z.uuid().optional().describe("Task ID (required for claim/release/accept/reject)."),
         // For 'reject' action:
         reason: z.string().optional().describe("Reason for rejection (optional for 'reject')."),
+        // For 'create' action:
+        model: z
+          .enum(["haiku", "sonnet", "opus"])
+          .optional()
+          .describe(
+            "Model to use for the created task ('haiku', 'sonnet', or 'opus'). Only used with 'create' action.",
+          ),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
@@ -68,7 +75,7 @@ export const registerTaskActionTool = (server: McpServer) => {
       }),
     },
     async (input, requestInfo, _meta) => {
-      const { action, task, taskType, tags, priority, dependsOn, taskId, reason } = input;
+      const { action, task, taskType, tags, priority, dependsOn, taskId, reason, model } = input;
 
       if (!requestInfo.agentId) {
         return {
@@ -97,6 +104,7 @@ export const registerTaskActionTool = (server: McpServer) => {
               tags,
               priority,
               dependsOn,
+              model,
             });
             return {
               success: true,

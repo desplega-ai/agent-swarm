@@ -61,6 +61,8 @@ export interface AgentTask {
   failureReason?: string;
   output?: string;
   progress?: string;
+  model?: string;
+  scheduleId?: string;
 }
 
 export interface AgentWithTasks extends Agent {
@@ -301,6 +303,7 @@ export interface ScheduledTask {
   nextRunAt?: string;
   createdByAgentId?: string;
   timezone: string;
+  model?: string;
   createdAt: string;
   lastUpdatedAt: string;
 }

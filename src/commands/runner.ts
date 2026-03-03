@@ -527,6 +527,7 @@ interface RunClaudeIterationOptions {
   sessionId?: string;
   iteration?: number;
   taskId?: string;
+  model?: string;
 }
 
 /** Running task state for parallel execution */
@@ -1079,10 +1080,17 @@ async function runClaudeIteration(
   opts: RunClaudeIterationOptions,
 ): Promise<{ exitCode: number; errorTracker: SessionErrorTracker }> {
   const { role } = opts;
+
+  // Resolve env first so we can use MODEL_OVERRIDE from config
+  const freshEnv = await fetchResolvedEnv(opts.apiUrl || "", opts.apiKey || "", opts.agentId || "");
+
+  // Priority: task.model > config MODEL_OVERRIDE > default "opus"
+  const model = opts.model || freshEnv.MODEL_OVERRIDE || "opus";
+
   const Cmd = [
     "claude",
     "--model",
-    "opus",
+    model,
     "--verbose",
     "--output-format",
     "stream-json",
@@ -1102,12 +1110,12 @@ async function runClaudeIteration(
     Cmd.push("--append-system-prompt", opts.systemPrompt);
   }
 
-  console.log(`\x1b[2m[${role}]\x1b[0m \x1b[36m▸\x1b[0m Starting Claude (PID will follow)`);
+  console.log(
+    `\x1b[2m[${role}]\x1b[0m \x1b[36m▸\x1b[0m Starting Claude (model: ${model}, PID will follow)`,
+  );
 
   const logFileHandle = Bun.file(opts.logFile).writer();
   let stderrOutput = "";
-
-  const freshEnv = await fetchResolvedEnv(opts.apiUrl || "", opts.apiKey || "", opts.agentId || "");
 
   const proc = Bun.spawn(Cmd, {
     env: freshEnv,
@@ -1254,10 +1262,17 @@ async function spawnClaudeProcess(
   isYolo: boolean,
 ): Promise<RunningTask> {
   const { role, taskId } = opts;
+
+  // Resolve env first so we can use MODEL_OVERRIDE from config
+  const freshEnv = await fetchResolvedEnv(opts.apiUrl || "", opts.apiKey || "", opts.agentId || "");
+
+  // Priority: task.model > config MODEL_OVERRIDE > default "opus"
+  const model = opts.model || freshEnv.MODEL_OVERRIDE || "opus";
+
   const Cmd = [
     "claude",
     "--model",
-    "opus",
+    model,
     "--verbose",
     "--output-format",
     "stream-json",
@@ -1280,7 +1295,7 @@ async function spawnClaudeProcess(
   const effectiveTaskId = taskId || crypto.randomUUID();
 
   console.log(
-    `\x1b[2m[${role}]\x1b[0m \x1b[36m▸\x1b[0m Spawning Claude for task ${effectiveTaskId.slice(0, 8)}`,
+    `\x1b[2m[${role}]\x1b[0m \x1b[36m▸\x1b[0m Spawning Claude (model: ${model}) for task ${effectiveTaskId.slice(0, 8)}`,
   );
 
   const logFileHandle = Bun.file(opts.logFile).writer();
@@ -1295,8 +1310,6 @@ async function spawnClaudeProcess(
   });
 
   console.log(`\x1b[2m[${role}]\x1b[0m Task file written: ${taskFilePath}`);
-
-  const freshEnv = await fetchResolvedEnv(opts.apiUrl || "", opts.apiKey || "", opts.agentId || "");
 
   const proc = Bun.spawn(Cmd, {
     env: {
@@ -1378,7 +1391,7 @@ async function spawnClaudeProcess(
                       cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
                       durationMs: json.duration_ms || 0,
                       numTurns: json.num_turns || 1,
-                      model: "opus",
+                      model,
                       isError: json.is_error || false,
                     },
                     opts.apiUrl!,
@@ -1442,7 +1455,7 @@ async function spawnClaudeProcess(
                     cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
                     durationMs: json.duration_ms || 0,
                     numTurns: json.num_turns || 1,
-                    model: "opus",
+                    model,
                     isError: json.is_error || false,
                   },
                   opts.apiUrl!,
@@ -2001,6 +2014,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               sessionId,
               iteration,
               taskId: task.id,
+              model: (task as { model?: string }).model,
             },
             logDir,
             metadataType,
@@ -2126,6 +2140,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             }
           }
 
+          // Extract model from task data for per-task model selection
+          const taskModel = (trigger.task as { model?: string } | undefined)?.model;
+
           // Handle repo context for tasks with githubRepo
           const taskGithubRepo = (trigger.task as { githubRepo?: string } | undefined)?.githubRepo;
           if (taskGithubRepo && apiUrl) {
@@ -2182,6 +2199,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               sessionId,
               iteration,
               taskId: trigger.taskId,
+              model: taskModel,
             },
             logDir,
             metadataType,

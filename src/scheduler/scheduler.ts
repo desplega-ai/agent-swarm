@@ -38,6 +38,9 @@ async function recoverMissedSchedules(): Promise<void> {
           tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, "recovered"],
           priority: schedule.priority,
           agentId: schedule.targetAgentId,
+          model: schedule.model,
+          scheduleId: schedule.id,
+          source: "schedule",
         });
 
         const nextRun = calculateNextRun(schedule, now);
@@ -112,6 +115,9 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
         tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`],
         priority: schedule.priority,
         agentId: schedule.targetAgentId,
+        model: schedule.model,
+        scheduleId: schedule.id,
+        source: "schedule",
       });
 
       const nextRun = calculateNextRun(schedule, new Date());
@@ -248,6 +254,9 @@ export async function runScheduleNow(scheduleId: string): Promise<void> {
       tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, "manual-run"],
       priority: schedule.priority,
       agentId: schedule.targetAgentId,
+      model: schedule.model,
+      scheduleId: schedule.id,
+      source: "schedule",
     });
 
     // Only update lastRunAt, not nextRunAt (to not affect regular schedule)
