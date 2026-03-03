@@ -4,6 +4,7 @@ import {
   createTaskExtended,
   getActiveTaskCount,
   getAllAgents,
+  getDb,
   getIdleWorkersWithCapacity,
   getLeadAgent,
   getStalledInProgressTasks,
@@ -21,7 +22,7 @@ import type { AgentTask } from "../types";
 // ============================================================================
 
 /** Default heartbeat interval: 90 seconds */
-const DEFAULT_INTERVAL_MS = 90_000;
+const DEFAULT_INTERVAL_MS = Number(process.env.HEARTBEAT_INTERVAL_MS) || 90_000;
 
 /** Stall threshold: tasks in_progress with no update for this many minutes */
 const STALL_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALL_THRESHOLD_MIN) || 30;
@@ -168,28 +169,30 @@ function checkWorkerHealth(findings: HeartbeatFindings): void {
  * Uses atomic claimTask() to prevent races.
  */
 function autoAssignPoolTasks(findings: HeartbeatFindings): void {
-  const idleWorkers = getIdleWorkersWithCapacity();
-  if (idleWorkers.length === 0) return;
+  getDb().transaction(() => {
+    const idleWorkers = getIdleWorkersWithCapacity();
+    if (idleWorkers.length === 0) return;
 
-  const poolTasks = getUnassignedPoolTasks(MAX_AUTO_ASSIGN_PER_SWEEP);
-  if (poolTasks.length === 0) return;
+    const poolTasks = getUnassignedPoolTasks(MAX_AUTO_ASSIGN_PER_SWEEP);
+    if (poolTasks.length === 0) return;
 
-  let workerIndex = 0;
-  for (const task of poolTasks) {
-    if (workerIndex >= idleWorkers.length) break;
+    let workerIndex = 0;
+    for (const task of poolTasks) {
+      if (workerIndex >= idleWorkers.length) break;
 
-    const worker = idleWorkers[workerIndex]!;
-    const claimed = claimTask(task.id, worker.id);
+      const worker = idleWorkers[workerIndex]!;
+      const claimed = claimTask(task.id, worker.id);
 
-    if (claimed) {
-      findings.autoAssigned.push({ taskId: task.id, agentId: worker.id });
-      // Check if this worker still has capacity for more
-      const remaining = (worker.maxTasks ?? 1) - getActiveTaskCount(worker.id);
-      if (remaining <= 0) {
-        workerIndex++;
+      if (claimed) {
+        findings.autoAssigned.push({ taskId: task.id, agentId: worker.id });
+        // Check if this worker still has capacity for more
+        const remaining = (worker.maxTasks ?? 1) - getActiveTaskCount(worker.id);
+        if (remaining <= 0) {
+          workerIndex++;
+        }
       }
     }
-  }
+  })();
 }
 
 /**
