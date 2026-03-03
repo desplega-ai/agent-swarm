@@ -232,7 +232,7 @@ if command -v claude >/dev/null 2>&1; then
 
     echo "Installing context-mode plugin..."
     claude plugin marketplace add mksglu/claude-context-mode || echo "context-mode marketplace add failed, continuing..."
-    claude plugin install context-mode@mksglu-claude-context-mode --scope user || echo "context-mode plugin install failed, continuing..."
+    claude plugin install context-mode@claude-context-mode --scope user || echo "context-mode plugin install failed, continuing..."
 
     echo "Marketplace installation completed"
 else
