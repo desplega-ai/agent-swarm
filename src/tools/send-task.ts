@@ -61,6 +61,12 @@ export const registerSendTaskTool = (server: McpServer) => {
           .describe(
             "GitHub repo identifier (e.g., 'desplega-ai/agent-swarm'). Links the task to a registered repo for workspace context.",
           ),
+        model: z
+          .enum(["haiku", "sonnet", "opus"])
+          .optional()
+          .describe(
+            "Model to use for this task ('haiku', 'sonnet', or 'opus'). If not set, uses agent/global config MODEL_OVERRIDE or defaults to 'opus'.",
+          ),
         allowDuplicate: z
           .boolean()
           .default(false)
@@ -87,6 +93,7 @@ export const registerSendTaskTool = (server: McpServer) => {
         epicId,
         parentTaskId,
         githubRepo,
+        model,
         allowDuplicate,
       },
       requestInfo,
@@ -187,6 +194,7 @@ export const registerSendTaskTool = (server: McpServer) => {
             epicId,
             parentTaskId,
             githubRepo: effectiveGithubRepo,
+            model,
           });
 
           return {
@@ -233,6 +241,7 @@ export const registerSendTaskTool = (server: McpServer) => {
             epicId,
             parentTaskId,
             githubRepo: effectiveGithubRepo,
+            model,
           });
 
           return {
@@ -253,6 +262,7 @@ export const registerSendTaskTool = (server: McpServer) => {
           epicId,
           parentTaskId,
           githubRepo: effectiveGithubRepo,
+          model,
         });
 
         return {
