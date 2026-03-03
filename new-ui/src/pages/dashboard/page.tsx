@@ -1,32 +1,32 @@
-import { useMemo } from "react";
-import { Link } from "react-router-dom";
-import { StatsBar } from "@/components/shared/stats-bar";
-import { StatusBadge } from "@/components/shared/status-badge";
-import { useStats, useHealth, useLogs } from "@/api/hooks/use-stats";
-import { useAgents } from "@/api/hooks/use-agents";
-import { useTasks } from "@/api/hooks/use-tasks";
-import { useDashboardCosts } from "@/api/hooks/use-costs";
-import { formatRelativeTime, cn } from "@/lib/utils";
+import type { LucideIcon } from "lucide-react";
 import {
-  Users,
-  ListTodo,
   Activity,
-  Crown,
-  UserPlus,
-  UserMinus,
-  ClipboardPlus,
   ArrowRightLeft,
+  Ban,
   CircleCheck,
   CircleX,
-  Ban,
+  ClipboardPlus,
+  Crown,
+  ListTodo,
+  Loader2,
   MessageSquare,
   Radio,
   Server,
   Timer,
-  Loader2,
+  UserMinus,
+  UserPlus,
+  Users,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
-import type { AgentWithTasks, AgentLog } from "@/api/types";
+import { useMemo } from "react";
+import { Link } from "react-router-dom";
+import { useAgents } from "@/api/hooks/use-agents";
+import { useDashboardCosts } from "@/api/hooks/use-costs";
+import { useHealth, useLogs, useStats } from "@/api/hooks/use-stats";
+import { useTasks } from "@/api/hooks/use-tasks";
+import type { AgentLog, AgentWithTasks } from "@/api/types";
+import { StatsBar } from "@/components/shared/stats-bar";
+import { StatusBadge } from "@/components/shared/status-badge";
+import { cn, formatRelativeTime } from "@/lib/utils";
 
 // --- Agent Tile (Command Center style) ---
 
@@ -69,7 +69,14 @@ function ActiveTaskRow({
   task,
   agentName,
 }: {
-  task: { id: string; task: string; status: string; agentId: string | null; createdAt: string; progress?: string };
+  task: {
+    id: string;
+    task: string;
+    status: string;
+    agentId: string | null;
+    createdAt: string;
+    progress?: string;
+  };
   agentName: string | null;
 }) {
   return (
@@ -90,7 +97,7 @@ function ActiveTaskRow({
       <div className="min-w-0 flex-1">
         <p className="text-sm truncate">{task.task}</p>
         <p className="text-[11px] text-muted-foreground">
-          {agentName ?? (task.agentId ? task.agentId.slice(0, 8) + "..." : "Unassigned")}
+          {agentName ?? (task.agentId ? `${task.agentId.slice(0, 8)}...` : "Unassigned")}
         </p>
       </div>
       <span className="text-[11px] text-muted-foreground shrink-0">
@@ -120,29 +127,31 @@ const eventIcons: Record<string, { icon: LucideIcon; color: string }> = {
 
 function statusColor(status: string | null | undefined): string {
   switch (status) {
-    case "completed": return "text-emerald-400";
-    case "failed": case "cancelled": return "text-red-400";
-    case "in_progress": case "busy": return "text-amber-400";
-    case "idle": return "text-emerald-400";
-    case "offline": return "text-zinc-400";
-    default: return "text-primary";
+    case "completed":
+      return "text-emerald-400";
+    case "failed":
+    case "cancelled":
+      return "text-red-400";
+    case "in_progress":
+    case "busy":
+      return "text-amber-400";
+    case "idle":
+      return "text-emerald-400";
+    case "offline":
+      return "text-zinc-400";
+    default:
+      return "text-primary";
   }
 }
 
-function ActivityItem({
-  log,
-  agentMap,
-}: {
-  log: AgentLog;
-  agentMap: Map<string, string>;
-}) {
+function ActivityItem({ log, agentMap }: { log: AgentLog; agentMap: Map<string, string> }) {
   const config = eventIcons[log.eventType] ?? {
     icon: Activity,
     color: "text-zinc-400 bg-zinc-400/10",
   };
   const Icon = config.icon;
 
-  const agentName = log.agentId ? agentMap.get(log.agentId) ?? log.agentId.slice(0, 8) : null;
+  const agentName = log.agentId ? (agentMap.get(log.agentId) ?? log.agentId.slice(0, 8)) : null;
 
   const agentLink = log.agentId ? (
     <Link to={`/agents/${log.agentId}`} className="font-semibold text-primary hover:underline">
@@ -169,9 +178,7 @@ function ActivityItem({
         return (
           <>
             {agentLink} is now{" "}
-            <span className={cn("font-semibold", statusColor(log.newValue))}>
-              {log.newValue}
-            </span>
+            <span className={cn("font-semibold", statusColor(log.newValue))}>{log.newValue}</span>
           </>
         );
       case "task_created":
@@ -208,26 +215,52 @@ function ActivityItem({
           </>
         );
       case "task_offered":
-        return <>{agentLink} was offered task {taskLink}</>;
+        return (
+          <>
+            {agentLink} was offered task {taskLink}
+          </>
+        );
       case "task_accepted":
-        return <>{agentLink} accepted task {taskLink}</>;
+        return (
+          <>
+            {agentLink} accepted task {taskLink}
+          </>
+        );
       case "task_rejected":
-        return <>{agentLink} rejected task {taskLink}</>;
+        return (
+          <>
+            {agentLink} rejected task {taskLink}
+          </>
+        );
       case "task_claimed":
-        return <>{agentLink} claimed task {taskLink}</>;
+        return (
+          <>
+            {agentLink} claimed task {taskLink}
+          </>
+        );
       case "task_released":
-        return <>{agentLink} released task {taskLink}</>;
+        return (
+          <>
+            {agentLink} released task {taskLink}
+          </>
+        );
       case "channel_message": {
         let channelId: string | undefined;
         if (log.metadata) {
-          try { channelId = JSON.parse(log.metadata).channelId; } catch { /* ignore */ }
+          try {
+            channelId = JSON.parse(log.metadata).channelId;
+          } catch {
+            /* ignore */
+          }
         }
         return (
           <>
-            {agentLink ?? <span className="font-semibold text-muted-foreground">Human</span>}{" "}
-            in{" "}
+            {agentLink ?? <span className="font-semibold text-muted-foreground">Human</span>} in{" "}
             {channelId ? (
-              <Link to={`/chat?channel=${channelId}`} className="font-semibold text-blue-400 hover:underline">
+              <Link
+                to={`/chat?channel=${channelId}`}
+                className="font-semibold text-blue-400 hover:underline"
+              >
                 #chat
               </Link>
             ) : (
@@ -253,9 +286,7 @@ function ActivityItem({
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-sm">{renderContent()}</p>
-        <p className="text-[11px] text-muted-foreground">
-          {formatRelativeTime(log.createdAt)}
-        </p>
+        <p className="text-[11px] text-muted-foreground">{formatRelativeTime(log.createdAt)}</p>
       </div>
     </div>
   );
@@ -278,7 +309,9 @@ export default function DashboardPage() {
 
   const agentMap = useMemo(() => {
     const m = new Map<string, string>();
-    agents?.forEach((a) => m.set(a.id, a.name));
+    agents?.forEach((a) => {
+      m.set(a.id, a.name);
+    });
     return m;
   }, [agents]);
 
@@ -323,18 +356,23 @@ export default function DashboardPage() {
           <div className="flex items-center gap-2">
             <Users className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold">Agents</h2>
-            {agents && (
-              <span className="text-xs text-muted-foreground">{agents.length} total</span>
-            )}
+            {agents && <span className="text-xs text-muted-foreground">{agents.length} total</span>}
           </div>
           <div className="rounded-lg border border-border">
             {sortedAgents.length > 0 ? (
               <div>
                 {sortedAgents.slice(0, 3).map((agent) => (
-                  <AgentRow key={agent.id} agent={agent} currentTaskText={agentTaskMap.get(agent.id)} />
+                  <AgentRow
+                    key={agent.id}
+                    agent={agent}
+                    currentTaskText={agentTaskMap.get(agent.id)}
+                  />
                 ))}
                 {sortedAgents.length > 3 && (
-                  <Link to="/agents" className="block text-center text-xs text-primary hover:underline py-2.5 border-t border-border/30">
+                  <Link
+                    to="/agents"
+                    className="block text-center text-xs text-primary hover:underline py-2.5 border-t border-border/30"
+                  >
                     View all {sortedAgents.length} agents
                   </Link>
                 )}
@@ -365,11 +403,14 @@ export default function DashboardPage() {
                   <ActiveTaskRow
                     key={task.id}
                     task={task}
-                    agentName={task.agentId ? agentMap.get(task.agentId) ?? null : null}
+                    agentName={task.agentId ? (agentMap.get(task.agentId) ?? null) : null}
                   />
                 ))}
                 {tasksData.tasks.length > 3 && (
-                  <Link to="/tasks?status=in_progress" className="block text-center text-xs text-primary hover:underline py-2.5 border-t border-border/30">
+                  <Link
+                    to="/tasks?status=in_progress"
+                    className="block text-center text-xs text-primary hover:underline py-2.5 border-t border-border/30"
+                  >
                     View all {tasksData.tasks.length} active tasks
                   </Link>
                 )}

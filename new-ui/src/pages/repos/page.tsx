@@ -1,20 +1,9 @@
-import { useState, useMemo, useCallback } from "react";
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
-import { useRepos, useCreateRepo, useUpdateRepo, useDeleteRepo } from "@/api/hooks/use-repos";
+import { ExternalLink, FolderGit2, GitBranch, Pencil, Plus, Trash2 } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { useCreateRepo, useDeleteRepo, useRepos, useUpdateRepo } from "@/api/hooks/use-repos";
+import type { SwarmRepo } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,8 +14,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { GitBranch, Plus, Pencil, Trash2, FolderGit2, ExternalLink } from "lucide-react";
-import type { SwarmRepo } from "@/api/types";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 
 interface RepoFormData {
   url: string;
@@ -160,10 +160,10 @@ export default function ReposPage() {
     setDialogOpen(true);
   }
 
-  function handleEdit(repo: SwarmRepo) {
+  const handleEdit = useCallback((repo: SwarmRepo) => {
     setEditingRepo(repo);
     setDialogOpen(true);
-  }
+  }, []);
 
   function handleSubmit(data: RepoFormData) {
     if (editingRepo) {
@@ -286,21 +286,18 @@ export default function ReposPage() {
         },
       },
     ],
-    [],
+    [handleEdit],
   );
 
-  const onRowClicked = useCallback(
-    (event: RowClickedEvent<SwarmRepo>) => {
-      // Skip if click originated from a button (action column)
-      const target = event.event?.target as HTMLElement;
-      if (target?.closest("button")) return;
-      if (event.data) {
-        setEditingRepo(event.data);
-        setDialogOpen(true);
-      }
-    },
-    [],
-  );
+  const onRowClicked = useCallback((event: RowClickedEvent<SwarmRepo>) => {
+    // Skip if click originated from a button (action column)
+    const target = event.event?.target as HTMLElement;
+    if (target?.closest("button")) return;
+    if (event.data) {
+      setEditingRepo(event.data);
+      setDialogOpen(true);
+    }
+  }, []);
 
   if (!isLoading && (!repos || repos.length === 0)) {
     return (
@@ -355,7 +352,8 @@ export default function ReposPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Repository</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete <strong>{deleteTarget?.name}</strong>? This action cannot be undone.
+              Are you sure you want to delete <strong>{deleteTarget?.name}</strong>? This action
+              cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

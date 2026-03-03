@@ -5,6 +5,7 @@ export interface TaskFilters {
   status?: string;
   agentId?: string;
   epicId?: string;
+  scheduleId?: string;
   search?: string;
   includeHeartbeat?: boolean;
   limit?: number;

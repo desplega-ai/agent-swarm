@@ -1,18 +1,18 @@
-import { useCallback, useMemo, useRef } from "react";
-import { AgGridReact } from "ag-grid-react";
 import {
   ClientSideRowModelModule,
-  ModuleRegistry,
-  PaginationModule,
-  TextFilterModule,
-  NumberFilterModule,
-  QuickFilterModule,
+  type ColDef,
   ColumnAutoSizeModule,
   CsvExportModule,
-  ValidationModule,
-  type ColDef,
+  ModuleRegistry,
+  NumberFilterModule,
+  PaginationModule,
+  QuickFilterModule,
   type RowClickedEvent,
+  TextFilterModule,
+  ValidationModule,
 } from "ag-grid-community";
+import { AgGridReact } from "ag-grid-react";
+import { useCallback, useMemo, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 ModuleRegistry.registerModules([
@@ -37,6 +37,7 @@ interface DataGridProps<TData> {
   pagination?: boolean;
   className?: string;
   domLayout?: "normal" | "autoHeight";
+  enableCellTextSelection?: boolean;
 }
 
 export function DataGrid<TData>({
@@ -50,6 +51,7 @@ export function DataGrid<TData>({
   pagination: paginationEnabled = true,
   className,
   domLayout = "normal",
+  enableCellTextSelection = false,
 }: DataGridProps<TData>) {
   const gridRef = useRef<AgGridReact<TData>>(null);
 
@@ -64,7 +66,8 @@ export function DataGrid<TData>({
   );
 
   const overlayNoRowsTemplate = useMemo(
-    () => `<div class="flex items-center justify-center p-8 text-muted-foreground">${emptyMessage}</div>`,
+    () =>
+      `<div class="flex items-center justify-center p-8 text-muted-foreground">${emptyMessage}</div>`,
     [emptyMessage],
   );
 
@@ -105,6 +108,8 @@ export function DataGrid<TData>({
         onGridSizeChanged={onGridSizeChanged}
         animateRows={false}
         suppressCellFocus
+        enableCellTextSelection={enableCellTextSelection}
+        ensureDomOrder={enableCellTextSelection}
       />
     </div>
   );

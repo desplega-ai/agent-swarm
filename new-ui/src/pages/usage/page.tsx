@@ -1,8 +1,7 @@
-import { useState, useMemo } from "react";
-import { useUsageSummary } from "@/api/hooks/use-costs";
+import { useMemo, useState } from "react";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useAgents } from "@/api/hooks/use-agents";
-import { formatCurrency, formatCompactNumber } from "@/lib/utils";
-import { Skeleton } from "@/components/ui/skeleton";
+import { useUsageSummary } from "@/api/hooks/use-costs";
 import { UsageSummary } from "@/components/shared/usage-summary";
 import {
   Select,
@@ -11,15 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
+import { Skeleton } from "@/components/ui/skeleton";
+import { formatCompactNumber, formatCurrency } from "@/lib/utils";
 
 type DateRange = "7d" | "30d" | "90d" | "all";
 
@@ -57,7 +49,9 @@ export default function UsagePage() {
 
   const agentMap = useMemo(() => {
     const m = new Map<string, string>();
-    agents?.forEach((a) => m.set(a.id, a.name));
+    agents?.forEach((a) => {
+      m.set(a.id, a.name);
+    });
     return m;
   }, [agents]);
 
@@ -65,7 +59,7 @@ export default function UsagePage() {
     if (!summary?.byAgent) return [];
     return summary.byAgent.map((a) => ({
       agentId: a.agentId,
-      name: agentMap.get(a.agentId) ?? a.agentId.slice(0, 8) + "...",
+      name: agentMap.get(a.agentId) ?? `${a.agentId.slice(0, 8)}...`,
       cost: Math.round(a.costUsd * 1000) / 1000,
       sessions: a.sessions,
       tokens: a.inputTokens + a.outputTokens,
@@ -132,15 +126,38 @@ export default function UsagePage() {
       {/* Cost by Agent — bar chart + table */}
       {agentData.length > 0 && (
         <div className="rounded-lg border border-border p-4">
-          <p className="text-xs text-muted-foreground uppercase tracking-wider mb-3">Cost by Agent</p>
+          <p className="text-xs text-muted-foreground uppercase tracking-wider mb-3">
+            Cost by Agent
+          </p>
           <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
             <ResponsiveContainer width="100%" height={Math.max(180, agentData.length * 36)}>
               <BarChart data={agentData.slice(0, 10)} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" horizontal={false} />
-                <XAxis type="number" tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }} tickFormatter={(v) => `$${v}`} />
-                <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} width={100} />
-                <Tooltip contentStyle={tooltipStyle} formatter={(value) => [`$${Number(value).toFixed(3)}`, "Cost"]} />
-                <Bar dataKey="cost" fill="var(--color-primary)" radius={[0, 4, 4, 0]} barSize={20} />
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="var(--color-border)"
+                  horizontal={false}
+                />
+                <XAxis
+                  type="number"
+                  tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+                  tickFormatter={(v) => `$${v}`}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="name"
+                  tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
+                  width={100}
+                />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  formatter={(value) => [`$${Number(value).toFixed(3)}`, "Cost"]}
+                />
+                <Bar
+                  dataKey="cost"
+                  fill="var(--color-primary)"
+                  radius={[0, 4, 4, 0]}
+                  barSize={20}
+                />
               </BarChart>
             </ResponsiveContainer>
             <div className="overflow-auto">
@@ -160,7 +177,9 @@ export default function UsagePage() {
                       <td className="py-2 font-medium">{agent.name}</td>
                       <td className="py-2 text-right font-mono">{formatCurrency(agent.cost)}</td>
                       <td className="py-2 text-right font-mono">{agent.sessions}</td>
-                      <td className="py-2 text-right font-mono">{formatCompactNumber(agent.tokens)}</td>
+                      <td className="py-2 text-right font-mono">
+                        {formatCompactNumber(agent.tokens)}
+                      </td>
                       <td className="py-2 text-right font-mono">{formatCurrency(agent.avgCost)}</td>
                     </tr>
                   ))}

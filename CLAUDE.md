@@ -205,6 +205,32 @@ The UI connects to the API via `VITE_API_URL` (defaults to `http://localhost:301
 
 ---
 
+## Pre-PR Checklist
+
+Before pushing a PR, run the checks that CI will enforce. Which checks to run depends on what files you changed:
+
+**Root project (src/, tools/, etc.):**
+```bash
+bun run lint:fix        # Biome lint + format
+bun run tsc:check       # TypeScript type check
+bun test                # Unit tests
+```
+
+**new-ui/ (dashboard):**
+```bash
+cd new-ui
+pnpm lint               # Biome check (lint + format)
+pnpm exec tsc --noEmit  # TypeScript type check
+```
+
+**Both:** Run both sets if your changes span root and new-ui.
+
+**Docker changes (Dockerfile, Dockerfile.worker):** CI does a build test — verify locally with `docker build -f <Dockerfile> .` if unsure.
+
+All of these are enforced by the Merge Gate workflow (`.github/workflows/merge-gate.yml`). The gate job blocks merge if any check fails.
+
+---
+
 ## Bun Rules
 
 Use Bun instead of Node.js, npm, pnpm, or vite.

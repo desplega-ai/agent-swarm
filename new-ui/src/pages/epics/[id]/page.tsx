@@ -1,18 +1,18 @@
-import { useState, useMemo, useCallback } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
+import { ArrowLeft, GitBranch, Search } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { useAgents } from "@/api/hooks/use-agents";
 import { useEpic } from "@/api/hooks/use-epics";
 import { useTasks } from "@/api/hooks/use-tasks";
-import { useAgents } from "@/api/hooks/use-agents";
-import { StatusBadge } from "@/components/shared/status-badge";
-import { JsonViewer } from "@/components/shared/json-viewer";
+import type { AgentTask, AgentTaskStatus } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
-import { Card, CardContent } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { JsonViewer } from "@/components/shared/json-viewer";
+import { StatusBadge } from "@/components/shared/status-badge";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -20,18 +20,52 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { formatSmartTime, formatElapsed } from "@/lib/utils";
-import { cn } from "@/lib/utils";
-import { ArrowLeft, Search, GitBranch } from "lucide-react";
-import type { AgentTask, AgentTaskStatus } from "@/api/types";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
 // --- Kanban column ---
 
-const KANBAN_COLUMNS: { key: string; title: string; dotColor: string; bgColor: string; borderColor: string; statuses: AgentTaskStatus[] }[] = [
-  { key: "pending", title: "PENDING", dotColor: "bg-yellow-500", bgColor: "bg-yellow-500/5", borderColor: "border-yellow-500/20", statuses: ["backlog", "unassigned", "offered", "reviewing", "pending"] },
-  { key: "inProgress", title: "IN PROGRESS", dotColor: "bg-blue-500", bgColor: "bg-blue-500/5", borderColor: "border-blue-500/20", statuses: ["in_progress", "paused"] },
-  { key: "completed", title: "COMPLETED", dotColor: "bg-emerald-500", bgColor: "bg-emerald-500/5", borderColor: "border-emerald-500/20", statuses: ["completed"] },
-  { key: "failed", title: "FAILED", dotColor: "bg-red-500", bgColor: "bg-red-500/5", borderColor: "border-red-500/20", statuses: ["failed", "cancelled"] },
+const KANBAN_COLUMNS: {
+  key: string;
+  title: string;
+  dotColor: string;
+  bgColor: string;
+  borderColor: string;
+  statuses: AgentTaskStatus[];
+}[] = [
+  {
+    key: "pending",
+    title: "PENDING",
+    dotColor: "bg-yellow-500",
+    bgColor: "bg-yellow-500/5",
+    borderColor: "border-yellow-500/20",
+    statuses: ["backlog", "unassigned", "offered", "reviewing", "pending"],
+  },
+  {
+    key: "inProgress",
+    title: "IN PROGRESS",
+    dotColor: "bg-blue-500",
+    bgColor: "bg-blue-500/5",
+    borderColor: "border-blue-500/20",
+    statuses: ["in_progress", "paused"],
+  },
+  {
+    key: "completed",
+    title: "COMPLETED",
+    dotColor: "bg-emerald-500",
+    bgColor: "bg-emerald-500/5",
+    borderColor: "border-emerald-500/20",
+    statuses: ["completed"],
+  },
+  {
+    key: "failed",
+    title: "FAILED",
+    dotColor: "bg-red-500",
+    bgColor: "bg-red-500/5",
+    borderColor: "border-red-500/20",
+    statuses: ["failed", "cancelled"],
+  },
 ];
 
 function KanbanColumn({
@@ -53,12 +87,23 @@ function KanbanColumn({
     <div className="flex flex-col flex-1 min-w-[180px] max-w-[300px] min-h-0">
       <div className="flex items-center gap-2 px-1 mb-2 shrink-0">
         <div className={cn("h-2 w-2 rounded-full", dotColor)} />
-        <span className="text-[10px] font-semibold text-muted-foreground tracking-wider">{title}</span>
-        <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center">
+        <span className="text-[10px] font-semibold text-muted-foreground tracking-wider">
+          {title}
+        </span>
+        <Badge
+          variant="outline"
+          className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center"
+        >
           {tasks.length}
         </Badge>
       </div>
-      <div className={cn("flex-1 rounded-lg border p-2 space-y-2 min-h-0 overflow-y-auto", bgColor, borderColor)}>
+      <div
+        className={cn(
+          "flex-1 rounded-lg border p-2 space-y-2 min-h-0 overflow-y-auto",
+          bgColor,
+          borderColor,
+        )}
+      >
         {tasks.length === 0 ? (
           <p className="text-[11px] text-muted-foreground/60 text-center py-4">No tasks</p>
         ) : (
@@ -72,12 +117,18 @@ function KanbanColumn({
               <p className="text-xs line-clamp-2 text-foreground">{task.task}</p>
               <div className="flex items-center gap-1.5 mt-1.5">
                 {task.taskType && (
-                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-4 font-medium leading-none items-center uppercase">
+                  <Badge
+                    variant="outline"
+                    className="text-[8px] px-1 py-0 h-4 font-medium leading-none items-center uppercase"
+                  >
                     {task.taskType}
                   </Badge>
                 )}
                 {task.priority !== undefined && (
-                  <Badge variant="outline" className="text-[8px] px-1 py-0 h-4 font-mono leading-none items-center">
+                  <Badge
+                    variant="outline"
+                    className="text-[8px] px-1 py-0 h-4 font-mono leading-none items-center"
+                  >
                     P{task.priority}
                   </Badge>
                 )}
@@ -90,7 +141,13 @@ function KanbanColumn({
   );
 }
 
-function KanbanBoard({ tasks, onTaskClick }: { tasks: AgentTask[]; onTaskClick: (id: string) => void }) {
+function KanbanBoard({
+  tasks,
+  onTaskClick,
+}: {
+  tasks: AgentTask[];
+  onTaskClick: (id: string) => void;
+}) {
   const grouped = useMemo(() => {
     const result: Record<string, AgentTask[]> = {};
     for (const col of KANBAN_COLUMNS) {
@@ -133,11 +190,12 @@ export default function EpicDetailPage() {
   const [taskPage, setTaskPage] = useState(0);
 
   const taskFilters = useMemo(() => {
-    const f: { epicId?: string; status?: string; search?: string; limit: number; offset: number } = {
-      epicId: id,
-      limit: PAGE_SIZE,
-      offset: taskPage * PAGE_SIZE,
-    };
+    const f: { epicId?: string; status?: string; search?: string; limit: number; offset: number } =
+      {
+        epicId: id,
+        limit: PAGE_SIZE,
+        offset: taskPage * PAGE_SIZE,
+      };
     if (taskStatus !== "all") f.status = taskStatus;
     if (taskSearch) f.search = taskSearch;
     return f;
@@ -148,7 +206,9 @@ export default function EpicDetailPage() {
 
   const agentMap = useMemo(() => {
     const m = new Map<string, string>();
-    agents?.forEach((a) => m.set(a.id, a.name));
+    agents?.forEach((a) => {
+      m.set(a.id, a.name);
+    });
     return m;
   }, [agents]);
 
@@ -170,9 +230,7 @@ export default function EpicDetailPage() {
         field: "status",
         headerName: "Status",
         width: 130,
-        cellRenderer: (params: { value: AgentTaskStatus }) => (
-          <StatusBadge status={params.value} />
-        ),
+        cellRenderer: (params: { value: AgentTaskStatus }) => <StatusBadge status={params.value} />,
       },
       {
         field: "taskType",
@@ -180,7 +238,10 @@ export default function EpicDetailPage() {
         width: 110,
         cellRenderer: (params: { value: string | undefined }) =>
           params.value ? (
-            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+            >
               {params.value}
             </Badge>
           ) : null,
@@ -190,7 +251,9 @@ export default function EpicDetailPage() {
         headerName: "Agent",
         width: 150,
         valueFormatter: (params) =>
-          params.value ? (agentMap.get(params.value) ?? params.value.slice(0, 8) + "...") : "Unassigned",
+          params.value
+            ? (agentMap.get(params.value) ?? `${params.value.slice(0, 8)}...`)
+            : "Unassigned",
       },
       {
         headerName: "Elapsed",
@@ -200,7 +263,11 @@ export default function EpicDetailPage() {
           if (!task) return "";
           const start = task.acceptedAt ?? task.createdAt;
           const end = task.finishedAt;
-          const isActive = !end && (task.status === "in_progress" || task.status === "pending" || task.status === "offered");
+          const isActive =
+            !end &&
+            (task.status === "in_progress" ||
+              task.status === "pending" ||
+              task.status === "offered");
           return isActive ? formatElapsed(start) : end ? formatElapsed(start, end) : "—";
         },
       },
@@ -269,7 +336,11 @@ export default function EpicDetailPage() {
         <h1 className="text-xl font-semibold">{epic.name}</h1>
         <StatusBadge status={epic.status} size="md" />
         {epic.tags?.map((tag) => (
-          <Badge key={tag} variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
+          <Badge
+            key={tag}
+            variant="outline"
+            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+          >
             {tag}
           </Badge>
         ))}
@@ -313,13 +384,17 @@ export default function EpicDetailPage() {
               </div>
               {epic.description && (
                 <div>
-                  <span className="text-xs text-muted-foreground uppercase tracking-wide">Description</span>
+                  <span className="text-xs text-muted-foreground uppercase tracking-wide">
+                    Description
+                  </span>
                   <pre className="text-sm whitespace-pre-wrap font-sans">{epic.description}</pre>
                 </div>
               )}
               {epic.leadAgentId && (
                 <div>
-                  <span className="text-xs text-muted-foreground uppercase tracking-wide">Lead Agent</span>
+                  <span className="text-xs text-muted-foreground uppercase tracking-wide">
+                    Lead Agent
+                  </span>
                   <p className="text-sm">
                     <Link
                       to={`/agents/${epic.leadAgentId}`}
@@ -349,11 +424,20 @@ export default function EpicDetailPage() {
               <Input
                 placeholder="Search tasks..."
                 value={taskSearch}
-                onChange={(e) => { setTaskSearch(e.target.value); setTaskPage(0); }}
+                onChange={(e) => {
+                  setTaskSearch(e.target.value);
+                  setTaskPage(0);
+                }}
                 className="pl-9"
               />
             </div>
-            <Select value={taskStatus} onValueChange={(v) => { setTaskStatus(v); setTaskPage(0); }}>
+            <Select
+              value={taskStatus}
+              onValueChange={(v) => {
+                setTaskStatus(v);
+                setTaskPage(0);
+              }}
+            >
               <SelectTrigger className="w-[160px]">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>

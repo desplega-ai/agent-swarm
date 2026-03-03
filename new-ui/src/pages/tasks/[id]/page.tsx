@@ -1,54 +1,69 @@
-import { useParams, useNavigate, Link } from "react-router-dom";
-import { useTask, useTaskSessionLogs } from "@/api/hooks/use-tasks";
-import { useAgents } from "@/api/hooks/use-agents";
-import { useSessionCosts } from "@/api/hooks/use-costs";
-import { StatusBadge } from "@/components/shared/status-badge";
-import { SessionLogViewer } from "@/components/shared/session-log-viewer";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatSmartTime, formatRelativeTime } from "@/lib/utils";
 import {
-  ArrowLeft,
-  User,
-  Calendar,
-  Clock,
   AlertTriangle,
+  ArrowLeft,
+  Calendar,
   CheckCircle2,
-  Terminal,
   ChevronDown,
   ChevronRight,
-  GitBranch,
-  DollarSign,
-  Zap,
-  Timer,
-  Hash,
+  Clock,
   Cpu,
+  DollarSign,
+  GitBranch,
+  Hash,
+  Terminal,
+  Timer,
+  User,
+  Zap,
 } from "lucide-react";
-import type { AgentLog, SessionCost } from "@/api/types";
 import { useMemo, useState } from "react";
-import { cn } from "@/lib/utils";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { useAgents } from "@/api/hooks/use-agents";
+import { useSessionCosts } from "@/api/hooks/use-costs";
+import { useTask, useTaskSessionLogs } from "@/api/hooks/use-tasks";
+import type { AgentLog, SessionCost } from "@/api/types";
+import { SessionLogViewer } from "@/components/shared/session-log-viewer";
+import { StatusBadge } from "@/components/shared/status-badge";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn, formatRelativeTime, formatSmartTime } from "@/lib/utils";
 
 function logStatusColor(status: string | null | undefined): string {
   switch (status) {
-    case "completed": return "text-emerald-400";
-    case "failed": case "cancelled": return "text-red-400";
-    case "in_progress": case "busy": return "text-amber-400";
-    case "idle": return "text-emerald-400";
-    case "offline": return "text-zinc-400";
-    case "pending": case "offered": case "unassigned": return "text-yellow-400";
-    default: return "text-primary";
+    case "completed":
+      return "text-emerald-400";
+    case "failed":
+    case "cancelled":
+      return "text-red-400";
+    case "in_progress":
+    case "busy":
+      return "text-amber-400";
+    case "idle":
+      return "text-emerald-400";
+    case "offline":
+      return "text-zinc-400";
+    case "pending":
+    case "offered":
+    case "unassigned":
+      return "text-yellow-400";
+    default:
+      return "text-primary";
   }
 }
 
 function logDotColor(eventType: string, newValue?: string): string {
   if (eventType === "task_status_change") {
     switch (newValue) {
-      case "completed": return "bg-emerald-500";
-      case "failed": case "cancelled": return "bg-red-500";
-      case "in_progress": return "bg-amber-500";
-      default: return "bg-primary/60";
+      case "completed":
+        return "bg-emerald-500";
+      case "failed":
+      case "cancelled":
+        return "bg-red-500";
+      case "in_progress":
+        return "bg-amber-500";
+      default:
+        return "bg-primary/60";
     }
   }
   if (eventType === "task_created") return "bg-blue-400";
@@ -90,9 +105,7 @@ function renderLogContent(log: AgentLog): React.ReactNode {
       return (
         <>
           <span className="text-xs font-medium">{log.eventType.replace(/_/g, " ")}</span>
-          {log.newValue && (
-            <p className="text-xs text-muted-foreground truncate">{log.newValue}</p>
-          )}
+          {log.newValue && <p className="text-xs text-muted-foreground truncate">{log.newValue}</p>}
         </>
       );
   }
@@ -104,12 +117,19 @@ function LogTimeline({ logs }: { logs: AgentLog[] }) {
       {logs.map((log, i) => (
         <div key={log.id} className="flex gap-3 text-sm">
           <div className="flex flex-col items-center">
-            <div className={cn("h-2 w-2 rounded-full mt-1.5 shrink-0", logDotColor(log.eventType, log.newValue ?? undefined))} />
+            <div
+              className={cn(
+                "h-2 w-2 rounded-full mt-1.5 shrink-0",
+                logDotColor(log.eventType, log.newValue ?? undefined),
+              )}
+            />
             {i < logs.length - 1 && <div className="flex-1 w-px bg-border/40" />}
           </div>
           <div className="pb-3 min-w-0">
             {renderLogContent(log)}
-            <p className="text-[10px] text-muted-foreground/60 mt-0.5">{formatRelativeTime(log.createdAt)}</p>
+            <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+              {formatRelativeTime(log.createdAt)}
+            </p>
           </div>
         </div>
       ))}
@@ -117,7 +137,15 @@ function LogTimeline({ logs }: { logs: AgentLog[] }) {
   );
 }
 
-function MetaRow({ icon: Icon, label, children }: { icon: React.ElementType; label: string; children: React.ReactNode }) {
+function MetaRow({
+  icon: Icon,
+  label,
+  children,
+}: {
+  icon: React.ElementType;
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex items-start gap-3 py-1.5">
       <div className="flex items-center gap-2 w-24 shrink-0">
@@ -163,11 +191,7 @@ function CollapsibleCard({
         <Icon className={cn("h-3.5 w-3.5 shrink-0", iconColor)} />
         <span className={cn("text-xs font-semibold", iconColor)}>{title}</span>
       </button>
-      {open && (
-        <div className="px-3 pb-2.5">
-          {children}
-        </div>
-      )}
+      {open && <div className="px-3 pb-2.5">{children}</div>}
     </div>
   );
 }
@@ -190,7 +214,13 @@ function formatTokens(n: number): string {
   return n.toLocaleString();
 }
 
-function TaskCostSection({ costs, isLoading }: { costs: SessionCost[] | undefined; isLoading: boolean }) {
+function TaskCostSection({
+  costs,
+  isLoading,
+}: {
+  costs: SessionCost[] | undefined;
+  isLoading: boolean;
+}) {
   const stats = useMemo(() => {
     if (!costs || costs.length === 0) return null;
     const totalCost = costs.reduce((sum, c) => sum + c.totalCostUsd, 0);
@@ -201,7 +231,17 @@ function TaskCostSection({ costs, isLoading }: { costs: SessionCost[] | undefine
     const totalDurationMs = costs.reduce((sum, c) => sum + c.durationMs, 0);
     const totalTurns = costs.reduce((sum, c) => sum + c.numTurns, 0);
     const models = [...new Set(costs.map((c) => c.model))];
-    return { totalCost, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, totalDurationMs, totalTurns, models, sessions: costs.length };
+    return {
+      totalCost,
+      inputTokens,
+      outputTokens,
+      cacheReadTokens,
+      cacheWriteTokens,
+      totalDurationMs,
+      totalTurns,
+      models,
+      sessions: costs.length,
+    };
   }, [costs]);
 
   if (isLoading) {
@@ -209,7 +249,9 @@ function TaskCostSection({ costs, isLoading }: { costs: SessionCost[] | undefine
       <>
         <Separator className="my-2" />
         <div className="space-y-1.5">
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Session Cost</span>
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+            Session Cost
+          </span>
           <div className="space-y-2">
             <Skeleton className="h-3 w-20" />
             <Skeleton className="h-3 w-28" />
@@ -226,7 +268,9 @@ function TaskCostSection({ costs, isLoading }: { costs: SessionCost[] | undefine
     <>
       <Separator className="my-2" />
       <div className="space-y-1">
-        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Session Cost</span>
+        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+          Session Cost
+        </span>
         <MetaRow icon={DollarSign} label="Cost">
           <span className="text-xs font-semibold">${stats.totalCost.toFixed(4)}</span>
         </MetaRow>
@@ -238,7 +282,8 @@ function TaskCostSection({ costs, isLoading }: { costs: SessionCost[] | undefine
         {(stats.cacheReadTokens > 0 || stats.cacheWriteTokens > 0) && (
           <MetaRow icon={Zap} label="Cache">
             <span className="text-xs font-mono">
-              {formatTokens(stats.cacheReadTokens)} read / {formatTokens(stats.cacheWriteTokens)} write
+              {formatTokens(stats.cacheReadTokens)} read / {formatTokens(stats.cacheWriteTokens)}{" "}
+              write
             </span>
           </MetaRow>
         )}
@@ -246,7 +291,10 @@ function TaskCostSection({ costs, isLoading }: { costs: SessionCost[] | undefine
           <span className="text-xs">{formatDuration(stats.totalDurationMs)}</span>
         </MetaRow>
         <MetaRow icon={Hash} label="Turns">
-          <span className="text-xs">{stats.totalTurns.toLocaleString()}{stats.sessions > 1 ? ` (${stats.sessions} sessions)` : ""}</span>
+          <span className="text-xs">
+            {stats.totalTurns.toLocaleString()}
+            {stats.sessions > 1 ? ` (${stats.sessions} sessions)` : ""}
+          </span>
         </MetaRow>
         <MetaRow icon={Cpu} label="Model">
           <span className="text-xs font-mono">{stats.models.join(", ")}</span>
@@ -293,7 +341,7 @@ export default function TaskDetailPage() {
       {task.agentId && (
         <MetaRow icon={User} label="Agent">
           <Link to={`/agents/${task.agentId}`} className="text-primary hover:underline text-xs">
-            {agentName ?? task.agentId.slice(0, 8) + "..."}
+            {agentName ?? `${task.agentId.slice(0, 8)}...`}
           </Link>
         </MetaRow>
       )}
@@ -333,7 +381,9 @@ export default function TaskDetailPage() {
         <>
           <Separator className="my-2" />
           <div className="space-y-1">
-            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Progress</span>
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+              Progress
+            </span>
             <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed max-h-32 overflow-auto">
               {task.progress}
             </p>
@@ -347,7 +397,9 @@ export default function TaskDetailPage() {
         <>
           <Separator className="my-2" />
           <div className="space-y-2">
-            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Activity</span>
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+              Activity
+            </span>
             <LogTimeline logs={task.logs!} />
           </div>
         </>
@@ -424,17 +476,27 @@ export default function TaskDetailPage() {
         <div className="flex items-center gap-2 flex-wrap">
           <StatusBadge status={task.status} size="md" />
           {task.taskType && (
-            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+            >
               {task.taskType}
             </Badge>
           )}
           {task.priority !== undefined && (
-            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center">
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center"
+            >
               P{task.priority}
             </Badge>
           )}
           {task.tags?.map((tag) => (
-            <Badge key={tag} variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
+            <Badge
+              key={tag}
+              variant="outline"
+              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+            >
               {tag}
             </Badge>
           ))}

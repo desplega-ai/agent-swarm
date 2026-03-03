@@ -1,11 +1,11 @@
 import { Moon, Sun } from "lucide-react";
 import { useHealth } from "@/api/hooks/use-stats";
-import { useTheme } from "@/hooks/use-theme";
 import { Button } from "@/components/ui/button";
-import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
-import { Breadcrumbs } from "./breadcrumbs";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { useTheme } from "@/hooks/use-theme";
 import { cn } from "@/lib/utils";
+import { Breadcrumbs } from "./breadcrumbs";
 
 export function AppHeader() {
   const { theme, toggleTheme } = useTheme();
@@ -25,31 +25,13 @@ export function AppHeader() {
       <div className="flex items-center gap-3">
         {/* Health indicator */}
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <div
-            className={cn(
-              "size-2 rounded-full",
-              isHealthy
-                ? "bg-emerald-500"
-                : "bg-red-500",
-            )}
-          />
-          <span className="hidden sm:inline">
-            {isHealthy ? "Connected" : "Disconnected"}
-          </span>
+          <div className={cn("size-2 rounded-full", isHealthy ? "bg-emerald-500" : "bg-red-500")} />
+          <span className="hidden sm:inline">{isHealthy ? "Connected" : "Disconnected"}</span>
         </div>
 
         {/* Theme toggle */}
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={toggleTheme}
-          className="size-8"
-        >
-          {theme === "dark" ? (
-            <Sun className="size-4" />
-          ) : (
-            <Moon className="size-4" />
-          )}
+        <Button variant="ghost" size="icon" onClick={toggleTheme} className="size-8">
+          {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
           <span className="sr-only">Toggle theme</span>
         </Button>
       </div>

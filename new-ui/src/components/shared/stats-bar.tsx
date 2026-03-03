@@ -1,15 +1,6 @@
-import { Link } from "react-router-dom";
-import {
-  Bot,
-  CheckCircle2,
-  Clock,
-  DollarSign,
-  Heart,
-  Loader2,
-  XCircle,
-  Zap,
-} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { Bot, CheckCircle2, Clock, DollarSign, Heart, Loader2, XCircle, Zap } from "lucide-react";
+import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 interface StatItemProps {
@@ -32,7 +23,12 @@ function StatItem({ icon: Icon, label, value, variant = "default", to }: StatIte
     <>
       <Icon className={cn("h-3.5 w-3.5 shrink-0", variantStyles[variant])} />
       <span className="hidden sm:inline text-xs text-muted-foreground">{label}</span>
-      <span className={cn("text-xs sm:text-sm font-bold font-mono tabular-nums shrink-0", variantStyles[variant])}>
+      <span
+        className={cn(
+          "text-xs sm:text-sm font-bold font-mono tabular-nums shrink-0",
+          variantStyles[variant],
+        )}
+      >
         {value}
       </span>
     </>
@@ -51,7 +47,10 @@ function StatItem({ icon: Icon, label, value, variant = "default", to }: StatIte
   }
 
   return (
-    <div className="flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5" title={label}>
+    <div
+      className="flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5"
+      title={label}
+    >
       {content}
     </div>
   );
@@ -59,7 +58,13 @@ function StatItem({ icon: Icon, label, value, variant = "default", to }: StatIte
 
 interface StatsBarProps {
   agents?: { total: number; idle: number; busy: number; offline: number };
-  tasks?: { total: number; pending: number; in_progress: number; completed: number; failed: number };
+  tasks?: {
+    total: number;
+    pending: number;
+    in_progress: number;
+    completed: number;
+    failed: number;
+  };
   epics?: { active: number };
   healthy?: boolean;
   costToday?: number;
@@ -82,7 +87,12 @@ export function StatsBar({ agents, tasks, healthy, costToday, costMtd }: StatsBa
         variant={(agents?.busy ?? 0) > 0 ? "warning" : "default"}
         to="/agents?status=busy"
       />
-      <StatItem icon={Clock} label="Pending" value={tasks?.pending ?? 0} to="/tasks?status=pending" />
+      <StatItem
+        icon={Clock}
+        label="Pending"
+        value={tasks?.pending ?? 0}
+        to="/tasks?status=pending"
+      />
       <StatItem
         icon={Loader2}
         label="Running"
@@ -110,12 +120,7 @@ export function StatsBar({ agents, tasks, healthy, costToday, costMtd }: StatsBa
         value={formatCostCompact(costToday ?? 0)}
         to="/usage"
       />
-      <StatItem
-        icon={DollarSign}
-        label="MTD"
-        value={formatCostCompact(costMtd ?? 0)}
-        to="/usage"
-      />
+      <StatItem icon={DollarSign} label="MTD" value={formatCostCompact(costMtd ?? 0)} to="/usage" />
       <StatItem
         icon={Heart}
         label="Health"

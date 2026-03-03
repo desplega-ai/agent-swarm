@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.check.outputs.code }}
+      new-ui: ${{ steps.check.outputs.new-ui }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -32,6 +33,14 @@ jobs:
           else
             echo "code=false" >> $GITHUB_OUTPUT
             echo "No code files changed (only docs-site/ or landing/)"
+          fi
+          UI_CHANGED=$(echo "$CHANGED" | grep '^new-ui/' || true)
+          if [ -n "$UI_CHANGED" ]; then
+            echo "new-ui=true" >> $GITHUB_OUTPUT
+            echo "new-ui files changed:"
+            echo "$UI_CHANGED"
+          else
+            echo "new-ui=false" >> $GITHUB_OUTPUT
           fi
 
   lint-and-typecheck:
@@ -104,9 +113,39 @@ jobs:
           push: false
           tags: test-image:latest
 
+  new-ui-lint:
+    name: New UI Lint and Type Check
+    needs: detect-changes
+    if: needs.detect-changes.outputs.new-ui == 'true'
+    runs-on: depot-ubuntu-latest
+    defaults:
+      run:
+        working-directory: new-ui
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Biome linter
+        run: pnpm lint
+
+      - name: Run TypeScript type check
+        run: pnpm exec tsc --noEmit
+
   gate:
     name: Merge Gate
-    needs: [detect-changes, lint-and-typecheck, test, docker-build]
+    needs: [detect-changes, lint-and-typecheck, test, docker-build, new-ui-lint]
     if: always()
     runs-on: ubuntu-latest
 

@@ -1,3 +1,4 @@
+import { getConfig } from "@/lib/config";
 import type {
   AgentsResponse,
   AgentWithTasks,
@@ -22,7 +23,6 @@ import type {
   TaskWithLogs,
   UsageSummaryResponse,
 } from "./types";
-import { getConfig } from "@/lib/config";
 
 class ApiClient {
   private getHeaders(): HeadersInit {
@@ -31,7 +31,7 @@ class ApiClient {
       "Content-Type": "application/json",
     };
     if (config.apiKey) {
-      headers["Authorization"] = `Bearer ${config.apiKey}`;
+      headers.Authorization = `Bearer ${config.apiKey}`;
     }
     return headers;
   }
@@ -102,6 +102,7 @@ class ApiClient {
     status?: string;
     agentId?: string;
     epicId?: string;
+    scheduleId?: string;
     search?: string;
     includeHeartbeat?: boolean;
     limit?: number;
@@ -111,6 +112,7 @@ class ApiClient {
     if (filters?.status) params.set("status", filters.status);
     if (filters?.agentId) params.set("agentId", filters.agentId);
     if (filters?.epicId) params.set("epicId", filters.epicId);
+    if (filters?.scheduleId) params.set("scheduleId", filters.scheduleId);
     if (filters?.search) params.set("search", filters.search);
     if (filters?.includeHeartbeat) params.set("includeHeartbeat", "true");
     if (filters?.limit != null) params.set("limit", String(filters.limit));

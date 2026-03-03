@@ -1,14 +1,16 @@
-import { useMemo, useCallback } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
+import { ChevronLeft, ChevronRight, Clock, GitBranch, Search, X } from "lucide-react";
+import { useCallback, useMemo } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useAgents } from "@/api/hooks/use-agents";
+import { useScheduledTasks } from "@/api/hooks/use-schedules";
+import { useTasks } from "@/api/hooks/use-tasks";
+import type { AgentTask, AgentTaskStatus } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { useTasks } from "@/api/hooks/use-tasks";
-import { useAgents } from "@/api/hooks/use-agents";
-import { formatSmartTime, formatElapsed } from "@/lib/utils";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -17,8 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Search, ChevronLeft, ChevronRight, GitBranch, X } from "lucide-react";
-import type { AgentTask, AgentTaskStatus } from "@/api/types";
+import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
 const PAGE_SIZE = 100;
 
@@ -29,6 +30,7 @@ export default function TasksPage() {
   // Read all filter state from URL params
   const statusFilter = searchParams.get("status") ?? "all";
   const agentFilter = searchParams.get("agent") ?? "all";
+  const scheduleFilter = searchParams.get("schedule") ?? "all";
   const searchParam = searchParams.get("search") ?? "";
   const includeHeartbeat = searchParams.get("heartbeat") === "true";
   const page = searchParams.has("page") ? Number(searchParams.get("page")) : 0;
@@ -39,7 +41,13 @@ export default function TasksPage() {
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
         // Set or delete the key
-        const defaultValues: Record<string, string> = { status: "all", agent: "all", search: "", page: "0" };
+        const defaultValues: Record<string, string> = {
+          status: "all",
+          agent: "all",
+          schedule: "all",
+          search: "",
+          page: "0",
+        };
         if (value === (defaultValues[key] ?? "")) {
           next.delete(key);
         } else {
@@ -54,29 +62,47 @@ export default function TasksPage() {
   );
 
   const { data: agents } = useAgents();
+  const { data: schedules } = useScheduledTasks();
   const agentMap = useMemo(() => {
     const m = new Map<string, string>();
-    agents?.forEach((a) => m.set(a.id, a.name));
+    agents?.forEach((a) => {
+      m.set(a.id, a.name);
+    });
     return m;
   }, [agents]);
 
   const filters = useMemo(() => {
-    const f: { status?: string; agentId?: string; search?: string; includeHeartbeat?: boolean; limit: number; offset: number } = {
+    const f: {
+      status?: string;
+      agentId?: string;
+      scheduleId?: string;
+      search?: string;
+      includeHeartbeat?: boolean;
+      limit: number;
+      offset: number;
+    } = {
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     };
     if (statusFilter !== "all") f.status = statusFilter;
     if (agentFilter !== "all") f.agentId = agentFilter;
+    if (scheduleFilter !== "all") f.scheduleId = scheduleFilter;
     if (searchParam) f.search = searchParam;
     if (includeHeartbeat) f.includeHeartbeat = true;
     return f;
-  }, [statusFilter, agentFilter, searchParam, includeHeartbeat, page]);
+  }, [statusFilter, agentFilter, scheduleFilter, searchParam, includeHeartbeat, page]);
 
   const { data: tasksData, isLoading } = useTasks(filters);
 
   const total = tasksData?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const hasActiveFilters = statusFilter !== "all" || agentFilter !== "all" || searchParam !== "" || includeHeartbeat || page !== 0;
+  const hasActiveFilters =
+    statusFilter !== "all" ||
+    agentFilter !== "all" ||
+    scheduleFilter !== "all" ||
+    searchParam !== "" ||
+    includeHeartbeat ||
+    page !== 0;
 
   const clearFilters = useCallback(() => {
     setSearchParams(new URLSearchParams());
@@ -97,9 +123,7 @@ export default function TasksPage() {
         field: "status",
         headerName: "Status",
         width: 130,
-        cellRenderer: (params: { value: AgentTaskStatus }) => (
-          <StatusBadge status={params.value} />
-        ),
+        cellRenderer: (params: { value: AgentTaskStatus }) => <StatusBadge status={params.value} />,
       },
       {
         field: "taskType",
@@ -107,7 +131,10 @@ export default function TasksPage() {
         width: 110,
         cellRenderer: (params: { value: string | undefined }) =>
           params.value ? (
-            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+            >
               {params.value}
             </Badge>
           ) : null,
@@ -117,7 +144,9 @@ export default function TasksPage() {
         headerName: "Agent",
         width: 150,
         valueFormatter: (params) =>
-          params.value ? (agentMap.get(params.value) ?? params.value.slice(0, 8) + "...") : "Unassigned",
+          params.value
+            ? (agentMap.get(params.value) ?? `${params.value.slice(0, 8)}...`)
+            : "Unassigned",
       },
       {
         headerName: "Elapsed",
@@ -127,7 +156,11 @@ export default function TasksPage() {
           if (!task) return "";
           const start = task.acceptedAt ?? task.createdAt;
           const end = task.finishedAt;
-          const isActive = !end && (task.status === "in_progress" || task.status === "pending" || task.status === "offered");
+          const isActive =
+            !end &&
+            (task.status === "in_progress" ||
+              task.status === "pending" ||
+              task.status === "offered");
           return isActive ? formatElapsed(start) : end ? formatElapsed(start, end) : "—";
         },
       },
@@ -154,7 +187,11 @@ export default function TasksPage() {
         cellRenderer: (params: { value: string[] }) => (
           <div className="flex gap-1 items-center">
             {params.value?.slice(0, 2).map((tag) => (
-              <Badge key={tag} variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase shrink-0">
+              <Badge
+                key={tag}
+                variant="outline"
+                className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase shrink-0"
+              >
                 {tag}
               </Badge>
             ))}
@@ -224,6 +261,22 @@ export default function TasksPage() {
             ))}
           </SelectContent>
         </Select>
+        <Select value={scheduleFilter} onValueChange={(v) => setParam("schedule", v)}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Schedule" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Schedules</SelectItem>
+            {schedules?.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                <div className="flex items-center gap-1.5">
+                  <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
+                  <span className="truncate">{s.name}</span>
+                </div>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
           <Switch
             size="sm"
@@ -233,7 +286,12 @@ export default function TasksPage() {
           Heartbeat
         </label>
         {hasActiveFilters && (
-          <Button variant="ghost" size="sm" className="ml-auto text-xs text-muted-foreground" onClick={clearFilters}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto text-xs text-muted-foreground"
+            onClick={clearFilters}
+          >
             <X className="h-3 w-3 mr-1" />
             Clear filters
           </Button>

@@ -1,18 +1,17 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useParams } from "react-router-dom";
+import { Check, Code, Copy, Hash, Lock, MessageSquare, Reply, Send, Type, X } from "lucide-react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { useParams } from "react-router-dom";
 import remarkGfm from "remark-gfm";
+import { useAgents } from "@/api/hooks/use-agents";
 import {
   useChannels,
   useMessages,
   usePostMessage,
   useThreadMessages,
 } from "@/api/hooks/use-channels";
-import { useAgents } from "@/api/hooks/use-agents";
-import { formatRelativeTime, cn } from "@/lib/utils";
-import { useAutoScroll } from "@/hooks/use-auto-scroll";
+import type { Channel, ChannelMessage } from "@/api/types";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -20,26 +19,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Hash,
-  Lock,
-  Send,
-  MessageSquare,
-  Copy,
-  Check,
-  Code,
-  Type,
-  Reply,
-  X,
-} from "lucide-react";
-import type { Channel, ChannelMessage } from "@/api/types";
+import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useAutoScroll } from "@/hooks/use-auto-scroll";
+import { cn, formatRelativeTime } from "@/lib/utils";
 
 // --- Channel sidebar ---
 
@@ -118,8 +102,17 @@ function MessageBubble({
 
   return (
     <div
-      className={cn("group relative flex gap-3 px-4 py-2 hover:bg-muted/20", onOpenThread && "md:cursor-default cursor-pointer")}
-      onClick={onOpenThread ? () => { if (window.innerWidth < 768) onOpenThread(); } : undefined}
+      className={cn(
+        "group relative flex gap-3 px-4 py-2 hover:bg-muted/20",
+        onOpenThread && "md:cursor-default cursor-pointer",
+      )}
+      onClick={
+        onOpenThread
+          ? () => {
+              if (window.innerWidth < 768) onOpenThread();
+            }
+          : undefined
+      }
     >
       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold text-muted-foreground mt-0.5">
         {initials}
@@ -198,9 +191,7 @@ function MessageBubble({
           </pre>
         ) : (
           <div className="mt-0.5 text-sm text-foreground/90 prose-chat overflow-hidden break-words">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {message.content}
-            </ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
           </div>
         )}
 
@@ -332,11 +323,7 @@ function ThreadPanel({
       </div>
 
       {/* Thread reply input */}
-      <MessageInput
-        channelId={channelId}
-        replyToId={parentMessage.id}
-        placeholder="Reply..."
-      />
+      <MessageInput channelId={channelId} replyToId={parentMessage.id} placeholder="Reply..." />
     </div>
   );
 }
@@ -349,31 +336,40 @@ export default function ChatPage() {
   const { data: agents } = useAgents();
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+  const [prevChannelId, setPrevChannelId] = useState<string | null>(null);
 
   const agentMap = useMemo(() => {
     const m = new Map<string, string>();
-    agents?.forEach((a) => m.set(a.id, a.name));
+    agents?.forEach((a) => {
+      m.set(a.id, a.name);
+    });
     return m;
   }, [agents]);
 
-  useEffect(() => {
-    if (urlChannelId && channels?.some((c) => c.id === urlChannelId)) {
-      setActiveChannelId(urlChannelId);
-    } else if (!activeChannelId && channels && channels.length > 0) {
-      setActiveChannelId(channels[0].id);
+  // Derive active channel from URL or first available — no useEffect needed
+  const resolvedChannelId =
+    urlChannelId && channels?.some((c) => c.id === urlChannelId)
+      ? urlChannelId
+      : (activeChannelId ?? (channels && channels.length > 0 ? channels[0].id : null));
+
+  // Sync resolved channel into state when it changes from URL/channels loading
+  if (resolvedChannelId !== activeChannelId && resolvedChannelId !== null) {
+    setActiveChannelId(resolvedChannelId);
+  }
+
+  // Reset thread when channel changes
+  if (activeChannelId !== prevChannelId) {
+    setPrevChannelId(activeChannelId);
+    if (prevChannelId !== null) {
+      setSelectedThreadId(null);
     }
-  }, [channels, activeChannelId, urlChannelId]);
+  }
 
   const activeChannel = channels?.find((c) => c.id === activeChannelId);
 
   const { data: messages, isLoading: messagesLoading } = useMessages(activeChannelId ?? "", {
     limit: 200,
   });
-
-  // Close thread when switching channels
-  useEffect(() => {
-    setSelectedThreadId(null);
-  }, [activeChannelId]);
 
   // Count replies per top-level message
   const replyCounts = useMemo(() => {
@@ -394,7 +390,7 @@ export default function ChatPage() {
 
   // Find selected thread parent message
   const threadParent = useMemo(
-    () => (selectedThreadId ? messages?.find((m) => m.id === selectedThreadId) ?? null : null),
+    () => (selectedThreadId ? (messages?.find((m) => m.id === selectedThreadId) ?? null) : null),
     [selectedThreadId, messages],
   );
 
@@ -419,17 +415,15 @@ export default function ChatPage() {
         {/* Mobile channel selector */}
         {channels && channels.length > 0 && (
           <div className="md:hidden flex-1">
-            <Select
-              value={activeChannelId ?? ""}
-              onValueChange={(v) => setActiveChannelId(v)}
-            >
+            <Select value={activeChannelId ?? ""} onValueChange={(v) => setActiveChannelId(v)}>
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select channel" />
               </SelectTrigger>
               <SelectContent>
                 {channels.map((ch) => (
                   <SelectItem key={ch.id} value={ch.id}>
-                    {ch.type === "dm" ? "🔒 " : "# "}{ch.name}
+                    {ch.type === "dm" ? "🔒 " : "# "}
+                    {ch.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -464,10 +458,7 @@ export default function ChatPage() {
               </div>
 
               {/* Messages scroll area */}
-              <div
-                ref={setScrollEl}
-                className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden"
-              >
+              <div ref={setScrollEl} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
                 {messagesLoading ? (
                   <div className="space-y-4 p-4">
                     {Array.from({ length: 5 }).map((_, i) => (
@@ -501,10 +492,7 @@ export default function ChatPage() {
               </div>
 
               {/* Message input */}
-              <MessageInput
-                channelId={activeChannelId!}
-                channelName={activeChannel.name}
-              />
+              <MessageInput channelId={activeChannelId!} channelName={activeChannel.name} />
             </>
           ) : (
             <div className="flex flex-1 items-center justify-center text-muted-foreground">

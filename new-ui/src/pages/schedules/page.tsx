@@ -1,13 +1,13 @@
-import { useMemo, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
-import { DataGrid } from "@/components/shared/data-grid";
-import { useScheduledTasks } from "@/api/hooks/use-schedules";
-import { useAgents } from "@/api/hooks/use-agents";
-import { formatSmartTime } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 import { Clock } from "lucide-react";
+import { useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAgents } from "@/api/hooks/use-agents";
+import { useScheduledTasks } from "@/api/hooks/use-schedules";
 import type { ScheduledTask } from "@/api/types";
+import { DataGrid } from "@/components/shared/data-grid";
+import { Badge } from "@/components/ui/badge";
+import { formatSmartTime } from "@/lib/utils";
 
 function formatInterval(ms: number): string {
   const seconds = ms / 1000;
@@ -26,7 +26,9 @@ export default function SchedulesPage() {
 
   const agentMap = useMemo(() => {
     const m = new Map<string, string>();
-    agents?.forEach((a) => m.set(a.id, a.name));
+    agents?.forEach((a) => {
+      m.set(a.id, a.name);
+    });
     return m;
   }, [agents]);
 
@@ -60,7 +62,7 @@ export default function SchedulesPage() {
         width: 180,
         minWidth: 150,
         valueFormatter: (params) =>
-          params.value ? (agentMap.get(params.value) ?? params.value.slice(0, 8) + "...") : "Pool",
+          params.value ? (agentMap.get(params.value) ?? `${params.value.slice(0, 8)}...`) : "Pool",
       },
       {
         field: "nextRunAt",

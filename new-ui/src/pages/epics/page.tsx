@@ -1,10 +1,11 @@
-import { useState, useMemo, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
+import { Search } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useEpics } from "@/api/hooks/use-epics";
+import type { EpicStatus, EpicWithProgress } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { useEpics } from "@/api/hooks/use-epics";
-import { formatSmartTime } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -13,8 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search } from "lucide-react";
-import type { EpicWithProgress, EpicStatus } from "@/api/types";
+import { formatSmartTime } from "@/lib/utils";
 
 export default function EpicsPage() {
   const navigate = useNavigate();
@@ -45,9 +45,7 @@ export default function EpicsPage() {
         field: "status",
         headerName: "Status",
         width: 120,
-        cellRenderer: (params: { value: EpicStatus }) => (
-          <StatusBadge status={params.value} />
-        ),
+        cellRenderer: (params: { value: EpicStatus }) => <StatusBadge status={params.value} />,
       },
       {
         field: "goal",
