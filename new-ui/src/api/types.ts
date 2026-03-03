@@ -62,6 +62,7 @@ export interface AgentTask {
   output?: string;
   progress?: string;
   model?: string;
+  scheduleId?: string;
 }
 
 export interface AgentWithTasks extends Agent {

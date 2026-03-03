@@ -60,6 +60,7 @@ export const AgentTaskSourceSchema = z.enum([
   "github",
   "agentmail",
   "system",
+  "schedule",
 ]);
 export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 
@@ -125,6 +126,9 @@ export const AgentTaskSchema = z.object({
 
   // Model selection (optional — defaults to "opus" via runner)
   model: z.enum(["haiku", "sonnet", "opus"]).optional(),
+
+  // Schedule linking (optional — set when task was created by a schedule)
+  scheduleId: z.uuid().optional(),
 });
 
 export const AgentStatusSchema = z.enum(["idle", "busy", "offline"]);

@@ -862,6 +862,18 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     /* exists */
   }
 
+  // Migration: Add scheduleId column to agent_tasks for schedule-to-task linking
+  try {
+    db.run(`ALTER TABLE agent_tasks ADD COLUMN scheduleId TEXT`);
+  } catch {
+    /* exists */
+  }
+  try {
+    db.run(`CREATE INDEX idx_agent_tasks_schedule_id ON agent_tasks(scheduleId)`);
+  } catch {
+    /* exists */
+  }
+
   // Migration: Create context_versions table for tracking changes to agent identity files
   db.run(`
     CREATE TABLE IF NOT EXISTS context_versions (
@@ -1376,6 +1388,7 @@ type AgentTaskRow = {
   parentTaskId: string | null;
   claudeSessionId: string | null;
   model: string | null;
+  scheduleId: string | null;
   createdAt: string;
   lastUpdatedAt: string;
   finishedAt: string | null;
@@ -1419,6 +1432,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     parentTaskId: row.parentTaskId ?? undefined,
     claudeSessionId: row.claudeSessionId ?? undefined,
     model: (row.model as "haiku" | "sonnet" | "opus" | null) ?? undefined,
+    scheduleId: row.scheduleId ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     finishedAt: row.finishedAt ?? undefined,
@@ -1632,6 +1646,7 @@ export interface TaskFilters {
   readyOnly?: boolean;
   taskType?: string;
   tags?: string[];
+  scheduleId?: string;
   limit?: number;
   offset?: number;
   includeHeartbeat?: boolean;
@@ -1683,6 +1698,11 @@ export function getAllTasks(filters?: TaskFilters): AgentTask[] {
     for (const tag of filters.tags) {
       params.push(`%"${tag}"%`);
     }
+  }
+
+  if (filters?.scheduleId) {
+    conditions.push("scheduleId = ?");
+    params.push(filters.scheduleId);
   }
 
   // Exclude heartbeat tasks by default
@@ -1759,6 +1779,11 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
     for (const tag of filters.tags) {
       params.push(`%"${tag}"%`);
     }
+  }
+
+  if (filters?.scheduleId) {
+    conditions.push("scheduleId = ?");
+    params.push(filters.scheduleId);
   }
 
   // Exclude heartbeat tasks by default
@@ -2327,6 +2352,7 @@ export interface CreateTaskOptions {
   epicId?: string;
   parentTaskId?: string;
   model?: string;
+  scheduleId?: string;
 }
 
 /**
@@ -2383,8 +2409,8 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         slackChannelId, slackThreadTs, slackUserId,
         githubRepo, githubEventType, githubNumber, githubCommentId, githubAuthor, githubUrl,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
-        mentionMessageId, mentionChannelId, epicId, parentTaskId, model, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        mentionMessageId, mentionChannelId, epicId, parentTaskId, model, scheduleId, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -2416,6 +2442,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.epicId ?? null,
       options?.parentTaskId ?? null,
       options?.model ?? null,
+      options?.scheduleId ?? null,
       now,
       now,
     );
