@@ -51,6 +51,7 @@ Returns a list of tasks with various filters. Sorted by priority (desc) then las
 | `taskType` | string | No | Filter by type (e.g., `bug`, `feature`) |
 | `tags` | array | No | Filter by matching tags |
 | `search` | string | No | Search in task description |
+| `scheduleId` | uuid | No | Filter by schedule ID to find tasks created by a specific schedule |
 | `includeHeartbeat` | boolean | No | Include heartbeat/system tasks in results (excluded by default) |
 | `status` | string | No | Filter by status |
 | `limit` | number | No | Max tasks to return (default: 25) |
@@ -70,6 +71,7 @@ Send a task to a specific agent, create an unassigned task, or offer a task for 
 | `dependsOn` | array | No | Task IDs this depends on |
 | `epicId` | uuid | No | Associated epic |
 | `parentTaskId` | uuid | No | Parent task for session continuity |
+| `model` | string | No | Model for this task: `haiku`, `sonnet`, or `opus`. Falls back to agent/global `MODEL_OVERRIDE` config, then `opus` |
 
 ### get-task-details
 
@@ -253,6 +255,7 @@ Manage tasks in the pool: create, claim, release, accept, reject, or move to/fro
 | `task` | string | Varies | Required for create |
 | `priority` | number | No | Priority 0-100 |
 | `tags` | array | No | Tags for filtering |
+| `model` | string | No | Model for the created task: `haiku`, `sonnet`, or `opus` (only used with `create` action) |
 
 ## Messaging Tools
 
@@ -317,7 +320,7 @@ Manage HTTP service discovery. See [Service Discovery](/docs/concepts/services) 
 
 ### create-schedule / list-schedules / update-schedule / delete-schedule / run-schedule-now
 
-Manage recurring task automation. See [Scheduled Tasks](/docs/concepts/scheduling) for details.
+Manage recurring task automation. Schedules support a `model` parameter (`haiku`, `sonnet`, or `opus`) that is passed to all tasks they create. See [Scheduled Tasks](/docs/concepts/scheduling) for details.
 
 ## Epic Tools
 
