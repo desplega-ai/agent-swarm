@@ -64,7 +64,7 @@ export async function handleStats(
 
   // GET /api/services - List all services (with optional filters: status, agentId, name)
   if (matchRoute(req.method, pathSegments, "GET", ["api", "services"], true)) {
-    const status = queryParams.get("status") as import("./types").ServiceStatus | null;
+    const status = queryParams.get("status") as import("../types").ServiceStatus | null;
     const agentId = queryParams.get("agentId");
     const name = queryParams.get("name");
     const services = getAllServices({

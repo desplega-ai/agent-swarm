@@ -11,11 +11,9 @@ import {
   getTasksCount,
   pauseTask,
   resumeTask,
-  updateAgentStatus,
   updateAgentStatusFromCapacity,
   updateTaskClaudeSessionId,
 } from "../be/db";
-import type { AgentStatus } from "../types";
 import { matchRoute } from "./utils";
 
 export async function handleTasks(
@@ -26,7 +24,7 @@ export async function handleTasks(
   myAgentId: string | undefined,
 ): Promise<boolean> {
   if (matchRoute(req.method, pathSegments, "GET", ["api", "tasks"], true)) {
-    const status = queryParams.get("status") as import("./types").AgentTaskStatus | null;
+    const status = queryParams.get("status") as import("../types").AgentTaskStatus | null;
     const agentId = queryParams.get("agentId");
     const epicId = queryParams.get("epicId");
     const scheduleId = queryParams.get("scheduleId");

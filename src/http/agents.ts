@@ -86,7 +86,7 @@ export async function handleAgentsRest(
   res: ServerResponse,
   pathSegments: string[],
   queryParams: URLSearchParams,
-  myAgentId: string | undefined,
+  _myAgentId: string | undefined,
 ): Promise<boolean> {
   if (matchRoute(req.method, pathSegments, "GET", ["api", "agents"], true)) {
     const includeTasks = queryParams.get("include") === "tasks";
@@ -247,7 +247,7 @@ export async function handleAgentsRest(
       body.changeSource || body.changedByAgentId || body.changeReason
         ? {
             changeSource: validChangeSources.includes(body.changeSource ?? "")
-              ? (body.changeSource as import("./types").ChangeSource)
+              ? (body.changeSource as import("../types").ChangeSource)
               : undefined,
             changedByAgentId: body.changedByAgentId ?? null,
             changeReason: body.changeReason ?? null,

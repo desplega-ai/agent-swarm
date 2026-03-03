@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { initAgentMail, isAgentMailEnabled, resetAgentMail } from "../agentmail";
+import { initAgentMail, resetAgentMail } from "../agentmail";
 import {
   getAgentById,
   getDb,
@@ -10,7 +10,7 @@ import {
   shouldBlockPolling,
   updateAgentStatus,
 } from "../be/db";
-import { initGitHub, isGitHubEnabled, resetGitHub } from "../github";
+import { initGitHub, resetGitHub } from "../github";
 import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
 import { agentWithCapacity, parseQueryParams } from "./utils";

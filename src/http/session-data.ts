@@ -18,8 +18,8 @@ export async function handleSessionData(
   req: IncomingMessage,
   res: ServerResponse,
   pathSegments: string[],
-  queryParams: URLSearchParams,
-  myAgentId: string | undefined,
+  _queryParams: URLSearchParams,
+  _myAgentId: string | undefined,
 ): Promise<boolean> {
   if (matchRoute(req.method, pathSegments, "POST", ["api", "session-logs"])) {
     // Parse request body

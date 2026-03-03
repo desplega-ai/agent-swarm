@@ -15,7 +15,7 @@ export async function handleActiveSessions(
   res: ServerResponse,
   pathSegments: string[],
   queryParams: URLSearchParams,
-  myAgentId: string | undefined,
+  _myAgentId: string | undefined,
 ): Promise<boolean> {
   if (matchRoute(req.method, pathSegments, "GET", ["api", "active-sessions"], true)) {
     const agentId = queryParams.get("agentId");

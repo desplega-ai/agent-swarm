@@ -23,6 +23,7 @@ async function api(
   method: string,
   path: string,
   opts: { body?: unknown; agentId?: string; headers?: Record<string, string> } = {},
+  // biome-ignore lint/suspicious/noExplicitAny: test helper needs flexible body type
 ): Promise<{ status: number; body: any; ok: boolean }> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -37,6 +38,7 @@ async function api(
   });
 
   const text = await res.text();
+  // biome-ignore lint/suspicious/noExplicitAny: body can be parsed JSON or raw text
   let body: any;
   try {
     body = JSON.parse(text);
@@ -92,14 +94,14 @@ beforeAll(async () => {
     await unlink(TEST_DB_PATH);
   } catch {}
   try {
-    await unlink(TEST_DB_PATH + "-wal");
+    await unlink(`${TEST_DB_PATH}-wal`);
   } catch {}
   try {
-    await unlink(TEST_DB_PATH + "-shm");
+    await unlink(`${TEST_DB_PATH}-shm`);
   } catch {}
 
   serverProc = Bun.spawn(["bun", "src/http.ts"], {
-    cwd: import.meta.dir + "/../..",
+    cwd: `${import.meta.dir}/../..`,
     env: {
       ...process.env,
       PORT: String(TEST_PORT),
@@ -131,10 +133,10 @@ afterAll(async () => {
     await unlink(TEST_DB_PATH);
   } catch {}
   try {
-    await unlink(TEST_DB_PATH + "-wal");
+    await unlink(`${TEST_DB_PATH}-wal`);
   } catch {}
   try {
-    await unlink(TEST_DB_PATH + "-shm");
+    await unlink(`${TEST_DB_PATH}-shm`);
   } catch {}
 });
 
@@ -671,12 +673,12 @@ describe("Session Costs", () => {
   });
 
   test("GET /api/session-costs/summary — get cost summary", async () => {
-    const { status, body } = await get("/api/session-costs/summary");
+    const { status } = await get("/api/session-costs/summary");
     expect(status).toBe(200);
   });
 
   test("GET /api/session-costs/dashboard — get dashboard data", async () => {
-    const { status, body } = await get("/api/session-costs/dashboard");
+    const { status } = await get("/api/session-costs/dashboard");
     expect(status).toBe(200);
   });
 });
@@ -687,7 +689,7 @@ describe("Session Costs", () => {
 
 describe("Active Sessions", () => {
   test("POST /api/active-sessions — missing fields returns 400", async () => {
-    const { status, body } = await post("/api/active-sessions", {
+    const { status } = await post("/api/active-sessions", {
       body: { agentId: ids.workerAgent },
     });
     expect(status).toBe(400);
@@ -721,7 +723,7 @@ describe("Active Sessions", () => {
   });
 
   test("PUT /api/active-sessions/heartbeat/:taskId — update heartbeat", async () => {
-    const { status, body } = await put(`/api/active-sessions/heartbeat/${ids.task}`);
+    const { status } = await put(`/api/active-sessions/heartbeat/${ids.task}`);
     expect(status).toBe(200);
   });
 
@@ -735,7 +737,7 @@ describe("Active Sessions", () => {
     await post("/api/active-sessions", {
       body: { agentId: ids.workerAgent2, taskId: ids.task, triggerType: "task" },
     });
-    const { status, body } = await del(`/api/active-sessions/by-task/${ids.task}`);
+    const { status } = await del(`/api/active-sessions/by-task/${ids.task}`);
     expect(status).toBe(200);
   });
 
@@ -791,7 +793,7 @@ describe("Stats & Metadata", () => {
   });
 
   test("GET /api/concurrent-context — returns concurrency info", async () => {
-    const { status, body } = await get("/api/concurrent-context");
+    const { status } = await get("/api/concurrent-context");
     expect(status).toBe(200);
   });
 });
@@ -864,7 +866,7 @@ describe("Epics", () => {
   });
 
   test("PUT /api/epics/:id — update epic", async () => {
-    const { status, body } = await put(`/api/epics/${ids.epic}`, {
+    const { status } = await put(`/api/epics/${ids.epic}`, {
       body: { goal: "Updated goal", status: "active" },
     });
     expect(status).toBe(200);
@@ -919,6 +921,7 @@ describe("Channels & Messages", () => {
     expect(status).toBe(200);
     expect(body.channels).toBeDefined();
     expect(Array.isArray(body.channels)).toBe(true);
+    // biome-ignore lint/suspicious/noExplicitAny: channel shape varies
     const general = body.channels.find((c: any) => c.name === "general");
     expect(general).toBeDefined();
     ids.channel = general.id;
@@ -1032,7 +1035,7 @@ describe("Config", () => {
   });
 
   test("GET /api/config/resolved — get merged config", async () => {
-    const { status, body } = await get("/api/config/resolved");
+    const { status } = await get("/api/config/resolved");
     expect(status).toBe(200);
   });
 
@@ -1063,7 +1066,7 @@ describe("Config", () => {
 
 describe("Repos", () => {
   test("POST /api/repos — missing fields returns 400", async () => {
-    const { status, body } = await post("/api/repos", {
+    const { status } = await post("/api/repos", {
       body: { name: "test-repo" },
     });
     expect(status).toBe(400);
