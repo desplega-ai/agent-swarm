@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { chunkContent } from "../be/chunking";
 import {
   createMemory,
   deleteMemoriesBySourcePath,
@@ -7,7 +8,7 @@ import {
   updateMemoryEmbedding,
 } from "../be/db";
 import { getEmbedding, serializeEmbedding } from "../be/embedding";
-import { chunkContent } from "../be/chunking";
+import { matchRoute } from "./utils";
 
 export async function handleMemory(
   req: IncomingMessage,
@@ -15,13 +16,7 @@ export async function handleMemory(
   pathSegments: string[],
   myAgentId: string | undefined,
 ): Promise<boolean> {
-  if (
-    req.method === "POST" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "memory" &&
-    pathSegments[2] === "index" &&
-    !pathSegments[3]
-  ) {
+  if (matchRoute(req.method, pathSegments, "POST", ["api", "memory", "index"], true)) {
     const chunks: Buffer[] = [];
     for await (const chunk of req) {
       chunks.push(chunk);
@@ -34,21 +29,18 @@ export async function handleMemory(
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Missing required fields: content, name, scope, source" }));
       return true;
-
     }
 
     if (!["agent", "swarm"].includes(scope)) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "scope must be 'agent' or 'swarm'" }));
       return true;
-
     }
 
     if (!["manual", "file_index", "session_summary", "task_completion"].includes(source)) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Invalid source type" }));
       return true;
-
     }
 
     // Chunk content and create memories in a transaction (with dedup)
@@ -105,17 +97,10 @@ export async function handleMemory(
     res.writeHead(202, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ queued: true, memoryIds }));
     return true;
-
   }
 
   // POST /api/memory/search - Search memories by natural language query
-  if (
-    req.method === "POST" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "memory" &&
-    pathSegments[2] === "search" &&
-    !pathSegments[3]
-  ) {
+  if (matchRoute(req.method, pathSegments, "POST", ["api", "memory", "search"], true)) {
     const chunks: Buffer[] = [];
     for await (const chunk of req) {
       chunks.push(chunk);
@@ -128,7 +113,6 @@ export async function handleMemory(
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Missing required fields: query, X-Agent-ID header" }));
       return true;
-
     }
 
     try {
@@ -137,7 +121,6 @@ export async function handleMemory(
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ results: [] }));
         return true;
-
       }
 
       const results = searchMemoriesByVector(queryEmbedding, searchAgentId, {
@@ -165,9 +148,7 @@ export async function handleMemory(
       res.end(JSON.stringify({ results: [] }));
     }
     return true;
-
   }
-
 
   return false;
 }

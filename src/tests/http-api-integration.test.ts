@@ -88,9 +88,15 @@ const ids = {
 
 beforeAll(async () => {
   // Clean up any leftover test DB
-  try { await unlink(TEST_DB_PATH); } catch {}
-  try { await unlink(TEST_DB_PATH + "-wal"); } catch {}
-  try { await unlink(TEST_DB_PATH + "-shm"); } catch {}
+  try {
+    await unlink(TEST_DB_PATH);
+  } catch {}
+  try {
+    await unlink(TEST_DB_PATH + "-wal");
+  } catch {}
+  try {
+    await unlink(TEST_DB_PATH + "-shm");
+  } catch {}
 
   serverProc = Bun.spawn(["bun", "src/http.ts"], {
     cwd: import.meta.dir + "/../..",
@@ -116,12 +122,20 @@ afterAll(async () => {
   if (serverProc) {
     serverProc.kill();
     // Wait for process to exit
-    try { await serverProc.exited; } catch {}
+    try {
+      await serverProc.exited;
+    } catch {}
   }
   await Bun.sleep(300);
-  try { await unlink(TEST_DB_PATH); } catch {}
-  try { await unlink(TEST_DB_PATH + "-wal"); } catch {}
-  try { await unlink(TEST_DB_PATH + "-shm"); } catch {}
+  try {
+    await unlink(TEST_DB_PATH);
+  } catch {}
+  try {
+    await unlink(TEST_DB_PATH + "-wal");
+  } catch {}
+  try {
+    await unlink(TEST_DB_PATH + "-shm");
+  } catch {}
 });
 
 // ===========================================================================
@@ -947,9 +961,7 @@ describe("Channels & Messages", () => {
   });
 
   test("GET /api/channels/:id/messages/:messageId/thread — get thread", async () => {
-    const { status } = await get(
-      `/api/channels/${ids.channel}/messages/${ids.message}/thread`,
-    );
+    const { status } = await get(`/api/channels/${ids.channel}/messages/${ids.message}/thread`);
     expect(status).toBe(200);
   });
 });

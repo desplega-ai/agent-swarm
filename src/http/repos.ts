@@ -6,6 +6,7 @@ import {
   getSwarmRepos,
   updateSwarmRepo,
 } from "../be/db";
+import { matchRoute } from "./utils";
 
 export async function handleRepos(
   req: IncomingMessage,
@@ -13,33 +14,20 @@ export async function handleRepos(
   pathSegments: string[],
   queryParams: URLSearchParams,
 ): Promise<boolean> {
-  if (
-    req.method === "GET" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "repos" &&
-    pathSegments[2] &&
-    !pathSegments[3]
-  ) {
-    const repo = getSwarmRepoById(pathSegments[2]);
+  if (matchRoute(req.method, pathSegments, "GET", ["api", "repos", null], true)) {
+    const repo = getSwarmRepoById(pathSegments[2]!);
     if (!repo) {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Repo not found" }));
       return true;
-
     }
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(repo));
     return true;
-
   }
 
   // GET /api/repos - List repos with optional filters
-  if (
-    req.method === "GET" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "repos" &&
-    !pathSegments[2]
-  ) {
+  if (matchRoute(req.method, pathSegments, "GET", ["api", "repos"], true)) {
     const autoCloneParam = queryParams.get("autoClone");
     const nameParam = queryParams.get("name") || undefined;
     const filters: { autoClone?: boolean; name?: string } = {};
@@ -53,16 +41,10 @@ export async function handleRepos(
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ repos }));
     return true;
-
   }
 
   // POST /api/repos - Create a new repo
-  if (
-    req.method === "POST" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "repos" &&
-    !pathSegments[2]
-  ) {
+  if (matchRoute(req.method, pathSegments, "POST", ["api", "repos"], true)) {
     const chunks: Buffer[] = [];
     for await (const chunk of req) {
       chunks.push(chunk);
@@ -73,7 +55,6 @@ export async function handleRepos(
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Missing required fields: url, name" }));
       return true;
-
     }
 
     try {
@@ -97,17 +78,10 @@ export async function handleRepos(
       }
     }
     return true;
-
   }
 
   // PUT /api/repos/:id - Update a repo
-  if (
-    req.method === "PUT" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "repos" &&
-    pathSegments[2] &&
-    !pathSegments[3]
-  ) {
+  if (matchRoute(req.method, pathSegments, "PUT", ["api", "repos", null], true)) {
     const chunks: Buffer[] = [];
     for await (const chunk of req) {
       chunks.push(chunk);
@@ -115,7 +89,7 @@ export async function handleRepos(
     const body = JSON.parse(Buffer.concat(chunks).toString());
 
     try {
-      const updated = updateSwarmRepo(pathSegments[2], {
+      const updated = updateSwarmRepo(pathSegments[2]!, {
         url: body.url,
         name: body.name,
         clonePath: body.clonePath,
@@ -127,7 +101,6 @@ export async function handleRepos(
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Repo not found" }));
         return true;
-
       }
 
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -143,28 +116,19 @@ export async function handleRepos(
       }
     }
     return true;
-
   }
 
   // DELETE /api/repos/:id - Delete a repo
-  if (
-    req.method === "DELETE" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "repos" &&
-    pathSegments[2] &&
-    !pathSegments[3]
-  ) {
-    const deleted = deleteSwarmRepo(pathSegments[2]);
+  if (matchRoute(req.method, pathSegments, "DELETE", ["api", "repos", null], true)) {
+    const deleted = deleteSwarmRepo(pathSegments[2]!);
     if (!deleted) {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Repo not found" }));
       return true;
-
     }
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ success: true }));
     return true;
-
   }
 
   // POST /api/memory/index - Ingest content into memory system (async embedding)

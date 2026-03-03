@@ -11,7 +11,6 @@ export async function handleEcosystem(
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
       return true;
-
     }
 
     const services = getServicesByAgentId(myAgentId);
@@ -40,9 +39,7 @@ export async function handleEcosystem(
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(ecosystem));
     return true;
-
   }
-
 
   return false;
 }

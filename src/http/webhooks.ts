@@ -1,10 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AgentMailWebhookPayload } from "../agentmail";
-import {
-  handleMessageReceived,
-  isAgentMailEnabled,
-  verifyAgentMailWebhook,
-} from "../agentmail";
+import { handleMessageReceived, isAgentMailEnabled, verifyAgentMailWebhook } from "../agentmail";
 import type {
   CheckRunEvent,
   CheckSuiteEvent,
@@ -25,24 +21,19 @@ import {
   isGitHubEnabled,
   verifyWebhookSignature,
 } from "../github";
+import { matchRoute } from "./utils";
 
 export async function handleWebhooks(
   req: IncomingMessage,
   res: ServerResponse,
   pathSegments: string[],
 ): Promise<boolean> {
-  if (
-    req.method === "POST" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "github" &&
-    pathSegments[2] === "webhook"
-  ) {
+  if (matchRoute(req.method, pathSegments, "POST", ["api", "github", "webhook"])) {
     // Check if GitHub integration is enabled
     if (!isGitHubEnabled()) {
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "GitHub integration not configured" }));
       return true;
-
     }
 
     // Get event type and signature
@@ -63,7 +54,6 @@ export async function handleWebhooks(
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Invalid signature" }));
       return true;
-
     }
 
     // Handle ping event (webhook setup verification)
@@ -72,7 +62,6 @@ export async function handleWebhooks(
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ message: "pong" }));
       return true;
-
     }
 
     // Parse JSON body
@@ -83,7 +72,6 @@ export async function handleWebhooks(
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Invalid JSON body" }));
       return true;
-
     }
 
     console.log(`[GitHub] Received ${eventType} event`);
@@ -133,7 +121,6 @@ export async function handleWebhooks(
       res.end(JSON.stringify({ error: "Internal server error", message: errorMessage }));
     }
     return true;
-
   }
 
   // ============================================================================
@@ -141,18 +128,12 @@ export async function handleWebhooks(
   // ============================================================================
 
   // POST /api/agentmail/webhook - Handle AgentMail webhook events
-  if (
-    req.method === "POST" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "agentmail" &&
-    pathSegments[2] === "webhook"
-  ) {
+  if (matchRoute(req.method, pathSegments, "POST", ["api", "agentmail", "webhook"])) {
     // Check if AgentMail integration is enabled
     if (!isAgentMailEnabled()) {
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "AgentMail integration not configured" }));
       return true;
-
     }
 
     // Read raw body (required for Svix signature verification)
@@ -178,7 +159,6 @@ export async function handleWebhooks(
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Invalid signature" }));
       return true;
-
     }
 
     // Return 200 immediately — Svix best practice to avoid retries.
@@ -206,9 +186,7 @@ export async function handleWebhooks(
       }
     }
     return true;
-
   }
-
 
   return false;
 }

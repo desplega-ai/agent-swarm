@@ -12,7 +12,7 @@ import {
   getTaskById,
 } from "../be/db";
 import type { SessionCost } from "../types";
-import { parseQueryParams } from "./utils";
+import { matchRoute, parseQueryParams } from "./utils";
 
 export async function handleSessionData(
   req: IncomingMessage,
@@ -21,7 +21,7 @@ export async function handleSessionData(
   queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
-  if (req.method === "POST" && pathSegments[0] === "api" && pathSegments[1] === "session-logs") {
+  if (matchRoute(req.method, pathSegments, "POST", ["api", "session-logs"])) {
     // Parse request body
     const chunks: Buffer[] = [];
     for await (const chunk of req) {
@@ -34,21 +34,18 @@ export async function handleSessionData(
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Missing or invalid 'sessionId' field" }));
       return true;
-
     }
 
     if (typeof body.iteration !== "number" || body.iteration < 1) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Missing or invalid 'iteration' field" }));
       return true;
-
     }
 
     if (!Array.isArray(body.lines) || body.lines.length === 0) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Missing or invalid 'lines' array" }));
       return true;
-
     }
 
     try {
@@ -68,36 +65,27 @@ export async function handleSessionData(
       res.end(JSON.stringify({ error: "Failed to store session logs" }));
     }
     return true;
-
   }
 
   // GET /api/tasks/:id/session-logs - Get session logs for a task
-  if (
-    req.method === "GET" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "tasks" &&
-    pathSegments[2] &&
-    pathSegments[3] === "session-logs"
-  ) {
-    const taskId = pathSegments[2];
+  if (matchRoute(req.method, pathSegments, "GET", ["api", "tasks", null, "session-logs"])) {
+    const taskId = pathSegments[2]!;
     const task = getTaskById(taskId);
 
     if (!task) {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Task not found" }));
       return true;
-
     }
 
     const logs = getSessionLogsByTaskId(taskId);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ logs }));
     return true;
-
   }
 
   // POST /api/session-costs - Store session cost record
-  if (req.method === "POST" && pathSegments[0] === "api" && pathSegments[1] === "session-costs") {
+  if (matchRoute(req.method, pathSegments, "POST", ["api", "session-costs"])) {
     // Parse request body
     const chunks: Buffer[] = [];
     for await (const chunk of req) {
@@ -110,21 +98,18 @@ export async function handleSessionData(
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Missing or invalid 'sessionId' field" }));
       return true;
-
     }
 
     if (!body.agentId || typeof body.agentId !== "string") {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Missing or invalid 'agentId' field" }));
       return true;
-
     }
 
     if (typeof body.totalCostUsd !== "number") {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Missing or invalid 'totalCostUsd' field" }));
       return true;
-
     }
 
     try {
@@ -151,16 +136,10 @@ export async function handleSessionData(
       res.end(JSON.stringify({ error: "Failed to store session cost" }));
     }
     return true;
-
   }
 
   // GET /api/session-costs/summary - Aggregated session cost summary
-  if (
-    req.method === "GET" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "session-costs" &&
-    pathSegments[2] === "summary"
-  ) {
+  if (matchRoute(req.method, pathSegments, "GET", ["api", "session-costs", "summary"])) {
     const summaryParams = parseQueryParams(req.url || "");
     const rawGroupBy = summaryParams.get("groupBy");
     const validGroupBy = ["day", "agent", "both"] as const;
@@ -172,7 +151,6 @@ export async function handleSessionData(
         }),
       );
       return true;
-
     }
     const summary = getSessionCostSummary({
       startDate: summaryParams.get("startDate") || undefined,
@@ -184,30 +162,18 @@ export async function handleSessionData(
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(summary));
     return true;
-
   }
 
   // GET /api/session-costs/dashboard - Cost today and month-to-date
-  if (
-    req.method === "GET" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "session-costs" &&
-    pathSegments[2] === "dashboard"
-  ) {
+  if (matchRoute(req.method, pathSegments, "GET", ["api", "session-costs", "dashboard"])) {
     const dashboardCosts = getDashboardCostSummary();
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(dashboardCosts));
     return true;
-
   }
 
   // GET /api/session-costs - Query session costs with filters
-  if (
-    req.method === "GET" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "session-costs" &&
-    !pathSegments[2]
-  ) {
+  if (matchRoute(req.method, pathSegments, "GET", ["api", "session-costs"], true)) {
     const costsQueryParams = parseQueryParams(req.url || "");
     const agentId = costsQueryParams.get("agentId");
     const taskId = costsQueryParams.get("taskId");
@@ -235,7 +201,6 @@ export async function handleSessionData(
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ costs }));
     return true;
-
   }
 
   // GET /ecosystem - Generate PM2 ecosystem config for agent's services

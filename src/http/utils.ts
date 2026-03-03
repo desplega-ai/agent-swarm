@@ -1,5 +1,4 @@
-import type { ServerResponse } from "node:http";
-import type { IncomingMessage } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { getActiveTaskCount } from "../be/db";
 
 export function setCorsHeaders(res: ServerResponse) {
@@ -56,4 +55,33 @@ export function json(res: ServerResponse, data: unknown, status = 200) {
 export function jsonError(res: ServerResponse, error: string, status = 400) {
   res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ error }));
+}
+
+/**
+ * Match a route pattern against HTTP method and path segments.
+ *
+ * @param method - HTTP method from request (e.g. "GET", "POST")
+ * @param pathSegments - URL path segments (e.g. ["api", "config", "resolved"])
+ * @param expectedMethod - Expected HTTP method to match
+ * @param pattern - Segment patterns: string for literal match, null for dynamic param (must be truthy)
+ * @param exact - If true, ensures no extra trailing segments exist (default: false)
+ */
+export function matchRoute(
+  method: string | undefined,
+  pathSegments: string[],
+  expectedMethod: string,
+  pattern: readonly (string | null)[],
+  exact = false,
+): boolean {
+  if (method !== expectedMethod) return false;
+  for (let i = 0; i < pattern.length; i++) {
+    const seg = pattern[i];
+    if (seg === null) {
+      if (!pathSegments[i]) return false;
+    } else {
+      if (pathSegments[i] !== seg) return false;
+    }
+  }
+  if (exact && pathSegments[pattern.length]) return false;
+  return true;
 }

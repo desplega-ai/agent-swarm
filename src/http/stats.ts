@@ -9,6 +9,7 @@ import {
   getTaskStats,
 } from "../be/db";
 import type { AgentLog } from "../types";
+import { matchRoute } from "./utils";
 
 export async function handleStats(
   req: IncomingMessage,
@@ -16,7 +17,7 @@ export async function handleStats(
   pathSegments: string[],
   queryParams: URLSearchParams,
 ): Promise<boolean> {
-  if (req.method === "GET" && pathSegments[0] === "api" && pathSegments[1] === "logs") {
+  if (matchRoute(req.method, pathSegments, "GET", ["api", "logs"])) {
     const limitParam = queryParams.get("limit");
     const limit = limitParam ? parseInt(limitParam, 10) : 100;
     const agentId = queryParams.get("agentId");
@@ -29,11 +30,10 @@ export async function handleStats(
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ logs }));
     return true;
-
   }
 
   // GET /api/stats - Dashboard summary stats
-  if (req.method === "GET" && pathSegments[0] === "api" && pathSegments[1] === "stats") {
+  if (matchRoute(req.method, pathSegments, "GET", ["api", "stats"])) {
     const agents = getAllAgents();
     const taskStats = getTaskStats();
 
@@ -60,16 +60,10 @@ export async function handleStats(
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(stats));
     return true;
-
   }
 
   // GET /api/services - List all services (with optional filters: status, agentId, name)
-  if (
-    req.method === "GET" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "services" &&
-    !pathSegments[2]
-  ) {
+  if (matchRoute(req.method, pathSegments, "GET", ["api", "services"], true)) {
     const status = queryParams.get("status") as import("./types").ServiceStatus | null;
     const agentId = queryParams.get("agentId");
     const name = queryParams.get("name");
@@ -81,16 +75,10 @@ export async function handleStats(
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ services }));
     return true;
-
   }
 
   // GET /api/scheduled-tasks - List all scheduled tasks (with optional filters: enabled, name)
-  if (
-    req.method === "GET" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "scheduled-tasks" &&
-    !pathSegments[2]
-  ) {
+  if (matchRoute(req.method, pathSegments, "GET", ["api", "scheduled-tasks"], true)) {
     const enabledParam = queryParams.get("enabled");
     const name = queryParams.get("name");
     const scheduledTasks = getScheduledTasks({
@@ -100,23 +88,15 @@ export async function handleStats(
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ scheduledTasks }));
     return true;
-
   }
 
   // GET /api/concurrent-context - Get concurrent session context for lead awareness
-  if (
-    req.method === "GET" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "concurrent-context" &&
-    !pathSegments[2]
-  ) {
+  if (matchRoute(req.method, pathSegments, "GET", ["api", "concurrent-context"], true)) {
     const context = getConcurrentContext();
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(context));
     return true;
-
   }
-
 
   return false;
 }

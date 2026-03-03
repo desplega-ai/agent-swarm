@@ -7,6 +7,7 @@ import {
   maskSecrets,
   upsertSwarmConfig,
 } from "../be/db";
+import { matchRoute } from "./utils";
 
 export async function handleConfig(
   req: IncomingMessage,
@@ -14,13 +15,7 @@ export async function handleConfig(
   pathSegments: string[],
   queryParams: URLSearchParams,
 ): Promise<boolean> {
-  if (
-    req.method === "GET" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "config" &&
-    pathSegments[2] === "resolved" &&
-    !pathSegments[3]
-  ) {
+  if (matchRoute(req.method, pathSegments, "GET", ["api", "config", "resolved"], true)) {
     const agentId = queryParams.get("agentId") || undefined;
     const repoId = queryParams.get("repoId") || undefined;
     const includeSecrets = queryParams.get("includeSecrets") === "true";
@@ -28,18 +23,11 @@ export async function handleConfig(
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ configs: includeSecrets ? configs : maskSecrets(configs) }));
     return true;
-
   }
 
   // GET /api/config/:id - Get single config entry
-  if (
-    req.method === "GET" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "config" &&
-    pathSegments[2] &&
-    !pathSegments[3]
-  ) {
-    const configId = pathSegments[2];
+  if (matchRoute(req.method, pathSegments, "GET", ["api", "config", null], true)) {
+    const configId = pathSegments[2]!;
     const includeSecrets = queryParams.get("includeSecrets") === "true";
     const config = getSwarmConfigById(configId);
 
@@ -47,23 +35,16 @@ export async function handleConfig(
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Config not found" }));
       return true;
-
     }
 
     const result = includeSecrets ? config : maskSecrets([config])[0];
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(result));
     return true;
-
   }
 
   // GET /api/config - List config entries with optional filters
-  if (
-    req.method === "GET" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "config" &&
-    !pathSegments[2]
-  ) {
+  if (matchRoute(req.method, pathSegments, "GET", ["api", "config"], true)) {
     const scope = queryParams.get("scope") || undefined;
     const scopeId = queryParams.get("scopeId") || undefined;
     const includeSecrets = queryParams.get("includeSecrets") === "true";
@@ -71,16 +52,10 @@ export async function handleConfig(
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ configs: includeSecrets ? configs : maskSecrets(configs) }));
     return true;
-
   }
 
   // PUT /api/config - Upsert a config entry
-  if (
-    req.method === "PUT" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "config" &&
-    !pathSegments[2]
-  ) {
+  if (matchRoute(req.method, pathSegments, "PUT", ["api", "config"], true)) {
     const chunks: Buffer[] = [];
     for await (const chunk of req) {
       chunks.push(chunk);
@@ -91,7 +66,6 @@ export async function handleConfig(
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Missing required fields: scope, key, value" }));
       return true;
-
     }
 
     const validScopes = ["global", "agent", "repo"];
@@ -99,21 +73,18 @@ export async function handleConfig(
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Invalid scope. Must be: global, agent, repo" }));
       return true;
-
     }
 
     if (body.scope === "global" && body.scopeId) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Global scope must not have scopeId" }));
       return true;
-
     }
 
     if ((body.scope === "agent" || body.scope === "repo") && !body.scopeId) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Agent/repo scope requires scopeId" }));
       return true;
-
     }
 
     try {
@@ -135,33 +106,23 @@ export async function handleConfig(
       res.end(JSON.stringify({ error: "Failed to upsert config" }));
     }
     return true;
-
   }
 
   // DELETE /api/config/:id - Delete a config entry
-  if (
-    req.method === "DELETE" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "config" &&
-    pathSegments[2] &&
-    !pathSegments[3]
-  ) {
-    const configId = pathSegments[2];
+  if (matchRoute(req.method, pathSegments, "DELETE", ["api", "config", null], true)) {
+    const configId = pathSegments[2]!;
     const deleted = deleteSwarmConfig(configId);
 
     if (!deleted) {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Config not found" }));
       return true;
-
     }
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ success: true }));
     return true;
-
   }
-
 
   return false;
 }

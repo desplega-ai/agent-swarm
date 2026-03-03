@@ -4,28 +4,27 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { hasCapability } from "@/server";
-import { closeDb } from "../be/db";
 import { initAgentMail } from "../agentmail";
+import { closeDb } from "../be/db";
 import { initGitHub } from "../github";
 import { startSlackApp, stopSlackApp } from "../slack";
-
-import { getPathSegments, parseQueryParams, setCorsHeaders } from "./utils";
-import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
-import { handleAgentRegister, handleAgentsRest } from "./agents";
-import { handlePoll } from "./poll";
-import { handleSessionData } from "./session-data";
-import { handleEcosystem } from "./ecosystem";
-import { handleWebhooks } from "./webhooks";
-import { handleTasks } from "./tasks";
-import { handleStats } from "./stats";
 import { handleActiveSessions } from "./active-sessions";
-import { handleEpics } from "./epics";
+import { handleAgentRegister, handleAgentsRest } from "./agents";
 import { handleConfig } from "./config";
-import { handleRepos } from "./repos";
-import { handleMemory } from "./memory";
+import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
+import { handleEcosystem } from "./ecosystem";
+import { handleEpics } from "./epics";
 import { handleMcp } from "./mcp";
+import { handleMemory } from "./memory";
+import { handlePoll } from "./poll";
+import { handleRepos } from "./repos";
+import { handleSessionData } from "./session-data";
+import { handleStats } from "./stats";
+import { handleTasks } from "./tasks";
+import { getPathSegments, parseQueryParams, setCorsHeaders } from "./utils";
+import { handleWebhooks } from "./webhooks";
 
 const port = parseInt(process.env.PORT || process.argv[2] || "3013", 10);
 const apiKey = process.env.API_KEY || "";
@@ -43,8 +42,7 @@ if (globalState.__httpServer) {
   globalState.__httpServer.close();
 }
 
-const transports: Record<string, StreamableHTTPServerTransport> =
-  globalState.__transports ?? {};
+const transports: Record<string, StreamableHTTPServerTransport> = globalState.__transports ?? {};
 
 const httpServer = createHttpServer(async (req, res) => {
   const startTime = performance.now();
@@ -62,9 +60,7 @@ const httpServer = createHttpServer(async (req, res) => {
   const logRequest = () => {
     const elapsed = (performance.now() - startTime).toFixed(1);
     const statusEmoji = statusCode >= 400 ? "⚠️" : "✓";
-    console.log(
-      `[HTTP] ${statusEmoji} ${req.method} ${req.url} → ${statusCode} (${elapsed}ms)`,
-    );
+    console.log(`[HTTP] ${statusEmoji} ${req.method} ${req.url} → ${statusCode} (${elapsed}ms)`);
   };
 
   // Ensure we log on response finish
@@ -78,8 +74,7 @@ const httpServer = createHttpServer(async (req, res) => {
   setCorsHeaders(res);
 
   // ── Core routes (OPTIONS, health, auth, /me, /cancelled-tasks, /ping, /close) ──
-  if (await handleCore(req, res, req.headers["x-agent-id"] as string | undefined, apiKey))
-    return;
+  if (await handleCore(req, res, req.headers["x-agent-id"] as string | undefined, apiKey)) return;
 
   const pathSegments = getPathSegments(req.url || "");
   const queryParams = parseQueryParams(req.url || "");
@@ -179,9 +174,7 @@ httpServer
     try {
       const updated = loadGlobalConfigsIntoEnv(false);
       if (updated.length > 0) {
-        console.log(
-          `Injected ${updated.length} swarm_config value(s) into process.env`,
-        );
+        console.log(`Injected ${updated.length} swarm_config value(s) into process.env`);
       }
     } catch (e) {
       console.error("Failed to load global swarm configs:", e);

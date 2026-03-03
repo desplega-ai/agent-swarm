@@ -14,6 +14,7 @@ import {
   markEpicsProgressNotified,
   startTask,
 } from "../be/db";
+import { matchRoute } from "./utils";
 
 export async function handlePoll(
   req: IncomingMessage,
@@ -21,12 +22,11 @@ export async function handlePoll(
   pathSegments: string[],
   myAgentId: string | undefined,
 ): Promise<boolean> {
-  if (req.method === "GET" && pathSegments[0] === "api" && pathSegments[1] === "poll") {
+  if (matchRoute(req.method, pathSegments, "GET", ["api", "poll"])) {
     if (!myAgentId) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
       return true;
-
     }
 
     // Use transaction for consistent reads across all trigger checks
@@ -160,7 +160,6 @@ export async function handlePoll(
         }),
       );
       return true;
-
     }
 
     // Handle error case
@@ -168,13 +167,11 @@ export async function handlePoll(
       res.writeHead(result.status ?? 500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: result.error }));
       return true;
-
     }
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(result));
     return true;
-
   }
 
   return false;

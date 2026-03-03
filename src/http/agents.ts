@@ -14,7 +14,7 @@ import {
   updateAgentProfile,
   updateAgentStatus,
 } from "../be/db";
-import { agentWithCapacity } from "./utils";
+import { agentWithCapacity, matchRoute } from "./utils";
 
 export async function handleAgentRegister(
   req: IncomingMessage,
@@ -22,12 +22,7 @@ export async function handleAgentRegister(
   pathSegments: string[],
   myAgentId: string | undefined,
 ): Promise<boolean> {
-  if (
-    req.method === "POST" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "agents" &&
-    !pathSegments[2]
-  ) {
+  if (matchRoute(req.method, pathSegments, "POST", ["api", "agents"], true)) {
     // Parse request body
     const chunks: Buffer[] = [];
     for await (const chunk of req) {
@@ -40,7 +35,6 @@ export async function handleAgentRegister(
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Missing or invalid 'name' field" }));
       return true;
-
     }
 
     // Use X-Agent-ID header if provided, otherwise generate new UUID
@@ -82,7 +76,6 @@ export async function handleAgentRegister(
     res.writeHead(result.created ? 201 : 200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(result.agent));
     return true;
-
   }
 
   return false;
@@ -95,30 +88,18 @@ export async function handleAgentsRest(
   queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
-  if (
-    req.method === "GET" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "agents" &&
-    !pathSegments[2]
-  ) {
+  if (matchRoute(req.method, pathSegments, "GET", ["api", "agents"], true)) {
     const includeTasks = queryParams.get("include") === "tasks";
     const agents = includeTasks ? getAllAgentsWithTasks() : getAllAgents();
     const agentsWithCapacity = agents.map(agentWithCapacity);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ agents: agentsWithCapacity }));
     return true;
-
   }
 
   // PUT /api/agents/:id/name - Update agent name (check before GET to avoid conflict)
-  if (
-    req.method === "PUT" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "agents" &&
-    pathSegments[2] &&
-    pathSegments[3] === "name"
-  ) {
-    const agentId = pathSegments[2];
+  if (matchRoute(req.method, pathSegments, "PUT", ["api", "agents", null, "name"])) {
+    const agentId = pathSegments[2]!;
 
     // Parse request body
     const chunks: Buffer[] = [];
@@ -134,14 +115,12 @@ export async function handleAgentsRest(
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Invalid JSON" }));
       return true;
-
     }
 
     if (!body.name || typeof body.name !== "string" || !body.name.trim()) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Invalid name" }));
       return true;
-
     }
 
     try {
@@ -150,7 +129,6 @@ export async function handleAgentsRest(
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Agent not found" }));
         return true;
-
       }
 
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -160,24 +138,16 @@ export async function handleAgentsRest(
       res.end(JSON.stringify({ error: (error as Error).message }));
     }
     return true;
-
   }
 
   // GET /api/agents/:id/setup-script - Fetch agent + global setup scripts for Docker entrypoint
-  if (
-    req.method === "GET" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "agents" &&
-    pathSegments[2] &&
-    pathSegments[3] === "setup-script"
-  ) {
-    const agentId = pathSegments[2];
+  if (matchRoute(req.method, pathSegments, "GET", ["api", "agents", null, "setup-script"])) {
+    const agentId = pathSegments[2]!;
     const agent = getAgentById(agentId);
     if (!agent) {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Agent not found" }));
       return true;
-
     }
 
     // Fetch global setup script from swarm_config
@@ -192,18 +162,11 @@ export async function handleAgentsRest(
       }),
     );
     return true;
-
   }
 
   // PUT /api/agents/:id/profile - Update agent profile (role, description, capabilities)
-  if (
-    req.method === "PUT" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "agents" &&
-    pathSegments[2] &&
-    pathSegments[3] === "profile"
-  ) {
-    const agentId = pathSegments[2];
+  if (matchRoute(req.method, pathSegments, "PUT", ["api", "agents", null, "profile"])) {
+    const agentId = pathSegments[2]!;
 
     // Parse request body
     const chunks: Buffer[] = [];
@@ -231,7 +194,6 @@ export async function handleAgentsRest(
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Invalid JSON" }));
       return true;
-
     }
 
     // At least one field must be provided
@@ -253,7 +215,6 @@ export async function handleAgentsRest(
         }),
       );
       return true;
-
     }
 
     // Validate role length if provided
@@ -261,7 +222,6 @@ export async function handleAgentsRest(
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Role must be 100 characters or less" }));
       return true;
-
     }
 
     // Validate capabilities if provided
@@ -269,7 +229,6 @@ export async function handleAgentsRest(
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Capabilities must be an array of strings" }));
       return true;
-
     }
 
     // Validate text field sizes (max 64KB each)
@@ -279,7 +238,6 @@ export async function handleAgentsRest(
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: `${field} must be 64KB or less` }));
         return true;
-
       }
     }
 
@@ -315,40 +273,25 @@ export async function handleAgentsRest(
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Agent not found" }));
       return true;
-
     }
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(agentWithCapacity(agent)));
     return true;
-
   }
 
   // PUT /api/agents/:id/activity - Update agent last activity timestamp
-  if (
-    req.method === "PUT" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "agents" &&
-    pathSegments[2] &&
-    pathSegments[3] === "activity"
-  ) {
-    const agentId = pathSegments[2];
+  if (matchRoute(req.method, pathSegments, "PUT", ["api", "agents", null, "activity"])) {
+    const agentId = pathSegments[2]!;
     updateAgentActivity(agentId);
     res.writeHead(204);
     res.end();
     return true;
-
   }
 
   // GET /api/agents/:id - Get single agent (optionally with tasks)
-  if (
-    req.method === "GET" &&
-    pathSegments[0] === "api" &&
-    pathSegments[1] === "agents" &&
-    pathSegments[2] &&
-    !pathSegments[3]
-  ) {
-    const agentId = pathSegments[2];
+  if (matchRoute(req.method, pathSegments, "GET", ["api", "agents", null], true)) {
+    const agentId = pathSegments[2]!;
     const includeTasks = queryParams.get("include") === "tasks";
     const agent = includeTasks ? getAgentWithTasks(agentId) : getAgentById(agentId);
 
@@ -356,13 +299,11 @@ export async function handleAgentsRest(
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Agent not found" }));
       return true;
-
     }
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(agentWithCapacity(agent)));
     return true;
-
   }
 
   // GET /api/tasks - List all tasks (with optional filters: status, agentId, search)
