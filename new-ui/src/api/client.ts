@@ -5,10 +5,12 @@ import type {
   ChannelMessage,
   ChannelsResponse,
   DashboardCostResponse,
+  Epic,
   EpicsResponse,
   EpicWithTasks,
   LogsResponse,
   MessagesResponse,
+  ScheduledTask,
   ScheduledTasksResponse,
   ServicesResponse,
   SessionCostsResponse,
@@ -131,6 +133,67 @@ class ApiClient {
     return res.json();
   }
 
+  async createTask(data: {
+    task: string;
+    agentId?: string;
+    taskType?: string;
+    tags?: string[];
+    priority?: number;
+    dependsOn?: string[];
+  }): Promise<TaskWithLogs> {
+    const url = `${this.getBaseUrl()}/api/tasks`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to create task" }));
+      throw new Error(error.error || `Failed to create task: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async cancelTask(id: string, reason?: string): Promise<{ success: boolean; task: TaskWithLogs }> {
+    const url = `${this.getBaseUrl()}/api/tasks/${id}/cancel`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ reason }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to cancel task" }));
+      throw new Error(error.error || `Failed to cancel task: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async pauseTask(id: string): Promise<{ success: boolean; task: TaskWithLogs }> {
+    const url = `${this.getBaseUrl()}/api/tasks/${id}/pause`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to pause task" }));
+      throw new Error(error.error || `Failed to pause task: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async resumeTask(id: string): Promise<{ success: boolean; task: TaskWithLogs }> {
+    const url = `${this.getBaseUrl()}/api/tasks/${id}/resume`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to resume task" }));
+      throw new Error(error.error || `Failed to resume task: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async fetchTaskSessionLogs(taskId: string): Promise<SessionLog[]> {
     const url = `${this.getBaseUrl()}/api/tasks/${taskId}/session-logs`;
     const res = await fetch(url, { headers: this.getHeaders() });
@@ -165,6 +228,34 @@ class ApiClient {
     const url = `${baseUrl}/health`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
+    return res.json();
+  }
+
+  async createChannel(data: {
+    name: string;
+    description?: string;
+    type?: string;
+  }): Promise<{ channel: { id: string; name: string } }> {
+    const url = `${this.getBaseUrl()}/api/channels`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Failed to create channel: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async deleteChannel(id: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/channels/${id}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Failed to delete channel: ${res.status}`);
+    }
     return res.json();
   }
 
@@ -292,6 +383,77 @@ class ApiClient {
     return res.json();
   }
 
+  async fetchSchedule(id: string): Promise<ScheduledTask> {
+    const url = `${this.getBaseUrl()}/api/schedules/${id}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch schedule: ${res.status}`);
+    return res.json();
+  }
+
+  async createSchedule(data: {
+    name: string;
+    taskTemplate: string;
+    cronExpression?: string;
+    intervalMs?: number;
+    description?: string;
+    taskType?: string;
+    tags?: string[];
+    priority?: number;
+    targetAgentId?: string;
+    timezone?: string;
+    model?: string;
+    enabled?: boolean;
+  }): Promise<ScheduledTask> {
+    const url = `${this.getBaseUrl()}/api/schedules`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { ...this.getHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Failed to create schedule: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async updateSchedule(id: string, data: Partial<ScheduledTask>): Promise<ScheduledTask> {
+    const url = `${this.getBaseUrl()}/api/schedules/${id}`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: { ...this.getHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Failed to update schedule: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async deleteSchedule(id: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/schedules/${id}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Failed to delete schedule: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async runScheduleNow(id: string): Promise<{ schedule: ScheduledTask; task: TaskWithLogs }> {
+    const url = `${this.getBaseUrl()}/api/schedules/${id}/run`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Failed to run schedule: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async fetchEpics(filters?: {
     status?: string;
     search?: string;
@@ -312,6 +474,68 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/epics/${id}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch epic: ${res.status}`);
+    return res.json();
+  }
+
+  async createEpic(data: {
+    name: string;
+    goal: string;
+    description?: string;
+    priority?: number;
+    tags?: string[];
+    leadAgentId?: string;
+  }): Promise<Epic> {
+    const url = `${this.getBaseUrl()}/api/epics`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { ...this.getHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Failed to create epic: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async updateEpic(id: string, data: Partial<Epic>): Promise<Epic> {
+    const url = `${this.getBaseUrl()}/api/epics/${id}`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: { ...this.getHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Failed to update epic: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async deleteEpic(id: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/epics/${id}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Failed to delete epic: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async assignTaskToEpic(
+    epicId: string,
+    data: { taskId?: string; task?: string },
+  ): Promise<TaskWithLogs> {
+    const url = `${this.getBaseUrl()}/api/epics/${epicId}/tasks`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { ...this.getHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Failed to assign task to epic: ${res.status}`);
+    }
     return res.json();
   }
 

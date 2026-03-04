@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
+  cancelTask,
   completeTask,
   createTaskExtended,
   failTask,
@@ -113,6 +114,57 @@ export async function handleTasks(
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(task));
+    return true;
+  }
+
+  // POST /api/tasks/:id/cancel - Cancel a pending or in-progress task
+  if (matchRoute(req.method, pathSegments, "POST", ["api", "tasks", null, "cancel"])) {
+    const taskId = pathSegments[2]!;
+    const task = getTaskById(taskId);
+
+    if (!task) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Task not found" }));
+      return true;
+    }
+
+    const terminalStatuses = ["completed", "failed", "cancelled"];
+    if (terminalStatuses.includes(task.status)) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: `Cannot cancel task with status '${task.status}'` }));
+      return true;
+    }
+
+    // Parse optional reason from body
+    let reason: string | undefined;
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const raw = Buffer.concat(chunks).toString();
+    if (raw) {
+      try {
+        const body = JSON.parse(raw);
+        reason = body.reason;
+      } catch {
+        // No body or invalid JSON — proceed without reason
+      }
+    }
+
+    const cancelledTask = cancelTask(taskId, reason);
+    if (!cancelledTask) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Failed to cancel task" }));
+      return true;
+    }
+
+    // Update agent status if task had an assigned agent
+    if (task.agentId) {
+      updateAgentStatusFromCapacity(task.agentId);
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ success: true, task: cancelledTask }));
     return true;
   }
 
@@ -240,14 +292,8 @@ export async function handleTasks(
     return true;
   }
 
-  // POST /api/tasks/:id/pause - Pause an in-progress task (for graceful shutdown)
+  // POST /api/tasks/:id/pause - Pause an in-progress task
   if (matchRoute(req.method, pathSegments, "POST", ["api", "tasks", null, "pause"])) {
-    if (!myAgentId) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
-      return true;
-    }
-
     const taskId = pathSegments[2]!;
     const task = getTaskById(taskId);
 
@@ -257,8 +303,8 @@ export async function handleTasks(
       return true;
     }
 
-    // Only allow the assigned agent to pause their own task
-    if (task.agentId !== myAgentId) {
+    // If called by an agent, only allow pausing own tasks
+    if (myAgentId && task.agentId !== myAgentId) {
       res.writeHead(403, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Task belongs to another agent" }));
       return true;
@@ -284,12 +330,6 @@ export async function handleTasks(
 
   // POST /api/tasks/:id/resume - Resume a paused task
   if (matchRoute(req.method, pathSegments, "POST", ["api", "tasks", null, "resume"])) {
-    if (!myAgentId) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
-      return true;
-    }
-
     const taskId = pathSegments[2]!;
     const task = getTaskById(taskId);
 
@@ -299,8 +339,8 @@ export async function handleTasks(
       return true;
     }
 
-    // Only allow the assigned agent to resume their own task
-    if (task.agentId !== myAgentId) {
+    // If called by an agent, only allow resuming own tasks
+    if (myAgentId && task.agentId !== myAgentId) {
       res.writeHead(403, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Task belongs to another agent" }));
       return true;

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
 
 export interface TaskFilters {
@@ -34,5 +34,56 @@ export function useTaskSessionLogs(taskId: string) {
     queryFn: () => api.fetchTaskSessionLogs(taskId),
     enabled: !!taskId,
     refetchInterval: 5000,
+  });
+}
+
+export function useCreateTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      task: string;
+      agentId?: string;
+      taskType?: string;
+      tags?: string[];
+      priority?: number;
+      dependsOn?: string[];
+    }) => api.createTask(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    },
+  });
+}
+
+export function useCancelTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) => api.cancelTask(id, reason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["task"] });
+      queryClient.invalidateQueries({ queryKey: ["stats"] });
+    },
+  });
+}
+
+export function usePauseTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.pauseTask(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["task"] });
+    },
+  });
+}
+
+export function useResumeTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.resumeTask(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["task"] });
+    },
   });
 }

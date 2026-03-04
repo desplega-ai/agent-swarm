@@ -237,8 +237,8 @@ describe("Task Cancellation", () => {
       expect(result).toBeNull();
     });
 
-    test("should not cancel an unassigned task", () => {
-      // Tasks without an agentId have status "unassigned" which is not cancellable
+    test("should cancel an unassigned task", () => {
+      // Tasks without an agentId have status "unassigned" — still cancellable
       const task = createTaskExtended("Unassigned task", {
         creatorAgentId: "lead-agent-cancel",
         // No agentId - so it's unassigned
@@ -246,8 +246,10 @@ describe("Task Cancellation", () => {
 
       expect(task.status).toBe("unassigned");
 
-      const result = cancelTask(task.id, "Try to cancel unassigned");
-      expect(result).toBeNull();
+      const result = cancelTask(task.id, "Cancel unassigned task");
+      expect(result).not.toBeNull();
+      expect(result!.status).toBe("cancelled");
+      expect(result!.failureReason).toContain("Cancel unassigned task");
     });
 
     test("should use default cancellation reason if none provided", () => {

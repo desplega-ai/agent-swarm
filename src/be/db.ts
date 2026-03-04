@@ -901,6 +901,121 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   );
   db.run(`CREATE INDEX IF NOT EXISTS idx_cv_hash ON context_versions(agentId, field, contentHash)`);
 
+  // Migration: Remove restrictive CHECK constraint on agent_tasks.status
+  // Old databases have CHECK(status IN ('pending','in_progress','completed','failed'))
+  // which blocks 'cancelled', 'paused', 'offered', 'unassigned' statuses
+  try {
+    const taskSchemaInfo = db
+      .prepare<{ sql: string | null }, []>(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_tasks'",
+      )
+      .get();
+
+    const needsStatusMigration =
+      taskSchemaInfo?.sql?.includes("CHECK") &&
+      taskSchemaInfo.sql.includes("status") &&
+      !taskSchemaInfo.sql.includes("'cancelled'");
+
+    if (needsStatusMigration) {
+      console.log("[Migration] Removing restrictive CHECK constraint on agent_tasks.status");
+      db.run("PRAGMA foreign_keys=off");
+
+      db.run(`
+        CREATE TABLE agent_tasks_new (
+          id TEXT PRIMARY KEY,
+          agentId TEXT,
+          creatorAgentId TEXT,
+          task TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          source TEXT NOT NULL DEFAULT 'mcp',
+          taskType TEXT,
+          tags TEXT DEFAULT '[]',
+          priority INTEGER DEFAULT 50,
+          dependsOn TEXT DEFAULT '[]',
+          offeredTo TEXT,
+          offeredAt TEXT,
+          acceptedAt TEXT,
+          rejectionReason TEXT,
+          slackChannelId TEXT,
+          slackThreadTs TEXT,
+          slackUserId TEXT,
+          createdAt TEXT NOT NULL,
+          lastUpdatedAt TEXT NOT NULL,
+          finishedAt TEXT,
+          failureReason TEXT,
+          output TEXT,
+          progress TEXT,
+          notifiedAt TEXT,
+          mentionMessageId TEXT,
+          mentionChannelId TEXT,
+          githubRepo TEXT,
+          githubEventType TEXT,
+          githubNumber INTEGER,
+          githubCommentId INTEGER,
+          githubAuthor TEXT,
+          githubUrl TEXT,
+          epicId TEXT REFERENCES epics(id) ON DELETE SET NULL,
+          parentTaskId TEXT,
+          claudeSessionId TEXT,
+          agentmailInboxId TEXT,
+          agentmailMessageId TEXT,
+          agentmailThreadId TEXT,
+          model TEXT,
+          scheduleId TEXT
+        )
+      `);
+
+      // Copy all data — use column list to handle any column ordering differences
+      db.run(`
+        INSERT INTO agent_tasks_new (
+          id, agentId, creatorAgentId, task, status, source, taskType, tags,
+          priority, dependsOn, offeredTo, offeredAt, acceptedAt, rejectionReason,
+          slackChannelId, slackThreadTs, slackUserId, createdAt, lastUpdatedAt,
+          finishedAt, failureReason, output, progress, notifiedAt,
+          mentionMessageId, mentionChannelId, githubRepo, githubEventType,
+          githubNumber, githubCommentId, githubAuthor, githubUrl,
+          epicId, parentTaskId, claudeSessionId,
+          agentmailInboxId, agentmailMessageId, agentmailThreadId,
+          model, scheduleId
+        )
+        SELECT
+          id, agentId, creatorAgentId, task, status, source, taskType, tags,
+          priority, dependsOn, offeredTo, offeredAt, acceptedAt, rejectionReason,
+          slackChannelId, slackThreadTs, slackUserId, createdAt, lastUpdatedAt,
+          finishedAt, failureReason, output, progress, notifiedAt,
+          mentionMessageId, mentionChannelId, githubRepo, githubEventType,
+          githubNumber, githubCommentId, githubAuthor, githubUrl,
+          epicId, parentTaskId, claudeSessionId,
+          agentmailInboxId, agentmailMessageId, agentmailThreadId,
+          model, scheduleId
+        FROM agent_tasks
+      `);
+
+      db.run("DROP TABLE agent_tasks");
+      db.run("ALTER TABLE agent_tasks_new RENAME TO agent_tasks");
+
+      // Recreate all indexes
+      db.run("CREATE INDEX IF NOT EXISTS idx_agent_tasks_agentId ON agent_tasks(agentId)");
+      db.run("CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status)");
+      db.run("CREATE INDEX IF NOT EXISTS idx_agent_tasks_offeredTo ON agent_tasks(offeredTo)");
+      db.run("CREATE INDEX IF NOT EXISTS idx_agent_tasks_taskType ON agent_tasks(taskType)");
+      db.run("CREATE INDEX IF NOT EXISTS idx_agent_tasks_epicId ON agent_tasks(epicId)");
+      db.run(
+        "CREATE INDEX IF NOT EXISTS idx_agent_tasks_agentmailThreadId ON agent_tasks(agentmailThreadId)",
+      );
+      db.run("CREATE INDEX IF NOT EXISTS idx_agent_tasks_schedule_id ON agent_tasks(scheduleId)");
+
+      db.run("PRAGMA foreign_keys=on");
+      console.log("[Migration] Successfully removed CHECK constraint on agent_tasks.status");
+    }
+  } catch (e) {
+    console.error("[Migration] Failed to update agent_tasks CHECK constraint:", e);
+    try {
+      db.run("PRAGMA foreign_keys=on");
+    } catch {}
+    throw e;
+  }
+
   // Backfill: Seed v1 for existing agents that don't have any context versions yet
   seedContextVersions();
 
@@ -2030,8 +2145,9 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
   const oldTask = getTaskById(id);
   if (!oldTask) return null;
 
-  // Only cancel tasks that are in progress or pending
-  if (!["pending", "in_progress"].includes(oldTask.status)) {
+  // Only cancel tasks that are not already in a terminal state
+  const terminalStatuses = ["completed", "failed", "cancelled"];
+  if (terminalStatuses.includes(oldTask.status)) {
     return null;
   }
 

@@ -107,6 +107,7 @@ export default function UsagePage() {
               {agents?.map((a) => (
                 <SelectItem key={a.id} value={a.id}>
                   {a.name}
+                  {a.isLead ? " (Lead)" : ""}
                 </SelectItem>
               ))}
             </SelectContent>

@@ -1,12 +1,23 @@
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
-import { Search } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useEpics } from "@/api/hooks/use-epics";
+import { useAgents } from "@/api/hooks/use-agents";
+import { useCreateEpic, useEpics } from "@/api/hooks/use-epics";
 import type { EpicStatus, EpicWithProgress } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -14,12 +25,167 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { formatSmartTime } from "@/lib/utils";
+
+interface EpicFormData {
+  name: string;
+  goal: string;
+  description: string;
+  priority: number;
+  tags: string;
+  leadAgentId: string;
+}
+
+const emptyEpicForm: EpicFormData = {
+  name: "",
+  goal: "",
+  description: "",
+  priority: 50,
+  tags: "",
+  leadAgentId: "",
+};
+
+function EpicDialog({
+  open,
+  onOpenChange,
+  onSubmit,
+  editData,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (data: EpicFormData) => void;
+  editData?: EpicFormData | null;
+}) {
+  const { data: agents } = useAgents();
+  const [form, setForm] = useState<EpicFormData>(editData ?? emptyEpicForm);
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    onSubmit(form);
+    if (!editData) setForm(emptyEpicForm);
+    onOpenChange(false);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <form onSubmit={handleSubmit}>
+          <DialogHeader>
+            <DialogTitle>{editData ? "Edit Epic" : "Create Epic"}</DialogTitle>
+            <DialogDescription>
+              {editData ? "Update epic details." : "Create a new epic to organize tasks."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Name *</Label>
+              <Input
+                placeholder="Epic name"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Goal *</Label>
+              <Textarea
+                placeholder="What should this epic achieve?"
+                value={form.goal}
+                onChange={(e) => setForm({ ...form, goal: e.target.value })}
+                required
+                rows={2}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Textarea
+                placeholder="Additional details..."
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                rows={2}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Priority (0–100)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={form.priority}
+                  onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Lead Agent</Label>
+                <Select
+                  value={form.leadAgentId}
+                  onValueChange={(v) => setForm({ ...form, leadAgentId: v === "_none" ? "" : v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="None" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">None</SelectItem>
+                    {agents?.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name}
+                        {a.isLead ? " (Lead)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Tags (comma-separated)</Label>
+              <Input
+                placeholder="frontend, urgent"
+                value={form.tags}
+                onChange={(e) => setForm({ ...form, tags: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              className="bg-primary hover:bg-primary/90"
+              disabled={!form.name.trim() || !form.goal.trim()}
+            >
+              {editData ? "Update" : "Create"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export default function EpicsPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const createEpic = useCreateEpic();
+
+  function handleCreateSubmit(data: EpicFormData) {
+    const tags = data.tags
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    createEpic.mutate({
+      name: data.name,
+      goal: data.goal,
+      ...(data.description && { description: data.description }),
+      ...(data.priority !== 50 && { priority: data.priority }),
+      ...(tags.length > 0 && { tags }),
+      ...(data.leadAgentId && { leadAgentId: data.leadAgentId }),
+    });
+  }
 
   const filters = useMemo(() => {
     const f: { status?: string } = {};
@@ -104,7 +270,16 @@ export default function EpicsPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <h1 className="text-xl font-semibold">Epics</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Epics</h1>
+        <Button
+          onClick={() => setDialogOpen(true)}
+          size="sm"
+          className="gap-1 bg-primary hover:bg-primary/90"
+        >
+          <Plus className="h-3.5 w-3.5" /> Create Epic
+        </Button>
+      </div>
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">
@@ -139,6 +314,8 @@ export default function EpicsPage() {
         loading={isLoading}
         emptyMessage="No epics found"
       />
+
+      <EpicDialog open={dialogOpen} onOpenChange={setDialogOpen} onSubmit={handleCreateSubmit} />
     </div>
   );
 }

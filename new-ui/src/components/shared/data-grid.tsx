@@ -3,6 +3,7 @@ import {
   type ColDef,
   ColumnAutoSizeModule,
   CsvExportModule,
+  type GetRowIdParams,
   ModuleRegistry,
   NumberFilterModule,
   PaginationModule,
@@ -12,7 +13,7 @@ import {
   ValidationModule,
 } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 ModuleRegistry.registerModules([
@@ -38,6 +39,7 @@ interface DataGridProps<TData> {
   className?: string;
   domLayout?: "normal" | "autoHeight";
   enableCellTextSelection?: boolean;
+  getRowId?: (params: GetRowIdParams<TData>) => string;
 }
 
 export function DataGrid<TData>({
@@ -52,8 +54,15 @@ export function DataGrid<TData>({
   className,
   domLayout = "normal",
   enableCellTextSelection = false,
+  getRowId,
 }: DataGridProps<TData>) {
   const gridRef = useRef<AgGridReact<TData>>(null);
+
+  const defaultGetRowId = useCallback((params: GetRowIdParams<TData>) => {
+    const data = params.data as Record<string, unknown>;
+    if (data && typeof data.id === "string") return data.id;
+    return String(params.rowIndex);
+  }, []);
 
   const defaultColDef = useMemo<ColDef>(
     () => ({
@@ -78,12 +87,28 @@ export function DataGrid<TData>({
     gridRef.current?.api?.sizeColumnsToFit();
   }, [loading]);
 
-  const onGridSizeChanged = useCallback(() => {
-    gridRef.current?.api?.sizeColumnsToFit();
+  // Track container width to only re-fit columns on real container resizes,
+  // not on scrollbar appear/disappear from content changes (e.g. eye icon toggle)
+  const containerRef = useRef<HTMLDivElement>(null);
+  const lastWidthRef = useRef<number>(0);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      if (Math.abs(width - lastWidthRef.current) > 1) {
+        lastWidthRef.current = width;
+        gridRef.current?.api?.sizeColumnsToFit();
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
   }, []);
 
   return (
     <div
+      ref={containerRef}
       className={cn(
         "ag-theme-quartz w-full",
         domLayout === "normal" && "h-[500px] flex-1",
@@ -105,7 +130,7 @@ export function DataGrid<TData>({
         loading={loading}
         overlayNoRowsTemplate={overlayNoRowsTemplate}
         onGridReady={onGridReady}
-        onGridSizeChanged={onGridSizeChanged}
+        getRowId={getRowId ?? defaultGetRowId}
         animateRows={false}
         suppressCellFocus
         enableCellTextSelection={enableCellTextSelection}

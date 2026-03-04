@@ -1,18 +1,37 @@
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
-import { ArrowLeft, GitBranch, Search } from "lucide-react";
+import { ArrowLeft, GitBranch, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
-import { useEpic } from "@/api/hooks/use-epics";
+import { useAssignTaskToEpic, useDeleteEpic, useEpic, useUpdateEpic } from "@/api/hooks/use-epics";
 import { useTasks } from "@/api/hooks/use-tasks";
-import type { AgentTask, AgentTaskStatus } from "@/api/types";
+import type { AgentTask, AgentTaskStatus, EpicStatus } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { JsonViewer } from "@/components/shared/json-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -22,6 +41,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
 // --- Kanban column ---
@@ -177,12 +197,142 @@ function KanbanBoard({
   );
 }
 
+function EditEpicForm({
+  epic,
+  onSubmit,
+  onCancel,
+}: {
+  epic: {
+    name: string;
+    goal: string;
+    description?: string;
+    priority: number;
+    tags: string[];
+    leadAgentId?: string;
+  };
+  onSubmit: (
+    data: Partial<{
+      name: string;
+      goal: string;
+      description: string;
+      priority: number;
+      tags: string[];
+      leadAgentId: string | null;
+    }>,
+  ) => void;
+  onCancel: () => void;
+}) {
+  const { data: agents } = useAgents();
+  const [name, setName] = useState(epic.name);
+  const [goal, setGoal] = useState(epic.goal);
+  const [description, setDescription] = useState(epic.description ?? "");
+  const [priority, setPriority] = useState(epic.priority);
+  const [tags, setTags] = useState(epic.tags?.join(", ") ?? "");
+  const [leadAgentId, setLeadAgentId] = useState(epic.leadAgentId ?? "");
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const tagList = tags
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    onSubmit({
+      name,
+      goal,
+      description: description || undefined,
+      priority,
+      tags: tagList,
+      leadAgentId: leadAgentId || null,
+    });
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <DialogHeader>
+        <DialogTitle>Edit Epic</DialogTitle>
+        <DialogDescription>Update epic details.</DialogDescription>
+      </DialogHeader>
+      <div className="space-y-4 py-4">
+        <div className="space-y-2">
+          <Label>Name *</Label>
+          <Input value={name} onChange={(e) => setName(e.target.value)} required />
+        </div>
+        <div className="space-y-2">
+          <Label>Goal *</Label>
+          <Textarea value={goal} onChange={(e) => setGoal(e.target.value)} required rows={2} />
+        </div>
+        <div className="space-y-2">
+          <Label>Description</Label>
+          <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>Priority (0–100)</Label>
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={priority}
+              onChange={(e) => setPriority(Number(e.target.value))}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Lead Agent</Label>
+            <Select
+              value={leadAgentId}
+              onValueChange={(v) => setLeadAgentId(v === "_none" ? "" : v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="None" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_none">None</SelectItem>
+                {agents?.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>
+                    {a.name}
+                    {a.isLead ? " (Lead)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <Label>Tags (comma-separated)</Label>
+          <Input value={tags} onChange={(e) => setTags(e.target.value)} />
+        </div>
+      </div>
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          className="bg-primary hover:bg-primary/90"
+          disabled={!name.trim() || !goal.trim()}
+        >
+          Update
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
 const PAGE_SIZE = 100;
 
 export default function EpicDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: epic, isLoading } = useEpic(id!);
+  const updateEpic = useUpdateEpic();
+  const deleteEpic = useDeleteEpic();
+  const assignTask = useAssignTaskToEpic();
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [addTaskOpen, setAddTaskOpen] = useState(false);
+  const [addTaskInput, setAddTaskInput] = useState("");
+  const [addTaskMode, setAddTaskMode] = useState<"existing" | "new">("new");
 
   // Task tab filters
   const [taskSearch, setTaskSearch] = useState("");
@@ -334,7 +484,23 @@ export default function EpicDetailPage() {
 
       <div className="flex items-center gap-3 flex-wrap shrink-0">
         <h1 className="text-xl font-semibold">{epic.name}</h1>
-        <StatusBadge status={epic.status} size="md" />
+        <Select
+          value={epic.status}
+          onValueChange={(v) =>
+            updateEpic.mutate({ id: epic.id, data: { status: v as EpicStatus } })
+          }
+        >
+          <SelectTrigger className="w-[130px] h-7 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="draft">Draft</SelectItem>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="paused">Paused</SelectItem>
+            <SelectItem value="completed">Completed</SelectItem>
+            <SelectItem value="cancelled">Cancelled</SelectItem>
+          </SelectContent>
+        </Select>
         {epic.tags?.map((tag) => (
           <Badge
             key={tag}
@@ -344,6 +510,19 @@ export default function EpicDetailPage() {
             {tag}
           </Badge>
         ))}
+        <div className="ml-auto flex items-center gap-1.5 shrink-0">
+          <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+            <Pencil className="h-3 w-3 mr-1" /> Edit
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-red-500/30 text-red-400 hover:bg-red-500/10"
+            onClick={() => setDeleteOpen(true)}
+          >
+            <Trash2 className="h-3 w-3 mr-1" /> Delete
+          </Button>
+        </div>
       </div>
 
       {/* Progress Bar */}
@@ -450,6 +629,18 @@ export default function EpicDetailPage() {
                 <SelectItem value="cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>
+            <Button
+              size="sm"
+              variant="outline"
+              className="ml-auto"
+              onClick={() => {
+                setAddTaskInput("");
+                setAddTaskMode("new");
+                setAddTaskOpen(true);
+              }}
+            >
+              <Plus className="h-3 w-3 mr-1" /> Add Task
+            </Button>
           </div>
 
           <DataGrid
@@ -500,6 +691,116 @@ export default function EpicDetailPage() {
           />
         </TabsContent>
       </Tabs>
+
+      {/* Edit Epic Dialog */}
+      {editOpen && (
+        <Dialog open={editOpen} onOpenChange={setEditOpen}>
+          <DialogContent>
+            <EditEpicForm
+              epic={epic}
+              onSubmit={(data) => {
+                updateEpic.mutate({ id: epic.id, data });
+                setEditOpen(false);
+              }}
+              onCancel={() => setEditOpen(false)}
+            />
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Epic</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{epic.name}</strong>? This action cannot be
+              undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              onClick={() => {
+                deleteEpic.mutate(epic.id, { onSuccess: () => navigate("/epics") });
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Add Task Dialog */}
+      <Dialog open={addTaskOpen} onOpenChange={setAddTaskOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Task to Epic</DialogTitle>
+            <DialogDescription>Create a new task or assign an existing one.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant={addTaskMode === "new" ? "default" : "outline"}
+                onClick={() => {
+                  setAddTaskMode("new");
+                  setAddTaskInput("");
+                }}
+              >
+                New Task
+              </Button>
+              <Button
+                size="sm"
+                variant={addTaskMode === "existing" ? "default" : "outline"}
+                onClick={() => {
+                  setAddTaskMode("existing");
+                  setAddTaskInput("");
+                }}
+              >
+                Existing Task
+              </Button>
+            </div>
+            <div className="space-y-2">
+              <Label>{addTaskMode === "new" ? "Task Description" : "Task ID"}</Label>
+              {addTaskMode === "new" ? (
+                <Textarea
+                  placeholder="Describe the task..."
+                  value={addTaskInput}
+                  onChange={(e) => setAddTaskInput(e.target.value)}
+                  rows={3}
+                />
+              ) : (
+                <Input
+                  placeholder="Enter task ID"
+                  value={addTaskInput}
+                  onChange={(e) => setAddTaskInput(e.target.value)}
+                />
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setAddTaskOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-primary hover:bg-primary/90"
+              disabled={!addTaskInput.trim()}
+              onClick={() => {
+                const data =
+                  addTaskMode === "new"
+                    ? { task: addTaskInput.trim() }
+                    : { taskId: addTaskInput.trim() };
+                assignTask.mutate({ epicId: epic.id, data });
+                setAddTaskOpen(false);
+              }}
+            >
+              {addTaskMode === "new" ? "Create & Add" : "Assign"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

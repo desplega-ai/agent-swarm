@@ -1,4 +1,17 @@
-import { Check, Code, Copy, Hash, Lock, MessageSquare, Reply, Send, Type, X } from "lucide-react";
+import {
+  Check,
+  Code,
+  Copy,
+  Hash,
+  Lock,
+  MessageSquare,
+  Plus,
+  Reply,
+  Send,
+  Trash2,
+  Type,
+  X,
+} from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { useParams } from "react-router-dom";
@@ -6,12 +19,35 @@ import remarkGfm from "remark-gfm";
 import { useAgents } from "@/api/hooks/use-agents";
 import {
   useChannels,
+  useCreateChannel,
+  useDeleteChannel,
   useMessages,
   usePostMessage,
   useThreadMessages,
 } from "@/api/hooks/use-channels";
 import type { Channel, ChannelMessage } from "@/api/types";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -27,42 +63,155 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 
 // --- Channel sidebar ---
 
+const GENERAL_CHANNEL_ID = "00000000-0000-4000-8000-000000000001";
+
 function ChannelSidebar({
   channels,
   activeChannelId,
   onSelect,
+  onChannelDeleted,
 }: {
   channels: Channel[];
   activeChannelId: string | null;
   onSelect: (id: string) => void;
+  onChannelDeleted?: (id: string) => void;
 }) {
+  const createChannel = useCreateChannel();
+  const deleteChannel = useDeleteChannel();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+
+  function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    const name = newName.trim();
+    if (!name) return;
+    createChannel.mutate(
+      { name, ...(newDescription.trim() && { description: newDescription.trim() }) },
+      {
+        onSuccess: (result) => {
+          onSelect(result.channel.id);
+        },
+      },
+    );
+    setNewName("");
+    setNewDescription("");
+    setCreateOpen(false);
+  }
+
+  function handleDelete(channelId: string) {
+    deleteChannel.mutate(channelId);
+    onChannelDeleted?.(channelId);
+  }
+
   return (
     <div className="w-48 shrink-0 border-r border-border bg-muted/30 overflow-y-auto h-full">
-      <div className="p-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-        Channels
+      <div className="flex items-center justify-between p-3">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Channels
+        </span>
+        <button
+          type="button"
+          onClick={() => setCreateOpen(true)}
+          className="h-5 w-5 inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
       </div>
       <div className="space-y-0.5 px-2 pb-2">
         {channels.map((ch) => (
-          <button
+          <div
             key={ch.id}
-            type="button"
-            onClick={() => onSelect(ch.id)}
             className={cn(
-              "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+              "group/ch flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
               activeChannelId === ch.id
                 ? "bg-primary/15 text-primary"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
           >
-            {ch.type === "dm" ? (
-              <Lock className="h-3.5 w-3.5 shrink-0" />
-            ) : (
-              <Hash className="h-3.5 w-3.5 shrink-0" />
+            <button
+              type="button"
+              onClick={() => onSelect(ch.id)}
+              className="flex items-center gap-2 min-w-0 flex-1"
+            >
+              {ch.type === "dm" ? (
+                <Lock className="h-3.5 w-3.5 shrink-0" />
+              ) : (
+                <Hash className="h-3.5 w-3.5 shrink-0" />
+              )}
+              <span className="truncate text-xs">{ch.name}</span>
+            </button>
+            {ch.id !== GENERAL_CHANNEL_ID && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <button
+                    type="button"
+                    className="h-4 w-4 shrink-0 inline-flex items-center justify-center rounded opacity-0 group-hover/ch:opacity-100 text-muted-foreground hover:text-red-400 transition-all"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete #{ch.name}?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently delete this channel and all its messages.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => handleDelete(ch.id)}
+                      className="bg-red-600 hover:bg-red-700"
+                    >
+                      Delete
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             )}
-            <span className="truncate text-xs">{ch.name}</span>
-          </button>
+          </div>
         ))}
       </div>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="max-w-sm">
+          <form onSubmit={handleCreate}>
+            <DialogHeader>
+              <DialogTitle>Create Channel</DialogTitle>
+              <DialogDescription>Add a new channel for agent communication.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Name *</Label>
+                <Input
+                  placeholder="e.g. deployments"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Description</Label>
+                <Input
+                  placeholder="Optional description"
+                  value={newDescription}
+                  onChange={(e) => setNewDescription(e.target.value)}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!newName.trim()}>
+                Create
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -439,6 +588,12 @@ export default function ChatPage() {
             channels={channels ?? []}
             activeChannelId={activeChannelId}
             onSelect={setActiveChannelId}
+            onChannelDeleted={(id) => {
+              if (activeChannelId === id) {
+                const remaining = channels?.filter((c) => c.id !== id);
+                setActiveChannelId(remaining?.[0]?.id ?? null);
+              }
+            }}
           />
         </div>
 

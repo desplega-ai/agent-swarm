@@ -1,17 +1,52 @@
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
-import { ArrowLeft, Clock, ListTodo, Timer } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { ArrowLeft, Clock, ListTodo, Pencil, Play, Timer, Trash2 } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
-import { useScheduledTasks } from "@/api/hooks/use-schedules";
+import {
+  useDeleteSchedule,
+  useRunScheduleNow,
+  useScheduledTask,
+  useUpdateSchedule,
+} from "@/api/hooks/use-schedules";
 import { useTasks } from "@/api/hooks/use-tasks";
 import type { AgentTask, AgentTaskStatus } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
 function formatInterval(ms: number): string {
@@ -111,8 +146,14 @@ function ScheduleTasks({ scheduleId }: { scheduleId: string }) {
 export default function ScheduleDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { data: schedules, isLoading } = useScheduledTasks();
+  const { data: schedule, isLoading } = useScheduledTask(id!);
   const { data: agents } = useAgents();
+  const updateSchedule = useUpdateSchedule();
+  const deleteSchedule = useDeleteSchedule();
+  const runNow = useRunScheduleNow();
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const agentMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -121,8 +162,6 @@ export default function ScheduleDetailPage() {
     });
     return m;
   }, [agents]);
-
-  const schedule = schedules?.find((s) => s.id === id);
 
   if (isLoading) {
     return (
@@ -149,14 +188,17 @@ export default function ScheduleDetailPage() {
 
       <div className="flex items-center gap-3 flex-wrap">
         <h1 className="text-xl font-semibold">{schedule.name}</h1>
-        <Badge
-          variant={schedule.enabled ? "default" : "secondary"}
-          className={
-            schedule.enabled ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" : ""
-          }
-        >
-          {schedule.enabled ? "Enabled" : "Disabled"}
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={schedule.enabled}
+            onCheckedChange={(checked) =>
+              updateSchedule.mutate({ id: schedule.id, data: { enabled: checked } })
+            }
+          />
+          <span className="text-xs text-muted-foreground">
+            {schedule.enabled ? "Enabled" : "Disabled"}
+          </span>
+        </div>
         {schedule.taskType && (
           <Badge
             variant="outline"
@@ -165,6 +207,27 @@ export default function ScheduleDetailPage() {
             {schedule.taskType}
           </Badge>
         )}
+        <div className="ml-auto flex items-center gap-1.5 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => runNow.mutate(schedule.id)}
+            disabled={!schedule.enabled || runNow.isPending}
+          >
+            <Play className="h-3 w-3 mr-1" /> Run Now
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+            <Pencil className="h-3 w-3 mr-1" /> Edit
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-red-500/30 text-red-400 hover:bg-red-500/10"
+            onClick={() => setDeleteOpen(true)}
+          >
+            <Trash2 className="h-3 w-3 mr-1" /> Delete
+          </Button>
+        </div>
       </div>
 
       {schedule.description && (
@@ -318,6 +381,257 @@ export default function ScheduleDetailPage() {
 
         <TabsContent value="tasks">{id && <ScheduleTasks scheduleId={id} />}</TabsContent>
       </Tabs>
+
+      {/* Edit Dialog */}
+      {editOpen && (
+        <EditScheduleDialog
+          schedule={schedule}
+          agents={agents}
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          onSubmit={(data) => {
+            updateSchedule.mutate({ id: schedule.id, data });
+            setEditOpen(false);
+          }}
+        />
+      )}
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Schedule</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{schedule.name}</strong>? This action cannot
+              be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              onClick={() => {
+                deleteSchedule.mutate(schedule.id, { onSuccess: () => navigate("/schedules") });
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
+  );
+}
+
+function EditScheduleDialog({
+  schedule,
+  agents,
+  open,
+  onOpenChange,
+  onSubmit,
+}: {
+  schedule: {
+    name: string;
+    taskTemplate: string;
+    cronExpression?: string;
+    intervalMs?: number;
+    description?: string;
+    taskType?: string;
+    tags: string[];
+    priority: number;
+    targetAgentId?: string;
+    timezone: string;
+    model?: string;
+  };
+  agents: { id: string; name: string }[] | undefined;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (data: Record<string, unknown>) => void;
+}) {
+  const [name, setName] = useState(schedule.name);
+  const [taskTemplate, setTaskTemplate] = useState(schedule.taskTemplate);
+  const [cronExpression, setCronExpression] = useState(schedule.cronExpression ?? "");
+  const [intervalMinutes, setIntervalMinutes] = useState(
+    schedule.intervalMs ? schedule.intervalMs / 60000 : 60,
+  );
+  const [scheduleType, setScheduleType] = useState<"cron" | "interval">(
+    schedule.cronExpression ? "cron" : "interval",
+  );
+  const [description, setDescription] = useState(schedule.description ?? "");
+  const [taskType, setTaskType] = useState(schedule.taskType ?? "");
+  const [tags, setTags] = useState(schedule.tags.join(", "));
+  const [priority, setPriority] = useState(schedule.priority);
+  const [targetAgentId, setTargetAgentId] = useState(schedule.targetAgentId ?? "");
+  const [timezone, setTimezone] = useState(schedule.timezone);
+  const [model, setModel] = useState(schedule.model ?? "");
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const tagList = tags
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    onSubmit({
+      name,
+      taskTemplate,
+      ...(scheduleType === "cron"
+        ? { cronExpression, intervalMs: null }
+        : { intervalMs: intervalMinutes * 60000, cronExpression: null }),
+      description: description || null,
+      taskType: taskType || null,
+      tags: tagList,
+      priority,
+      targetAgentId: targetAgentId || null,
+      timezone,
+      model: model || null,
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <form onSubmit={handleSubmit}>
+          <DialogHeader>
+            <DialogTitle>Edit Schedule</DialogTitle>
+            <DialogDescription>Update schedule configuration.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Name *</Label>
+              <Input value={name} onChange={(e) => setName(e.target.value)} required />
+            </div>
+            <div className="space-y-2">
+              <Label>Task Template *</Label>
+              <Textarea
+                value={taskTemplate}
+                onChange={(e) => setTaskTemplate(e.target.value)}
+                required
+                rows={3}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Schedule Type</Label>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={scheduleType === "cron" ? "default" : "outline"}
+                  onClick={() => setScheduleType("cron")}
+                >
+                  Cron
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={scheduleType === "interval" ? "default" : "outline"}
+                  onClick={() => setScheduleType("interval")}
+                >
+                  Interval
+                </Button>
+              </div>
+            </div>
+            {scheduleType === "cron" ? (
+              <div className="space-y-2">
+                <Label>Cron Expression *</Label>
+                <Input
+                  value={cronExpression}
+                  onChange={(e) => setCronExpression(e.target.value)}
+                  className="font-mono"
+                  required
+                />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>Interval (minutes)</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={intervalMinutes}
+                  onChange={(e) => setIntervalMinutes(Number(e.target.value))}
+                />
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Target Agent</Label>
+                <Select
+                  value={targetAgentId}
+                  onValueChange={(v) => setTargetAgentId(v === "_none" ? "" : v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Task Pool" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">Task Pool</SelectItem>
+                    {agents?.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name}
+                        {a.isLead ? " (Lead)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Priority (0–100)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={priority}
+                  onChange={(e) => setPriority(Number(e.target.value))}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Task Type</Label>
+                <Input value={taskType} onChange={(e) => setTaskType(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Model</Label>
+                <Select value={model} onValueChange={(v) => setModel(v === "_none" ? "" : v)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Default" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">Default</SelectItem>
+                    <SelectItem value="haiku">Haiku</SelectItem>
+                    <SelectItem value="sonnet">Sonnet</SelectItem>
+                    <SelectItem value="opus">Opus</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Timezone</Label>
+                <Input value={timezone} onChange={(e) => setTimezone(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Tags (comma-separated)</Label>
+                <Input value={tags} onChange={(e) => setTags(e.target.value)} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Input value={description} onChange={(e) => setDescription(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              className="bg-primary hover:bg-primary/90"
+              disabled={!name.trim() || !taskTemplate.trim()}
+            >
+              Update
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

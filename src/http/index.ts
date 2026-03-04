@@ -20,6 +20,7 @@ import { handleMcp } from "./mcp";
 import { handleMemory } from "./memory";
 import { handlePoll } from "./poll";
 import { handleRepos } from "./repos";
+import { handleSchedules } from "./schedules";
 import { handleSessionData } from "./session-data";
 import { handleStats } from "./stats";
 import { handleTasks } from "./tasks";
@@ -92,6 +93,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleStats(req, res, pathSegments, queryParams),
     () => handleActiveSessions(req, res, pathSegments, queryParams, myAgentId),
     () => handleEpics(req, res, pathSegments, queryParams, myAgentId),
+    () => handleSchedules(req, res, pathSegments, queryParams, myAgentId),
     () => handleConfig(req, res, pathSegments, queryParams),
     () => handleRepos(req, res, pathSegments, queryParams),
     () => handleMemory(req, res, pathSegments, myAgentId),

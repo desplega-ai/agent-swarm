@@ -538,6 +538,53 @@ describe("Task Pause & Resume", () => {
 });
 
 // ===========================================================================
+// 4b. Task Cancel
+// ===========================================================================
+
+describe("Task Cancel", () => {
+  let cancelTaskId: string;
+
+  test("POST /api/tasks/:id/cancel — cancel pending task with reason", async () => {
+    const { body: t } = await post("/api/tasks", {
+      agentId: ids.leadAgent,
+      body: { task: "Cancel test - pending task" },
+    });
+    cancelTaskId = t.id;
+
+    const { status, body } = await post(`/api/tasks/${cancelTaskId}/cancel`, {
+      body: { reason: "test cancellation" },
+    });
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.task).toBeDefined();
+    expect(body.task.status).toBe("cancelled");
+    expect(body.task.failureReason).toContain("test cancellation");
+  });
+
+  test("POST /api/tasks/:id/cancel — already-cancelled task returns 400", async () => {
+    // cancelTaskId was cancelled in the previous test
+    const { status } = await post(`/api/tasks/${cancelTaskId}/cancel`);
+    expect(status).toBe(400);
+  });
+
+  test("POST /api/tasks/:id/cancel — non-existent task returns 404", async () => {
+    const { status } = await post(`/api/tasks/${randomUUID()}/cancel`);
+    expect(status).toBe(404);
+  });
+
+  test("POST /api/tasks/:id/cancel — cancel without reason", async () => {
+    const { body: t } = await post("/api/tasks", {
+      agentId: ids.leadAgent,
+      body: { task: "Cancel test - no reason" },
+    });
+    const { status, body } = await post(`/api/tasks/${t.id}/cancel`);
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.task.status).toBe("cancelled");
+  });
+});
+
+// ===========================================================================
 // 5. Cancelled Tasks
 // ===========================================================================
 
@@ -912,6 +959,155 @@ describe("Epics", () => {
 });
 
 // ===========================================================================
+// 11b. Schedule CRUD
+// ===========================================================================
+
+describe("Schedule CRUD", () => {
+  let scheduleId: string;
+
+  test("POST /api/schedules — create schedule with cron expression", async () => {
+    const { status, body } = await post("/api/schedules", {
+      body: {
+        name: "test-schedule",
+        taskTemplate: "Run integration test suite",
+        cronExpression: "0 * * * *",
+      },
+    });
+    expect(status).toBe(201);
+    expect(body.id).toBeDefined();
+    expect(body.name).toBe("test-schedule");
+    expect(body.nextRunAt).toBeDefined();
+    expect(body.enabled).toBe(true);
+    scheduleId = body.id;
+  });
+
+  test("POST /api/schedules — missing name returns 400", async () => {
+    const { status } = await post("/api/schedules", {
+      body: { taskTemplate: "do something" },
+    });
+    expect(status).toBe(400);
+  });
+
+  test("POST /api/schedules — missing taskTemplate returns 400", async () => {
+    const { status } = await post("/api/schedules", {
+      body: { name: "no-template" },
+    });
+    expect(status).toBe(400);
+  });
+
+  test("POST /api/schedules — invalid cron expression returns 400", async () => {
+    const { status } = await post("/api/schedules", {
+      body: {
+        name: "bad-cron",
+        taskTemplate: "do something",
+        cronExpression: "not-a-cron",
+      },
+    });
+    expect(status).toBe(400);
+  });
+
+  test("POST /api/schedules — duplicate name returns 409", async () => {
+    const { status } = await post("/api/schedules", {
+      body: {
+        name: "test-schedule",
+        taskTemplate: "duplicate",
+        cronExpression: "0 * * * *",
+      },
+    });
+    expect([400, 409]).toContain(status);
+  });
+
+  test("GET /api/schedules/:id — fetch single schedule", async () => {
+    const { status, body } = await get(`/api/schedules/${scheduleId}`);
+    expect(status).toBe(200);
+    expect(body.id).toBe(scheduleId);
+    expect(body.name).toBe("test-schedule");
+    expect(body.taskTemplate).toBe("Run integration test suite");
+  });
+
+  test("GET /api/schedules/:id — non-existent returns 404", async () => {
+    const { status } = await get(`/api/schedules/${randomUUID()}`);
+    expect(status).toBe(404);
+  });
+
+  test("PUT /api/schedules/:id — update name", async () => {
+    const { status, body } = await put(`/api/schedules/${scheduleId}`, {
+      body: { name: "updated-schedule" },
+    });
+    expect(status).toBe(200);
+    expect(body.name).toBe("updated-schedule");
+  });
+
+  test("PUT /api/schedules/:id — disable schedule clears nextRunAt", async () => {
+    const { status, body } = await put(`/api/schedules/${scheduleId}`, {
+      body: { enabled: false },
+    });
+    expect(status).toBe(200);
+    expect(body.enabled).toBe(false);
+    expect(body.nextRunAt).toBeFalsy();
+  });
+
+  test("PUT /api/schedules/:id — re-enable schedule recalculates nextRunAt", async () => {
+    const { status, body } = await put(`/api/schedules/${scheduleId}`, {
+      body: { enabled: true },
+    });
+    expect(status).toBe(200);
+    expect(body.enabled).toBe(true);
+    expect(body.nextRunAt).toBeDefined();
+    expect(body.nextRunAt).not.toBeNull();
+  });
+
+  test("PUT /api/schedules/:id — non-existent returns 404", async () => {
+    const { status } = await put(`/api/schedules/${randomUUID()}`, {
+      body: { name: "ghost" },
+    });
+    expect(status).toBe(404);
+  });
+
+  test("POST /api/schedules/:id/run — run now creates a task", async () => {
+    const { status, body } = await post(`/api/schedules/${scheduleId}/run`);
+    expect(status).toBe(200);
+    expect(body.schedule).toBeDefined();
+    expect(body.task).toBeDefined();
+    expect(body.task.id).toBeDefined();
+  });
+
+  test("POST /api/schedules/:id/run — disabled schedule returns 400", async () => {
+    // Disable the schedule first
+    await put(`/api/schedules/${scheduleId}`, {
+      body: { enabled: false },
+    });
+    const { status } = await post(`/api/schedules/${scheduleId}/run`);
+    expect(status).toBe(400);
+    // Re-enable for subsequent tests
+    await put(`/api/schedules/${scheduleId}`, {
+      body: { enabled: true },
+    });
+  });
+
+  test("POST /api/schedules/:id/run — non-existent returns 404", async () => {
+    const { status } = await post(`/api/schedules/${randomUUID()}/run`);
+    expect(status).toBe(404);
+  });
+
+  test("DELETE /api/schedules/:id — delete schedule", async () => {
+    const { status, body } = await del(`/api/schedules/${scheduleId}`);
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+  });
+
+  test("DELETE /api/schedules/:id — non-existent returns 404", async () => {
+    const { status } = await del(`/api/schedules/${randomUUID()}`);
+    expect(status).toBe(404);
+  });
+
+  test("GET /api/schedules/:id — deleted schedule returns 404", async () => {
+    const { status } = await get(`/api/schedules/${scheduleId}`);
+    expect(status).toBe(404);
+  });
+});
+
+// ===========================================================================
 // 12. Channels & Messages
 // ===========================================================================
 
@@ -966,6 +1162,72 @@ describe("Channels & Messages", () => {
   test("GET /api/channels/:id/messages/:messageId/thread — get thread", async () => {
     const { status } = await get(`/api/channels/${ids.channel}/messages/${ids.message}/thread`);
     expect(status).toBe(200);
+  });
+
+  // --- Channel Create / Delete ---
+
+  let createdChannelId: string;
+
+  test("POST /api/channels — create channel", async () => {
+    const { status, body } = await post("/api/channels", {
+      body: { name: "test-channel-crud" },
+    });
+    expect(status).toBe(201);
+    expect(body.id).toBeDefined();
+    expect(body.name).toBe("test-channel-crud");
+    expect(body.type).toBe("public");
+    createdChannelId = body.id;
+  });
+
+  test("POST /api/channels — create with description and type", async () => {
+    const { status, body } = await post("/api/channels", {
+      body: { name: "test-dm-channel", description: "A DM channel", type: "dm" },
+    });
+    expect(status).toBe(201);
+    expect(body.type).toBe("dm");
+    expect(body.description).toBe("A DM channel");
+    // Clean up - delete this channel
+    await del(`/api/channels/${body.id}`);
+  });
+
+  test("POST /api/channels — duplicate name returns 409", async () => {
+    const { status } = await post("/api/channels", {
+      body: { name: "test-channel-crud" },
+    });
+    expect([400, 409]).toContain(status);
+  });
+
+  test("POST /api/channels — missing name returns 400", async () => {
+    const { status } = await post("/api/channels", {
+      body: {},
+    });
+    expect(status).toBe(400);
+  });
+
+  test("DELETE /api/channels/:id — delete created channel", async () => {
+    const { status, body } = await del(`/api/channels/${createdChannelId}`);
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+  });
+
+  test("DELETE /api/channels/:id — cannot delete general channel", async () => {
+    // The general channel has the well-known ID
+    const generalId = "00000000-0000-4000-8000-000000000001";
+    const { status } = await del(`/api/channels/${generalId}`);
+    expect([400, 403]).toContain(status);
+  });
+
+  test("DELETE /api/channels/:id — non-existent returns 404", async () => {
+    const { status } = await del(`/api/channels/${randomUUID()}`);
+    expect(status).toBe(404);
+  });
+
+  test("GET /api/channels — deleted channel not in list", async () => {
+    const { status, body } = await get("/api/channels");
+    expect(status).toBe(200);
+    // biome-ignore lint/suspicious/noExplicitAny: channel shape varies
+    const found = body.channels.find((c: any) => c.id === createdChannelId);
+    expect(found).toBeUndefined();
   });
 });
 

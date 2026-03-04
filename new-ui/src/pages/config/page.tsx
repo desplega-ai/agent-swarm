@@ -233,8 +233,6 @@ function ConfigDetailDialog({
   const [showValue, setShowValue] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  if (!config) return null;
-
   function handleCopy() {
     if (!config) return;
     navigator.clipboard.writeText(config.value);
@@ -246,62 +244,68 @@ function ConfigDetailDialog({
     <Dialog open={!!config} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle className="font-mono text-base">{config.key}</DialogTitle>
-          <DialogDescription>{config.description || "No description"}</DialogDescription>
+          <DialogTitle className="font-mono text-base">{config?.key}</DialogTitle>
+          <DialogDescription>{config?.description || "No description"}</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 py-2">
-          <div className="flex items-center gap-2">
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-            >
-              {config.scope}
-            </Badge>
-            {config.isSecret && (
+        {config && (
+          <div className="space-y-4 py-2">
+            <div className="flex items-center gap-2">
               <Badge
                 variant="outline"
-                className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase border-amber-500/30 text-amber-400"
+                className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
               >
-                secret
+                {config.scope}
               </Badge>
-            )}
-          </div>
-
-          {config.scope !== "global" && config.scopeId && (
-            <div>
-              <Label className="text-xs text-muted-foreground uppercase tracking-wide">
-                {config.scope === "agent" ? "Agent" : "Scope ID"}
-              </Label>
-              <p className="text-sm mt-0.5">{agentName || `${config.scopeId.slice(0, 8)}...`}</p>
-            </div>
-          )}
-
-          <div>
-            <Label className="text-xs text-muted-foreground uppercase tracking-wide">Value</Label>
-            <div className="flex items-center gap-1 mt-1">
-              <code className="flex-1 text-sm font-mono rounded-md bg-muted p-2 break-all select-text">
-                {showValue ? config.value : "••••••••••••••••"}
-              </code>
-              <div className="flex flex-col gap-1 shrink-0">
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-7 w-7"
-                  onClick={() => setShowValue(!showValue)}
+              {config.isSecret && (
+                <Badge
+                  variant="outline"
+                  className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase border-amber-500/30 text-amber-400"
                 >
-                  {showValue ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                </Button>
-                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleCopy}>
-                  {copied ? (
-                    <Check className="h-3.5 w-3.5 text-emerald-400" />
-                  ) : (
-                    <Copy className="h-3.5 w-3.5" />
-                  )}
-                </Button>
+                  secret
+                </Badge>
+              )}
+            </div>
+
+            {config.scope !== "global" && config.scopeId && (
+              <div>
+                <Label className="text-xs text-muted-foreground uppercase tracking-wide">
+                  {config.scope === "agent" ? "Agent" : "Scope ID"}
+                </Label>
+                <p className="text-sm mt-0.5">{agentName || `${config.scopeId.slice(0, 8)}...`}</p>
+              </div>
+            )}
+
+            <div>
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Value</Label>
+              <div className="flex items-center gap-1 mt-1">
+                <code className="flex-1 text-sm font-mono rounded-md bg-muted p-2 break-all select-text">
+                  {showValue ? config.value : "••••••••••••••••"}
+                </code>
+                <div className="flex flex-col gap-1 shrink-0">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7"
+                    onClick={() => setShowValue(!showValue)}
+                  >
+                    {showValue ? (
+                      <EyeOff className="h-3.5 w-3.5" />
+                    ) : (
+                      <Eye className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleCopy}>
+                    {copied ? (
+                      <Check className="h-3.5 w-3.5 text-emerald-400" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -325,7 +329,6 @@ function SwarmConfigSection() {
   const [editEntry, setEditEntry] = useState<SwarmConfig | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SwarmConfig | null>(null);
   const [detailEntry, setDetailEntry] = useState<SwarmConfig | null>(null);
-  const [revealedSecrets, setRevealedSecrets] = useState<Set<string>>(new Set());
   const [scopeFilter, setScopeFilter] = useState<string>("all");
 
   function handleAdd() {
@@ -357,16 +360,10 @@ function SwarmConfigSection() {
     }
   }
 
-  const toggleReveal = useCallback((id: string) => {
-    setRevealedSecrets((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
   const onRowClicked = useCallback((event: RowClickedEvent<SwarmConfig>) => {
+    // Ignore clicks on interactive elements (buttons, links) inside cells
+    const target = event.event?.target as HTMLElement | undefined;
+    if (target?.closest("button, a, [role='button']")) return;
     if (event.data) setDetailEntry(event.data);
   }, []);
 
@@ -378,7 +375,8 @@ function SwarmConfigSection() {
       {
         field: "scope",
         headerName: "Scope",
-        width: 100,
+        width: 110,
+        minWidth: 90,
         cellRenderer: (params: { value: string }) => (
           <Badge
             variant="outline"
@@ -390,7 +388,8 @@ function SwarmConfigSection() {
       },
       {
         headerName: "Agent / Scope ID",
-        width: 150,
+        width: 160,
+        minWidth: 120,
         valueGetter: (params) => {
           const d = params.data;
           if (!d) return "—";
@@ -403,7 +402,8 @@ function SwarmConfigSection() {
       {
         field: "key",
         headerName: "Key",
-        width: 180,
+        width: 200,
+        minWidth: 140,
         cellRenderer: (params: { value: string }) => (
           <span className="font-mono select-text">{params.value}</span>
         ),
@@ -411,28 +411,13 @@ function SwarmConfigSection() {
       {
         field: "value",
         headerName: "Value",
-        width: 300,
+        flex: 1,
+        minWidth: 200,
         cellRenderer: (params: ICellRendererParams<SwarmConfig>) => {
           const cfg = params.data;
           if (!cfg) return null;
           if (cfg.isSecret) {
-            const revealed = revealedSecrets.has(cfg.id);
-            return (
-              <div className="flex items-center gap-1 font-mono min-w-0">
-                <span className="truncate select-text">{revealed ? cfg.value : "••••••••"}</span>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-6 w-6 shrink-0"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleReveal(cfg.id);
-                  }}
-                >
-                  {revealed ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                </Button>
-              </div>
-            );
+            return <span className="font-mono text-muted-foreground">••••••••</span>;
           }
           return <span className="font-mono truncate select-text">{cfg.value}</span>;
         },
@@ -440,8 +425,8 @@ function SwarmConfigSection() {
       {
         field: "description",
         headerName: "Description",
-        flex: 1,
-        minWidth: 150,
+        width: 200,
+        minWidth: 120,
         cellRenderer: (params: { value: string | null }) => (
           <span className="text-muted-foreground truncate">{params.value ?? "—"}</span>
         ),
@@ -449,6 +434,7 @@ function SwarmConfigSection() {
       {
         headerName: "",
         width: 100,
+        minWidth: 100,
         sortable: false,
         cellRenderer: (params: ICellRendererParams<SwarmConfig>) => {
           const cfg = params.data;
@@ -482,7 +468,7 @@ function SwarmConfigSection() {
         },
       },
     ],
-    [agentMap, revealedSecrets, handleEdit, toggleReveal],
+    [agentMap, handleEdit],
   );
 
   return (
@@ -519,7 +505,6 @@ function SwarmConfigSection() {
       />
 
       <ConfigDetailDialog
-        key={detailEntry?.id ?? "none"}
         config={detailEntry}
         onOpenChange={(open) => !open && setDetailEntry(null)}
         agentName={detailEntry?.scopeId ? agentMap.get(detailEntry.scopeId) : undefined}

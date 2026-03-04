@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   ArrowLeft,
+  Ban,
   Calendar,
   CheckCircle2,
   ChevronDown,
@@ -10,6 +11,8 @@ import {
   DollarSign,
   GitBranch,
   Hash,
+  Pause,
+  Play,
   Terminal,
   Timer,
   User,
@@ -19,11 +22,29 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useSessionCosts } from "@/api/hooks/use-costs";
-import { useTask, useTaskSessionLogs } from "@/api/hooks/use-tasks";
+import {
+  useCancelTask,
+  usePauseTask,
+  useResumeTask,
+  useTask,
+  useTaskSessionLogs,
+} from "@/api/hooks/use-tasks";
 import type { AgentLog, SessionCost } from "@/api/types";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -311,6 +332,9 @@ export default function TaskDetailPage() {
   const { data: sessionLogs } = useTaskSessionLogs(id!);
   const { data: agents } = useAgents();
   const { data: costs, isLoading: costsLoading } = useSessionCosts({ taskId: id });
+  const cancelTask = useCancelTask();
+  const pauseTask = usePauseTask();
+  const resumeTask = useResumeTask();
   const agentName = useMemo(() => {
     if (!task?.agentId || !agents) return null;
     return agents.find((a) => a.id === task.agentId)?.name ?? null;
@@ -329,6 +353,11 @@ export default function TaskDetailPage() {
   if (!task) {
     return <p className="text-muted-foreground">Task not found.</p>;
   }
+
+  const terminalStatuses = ["completed", "failed", "cancelled"];
+  const canCancel = !terminalStatuses.includes(task.status) && task.status !== "paused";
+  const canPause = task.status === "in_progress";
+  const canResume = task.status === "paused";
 
   const isFailed = task.status === "failed";
   const isCompleted = task.status === "completed";
@@ -501,7 +530,68 @@ export default function TaskDetailPage() {
             </Badge>
           ))}
         </div>
-        <p className="text-sm leading-relaxed line-clamp-3">{task.task}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm leading-relaxed line-clamp-3 flex-1">{task.task}</p>
+          {(canCancel || canPause || canResume) && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              {canPause && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => pauseTask.mutate(task.id)}
+                  disabled={pauseTask.isPending}
+                >
+                  <Pause className="h-3 w-3 mr-1" />
+                  Pause
+                </Button>
+              )}
+              {canResume && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => resumeTask.mutate(task.id)}
+                  disabled={resumeTask.isPending}
+                >
+                  <Play className="h-3 w-3 mr-1" />
+                  Resume
+                </Button>
+              )}
+              {canCancel && (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-red-500/30 text-red-400 hover:bg-red-500/10"
+                    >
+                      <Ban className="h-3 w-3 mr-1" />
+                      Cancel
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Cancel Task</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Are you sure you want to cancel this task? This action cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Keep Task</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={() =>
+                          cancelTask.mutate({ id: task.id, reason: "Cancelled from dashboard" })
+                        }
+                        className="bg-red-600 hover:bg-red-700"
+                      >
+                        Cancel Task
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       <Separator className="shrink-0" />

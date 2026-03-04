@@ -1,12 +1,15 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   assignTaskToEpic,
+  createChannel,
   createEpic,
   createTaskExtended,
+  deleteChannel,
   deleteEpic,
   getAgentById,
   getAllChannels,
   getChannelById,
+  getChannelByName,
   getChannelMessages,
   getEpicById,
   getEpics,
@@ -182,6 +185,73 @@ export async function handleEpics(
     const channels = getAllChannels();
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ channels }));
+    return true;
+  }
+
+  // POST /api/channels - Create a new channel
+  if (matchRoute(req.method, pathSegments, "POST", ["api", "channels"], true)) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    if (!body.name) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing required field: name" }));
+      return true;
+    }
+
+    // Check for duplicate name
+    const existing = getChannelByName(body.name);
+    if (existing) {
+      res.writeHead(409, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Channel with this name already exists" }));
+      return true;
+    }
+
+    try {
+      const channel = createChannel(body.name, {
+        description: body.description,
+        type: body.type,
+      });
+      res.writeHead(201, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(channel));
+    } catch (_error) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Failed to create channel" }));
+    }
+    return true;
+  }
+
+  // DELETE /api/channels/:id - Delete a channel
+  if (matchRoute(req.method, pathSegments, "DELETE", ["api", "channels", null], true)) {
+    const channelId = pathSegments[2]!;
+
+    // Protect the general channel
+    const GENERAL_CHANNEL_ID = "00000000-0000-4000-8000-000000000001";
+    if (channelId === GENERAL_CHANNEL_ID) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Cannot delete the general channel" }));
+      return true;
+    }
+
+    const channel = getChannelById(channelId);
+    if (!channel) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Channel not found" }));
+      return true;
+    }
+
+    const deleted = deleteChannel(channelId);
+    if (!deleted) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Failed to delete channel" }));
+      return true;
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ success: true }));
     return true;
   }
 
