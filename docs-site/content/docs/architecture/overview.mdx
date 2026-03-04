@@ -34,7 +34,7 @@ The MCP (Model Context Protocol) server is the central coordination point. It:
 - Handles integrations (Slack, GitHub, AgentMail webhooks)
 - Runs the task scheduler for recurring automation
 
-The server runs on port `3013` by default and is implemented in `src/http.ts` with tool definitions in `src/server.ts`.
+The server runs on port `3013` by default and is implemented in `src/http/` (modular route handlers) with tool definitions in `src/server.ts`.
 
 ### Lead Agent
 
@@ -100,7 +100,16 @@ Each worker container includes:
 agent-swarm/
 ├── src/
 │   ├── cli.tsx          # CLI entry point (Ink/React)
-│   ├── http.ts          # HTTP server entry
+│   ├── http/            # Modular HTTP route handlers
+│   │   ├── index.ts     # Handler registry & dispatch
+│   │   ├── tasks.ts     # Task endpoints
+│   │   ├── agents.ts    # Agent endpoints
+│   │   ├── epics.ts     # Epic endpoints
+│   │   ├── schedules.ts # Schedule endpoints
+│   │   ├── core.ts      # Core endpoints (join, poll, progress)
+│   │   ├── config.ts    # Config endpoints
+│   │   ├── memory.ts    # Memory endpoints
+│   │   └── ...          # Additional route modules
 │   ├── server.ts        # MCP server setup & tool registration
 │   ├── tools/           # MCP tool implementations
 │   ├── be/              # Backend (database, business logic)
@@ -134,3 +143,11 @@ agent-swarm/
 | Memory Embeddings | OpenAI `text-embedding-3-small` |
 | Dashboard | React + Vite |
 | Schema Validation | Zod |
+
+## Next Steps
+
+- [Agent Identity & Configuration](/docs/architecture/agents) — How agents are personalized and evolve
+- [Hook System](/docs/architecture/hooks) — The six hooks that fire during each session
+- [Memory System](/docs/architecture/memory) — How agents build compounding knowledge
+- [Task Lifecycle](/docs/concepts/task-lifecycle) — How tasks flow through the swarm
+- [Deployment Guide](/docs/guides/deployment) — Production deployment options

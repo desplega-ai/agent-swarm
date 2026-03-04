@@ -1,8 +1,20 @@
+import {
+  BarChart3,
+  Bot,
+  ClipboardList,
+  Clock,
+  FolderGit2,
+  Hexagon,
+  LayoutDashboard,
+  MessageSquare,
+  Server,
+  Settings,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
-import { useTasks } from "@/api/hooks/use-tasks";
 import { useEpics } from "@/api/hooks/use-epics";
+import { useTasks } from "@/api/hooks/use-tasks";
 import {
   CommandDialog,
   CommandEmpty,
@@ -12,18 +24,6 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
-import {
-  Bot,
-  ClipboardList,
-  LayoutDashboard,
-  MessageSquare,
-  Clock,
-  BarChart3,
-  Settings,
-  FolderGit2,
-  Server,
-  Hexagon,
-} from "lucide-react";
 
 const NAV_ITEMS = [
   { label: "Dashboard", path: "/", icon: LayoutDashboard, shortcut: "1" },
@@ -86,10 +86,7 @@ export function CommandMenu() {
             <CommandSeparator />
             <CommandGroup heading="Agents">
               {agents.slice(0, 8).map((agent) => (
-                <CommandItem
-                  key={agent.id}
-                  onSelect={() => handleSelect(`/agents/${agent.id}`)}
-                >
+                <CommandItem key={agent.id} onSelect={() => handleSelect(`/agents/${agent.id}`)}>
                   <Bot className="h-4 w-4" />
                   <span>{agent.name}</span>
                   {agent.role && (
@@ -106,10 +103,7 @@ export function CommandMenu() {
             <CommandSeparator />
             <CommandGroup heading="Recent Tasks">
               {tasks.slice(0, 6).map((task) => (
-                <CommandItem
-                  key={task.id}
-                  onSelect={() => handleSelect(`/tasks/${task.id}`)}
-                >
+                <CommandItem key={task.id} onSelect={() => handleSelect(`/tasks/${task.id}`)}>
                   <ClipboardList className="h-4 w-4" />
                   <span className="truncate max-w-[300px]">{task.task}</span>
                 </CommandItem>
@@ -123,10 +117,7 @@ export function CommandMenu() {
             <CommandSeparator />
             <CommandGroup heading="Epics">
               {epics.slice(0, 5).map((epic) => (
-                <CommandItem
-                  key={epic.id}
-                  onSelect={() => handleSelect(`/epics/${epic.id}`)}
-                >
+                <CommandItem key={epic.id} onSelect={() => handleSelect(`/epics/${epic.id}`)}>
                   <Hexagon className="h-4 w-4" />
                   <span>{epic.name}</span>
                 </CommandItem>

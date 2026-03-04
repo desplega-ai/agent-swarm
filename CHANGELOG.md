@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.34.0] - 2026-03-04
+
+### Added
+- Task cost tracking and display in task details page (#131)
+- Schedule and epic HTTP API endpoints for CRUD operations
+- Exhaustive HTTP API integration test suite (#132)
+- `claude-context-mode` as default context management plugin for workers (#125)
+- Base prompt test coverage
+
+### Changed
+- Refactored monolithic `src/http.ts` into modular route handlers under `src/http/` (#132)
+- Abstracted route matching into `matchRoute` utility with dedicated tests
+- Converted handler dispatch to registry-based for-loop pattern
+- Improved system prompt assembly in `base-prompt.ts`
+
+### Fixed
+- Context-mode marketplace plugin ID in install command (#130)
+- Lint warnings and type errors across HTTP route handlers
+
 ## [1.32.0] - 2026-03-03
 
 ### Added

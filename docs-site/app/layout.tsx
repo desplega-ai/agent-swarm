@@ -41,6 +41,48 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en" suppressHydrationWarning>
       <head>
         <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@graph": [
+                {
+                  "@type": "Organization",
+                  "@id": "https://agent-swarm.dev/#organization",
+                  name: "Agent Swarm",
+                  url: "https://agent-swarm.dev",
+                  logo: {
+                    "@type": "ImageObject",
+                    url: "https://agent-swarm.dev/logo.png",
+                  },
+                },
+                {
+                  "@type": "WebSite",
+                  "@id": "https://docs.agent-swarm.dev/#website",
+                  url: "https://docs.agent-swarm.dev",
+                  name: "Agent Swarm Documentation",
+                  publisher: {
+                    "@id": "https://agent-swarm.dev/#organization",
+                  },
+                },
+                {
+                  "@type": "TechArticle",
+                  name: "Agent Swarm Documentation",
+                  description:
+                    "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants.",
+                  url: "https://docs.agent-swarm.dev",
+                  mainEntity: {
+                    "@type": "SoftwareApplication",
+                    name: "Agent Swarm",
+                    applicationCategory: "DeveloperApplication",
+                    operatingSystem: "Linux, macOS",
+                  },
+                },
+              ],
+            }),
+          }}
+        />
+        <script
           async
           src="https://plausible.io/js/pa-N5qqdwlGhd8el6aPC8pJ7.js"
         />

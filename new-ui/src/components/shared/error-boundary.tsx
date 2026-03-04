@@ -1,8 +1,8 @@
+import { AlertTriangle, Home, RotateCcw } from "lucide-react";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { AlertTriangle, Home, RotateCcw } from "lucide-react";
 
 interface ErrorBoundaryProps {
   children: ReactNode;

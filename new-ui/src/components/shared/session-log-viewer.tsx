@@ -1,17 +1,9 @@
+import { ArrowDown, Bot, ChevronDown, ChevronRight, Terminal, User, Wrench } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
+import type { SessionLog } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
-import {
-  ArrowDown,
-  Bot,
-  ChevronDown,
-  ChevronRight,
-  Terminal,
-  User,
-  Wrench,
-} from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { SessionLog } from "@/api/types";
 
 // --- Parsed message types ---
 
@@ -64,8 +56,10 @@ function parseSessionLogs(logs: SessionLog[]): ParsedMessage[] {
   const messages: ParsedMessage[] = [];
 
   for (const log of sorted) {
-    let parsed: { type?: string; message?: { role?: string; content?: unknown; model?: string; id?: string } } | null =
-      null;
+    let parsed: {
+      type?: string;
+      message?: { role?: string; content?: unknown; model?: string; id?: string };
+    } | null = null;
     try {
       parsed = JSON.parse(log.content);
     } catch {
@@ -102,9 +96,7 @@ function parseSessionLogs(logs: SessionLog[]): ParsedMessage[] {
           });
         } else if (block.type === "tool_result") {
           const text =
-            typeof block.content === "string"
-              ? block.content
-              : JSON.stringify(block.content);
+            typeof block.content === "string" ? block.content : JSON.stringify(block.content);
           blocks.push({
             type: "tool_result",
             tool_use_id: block.tool_use_id ?? "",
@@ -117,9 +109,7 @@ function parseSessionLogs(logs: SessionLog[]): ParsedMessage[] {
     if (blocks.length === 0) continue;
 
     const role =
-      parsed.type === "assistant" || parsed.message.role === "assistant"
-        ? "assistant"
-        : "user";
+      parsed.type === "assistant" || parsed.message.role === "assistant" ? "assistant" : "user";
 
     messages.push({
       id: log.id,
@@ -199,7 +189,7 @@ function ToolResultBubble({ content }: { content: string }) {
     // keep as-is
   }
   const isLong = display.length > 200;
-  const preview = isLong ? display.slice(0, 200) + "..." : display;
+  const preview = isLong ? `${display.slice(0, 200)}...` : display;
 
   return (
     <div className="rounded-md border border-border/50 bg-muted/30 px-3 py-2">
@@ -241,11 +231,7 @@ function MessageBubble({ message }: { message: ParsedMessage }) {
               : "bg-muted text-muted-foreground",
         )}
       >
-        {isAssistant ? (
-          <Bot className="h-3.5 w-3.5" />
-        ) : (
-          <User className="h-3.5 w-3.5" />
-        )}
+        {isAssistant ? <Bot className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
       </div>
       <div className="min-w-0 flex-1 space-y-2">
         <div className="flex items-center gap-2">
@@ -256,7 +242,11 @@ function MessageBubble({ message }: { message: ParsedMessage }) {
             <span className="text-[10px] text-muted-foreground/60 font-mono">{message.model}</span>
           )}
           <span className="ml-auto text-[10px] text-muted-foreground/50 font-mono">
-            {new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+            {new Date(message.timestamp).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            })}
           </span>
         </div>
         {message.content.map((block, i) => {
@@ -309,11 +299,26 @@ export function SessionLogViewer({ logs, className }: SessionLogViewerProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const { isFollowing, scrollToBottom } = useAutoScroll(scrollEl, [logs]);
 
-  // Group messages by iteration for dividers
-  let lastIteration = -1;
+  // Pre-compute which messages start a new iteration
+  const iterationStarts = useMemo(() => {
+    const starts = new Set<string>();
+    let prev = -1;
+    for (const msg of messages) {
+      if (msg.iteration !== prev) {
+        starts.add(msg.id);
+        prev = msg.iteration;
+      }
+    }
+    return starts;
+  }, [messages]);
 
   return (
-    <div className={cn("flex flex-col rounded-lg border border-border bg-background overflow-hidden", className)}>
+    <div
+      className={cn(
+        "flex flex-col rounded-lg border border-border bg-background overflow-hidden",
+        className,
+      )}
+    >
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-muted/50">
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           Session Logs
@@ -344,11 +349,9 @@ export function SessionLogViewer({ logs, className }: SessionLogViewerProps) {
         ) : (
           <div className="divide-y divide-border/50">
             {messages.map((msg) => {
-              const showDivider = msg.iteration !== lastIteration;
-              lastIteration = msg.iteration;
               return (
                 <div key={msg.id}>
-                  {showDivider && <IterationDivider iteration={msg.iteration} />}
+                  {iterationStarts.has(msg.id) && <IterationDivider iteration={msg.iteration} />}
                   <MessageBubble message={msg} />
                 </div>
               );

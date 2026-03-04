@@ -1,5 +1,5 @@
-import { Link, useLocation } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
+import { Link, useLocation } from "react-router-dom";
 
 const routeLabels: Record<string, string> = {
   agents: "Agents",
@@ -17,7 +17,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 
 function formatSegment(segment: string): string {
   if (routeLabels[segment]) return routeLabels[segment];
-  if (UUID_REGEX.test(segment)) return segment.slice(0, 8) + "...";
+  if (UUID_REGEX.test(segment)) return `${segment.slice(0, 8)}...`;
   return segment;
 }
 

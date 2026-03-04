@@ -43,6 +43,9 @@ export const metadata: Metadata = {
       "We shipped x402 payment capability into Agent Swarm — AI agents can now autonomously pay for API services using crypto.",
     images: ["https://agent-swarm.dev/og-image.png"],
   },
+  alternates: {
+    canonical: "/blog/openfort-hackathon",
+  },
 };
 
 function SectionIcon({

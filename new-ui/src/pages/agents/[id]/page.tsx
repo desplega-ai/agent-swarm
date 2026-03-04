@@ -1,19 +1,27 @@
-import { useState, useMemo, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
+import {
+  ArrowLeft,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  GitBranch,
+  Pencil,
+  Search,
+  X,
+} from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { useAgent, useUpdateAgentName, useUpdateAgentProfile } from "@/api/hooks/use-agents";
-import { useTasks } from "@/api/hooks/use-tasks";
 import { useSessionCosts } from "@/api/hooks/use-costs";
+import { useTasks } from "@/api/hooks/use-tasks";
+import type { Agent, AgentTask, AgentTaskStatus } from "@/api/types";
+import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { UsageSummary } from "@/components/shared/usage-summary";
-import { DataGrid } from "@/components/shared/data-grid";
-import { Card, CardContent } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -21,9 +29,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { formatSmartTime, formatElapsed } from "@/lib/utils";
-import { Check, Pencil, X, ArrowLeft, Search, GitBranch, ChevronDown, ChevronRight } from "lucide-react";
-import type { Agent, AgentTask, AgentTaskStatus } from "@/api/types";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
 const PAGE_SIZE = 100;
 
@@ -135,18 +144,23 @@ export default function AgentDetailPage() {
   const [taskPage, setTaskPage] = useState(0);
 
   const taskFilters = useMemo(() => {
-    const f: { agentId?: string; status?: string; search?: string; limit: number; offset: number } = {
-      agentId: id,
-      limit: PAGE_SIZE,
-      offset: taskPage * PAGE_SIZE,
-    };
+    const f: { agentId?: string; status?: string; search?: string; limit: number; offset: number } =
+      {
+        agentId: id,
+        limit: PAGE_SIZE,
+        offset: taskPage * PAGE_SIZE,
+      };
     if (taskStatus !== "all") f.status = taskStatus;
     if (taskSearch) f.search = taskSearch;
     return f;
   }, [id, taskStatus, taskSearch, taskPage]);
 
   const { data: tasksData, isLoading: tasksLoading } = useTasks(taskFilters);
-  const { data: agentCosts } = useSessionCosts({ agentId: id, limit: 1000, enabled: activeTab === "usage" });
+  const { data: agentCosts } = useSessionCosts({
+    agentId: id,
+    limit: 1000,
+    enabled: activeTab === "usage",
+  });
 
   const taskTotal = tasksData?.total ?? 0;
   const taskTotalPages = Math.max(1, Math.ceil(taskTotal / PAGE_SIZE));
@@ -184,9 +198,7 @@ export default function AgentDetailPage() {
         field: "status",
         headerName: "Status",
         width: 130,
-        cellRenderer: (params: { value: AgentTaskStatus }) => (
-          <StatusBadge status={params.value} />
-        ),
+        cellRenderer: (params: { value: AgentTaskStatus }) => <StatusBadge status={params.value} />,
       },
       {
         field: "taskType",
@@ -194,7 +206,10 @@ export default function AgentDetailPage() {
         width: 110,
         cellRenderer: (params: { value: string | undefined }) =>
           params.value ? (
-            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+            >
               {params.value}
             </Badge>
           ) : null,
@@ -207,7 +222,11 @@ export default function AgentDetailPage() {
           if (!task) return "";
           const start = task.acceptedAt ?? task.createdAt;
           const end = task.finishedAt;
-          const isActive = !end && (task.status === "in_progress" || task.status === "pending" || task.status === "offered");
+          const isActive =
+            !end &&
+            (task.status === "in_progress" ||
+              task.status === "pending" ||
+              task.status === "offered");
           return isActive ? formatElapsed(start) : end ? formatElapsed(start, end) : "—";
         },
       },
@@ -312,22 +331,32 @@ export default function AgentDetailPage() {
             <CardContent className="p-4 space-y-3">
               {agent.role && (
                 <div>
-                  <span className="text-xs text-muted-foreground uppercase tracking-wide">Role</span>
+                  <span className="text-xs text-muted-foreground uppercase tracking-wide">
+                    Role
+                  </span>
                   <p className="text-sm">{agent.role}</p>
                 </div>
               )}
               {agent.description && (
                 <div>
-                  <span className="text-xs text-muted-foreground uppercase tracking-wide">Description</span>
+                  <span className="text-xs text-muted-foreground uppercase tracking-wide">
+                    Description
+                  </span>
                   <p className="text-sm">{agent.description}</p>
                 </div>
               )}
               {agent.capabilities && agent.capabilities.length > 0 && (
                 <div>
-                  <span className="text-xs text-muted-foreground uppercase tracking-wide">Capabilities</span>
+                  <span className="text-xs text-muted-foreground uppercase tracking-wide">
+                    Capabilities
+                  </span>
                   <div className="flex flex-wrap gap-1 mt-1">
                     {agent.capabilities.map((cap) => (
-                      <Badge key={cap} variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
+                      <Badge
+                        key={cap}
+                        variant="outline"
+                        className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+                      >
                         {cap}
                       </Badge>
                     ))}
@@ -341,11 +370,41 @@ export default function AgentDetailPage() {
             </CardContent>
           </Card>
 
-          <EditableMarkdownField title="SOUL.md" field="soulMd" agent={agent} onSave={saveField} saving={updateProfile.isPending} />
-          <EditableMarkdownField title="IDENTITY.md" field="identityMd" agent={agent} onSave={saveField} saving={updateProfile.isPending} />
-          <EditableMarkdownField title="CLAUDE.md" field="claudeMd" agent={agent} onSave={saveField} saving={updateProfile.isPending} />
-          <EditableMarkdownField title="TOOLS.md" field="toolsMd" agent={agent} onSave={saveField} saving={updateProfile.isPending} />
-          <EditableMarkdownField title="Setup Script" field="setupScript" agent={agent} onSave={saveField} saving={updateProfile.isPending} />
+          <EditableMarkdownField
+            title="SOUL.md"
+            field="soulMd"
+            agent={agent}
+            onSave={saveField}
+            saving={updateProfile.isPending}
+          />
+          <EditableMarkdownField
+            title="IDENTITY.md"
+            field="identityMd"
+            agent={agent}
+            onSave={saveField}
+            saving={updateProfile.isPending}
+          />
+          <EditableMarkdownField
+            title="CLAUDE.md"
+            field="claudeMd"
+            agent={agent}
+            onSave={saveField}
+            saving={updateProfile.isPending}
+          />
+          <EditableMarkdownField
+            title="TOOLS.md"
+            field="toolsMd"
+            agent={agent}
+            onSave={saveField}
+            saving={updateProfile.isPending}
+          />
+          <EditableMarkdownField
+            title="Setup Script"
+            field="setupScript"
+            agent={agent}
+            onSave={saveField}
+            saving={updateProfile.isPending}
+          />
         </TabsContent>
 
         <TabsContent value="tasks" className="flex flex-col flex-1 min-h-0 mt-4 gap-3">
@@ -355,11 +414,20 @@ export default function AgentDetailPage() {
               <Input
                 placeholder="Search tasks..."
                 value={taskSearch}
-                onChange={(e) => { setTaskSearch(e.target.value); setTaskPage(0); }}
+                onChange={(e) => {
+                  setTaskSearch(e.target.value);
+                  setTaskPage(0);
+                }}
                 className="pl-9"
               />
             </div>
-            <Select value={taskStatus} onValueChange={(v) => { setTaskStatus(v); setTaskPage(0); }}>
+            <Select
+              value={taskStatus}
+              onValueChange={(v) => {
+                setTaskStatus(v);
+                setTaskPage(0);
+              }}
+            >
               <SelectTrigger className="w-[160px]">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
