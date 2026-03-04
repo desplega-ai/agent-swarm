@@ -28,6 +28,9 @@ export const metadata: Metadata = {
       "Real session transcripts showing autonomous AI agent coordination in action.",
     images: ["https://agent-swarm.dev/og-image.png"],
   },
+  alternates: {
+    canonical: "/examples",
+  },
 };
 
 type Example = {

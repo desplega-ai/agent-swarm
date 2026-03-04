@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Github, BookOpen, LayoutDashboard, Menu, X } from "lucide-react";
+import { Github, BookOpen, LayoutDashboard, Menu, X, Newspaper, Play } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 export function Navbar() {
@@ -26,7 +26,7 @@ export function Navbar() {
       }`}
     >
       <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
-        <a href="#" className="flex items-center gap-3 group">
+        <a href="/" className="flex items-center gap-3 group">
           <img src="/logo.png" alt="Agent Swarm" className="w-8 h-8 rounded-lg shadow-lg shadow-amber-500/20 group-hover:shadow-amber-500/40 transition-shadow" />
           <span className="text-lg font-bold tracking-tight text-zinc-900">
             Agent Swarm
@@ -51,6 +51,18 @@ export function Navbar() {
             className="text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
           >
             Architecture
+          </a>
+          <a
+            href="/blog"
+            className="text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
+          >
+            Blog
+          </a>
+          <a
+            href="/examples"
+            className="text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
+          >
+            Examples
           </a>
           <div className="w-px h-5 bg-zinc-200" />
           <a
@@ -100,6 +112,8 @@ export function Navbar() {
               <a href="#features" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Features</a>
               <a href="#how-it-works" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">How It Works</a>
               <a href="#architecture" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Architecture</a>
+              <a href="/blog" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Blog</a>
+              <a href="/examples" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Examples</a>
               <div className="h-px bg-zinc-200" />
               <a href="https://docs.agent-swarm.dev" className="flex items-center gap-2 text-sm font-medium text-zinc-600 py-2">
                 <BookOpen className="w-4 h-4" /> Docs
