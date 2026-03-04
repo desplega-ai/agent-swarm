@@ -69,7 +69,7 @@ services:
       - SWARM_URL=${SWARM_URL:-localhost}
 
     ports:
-      - "${SERVICE_PORT:-3020}:3000"
+      - "${LEAD_PORT:-3020}:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -105,7 +105,7 @@ services:
       - SWARM_URL=${SWARM_URL:-localhost}
 
     ports:
-      - "${SERVICE_PORT:-3021}:3000"
+      - "${WORKER1_PORT:-3021}:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -141,7 +141,7 @@ services:
       - SWARM_URL=${SWARM_URL:-localhost}
 
     ports:
-      - "${SERVICE_PORT:-3022}:3000"
+      - "${WORKER2_PORT:-3022}:3000"
 
     volumes:
       - swarm_logs:/logs
