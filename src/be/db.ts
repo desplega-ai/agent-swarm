@@ -1,5 +1,4 @@
 import { Database } from "bun:sqlite";
-import { runMigrations } from "./migrations/runner";
 import type {
   ActiveSession,
   Agent,
@@ -33,6 +32,7 @@ import type {
   VersionableField,
   VersionMeta,
 } from "../types";
+import { runMigrations } from "./migrations/runner";
 
 let db: Database | null = null;
 

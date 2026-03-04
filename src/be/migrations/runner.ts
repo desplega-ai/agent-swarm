@@ -1,7 +1,7 @@
-import { Database } from "bun:sqlite";
-import { readdirSync, readFileSync } from "fs";
-import { join } from "path";
-import { createHash } from "crypto";
+import type { Database } from "bun:sqlite";
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 interface Migration {
   version: number;
@@ -81,9 +81,7 @@ export function runMigrations(db: Database): void {
         .get() as { cnt: number };
 
       if (tableCount.cnt > 0) {
-        console.log(
-          "[migrations] Existing database detected — bootstrapping migration tracking",
-        );
+        console.log("[migrations] Existing database detected — bootstrapping migration tracking");
         db.run(
           "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
           [
@@ -124,15 +122,12 @@ export function runMigrations(db: Database): void {
 
     db.transaction(() => {
       db.exec(migration.sql);
-      db.run(
-        "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
-        [
-          migration.version,
-          migration.name,
-          new Date().toISOString(),
-          migration.checksum,
-        ],
-      );
+      db.run("INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)", [
+        migration.version,
+        migration.name,
+        new Date().toISOString(),
+        migration.checksum,
+      ]);
     })();
 
     const elapsed = (performance.now() - start).toFixed(1);
