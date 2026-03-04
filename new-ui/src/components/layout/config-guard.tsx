@@ -1,5 +1,5 @@
+import { Navigate, useLocation } from "react-router-dom";
 import { useConfig } from "@/hooks/use-config";
-import { useLocation, Navigate } from "react-router-dom";
 
 interface ConfigGuardProps {
   children: React.ReactNode;

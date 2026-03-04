@@ -312,12 +312,7 @@ export interface ScheduledTasksResponse {
   scheduledTasks: ScheduledTask[];
 }
 
-export type EpicStatus =
-  | "draft"
-  | "active"
-  | "paused"
-  | "completed"
-  | "cancelled";
+export type EpicStatus = "draft" | "active" | "paused" | "completed" | "cancelled";
 
 export interface Epic {
   id: string;

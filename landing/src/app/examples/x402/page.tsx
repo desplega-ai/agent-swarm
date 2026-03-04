@@ -30,6 +30,9 @@ export const metadata: Metadata = {
       "https://blob.imference.com/large/37f7ee3b-616b-402f-8cb3-d69896165e3f.webp",
     ],
   },
+  alternates: {
+    canonical: "/examples/x402",
+  },
 };
 
 function Avatar({

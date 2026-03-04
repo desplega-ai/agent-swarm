@@ -1,12 +1,13 @@
-import { useState, useMemo, useCallback } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
+import { Crown, Search } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useAgents } from "@/api/hooks/use-agents";
+import type { AgentStatus, AgentWithTasks } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { useAgents } from "@/api/hooks/use-agents";
-import { formatSmartTime } from "@/lib/utils";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -14,8 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search, Crown } from "lucide-react";
-import type { AgentWithTasks, AgentStatus } from "@/api/types";
+import { formatSmartTime } from "@/lib/utils";
 
 export default function AgentsPage() {
   const navigate = useNavigate();
@@ -26,7 +26,8 @@ export default function AgentsPage() {
 
   const filteredAgents = useMemo(() => {
     if (!agents) return [];
-    const filtered = statusFilter === "all" ? [...agents] : agents.filter((a) => a.status === statusFilter);
+    const filtered =
+      statusFilter === "all" ? [...agents] : agents.filter((a) => a.status === statusFilter);
     return filtered.sort((a, b) => (b.isLead ? 1 : 0) - (a.isLead ? 1 : 0));
   }, [agents, statusFilter]);
 
@@ -40,9 +41,7 @@ export default function AgentsPage() {
         cellRenderer: (params: { value: string; data: AgentWithTasks | undefined }) => (
           <span className="flex items-center gap-1.5 font-semibold">
             {params.value}
-            {params.data?.isLead && (
-              <Crown className="h-3.5 w-3.5 text-primary shrink-0" />
-            )}
+            {params.data?.isLead && <Crown className="h-3.5 w-3.5 text-primary shrink-0" />}
           </span>
         ),
       },
@@ -51,9 +50,7 @@ export default function AgentsPage() {
         field: "status",
         headerName: "Status",
         width: 120,
-        cellRenderer: (params: { value: AgentStatus }) => (
-          <StatusBadge status={params.value} />
-        ),
+        cellRenderer: (params: { value: AgentStatus }) => <StatusBadge status={params.value} />,
       },
       {
         field: "capabilities",
@@ -63,7 +60,11 @@ export default function AgentsPage() {
         cellRenderer: (params: { value: string[] | undefined }) => (
           <div className="flex gap-1 items-center justify-center">
             {params.value?.slice(0, 2).map((cap) => (
-              <Badge key={cap} variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase shrink-0">
+              <Badge
+                key={cap}
+                variant="outline"
+                className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase shrink-0"
+              >
                 {cap}
               </Badge>
             ))}

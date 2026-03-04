@@ -30,6 +30,9 @@ export const metadata: Metadata = {
       "Updates, technical deep dives, and stories from the Agent Swarm team.",
     images: ["https://agent-swarm.dev/og-image.png"],
   },
+  alternates: {
+    canonical: "/blog",
+  },
 };
 
 interface BlogPost {

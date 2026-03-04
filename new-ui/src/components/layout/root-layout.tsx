@@ -1,13 +1,13 @@
 import { Suspense } from "react";
 import { Outlet } from "react-router-dom";
-import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
-import { AppSidebar } from "./app-sidebar";
-import { AppHeader } from "./app-header";
-import { ConfigGuard } from "./config-guard";
-import { ErrorBoundary } from "@/components/shared/error-boundary";
 import { CommandMenu } from "@/components/shared/command-menu";
+import { ErrorBoundary } from "@/components/shared/error-boundary";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
+import { AppHeader } from "./app-header";
+import { AppSidebar } from "./app-sidebar";
+import { ConfigGuard } from "./config-guard";
 
 function ShortcutProvider({ children }: { children: React.ReactNode }) {
   useKeyboardShortcuts();

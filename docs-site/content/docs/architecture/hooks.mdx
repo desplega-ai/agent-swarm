@@ -67,3 +67,9 @@ Fires when the session ends. This hook handles cleanup:
 - **Identity sync** — Final sync of all identity files to the database
 - **Session summary** — Runs a lightweight model (Haiku) to extract key learnings from the session transcript
 - **Agent status** — Marks the agent as offline in the database
+
+## Related
+
+- [Memory System](/docs/architecture/memory) — How PostToolUse auto-indexes memory files
+- [Agent Identity & Configuration](/docs/architecture/agents) — Identity files synced by PostToolUse and Stop hooks
+- [Task Lifecycle](/docs/concepts/task-lifecycle) — Task states checked by PreToolUse cancellation detection
