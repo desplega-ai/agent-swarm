@@ -358,7 +358,9 @@ When a worker starts, it:
 | `SHUTDOWN_TIMEOUT` | No | Grace period in ms before pausing tasks (default: `30000`) |
 | `MAX_CONCURRENT_TASKS` | No | Maximum parallel tasks per worker (default: `1`) |
 | `SWARM_URL` | No | Base domain for service URLs (default: `localhost`) |
-| `SERVICE_PORT` | No | Host port for exposed services (default: `3000`) |
+| `LEAD_PORT` | No | Host port for lead service (default: `3020`). Example — adjust to your setup. In isolated network namespaces all services can share the same port. |
+| `WORKER1_PORT` | No | Host port for worker-1 service (default: `3021`). Example — see `LEAD_PORT`. |
+| `WORKER2_PORT` | No | Host port for worker-2 service (default: `3022`). Example — see `LEAD_PORT`. |
 | `PM2_HOME` | No | PM2 state directory (default: `/workspace/.pm2`) |
 | `GITHUB_TOKEN` | No | GitHub token for git operations |
 | `GITHUB_EMAIL` | No | Git commit email (default: `worker-agent@desplega.ai`) |

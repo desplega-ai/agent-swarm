@@ -48,7 +48,9 @@ These variables configure containerized agents (`ghcr.io/desplega-ai/agent-swarm
 |----------|---------|-------------|
 | `MCP_BASE_URL` | `http://host.docker.internal:3013` | URL of the API server. Use `http://api:3013` when services are on the same Docker network. |
 | `SWARM_URL` | `localhost` | Base domain for service discovery. Agent services are available at `https://{AGENT_ID}.{SWARM_URL}`. |
-| `SERVICE_PORT` | `3000` | Host port mapped to container port 3000 for exposed services. |
+| `LEAD_PORT` | `3020` | Host port mapped to the lead container's port 3000. Example variable used in `docker-compose.example.yml` — adjust to fit your setup. In isolated network namespaces you can use the same port for all services. |
+| `WORKER1_PORT` | `3021` | Host port mapped to worker-1 container's port 3000. Example variable — see `LEAD_PORT` note. |
+| `WORKER2_PORT` | `3022` | Host port mapped to worker-2 container's port 3000. Example variable — see `LEAD_PORT` note. |
 
 ### Behavior
 

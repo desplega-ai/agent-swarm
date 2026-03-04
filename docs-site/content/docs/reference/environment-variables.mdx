@@ -41,7 +41,9 @@ Complete reference for all environment variables used by Agent Swarm.
 | `SHUTDOWN_TIMEOUT` | No | `30000` | Grace period (ms) before pausing tasks |
 | `MAX_CONCURRENT_TASKS` | No | `1` | Maximum parallel tasks per worker |
 | `SWARM_URL` | No | `localhost` | Base domain for service URLs |
-| `SERVICE_PORT` | No | `3000` | Host port for exposed services |
+| `LEAD_PORT` | No | `3020` | Host port for lead service. Example variable used in `docker-compose.example.yml` — adjust to your setup. In isolated network namespaces all services can share the same port. |
+| `WORKER1_PORT` | No | `3021` | Host port for worker-1 service. Example — see `LEAD_PORT`. |
+| `WORKER2_PORT` | No | `3022` | Host port for worker-2 service. Example — see `LEAD_PORT`. |
 | `PM2_HOME` | No | `/workspace/.pm2` | PM2 state directory |
 
 ## Git Configuration
