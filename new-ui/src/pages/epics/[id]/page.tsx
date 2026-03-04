@@ -699,7 +699,10 @@ export default function EpicDetailPage() {
             <EditEpicForm
               epic={epic}
               onSubmit={(data) => {
-                updateEpic.mutate({ id: epic.id, data });
+                updateEpic.mutate({
+                  id: epic.id,
+                  data: { ...data, leadAgentId: data.leadAgentId ?? undefined },
+                });
                 setEditOpen(false);
               }}
               onCancel={() => setEditOpen(false)}

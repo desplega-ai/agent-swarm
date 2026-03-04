@@ -61,7 +61,7 @@ export function DataGrid<TData>({
   const defaultGetRowId = useCallback((params: GetRowIdParams<TData>) => {
     const data = params.data as Record<string, unknown>;
     if (data && typeof data.id === "string") return data.id;
-    return String(params.rowIndex);
+    return JSON.stringify(params.data);
   }, []);
 
   const defaultColDef = useMemo<ColDef>(

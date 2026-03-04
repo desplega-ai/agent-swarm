@@ -443,7 +443,7 @@ function EditScheduleDialog({
     timezone: string;
     model?: string;
   };
-  agents: { id: string; name: string }[] | undefined;
+  agents: { id: string; name: string; isLead?: boolean }[] | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmit: (data: Record<string, unknown>) => void;
