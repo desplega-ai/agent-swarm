@@ -266,8 +266,8 @@ Your source code lives in the \`desplega-ai/agent-swarm\` GitHub repository. Key
 - **Orchestration:** Runner process (\`src/commands/runner.ts\`) polls for tasks and spawns sessions
 - **Hooks:** Six hooks fire during your session (SessionStart, PreCompact, PreToolUse, PostToolUse, UserPromptSubmit, Stop) — see \`src/hooks/hook.ts\`
 - **Memory:** SQLite + OpenAI embeddings (text-embedding-3-small, 512d). Search is brute-force cosine similarity
-- **Identity Sync:** SOUL.md/IDENTITY.md/TOOLS.md synced to DB on file edit (PostToolUse) and session end (Stop)
-- **System Prompt:** Assembled from base-prompt.ts + SOUL.md + IDENTITY.md, passed via --append-system-prompt
+- **Identity Sync:** SOUL.md/IDENTITY.md/TOOLS.md/CLAUDE.md synced to DB on file edit (PostToolUse) and session end (Stop)
+- **System Prompt:** Assembled from base-prompt.ts + SOUL.md + IDENTITY.md + CLAUDE.md + TOOLS.md, passed via --append-system-prompt
 - **Task Lifecycle:** unassigned → offered → pending → in_progress → completed/failed. Completed output auto-indexed into memory
 - **MCP Server:** Tools come from MCP server at $MCP_BASE_URL (src/server.ts)
 
@@ -342,6 +342,16 @@ Use the \`/artifacts\` skill for detailed instructions, examples, and API refere
 Artifact content should be stored in \`/workspace/personal/artifacts/\` (persisted across sessions).
 `;
 
+/** Max characters per individual injected section before truncation */
+const BOOTSTRAP_MAX_CHARS = 20_000;
+
+/** Max total characters across all injected sections combined */
+const BOOTSTRAP_TOTAL_MAX_CHARS = 150_000;
+
+/** Truncation notice appended when a section is cut */
+const truncationNotice = (file: string) =>
+  `\n\n[...truncated, see /workspace/${file} for full content]\n`;
+
 export type BasePromptArgs = {
   role: string;
   agentId: string;
@@ -351,6 +361,8 @@ export type BasePromptArgs = {
   description?: string;
   soulMd?: string;
   identityMd?: string;
+  toolsMd?: string;
+  claudeMd?: string;
   repoContext?: {
     claudeMd?: string | null;
     clonePath: string;
@@ -363,9 +375,16 @@ export const getBasePrompt = (args: BasePromptArgs): string => {
 
   let prompt = BASE_PROMPT_ROLE.replace("{role}", role).replace("{agentId}", agentId);
 
-  // Inject agent identity (soul + identity) if available
-  if (args.soulMd || args.identityMd) {
+  // Inject agent identity (soul + identity + name/description) if available
+  if (args.soulMd || args.identityMd || args.name) {
     prompt += "\n\n## Your Identity\n\n";
+    if (args.name) {
+      prompt += `**Name:** ${args.name}\n`;
+      if (args.description) {
+        prompt += `**Description:** ${args.description}\n`;
+      }
+      prompt += "\n";
+    }
     if (args.soulMd) {
       prompt += `${args.soulMd}\n`;
     }
@@ -374,6 +393,7 @@ export const getBasePrompt = (args: BasePromptArgs): string => {
     }
   }
 
+  // Repo context (protected, never truncated)
   if (args.repoContext) {
     prompt += "\n\n## Repository Context\n\n";
 
@@ -391,35 +411,97 @@ export const getBasePrompt = (args: BasePromptArgs): string => {
     }
   }
 
-  prompt += BASE_PROMPT_REGISTER;
+  // Build static suffix (always included, never truncated)
+  let staticSuffix = "";
+  staticSuffix += BASE_PROMPT_REGISTER;
 
   if (role === "lead") {
-    prompt += BASE_PROMPT_LEAD;
+    staticSuffix += BASE_PROMPT_LEAD;
   } else {
-    prompt += BASE_PROMPT_WORKER;
+    staticSuffix += BASE_PROMPT_WORKER;
   }
 
-  prompt += BASE_PROMPT_FILESYSTEM;
-  prompt += BASE_PROMPT_SELF_AWARENESS;
-  prompt += BASE_PROMPT_CONTEXT_MODE;
-  prompt += BASE_PROMPT_GUIDELINES;
-  prompt += BASE_PROMPT_SYSTEM.replace("{swarmUrl}", swarmUrl);
+  staticSuffix += BASE_PROMPT_FILESYSTEM;
+  staticSuffix += BASE_PROMPT_SELF_AWARENESS;
+  staticSuffix += BASE_PROMPT_CONTEXT_MODE;
+  staticSuffix += BASE_PROMPT_GUIDELINES;
+  staticSuffix += BASE_PROMPT_SYSTEM;
 
   if (!args.capabilities || args.capabilities.includes("services")) {
-    prompt += BASE_PROMPT_SERVICES;
+    staticSuffix += BASE_PROMPT_SERVICES.replace("{agentId}", agentId).replace(
+      "{swarmUrl}",
+      swarmUrl,
+    );
   }
 
   if (!args.capabilities || args.capabilities.includes("artifacts")) {
-    prompt += BASE_PROMPT_ARTIFACTS;
+    staticSuffix += BASE_PROMPT_ARTIFACTS;
   }
 
   if (args.capabilities) {
-    prompt += `
+    staticSuffix += `
 ### Capabilities enabled for this agent:
 
 - ${args.capabilities.join("\n- ")}
 `;
   }
 
+  // Inject truncatable sections with per-section and total character caps
+  // Priority: agent CLAUDE.md > tools (tools cut first when over total budget)
+  const protectedLength = prompt.length + staticSuffix.length;
+  const totalBudget = Math.max(0, BOOTSTRAP_TOTAL_MAX_CHARS - protectedLength);
+  let totalUsed = 0;
+
+  // Agent CLAUDE.md (higher priority — injected first)
+  if (args.claudeMd) {
+    const perSectionBudget = Math.min(BOOTSTRAP_MAX_CHARS, totalBudget - totalUsed);
+    const section = truncateSection(
+      args.claudeMd,
+      "## Agent Instructions",
+      "CLAUDE.md",
+      perSectionBudget,
+    );
+    prompt += section;
+    totalUsed += section.length;
+  }
+
+  // Tools (lower priority — gets whatever budget remains)
+  if (args.toolsMd) {
+    const perSectionBudget = Math.min(BOOTSTRAP_MAX_CHARS, totalBudget - totalUsed);
+    const section = truncateSection(
+      args.toolsMd,
+      "## Your Tools & Capabilities",
+      "TOOLS.md",
+      perSectionBudget,
+    );
+    prompt += section;
+    totalUsed += section.length;
+  }
+
+  prompt += staticSuffix;
+
   return prompt;
 };
+
+/** Truncate a section to fit within a character budget, appending a notice if cut */
+function truncateSection(
+  content: string | undefined,
+  header: string,
+  fileName: string,
+  budget: number,
+): string {
+  if (!content || budget <= 0) return "";
+
+  const fullSection = `\n\n${header}\n\n${content}\n`;
+  if (fullSection.length <= budget) return fullSection;
+
+  const headerStr = `\n\n${header}\n\n`;
+  const notice = truncationNotice(fileName);
+  const contentBudget = budget - headerStr.length - notice.length;
+
+  if (contentBudget > 0) {
+    return headerStr + content.slice(0, contentBudget) + notice;
+  }
+
+  return "";
+}
