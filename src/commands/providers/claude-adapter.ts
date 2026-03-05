@@ -17,6 +17,61 @@ function getResumeArgs(additionalArgs: string[] | undefined, resumeSessionId?: s
   return args;
 }
 
+export async function emitClaudeStreamLineEvents(
+  line: string,
+  onEvent: ProviderStartContext["onEvent"],
+  errorTracker: SessionErrorTracker,
+): Promise<void> {
+  const trimmed = line.trim();
+  if (!trimmed) return;
+
+  await onEvent({
+    type: "stream_line",
+    provider: "claude",
+    line: trimmed,
+  });
+
+  try {
+    const json = JSON.parse(trimmed) as Record<string, unknown>;
+    if (json.type === "system" && json.subtype === "init" && typeof json.session_id === "string") {
+      await onEvent({
+        type: "session_init",
+        provider: "claude",
+        sessionId: json.session_id,
+      });
+    }
+
+    if (json.type === "result") {
+      const usage = (json.usage ?? {}) as {
+        input_tokens?: number;
+        output_tokens?: number;
+        cache_read_input_tokens?: number;
+        cache_creation_input_tokens?: number;
+      };
+
+      await onEvent({
+        type: "result",
+        provider: "claude",
+        totalCostUsd: typeof json.total_cost_usd === "number" ? json.total_cost_usd : undefined,
+        usage: {
+          inputTokens: usage.input_tokens,
+          outputTokens: usage.output_tokens,
+          cacheReadTokens: usage.cache_read_input_tokens,
+          cacheWriteTokens: usage.cache_creation_input_tokens,
+        },
+        durationMs: typeof json.duration_ms === "number" ? json.duration_ms : undefined,
+        numTurns: typeof json.num_turns === "number" ? json.num_turns : undefined,
+        isError: typeof json.is_error === "boolean" ? json.is_error : undefined,
+        raw: json,
+      });
+    }
+
+    trackErrorFromJson(json, errorTracker);
+  } catch {
+    // Ignore non-JSON lines from provider output.
+  }
+}
+
 export class ClaudeAdapter implements ProviderAdapter {
   readonly provider = "claude" as const;
 
@@ -91,75 +146,12 @@ export class ClaudeAdapter implements ProviderAdapter {
           partialLine = parts.pop() || "";
 
           for (const line of parts) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-
-            await context.onEvent({
-              type: "stream_line",
-              provider: "claude",
-              line: trimmed,
-            });
-
-            try {
-              const json = JSON.parse(trimmed) as Record<string, unknown>;
-              if (
-                json.type === "system" &&
-                json.subtype === "init" &&
-                typeof json.session_id === "string"
-              ) {
-                await context.onEvent({
-                  type: "session_init",
-                  provider: "claude",
-                  sessionId: json.session_id,
-                });
-              }
-
-              if (json.type === "result") {
-                const usage = (json.usage ?? {}) as {
-                  input_tokens?: number;
-                  output_tokens?: number;
-                  cache_read_input_tokens?: number;
-                  cache_creation_input_tokens?: number;
-                };
-
-                await context.onEvent({
-                  type: "result",
-                  provider: "claude",
-                  totalCostUsd:
-                    typeof json.total_cost_usd === "number" ? json.total_cost_usd : undefined,
-                  usage: {
-                    inputTokens: usage.input_tokens,
-                    outputTokens: usage.output_tokens,
-                    cacheReadTokens: usage.cache_read_input_tokens,
-                    cacheWriteTokens: usage.cache_creation_input_tokens,
-                  },
-                  durationMs: typeof json.duration_ms === "number" ? json.duration_ms : undefined,
-                  numTurns: typeof json.num_turns === "number" ? json.num_turns : undefined,
-                  isError: typeof json.is_error === "boolean" ? json.is_error : undefined,
-                  raw: json,
-                });
-              }
-
-              trackErrorFromJson(json, errorTracker);
-            } catch {
-              // Ignore non-JSON lines from provider output.
-            }
+            await emitClaudeStreamLineEvents(line, context.onEvent, errorTracker);
           }
         }
 
         if (partialLine.trim()) {
-          const trimmed = partialLine.trim();
-          await context.onEvent({
-            type: "stream_line",
-            provider: "claude",
-            line: trimmed,
-          });
-          try {
-            const json = JSON.parse(trimmed) as Record<string, unknown>;
-            trackErrorFromJson(json, errorTracker);
-          } catch {
-            // Ignore non-JSON lines from provider output.
-          }
+          await emitClaudeStreamLineEvents(partialLine, context.onEvent, errorTracker);
         }
       })();
 

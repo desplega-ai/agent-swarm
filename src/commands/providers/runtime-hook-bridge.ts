@@ -74,14 +74,6 @@ export function mapPiSdkEventToHookInvocations(rawEvent: unknown): HookInvocatio
   const type = typeof event.type === "string" ? event.type : "";
   if (!type) return [];
 
-  if (type === "agent_start" || type === "session_start") {
-    return [{ hookEventName: "SessionStart", payload: {} }];
-  }
-
-  if (type === "agent_end" || type === "session_end") {
-    return [{ hookEventName: "Stop", payload: {} }];
-  }
-
   if (type === "tool_execution_start" || type === "before_tool_call") {
     const tool_name = pickToolName(event);
     const tool_input = pickToolInput(event);

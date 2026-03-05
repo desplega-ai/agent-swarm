@@ -39,6 +39,13 @@ describe("runtime hook bridge", () => {
     });
   });
 
+  test("does not map pi lifecycle events to avoid duplicate SessionStart/Stop", () => {
+    expect(mapPiSdkEventToHookInvocations({ type: "agent_start" })).toEqual([]);
+    expect(mapPiSdkEventToHookInvocations({ type: "session_start" })).toEqual([]);
+    expect(mapPiSdkEventToHookInvocations({ type: "agent_end" })).toEqual([]);
+    expect(mapPiSdkEventToHookInvocations({ type: "session_end" })).toEqual([]);
+  });
+
   test("detects hook block response from mixed stdout", () => {
     const decision = extractHookBlockDecision(
       `status line\n{"decision":"block","reason":"cancelled"}\n`,

@@ -1304,7 +1304,7 @@ async function spawnClaudeProcess(
     sessionId: opts.sessionId,
     iteration: opts.iteration,
     taskId: effectiveTaskId,
-    taskFilePath: provider === "claude" ? taskFilePath : undefined,
+    taskFilePath,
     resumeSessionId: opts.resumeSessionId,
     onEvent: handleEvent,
   });
