@@ -3,7 +3,7 @@
   "checkpoint_id": "97856ac42531",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 1,
+  "checkpoints_count": 3,
   "files_touched": [
     "thoughts/taras/plans/2026-03-05-pi-mono-provider-implementation-plan.md"
   ],
@@ -21,13 +21,20 @@
       "context": "/97/856ac42531/1/context.md",
       "content_hash": "/97/856ac42531/1/content_hash.txt",
       "prompt": "/97/856ac42531/1/prompt.txt"
+    },
+    {
+      "metadata": "/97/856ac42531/2/metadata.json",
+      "transcript": "/97/856ac42531/2/full.jsonl",
+      "context": "/97/856ac42531/2/context.md",
+      "content_hash": "/97/856ac42531/2/content_hash.txt",
+      "prompt": "/97/856ac42531/2/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 297778,
+    "input_tokens": 599515,
     "cache_creation_tokens": 0,
-    "cache_read_tokens": 3538176,
-    "output_tokens": 11723,
-    "api_call_count": 47
+    "cache_read_tokens": 5333632,
+    "output_tokens": 30541,
+    "api_call_count": 71
   }
 }
