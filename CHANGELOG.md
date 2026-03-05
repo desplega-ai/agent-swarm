@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.35.1] - 2026-03-05
+
+### Fixed
+- Use unique port variables per service in `docker-compose.example.yml` to avoid conflicts (#137)
+- Clarified that port variables are examples and that isolated network namespaces can share ports
+
+### Changed
+- Added internal cross-links across docs pages and blog/examples navigation (#135)
+- Added canonical URLs and JSON-LD structured data to docs pages
+
 ## [1.34.0] - 2026-03-04
 
 ### Added
