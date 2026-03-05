@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.35.2] - 2026-03-05
+
+### Fixed
+- Avoid duplicate heartbeat triage task creation for the same stalled task set
+- Run stale heartbeat resource cleanup even when preflight triage gate bails
+
 ## [1.35.1] - 2026-03-05
 
 ### Fixed

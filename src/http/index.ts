@@ -9,6 +9,7 @@ import { hasCapability } from "@/server";
 import { initAgentMail } from "../agentmail";
 import { closeDb } from "../be/db";
 import { initGitHub } from "../github";
+import { stopHeartbeat } from "../heartbeat";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { handleActiveSessions } from "./active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
@@ -122,6 +123,9 @@ async function shutdown() {
     stopScheduler();
   }
 
+  // Stop heartbeat triage
+  stopHeartbeat();
+
   // Stop Slack bot
   await stopSlackApp();
 
@@ -176,6 +180,13 @@ httpServer
       const { startScheduler } = await import("../scheduler");
       const intervalMs = Number(process.env.SCHEDULER_INTERVAL_MS) || 10000;
       startScheduler(intervalMs);
+    }
+
+    // Start heartbeat triage (unless disabled)
+    if (process.env.HEARTBEAT_DISABLE !== "true") {
+      const { startHeartbeat } = await import("../heartbeat");
+      const heartbeatMs = Number(process.env.HEARTBEAT_INTERVAL_MS) || 90000;
+      startHeartbeat(heartbeatMs);
     }
   })
   .on("error", (err) => {

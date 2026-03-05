@@ -5500,3 +5500,58 @@ export function cleanupAgentSessions(agentId: string): number {
   const result = getDb().prepare("DELETE FROM active_sessions WHERE agentId = ?").run(agentId);
   return result.changes;
 }
+
+// ============================================================================
+// Heartbeat / Triage Query Functions
+// ============================================================================
+
+/**
+ * Get in_progress tasks that haven't been updated within the given threshold.
+ * Used by the heartbeat to detect potentially stalled tasks.
+ */
+export function getStalledInProgressTasks(thresholdMinutes: number = 30): AgentTask[] {
+  const cutoff = new Date(Date.now() - thresholdMinutes * 60 * 1000).toISOString();
+  return getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks
+       WHERE status = 'in_progress' AND lastUpdatedAt < ?
+       ORDER BY lastUpdatedAt ASC`,
+    )
+    .all(cutoff)
+    .map(rowToAgentTask);
+}
+
+/**
+ * Get idle, non-lead, non-offline agents that have capacity for more tasks.
+ * Used by the heartbeat for auto-assignment of pool tasks.
+ */
+export function getIdleWorkersWithCapacity(): Agent[] {
+  const agents = getDb()
+    .prepare<AgentRow, []>(
+      `SELECT * FROM agents
+       WHERE status = 'idle' AND isLead = 0`,
+    )
+    .all()
+    .map(rowToAgent);
+
+  return agents.filter((agent) => {
+    const activeCount = getActiveTaskCount(agent.id);
+    return activeCount < (agent.maxTasks ?? 1);
+  });
+}
+
+/**
+ * Get unassigned pool tasks ordered by priority (DESC) then creation time (ASC).
+ * Used by the heartbeat for auto-assignment.
+ */
+export function getUnassignedPoolTasks(limit: number = 10): AgentTask[] {
+  return getDb()
+    .prepare<AgentTaskRow, [number]>(
+      `SELECT * FROM agent_tasks
+       WHERE status = 'unassigned'
+       ORDER BY priority DESC, createdAt ASC
+       LIMIT ?`,
+    )
+    .all(limit)
+    .map(rowToAgentTask);
+}
