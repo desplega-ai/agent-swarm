@@ -1,0 +1,33 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "765b6507b393",
+  "session_id": "ses_34082f762ffe3oTR5A38BDpGp4",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-05T21:15:05.541386Z",
+  "branch": "feat/pi-harness-support",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "src/commands/providers/pi-mono-adapter.ts",
+    "src/tests/pi-mono-adapter-usage.test.ts"
+  ],
+  "agent": "OpenCode",
+  "turn_id": "b58836c37a62",
+  "checkpoint_transcript_start": 27,
+  "transcript_lines_at_start": 27,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-05T21:15:05.135076Z",
+    "agent_lines": 218,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 218,
+    "agent_percentage": 100
+  }
+}
