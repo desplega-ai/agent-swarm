@@ -105,6 +105,8 @@ A task with dependencies won't be offered or claimable until all dependencies ar
 | `dependsOn` | Array of task IDs that must complete first |
 | `epicId` | Optional association with an epic |
 | `parentTaskId` | For session continuity — child task resumes parent's Claude session |
+| `model` | Model override: `haiku`, `sonnet`, or `opus`. Priority: task > `MODEL_OVERRIDE` config > `opus` |
+| `scheduleId` | Back-reference to the originating schedule (set automatically for schedule-created tasks) |
 
 ## Progress Tracking
 
@@ -136,3 +138,10 @@ When a worker container receives SIGTERM:
 4. **On restart** — Worker automatically resumes paused tasks with full context
 
 This enables zero-downtime deployments.
+
+## Related
+
+- [Epics](/docs/concepts/epics) — Organizing related tasks into larger projects
+- [Scheduled Tasks](/docs/concepts/scheduling) — Automate recurring task creation
+- [Architecture Overview](/docs/architecture/overview) — How the task system fits into the overall architecture
+- [Deployment Guide](/docs/guides/deployment) — Graceful shutdown and task resume in production

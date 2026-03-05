@@ -202,6 +202,12 @@ body {
   font-weight: 600;
 }
 
-.prose-chat h1 { font-size: 1.1em; }
-.prose-chat h2 { font-size: 1em; }
-.prose-chat h3 { font-size: 0.95em; }
+.prose-chat h1 {
+  font-size: 1.1em;
+}
+.prose-chat h2 {
+  font-size: 1em;
+}
+.prose-chat h3 {
+  font-size: 0.95em;
+}

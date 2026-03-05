@@ -1678,6 +1678,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let agentIdentityMd: string | undefined;
   let agentSetupScript: string | undefined;
   let agentToolsMd: string | undefined;
+  let agentClaudeMd: string | undefined;
   let agentProfileName: string | undefined;
   let agentDescription: string | undefined;
 
@@ -1695,6 +1696,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       description: agentDescription,
       soulMd: agentSoulMd,
       identityMd: agentIdentityMd,
+      toolsMd: agentToolsMd,
+      claudeMd: agentClaudeMd,
       repoContext: currentRepoContext,
     });
   };
@@ -1825,12 +1828,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         agentIdentityMd = profile.identityMd;
         agentSetupScript = profile.setupScript;
         agentToolsMd = profile.toolsMd;
+        agentClaudeMd = profile.claudeMd;
         agentProfileName = profile.name;
         agentDescription = profile.description;
 
         // Generate default templates if missing (runner registers via POST /api/agents
         // which doesn't generate templates like join-swarm does)
-        if (!agentSoulMd || !agentIdentityMd || !agentToolsMd) {
+        if (!agentSoulMd || !agentIdentityMd || !agentToolsMd || !agentClaudeMd) {
           const agentInfo = {
             name: agentProfileName || agentName,
             role: role,
@@ -1840,9 +1844,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           if (!agentSoulMd) agentSoulMd = generateDefaultSoulMd(agentInfo);
           if (!agentIdentityMd) agentIdentityMd = generateDefaultIdentityMd(agentInfo);
           if (!agentToolsMd) agentToolsMd = generateDefaultToolsMd(agentInfo);
-          const defaultClaudeMd = !profile.claudeMd
-            ? generateDefaultClaudeMd(agentInfo)
-            : undefined;
+          if (!agentClaudeMd) agentClaudeMd = generateDefaultClaudeMd(agentInfo);
 
           // Push generated templates to server
           try {
@@ -1850,7 +1852,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             if (!profile.soulMd) profileUpdate.soulMd = agentSoulMd;
             if (!profile.identityMd) profileUpdate.identityMd = agentIdentityMd;
             if (!profile.toolsMd) profileUpdate.toolsMd = agentToolsMd;
-            if (defaultClaudeMd) profileUpdate.claudeMd = defaultClaudeMd;
+            if (!profile.claudeMd && agentClaudeMd) profileUpdate.claudeMd = agentClaudeMd;
 
             await fetch(`${apiUrl}/api/agents/${agentId}/profile`, {
               method: "PUT",
@@ -1873,7 +1875,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           ? `${basePrompt}\n\n${additionalSystemPrompt}`
           : basePrompt;
         console.log(
-          `[${role}] Loaded agent identity (soul: ${agentSoulMd ? "yes" : "no"}, identity: ${agentIdentityMd ? "yes" : "no"})`,
+          `[${role}] Loaded agent identity (soul: ${agentSoulMd ? "yes" : "no"}, identity: ${agentIdentityMd ? "yes" : "no"}, tools: ${agentToolsMd ? "yes" : "no"}, claude: ${agentClaudeMd ? "yes" : "no"})`,
         );
         console.log(`[${role}] Updated system prompt length: ${resolvedSystemPrompt.length} chars`);
       }
@@ -1922,6 +1924,16 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         console.log(`[${role}] Wrote TOOLS.md to workspace`);
       } catch (err) {
         console.warn(`[${role}] Could not write TOOLS.md: ${(err as Error).message}`);
+      }
+    }
+
+    // Write CLAUDE.md to workspace (agent-level instructions)
+    if (agentClaudeMd) {
+      try {
+        await Bun.write("/workspace/CLAUDE.md", agentClaudeMd);
+        console.log(`[${role}] Wrote CLAUDE.md to workspace`);
+      } catch (err) {
+        console.warn(`[${role}] Could not write CLAUDE.md: ${(err as Error).message}`);
       }
     }
 

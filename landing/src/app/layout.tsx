@@ -33,6 +33,9 @@ export const metadata: Metadata = {
     images: ["https://agent-swarm.dev/og-image.png"],
   },
   metadataBase: new URL("https://agent-swarm.dev"),
+  alternates: {
+    canonical: "/",
+  },
 };
 
 export default function RootLayout({

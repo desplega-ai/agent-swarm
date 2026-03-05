@@ -1,16 +1,16 @@
+import { Activity, Clock, Coins, DollarSign, TrendingUp } from "lucide-react";
 import { useMemo } from "react";
-import { formatCurrency, formatCompactNumber, formatDuration } from "@/lib/utils";
 import {
-  LineChart,
+  CartesianGrid,
   Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
 } from "recharts";
-import { DollarSign, Coins, Activity, Clock, TrendingUp } from "lucide-react";
-import type { SessionCost, UsageSummaryTotals, UsageSummaryDailyRow } from "@/api/types";
+import type { SessionCost, UsageSummaryDailyRow, UsageSummaryTotals } from "@/api/types";
+import { formatCompactNumber, formatCurrency, formatDuration } from "@/lib/utils";
 
 function StatCard({
   label,
@@ -160,8 +160,17 @@ export function UsageSummary(props: UsageSummaryProps) {
               tickFormatter={(v) => `$${v}`}
               width={50}
             />
-            <Tooltip contentStyle={tooltipStyle} formatter={(value) => [`$${Number(value).toFixed(3)}`, "Cost"]} />
-            <Line type="monotone" dataKey="cost" stroke="var(--color-primary)" strokeWidth={2} dot={false} />
+            <Tooltip
+              contentStyle={tooltipStyle}
+              formatter={(value) => [`$${Number(value).toFixed(3)}`, "Cost"]}
+            />
+            <Line
+              type="monotone"
+              dataKey="cost"
+              stroke="var(--color-primary)"
+              strokeWidth={2}
+              dot={false}
+            />
           </LineChart>
         </ResponsiveContainer>
       </div>

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.5/schema.json",
+  "extends": ["../biome.json"],
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    },
+    "formatter": {
+      "enabled": false
+    },
+    "linter": {
+      "enabled": false
+    }
+  },
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "noArrayIndexKey": "off"
+      },
+      "a11y": {
+        "noStaticElementInteractions": "off",
+        "useKeyWithClickEvents": "off",
+        "noLabelWithoutControl": "off"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["src/components/ui/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noDocumentCookie": "off"
+          },
+          "correctness": {
+            "useExhaustiveDependencies": "off"
+          }
+        }
+      }
+    }
+  ]
+}

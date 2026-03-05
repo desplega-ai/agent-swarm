@@ -230,6 +230,10 @@ if command -v claude >/dev/null 2>&1; then
     echo "Installing plugins from desplega.ai..."
     claude plugin install qa-use@desplega.ai --scope user || echo "Plugin install failed, continuing..."
 
+    echo "Installing context-mode plugin..."
+    claude plugin marketplace add mksglu/claude-context-mode || echo "context-mode marketplace add failed, continuing..."
+    claude plugin install context-mode@claude-context-mode --scope user || echo "context-mode plugin install failed, continuing..."
+
     echo "Marketplace installation completed"
 else
     echo "WARNING: claude CLI not found, skipping marketplace installation"

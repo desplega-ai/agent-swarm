@@ -68,6 +68,27 @@ export function useThreadMessages(channelId: string, messageId: string) {
   });
 }
 
+export function useCreateChannel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { name: string; description?: string; type?: string }) =>
+      api.createChannel(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["channels"] });
+    },
+  });
+}
+
+export function useDeleteChannel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteChannel(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["channels"] });
+    },
+  });
+}
+
 export function usePostMessage(channelId: string) {
   const queryClient = useQueryClient();
 
