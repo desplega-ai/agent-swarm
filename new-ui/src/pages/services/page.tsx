@@ -1,13 +1,13 @@
+import { ExternalLink, Server } from "lucide-react";
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { useServices } from "@/api/hooks/use-services";
 import { useAgents } from "@/api/hooks/use-agents";
-import { formatSmartTime, cn } from "@/lib/utils";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Server, ExternalLink } from "lucide-react";
+import { useServices } from "@/api/hooks/use-services";
 import type { ServiceStatus } from "@/api/types";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn, formatSmartTime } from "@/lib/utils";
 
 const statusColors: Record<ServiceStatus, string> = {
   healthy: "bg-emerald-500",
@@ -29,7 +29,9 @@ export default function ServicesPage() {
 
   const agentMap = useMemo(() => {
     const m = new Map<string, string>();
-    agents?.forEach((a) => m.set(a.id, a.name));
+    agents?.forEach((a) => {
+      m.set(a.id, a.name);
+    });
     return m;
   }, [agents]);
 
@@ -66,7 +68,10 @@ export default function ServicesPage() {
                     />
                     <span className="font-semibold">{svc.name}</span>
                   </div>
-                  <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
+                  <Badge
+                    variant="outline"
+                    className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+                  >
                     {statusLabels[svc.status] ?? svc.status}
                   </Badge>
                 </div>
@@ -78,11 +83,8 @@ export default function ServicesPage() {
                 <div className="space-y-1 text-xs text-muted-foreground">
                   <div className="flex items-center gap-1">
                     <span className="text-muted-foreground/60">Agent:</span>
-                    <Link
-                      to={`/agents/${svc.agentId}`}
-                      className="text-primary hover:underline"
-                    >
-                      {agentMap.get(svc.agentId) ?? svc.agentId.slice(0, 8) + "..."}
+                    <Link to={`/agents/${svc.agentId}`} className="text-primary hover:underline">
+                      {agentMap.get(svc.agentId) ?? `${svc.agentId.slice(0, 8)}...`}
                     </Link>
                   </div>
 

@@ -21,11 +21,7 @@ export function useKeyboardShortcuts() {
     function onKeyDown(e: KeyboardEvent) {
       // Skip when typing in inputs
       const target = e.target as HTMLElement;
-      if (
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
-      ) {
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) {
         return;
       }
 

@@ -6,7 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.35.1] - 2026-03-05
+
+### Fixed
+- Use unique port variables per service in `docker-compose.example.yml` to avoid conflicts (#137)
+- Clarified that port variables are examples and that isolated network namespaces can share ports
+
+### Changed
+- Added internal cross-links across docs pages and blog/examples navigation (#135)
+- Added canonical URLs and JSON-LD structured data to docs pages
+
+## [1.34.0] - 2026-03-04
+
 ### Added
+- Task cost tracking and display in task details page (#131)
+- Schedule and epic HTTP API endpoints for CRUD operations
+- Exhaustive HTTP API integration test suite (#132)
+- `claude-context-mode` as default context management plugin for workers (#125)
+- Base prompt test coverage
+
+### Changed
+- Refactored monolithic `src/http.ts` into modular route handlers under `src/http/` (#132)
+- Abstracted route matching into `matchRoute` utility with dedicated tests
+- Converted handler dispatch to registry-based for-loop pattern
+- Improved system prompt assembly in `base-prompt.ts`
+
+### Fixed
+- Context-mode marketplace plugin ID in install command (#130)
+- Lint warnings and type errors across HTTP route handlers
+
+## [1.32.0] - 2026-03-03
+
+### Added
+- Model control per task, schedule, and global override — `model` parameter (`haiku`/`sonnet`/`opus`) on `send-task`, `task-action`, `create-schedule`, and `update-schedule` (#127)
+- Schedule-to-task linking via `scheduleId` — tasks created by schedules have a direct back-reference and `get-tasks` supports filtering by `scheduleId` (#127)
+- Multi-credential support — `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` accept comma-separated values for load balancing across subscriptions (#119)
+- `ANTHROPIC_API_KEY` as alternative credential to `CLAUDE_CODE_OAUTH_TOKEN`
 - x402 payments guide page and environment variables reference in documentation site
 
 ## [1.31.0] - 2026-02-28

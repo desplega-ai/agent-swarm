@@ -1,4 +1,3 @@
-import { NavLink, useLocation } from "react-router-dom";
 import {
   BarChart3,
   Clock,
@@ -11,6 +10,7 @@ import {
   Settings,
   Users,
 } from "lucide-react";
+import { NavLink, useLocation } from "react-router-dom";
 import {
   Sidebar,
   SidebarContent,
@@ -63,7 +63,10 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="h-14 justify-center border-b border-sidebar-border">
-        <NavLink to="/" className="flex items-center gap-2 group-data-[collapsible=icon]:justify-center">
+        <NavLink
+          to="/"
+          className="flex items-center gap-2 group-data-[collapsible=icon]:justify-center"
+        >
           <img
             src="/logo.png"
             alt="Agent Swarm"

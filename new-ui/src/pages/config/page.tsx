@@ -1,32 +1,24 @@
-import { useState, useEffect, useMemo } from "react";
+import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
+import {
+  Check,
+  CheckCircle2,
+  Copy,
+  Eye,
+  EyeOff,
+  Hexagon,
+  Loader2,
+  Pencil,
+  Plus,
+  Trash2,
+  XCircle,
+} from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { ColDef, ICellRendererParams } from "ag-grid-community";
-import { useConfig } from "@/hooks/use-config";
-import { useConfigs, useUpsertConfig, useDeleteConfig } from "@/api/hooks/use-config-api";
 import { useAgents } from "@/api/hooks/use-agents";
+import { useConfigs, useDeleteConfig, useUpsertConfig } from "@/api/hooks/use-config-api";
+import type { SwarmConfig, SwarmConfigScope } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,8 +29,28 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, CheckCircle2, XCircle, Hexagon, Plus, Pencil, Trash2, Eye, EyeOff, Copy, Check } from "lucide-react";
-import type { SwarmConfig, SwarmConfigScope } from "@/api/types";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { useConfig } from "@/hooks/use-config";
 
 interface ConfigFormData {
   scope: SwarmConfigScope;
@@ -70,24 +82,18 @@ function ConfigEntryDialog({
   onSubmit: (data: ConfigFormData) => void;
 }) {
   const { data: agents } = useAgents();
-  const [form, setForm] = useState<ConfigFormData>(emptyConfigForm);
-
-  useEffect(() => {
-    if (open) {
-      setForm(
-        editEntry
-          ? {
-              scope: editEntry.scope,
-              scopeId: editEntry.scopeId ?? "",
-              key: editEntry.key,
-              value: editEntry.isSecret ? "" : editEntry.value,
-              isSecret: editEntry.isSecret,
-              description: editEntry.description ?? "",
-            }
-          : emptyConfigForm,
-      );
-    }
-  }, [editEntry, open]);
+  const [form, setForm] = useState<ConfigFormData>(() =>
+    editEntry
+      ? {
+          scope: editEntry.scope,
+          scopeId: editEntry.scopeId ?? "",
+          key: editEntry.key,
+          value: editEntry.isSecret ? "" : editEntry.value,
+          isSecret: editEntry.isSecret,
+          description: editEntry.description ?? "",
+        }
+      : emptyConfigForm,
+  );
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -110,7 +116,9 @@ function ConfigEntryDialog({
               <Label>Scope</Label>
               <Select
                 value={form.scope}
-                onValueChange={(v) => setForm({ ...form, scope: v as SwarmConfigScope, scopeId: "" })}
+                onValueChange={(v) =>
+                  setForm({ ...form, scope: v as SwarmConfigScope, scopeId: "" })
+                }
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -213,22 +221,114 @@ function ConfigEntryDialog({
   );
 }
 
+function ConfigDetailDialog({
+  config,
+  onOpenChange,
+  agentName,
+}: {
+  config: SwarmConfig | null;
+  onOpenChange: (open: boolean) => void;
+  agentName?: string;
+}) {
+  const [showValue, setShowValue] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  function handleCopy() {
+    if (!config) return;
+    navigator.clipboard.writeText(config.value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <Dialog open={!!config} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="font-mono text-base">{config?.key}</DialogTitle>
+          <DialogDescription>{config?.description || "No description"}</DialogDescription>
+        </DialogHeader>
+        {config && (
+          <div className="space-y-4 py-2">
+            <div className="flex items-center gap-2">
+              <Badge
+                variant="outline"
+                className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+              >
+                {config.scope}
+              </Badge>
+              {config.isSecret && (
+                <Badge
+                  variant="outline"
+                  className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase border-amber-500/30 text-amber-400"
+                >
+                  secret
+                </Badge>
+              )}
+            </div>
+
+            {config.scope !== "global" && config.scopeId && (
+              <div>
+                <Label className="text-xs text-muted-foreground uppercase tracking-wide">
+                  {config.scope === "agent" ? "Agent" : "Scope ID"}
+                </Label>
+                <p className="text-sm mt-0.5">{agentName || `${config.scopeId.slice(0, 8)}...`}</p>
+              </div>
+            )}
+
+            <div>
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Value</Label>
+              <div className="flex items-center gap-1 mt-1">
+                <code className="flex-1 text-sm font-mono rounded-md bg-muted p-2 break-all select-text">
+                  {showValue ? config.value : "••••••••••••••••"}
+                </code>
+                <div className="flex flex-col gap-1 shrink-0">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7"
+                    onClick={() => setShowValue(!showValue)}
+                  >
+                    {showValue ? (
+                      <EyeOff className="h-3.5 w-3.5" />
+                    ) : (
+                      <Eye className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                  <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleCopy}>
+                    {copied ? (
+                      <Check className="h-3.5 w-3.5 text-emerald-400" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function SwarmConfigSection() {
-  const { data: configs, isLoading } = useConfigs();
+  const { data: configs, isLoading } = useConfigs({ includeSecrets: true });
   const { data: agents } = useAgents();
   const upsertConfig = useUpsertConfig();
   const deleteConfig = useDeleteConfig();
 
   const agentMap = useMemo(() => {
     const m = new Map<string, string>();
-    agents?.forEach((a) => m.set(a.id, a.name));
+    agents?.forEach((a) => {
+      m.set(a.id, a.name);
+    });
     return m;
   }, [agents]);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editEntry, setEditEntry] = useState<SwarmConfig | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SwarmConfig | null>(null);
-  const [revealedSecrets, setRevealedSecrets] = useState<Set<string>>(new Set());
+  const [detailEntry, setDetailEntry] = useState<SwarmConfig | null>(null);
   const [scopeFilter, setScopeFilter] = useState<string>("all");
 
   function handleAdd() {
@@ -236,10 +336,10 @@ function SwarmConfigSection() {
     setDialogOpen(true);
   }
 
-  function handleEdit(entry: SwarmConfig) {
+  const handleEdit = useCallback((entry: SwarmConfig) => {
     setEditEntry(entry);
     setDialogOpen(true);
-  }
+  }, []);
 
   function handleSubmit(data: ConfigFormData) {
     upsertConfig.mutate({
@@ -260,14 +360,12 @@ function SwarmConfigSection() {
     }
   }
 
-  function toggleReveal(id: string) {
-    setRevealedSecrets((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
+  const onRowClicked = useCallback((event: RowClickedEvent<SwarmConfig>) => {
+    // Ignore clicks on interactive elements (buttons, links) inside cells
+    const target = event.event?.target as HTMLElement | undefined;
+    if (target?.closest("button, a, [role='button']")) return;
+    if (event.data) setDetailEntry(event.data);
+  }, []);
 
   const filteredConfigs =
     scopeFilter === "all" ? configs : configs?.filter((c) => c.scope === scopeFilter);
@@ -277,32 +375,37 @@ function SwarmConfigSection() {
       {
         field: "scope",
         headerName: "Scope",
-        width: 100,
+        width: 110,
+        minWidth: 90,
         cellRenderer: (params: { value: string }) => (
-          <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase">
+          <Badge
+            variant="outline"
+            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+          >
             {params.value}
           </Badge>
         ),
       },
       {
         headerName: "Agent / Scope ID",
-        width: 150,
+        width: 160,
+        minWidth: 120,
         valueGetter: (params) => {
           const d = params.data;
           if (!d) return "—";
           if (d.scope === "agent" && d.scopeId)
-            return agentMap.get(d.scopeId) ?? d.scopeId.slice(0, 8) + "...";
-          if (d.scope === "repo" && d.scopeId)
-            return d.scopeId.slice(0, 8) + "...";
+            return agentMap.get(d.scopeId) ?? `${d.scopeId.slice(0, 8)}...`;
+          if (d.scope === "repo" && d.scopeId) return `${d.scopeId.slice(0, 8)}...`;
           return "—";
         },
       },
       {
         field: "key",
         headerName: "Key",
-        width: 180,
+        width: 200,
+        minWidth: 140,
         cellRenderer: (params: { value: string }) => (
-          <span className="font-mono">{params.value}</span>
+          <span className="font-mono select-text">{params.value}</span>
         ),
       },
       {
@@ -314,38 +417,24 @@ function SwarmConfigSection() {
           const cfg = params.data;
           if (!cfg) return null;
           if (cfg.isSecret) {
-            const revealed = revealedSecrets.has(cfg.id);
-            return (
-              <div className="flex items-center gap-1 font-mono">
-                <span>{revealed ? cfg.value : "••••••••"}</span>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-6 w-6"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleReveal(cfg.id);
-                  }}
-                >
-                  {revealed ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                </Button>
-              </div>
-            );
+            return <span className="font-mono text-muted-foreground">••••••••</span>;
           }
-          return <span className="font-mono">{cfg.value}</span>;
+          return <span className="font-mono truncate select-text">{cfg.value}</span>;
         },
       },
       {
         field: "description",
         headerName: "Description",
         width: 200,
+        minWidth: 120,
         cellRenderer: (params: { value: string | null }) => (
-          <span className="text-muted-foreground">{params.value ?? "—"}</span>
+          <span className="text-muted-foreground truncate">{params.value ?? "—"}</span>
         ),
       },
       {
         headerName: "",
         width: 100,
+        minWidth: 100,
         sortable: false,
         cellRenderer: (params: ICellRendererParams<SwarmConfig>) => {
           const cfg = params.data;
@@ -379,7 +468,7 @@ function SwarmConfigSection() {
         },
       },
     ],
-    [agentMap, revealedSecrets, deleteTarget],
+    [agentMap, handleEdit],
   );
 
   return (
@@ -408,12 +497,21 @@ function SwarmConfigSection() {
       <DataGrid
         rowData={filteredConfigs ?? []}
         columnDefs={columnDefs}
+        onRowClicked={onRowClicked}
         loading={isLoading}
         emptyMessage="No configuration entries"
         domLayout="autoHeight"
+        enableCellTextSelection
+      />
+
+      <ConfigDetailDialog
+        config={detailEntry}
+        onOpenChange={(open) => !open && setDetailEntry(null)}
+        agentName={detailEntry?.scopeId ? agentMap.get(detailEntry.scopeId) : undefined}
       />
 
       <ConfigEntryDialog
+        key={editEntry?.id ?? "new"}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         editEntry={editEntry}
@@ -425,7 +523,9 @@ function SwarmConfigSection() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Config Entry</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete <strong className="font-mono">{deleteTarget?.key}</strong>? This action cannot be undone.
+              Are you sure you want to delete{" "}
+              <strong className="font-mono">{deleteTarget?.key}</strong>? This action cannot be
+              undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -545,7 +645,11 @@ export default function ConfigPage() {
                   onClick={handleCopyApiKey}
                   disabled={!apiKey}
                 >
-                  {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                  {copied ? (
+                    <Check className="h-4 w-4 text-emerald-400" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
                 </Button>
               </div>
             </div>
@@ -634,7 +738,11 @@ export default function ConfigPage() {
                   onClick={handleCopyApiKey}
                   disabled={!apiKey}
                 >
-                  {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                  {copied ? (
+                    <Check className="h-4 w-4 text-emerald-400" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
                 </Button>
               </div>
             </div>

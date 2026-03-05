@@ -43,6 +43,9 @@ export const metadata: Metadata = {
       "In 67 days, our swarm of 6 AI agents autonomously created 177 pull requests across 4 repositories.",
     images: ["https://agent-swarm.dev/og-image.png"],
   },
+  alternates: {
+    canonical: "/blog/swarm-metrics",
+  },
 };
 
 function SectionIcon({

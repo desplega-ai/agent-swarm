@@ -1,5 +1,5 @@
-import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 interface JsonViewerProps {
@@ -22,11 +22,7 @@ export function JsonViewer({ data, title, defaultExpanded = false, className }: 
           onClick={() => setExpanded(!expanded)}
           className="flex w-full items-center gap-2 px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
         >
-          {expanded ? (
-            <ChevronDown className="h-4 w-4" />
-          ) : (
-            <ChevronRight className="h-4 w-4" />
-          )}
+          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           {title}
         </button>
         {expanded && (

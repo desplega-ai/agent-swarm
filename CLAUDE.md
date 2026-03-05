@@ -4,7 +4,40 @@ Multi-agent orchestration for Claude Code, Codex, Gemini CLI. Enables task distr
 
 **Getting Started**: See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup. Run `bun run start:http` to start the server.
 
-**Database**: Uses `bun:sqlite` (SQLite with WAL mode). DB file at `./agent-swarm-db.sqlite` (auto-created). Schema defined in `src/be/db.ts`.
+**Database**: Uses `bun:sqlite` (SQLite with WAL mode). DB file at `./agent-swarm-db.sqlite` (auto-created). Schema defined in `src/be/migrations/` as numbered SQL files, run by `src/be/migrations/runner.ts`. Query functions in `src/be/db.ts`.
+
+### Database Migrations
+
+Schema changes use a file-based migration system (`src/be/migrations/`):
+
+```bash
+# Migration files: numbered SQL files executed in order
+src/be/migrations/
+  001_initial.sql    # Baseline: all tables, indexes, seed data
+  runner.ts          # Migration runner (auto-runs on startup)
+```
+
+**Adding a new migration:**
+1. Create `src/be/migrations/NNN_descriptive_name.sql` (next number after highest existing)
+2. Write forward-only SQL (CREATE TABLE, ALTER TABLE, CREATE INDEX, etc.)
+3. Test with both fresh DB (`rm agent-swarm-db.sqlite && bun run start:http`) and existing DB
+4. The runner applies it automatically on next startup
+
+**How it works:**
+- `_migrations` table tracks which migrations have been applied (version, name, checksum)
+- On startup, runner compares SQL files against `_migrations` and applies pending ones
+- Each migration runs in a transaction — atomic success or rollback
+- Checksums detect accidental edits to applied migrations (logged as warnings)
+- Bootstrap is schema-aware for pre-migration DBs:
+  - If baseline tables already exist, runner marks `001_initial` as applied without re-executing it
+  - If schema is partial/incomplete, runner executes `001_initial` to reach baseline safely
+- `initDb()` also runs compatibility guards after migrations for legacy DBs (for example, adding missing `agents` profile columns before seeding context versions)
+
+**Rules:**
+- Never modify an already-applied migration — create a new one instead
+- No `down` migrations (SQLite limitations make rollbacks unreliable)
+- Use `IF NOT EXISTS` for CREATE TABLE/INDEX in migrations for safety
+- Keep the `AgentTaskSourceSchema` in `src/types.ts` in sync with CHECK constraints in SQL
 
 ## Quick Reference
 
@@ -43,6 +76,8 @@ src/
   cli.tsx       # CLI entry point (Ink)
   tools/        # MCP tool definitions
   be/           # Backend utilities (DB, storage)
+    db.ts       # DB init + query functions
+    migrations/ # SQL migration files + runner
   github/       # GitHub webhook handlers
   slack/        # Slack integration
 new-ui/          # Dashboard (Next.js app)
@@ -202,6 +237,32 @@ cd ui && pnpm run dev --port 5275
 ```
 
 The UI connects to the API via `VITE_API_URL` (defaults to `http://localhost:3013`). When using alternate API ports, update accordingly in the UI `.env` or pass as env var.
+
+---
+
+## Pre-PR Checklist
+
+Before pushing a PR, run the checks that CI will enforce. Which checks to run depends on what files you changed:
+
+**Root project (src/, tools/, etc.):**
+```bash
+bun run lint:fix        # Biome lint + format
+bun run tsc:check       # TypeScript type check
+bun test                # Unit tests
+```
+
+**new-ui/ (dashboard):**
+```bash
+cd new-ui
+pnpm lint               # Biome check (lint + format)
+pnpm exec tsc --noEmit  # TypeScript type check
+```
+
+**Both:** Run both sets if your changes span root and new-ui.
+
+**Docker changes (Dockerfile, Dockerfile.worker):** CI does a build test — verify locally with `docker build -f <Dockerfile> .` if unsure.
+
+All of these are enforced by the Merge Gate workflow (`.github/workflows/merge-gate.yml`). The gate job blocks merge if any check fails.
 
 ---
 

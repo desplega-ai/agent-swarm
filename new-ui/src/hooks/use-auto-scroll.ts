@@ -76,7 +76,6 @@ export function useAutoScroll(
       // Subsequent updates - only scroll if user was near bottom
       doScrollToBottom();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [element, isFollowing, ...deps]);
 
   return { isFollowing, scrollToBottom };
