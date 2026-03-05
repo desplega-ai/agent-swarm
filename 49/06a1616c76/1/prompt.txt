@@ -1,0 +1,1088 @@
+# Implement Plan
+
+A thin wrapper that invokes the `desplega:implementing` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse autonomy mode from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - If plan file has `autonomy:` in frontmatter, use that as default
+   - Otherwise, default to **Critical** (don't prompt - implementation is more straightforward)
+
+2. **ALWAYS invoke the `desplega:implementing` skill:**
+   - Pass the plan file path
+   - Pass the autonomy mode determined above
+   - Let the skill handle all implementation logic
+
+3. **If no plan path provided:**
+   - Respond with: "I need a plan file to proceed. Please provide the path to the plan you would like me to implement."
+
+## Example Usage
+
+```
+/implement-plan thoughts/<username|shared>/plans/2026-01-14-my-feature.md
+/implement-plan --autonomy=autopilot @plans/feature.md
+/implement-plan --autonomy=verbose @current-plan.md
+```
+
+@thoughts/taras/plans/2026-03-05-pi-mono-provider-implementation-plan.md
+Called the Read tool with the following input: {"filePath":"/Users/taras/Documents/code/agent-swarm/thoughts/taras/plans/2026-03-05-pi-mono-provider-implementation-plan.md"}
+<path>/Users/taras/Documents/code/agent-swarm/thoughts/taras/plans/2026-03-05-pi-mono-provider-implementation-plan.md</path>
+<type>file</type>
+<content>1: ---
+2: date: 2026-03-05
+3: planner: OpenCode (gpt-5.3-codex)
+4: branch: main
+5: repository: agent-swarm
+6: topic: "HARNESS_PROVIDER runtime adapters (claude + pi-mono)"
+7: tags: [plan, provider, runner, pi-mono, hooks, session-lifecycle, compatibility]
+8: status: draft
+9: autonomy: autopilot
+10: research: thoughts/taras/research/2026-03-05-pi-mono-provider-research.md
+11: last_updated: 2026-03-05
+12: last_updated_by: OpenCode (gpt-5.3-codex)
+13: ---
+14: 
+15: # HARNESS_PROVIDER Runtime Adapter Implementation Plan
+16: 
+17: ## Overview
+18: 
+19: Add a provider adapter architecture to `runAgent()` so runtime execution can be selected by `HARNESS_PROVIDER=claude|pi` (default `claude`) without breaking existing behavior. The Claude path must remain functionally identical, while a new pi-mono adapter is introduced with parity for hooks, skills, session lifecycle, cancellation, logs, costs, and parent/child continuity.
+20: 
+21: ## Current State Analysis
+22: 
+23: ### Runtime is currently Claude-coupled
+24: - Claude invocation is hardcoded in both execution paths:
+25:   - `runClaudeIteration()` command construction (`src/commands/runner.ts:1090`)
+26:   - `spawnClaudeProcess()` command construction (`src/commands/runner.ts:1272`)
+27:   - hardcoded `--output-format stream-json` (`src/commands/runner.ts:1096`)
+28: - Claude stream parsing drives session and telemetry:
+29:   - session init detection (`src/commands/runner.ts:1159`, `src/commands/runner.ts:1359`)
+30:   - cost extraction from `result` events (`src/commands/runner.ts:1369`)
+31:   - stale resume retry logic (`src/commands/runner.ts:1550`)
+32: 
+33: ### Lifecycle orchestration is reusable across providers
+34: - Shared runner orchestration already exists in:
+35:   - `runAgent()` (`src/commands/runner.ts:1656`)
+36:   - completion/finalization in `checkCompletedProcesses()` + `ensureTaskFinished()` (`src/commands/runner.ts:1593`, `src/commands/runner.ts:240`)
+37:   - cancellation scan in polling loop (`src/commands/runner.ts:2066`)
+38: - Shared persistence APIs are backend-agnostic:
+39:   - logs: `POST /api/session-logs` (`src/http/session-data.ts:24`)
+40:   - costs: `POST /api/session-costs` (`src/http/session-data.ts:88`)
+41:   - finish: `POST /api/tasks/:id/finish` (`src/http/tasks.ts:188`)
+42: 
+43: ### Session continuity is Claude-shaped but adaptable
+44: - Task stores `claudeSessionId` (`src/types.ts:125`, `src/be/migrations/001_initial.sql:98`).
+45: - Resume behavior uses `--resume` with own session first, then parent session (`src/commands/runner.ts:1980`, `src/commands/runner.ts:2136`).
+46: - Session persistence endpoint is Claude-specific by name (`PUT /api/tasks/:id/claude-session`, `src/http/tasks.ts:93`).
+47: 
+48: ### Hook parity constraints to preserve
+49: - Hooks rely on `TASK_FILE` + cancellation checks against `/cancelled-tasks` (`src/hooks/hook.ts:96`, `src/hooks/hook.ts:507`).
+50: - Pre/post tool semantics are implemented in `src/hooks/hook.ts` and must still trigger at equivalent lifecycle moments for pi-backed runs.
+51: 
+52: ## Desired End State
+53: 
+54: 1. `HARNESS_PROVIDER` resolves provider at runtime with this policy:
+55:    - `claude` when unset
+56:    - `claude` with warning when unknown
+57:    - `pi` only when explicitly configured
+58: 2. Runner executes via provider adapter interface (`ClaudeAdapter`, `PiMonoAdapter`).
+59: 3. Both adapters emit normalized runtime events consumed by a single persistence/finalization path.
+60: 4. Claude behavior remains unchanged for existing deployments.
+61: 5. Pi mode fails fast on missing required auth for selected provider family (no silent fallback).
+62: 6. Parent/child continuity, pause/resume, cancellation, logs, and costs work with parity-level behavior.
+63: 
+64: ## Quick Verification Reference
+65: 
+66: Common commands:
+67: - `bun run lint:fix`
+68: - `bun run tsc:check`
+69: - `bun test`
+70: - `bun test src/tests/runner*.test.ts`
+71: - `bun test src/tests/task-cancellation.test.ts`
+72: - `bun test src/tests/task-pause-resume.test.ts`
+73: - `bun test src/tests/session-attach.test.ts`
+74: - `bun test src/tests/session-logs.test.ts`
+75: - `bun test src/tests/session-costs.test.ts`
+76: 
+77: Key files:
+78: - `src/commands/runner.ts`
+79: - `src/commands/providers/claude-adapter.ts` (new)
+80: - `src/commands/providers/pi-mono-adapter.ts` (new)
+81: - `src/commands/providers/types.ts` (new)
+82: - `src/http/tasks.ts`
+83: - `src/http/session-data.ts`
+84: - `src/be/db.ts`
+85: - `src/types.ts`
+86: - `src/tests/runner*.test.ts` and new provider-focused tests
+87: 
+88: ## What We're NOT Doing
+89: 
+90: - Replacing direct `agent-swarm claude` command UX.
+91: - Redesigning UI to choose providers.
+92: - Changing existing external API shapes for session logs/costs.
+93: - Shipping advanced pi-native enhancements (beyond parity-safe lifecycle mapping) in v1.
+94: 
+95: ## Implementation Approach
+96: 
+97: Use a compatibility-first extraction:
+98: - First isolate existing Claude logic behind an adapter with no behavior changes.
+99: - Then introduce normalized runtime events and shared telemetry persistence.
+100: - Add pi adapter behind `HARNESS_PROVIDER=pi`.
+101: - Add targeted parity tests and explicit env failure behavior.
+102: 
+103: ---
+104: 
+105: ## Phase 1: Provider Selection Contract + Adapter Interfaces
+106: 
+107: ### Overview
+108: Define provider selection and adapter contracts without altering behavior.
+109: 
+110: ### Changes Required
+111: 
+112: #### 1. Add provider selection resolver
+113: **File**: `src/commands/runner.ts`
+114: **Changes**:
+115: - Add `resolveHarnessProvider(freshEnv): "claude" | "pi"` near env resolution helpers.
+116: - Resolve from `HARNESS_PROVIDER` after `fetchResolvedEnv()` (so config precedence works).
+117: - Unknown value policy: log warning and return `claude`.
+118: 
+119: #### 2. Introduce adapter contracts
+120: **File**: `src/commands/providers/types.ts` (new)
+121: **Changes**:
+122: - Define `ProviderAdapter` interface with methods:
+123:   - `startRun(context): Promise<ProviderRunHandle>`
+124:   - `cancel(runHandle): Promise<void>`
+125:   - `buildResumeContext(task, parentTask): ProviderResumeContext`
+126: - Define normalized runtime event union (minimum):
+127:   - `session_init`
+128:   - `stream_line`
+129:   - `result`
+130:   - `stderr`
+131:   - `provider_error`
+132:   - `process_exit`
+133: 
+134: #### 3. Add provider-aware task runtime metadata (compat-safe)
+135: **File**: `src/types.ts`
+136: **Changes**:
+137: - Add optional runtime metadata type for provider/session without removing `claudeSessionId`.
+138: - Keep `claudeSessionId` unchanged for backward compatibility.
+139: 
+140: ### Success Criteria:
+141: 
+142: #### Automated Verification:
+143: - [ ] Typecheck passes: `bun run tsc:check`
+144: - [ ] Lint/format passes: `bun run lint:fix`
+145: - [ ] Existing runner tests pass unchanged: `bun test src/tests/runner*.test.ts`
+146: 
+147: #### Manual Verification:
+148: - [ ] With no `HARNESS_PROVIDER`, runtime resolves to `claude`.
+149: - [ ] With invalid `HARNESS_PROVIDER=foo`, runtime warns and still uses `claude`.
+150: 
+151: **Implementation Note**: This phase must be behavior-preserving; no runtime flow changes beyond selection scaffolding.
+152: 
+153: ---
+154: 
+155: ## Phase 2: Extract ClaudeAdapter with Zero Functional Delta
+156: 
+157: ### Overview
+158: Move Claude-specific process and stream-json parsing logic out of `runner.ts` into a dedicated adapter.
+159: 
+160: ### Changes Required
+161: 
+162: #### 1. Move command construction and subprocess handling
+163: **File**: `src/commands/providers/claude-adapter.ts` (new)
+164: **Changes**:
+165: - Lift logic currently in:
+166:   - `runClaudeIteration()` (`src/commands/runner.ts:1079`)
+167:   - `spawnClaudeProcess()` (`src/commands/runner.ts:1257`)
+168: - Preserve exact command args:
+169:   - `claude --model ... --verbose --output-format stream-json ...`
+170: - Preserve `TASK_FILE` semantics.
+171: 
+172: #### 2. Move Claude event parsing into adapter event emission
+173: **File**: `src/commands/providers/claude-adapter.ts` (new)
+174: **Changes**:
+175: - Parse per-line JSON exactly as current implementation does.
+176: - Emit normalized events for:
+177:   - session init and id extraction
+178:   - result/cost payload
+179:   - stderr and JSON parse failures
+180: 
+181: #### 3. Keep runner orchestration unchanged
+182: **File**: `src/commands/runner.ts`
+183: **Changes**:
+184: - Replace direct Claude subprocess calls with adapter invocation.
+185: - Keep existing `checkCompletedProcesses()` flow and finish semantics.
+186: 
+187: ### Success Criteria:
+188: 
+189: #### Automated Verification:
+190: - [ ] Runner lifecycle tests pass: `bun test src/tests/runner*.test.ts`
+191: - [ ] Cancellation tests pass: `bun test src/tests/task-cancellation.test.ts`
+192: - [ ] Typecheck passes: `bun run tsc:check`
+193: 
+194: #### Manual Verification:
+195: - [ ] Diff inspection confirms no changes to Claude command flags.
+196: - [ ] Default runtime still creates session logs and costs in same format.
+197: 
+198: **Implementation Note**: Stop after this phase and verify Claude parity before introducing pi execution.
+199: 
+200: ---
+201: 
+202: ## Phase 3: Shared Normalization + Persistence Pipeline
+203: 
+204: ### Overview
+205: Centralize how provider events are converted into session-id updates, logs, costs, and final status.
+206: 
+207: ### Changes Required
+208: 
+209: #### 1. Introduce event-to-persistence mapper
+210: **File**: `src/commands/runner.ts` (or `src/commands/providers/runtime-normalizer.ts` new)
+211: **Changes**:
+212: - Build one handler that consumes normalized events and triggers:
+213:   - `saveClaudeSessionId()` (compat path for now)
+214:   - `flushLogBuffer()`
+215:   - `saveCostData()`
+216:   - failure reason enrichment via `SessionErrorTracker`
+217: 
+218: #### 2. Preserve existing API contracts
+219: **File**: `src/http/session-data.ts` (validate only)
+220: **Changes**:
+221: - No schema changes required; ensure adapter pipeline supplies existing fields.
+222: - Continue sending `cli` label (`"claude"` for current adapter; `"pi"` for new one).
+223: 
+224: #### 3. Add dedicated normalization tests
+225: **File**: `src/tests/runner-provider-normalization.test.ts` (new)
+226: **Changes**:
+227: - Verify normalized `session_init` stores session id.
+228: - Verify normalized `result` stores cost data mapping.
+229: - Verify line buffering behavior remains consistent.
+230: 
+231: ### Success Criteria:
+232: 
+233: #### Automated Verification:
+234: - [ ] Session logs tests pass: `bun test src/tests/session-logs.test.ts`
+235: - [ ] Session costs tests pass: `bun test src/tests/session-costs.test.ts`
+236: - [ ] New normalization tests pass: `bun test src/tests/runner-provider-normalization.test.ts`
+237: 
+238: #### Manual Verification:
+239: - [ ] `session_logs` rows still include expected line ordering and `cli` value.
+240: - [ ] `session_costs` rows still persist token defaults and totals correctly.
+241: 
+242: **Implementation Note**: Do not change HTTP payload contracts in this phase.
+243: 
+244: ---
+245: 
+246: ## Phase 4: PiMonoAdapter + Auth/Model Resolution
+247: 
+248: ### Overview
+249: Implement pi execution path behind `HARNESS_PROVIDER=pi` with explicit auth resolution and deterministic failures.
+250: 
+251: ### Changes Required
+252: 
+253: #### 1. Add pi dependencies and adapter
+254: **File**: `package.json`
+255: **Changes**:
+256: - Add required pi packages used by adapter (pin exact versions during implementation).
+257: 
+258: **File**: `src/commands/providers/pi-mono-adapter.ts` (new)
+259: **Changes**:
+260: - Create session via pi API (embedded mode).
+261: - Subscribe to lifecycle/tool/message events.
+262: - Emit normalized runtime events consumed by Phase 3 pipeline.
+263: 
+264: #### 2. Add auth/provider family resolver for pi mode
+265: **File**: `src/commands/providers/pi-config.ts` (new)
+266: **Changes**:
+267: - Resolve provider family from selected model/config.
+268: - Required env matrix:
+269:   - Anthropic: `ANTHROPIC_API_KEY`
+270:   - OpenRouter: `OPENROUTER_API_KEY`
+271:   - OpenAI-compatible: `OPENAI_API_KEY`
+272:   - Ollama/local: provider-specific base URL as needed
+273: - Throw clear error on missing required keys.
+274: 
+275: #### 3. Wire adapter selection in runner
+276: **File**: `src/commands/runner.ts`
+277: **Changes**:
+278: - Instantiate `ClaudeAdapter` or `PiMonoAdapter` from provider resolver.
+279: - Keep model precedence unchanged (`task.model` -> `MODEL_OVERRIDE` -> default).
+280: 
+281: ### Success Criteria:
+282: 
+283: #### Automated Verification:
+284: - [ ] Dependencies install cleanly: `bun install`
+285: - [ ] Typecheck passes: `bun run tsc:check`
+286: - [ ] Pi adapter tests pass: `bun test src/tests/pi-provider*.test.ts`
+287: 
+288: #### Manual Verification:
+289: - [ ] `HARNESS_PROVIDER=pi` with missing auth fails with explicit missing key message.
+290: - [ ] `HARNESS_PROVIDER=pi` with valid auth starts and emits session/init/result events.
+291: 
+292: **Implementation Note**: No silent fallback to Claude for pi auth errors.
+293: 
+294: ---
+295: 
+296: ## Phase 5: Resume, Parent/Child Continuity, and Cancellation Parity
+297: 
+298: ### Overview
+299: Recreate current continuation behavior for pi while preserving existing Claude logic.
+300: 
+301: ### Changes Required
+302: 
+303: #### 1. Provider-aware resume strategy
+304: **File**: `src/commands/runner.ts`
+305: **Changes**:
+306: - Keep current parent-first flow points:
+307:   - paused task resume path (`src/commands/runner.ts:1980`)
+308:   - child task path (`src/commands/runner.ts:2136`)
+309: - Add provider-specific resume context handling:
+310:   - Claude: existing `--resume`
+311:   - Pi: session restore/rehydrate API (or fallback context bootstrap)
+312: 
+313: #### 2. Session id compatibility mapping
+314: **File**: `src/http/tasks.ts`
+315: **Changes**:
+316: - Keep existing `PUT /api/tasks/:id/claude-session` for compatibility.
+317: - Optionally add generic alias route (if needed) that writes same field + provider metadata.
+318: 
+319: **File**: `src/be/db.ts`
+320: **Changes**:
+321: - If generic metadata is needed, add non-breaking column via migration (JSON text metadata).
+322: 
+323: #### 3. Cancellation parity
+324: **File**: `src/commands/providers/pi-mono-adapter.ts`
+325: **Changes**:
+326: - Implement `cancel()` path to abort pi session.
+327: 
+328: **File**: `src/commands/runner.ts`
+329: **Changes**:
+330: - Reuse existing cancellation detection loop; call provider cancel for pi instead of process kill semantics where applicable.
+331: 
+332: ### Success Criteria:
+333: 
+334: #### Automated Verification:
+335: - [ ] Pause/resume tests pass: `bun test src/tests/task-pause-resume.test.ts`
+336: - [ ] Session attach/continuity tests pass: `bun test src/tests/session-attach.test.ts`
+337: - [ ] Cancellation tests pass: `bun test src/tests/task-cancellation.test.ts`
+338: 
+339: #### Manual Verification:
+340: - [ ] Parent/child task in pi mode continues with expected context behavior.
+341: - [ ] Cancelling an in-progress pi task prevents further tool execution and finishes as cancelled.
+342: 
+343: **Implementation Note**: Parity target is behavioral, not byte-for-byte identical internal mechanics.
+344: 
+345: ---
+346: 
+347: ## Phase 6: Hook Lifecycle Bridging for Provider-Neutral Semantics
+348: 
+349: ### Overview
+350: Ensure hook behavior remains equivalent when tool and lifecycle events originate from pi runtime instead of Claude stream output.
+351: 
+352: ### Changes Required
+353: 
+354: #### 1. Map provider events to hook lifecycle triggers
+355: **File**: `src/commands/providers/runtime-hook-bridge.ts` (new)
+356: **Changes**:
+357: - Map normalized events to existing hook semantics:
+358:   - session start -> `SessionStart`
+359:   - before tool call -> `PreToolUse`
+360:   - after tool call -> `PostToolUse`
+361:   - session end -> `Stop`
+362: 
+363: #### 2. Keep cancellation guards untouched
+364: **File**: `src/hooks/hook.ts`
+365: **Changes**:
+366: - Avoid changing cancellation source of truth (`/cancelled-tasks`).
+367: - Ensure pi-triggered tool lifecycle still passes through guardrails.
+368: 
+369: ### Success Criteria:
+370: 
+371: #### Automated Verification:
+372: - [ ] Hook-related tests pass: `bun test src/tests/hook*.test.ts`
+373: - [ ] Runner regression tests pass: `bun test src/tests/runner*.test.ts`
+374: 
+375: #### Manual Verification:
+376: - [ ] PreToolUse blocking behavior still triggers when task is cancelled.
+377: - [ ] PostToolUse reminders/heartbeats still fire in pi mode.
+378: 
+379: **Implementation Note**: If event naming mismatch exists in pi SDK, adapt at bridge layer only.
+380: 
+381: ---
+382: 
+383: ## Phase 7: Documentation + Rollout Safety Matrix
+384: 
+385: ### Overview
+386: Document operational behavior and freeze rollout checks for safe adoption.
+387: 
+388: ### Changes Required
+389: 
+390: #### 1. Docs update
+391: **File**: `CLAUDE.md`
+392: **Changes**:
+393: - Add `HARNESS_PROVIDER` usage and default behavior.
+394: - Add required env keys for pi provider families.
+395: 
+396: **File**: `CONTRIBUTING.md` and/or `MCP.md`
+397: **Changes**:
+398: - Add troubleshooting section for provider selection and auth errors.
+399: 
+400: #### 2. Add explicit parity matrix test doc
+401: **File**: `thoughts/taras/plans/2026-03-05-pi-mono-provider-implementation-plan.md` (this file)
+402: **Changes**:
+403: - Check off matrix only after both providers satisfy each lifecycle criterion.
+404: 
+405: ### Success Criteria:
+406: 
+407: #### Automated Verification:
+408: - [ ] Lint/format passes: `bun run lint:fix`
+409: - [ ] Typecheck passes: `bun run tsc:check`
+410: - [ ] Full tests pass: `bun test`
+411: 
+412: #### Manual Verification:
+413: - [ ] New developer can run Claude mode and pi mode locally from docs alone.
+414: - [ ] Existing Claude-only deployment works with no config changes.
+415: 
+416: **Implementation Note**: Final human review required before merge/PR.
+417: 
+418: ---
+419: 
+420: ## Testing Strategy
+421: 
+422: ### New tests to add (explicit)
+423: - `src/tests/provider-selection.test.ts`
+424:   - unset provider defaults to `claude`
+425:   - unknown provider warns + uses `claude`
+426:   - explicit `pi` selected when valid
+427: - `src/tests/runner-provider-normalization.test.ts`
+428:   - normalized session_init updates task session id
+429:   - normalized result persists cost mapping
+430:   - stream/stderr events persist to session logs
+431: - `src/tests/pi-provider-auth-validation.test.ts`
+432:   - missing required env key errors are deterministic
+433:   - no fallback to Claude on pi auth failure
+434: 
+435: ### Existing tests to keep green (parity gates)
+436: - `src/tests/runner*.test.ts`
+437: - `src/tests/task-cancellation.test.ts`
+438: - `src/tests/task-pause-resume.test.ts`
+439: - `src/tests/session-attach.test.ts`
+440: - `src/tests/session-logs.test.ts`
+441: - `src/tests/session-costs.test.ts`
+442: 
+443: ## Manual E2E Verification (Required)
+444: 
+445: ```bash
+446: # 1) Start API
+447: bun run start:http
+448: 
+449: # 2) Start worker in default mode (Claude)
+450: HARNESS_PROVIDER=claude bun run start:worker
+451: 
+452: # 3) Create Claude smoke task
+453: curl -H "Authorization: Bearer 123123" -H "Content-Type: application/json" \
+454:   -X POST http://localhost:3013/api/tasks \
+455:   -d '{"task":"Say hi","taskType":"test"}'
+456: 
+457: # 4) Verify logs and costs exist
+458: curl -H "Authorization: Bearer 123123" http://localhost:3013/api/session-logs?limit=20
+459: curl -H "Authorization: Bearer 123123" http://localhost:3013/api/session-costs?limit=20
+460: 
+461: # 5) Restart worker in pi mode using OpenRouter + explicit model
+462: HARNESS_PROVIDER=pi OPENROUTER_API_KEY=<key> \
+463: MODEL_OVERRIDE=openrouter/openai/gpt-oss-120b bun run start:worker
+464: 
+465: # 6) Create pi smoke task
+466: curl -H "Authorization: Bearer 123123" -H "Content-Type: application/json" \
+467:   -X POST http://localhost:3013/api/tasks \
+468:   -d '{"task":"Say hi from pi","taskType":"test"}'
+469: 
+470: # 7) Pi hook smoke test (exercise tool lifecycle)
+471: curl -H "Authorization: Bearer 123123" -H "Content-Type: application/json" \
+472:   -X POST http://localhost:3013/api/tasks \
+473:   -d '{"task":"Create /tmp/pi-hook-check.txt with content hook-ok, then read it back and report it","taskType":"test"}'
+474: 
+475: # 8) Pi cancellation + hook guard test
+476: # create a long-running task, cancel it via API/MCP, verify final state is "cancelled"
+477: # and verify no additional tool-use events continue after cancellation
+478: ```
+479: 
+480: ```bash
+481: # 9) Docker E2E setup for pi mode (full worker container path)
+482: lsof -i :3013
+483: PORT=3014 bun run start:http &
+484: bun run docker:build:worker
+485: docker run --rm -d \
+486:   --name e2e-test-worker \
+487:   --env-file .env.docker \
+488:   -e MCP_BASE_URL=http://host.docker.internal:3014 \
+489:   -e HARNESS_PROVIDER=pi \
+490:   -e OPENROUTER_API_KEY=<key> \
+491:   -e MODEL_OVERRIDE=openrouter/openai/gpt-oss-120b \
+492:   -p 3203:3000 \
+493:   agent-swarm-worker:latest
+494: 
+495: # 10) Docker pi smoke task
+496: curl -H "Authorization: Bearer 123123" -H "Content-Type: application/json" \
+497:   -X POST http://localhost:3014/api/tasks \
+498:   -d '{"task":"Say hi from pi docker","taskType":"test"}'
+499: 
+500: # 11) Docker pi hook verification task + logs
+501: curl -H "Authorization: Bearer 123123" -H "Content-Type: application/json" \
+502:   -X POST http://localhost:3014/api/tasks \
+503:   -d '{"task":"Write /workspace/personal/memory/pi-hook-test.md and then read it back","taskType":"test"}'
+504: docker logs e2e-test-worker
+505: 
+506: # 12) Cleanup
+507: docker stop e2e-test-worker
+508: ```
+509: 
+510: ## Parity Checklist
+511: 
+512: - [ ] Provider selection (`HARNESS_PROVIDER`) behaves as specified
+513: - [ ] Claude default path unchanged
+514: - [ ] Pi auth errors are explicit and deterministic
+515: - [ ] Session id persistence works in both providers
+516: - [ ] Logs and costs persist through existing endpoints in both providers
+517: - [ ] Parent/child continuity works in both providers
+518: - [ ] Cancellation behavior works in both providers
+519: - [ ] Hook guardrails still enforce pre/post tool semantics
+520: 
+521: ## References
+522: - Primary research: `thoughts/taras/research/2026-03-05-pi-mono-provider-research.md`
+523: - Related architecture: `thoughts/shared/research/2025-12-22-runner-loop-architecture.md`
+524: - Related comparison: `thoughts/swarm-researcher/research/2026-02-23-openclaw-vs-agent-swarm-comparison.md`
+
+(End of file - total 524 lines)
+</content>
+Called the Read tool with the following input: {"filePath":"/Users/taras/Documents/code/agent-swarm/thoughts/taras/plans/2026-03-05-pi-mono-provider-implementation-plan.md"}
+<path>/Users/taras/Documents/code/agent-swarm/thoughts/taras/plans/2026-03-05-pi-mono-provider-implementation-plan.md</path>
+<type>file</type>
+<content>1: ---
+2: date: 2026-03-05
+3: planner: OpenCode (gpt-5.3-codex)
+4: branch: main
+5: repository: agent-swarm
+6: topic: "HARNESS_PROVIDER runtime adapters (claude + pi-mono)"
+7: tags: [plan, provider, runner, pi-mono, hooks, session-lifecycle, compatibility]
+8: status: draft
+9: autonomy: autopilot
+10: research: thoughts/taras/research/2026-03-05-pi-mono-provider-research.md
+11: last_updated: 2026-03-05
+12: last_updated_by: OpenCode (gpt-5.3-codex)
+13: ---
+14: 
+15: # HARNESS_PROVIDER Runtime Adapter Implementation Plan
+16: 
+17: ## Overview
+18: 
+19: Add a provider adapter architecture to `runAgent()` so runtime execution can be selected by `HARNESS_PROVIDER=claude|pi` (default `claude`) without breaking existing behavior. The Claude path must remain functionally identical, while a new pi-mono adapter is introduced with parity for hooks, skills, session lifecycle, cancellation, logs, costs, and parent/child continuity.
+20: 
+21: ## Current State Analysis
+22: 
+23: ### Runtime is currently Claude-coupled
+24: - Claude invocation is hardcoded in both execution paths:
+25:   - `runClaudeIteration()` command construction (`src/commands/runner.ts:1090`)
+26:   - `spawnClaudeProcess()` command construction (`src/commands/runner.ts:1272`)
+27:   - hardcoded `--output-format stream-json` (`src/commands/runner.ts:1096`)
+28: - Claude stream parsing drives session and telemetry:
+29:   - session init detection (`src/commands/runner.ts:1159`, `src/commands/runner.ts:1359`)
+30:   - cost extraction from `result` events (`src/commands/runner.ts:1369`)
+31:   - stale resume retry logic (`src/commands/runner.ts:1550`)
+32: 
+33: ### Lifecycle orchestration is reusable across providers
+34: - Shared runner orchestration already exists in:
+35:   - `runAgent()` (`src/commands/runner.ts:1656`)
+36:   - completion/finalization in `checkCompletedProcesses()` + `ensureTaskFinished()` (`src/commands/runner.ts:1593`, `src/commands/runner.ts:240`)
+37:   - cancellation scan in polling loop (`src/commands/runner.ts:2066`)
+38: - Shared persistence APIs are backend-agnostic:
+39:   - logs: `POST /api/session-logs` (`src/http/session-data.ts:24`)
+40:   - costs: `POST /api/session-costs` (`src/http/session-data.ts:88`)
+41:   - finish: `POST /api/tasks/:id/finish` (`src/http/tasks.ts:188`)
+42: 
+43: ### Session continuity is Claude-shaped but adaptable
+44: - Task stores `claudeSessionId` (`src/types.ts:125`, `src/be/migrations/001_initial.sql:98`).
+45: - Resume behavior uses `--resume` with own session first, then parent session (`src/commands/runner.ts:1980`, `src/commands/runner.ts:2136`).
+46: - Session persistence endpoint is Claude-specific by name (`PUT /api/tasks/:id/claude-session`, `src/http/tasks.ts:93`).
+47: 
+48: ### Hook parity constraints to preserve
+49: - Hooks rely on `TASK_FILE` + cancellation checks against `/cancelled-tasks` (`src/hooks/hook.ts:96`, `src/hooks/hook.ts:507`).
+50: - Pre/post tool semantics are implemented in `src/hooks/hook.ts` and must still trigger at equivalent lifecycle moments for pi-backed runs.
+51: 
+52: ## Desired End State
+53: 
+54: 1. `HARNESS_PROVIDER` resolves provider at runtime with this policy:
+55:    - `claude` when unset
+56:    - `claude` with warning when unknown
+57:    - `pi` only when explicitly configured
+58: 2. Runner executes via provider adapter interface (`ClaudeAdapter`, `PiMonoAdapter`).
+59: 3. Both adapters emit normalized runtime events consumed by a single persistence/finalization path.
+60: 4. Claude behavior remains unchanged for existing deployments.
+61: 5. Pi mode fails fast on missing required auth for selected provider family (no silent fallback).
+62: 6. Parent/child continuity, pause/resume, cancellation, logs, and costs work with parity-level behavior.
+63: 
+64: ## Quick Verification Reference
+65: 
+66: Common commands:
+67: - `bun run lint:fix`
+68: - `bun run tsc:check`
+69: - `bun test`
+70: - `bun test src/tests/runner*.test.ts`
+71: - `bun test src/tests/task-cancellation.test.ts`
+72: - `bun test src/tests/task-pause-resume.test.ts`
+73: - `bun test src/tests/session-attach.test.ts`
+74: - `bun test src/tests/session-logs.test.ts`
+75: - `bun test src/tests/session-costs.test.ts`
+76: 
+77: Key files:
+78: - `src/commands/runner.ts`
+79: - `src/commands/providers/claude-adapter.ts` (new)
+80: - `src/commands/providers/pi-mono-adapter.ts` (new)
+81: - `src/commands/providers/types.ts` (new)
+82: - `src/http/tasks.ts`
+83: - `src/http/session-data.ts`
+84: - `src/be/db.ts`
+85: - `src/types.ts`
+86: - `src/tests/runner*.test.ts` and new provider-focused tests
+87: 
+88: ## What We're NOT Doing
+89: 
+90: - Replacing direct `agent-swarm claude` command UX.
+91: - Redesigning UI to choose providers.
+92: - Changing existing external API shapes for session logs/costs.
+93: - Shipping advanced pi-native enhancements (beyond parity-safe lifecycle mapping) in v1.
+94: 
+95: ## Implementation Approach
+96: 
+97: Use a compatibility-first extraction:
+98: - First isolate existing Claude logic behind an adapter with no behavior changes.
+99: - Then introduce normalized runtime events and shared telemetry persistence.
+100: - Add pi adapter behind `HARNESS_PROVIDER=pi`.
+101: - Add targeted parity tests and explicit env failure behavior.
+102: 
+103: ---
+104: 
+105: ## Phase 1: Provider Selection Contract + Adapter Interfaces
+106: 
+107: ### Overview
+108: Define provider selection and adapter contracts without altering behavior.
+109: 
+110: ### Changes Required
+111: 
+112: #### 1. Add provider selection resolver
+113: **File**: `src/commands/runner.ts`
+114: **Changes**:
+115: - Add `resolveHarnessProvider(freshEnv): "claude" | "pi"` near env resolution helpers.
+116: - Resolve from `HARNESS_PROVIDER` after `fetchResolvedEnv()` (so config precedence works).
+117: - Unknown value policy: log warning and return `claude`.
+118: 
+119: #### 2. Introduce adapter contracts
+120: **File**: `src/commands/providers/types.ts` (new)
+121: **Changes**:
+122: - Define `ProviderAdapter` interface with methods:
+123:   - `startRun(context): Promise<ProviderRunHandle>`
+124:   - `cancel(runHandle): Promise<void>`
+125:   - `buildResumeContext(task, parentTask): ProviderResumeContext`
+126: - Define normalized runtime event union (minimum):
+127:   - `session_init`
+128:   - `stream_line`
+129:   - `result`
+130:   - `stderr`
+131:   - `provider_error`
+132:   - `process_exit`
+133: 
+134: #### 3. Add provider-aware task runtime metadata (compat-safe)
+135: **File**: `src/types.ts`
+136: **Changes**:
+137: - Add optional runtime metadata type for provider/session without removing `claudeSessionId`.
+138: - Keep `claudeSessionId` unchanged for backward compatibility.
+139: 
+140: ### Success Criteria:
+141: 
+142: #### Automated Verification:
+143: - [ ] Typecheck passes: `bun run tsc:check`
+144: - [ ] Lint/format passes: `bun run lint:fix`
+145: - [ ] Existing runner tests pass unchanged: `bun test src/tests/runner*.test.ts`
+146: 
+147: #### Manual Verification:
+148: - [ ] With no `HARNESS_PROVIDER`, runtime resolves to `claude`.
+149: - [ ] With invalid `HARNESS_PROVIDER=foo`, runtime warns and still uses `claude`.
+150: 
+151: **Implementation Note**: This phase must be behavior-preserving; no runtime flow changes beyond selection scaffolding.
+152: 
+153: ---
+154: 
+155: ## Phase 2: Extract ClaudeAdapter with Zero Functional Delta
+156: 
+157: ### Overview
+158: Move Claude-specific process and stream-json parsing logic out of `runner.ts` into a dedicated adapter.
+159: 
+160: ### Changes Required
+161: 
+162: #### 1. Move command construction and subprocess handling
+163: **File**: `src/commands/providers/claude-adapter.ts` (new)
+164: **Changes**:
+165: - Lift logic currently in:
+166:   - `runClaudeIteration()` (`src/commands/runner.ts:1079`)
+167:   - `spawnClaudeProcess()` (`src/commands/runner.ts:1257`)
+168: - Preserve exact command args:
+169:   - `claude --model ... --verbose --output-format stream-json ...`
+170: - Preserve `TASK_FILE` semantics.
+171: 
+172: #### 2. Move Claude event parsing into adapter event emission
+173: **File**: `src/commands/providers/claude-adapter.ts` (new)
+174: **Changes**:
+175: - Parse per-line JSON exactly as current implementation does.
+176: - Emit normalized events for:
+177:   - session init and id extraction
+178:   - result/cost payload
+179:   - stderr and JSON parse failures
+180: 
+181: #### 3. Keep runner orchestration unchanged
+182: **File**: `src/commands/runner.ts`
+183: **Changes**:
+184: - Replace direct Claude subprocess calls with adapter invocation.
+185: - Keep existing `checkCompletedProcesses()` flow and finish semantics.
+186: 
+187: ### Success Criteria:
+188: 
+189: #### Automated Verification:
+190: - [ ] Runner lifecycle tests pass: `bun test src/tests/runner*.test.ts`
+191: - [ ] Cancellation tests pass: `bun test src/tests/task-cancellation.test.ts`
+192: - [ ] Typecheck passes: `bun run tsc:check`
+193: 
+194: #### Manual Verification:
+195: - [ ] Diff inspection confirms no changes to Claude command flags.
+196: - [ ] Default runtime still creates session logs and costs in same format.
+197: 
+198: **Implementation Note**: Stop after this phase and verify Claude parity before introducing pi execution.
+199: 
+200: ---
+201: 
+202: ## Phase 3: Shared Normalization + Persistence Pipeline
+203: 
+204: ### Overview
+205: Centralize how provider events are converted into session-id updates, logs, costs, and final status.
+206: 
+207: ### Changes Required
+208: 
+209: #### 1. Introduce event-to-persistence mapper
+210: **File**: `src/commands/runner.ts` (or `src/commands/providers/runtime-normalizer.ts` new)
+211: **Changes**:
+212: - Build one handler that consumes normalized events and triggers:
+213:   - `saveClaudeSessionId()` (compat path for now)
+214:   - `flushLogBuffer()`
+215:   - `saveCostData()`
+216:   - failure reason enrichment via `SessionErrorTracker`
+217: 
+218: #### 2. Preserve existing API contracts
+219: **File**: `src/http/session-data.ts` (validate only)
+220: **Changes**:
+221: - No schema changes required; ensure adapter pipeline supplies existing fields.
+222: - Continue sending `cli` label (`"claude"` for current adapter; `"pi"` for new one).
+223: 
+224: #### 3. Add dedicated normalization tests
+225: **File**: `src/tests/runner-provider-normalization.test.ts` (new)
+226: **Changes**:
+227: - Verify normalized `session_init` stores session id.
+228: - Verify normalized `result` stores cost data mapping.
+229: - Verify line buffering behavior remains consistent.
+230: 
+231: ### Success Criteria:
+232: 
+233: #### Automated Verification:
+234: - [ ] Session logs tests pass: `bun test src/tests/session-logs.test.ts`
+235: - [ ] Session costs tests pass: `bun test src/tests/session-costs.test.ts`
+236: - [ ] New normalization tests pass: `bun test src/tests/runner-provider-normalization.test.ts`
+237: 
+238: #### Manual Verification:
+239: - [ ] `session_logs` rows still include expected line ordering and `cli` value.
+240: - [ ] `session_costs` rows still persist token defaults and totals correctly.
+241: 
+242: **Implementation Note**: Do not change HTTP payload contracts in this phase.
+243: 
+244: ---
+245: 
+246: ## Phase 4: PiMonoAdapter + Auth/Model Resolution
+247: 
+248: ### Overview
+249: Implement pi execution path behind `HARNESS_PROVIDER=pi` with explicit auth resolution and deterministic failures.
+250: 
+251: ### Changes Required
+252: 
+253: #### 1. Add pi dependencies and adapter
+254: **File**: `package.json`
+255: **Changes**:
+256: - Add required pi packages used by adapter (pin exact versions during implementation).
+257: 
+258: **File**: `src/commands/providers/pi-mono-adapter.ts` (new)
+259: **Changes**:
+260: - Create session via pi API (embedded mode).
+261: - Subscribe to lifecycle/tool/message events.
+262: - Emit normalized runtime events consumed by Phase 3 pipeline.
+263: 
+264: #### 2. Add auth/provider family resolver for pi mode
+265: **File**: `src/commands/providers/pi-config.ts` (new)
+266: **Changes**:
+267: - Resolve provider family from selected model/config.
+268: - Required env matrix:
+269:   - Anthropic: `ANTHROPIC_API_KEY`
+270:   - OpenRouter: `OPENROUTER_API_KEY`
+271:   - OpenAI-compatible: `OPENAI_API_KEY`
+272:   - Ollama/local: provider-specific base URL as needed
+273: - Throw clear error on missing required keys.
+274: 
+275: #### 3. Wire adapter selection in runner
+276: **File**: `src/commands/runner.ts`
+277: **Changes**:
+278: - Instantiate `ClaudeAdapter` or `PiMonoAdapter` from provider resolver.
+279: - Keep model precedence unchanged (`task.model` -> `MODEL_OVERRIDE` -> default).
+280: 
+281: ### Success Criteria:
+282: 
+283: #### Automated Verification:
+284: - [ ] Dependencies install cleanly: `bun install`
+285: - [ ] Typecheck passes: `bun run tsc:check`
+286: - [ ] Pi adapter tests pass: `bun test src/tests/pi-provider*.test.ts`
+287: 
+288: #### Manual Verification:
+289: - [ ] `HARNESS_PROVIDER=pi` with missing auth fails with explicit missing key message.
+290: - [ ] `HARNESS_PROVIDER=pi` with valid auth starts and emits session/init/result events.
+291: 
+292: **Implementation Note**: No silent fallback to Claude for pi auth errors.
+293: 
+294: ---
+295: 
+296: ## Phase 5: Resume, Parent/Child Continuity, and Cancellation Parity
+297: 
+298: ### Overview
+299: Recreate current continuation behavior for pi while preserving existing Claude logic.
+300: 
+301: ### Changes Required
+302: 
+303: #### 1. Provider-aware resume strategy
+304: **File**: `src/commands/runner.ts`
+305: **Changes**:
+306: - Keep current parent-first flow points:
+307:   - paused task resume path (`src/commands/runner.ts:1980`)
+308:   - child task path (`src/commands/runner.ts:2136`)
+309: - Add provider-specific resume context handling:
+310:   - Claude: existing `--resume`
+311:   - Pi: session restore/rehydrate API (or fallback context bootstrap)
+312: 
+313: #### 2. Session id compatibility mapping
+314: **File**: `src/http/tasks.ts`
+315: **Changes**:
+316: - Keep existing `PUT /api/tasks/:id/claude-session` for compatibility.
+317: - Optionally add generic alias route (if needed) that writes same field + provider metadata.
+318: 
+319: **File**: `src/be/db.ts`
+320: **Changes**:
+321: - If generic metadata is needed, add non-breaking column via migration (JSON text metadata).
+322: 
+323: #### 3. Cancellation parity
+324: **File**: `src/commands/providers/pi-mono-adapter.ts`
+325: **Changes**:
+326: - Implement `cancel()` path to abort pi session.
+327: 
+328: **File**: `src/commands/runner.ts`
+329: **Changes**:
+330: - Reuse existing cancellation detection loop; call provider cancel for pi instead of process kill semantics where applicable.
+331: 
+332: ### Success Criteria:
+333: 
+334: #### Automated Verification:
+335: - [ ] Pause/resume tests pass: `bun test src/tests/task-pause-resume.test.ts`
+336: - [ ] Session attach/continuity tests pass: `bun test src/tests/session-attach.test.ts`
+337: - [ ] Cancellation tests pass: `bun test src/tests/task-cancellation.test.ts`
+338: 
+339: #### Manual Verification:
+340: - [ ] Parent/child task in pi mode continues with expected context behavior.
+341: - [ ] Cancelling an in-progress pi task prevents further tool execution and finishes as cancelled.
+342: 
+343: **Implementation Note**: Parity target is behavioral, not byte-for-byte identical internal mechanics.
+344: 
+345: ---
+346: 
+347: ## Phase 6: Hook Lifecycle Bridging for Provider-Neutral Semantics
+348: 
+349: ### Overview
+350: Ensure hook behavior remains equivalent when tool and lifecycle events originate from pi runtime instead of Claude stream output.
+351: 
+352: ### Changes Required
+353: 
+354: #### 1. Map provider events to hook lifecycle triggers
+355: **File**: `src/commands/providers/runtime-hook-bridge.ts` (new)
+356: **Changes**:
+357: - Map normalized events to existing hook semantics:
+358:   - session start -> `SessionStart`
+359:   - before tool call -> `PreToolUse`
+360:   - after tool call -> `PostToolUse`
+361:   - session end -> `Stop`
+362: 
+363: #### 2. Keep cancellation guards untouched
+364: **File**: `src/hooks/hook.ts`
+365: **Changes**:
+366: - Avoid changing cancellation source of truth (`/cancelled-tasks`).
+367: - Ensure pi-triggered tool lifecycle still passes through guardrails.
+368: 
+369: ### Success Criteria:
+370: 
+371: #### Automated Verification:
+372: - [ ] Hook-related tests pass: `bun test src/tests/hook*.test.ts`
+373: - [ ] Runner regression tests pass: `bun test src/tests/runner*.test.ts`
+374: 
+375: #### Manual Verification:
+376: - [ ] PreToolUse blocking behavior still triggers when task is cancelled.
+377: - [ ] PostToolUse reminders/heartbeats still fire in pi mode.
+378: 
+379: **Implementation Note**: If event naming mismatch exists in pi SDK, adapt at bridge layer only.
+380: 
+381: ---
+382: 
+383: ## Phase 7: Documentation + Rollout Safety Matrix
+384: 
+385: ### Overview
+386: Document operational behavior and freeze rollout checks for safe adoption.
+387: 
+388: ### Changes Required
+389: 
+390: #### 1. Docs update
+391: **File**: `CLAUDE.md`
+392: **Changes**:
+393: - Add `HARNESS_PROVIDER` usage and default behavior.
+394: - Add required env keys for pi provider families.
+395: 
+396: **File**: `CONTRIBUTING.md` and/or `MCP.md`
+397: **Changes**:
+398: - Add troubleshooting section for provider selection and auth errors.
+399: 
+400: #### 2. Add explicit parity matrix test doc
+401: **File**: `thoughts/taras/plans/2026-03-05-pi-mono-provider-implementation-plan.md` (this file)
+402: **Changes**:
+403: - Check off matrix only after both providers satisfy each lifecycle criterion.
+404: 
+405: ### Success Criteria:
+406: 
+407: #### Automated Verification:
+408: - [ ] Lint/format passes: `bun run lint:fix`
+409: - [ ] Typecheck passes: `bun run tsc:check`
+410: - [ ] Full tests pass: `bun test`
+411: 
+412: #### Manual Verification:
+413: - [ ] New developer can run Claude mode and pi mode locally from docs alone.
+414: - [ ] Existing Claude-only deployment works with no config changes.
+415: 
+416: **Implementation Note**: Final human review required before merge/PR.
+417: 
+418: ---
+419: 
+420: ## Testing Strategy
+421: 
+422: ### New tests to add (explicit)
+423: - `src/tests/provider-selection.test.ts`
+424:   - unset provider defaults to `claude`
+425:   - unknown provider warns + uses `claude`
+426:   - explicit `pi` selected when valid
+427: - `src/tests/runner-provider-normalization.test.ts`
+428:   - normalized session_init updates task session id
+429:   - normalized result persists cost mapping
+430:   - stream/stderr events persist to session logs
+431: - `src/tests/pi-provider-auth-validation.test.ts`
+432:   - missing required env key errors are deterministic
+433:   - no fallback to Claude on pi auth failure
+434: 
+435: ### Existing tests to keep green (parity gates)
+436: - `src/tests/runner*.test.ts`
+437: - `src/tests/task-cancellation.test.ts`
+438: - `src/tests/task-pause-resume.test.ts`
+439: - `src/tests/session-attach.test.ts`
+440: - `src/tests/session-logs.test.ts`
+441: - `src/tests/session-costs.test.ts`
+442: 
+443: ## Manual E2E Verification (Required)
+444: 
+445: ```bash
+446: # 1) Start API
+447: bun run start:http
+448: 
+449: # 2) Start worker in default mode (Claude)
+450: HARNESS_PROVIDER=claude bun run start:worker
+451: 
+452: # 3) Create Claude smoke task
+453: curl -H "Authorization: Bearer 123123" -H "Content-Type: application/json" \
+454:   -X POST http://localhost:3013/api/tasks \
+455:   -d '{"task":"Say hi","taskType":"test"}'
+456: 
+457: # 4) Verify logs and costs exist
+458: curl -H "Authorization: Bearer 123123" http://localhost:3013/api/session-logs?limit=20
+459: curl -H "Authorization: Bearer 123123" http://localhost:3013/api/session-costs?limit=20
+460: 
+461: # 5) Restart worker in pi mode using OpenRouter + explicit model
+462: HARNESS_PROVIDER=pi OPENROUTER_API_KEY=<key> \
+463: MODEL_OVERRIDE=openrouter/openai/gpt-oss-120b bun run start:worker
+464: 
+465: # 6) Create pi smoke task
+466: curl -H "Authorization: Bearer 123123" -H "Content-Type: application/json" \
+467:   -X POST http://localhost:3013/api/tasks \
+468:   -d '{"task":"Say hi from pi","taskType":"test"}'
+469: 
+470: # 7) Pi hook smoke test (exercise tool lifecycle)
+471: curl -H "Authorization: Bearer 123123" -H "Content-Type: application/json" \
+472:   -X POST http://localhost:3013/api/tasks \
+473:   -d '{"task":"Create /tmp/pi-hook-check.txt with content hook-ok, then read it back and report it","taskType":"test"}'
+474: 
+475: # 8) Pi cancellation + hook guard test
+476: # create a long-running task, cancel it via API/MCP, verify final state is "cancelled"
+477: # and verify no additional tool-use events continue after cancellation
+478: ```
+479: 
+480: ```bash
+481: # 9) Docker E2E setup for pi mode (full worker container path)
+482: lsof -i :3013
+483: PORT=3014 bun run start:http &
+484: bun run docker:build:worker
+485: docker run --rm -d \
+486:   --name e2e-test-worker \
+487:   --env-file .env.docker \
+488:   -e MCP_BASE_URL=http://host.docker.internal:3014 \
+489:   -e HARNESS_PROVIDER=pi \
+490:   -e OPENROUTER_API_KEY=<key> \
+491:   -e MODEL_OVERRIDE=openrouter/openai/gpt-oss-120b \
+492:   -p 3203:3000 \
+493:   agent-swarm-worker:latest
+494: 
+495: # 10) Docker pi smoke task
+496: curl -H "Authorization: Bearer 123123" -H "Content-Type: application/json" \
+497:   -X POST http://localhost:3014/api/tasks \
+498:   -d '{"task":"Say hi from pi docker","taskType":"test"}'
+499: 
+500: # 11) Docker pi hook verification task + logs
+501: curl -H "Authorization: Bearer 123123" -H "Content-Type: application/json" \
+502:   -X POST http://localhost:3014/api/tasks \
+503:   -d '{"task":"Write /workspace/personal/memory/pi-hook-test.md and then read it back","taskType":"test"}'
+504: docker logs e2e-test-worker
+505: 
+506: # 12) Cleanup
+507: docker stop e2e-test-worker
+508: ```
+509: 
+510: ## Parity Checklist
+511: 
+512: - [ ] Provider selection (`HARNESS_PROVIDER`) behaves as specified
+513: - [ ] Claude default path unchanged
+514: - [ ] Pi auth errors are explicit and deterministic
+515: - [ ] Session id persistence works in both providers
+516: - [ ] Logs and costs persist through existing endpoints in both providers
+517: - [ ] Parent/child continuity works in both providers
+518: - [ ] Cancellation behavior works in both providers
+519: - [ ] Hook guardrails still enforce pre/post tool semantics
+520: 
+521: ## References
+522: - Primary research: `thoughts/taras/research/2026-03-05-pi-mono-provider-research.md`
+523: - Related architecture: `thoughts/shared/research/2025-12-22-runner-loop-architecture.md`
+524: - Related comparison: `thoughts/swarm-researcher/research/2026-02-23-openclaw-vs-agent-swarm-comparison.md`
+
+(End of file - total 524 lines)
+</content>
