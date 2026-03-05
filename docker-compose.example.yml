@@ -7,6 +7,14 @@
 #  - Sets up an API service and multiple worker/lead agents
 #  - Deploys 2 worker agents and 1 lead agent by default
 #  - Uses volumes for persistent storage of logs, db and agent workspaces
+#
+# Port mapping:
+#  Each service uses its own host port variable (LEAD_PORT, WORKER1_PORT, etc.)
+#  to avoid conflicts when multiple services share the same host network.
+#  The variable names and defaults below are examples — adjust them to fit your
+#  setup, especially if you add more workers.
+#  In isolated environments where each container has its own network namespace,
+#  you may map all services to the same port (e.g. 3000:3000).
 
 services:
   api:
@@ -69,7 +77,7 @@ services:
       - SWARM_URL=${SWARM_URL:-localhost}
 
     ports:
-      - "${SERVICE_PORT:-3020}:3000"
+      - "${LEAD_PORT:-3020}:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -105,7 +113,7 @@ services:
       - SWARM_URL=${SWARM_URL:-localhost}
 
     ports:
-      - "${SERVICE_PORT:-3021}:3000"
+      - "${WORKER1_PORT:-3021}:3000"
 
     volumes:
       - swarm_logs:/logs
@@ -141,7 +149,7 @@ services:
       - SWARM_URL=${SWARM_URL:-localhost}
 
     ports:
-      - "${SERVICE_PORT:-3022}:3000"
+      - "${WORKER2_PORT:-3022}:3000"
 
     volumes:
       - swarm_logs:/logs
