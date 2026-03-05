@@ -28,7 +28,10 @@ src/be/migrations/
 - On startup, runner compares SQL files against `_migrations` and applies pending ones
 - Each migration runs in a transaction — atomic success or rollback
 - Checksums detect accidental edits to applied migrations (logged as warnings)
-- Existing databases (pre-migration-system) are auto-bootstrapped: `001_initial` is marked as applied without executing
+- Bootstrap is schema-aware for pre-migration DBs:
+  - If baseline tables already exist, runner marks `001_initial` as applied without re-executing it
+  - If schema is partial/incomplete, runner executes `001_initial` to reach baseline safely
+- `initDb()` also runs compatibility guards after migrations for legacy DBs (for example, adding missing `agents` profile columns before seeding context versions)
 
 **Rules:**
 - Never modify an already-applied migration — create a new one instead

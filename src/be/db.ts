@@ -53,6 +53,9 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   // Run database migrations (schema creation + incremental changes)
   runMigrations(database);
 
+  // Compatibility migration for legacy databases that predate profile fields
+  ensureAgentProfileColumns(database);
+
   // Migration: Remove restrictive CHECK constraint on agent_tasks.status
   // Old databases have CHECK(status IN ('pending','in_progress','completed','failed'))
   // which blocks 'cancelled', 'paused', 'offered', 'unassigned' statuses
@@ -63,10 +66,10 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       )
       .get();
 
-    const needsStatusMigration =
-      taskSchemaInfo?.sql?.includes("CHECK") &&
-      taskSchemaInfo.sql.includes("status") &&
-      !taskSchemaInfo.sql.includes("'cancelled'");
+    const schemaSql = taskSchemaInfo?.sql ?? "";
+    const hasStatusCheck = /status\s+TEXT\b[^,]*\bCHECK\s*\(\s*status\s+IN\s*\(/i.test(schemaSql);
+    const statusAllowsCancelled = /status\s+IN\s*\([^)]*'cancelled'/i.test(schemaSql);
+    const needsStatusMigration = hasStatusCheck && !statusAllowsCancelled;
 
     if (needsStatusMigration) {
       console.log("[Migration] Removing restrictive CHECK constraint on agent_tasks.status");
@@ -79,7 +82,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
           creatorAgentId TEXT,
           task TEXT NOT NULL,
           status TEXT NOT NULL DEFAULT 'pending',
-          source TEXT NOT NULL DEFAULT 'mcp',
+          source TEXT NOT NULL DEFAULT 'mcp' CHECK(source IN ('mcp', 'slack', 'api', 'github', 'agentmail', 'system', 'schedule')),
           taskType TEXT,
           tags TEXT DEFAULT '[]',
           priority INTEGER DEFAULT 50,
@@ -164,7 +167,9 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     console.error("[Migration] Failed to update agent_tasks CHECK constraint:", e);
     try {
       db.run("PRAGMA foreign_keys=on");
-    } catch {}
+    } catch (cleanupError) {
+      console.error("[Migration] Failed to re-enable SQLite foreign_keys pragma:", cleanupError);
+    }
     throw e;
   }
 
@@ -199,6 +204,26 @@ const VERSIONABLE_FIELDS: VersionableField[] = [
   "claudeMd",
   "setupScript",
 ];
+
+function ensureAgentProfileColumns(database: Database): void {
+  const existingColumns = new Set(
+    database
+      .prepare<{ name: string }, []>("PRAGMA table_info(agents)")
+      .all()
+      .map((row) => row.name),
+  );
+
+  for (const column of VERSIONABLE_FIELDS) {
+    if (!existingColumns.has(column)) {
+      try {
+        database.run(`ALTER TABLE agents ADD COLUMN ${column} TEXT`);
+      } catch (error) {
+        console.error(`[Migration] Failed to add missing agents.${column} column`, error);
+        throw error;
+      }
+    }
+  }
+}
 
 function computeContentHash(content: string): string {
   const hasher = new Bun.CryptoHasher("sha256");

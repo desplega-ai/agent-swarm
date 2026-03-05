@@ -16,6 +16,42 @@ interface AppliedMigration {
   checksum: string;
 }
 
+const BASELINE_TABLES = [
+  "agents",
+  "channels",
+  "epics",
+  "agent_tasks",
+  "agent_log",
+  "channel_messages",
+  "channel_read_state",
+  "services",
+  "session_logs",
+  "session_costs",
+  "inbox_messages",
+  "scheduled_tasks",
+  "swarm_config",
+  "swarm_repos",
+  "agent_memory",
+  "active_sessions",
+  "agentmail_inbox_mappings",
+  "context_versions",
+];
+
+function shouldBootstrapInitialMigration(db: Database): boolean {
+  const rows = db
+    .prepare<{ name: string }, []>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '\\_migrations' ESCAPE '\\'",
+    )
+    .all();
+
+  if (rows.length === 0) {
+    return false;
+  }
+
+  const existingTables = new Set(rows.map((row) => row.name));
+  return BASELINE_TABLES.every((table) => existingTables.has(table));
+}
+
 /**
  * Runs all pending database migrations.
  *
@@ -74,13 +110,7 @@ export function runMigrations(db: Database): void {
   if (applied.size === 0) {
     const initialMigration = migrations.find((m) => m.version === 1);
     if (initialMigration) {
-      const tableCount = db
-        .prepare(
-          "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name NOT LIKE '\\_migrations' ESCAPE '\\'",
-        )
-        .get() as { cnt: number };
-
-      if (tableCount.cnt > 0) {
+      if (shouldBootstrapInitialMigration(db)) {
         console.log("[migrations] Existing database detected — bootstrapping migration tracking");
         db.run(
           "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
@@ -96,6 +126,10 @@ export function runMigrations(db: Database): void {
           name: initialMigration.name,
           checksum: initialMigration.checksum,
         });
+      } else {
+        console.log(
+          "[migrations] Existing database appears incomplete — applying 001_initial migration",
+        );
       }
     }
   }
