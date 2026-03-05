@@ -25,11 +25,20 @@ type PiSessionLike = {
   getSessionStats?: () => Record<string, unknown>;
 };
 
+interface PiUsageSnapshot {
+  totalCostUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  numTurns?: number;
+}
+
 function tryNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function extractUsageFromPiStats(stats: Record<string, unknown> | undefined): {
+export function extractUsageFromPiStats(stats: Record<string, unknown> | undefined): {
   totalCostUsd?: number;
   inputTokens?: number;
   outputTokens?: number;
@@ -50,6 +59,110 @@ function extractUsageFromPiStats(stats: Record<string, unknown> | undefined): {
     cacheReadTokens: tryNumber(stats.cacheReadTokens) ?? tryNumber(stats.cacheRead),
     cacheWriteTokens: tryNumber(stats.cacheWriteTokens) ?? tryNumber(stats.cacheWrite),
     numTurns: tryNumber(stats.turns),
+  };
+}
+
+export function extractUsageFromUsageRecord(
+  usage: Record<string, unknown> | undefined,
+): PiUsageSnapshot {
+  if (!usage) {
+    return {};
+  }
+
+  const cost = (usage.cost ?? {}) as Record<string, unknown>;
+
+  return {
+    totalCostUsd: tryNumber(usage.totalCostUsd) ?? tryNumber(cost.total),
+    inputTokens: tryNumber(usage.inputTokens) ?? tryNumber(usage.input),
+    outputTokens: tryNumber(usage.outputTokens) ?? tryNumber(usage.output),
+    cacheReadTokens: tryNumber(usage.cacheReadTokens) ?? tryNumber(usage.cacheRead),
+    cacheWriteTokens: tryNumber(usage.cacheWriteTokens) ?? tryNumber(usage.cacheWrite),
+  };
+}
+
+export function extractUsageFromPiEvent(event: unknown): PiUsageSnapshot {
+  if (!event || typeof event !== "object") {
+    return {};
+  }
+
+  const record = event as Record<string, unknown>;
+  const eventType = typeof record.type === "string" ? record.type : undefined;
+
+  const rootUsage = extractUsageFromUsageRecord(
+    record.usage && typeof record.usage === "object"
+      ? (record.usage as Record<string, unknown>)
+      : undefined,
+  );
+
+  const messageUsage = extractUsageFromUsageRecord(
+    record.message &&
+      typeof record.message === "object" &&
+      (record.message as Record<string, unknown>).usage &&
+      typeof (record.message as Record<string, unknown>).usage === "object"
+      ? ((record.message as Record<string, unknown>).usage as Record<string, unknown>)
+      : undefined,
+  );
+
+  const assistantPartialUsage = extractUsageFromUsageRecord(
+    record.assistantMessageEvent &&
+      typeof record.assistantMessageEvent === "object" &&
+      (record.assistantMessageEvent as Record<string, unknown>).partial &&
+      typeof (record.assistantMessageEvent as Record<string, unknown>).partial === "object" &&
+      ((record.assistantMessageEvent as Record<string, unknown>).partial as Record<string, unknown>)
+        .usage &&
+      typeof (
+        (record.assistantMessageEvent as Record<string, unknown>).partial as Record<string, unknown>
+      ).usage === "object"
+      ? ((
+          (record.assistantMessageEvent as Record<string, unknown>).partial as Record<
+            string,
+            unknown
+          >
+        ).usage as Record<string, unknown>)
+      : undefined,
+  );
+
+  const snapshot: PiUsageSnapshot = {
+    totalCostUsd:
+      assistantPartialUsage.totalCostUsd ?? messageUsage.totalCostUsd ?? rootUsage.totalCostUsd,
+    inputTokens:
+      assistantPartialUsage.inputTokens ?? messageUsage.inputTokens ?? rootUsage.inputTokens,
+    outputTokens:
+      assistantPartialUsage.outputTokens ?? messageUsage.outputTokens ?? rootUsage.outputTokens,
+    cacheReadTokens:
+      assistantPartialUsage.cacheReadTokens ??
+      messageUsage.cacheReadTokens ??
+      rootUsage.cacheReadTokens,
+    cacheWriteTokens:
+      assistantPartialUsage.cacheWriteTokens ??
+      messageUsage.cacheWriteTokens ??
+      rootUsage.cacheWriteTokens,
+  };
+
+  if (eventType === "turn_end") {
+    snapshot.numTurns = 1;
+  }
+
+  return snapshot;
+}
+
+export function mergeUsageSnapshots(
+  base: PiUsageSnapshot,
+  update: PiUsageSnapshot,
+): PiUsageSnapshot {
+  const maxNumber = (a?: number, b?: number): number | undefined => {
+    if (a === undefined) return b;
+    if (b === undefined) return a;
+    return Math.max(a, b);
+  };
+
+  return {
+    totalCostUsd: maxNumber(base.totalCostUsd, update.totalCostUsd),
+    inputTokens: maxNumber(base.inputTokens, update.inputTokens),
+    outputTokens: maxNumber(base.outputTokens, update.outputTokens),
+    cacheReadTokens: maxNumber(base.cacheReadTokens, update.cacheReadTokens),
+    cacheWriteTokens: maxNumber(base.cacheWriteTokens, update.cacheWriteTokens),
+    numTurns: (base.numTurns ?? 0) + (update.numTurns ?? 0) || undefined,
   };
 }
 
@@ -143,6 +256,7 @@ export class PiMonoAdapter implements ProviderAdapter {
 
     const promise = (async () => {
       let exitCode = 0;
+      const promptStartedAt = Date.now();
       try {
         validatePiAuthForModel(context.model, context.env);
 
@@ -236,12 +350,15 @@ export class PiMonoAdapter implements ProviderAdapter {
         let unsubscribe: (() => void) | undefined;
         let eventQueue = Promise.resolve();
         let eventQueueError: Error | null = null;
+        let observedUsage: PiUsageSnapshot = {};
         if (typeof session.subscribe === "function") {
           unsubscribe = session.subscribe((event: unknown) => {
             eventQueue = eventQueue
               .then(async () => {
                 const line = JSON.stringify(event);
                 writer.write(`${line}\n`);
+
+                observedUsage = mergeUsageSnapshots(observedUsage, extractUsageFromPiEvent(event));
 
                 await context.onEvent({
                   type: "stream_line",
@@ -293,7 +410,15 @@ export class PiMonoAdapter implements ProviderAdapter {
           typeof session.getSessionStats === "function"
             ? (session.getSessionStats() as Record<string, unknown>)
             : undefined;
-        const usage = extractUsageFromPiStats(stats);
+        const statsUsage = extractUsageFromPiStats(stats);
+        const usage = {
+          totalCostUsd: statsUsage.totalCostUsd ?? observedUsage.totalCostUsd,
+          inputTokens: statsUsage.inputTokens ?? observedUsage.inputTokens,
+          outputTokens: statsUsage.outputTokens ?? observedUsage.outputTokens,
+          cacheReadTokens: statsUsage.cacheReadTokens ?? observedUsage.cacheReadTokens,
+          cacheWriteTokens: statsUsage.cacheWriteTokens ?? observedUsage.cacheWriteTokens,
+          numTurns: statsUsage.numTurns ?? observedUsage.numTurns,
+        };
 
         await context.onEvent({
           type: "result",
@@ -305,7 +430,7 @@ export class PiMonoAdapter implements ProviderAdapter {
             cacheReadTokens: usage.cacheReadTokens,
             cacheWriteTokens: usage.cacheWriteTokens,
           },
-          durationMs: tryNumber(stats?.durationMs),
+          durationMs: tryNumber(stats?.durationMs) ?? Math.max(Date.now() - promptStartedAt, 0),
           numTurns: usage.numTurns,
           isError: false,
           raw: stats,
