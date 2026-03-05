@@ -118,6 +118,14 @@ curl -H "Authorization: Bearer 123123" -H "X-Agent-ID: <uuid>" http://localhost:
 - `API_KEY` - Auth token for API requests
 - `MCP_BASE_URL` - API server URL (default: http://localhost:3013)
 - `SLACK_DISABLE=true` / `GITHUB_DISABLE=true` - Disable integrations locally
+- `HARNESS_PROVIDER` - Runtime backend selector for lead/worker (`claude` default, `pi` opt-in)
+- `MODEL_OVERRIDE` - Model override applied after task-level model, used by both providers
+
+**When `HARNESS_PROVIDER=pi`:**
+- `ANTHROPIC_API_KEY` for Anthropic/Claude-family models (`haiku`, `sonnet`, `opus`, `claude-*`)
+- `OPENROUTER_API_KEY` for `openrouter/...` models
+- `OPENAI_API_KEY` for `openai/...` models
+- Optional local providers may require provider-specific base URLs (for example `OLLAMA_BASE_URL`)
 
 ---
 

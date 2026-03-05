@@ -117,6 +117,33 @@ export async function handleTasks(
     return true;
   }
 
+  // PUT /api/tasks/:id/runtime-session - Provider-neutral alias for session persistence
+  if (matchRoute(req.method, pathSegments, "PUT", ["api", "tasks", null, "runtime-session"])) {
+    const taskId = pathSegments[2]!;
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    if (!body.sessionId || typeof body.sessionId !== "string") {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing or invalid 'sessionId' field" }));
+      return true;
+    }
+
+    const task = updateTaskClaudeSessionId(taskId, body.sessionId);
+    if (!task) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Task not found" }));
+      return true;
+    }
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(task));
+    return true;
+  }
+
   // POST /api/tasks/:id/cancel - Cancel a pending or in-progress task
   if (matchRoute(req.method, pathSegments, "POST", ["api", "tasks", null, "cancel"])) {
     const taskId = pathSegments[2]!;

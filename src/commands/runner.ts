@@ -7,12 +7,17 @@ import {
 } from "../be/db.ts";
 import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt.ts";
 import { resolveCredentialPools } from "../utils/credentials.ts";
-import {
-  parseStderrForErrors,
-  SessionErrorTracker,
-  trackErrorFromJson,
-} from "../utils/error-tracker.ts";
+import type { SessionErrorTracker } from "../utils/error-tracker.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
+import { ClaudeAdapter } from "./providers/claude-adapter.ts";
+import { PiMonoAdapter } from "./providers/pi-mono-adapter.ts";
+import { createProviderEventProcessor } from "./providers/runtime-normalizer.ts";
+import type {
+  HarnessProvider,
+  ProviderAdapter,
+  ProviderRunHandle,
+  ProviderStartContext,
+} from "./providers/types.ts";
 
 /** Task file data written to /tmp for hook to read */
 interface TaskFileData {
@@ -229,6 +234,30 @@ async function fetchResolvedEnv(
   return env;
 }
 
+export function resolveHarnessProvider(
+  freshEnv: Record<string, string | undefined>,
+): HarnessProvider {
+  const rawValue = freshEnv.HARNESS_PROVIDER?.trim().toLowerCase();
+
+  if (!rawValue || rawValue === "claude") {
+    return "claude";
+  }
+
+  if (rawValue === "pi") {
+    return "pi";
+  }
+
+  console.warn(`[runner] Unknown HARNESS_PROVIDER="${rawValue}". Falling back to claude.`);
+  return "claude";
+}
+
+function createProviderAdapter(provider: HarnessProvider): ProviderAdapter {
+  if (provider === "pi") {
+    return new PiMonoAdapter();
+  }
+  return new ClaudeAdapter();
+}
+
 /**
  * Ensure task is marked as completed or failed via the API.
  * This is called when a Claude process exits to ensure task status is updated,
@@ -258,7 +287,7 @@ async function ensureTaskFinished(
   const body: Record<string, string> = { status };
 
   if (status === "failed") {
-    body.failureReason = failureReason || `Claude process exited with code ${exitCode}`;
+    body.failureReason = failureReason || `Provider run exited with code ${exitCode}`;
   } else {
     body.output =
       "Process completed (runner wrapper fallback - agent may have provided explicit output)";
@@ -465,7 +494,7 @@ function setupShutdownHandlers(
         );
         for (const [taskId, task] of state.activeTasks) {
           console.log(`[${role}] Pausing task ${taskId.slice(0, 8)}`);
-          task.process.kill("SIGTERM");
+          await task.cancel();
           // Mark as paused for graceful resume (instead of failed)
           if (apiConfig) {
             const paused = await pauseTaskViaAPI(apiConfig, role, taskId);
@@ -528,15 +557,20 @@ interface RunClaudeIterationOptions {
   iteration?: number;
   taskId?: string;
   model?: string;
+  provider?: HarnessProvider;
+  resumeSessionId?: string;
 }
 
 /** Running task state for parallel execution */
 interface RunningTask {
   taskId: string;
-  process: ReturnType<typeof Bun.spawn>;
+  provider: HarnessProvider;
+  process?: ReturnType<typeof Bun.spawn>;
+  cancel: () => Promise<void>;
   logFile: string;
   startTime: Date;
   promise: Promise<{ exitCode: number; errorTracker: SessionErrorTracker }>;
+  completedExitCode: number | null;
   /** The trigger type that caused this task to be spawned */
   triggerType?: string;
 }
@@ -645,6 +679,96 @@ async function saveCostData(cost: CostData, apiUrl: string, apiKey: string): Pro
   } catch (error) {
     console.warn(`[runner] Error saving cost data: ${error}`);
   }
+}
+
+interface RuntimeEventHandlerOptions {
+  role: string;
+  provider: HarnessProvider;
+  model: string;
+  apiUrl?: string;
+  apiKey?: string;
+  agentId?: string;
+  sessionId?: string;
+  iteration?: number;
+  taskId?: string;
+}
+
+function createRuntimeEventHandler(opts: RuntimeEventHandlerOptions): {
+  handleEvent: ProviderStartContext["onEvent"];
+  flushBufferedLogs: () => Promise<void>;
+} {
+  const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now(), partialLine: "" };
+  const shouldStreamLogs = !!(opts.apiUrl && opts.agentId && opts.sessionId && opts.iteration);
+
+  const maybeFlushLogs = async () => {
+    if (!shouldStreamLogs || logBuffer.lines.length === 0) return;
+    await flushLogBuffer(logBuffer, {
+      apiUrl: opts.apiUrl!,
+      apiKey: opts.apiKey || "",
+      agentId: opts.agentId!,
+      sessionId: opts.sessionId!,
+      iteration: opts.iteration!,
+      taskId: opts.taskId,
+      cli: opts.provider,
+    });
+  };
+
+  const processEvent = createProviderEventProcessor({
+    onSessionInit: async (providerSessionId) => {
+      if (!opts.taskId || !opts.apiUrl) return;
+      saveClaudeSessionId(opts.apiUrl, opts.apiKey || "", opts.taskId, providerSessionId).catch(
+        (err) => console.warn(`[runner] Failed to save session ID: ${err}`),
+      );
+    },
+    onStreamLine: async (line) => {
+      prettyPrintLine(line, opts.role);
+
+      if (!shouldStreamLogs || !line.trim()) {
+        return;
+      }
+
+      logBuffer.lines.push(line.trim());
+      const shouldFlush =
+        logBuffer.lines.length >= LOG_BUFFER_SIZE ||
+        Date.now() - logBuffer.lastFlush >= LOG_FLUSH_INTERVAL_MS;
+
+      if (shouldFlush) {
+        await maybeFlushLogs();
+      }
+    },
+    onCostData: async (cost) => {
+      if (!opts.apiUrl || !opts.agentId || !opts.sessionId) return;
+      saveCostData(
+        {
+          sessionId: opts.sessionId,
+          taskId: opts.taskId,
+          agentId: opts.agentId,
+          totalCostUsd: cost.totalCostUsd,
+          inputTokens: cost.inputTokens ?? 0,
+          outputTokens: cost.outputTokens ?? 0,
+          cacheReadTokens: cost.cacheReadTokens ?? 0,
+          cacheWriteTokens: cost.cacheWriteTokens ?? 0,
+          durationMs: cost.durationMs,
+          numTurns: cost.numTurns,
+          model: opts.model,
+          isError: cost.isError,
+        },
+        opts.apiUrl,
+        opts.apiKey || "",
+      ).catch((err) => console.warn(`[runner] Failed to save cost: ${err}`));
+    },
+    onStderr: async (stderr) => {
+      prettyPrintStderr(stderr, opts.role);
+    },
+    onProviderError: async (error) => {
+      console.warn(`[${opts.role}] ${error}`);
+    },
+  });
+
+  return {
+    handleEvent: processEvent,
+    flushBufferedLogs: maybeFlushLogs,
+  };
 }
 
 /** Save Claude session ID for a task (fire-and-forget) */
@@ -1081,179 +1205,51 @@ async function runClaudeIteration(
 ): Promise<{ exitCode: number; errorTracker: SessionErrorTracker }> {
   const { role } = opts;
 
-  // Resolve env first so we can use MODEL_OVERRIDE from config
   const freshEnv = await fetchResolvedEnv(opts.apiUrl || "", opts.apiKey || "", opts.agentId || "");
-
-  // Priority: task.model > config MODEL_OVERRIDE > default "opus"
+  const provider = opts.provider || resolveHarnessProvider(freshEnv);
+  const adapter = createProviderAdapter(provider);
   const model = opts.model || freshEnv.MODEL_OVERRIDE || "opus";
 
-  const Cmd = [
-    "claude",
-    "--model",
-    model,
-    "--verbose",
-    "--output-format",
-    "stream-json",
-    "--dangerously-skip-permissions",
-    "--allow-dangerously-skip-permissions",
-    "--permission-mode",
-    "bypassPermissions",
-    "-p",
-    opts.prompt,
-  ];
-
-  if (opts.additionalArgs && opts.additionalArgs.length > 0) {
-    Cmd.push(...opts.additionalArgs);
-  }
-
-  if (opts.systemPrompt) {
-    Cmd.push("--append-system-prompt", opts.systemPrompt);
-  }
-
   console.log(
-    `\x1b[2m[${role}]\x1b[0m \x1b[36m▸\x1b[0m Starting Claude (model: ${model}, PID will follow)`,
+    `\x1b[2m[${role}]\x1b[0m \x1b[36m▸\x1b[0m Starting ${provider} adapter (model: ${model})`,
   );
 
-  const logFileHandle = Bun.file(opts.logFile).writer();
-  let stderrOutput = "";
-
-  const proc = Bun.spawn(Cmd, {
-    env: freshEnv,
-    stdout: "pipe",
-    stderr: "pipe",
+  const { handleEvent, flushBufferedLogs } = createRuntimeEventHandler({
+    role,
+    provider,
+    model,
+    apiUrl: opts.apiUrl,
+    apiKey: opts.apiKey,
+    agentId: opts.agentId,
+    sessionId: opts.sessionId,
+    iteration: opts.iteration,
+    taskId: opts.taskId,
   });
 
-  let stdoutChunks = 0;
-  let stderrChunks = 0;
+  const runHandle = await adapter.startRun({
+    prompt: opts.prompt,
+    logFile: opts.logFile,
+    role,
+    model,
+    env: freshEnv,
+    systemPrompt: opts.systemPrompt,
+    additionalArgs: opts.additionalArgs,
+    apiUrl: opts.apiUrl,
+    apiKey: opts.apiKey,
+    agentId: opts.agentId,
+    sessionId: opts.sessionId,
+    iteration: opts.iteration,
+    taskId: opts.taskId,
+    resumeSessionId: opts.resumeSessionId,
+    onEvent: handleEvent,
+  });
 
-  // Track error signals from Claude CLI output for meaningful failure reasons
-  const errorTracker = new SessionErrorTracker();
-
-  const stdoutPromise = (async () => {
-    if (proc.stdout) {
-      // Initialize log buffer for API streaming
-      const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now(), partialLine: "" };
-      const shouldStream = opts.apiUrl && opts.sessionId && opts.iteration;
-
-      for await (const chunk of proc.stdout) {
-        stdoutChunks++;
-        const text = new TextDecoder().decode(chunk);
-        logFileHandle.write(text);
-
-        // Prepend any partial line from previous chunk
-        const combined = logBuffer.partialLine + text;
-        const parts = combined.split("\n");
-
-        // Last element may be incomplete - save for next chunk
-        logBuffer.partialLine = parts.pop() || "";
-
-        // Process only complete lines (those that ended with \n)
-        for (const line of parts) {
-          prettyPrintLine(line, role);
-
-          // Buffer non-empty lines for API streaming
-          if (shouldStream && line.trim()) {
-            // Capture Claude session ID from init message (legacy mode)
-            try {
-              const json = JSON.parse(line.trim());
-              if (json.type === "system" && json.subtype === "init" && json.session_id) {
-                if (opts.taskId) {
-                  saveClaudeSessionId(
-                    opts.apiUrl || "",
-                    opts.apiKey || "",
-                    opts.taskId,
-                    json.session_id,
-                  ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
-                }
-              }
-              trackErrorFromJson(json, errorTracker);
-            } catch {
-              // Not JSON - ignore
-            }
-
-            logBuffer.lines.push(line.trim());
-
-            // Check if we should flush (buffer full or time elapsed)
-            const shouldFlush =
-              logBuffer.lines.length >= LOG_BUFFER_SIZE ||
-              Date.now() - logBuffer.lastFlush >= LOG_FLUSH_INTERVAL_MS;
-
-            if (shouldFlush) {
-              await flushLogBuffer(logBuffer, {
-                apiUrl: opts.apiUrl!,
-                apiKey: opts.apiKey || "",
-                agentId: opts.agentId || "",
-                sessionId: opts.sessionId!,
-                iteration: opts.iteration!,
-                taskId: opts.taskId,
-                cli: "claude",
-              });
-            }
-          }
-        }
-      }
-
-      // Handle any remaining partial line at stream end
-      if (logBuffer.partialLine.trim()) {
-        prettyPrintLine(logBuffer.partialLine, role);
-        if (shouldStream) {
-          try {
-            const json = JSON.parse(logBuffer.partialLine.trim());
-            trackErrorFromJson(json, errorTracker);
-          } catch {
-            // Not JSON - ignore
-          }
-          logBuffer.lines.push(logBuffer.partialLine.trim());
-        }
-        logBuffer.partialLine = "";
-      }
-
-      // Final flush for remaining buffered logs
-      if (shouldStream && logBuffer.lines.length > 0) {
-        await flushLogBuffer(logBuffer, {
-          apiUrl: opts.apiUrl!,
-          apiKey: opts.apiKey || "",
-          agentId: opts.agentId || "",
-          sessionId: opts.sessionId!,
-          iteration: opts.iteration!,
-          taskId: opts.taskId,
-          cli: "claude",
-        });
-      }
-    }
-  })();
-
-  const stderrPromise = (async () => {
-    if (proc.stderr) {
-      for await (const chunk of proc.stderr) {
-        stderrChunks++;
-        const text = new TextDecoder().decode(chunk);
-        stderrOutput += text;
-        prettyPrintStderr(text, role);
-        parseStderrForErrors(text, errorTracker);
-        logFileHandle.write(
-          `${JSON.stringify({ type: "stderr", content: text, timestamp: new Date().toISOString() })}\n`,
-        );
-      }
-    }
-  })();
-
-  await Promise.all([stdoutPromise, stderrPromise]);
-  await logFileHandle.end();
-  const exitCode = await proc.exited;
-
-  if (exitCode !== 0 && stderrOutput) {
-    console.error(`\x1b[31m[${role}] Full stderr:\x1b[0m\n${stderrOutput}`);
-  }
-
-  if (stdoutChunks === 0 && stderrChunks === 0) {
-    console.warn(`\x1b[33m[${role}] WARNING: No output from Claude - check auth/startup\x1b[0m`);
-  }
-
-  return { exitCode: exitCode ?? 1, errorTracker };
+  const result = await runHandle.promise;
+  await flushBufferedLogs();
+  return result;
 }
 
-/** Spawn a Claude process without blocking - returns immediately with tracking info */
+/** Spawn a provider run without blocking and return tracking info */
 async function spawnClaudeProcess(
   opts: RunClaudeIterationOptions,
   logDir: string,
@@ -1263,45 +1259,16 @@ async function spawnClaudeProcess(
 ): Promise<RunningTask> {
   const { role, taskId } = opts;
 
-  // Resolve env first so we can use MODEL_OVERRIDE from config
   const freshEnv = await fetchResolvedEnv(opts.apiUrl || "", opts.apiKey || "", opts.agentId || "");
-
-  // Priority: task.model > config MODEL_OVERRIDE > default "opus"
+  const provider = opts.provider || resolveHarnessProvider(freshEnv);
+  const adapter = createProviderAdapter(provider);
   const model = opts.model || freshEnv.MODEL_OVERRIDE || "opus";
-
-  const Cmd = [
-    "claude",
-    "--model",
-    model,
-    "--verbose",
-    "--output-format",
-    "stream-json",
-    "--dangerously-skip-permissions",
-    "--allow-dangerously-skip-permissions",
-    "--permission-mode",
-    "bypassPermissions",
-    "-p",
-    opts.prompt,
-  ];
-
-  if (opts.additionalArgs && opts.additionalArgs.length > 0) {
-    Cmd.push(...opts.additionalArgs);
-  }
-
-  if (opts.systemPrompt) {
-    Cmd.push("--append-system-prompt", opts.systemPrompt);
-  }
-
   const effectiveTaskId = taskId || crypto.randomUUID();
 
   console.log(
-    `\x1b[2m[${role}]\x1b[0m \x1b[36m▸\x1b[0m Spawning Claude (model: ${model}) for task ${effectiveTaskId.slice(0, 8)}`,
+    `\x1b[2m[${role}]\x1b[0m \x1b[36m▸\x1b[0m Spawning ${provider} adapter (model: ${model}) for task ${effectiveTaskId.slice(0, 8)}`,
   );
 
-  const logFileHandle = Bun.file(opts.logFile).writer();
-
-  // Write task file before spawning so hook can read the current taskId
-  // We use the parent process PID since we need to write before spawn
   const taskFilePid = process.pid;
   const taskFilePath = await writeTaskFile(taskFilePid, {
     taskId: effectiveTaskId,
@@ -1311,282 +1278,134 @@ async function spawnClaudeProcess(
 
   console.log(`\x1b[2m[${role}]\x1b[0m Task file written: ${taskFilePath}`);
 
-  const proc = Bun.spawn(Cmd, {
-    env: {
-      ...freshEnv,
-      TASK_FILE: taskFilePath,
-    },
-    stdout: "pipe",
-    stderr: "pipe",
+  const { handleEvent, flushBufferedLogs } = createRuntimeEventHandler({
+    role,
+    provider,
+    model,
+    apiUrl: opts.apiUrl,
+    apiKey: opts.apiKey,
+    agentId: opts.agentId,
+    sessionId: opts.sessionId,
+    iteration: opts.iteration,
+    taskId: effectiveTaskId,
   });
 
-  // Create promise that resolves when process completes
-  const promise = (async () => {
-    let stderrOutput = "";
-    let stdoutChunks = 0;
-    let stderrChunks = 0;
+  const runHandle: ProviderRunHandle = await adapter.startRun({
+    prompt: opts.prompt,
+    logFile: opts.logFile,
+    role,
+    model,
+    env: freshEnv,
+    systemPrompt: opts.systemPrompt,
+    additionalArgs: opts.additionalArgs,
+    apiUrl: opts.apiUrl,
+    apiKey: opts.apiKey,
+    agentId: opts.agentId,
+    sessionId: opts.sessionId,
+    iteration: opts.iteration,
+    taskId: effectiveTaskId,
+    taskFilePath: provider === "claude" ? taskFilePath : undefined,
+    resumeSessionId: opts.resumeSessionId,
+    onEvent: handleEvent,
+  });
 
-    // Initialize log buffer for API streaming
-    const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now(), partialLine: "" };
-    const shouldStream = opts.apiUrl && opts.sessionId && opts.iteration;
+  const runningTask: RunningTask = {
+    taskId: effectiveTaskId,
+    provider,
+    process: runHandle.process,
+    cancel: async () => {
+      await adapter.cancel(runHandle);
+    },
+    logFile: opts.logFile,
+    startTime: new Date(),
+    completedExitCode: null,
+    promise: (async () => {
+      const result = await runHandle.promise;
+      await flushBufferedLogs();
 
-    // Track error signals from Claude CLI output for meaningful failure reasons
-    const errorTracker = new SessionErrorTracker();
+      if (result.exitCode !== 0) {
+        const errorLog = {
+          timestamp: new Date().toISOString(),
+          iteration: opts.iteration,
+          exitCode: result.exitCode,
+          taskId: effectiveTaskId,
+          provider,
+          error: true,
+        };
 
-    const stdoutPromise = (async () => {
-      if (proc.stdout) {
-        for await (const chunk of proc.stdout) {
-          stdoutChunks++;
-          const text = new TextDecoder().decode(chunk);
-          logFileHandle.write(text);
+        const errorsFile = `${logDir}/errors.jsonl`;
+        const errorsFileRef = Bun.file(errorsFile);
+        const existingErrors = (await errorsFileRef.exists()) ? await errorsFileRef.text() : "";
+        await Bun.write(errorsFile, `${existingErrors}${JSON.stringify(errorLog)}\n`);
 
-          // Prepend any partial line from previous chunk
-          const combined = logBuffer.partialLine + text;
-          const parts = combined.split("\n");
-
-          // Last element may be incomplete - save for next chunk
-          logBuffer.partialLine = parts.pop() || "";
-
-          // Process only complete lines (those that ended with \n)
-          for (const line of parts) {
-            prettyPrintLine(line, role);
-
-            // Extract cost data from result messages
-            if (shouldStream && line.trim()) {
-              try {
-                const json = JSON.parse(line.trim());
-                // Capture Claude session ID from init message
-                if (json.type === "system" && json.subtype === "init" && json.session_id) {
-                  if (opts.taskId) {
-                    saveClaudeSessionId(
-                      opts.apiUrl || "",
-                      opts.apiKey || "",
-                      opts.taskId,
-                      json.session_id,
-                    ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
-                  }
-                }
-                if (json.type === "result" && json.total_cost_usd !== undefined) {
-                  // Extract token data from the usage object
-                  // Claude's result JSON has: usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens
-                  const usage = json.usage as
-                    | {
-                        input_tokens?: number;
-                        output_tokens?: number;
-                        cache_read_input_tokens?: number;
-                        cache_creation_input_tokens?: number;
-                      }
-                    | undefined;
-
-                  // Fire and forget - don't block the stream
-                  saveCostData(
-                    {
-                      sessionId: opts.sessionId!,
-                      taskId: opts.taskId,
-                      agentId: opts.agentId || "",
-                      totalCostUsd: json.total_cost_usd || 0,
-                      inputTokens: usage?.input_tokens ?? 0,
-                      outputTokens: usage?.output_tokens ?? 0,
-                      cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
-                      cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
-                      durationMs: json.duration_ms || 0,
-                      numTurns: json.num_turns || 1,
-                      model,
-                      isError: json.is_error || false,
-                    },
-                    opts.apiUrl!,
-                    opts.apiKey || "",
-                  ).catch((err) => console.warn(`[runner] Failed to save cost: ${err}`));
-                }
-
-                // Track error signals for meaningful failure reasons
-                trackErrorFromJson(json, errorTracker);
-              } catch {
-                // Ignore parse errors - not all lines are JSON
-              }
-
-              // Buffer for log streaming
-              logBuffer.lines.push(line.trim());
-
-              const shouldFlush =
-                logBuffer.lines.length >= LOG_BUFFER_SIZE ||
-                Date.now() - logBuffer.lastFlush >= LOG_FLUSH_INTERVAL_MS;
-
-              if (shouldFlush) {
-                await flushLogBuffer(logBuffer, {
-                  apiUrl: opts.apiUrl!,
-                  apiKey: opts.apiKey || "",
-                  agentId: opts.agentId || "",
-                  sessionId: opts.sessionId!,
-                  iteration: opts.iteration!,
-                  taskId: opts.taskId,
-                  cli: "claude",
-                });
-              }
-            }
-          }
-        }
-
-        // Handle any remaining partial line at stream end
-        if (logBuffer.partialLine.trim()) {
-          prettyPrintLine(logBuffer.partialLine, role);
-          if (shouldStream) {
-            // Try to extract cost data and error signals from final partial line
-            try {
-              const json = JSON.parse(logBuffer.partialLine.trim());
-              if (json.type === "result" && json.total_cost_usd !== undefined) {
-                const usage = json.usage as
-                  | {
-                      input_tokens?: number;
-                      output_tokens?: number;
-                      cache_read_input_tokens?: number;
-                      cache_creation_input_tokens?: number;
-                    }
-                  | undefined;
-                saveCostData(
-                  {
-                    sessionId: opts.sessionId!,
-                    taskId: opts.taskId,
-                    agentId: opts.agentId || "",
-                    totalCostUsd: json.total_cost_usd || 0,
-                    inputTokens: usage?.input_tokens ?? 0,
-                    outputTokens: usage?.output_tokens ?? 0,
-                    cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
-                    cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
-                    durationMs: json.duration_ms || 0,
-                    numTurns: json.num_turns || 1,
-                    model,
-                    isError: json.is_error || false,
-                  },
-                  opts.apiUrl!,
-                  opts.apiKey || "",
-                ).catch((err) => console.warn(`[runner] Failed to save cost: ${err}`));
-              }
-              trackErrorFromJson(json, errorTracker);
-            } catch {
-              // Ignore parse errors
-            }
-            logBuffer.lines.push(logBuffer.partialLine.trim());
-          }
-          logBuffer.partialLine = "";
-        }
-
-        // Final flush for remaining buffered logs
-        if (shouldStream && logBuffer.lines.length > 0) {
-          await flushLogBuffer(logBuffer, {
-            apiUrl: opts.apiUrl!,
-            apiKey: opts.apiKey || "",
-            agentId: opts.agentId || "",
-            sessionId: opts.sessionId!,
-            iteration: opts.iteration!,
-            taskId: opts.taskId,
-            cli: "claude",
-          });
-        }
-      }
-    })();
-
-    const stderrPromise = (async () => {
-      if (proc.stderr) {
-        for await (const chunk of proc.stderr) {
-          stderrChunks++;
-          const text = new TextDecoder().decode(chunk);
-          stderrOutput += text;
-          prettyPrintStderr(text, role);
-          parseStderrForErrors(text, errorTracker);
-          logFileHandle.write(
-            `${JSON.stringify({ type: "stderr", content: text, timestamp: new Date().toISOString() })}\n`,
+        if (!isYolo) {
+          console.error(
+            `[${role}] Task ${effectiveTaskId.slice(0, 8)} exited with code ${result.exitCode}.`,
+          );
+        } else {
+          console.warn(
+            `[${role}] Task ${effectiveTaskId.slice(0, 8)} exited with code ${result.exitCode}. YOLO mode - continuing...`,
           );
         }
       }
-    })();
 
-    await Promise.all([stdoutPromise, stderrPromise]);
-    await logFileHandle.end();
-    const exitCode = await proc.exited;
+      await cleanupTaskFile(taskFilePid);
+      console.log(`\x1b[2m[${role}]\x1b[0m Task file cleaned up: ${taskFilePath}`);
 
-    if (exitCode !== 0 && stderrOutput) {
-      console.error(
-        `\x1b[31m[${role}] Full stderr for task ${effectiveTaskId.slice(0, 8)}:\x1b[0m\n${stderrOutput}`,
-      );
-    }
+      // Retry without --resume if Claude reports stale session state.
+      if (
+        provider === "claude" &&
+        result.exitCode !== 0 &&
+        result.errorTracker.isSessionNotFound()
+      ) {
+        const hasResume =
+          (opts.additionalArgs || []).includes("--resume") || Boolean(opts.resumeSessionId);
+        if (hasResume) {
+          console.log(
+            `\x1b[33m[${role}] Session not found for task ${effectiveTaskId.slice(0, 8)} — retrying without --resume\x1b[0m`,
+          );
 
-    if (stdoutChunks === 0 && stderrChunks === 0) {
-      console.warn(
-        `\x1b[33m[${role}] WARNING: No output from Claude for task ${effectiveTaskId.slice(0, 8)} - check auth/startup\x1b[0m`,
-      );
-    }
+          const freshAdditionalArgs = (opts.additionalArgs || []).filter((arg, idx, arr) => {
+            if (arg === "--resume") return false;
+            if (idx > 0 && arr[idx - 1] === "--resume") return false;
+            return true;
+          });
 
-    // Log errors if non-zero exit code
-    if (exitCode !== 0) {
-      const errorLog = {
-        timestamp: new Date().toISOString(),
-        iteration: opts.iteration,
-        exitCode,
-        taskId: effectiveTaskId,
-        error: true,
-      };
+          const retryTimestamp = new Date().toISOString().replace(/[:.]/g, "-");
+          const retryLogFile = `${logDir}/${retryTimestamp}-retry-${effectiveTaskId.slice(0, 8)}.jsonl`;
 
-      const errorsFile = `${logDir}/errors.jsonl`;
-      const errorsFileRef = Bun.file(errorsFile);
-      const existingErrors = (await errorsFileRef.exists()) ? await errorsFileRef.text() : "";
-      await Bun.write(errorsFile, `${existingErrors}${JSON.stringify(errorLog)}\n`);
+          const retryTask = await spawnClaudeProcess(
+            {
+              ...opts,
+              additionalArgs: freshAdditionalArgs,
+              resumeSessionId: undefined,
+              logFile: retryLogFile,
+              taskId: effectiveTaskId,
+              provider: "claude",
+            },
+            logDir,
+            _metadataType,
+            _sessionId,
+            isYolo,
+          );
 
-      if (!isYolo) {
-        console.error(
-          `[${role}] Task ${effectiveTaskId.slice(0, 8)} exited with code ${exitCode}.`,
-        );
-      } else {
-        console.warn(
-          `[${role}] Task ${effectiveTaskId.slice(0, 8)} exited with code ${exitCode}. YOLO mode - continuing...`,
-        );
+          return await retryTask.promise;
+        }
       }
-    }
 
-    // Clean up task file after process exits
-    await cleanupTaskFile(taskFilePid);
-    console.log(`\x1b[2m[${role}]\x1b[0m Task file cleaned up: ${taskFilePath}`);
-
-    // Retry without --resume if the session was not found (stale session ID on disk)
-    if (exitCode !== 0 && errorTracker.isSessionNotFound()) {
-      const hasResume = (opts.additionalArgs || []).includes("--resume");
-      if (hasResume) {
-        console.log(
-          `\x1b[33m[${role}] Session not found for task ${effectiveTaskId.slice(0, 8)} — retrying without --resume\x1b[0m`,
-        );
-
-        // Strip --resume and its value from additional args
-        const freshAdditionalArgs = (opts.additionalArgs || []).filter((arg, idx, arr) => {
-          if (arg === "--resume") return false;
-          if (idx > 0 && arr[idx - 1] === "--resume") return false;
-          return true;
-        });
-
-        const retryTimestamp = new Date().toISOString().replace(/[:.]/g, "-");
-        const retryLogFile = `${logDir}/${retryTimestamp}-retry-${effectiveTaskId.slice(0, 8)}.jsonl`;
-
-        const retryTask = await spawnClaudeProcess(
-          { ...opts, additionalArgs: freshAdditionalArgs, logFile: retryLogFile },
-          logDir,
-          _metadataType,
-          _sessionId,
-          isYolo,
-        );
-
-        return await retryTask.promise;
-      }
-    }
-
-    return { exitCode: exitCode ?? 1, errorTracker };
-  })();
-
-  return {
-    taskId: effectiveTaskId,
-    process: proc,
-    logFile: opts.logFile,
-    startTime: new Date(),
-    promise,
+      return result;
+    })(),
   };
+
+  runningTask.promise
+    .then((result) => {
+      runningTask.completedExitCode = result.exitCode;
+    })
+    .catch(() => {
+      runningTask.completedExitCode = 1;
+    });
+
+  return runningTask;
 }
 
 /** Check for completed processes and remove them from active tasks */
@@ -1603,14 +1422,15 @@ async function checkCompletedProcesses(
   }> = [];
 
   for (const [taskId, task] of state.activeTasks) {
-    // Check if the Bun subprocess has exited (non-blocking)
-    if (task.process.exitCode !== null) {
+    // Check if the provider run has exited (non-blocking)
+    const observedExitCode = task.process ? task.process.exitCode : task.completedExitCode;
+    if (observedExitCode !== null) {
       console.log(
-        `[${role}] Task ${taskId.slice(0, 8)} completed with exit code ${task.process.exitCode} (trigger: ${task.triggerType || "unknown"})`,
+        `[${role}] Task ${taskId.slice(0, 8)} completed with exit code ${observedExitCode} (trigger: ${task.triggerType || "unknown"})`,
       );
       completedTasks.push({
         taskId,
-        exitCode: task.process.exitCode,
+        exitCode: observedExitCode,
         triggerType: task.triggerType,
         promise: task.promise,
       });
@@ -1979,7 +1799,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
           // Resolve --resume: prefer own session ID, then parent's
           let resumeAdditionalArgs = opts.additionalArgs || [];
+          let resumeSessionId: string | undefined;
           if (task.claudeSessionId) {
+            resumeSessionId = task.claudeSessionId;
             resumeAdditionalArgs = [...resumeAdditionalArgs, "--resume", task.claudeSessionId];
             console.log(
               `[${role}] Resuming task's own session ${task.claudeSessionId.slice(0, 8)}`,
@@ -1987,6 +1809,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           } else if (task.parentTaskId) {
             const parentSessionId = await fetchClaudeSessionId(apiUrl, apiKey, task.parentTaskId);
             if (parentSessionId) {
+              resumeSessionId = parentSessionId;
               resumeAdditionalArgs = [...resumeAdditionalArgs, "--resume", parentSessionId];
               console.log(`[${role}] Resuming parent session ${parentSessionId.slice(0, 8)}`);
             }
@@ -2027,6 +1850,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               iteration,
               taskId: task.id,
               model: (task as { model?: string }).model,
+              resumeSessionId,
             },
             logDir,
             metadataType,
@@ -2066,7 +1890,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       // Check for cancelled tasks and signal their subprocesses
       if (state.activeTasks.size > 0) {
         for (const [taskId, task] of state.activeTasks) {
-          if (cancelledSignaled.has(taskId)) continue; // Already sent SIGTERM
+          if (cancelledSignaled.has(taskId)) continue; // Already signalled cancellation
           try {
             const cancelResp = await fetch(
               `${apiUrl}/cancelled-tasks?taskId=${encodeURIComponent(taskId)}`,
@@ -2083,9 +1907,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               };
               if (cancelData.cancelled?.some((t) => t.id === taskId)) {
                 console.log(
-                  `[${role}] Task ${taskId.slice(0, 8)} was cancelled — sending SIGTERM to subprocess`,
+                  `[${role}] Task ${taskId.slice(0, 8)} was cancelled — signalling provider cancel`,
                 );
-                task.process.kill("SIGTERM");
+                await task.cancel();
                 cancelledSignaled.add(taskId);
               }
             }
@@ -2135,6 +1959,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
           // Resolve --resume for child tasks with parentTaskId
           let effectiveAdditionalArgs = opts.additionalArgs || [];
+          let resumeSessionId: string | undefined;
           const taskObj = trigger.task as { parentTaskId?: string } | undefined;
           if (taskObj?.parentTaskId) {
             const parentSessionId = await fetchClaudeSessionId(
@@ -2143,6 +1968,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               taskObj.parentTaskId,
             );
             if (parentSessionId) {
+              resumeSessionId = parentSessionId;
               effectiveAdditionalArgs = [...effectiveAdditionalArgs, "--resume", parentSessionId];
               console.log(
                 `[${role}] Child task — resuming parent session ${parentSessionId.slice(0, 8)}`,
@@ -2212,6 +2038,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               iteration,
               taskId: trigger.taskId,
               model: taskModel,
+              resumeSessionId,
             },
             logDir,
             metadataType,
