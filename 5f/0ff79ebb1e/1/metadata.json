@@ -1,0 +1,48 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "5f0ff79ebb1e",
+  "session_id": "ses_34062dd03ffeQDqACw1NliCDjE",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-05T20:37:04.542343Z",
+  "branch": "feat/pi-harness-support",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "src/tests/pi-provider-auth-validation.test.ts",
+    "CLAUDE.md",
+    "src/commands/providers/runtime-normalizer.ts",
+    "src/types.ts",
+    "CONTRIBUTING.md",
+    "package.json",
+    "src/commands/runner.ts",
+    "src/http/tasks.ts",
+    "thoughts/taras/plans/2026-03-05-pi-mono-provider-implementation-plan.md",
+    "src/tests/provider-selection.test.ts",
+    "bun.lock",
+    "src/commands/providers/claude-adapter.ts",
+    "src/commands/providers/pi-config.ts",
+    "src/commands/providers/pi-mono-adapter.ts",
+    "src/commands/providers/runtime-hook-bridge.ts",
+    "src/commands/providers/types.ts",
+    "src/tests/runner-provider-normalization.test.ts"
+  ],
+  "agent": "OpenCode",
+  "turn_id": "a9625af814f0",
+  "checkpoint_transcript_start": 26,
+  "transcript_lines_at_start": 26,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-05T20:37:04.288555Z",
+    "agent_lines": 1829,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 1829,
+    "agent_percentage": 100
+  }
+}
