@@ -1,0 +1,36 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "4906a1616c76",
+  "session_id": "ses_34082f762ffe3oTR5A38BDpGp4",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-05T23:36:17.720535Z",
+  "branch": "feat/pi-harness-support",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "src/tests/runtime-hook-bridge.test.ts",
+    "src/commands/providers/claude-adapter.ts",
+    "src/commands/providers/runtime-hook-bridge.ts",
+    "src/commands/runner.ts",
+    "src/tests/claude-adapter-stream-parsing.test.ts"
+  ],
+  "agent": "OpenCode",
+  "turn_id": "b58836c37a62",
+  "checkpoint_transcript_start": 27,
+  "transcript_lines_at_start": 27,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-05T23:36:17.338818Z",
+    "agent_lines": 138,
+    "human_added": 2,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 140,
+    "agent_percentage": 98.57142857142858
+  }
+}
