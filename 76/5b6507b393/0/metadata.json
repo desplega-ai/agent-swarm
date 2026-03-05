@@ -1,0 +1,31 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "765b6507b393",
+  "session_id": "a907e501-5bdb-467b-b79a-c73ca7a54d4e",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-05T21:14:58.566687Z",
+  "branch": "feat/pi-harness-support",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "src/commands/providers/pi-mono-adapter.ts",
+    "src/tests/pi-mono-adapter-usage.test.ts"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "53410c74ed4b",
+  "token_usage": {
+    "input_tokens": 14,
+    "cache_creation_tokens": 25749,
+    "cache_read_tokens": 256825,
+    "output_tokens": 1250,
+    "api_call_count": 12
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-05T21:14:58.491027Z",
+    "agent_lines": 218,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 218,
+    "agent_percentage": 100
+  }
+}
