@@ -33,6 +33,8 @@ const STALE_CLEANUP_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALE_CLEAN
 /** Max pool tasks to auto-assign per sweep */
 const MAX_AUTO_ASSIGN_PER_SWEEP = Number(process.env.HEARTBEAT_MAX_AUTO_ASSIGN) || 5;
 
+const HEARTBEAT_ESCALATION_MARKER = "[heartbeat-escalation]";
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -239,6 +241,11 @@ function escalateToLead(findings: HeartbeatFindings): void {
     return;
   }
 
+  const escalationKey = buildEscalationKey(findings);
+  if (hasActiveEscalationTask(lead.id, escalationKey)) {
+    return;
+  }
+
   const sections: string[] = [
     "Task Type: Triage\nGoal: Investigate heartbeat findings that need human reasoning\n",
   ];
@@ -257,6 +264,8 @@ function escalateToLead(findings: HeartbeatFindings): void {
     );
   }
 
+  sections.push(`\n${HEARTBEAT_ESCALATION_MARKER} ${escalationKey}`);
+
   const taskDescription = sections.join("\n");
 
   createTaskExtended(taskDescription, {
@@ -267,6 +276,28 @@ function escalateToLead(findings: HeartbeatFindings): void {
   });
 
   console.log(`[Heartbeat] Created triage task for lead ${lead.name}`);
+}
+
+function buildEscalationKey(findings: HeartbeatFindings): string {
+  const stalledTaskIds = findings.stalledTasks
+    .map((task) => task.id)
+    .sort((a, b) => a.localeCompare(b));
+  return `stalled:${stalledTaskIds.join(",")}`;
+}
+
+function hasActiveEscalationTask(leadAgentId: string, escalationKey: string): boolean {
+  const existing = getDb()
+    .prepare<{ id: string }, [string, string]>(
+      `SELECT id FROM agent_tasks
+       WHERE agentId = ?
+         AND taskType = 'heartbeat'
+         AND status NOT IN ('completed', 'failed', 'cancelled')
+         AND task LIKE ?
+       LIMIT 1`,
+    )
+    .get(leadAgentId, `%${HEARTBEAT_ESCALATION_MARKER} ${escalationKey}%`);
+
+  return Boolean(existing);
 }
 
 // ============================================================================
@@ -285,6 +316,20 @@ export function runHeartbeatSweep(): void {
   try {
     // Tier 1: Preflight gate
     if (!preflightGate()) {
+      const cleanupOnlyFindings: HeartbeatFindings = {
+        stalledTasks: [],
+        workerHealthFixes: [],
+        autoAssigned: [],
+        staleCleanup: {
+          sessions: 0,
+          reviewingTasks: 0,
+          mentionProcessing: 0,
+          inboxProcessing: 0,
+        },
+        escalationNeeded: false,
+      };
+      cleanupStaleResources(cleanupOnlyFindings);
+      logFindings(cleanupOnlyFindings);
       return; // Nothing actionable — bail early
     }
 

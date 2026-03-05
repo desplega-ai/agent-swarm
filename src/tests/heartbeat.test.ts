@@ -309,6 +309,41 @@ describe("Heartbeat Triage", () => {
       expect(triageTasks.length).toBe(1);
       expect(triageTasks[0]!.task).toContain("Stalled Tasks");
     });
+
+    test("does not create duplicate triage tasks for same stalled set", () => {
+      const lead = createAgent({ name: "triage-lead", isLead: true, status: "idle" });
+      const worker = createAgent({ name: "stall-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Stalled task", { agentId: worker.id });
+      startTask(task.id);
+
+      const oldTime = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
+
+      runHeartbeatSweep();
+      runHeartbeatSweep();
+
+      const triageTasks = getDb()
+        .query("SELECT id FROM agent_tasks WHERE taskType = 'heartbeat' AND agentId = ?")
+        .all(lead.id) as Array<{ id: string }>;
+      expect(triageTasks.length).toBe(1);
+    });
+
+    test("cleans stale sessions even when preflight gate bails", () => {
+      const worker = createAgent({ name: "worker", isLead: false, status: "offline" });
+      const staleTime = new Date(Date.now() - 40 * 60 * 1000).toISOString();
+      getDb().run(
+        `INSERT INTO active_sessions (id, agentId, triggerType, startedAt, lastHeartbeatAt)
+         VALUES (?, ?, 'manual', ?, ?)`,
+        ["test-stale-session", worker.id, staleTime, staleTime],
+      );
+
+      runHeartbeatSweep();
+
+      const remaining = getDb()
+        .query("SELECT COUNT(*) as count FROM active_sessions WHERE id = ?")
+        .get("test-stale-session") as { count: number };
+      expect(remaining.count).toBe(0);
+    });
   });
 
   // ==========================================================================
