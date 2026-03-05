@@ -1,0 +1,30 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "97856ac42531",
+  "session_id": "ses_340603199ffeYJUaMTFi9U1FVo",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-05T20:16:14.975456Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "thoughts/taras/plans/2026-03-05-pi-mono-provider-implementation-plan.md"
+  ],
+  "agent": "OpenCode",
+  "turn_id": "731a917c73db",
+  "token_usage": {
+    "input_tokens": 96034,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 1223552,
+    "output_tokens": 6157,
+    "api_call_count": 22
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-05T20:16:14.796123Z",
+    "agent_lines": 477,
+    "human_added": 37,
+    "human_modified": 5,
+    "human_removed": 0,
+    "total_committed": 519,
+    "agent_percentage": 91.90751445086705
+  }
+}
