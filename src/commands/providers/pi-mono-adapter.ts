@@ -1,11 +1,19 @@
 import { SessionErrorTracker } from "../../utils/error-tracker.ts";
 import { parsePiModelIdentifier, validatePiAuthForModel } from "./pi-config.ts";
+import {
+  extractHookBlockDecision,
+  type HookInvocation,
+  mapPiSdkEventToHookInvocations,
+  mapProviderEventToHookLifecycle,
+} from "./runtime-hook-bridge.ts";
 import type {
   ProviderAdapter,
   ProviderRunHandle,
   ProviderSessionTask,
   ProviderStartContext,
 } from "./types.ts";
+
+const HOOK_SCRIPT_PATH = new URL("../../hooks/hook.ts", import.meta.url).pathname;
 
 type PiSessionLike = {
   sessionId?: string;
@@ -53,6 +61,58 @@ function getSessionId(session: PiSessionLike): string | null {
     return session.id;
   }
   return null;
+}
+
+async function runHookInvocation(
+  context: ProviderStartContext,
+  invocation: HookInvocation,
+): Promise<{ blocked: boolean; reason?: string }> {
+  const payload = {
+    hook_event_name: invocation.hookEventName,
+    session_id: context.sessionId,
+    ...invocation.payload,
+  };
+
+  const proc = Bun.spawn(["bun", HOOK_SCRIPT_PATH], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      ...context.env,
+      ...(context.apiUrl ? { MCP_BASE_URL: context.apiUrl } : {}),
+      ...(context.apiKey ? { API_KEY: context.apiKey } : {}),
+      ...(context.agentId ? { AGENT_ID: context.agentId } : {}),
+      ...(context.taskFilePath ? { TASK_FILE: context.taskFilePath } : {}),
+    },
+  });
+
+  if (proc.stdin) {
+    proc.stdin.write(`${JSON.stringify(payload)}\n`);
+    proc.stdin.end();
+  }
+
+  const stdout = proc.stdout ? await new Response(proc.stdout).text() : "";
+  const stderr = proc.stderr ? await new Response(proc.stderr).text() : "";
+  await proc.exited;
+
+  if (stderr.trim()) {
+    console.warn(`[pi-hook] ${stderr.trim()}`);
+  }
+
+  return extractHookBlockDecision(stdout);
+}
+
+async function runLifecycleHooks(
+  context: ProviderStartContext,
+  hookEventNames: Array<"SessionStart" | "PreToolUse" | "PostToolUse" | "Stop">,
+): Promise<void> {
+  for (const hookEventName of hookEventNames) {
+    await runHookInvocation(context, {
+      hookEventName,
+      payload: {},
+    });
+  }
 }
 
 export class PiMonoAdapter implements ProviderAdapter {
@@ -164,16 +224,51 @@ export class PiMonoAdapter implements ProviderAdapter {
           sessionId,
         });
 
+        await runLifecycleHooks(
+          context,
+          mapProviderEventToHookLifecycle({
+            type: "session_init",
+            provider: "pi",
+            sessionId,
+          }),
+        );
+
         let unsubscribe: (() => void) | undefined;
+        let eventQueue = Promise.resolve();
+        let eventQueueError: Error | null = null;
         if (typeof session.subscribe === "function") {
           unsubscribe = session.subscribe((event: unknown) => {
-            const line = JSON.stringify(event);
-            writer.write(`${line}\n`);
-            void context.onEvent({
-              type: "stream_line",
-              provider: "pi",
-              line,
-            });
+            eventQueue = eventQueue
+              .then(async () => {
+                const line = JSON.stringify(event);
+                writer.write(`${line}\n`);
+
+                await context.onEvent({
+                  type: "stream_line",
+                  provider: "pi",
+                  line,
+                });
+
+                const hookInvocations = mapPiSdkEventToHookInvocations(event);
+                for (const hookInvocation of hookInvocations) {
+                  const decision = await runHookInvocation(context, hookInvocation);
+
+                  if (decision.blocked && hookInvocation.hookEventName === "PreToolUse") {
+                    await context.onEvent({
+                      type: "provider_error",
+                      provider: "pi",
+                      error: `Hook blocked tool execution: ${decision.reason || "no reason provided"}`,
+                    });
+                    await sessionAbort?.();
+                    throw new Error(
+                      `Hook blocked tool execution: ${decision.reason || "no reason provided"}`,
+                    );
+                  }
+                }
+              })
+              .catch((error) => {
+                eventQueueError = error instanceof Error ? error : new Error(String(error));
+              });
           });
         }
 
@@ -188,6 +283,11 @@ export class PiMonoAdapter implements ProviderAdapter {
         }
 
         await session.prompt(context.prompt);
+        await eventQueue;
+
+        if (eventQueueError) {
+          throw eventQueueError;
+        }
 
         const stats =
           typeof session.getSessionStats === "function"
@@ -222,6 +322,15 @@ export class PiMonoAdapter implements ProviderAdapter {
           error: message,
         });
       } finally {
+        await runLifecycleHooks(
+          context,
+          mapProviderEventToHookLifecycle({
+            type: "process_exit",
+            provider: "pi",
+            exitCode,
+          }),
+        );
+
         await context.onEvent({
           type: "process_exit",
           provider: "pi",
