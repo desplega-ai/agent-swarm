@@ -1,0 +1,236 @@
+Implement the following plan:
+
+# Plan: Optimize Dockerfile.worker & docker-entrypoint.sh
+
+## Context
+
+The Docker worker image rebuilds slowly because:
+1. `@latest` packages (`wts`, `qa-use`) bust the npm cache on every build
+2. Claude marketplace plugin installs happen at **runtime** (entrypoint) instead of build time
+3. Static directory creation and wts config happen at runtime unnecessarily
+4. apt-get is split across 3 separate RUN commands (3 layers instead of 1)
+
+Reference: [exeuntu Dockerfile](https://github.com/boldsoftware/exeuntu/blob/main/Dockerfile) — single consolidated apt layer, version pinning, clean layer ordering.
+
+## Changes
+
+### Phase 1: Pin package versions in Dockerfile.worker
+
+**File**: `Dockerfile.worker` (lines 106-112)
+
+Replace `@latest` with pinned versions:
+
+```
+npm install -g \
+    pm2@6.0.14 \
+    @sentry/cli@3.2.2 \
+    @desplega.ai/wts@0.2.2 \
+    @desplega.ai/localtunnel@2.2.0 \
+    @desplega.ai/qa-use@2.8.7 \
+    && qa-use install-deps
+```
+
+**Verification**: `docker build -f Dockerfile.worker -t agent-swarm-worker:test .` (check npm install layer caches on rebuild)
+
+### Phase 2: Consolidate apt-get into a single RUN
+
+**File**: `Dockerfile.worker` (lines 27-57)
+
+Merge the 3 separate `apt-get update && apt-get install` blocks (base packages, Node.js, GitHub CLI) into a single RUN command. This:
+- Reduces layers from 3 to 1
+- Avoids redundant `apt-get update` calls
+- Follows exeuntu pattern
+
+The consolidated RUN should:
+1. Add NodeSource and GitHub CLI apt repos first (just the key + sources.list)
+2. Run a single `apt-get update`
+3. Install everything in one `apt-get install -y`
+4. Single `rm -rf /var/lib/apt/lists/*`
+
+```dockerfile
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+       | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+       | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update && apt-get install -y \
+    curl wget ca-certificates gnupg lsb-release \
+    git git-lfs \
+    vim nano \
+    build-essential make cmake gcc g++ \
+    python3 python3-pip python3-venv \
+    jq tree htop unzip zip tar gzip sqlite3 \
+    openssh-client \
+    sudo \
+    nodejs \
+    gh \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+**Verification**: `docker build -f Dockerfile.worker -t agent-swarm-worker:test .`
+
+### Phase 3: Move static setup from entrypoint to Dockerfile
+
+**File**: `Dockerfile.worker`, `docker-entrypoint.sh`
+
+#### 3a: Move marketplace installations to Dockerfile
+
+Currently in entrypoint lines 214-241. Move to Dockerfile **after** Claude CLI install (line 81), as a new RUN:
+
+```dockerfile
+# Install Claude marketplace plugins (build-time cache)
+RUN claude plugin marketplace add desplega-ai/ai-toolbox || true \
+    && claude plugin install desplega@desplega-ai-toolbox --scope user || true \
+    && claude plugin install agent-swarm@desplega-ai-toolbox --scope user || true \
+    && claude plugin install wts@desplega-ai-toolbox --scope user || true \
+    && claude plugin marketplace add desplega-ai/qa-use || true \
+    && claude plugin install qa-use@desplega.ai --scope user || true \
+    && claude plugin marketplace add mksglu/claude-context-mode || true \
+    && claude plugin install context-mode@claude-context-mode --scope user || true
+```
+
+Remove the entire marketplace block (lines 214-241) from `docker-entrypoint.sh`.
+
+#### 3b: Move wts config to Dockerfile
+
+Currently in entrypoint lines 423-433. Move to Dockerfile after user creation:
+
+```dockerfile
+RUN mkdir -p /home/worker/.wts \
+    && echo '{"defaults":{"autoTmux":false,"autoClaude":false}}' > /home/worker/.wts/config.json
+```
+
+Remove lines 423-433 from `docker-entrypoint.sh`.
+
+#### 3c: Move static directory creation to Dockerfile
+
+Currently in entrypoint lines 435-468. The **static** parts (personal dir, shared dir, memory dirs) can move to Dockerfile. The **agent-specific** parts (`$AGENT_ID` directories) must stay.
+
+Add to Dockerfile (near existing `mkdir -p /workspace`):
+
+```dockerfile
+RUN mkdir -p /workspace/personal /workspace/shared/thoughts/shared/plans \
+    /workspace/shared/thoughts/shared/research \
+    /workspace/personal/memory /workspace/shared/memory \
+    && chown -R worker:worker /workspace
+```
+
+Keep the `todos.md` creation in entrypoint (it's conditional on file existence). Keep `$AGENT_ID` thought dirs in entrypoint.
+
+Simplify entrypoint's workspace init section to only:
+- `todos.md` creation (if not exists)
+- `$AGENT_ID`-specific thought directories
+
+**Verification**:
+- `docker build -f Dockerfile.worker -t agent-swarm-worker:test .`
+- Run container and verify directories exist, wts config present, plugins installed
+
+### Phase 4: Optimize layer ordering in Dockerfile
+
+Reorder for maximum cache hits (least-changing first):
+
+1. Base OS + all apt packages (consolidated - rarely changes)
+2. Bun install (root + worker) — rarely changes
+3. User creation + sudo
+4. Claude CLI install
+5. Marketplace plugins (new, cached after first build)
+6. Static config (wts, directories)
+7. Claude settings.json + hooks config
+8. Global npm packages (pinned versions — cached until manual bump)
+9. **Binary from builder** (changes on every code change)
+10. Plugin commands/agents/skills COPY (changes on code change)
+11. Entrypoint COPY (changes on code change)
+
+Key insight: the binary COPY and plugin file COPYs should come **after** all package installs since they change most frequently.
+
+**Verification**: Change a source file, rebuild — only steps 9-11 should re-run.
+
+---
+
+## Files to modify
+
+- `Dockerfile.worker` — consolidate apt, pin versions, add build-time setup, reorder layers
+- `docker-entrypoint.sh` — remove marketplace install block, wts config, static directory creation
+
+## Manual E2E verification
+
+```bash
+# 1. Build image
+docker build -f Dockerfile.worker -t agent-swarm-worker:test .
+
+# 2. Verify cached rebuild (change a src file, rebuild — should skip package layers)
+touch src/cli.tsx && docker build -f Dockerfile.worker -t agent-swarm-worker:test .
+
+# 3. Run container and check build-time setup
+docker run --rm -it --entrypoint bash agent-swarm-worker:test -c \
+  "ls -la /home/worker/.wts/config.json && \
+   ls -d /workspace/personal /workspace/shared/memory && \
+   claude plugin list 2>/dev/null || echo 'plugin check done'"
+
+# 4. Full integration: start with env vars and verify entrypoint still works
+docker run --rm \
+  -e CLAUDE_CODE_OAUTH_TOKEN=test \
+  -e API_KEY=test \
+  -e AGENT_ROLE=worker \
+  agent-swarm-worker:test
+```
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/taras/.claude/projects/-Users-taras-Documents-code-agent-swarm/3e90a41a-8120-4e1a-8de2-d5fc78c6f862.jsonl
+
+---
+
+[Request interrupted by user]
+
+---
+
+continue
+
+---
+
+Tool loaded.
+
+---
+
+please perform e2e, also doiuble check that the pinned version are the LATEST for all the npm packages
+
+---
+
+<task-notification>
+<task-id>bd30mk687</task-id>
+<tool-use-id>toolu_0176UH8JtqtHKEU7G3j3uTFW</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-Documents-code-agent-swarm/tasks/bd30mk687.output</output-file>
+<status>failed</status>
+<summary>Background command "Build Docker image from updated Dockerfile" failed with exit code 1</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-Documents-code-agent-swarm/tasks/bd30mk687.output
+
+---
+
+<task-notification>
+<task-id>bjq52mq84</task-id>
+<tool-use-id>toolu_01N74ipohgzvpv4oX5toZivz</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-Documents-code-agent-swarm/tasks/bjq52mq84.output</output-file>
+<status>completed</status>
+<summary>Background command "Rebuild Docker image with curl bootstrap fix" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-Documents-code-agent-swarm/tasks/bjq52mq84.output
+
+---
+
+two things:
+
+1. can you add the agentmail-mcp to the default .mcp.json like this:
+
+    "command": "npx",
+    "args": ["-y", "agentmail-mcp"],
+    "env": { "AGENTMAIL_API_KEY": $key }
+
+if the `AGENTMAIL_API_KEY` is present
+
+2. The `api/agents/d454d1a5-4df9-49bd-8a89-e58d6a657dc3?include=tasks` call in the agent details tab is tooo large, can you ensure that the tasks are lazy loaded using the tasks + filter by agent id in the tasks tab in the ui? instead of loading them on details page load?
+
+---
+
+Tool loaded.
