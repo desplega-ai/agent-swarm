@@ -1,0 +1,31 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "b468dabbd969",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "src/be/db.ts",
+    "src/be/migrations/001_initial.sql",
+    "src/be/migrations/002_one_time_schedules.sql",
+    "src/scheduler/scheduler.test.ts",
+    "src/types.ts",
+    "thoughts/taras/plans/2026-03-06-one-time-scheduled-tasks.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/b4/68dabbd969/0/metadata.json",
+      "transcript": "/b4/68dabbd969/0/full.jsonl",
+      "context": "/b4/68dabbd969/0/context.md",
+      "content_hash": "/b4/68dabbd969/0/content_hash.txt",
+      "prompt": "/b4/68dabbd969/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1544,
+    "cache_creation_tokens": 266342,
+    "cache_read_tokens": 982426,
+    "output_tokens": 16533,
+    "api_call_count": 23
+  }
+}

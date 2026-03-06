@@ -1,0 +1,35 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "b468dabbd969",
+  "session_id": "2396c246-82c2-4e4a-b123-f25498a4224b",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-06T15:54:01.585459Z",
+  "branch": "main",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "src/be/db.ts",
+    "src/be/migrations/001_initial.sql",
+    "src/be/migrations/002_one_time_schedules.sql",
+    "src/scheduler/scheduler.test.ts",
+    "src/types.ts",
+    "thoughts/taras/plans/2026-03-06-one-time-scheduled-tasks.md"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "2bfacb4ca8ac",
+  "token_usage": {
+    "input_tokens": 1544,
+    "cache_creation_tokens": 266342,
+    "cache_read_tokens": 982426,
+    "output_tokens": 16533,
+    "api_call_count": 23
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-06T15:54:01.376167Z",
+    "agent_lines": 473,
+    "human_added": 503,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 976,
+    "agent_percentage": 48.46311475409836
+  }
+}
