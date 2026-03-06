@@ -59,6 +59,9 @@ export async function generateMetadata(props: {
   return {
     title,
     description,
+    alternates: {
+      canonical: url,
+    },
     openGraph: {
       title: `${title} | Agent Swarm`,
       description,
