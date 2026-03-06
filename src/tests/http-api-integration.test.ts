@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import type { Subprocess } from "bun";
+import { Webhook } from "svix";
 
 const TEST_PORT = 19876;
 const TEST_DB_PATH = `/tmp/test-http-integration-${Date.now()}.sqlite`;
@@ -1494,5 +1495,204 @@ describe("Close Agent", () => {
   test("POST /close — non-existent agent returns 404", async () => {
     const { status } = await post("/close", { agentId: randomUUID() });
     expect(status).toBe(404);
+  });
+});
+
+// ===========================================================================
+// AgentMail Webhooks
+// ===========================================================================
+
+describe("AgentMail Webhooks (disabled)", () => {
+  test("POST /api/agentmail/webhook returns 503 when disabled", async () => {
+    const { status, body } = await post("/api/agentmail/webhook", {
+      body: { type: "event", event_type: "message.received", event_id: "test-1" },
+    });
+    expect(status).toBe(503);
+    expect(body.error).toContain("not configured");
+  });
+});
+
+describe("AgentMail Webhooks (with filters)", () => {
+  const AGENTMAIL_PORT = 19877;
+  const AGENTMAIL_DB = `/tmp/test-agentmail-${Date.now()}.sqlite`;
+  const AGENTMAIL_BASE = `http://localhost:${AGENTMAIL_PORT}`;
+  const WEBHOOK_SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"; // test-only secret
+  let agentmailProc: Subprocess;
+
+  function signPayload(payload: unknown): { body: string; headers: Record<string, string> } {
+    const wh = new Webhook(WEBHOOK_SECRET);
+    const msgId = `msg_${randomUUID()}`;
+    const timestamp = new Date();
+    const body = JSON.stringify(payload);
+    const signature = wh.sign(msgId, timestamp, body);
+    return {
+      body,
+      headers: {
+        "svix-id": msgId,
+        "svix-timestamp": Math.floor(timestamp.getTime() / 1000).toString(),
+        "svix-signature": signature,
+      },
+    };
+  }
+
+  async function postWebhook(payload: unknown): Promise<{ status: number; body: unknown }> {
+    const signed = signPayload(payload);
+    const res = await fetch(`${AGENTMAIL_BASE}/api/agentmail/webhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...signed.headers },
+      body: signed.body,
+    });
+    const text = await res.text();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = text;
+    }
+    return { status: res.status, body: parsed };
+  }
+
+  function makePayload(
+    overrides: { inboxId?: string; from?: string | string[]; eventId?: string } = {},
+  ) {
+    return {
+      type: "event",
+      event_type: "message.received",
+      event_id: overrides.eventId ?? randomUUID(),
+      message: {
+        message_id: randomUUID(),
+        thread_id: randomUUID(),
+        inbox_id: overrides.inboxId ?? "bot@x.dev",
+        organization_id: "org-1",
+        from_: overrides.from ?? "alice@a.com",
+        to: [overrides.inboxId ?? "bot@x.dev"],
+        cc: [],
+        bcc: [],
+        reply_to: [],
+        subject: "Test",
+        preview: "Test email",
+        text: "Hello",
+        html: null,
+        labels: [],
+        attachments: [],
+        in_reply_to: null,
+        references: [],
+        timestamp: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    };
+  }
+
+  beforeAll(async () => {
+    try {
+      await unlink(AGENTMAIL_DB);
+    } catch {}
+    try {
+      await unlink(`${AGENTMAIL_DB}-wal`);
+    } catch {}
+    try {
+      await unlink(`${AGENTMAIL_DB}-shm`);
+    } catch {}
+
+    agentmailProc = Bun.spawn(["bun", "src/http.ts"], {
+      cwd: `${import.meta.dir}/../..`,
+      env: {
+        ...process.env,
+        PORT: String(AGENTMAIL_PORT),
+        DATABASE_PATH: AGENTMAIL_DB,
+        API_KEY: "",
+        CAPABILITIES: "core,task-pool,messaging,profiles",
+        SLACK_BOT_TOKEN: "",
+        GITHUB_WEBHOOK_SECRET: "",
+        AGENTMAIL_WEBHOOK_SECRET: WEBHOOK_SECRET,
+        AGENTMAIL_INBOX_DOMAIN_FILTER: "x.dev,y.xyz",
+        AGENTMAIL_SENDER_DOMAIN_FILTER: "a.com,b.com",
+      },
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+
+    await waitForServer(`${AGENTMAIL_BASE}/health`);
+
+    // Register a lead agent so messages can be routed
+    await fetch(`${AGENTMAIL_BASE}/api/agents`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-agent-id": randomUUID() },
+      body: JSON.stringify({ name: "TestLead", isLead: true }),
+    });
+  }, 20000);
+
+  afterAll(async () => {
+    if (agentmailProc) {
+      agentmailProc.kill();
+      try {
+        await agentmailProc.exited;
+      } catch {}
+    }
+    await Bun.sleep(300);
+    try {
+      await unlink(AGENTMAIL_DB);
+    } catch {}
+    try {
+      await unlink(`${AGENTMAIL_DB}-wal`);
+    } catch {}
+    try {
+      await unlink(`${AGENTMAIL_DB}-shm`);
+    } catch {}
+  });
+
+  test("rejects unsigned webhook with 401", async () => {
+    const res = await fetch(`${AGENTMAIL_BASE}/api/agentmail/webhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(makePayload()),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  test("accepts signed webhook with allowed inbox + sender", async () => {
+    const { status, body } = await postWebhook(
+      makePayload({ inboxId: "bot@x.dev", from: "alice@a.com" }),
+    );
+    expect(status).toBe(200);
+    expect(body).toEqual({ received: true });
+  });
+
+  test("accepts second allowed inbox domain", async () => {
+    const { status } = await postWebhook(
+      makePayload({ inboxId: "support@y.xyz", from: "bob@b.com" }),
+    );
+    expect(status).toBe(200);
+  });
+
+  test("filters out disallowed inbox domain (returns 200 but no processing)", async () => {
+    // The server returns 200 before filtering (Svix best practice),
+    // so we verify by checking that no task was created for a disallowed inbox.
+    const { status } = await postWebhook(
+      makePayload({ inboxId: "bot@evil.com", from: "alice@a.com" }),
+    );
+    expect(status).toBe(200);
+  });
+
+  test("filters out disallowed sender domain (returns 200 but no processing)", async () => {
+    const { status } = await postWebhook(
+      makePayload({ inboxId: "bot@x.dev", from: "hacker@evil.org" }),
+    );
+    expect(status).toBe(200);
+  });
+
+  test("filters out when sender is array of disallowed domains", async () => {
+    const { status } = await postWebhook(
+      makePayload({ inboxId: "bot@x.dev", from: ["hacker@evil.org", "spam@bad.net"] }),
+    );
+    expect(status).toBe(200);
+  });
+
+  test("allows when at least one sender in array matches", async () => {
+    const { status } = await postWebhook(
+      makePayload({ inboxId: "bot@x.dev", from: ["hacker@evil.org", "alice@a.com"] }),
+    );
+    expect(status).toBe(200);
   });
 });

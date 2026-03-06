@@ -1,6 +1,6 @@
 // AgentMail Integration
 export { initAgentMail, isAgentMailEnabled, resetAgentMail, verifyAgentMailWebhook } from "./app";
-export { handleMessageReceived } from "./handlers";
+export { handleMessageReceived, isInboxAllowed, isSenderAllowed } from "./handlers";
 export type {
   AgentMailAttachment,
   AgentMailEventType,

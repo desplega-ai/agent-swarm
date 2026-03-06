@@ -1,6 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AgentMailWebhookPayload } from "../agentmail";
-import { handleMessageReceived, isAgentMailEnabled, verifyAgentMailWebhook } from "../agentmail";
+import {
+  handleMessageReceived,
+  isAgentMailEnabled,
+  isInboxAllowed,
+  isSenderAllowed,
+  verifyAgentMailWebhook,
+} from "../agentmail";
 import type {
   CheckRunEvent,
   CheckSuiteEvent,
@@ -168,6 +174,32 @@ export async function handleWebhooks(
 
     // Process webhook asynchronously
     const payload = verified as AgentMailWebhookPayload;
+
+    // Filter by inbox domain (only process messages for inboxes we care about)
+    if (
+      payload.message &&
+      !isInboxAllowed(payload.message.inbox_id, process.env.AGENTMAIL_INBOX_DOMAIN_FILTER)
+    ) {
+      const domain = payload.message.inbox_id.split("@")[1] ?? "unknown";
+      console.log(
+        `[AgentMail] Ignoring event for inbox domain "${domain}" (not in AGENTMAIL_INBOX_DOMAIN_FILTER)`,
+      );
+      return true;
+    }
+
+    // Filter by sender domain (security — reject messages from untrusted senders)
+    if (
+      payload.message &&
+      !isSenderAllowed(payload.message.from_, process.env.AGENTMAIL_SENDER_DOMAIN_FILTER)
+    ) {
+      const from = Array.isArray(payload.message.from_)
+        ? payload.message.from_.join(", ")
+        : payload.message.from_;
+      console.log(
+        `[AgentMail] Ignoring event from sender "${from}" (not in AGENTMAIL_SENDER_DOMAIN_FILTER)`,
+      );
+      return true;
+    }
     console.log(`[AgentMail] Received ${payload.event_type} event (${payload.event_id})`);
 
     try {

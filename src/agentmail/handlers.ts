@@ -6,7 +6,35 @@ import {
   getAgentMailInboxMapping,
   getAllAgents,
 } from "../be/db";
-import type { AgentMailWebhookPayload } from "./types";
+import type { AgentMailMessage, AgentMailWebhookPayload } from "./types";
+
+/**
+ * Check if an inbox domain is allowed by the filter.
+ * Returns true if no filter is set or the inbox domain matches.
+ */
+export function isInboxAllowed(inboxId: string, filter: string | undefined): boolean {
+  if (!filter) return true;
+  const allowedDomains = filter.split(",").map((d) => d.trim().toLowerCase());
+  const inboxDomain = inboxId.split("@")[1]?.toLowerCase();
+  return !!inboxDomain && allowedDomains.includes(inboxDomain);
+}
+
+/**
+ * Check if a sender domain is allowed by the filter.
+ * Returns true if no filter is set or at least one sender domain matches.
+ */
+export function isSenderAllowed(
+  from: AgentMailMessage["from_"],
+  filter: string | undefined,
+): boolean {
+  if (!filter) return true;
+  const allowedDomains = filter.split(",").map((d) => d.trim().toLowerCase());
+  const fromAddresses = Array.isArray(from) ? from : [from || ""];
+  return fromAddresses.some((addr) => {
+    const domain = addr.split("@")[1]?.toLowerCase();
+    return !!domain && allowedDomains.includes(domain);
+  });
+}
 
 // Simple deduplication cache (60 second TTL)
 const processedEvents = new Map<string, number>();
