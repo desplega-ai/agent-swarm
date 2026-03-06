@@ -16,6 +16,7 @@ import {
   updateAgentStatus,
 } from "../be/db";
 import type { AgentTask } from "../types";
+import { recoverStuckWorkflowRuns } from "../workflows/recovery";
 
 // ============================================================================
 // Configuration (env var overrides)
@@ -48,6 +49,7 @@ export interface HeartbeatFindings {
     reviewingTasks: number;
     mentionProcessing: number;
     inboxProcessing: number;
+    workflowRuns: number;
   };
   escalationNeeded: boolean;
   escalationReason?: string;
@@ -97,7 +99,7 @@ export function preflightGate(): boolean {
 /**
  * Run all code-level triage checks. Returns findings for logging/escalation.
  */
-export function codeLevelTriage(): HeartbeatFindings {
+export async function codeLevelTriage(): Promise<HeartbeatFindings> {
   const findings: HeartbeatFindings = {
     stalledTasks: [],
     workerHealthFixes: [],
@@ -107,6 +109,7 @@ export function codeLevelTriage(): HeartbeatFindings {
       reviewingTasks: 0,
       mentionProcessing: 0,
       inboxProcessing: 0,
+      workflowRuns: 0,
     },
     escalationNeeded: false,
   };
@@ -120,8 +123,8 @@ export function codeLevelTriage(): HeartbeatFindings {
   // 3. Auto-assign pool tasks to idle workers
   autoAssignPoolTasks(findings);
 
-  // 4. Cleanup stale resources
-  cleanupStaleResources(findings);
+  // 4. Cleanup stale resources (including workflow run recovery)
+  await cleanupStaleResources(findings);
 
   // 5. Determine if escalation is needed
   evaluateEscalation(findings);
@@ -200,7 +203,7 @@ function autoAssignPoolTasks(findings: HeartbeatFindings): void {
 /**
  * Call existing stale resource cleanup functions.
  */
-function cleanupStaleResources(findings: HeartbeatFindings): void {
+async function cleanupStaleResources(findings: HeartbeatFindings): Promise<void> {
   findings.staleCleanup.sessions = cleanupStaleSessions(STALE_CLEANUP_THRESHOLD_MINUTES);
   findings.staleCleanup.reviewingTasks = releaseStaleReviewingTasks(
     STALE_CLEANUP_THRESHOLD_MINUTES,
@@ -211,6 +214,7 @@ function cleanupStaleResources(findings: HeartbeatFindings): void {
   findings.staleCleanup.inboxProcessing = releaseStaleProcessingInbox(
     STALE_CLEANUP_THRESHOLD_MINUTES,
   );
+  findings.staleCleanup.workflowRuns = await recoverStuckWorkflowRuns();
 }
 
 // ============================================================================
@@ -307,7 +311,7 @@ function hasActiveEscalationTask(leadAgentId: string, escalationKey: string): bo
 /**
  * Run a single heartbeat sweep (Tier 1 → Tier 2 → Tier 3).
  */
-export function runHeartbeatSweep(): void {
+export async function runHeartbeatSweep(): Promise<void> {
   if (isSweeping) {
     return; // Concurrency guard — skip if previous sweep is still running
   }
@@ -325,16 +329,17 @@ export function runHeartbeatSweep(): void {
           reviewingTasks: 0,
           mentionProcessing: 0,
           inboxProcessing: 0,
+          workflowRuns: 0,
         },
         escalationNeeded: false,
       };
-      cleanupStaleResources(cleanupOnlyFindings);
+      await cleanupStaleResources(cleanupOnlyFindings);
       logFindings(cleanupOnlyFindings);
       return; // Nothing actionable — bail early
     }
 
     // Tier 2: Code-level triage
-    const findings = codeLevelTriage();
+    const findings = await codeLevelTriage();
 
     // Log findings summary
     logFindings(findings);
@@ -364,8 +369,10 @@ function logFindings(findings: HeartbeatFindings): void {
     parts.push(`auto_assigned=${findings.autoAssigned.length}`);
   }
 
-  const { sessions, reviewingTasks, mentionProcessing, inboxProcessing } = findings.staleCleanup;
-  const totalCleanup = sessions + reviewingTasks + mentionProcessing + inboxProcessing;
+  const { sessions, reviewingTasks, mentionProcessing, inboxProcessing, workflowRuns } =
+    findings.staleCleanup;
+  const totalCleanup =
+    sessions + reviewingTasks + mentionProcessing + inboxProcessing + workflowRuns;
   if (totalCleanup > 0) {
     parts.push(`stale_cleanup=${totalCleanup}`);
   }

@@ -1,5 +1,6 @@
 export { findEntryNodes, getSuccessors, startWorkflowExecution } from "./engine";
 export { workflowEventBus } from "./event-bus";
+export { recoverStuckWorkflowRuns } from "./recovery";
 export { retryFailedRun } from "./resume";
 export { interpolate } from "./template";
 
