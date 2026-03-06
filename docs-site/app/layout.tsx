@@ -18,6 +18,7 @@ export const metadata: Metadata = {
     url: "https://docs.agent-swarm.dev",
     siteName: "Agent Swarm Docs",
     type: "website",
+    locale: "en_US",
     images: [
       {
         url: "https://agent-swarm.dev/og-image.png",
