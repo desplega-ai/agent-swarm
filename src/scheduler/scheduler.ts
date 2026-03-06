@@ -43,14 +43,27 @@ async function recoverMissedSchedules(): Promise<void> {
           source: "schedule",
         });
 
-        const nextRun = calculateNextRun(schedule, now);
-        updateScheduledTask(schedule.id, {
-          lastRunAt: now.toISOString(),
-          nextRunAt: nextRun,
-          lastUpdatedAt: now.toISOString(),
-        });
+        if (schedule.scheduleType === "one_time") {
+          updateScheduledTask(schedule.id, {
+            lastRunAt: now.toISOString(),
+            nextRunAt: null,
+            enabled: false,
+            lastUpdatedAt: now.toISOString(),
+          });
+        } else {
+          const nextRun = calculateNextRun(schedule, now);
+          updateScheduledTask(schedule.id, {
+            lastRunAt: now.toISOString(),
+            nextRunAt: nextRun,
+            lastUpdatedAt: now.toISOString(),
+          });
+        }
       });
       tx();
+
+      if (schedule.scheduleType === "one_time") {
+        console.log(`[Scheduler] One-time schedule "${schedule.name}" recovered and auto-disabled`);
+      }
     } catch (err) {
       console.error(`[Scheduler] Error recovering "${schedule.name}":`, err);
     }
@@ -120,12 +133,24 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
         source: "schedule",
       });
 
+      if (schedule.scheduleType === "one_time") {
+        updateScheduledTask(schedule.id, {
+          lastRunAt: now,
+          nextRunAt: null,
+          enabled: false,
+          lastUpdatedAt: now,
+          consecutiveErrors: 0,
+          lastErrorAt: null,
+          lastErrorMessage: null,
+        });
+        return null;
+      }
+
       const nextRun = calculateNextRun(schedule, new Date());
       updateScheduledTask(schedule.id, {
         lastRunAt: now,
         nextRunAt: nextRun,
         lastUpdatedAt: now,
-        // Reset error tracking on success
         consecutiveErrors: 0,
         lastErrorAt: null,
         lastErrorMessage: null,
@@ -135,7 +160,11 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
     });
 
     const nextRun = tx();
-    console.log(`[Scheduler] Executed schedule "${schedule.name}", next run: ${nextRun}`);
+    if (schedule.scheduleType === "one_time") {
+      console.log(`[Scheduler] Executed one-time schedule "${schedule.name}", auto-disabled`);
+    } else {
+      console.log(`[Scheduler] Executed schedule "${schedule.name}", next run: ${nextRun}`);
+    }
   } catch (err) {
     const errorCount = (schedule.consecutiveErrors ?? 0) + 1;
     const now = new Date();
@@ -160,7 +189,12 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
       lastUpdatedAt: now.toISOString(),
     };
 
-    if (errorCount >= MAX_CONSECUTIVE_ERRORS) {
+    if (schedule.scheduleType === "one_time") {
+      updates.enabled = false;
+      console.warn(
+        `[Scheduler] One-time schedule "${schedule.name}" failed, auto-disabled: ${errorMsg}`,
+      );
+    } else if (errorCount >= MAX_CONSECUTIVE_ERRORS) {
       updates.enabled = false;
       console.warn(
         `[Scheduler] Auto-disabled "${schedule.name}" after ${errorCount} consecutive errors`,
@@ -259,14 +293,29 @@ export async function runScheduleNow(scheduleId: string): Promise<void> {
       source: "schedule",
     });
 
-    // Only update lastRunAt, not nextRunAt (to not affect regular schedule)
-    updateScheduledTask(schedule.id, {
-      lastRunAt: now,
-      lastUpdatedAt: now,
-    });
+    if (schedule.scheduleType === "one_time") {
+      updateScheduledTask(schedule.id, {
+        lastRunAt: now,
+        nextRunAt: null,
+        enabled: false,
+        lastUpdatedAt: now,
+      });
+    } else {
+      // Only update lastRunAt, not nextRunAt (to not affect regular schedule)
+      updateScheduledTask(schedule.id, {
+        lastRunAt: now,
+        lastUpdatedAt: now,
+      });
+    }
   });
 
   tx();
 
-  console.log(`[Scheduler] Manually executed schedule "${schedule.name}"`);
+  if (schedule.scheduleType === "one_time") {
+    console.log(
+      `[Scheduler] Manually executed one-time schedule "${schedule.name}", auto-disabled`,
+    );
+  } else {
+    console.log(`[Scheduler] Manually executed schedule "${schedule.name}"`);
+  }
 }

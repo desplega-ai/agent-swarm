@@ -233,9 +233,14 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
     lastErrorAt TEXT,
     lastErrorMessage TEXT,
     model TEXT,
+    scheduleType TEXT NOT NULL DEFAULT 'recurring' CHECK(scheduleType IN ('recurring', 'one_time')),
     createdAt TEXT NOT NULL,
     lastUpdatedAt TEXT NOT NULL,
-    CHECK (cronExpression IS NOT NULL OR intervalMs IS NOT NULL)
+    CHECK (
+        (scheduleType = 'recurring' AND (cronExpression IS NOT NULL OR intervalMs IS NOT NULL))
+        OR
+        (scheduleType = 'one_time')
+    )
 );
 
 CREATE TABLE IF NOT EXISTS swarm_config (
@@ -364,6 +369,7 @@ CREATE INDEX IF NOT EXISTS idx_inbox_messages_status ON inbox_messages(status);
 -- scheduled_tasks indexes
 CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_enabled ON scheduled_tasks(enabled);
 CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_nextRunAt ON scheduled_tasks(nextRunAt);
+CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_type ON scheduled_tasks(scheduleType);
 
 -- epics indexes
 CREATE INDEX IF NOT EXISTS idx_epics_status ON epics(status);

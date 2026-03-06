@@ -60,6 +60,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
             createdByAgentId: z.string().optional(),
             timezone: z.string(),
             model: z.string().optional(),
+            scheduleType: z.string(),
             createdAt: z.string(),
             lastUpdatedAt: z.string(),
           })
@@ -128,6 +129,22 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         };
       }
 
+      // Reject updates on completed one-time schedules
+      if (schedule.scheduleType === "one_time" && !schedule.enabled && schedule.lastRunAt) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `One-time schedule "${schedule.name}" has already executed. Create a new one instead.`,
+            },
+          ],
+          structuredContent: {
+            success: false,
+            message: `One-time schedule "${schedule.name}" has already executed. Create a new one instead.`,
+          },
+        };
+      }
+
       // Validate new cron expression if provided
       if (cronExpression) {
         try {
@@ -191,23 +208,29 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         if (enabled !== undefined) updateData.enabled = enabled;
         if (model !== undefined) updateData.model = model;
 
-        // Recalculate nextRunAt if cron/interval/timezone changes or schedule is re-enabled
-        const needsNextRunRecalc =
-          cronExpression !== undefined ||
-          intervalMs !== undefined ||
-          timezone !== undefined ||
-          (enabled === true && !schedule.enabled);
+        // Recalculate nextRunAt based on schedule type
+        if (schedule.scheduleType === "one_time") {
+          // One-time schedules: no recalculation of nextRunAt via cron/interval
+          if (enabled === false) {
+            updateData.nextRunAt = undefined;
+          }
+        } else {
+          const needsNextRunRecalc =
+            cronExpression !== undefined ||
+            intervalMs !== undefined ||
+            timezone !== undefined ||
+            (enabled === true && !schedule.enabled);
 
-        if (needsNextRunRecalc && enabled !== false) {
-          const tempSchedule = {
-            cronExpression: cronExpression ?? schedule.cronExpression,
-            intervalMs: intervalMs ?? schedule.intervalMs,
-            timezone: timezone ?? schedule.timezone,
-          } as Parameters<typeof calculateNextRun>[0];
-          updateData.nextRunAt = calculateNextRun(tempSchedule, new Date());
-        } else if (enabled === false) {
-          // When disabling, clear nextRunAt
-          updateData.nextRunAt = undefined;
+          if (needsNextRunRecalc && enabled !== false) {
+            const tempSchedule = {
+              cronExpression: cronExpression ?? schedule.cronExpression,
+              intervalMs: intervalMs ?? schedule.intervalMs,
+              timezone: timezone ?? schedule.timezone,
+            } as Parameters<typeof calculateNextRun>[0];
+            updateData.nextRunAt = calculateNextRun(tempSchedule, new Date());
+          } else if (enabled === false) {
+            updateData.nextRunAt = undefined;
+          }
         }
 
         const updated = updateScheduledTask(schedule.id, updateData);

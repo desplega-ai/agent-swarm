@@ -3907,6 +3907,7 @@ type ScheduledTaskRow = {
   lastErrorAt: string | null;
   lastErrorMessage: string | null;
   model: string | null;
+  scheduleType: string;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -3932,6 +3933,7 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     lastErrorAt: row.lastErrorAt ?? undefined,
     lastErrorMessage: row.lastErrorMessage ?? undefined,
     model: (row.model as "haiku" | "sonnet" | "opus" | null) ?? undefined,
+    scheduleType: row.scheduleType as "recurring" | "one_time",
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -3940,6 +3942,8 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
 export interface ScheduledTaskFilters {
   enabled?: boolean;
   name?: string;
+  scheduleType?: "recurring" | "one_time";
+  hideCompleted?: boolean;
 }
 
 export function getScheduledTasks(filters?: ScheduledTaskFilters): ScheduledTask[] {
@@ -3954,6 +3958,15 @@ export function getScheduledTasks(filters?: ScheduledTaskFilters): ScheduledTask
   if (filters?.name) {
     query += " AND name LIKE ?";
     params.push(`%${filters.name}%`);
+  }
+
+  if (filters?.scheduleType) {
+    query += " AND scheduleType = ?";
+    params.push(filters.scheduleType);
+  }
+
+  if (filters?.hideCompleted !== false) {
+    query += " AND NOT (scheduleType = 'one_time' AND enabled = 0)";
   }
 
   query += " ORDER BY name ASC";
@@ -3993,6 +4006,7 @@ export interface CreateScheduledTaskData {
   createdByAgentId?: string;
   timezone?: string;
   model?: string;
+  scheduleType?: "recurring" | "one_time";
 }
 
 export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTask {
@@ -4004,8 +4018,8 @@ export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTas
       `INSERT INTO scheduled_tasks (
         id, name, description, cronExpression, intervalMs, taskTemplate,
         taskType, tags, priority, targetAgentId, enabled, nextRunAt,
-        createdByAgentId, timezone, model, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        createdByAgentId, timezone, model, scheduleType, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -4023,6 +4037,7 @@ export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTas
       data.createdByAgentId ?? null,
       data.timezone ?? "UTC",
       data.model ?? null,
+      data.scheduleType ?? "recurring",
       now,
       now,
     );
@@ -4043,12 +4058,13 @@ export interface UpdateScheduledTaskData {
   targetAgentId?: string | null;
   enabled?: boolean;
   lastRunAt?: string;
-  nextRunAt?: string;
+  nextRunAt?: string | null;
   timezone?: string;
   consecutiveErrors?: number;
   lastErrorAt?: string | null;
   lastErrorMessage?: string | null;
   model?: string | null;
+  scheduleType?: "recurring" | "one_time";
   lastUpdatedAt?: string;
 }
 
@@ -4126,6 +4142,10 @@ export function updateScheduledTask(
   if (data.model !== undefined) {
     updates.push("model = ?");
     params.push(data.model);
+  }
+  if (data.scheduleType !== undefined) {
+    updates.push("scheduleType = ?");
+    params.push(data.scheduleType);
   }
 
   if (updates.length === 0) {

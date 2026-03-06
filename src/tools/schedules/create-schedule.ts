@@ -12,7 +12,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
       title: "Create Scheduled Task",
       annotations: { destructiveHint: false },
       description:
-        "Create a new scheduled task that will automatically create agent tasks at specified intervals. Either cronExpression or intervalMs must be provided.",
+        "Create a new scheduled task. For recurring: provide cronExpression or intervalMs. For one-time: provide delayMs or runAt with scheduleType 'one_time'.",
       inputSchema: z.object({
         name: z
           .string()
@@ -23,16 +23,32 @@ export const registerCreateScheduleTool = (server: McpServer) => {
           .string()
           .min(1)
           .describe("The task description that will be created each time"),
+        scheduleType: z
+          .enum(["recurring", "one_time"])
+          .default("recurring")
+          .optional()
+          .describe("Schedule type: 'recurring' (default) or 'one_time'"),
         cronExpression: z
           .string()
           .optional()
-          .describe("Cron expression (e.g., '0 9 * * *' for daily at 9 AM)"),
+          .describe("Cron expression for recurring schedules (e.g., '0 9 * * *')"),
         intervalMs: z
           .number()
           .int()
           .positive()
           .optional()
-          .describe("Interval in milliseconds (e.g., 3600000 for hourly)"),
+          .describe("Interval in milliseconds for recurring schedules (e.g., 3600000 for hourly)"),
+        delayMs: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Delay in milliseconds for one-time schedules (e.g., 1800000 for 30 min)"),
+        runAt: z
+          .string()
+          .datetime()
+          .optional()
+          .describe("ISO datetime for one-time schedules (e.g., '2026-03-06T15:00:00Z')"),
         description: z.string().optional().describe("Human-readable description of the schedule"),
         taskType: z
           .string()
@@ -88,6 +104,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
             createdByAgentId: z.string().optional(),
             timezone: z.string(),
             model: z.string().optional(),
+            scheduleType: z.string(),
             createdAt: z.string(),
             lastUpdatedAt: z.string(),
           })
@@ -98,8 +115,11 @@ export const registerCreateScheduleTool = (server: McpServer) => {
       {
         name,
         taskTemplate,
+        scheduleType,
         cronExpression,
         intervalMs,
+        delayMs,
+        runAt,
         description,
         taskType,
         tags,
@@ -122,17 +142,89 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         };
       }
 
-      // Validate that either cronExpression or intervalMs is provided
-      if (!cronExpression && !intervalMs) {
-        return {
-          content: [
-            { type: "text", text: "Either cronExpression or intervalMs must be provided." },
-          ],
-          structuredContent: {
-            success: false,
-            message: "Either cronExpression or intervalMs must be provided.",
-          },
-        };
+      const isOneTime = scheduleType === "one_time";
+
+      // Validate params based on schedule type
+      if (isOneTime) {
+        if (cronExpression || intervalMs) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "One-time schedules cannot use cronExpression or intervalMs. Use delayMs or runAt instead.",
+              },
+            ],
+            structuredContent: {
+              success: false,
+              message:
+                "One-time schedules cannot use cronExpression or intervalMs. Use delayMs or runAt instead.",
+            },
+          };
+        }
+        if (!delayMs && !runAt) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "One-time schedules require either delayMs or runAt.",
+              },
+            ],
+            structuredContent: {
+              success: false,
+              message: "One-time schedules require either delayMs or runAt.",
+            },
+          };
+        }
+        if (delayMs && runAt) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Provide either delayMs or runAt, not both.",
+              },
+            ],
+            structuredContent: {
+              success: false,
+              message: "Provide either delayMs or runAt, not both.",
+            },
+          };
+        }
+        if (runAt && new Date(runAt).getTime() <= Date.now()) {
+          return {
+            content: [{ type: "text", text: "runAt must be in the future." }],
+            structuredContent: {
+              success: false,
+              message: "runAt must be in the future.",
+            },
+          };
+        }
+      } else {
+        if (delayMs || runAt) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "delayMs and runAt are only for one-time schedules. Set scheduleType to 'one_time'.",
+              },
+            ],
+            structuredContent: {
+              success: false,
+              message:
+                "delayMs and runAt are only for one-time schedules. Set scheduleType to 'one_time'.",
+            },
+          };
+        }
+        if (!cronExpression && !intervalMs) {
+          return {
+            content: [
+              { type: "text", text: "Either cronExpression or intervalMs must be provided." },
+            ],
+            structuredContent: {
+              success: false,
+              message: "Either cronExpression or intervalMs must be provided.",
+            },
+          };
+        }
       }
 
       // Validate cron expression syntax
@@ -179,14 +271,19 @@ export const registerCreateScheduleTool = (server: McpServer) => {
 
       try {
         // Calculate initial nextRunAt
-        const tempSchedule = {
-          cronExpression,
-          intervalMs,
-          timezone: timezone || "UTC",
-        } as Parameters<typeof calculateNextRun>[0];
-
-        const nextRunAt =
-          enabled !== false ? calculateNextRun(tempSchedule, new Date()) : undefined;
+        let nextRunAt: string | undefined;
+        if (enabled === false) {
+          nextRunAt = undefined;
+        } else if (isOneTime) {
+          nextRunAt = delayMs ? new Date(Date.now() + delayMs).toISOString() : runAt!;
+        } else {
+          const tempSchedule = {
+            cronExpression,
+            intervalMs,
+            timezone: timezone || "UTC",
+          } as Parameters<typeof calculateNextRun>[0];
+          nextRunAt = calculateNextRun(tempSchedule, new Date());
+        }
 
         const schedule = createScheduledTask({
           name,
@@ -203,14 +300,17 @@ export const registerCreateScheduleTool = (server: McpServer) => {
           nextRunAt,
           createdByAgentId: requestInfo.agentId,
           model,
+          scheduleType: scheduleType ?? "recurring",
         });
 
-        const scheduleType = cronExpression || `every ${intervalMs}ms`;
+        const scheduleDesc = isOneTime
+          ? `one-time at ${schedule.nextRunAt}`
+          : cronExpression || `every ${intervalMs}ms`;
         return {
           content: [
             {
               type: "text",
-              text: `Created schedule "${name}" (${scheduleType}). Next run: ${schedule.nextRunAt || "disabled"}`,
+              text: `Created schedule "${name}" (${scheduleDesc}). Next run: ${schedule.nextRunAt || "disabled"}`,
             },
           ],
           structuredContent: {

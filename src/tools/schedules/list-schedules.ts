@@ -15,6 +15,15 @@ export const registerListSchedulesTool = (server: McpServer) => {
       inputSchema: z.object({
         enabled: z.boolean().optional().describe("Filter by enabled status"),
         name: z.string().optional().describe("Filter by name (partial match)"),
+        scheduleType: z
+          .enum(["recurring", "one_time"])
+          .optional()
+          .describe("Filter by schedule type"),
+        hideCompleted: z
+          .boolean()
+          .default(true)
+          .optional()
+          .describe("Hide completed one-time schedules (default: true)"),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
@@ -37,6 +46,7 @@ export const registerListSchedulesTool = (server: McpServer) => {
             nextRunAt: z.string().optional(),
             createdByAgentId: z.string().optional(),
             timezone: z.string(),
+            scheduleType: z.string(),
             createdAt: z.string(),
             lastUpdatedAt: z.string(),
           }),
@@ -44,7 +54,7 @@ export const registerListSchedulesTool = (server: McpServer) => {
         count: z.number(),
       }),
     },
-    async ({ enabled, name }, requestInfo, _meta) => {
+    async ({ enabled, name, scheduleType, hideCompleted }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         return {
           content: [{ type: "text", text: 'Agent ID not found. Set the "X-Agent-ID" header.' }],
@@ -58,7 +68,7 @@ export const registerListSchedulesTool = (server: McpServer) => {
       }
 
       try {
-        const schedules = getScheduledTasks({ enabled, name });
+        const schedules = getScheduledTasks({ enabled, name, scheduleType, hideCompleted });
         const count = schedules.length;
         const statusSummary =
           count === 0 ? "No schedules found." : `Found ${count} schedule${count === 1 ? "" : "s"}.`;
@@ -66,10 +76,14 @@ export const registerListSchedulesTool = (server: McpServer) => {
         // Format for text output
         const scheduleList = schedules
           .map((s) => {
-            const schedule = s.cronExpression || `every ${s.intervalMs}ms`;
+            const type = s.scheduleType === "one_time" ? "one-time" : "recurring";
+            const schedule =
+              s.scheduleType === "one_time"
+                ? `runs at ${s.nextRunAt || s.lastRunAt || "unknown"}`
+                : s.cronExpression || `every ${s.intervalMs}ms`;
             const status = s.enabled ? "enabled" : "disabled";
             const nextRun = s.nextRunAt ? `next: ${s.nextRunAt}` : "not scheduled";
-            return `- ${s.name} (${status}) [${schedule}] ${nextRun}`;
+            return `- ${s.name} (${status}, ${type}) [${schedule}] ${nextRun}`;
           })
           .join("\n");
 

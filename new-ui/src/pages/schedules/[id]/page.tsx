@@ -199,6 +199,16 @@ export default function ScheduleDetailPage() {
             {schedule.enabled ? "Enabled" : "Disabled"}
           </span>
         </div>
+        <Badge
+          variant="outline"
+          className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${
+            schedule.scheduleType === "one_time"
+              ? "border-amber-500/30 text-amber-400"
+              : "border-emerald-500/30 text-emerald-400"
+          }`}
+        >
+          {schedule.scheduleType === "one_time" ? "One-time" : "Recurring"}
+        </Badge>
         {schedule.taskType && (
           <Badge
             variant="outline"
@@ -255,10 +265,27 @@ export default function ScheduleDetailPage() {
               <CardContent className="space-y-3">
                 <div>
                   <span className="text-xs text-muted-foreground uppercase tracking-wide">
-                    {schedule.cronExpression ? "Cron Expression" : "Interval"}
+                    {schedule.scheduleType === "one_time"
+                      ? schedule.lastRunAt
+                        ? "Executed At"
+                        : "Runs At"
+                      : schedule.cronExpression
+                        ? "Cron Expression"
+                        : "Interval"}
                   </span>
                   <div className="flex items-center gap-1.5 mt-0.5">
-                    {schedule.cronExpression ? (
+                    {schedule.scheduleType === "one_time" ? (
+                      <>
+                        <Timer className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm">
+                          {schedule.lastRunAt
+                            ? formatSmartTime(schedule.lastRunAt)
+                            : schedule.nextRunAt
+                              ? formatSmartTime(schedule.nextRunAt)
+                              : "—"}
+                        </span>
+                      </>
+                    ) : schedule.cronExpression ? (
                       <>
                         <Clock className="h-4 w-4 text-muted-foreground" />
                         <code className="text-sm font-mono">{schedule.cronExpression}</code>

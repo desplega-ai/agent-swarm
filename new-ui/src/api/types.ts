@@ -304,6 +304,7 @@ export interface ScheduledTask {
   createdByAgentId?: string;
   timezone: string;
   model?: string;
+  scheduleType?: "recurring" | "one_time";
   createdAt: string;
   lastUpdatedAt: string;
 }

@@ -81,9 +81,13 @@ export async function handleStats(
   if (matchRoute(req.method, pathSegments, "GET", ["api", "scheduled-tasks"], true)) {
     const enabledParam = queryParams.get("enabled");
     const name = queryParams.get("name");
+    const scheduleType = queryParams.get("scheduleType") as "recurring" | "one_time" | null;
+    const hideCompletedParam = queryParams.get("hideCompleted");
     const scheduledTasks = getScheduledTasks({
       enabled: enabledParam !== null ? enabledParam === "true" : undefined,
       name: name || undefined,
+      scheduleType: scheduleType || undefined,
+      hideCompleted: hideCompletedParam !== null ? hideCompletedParam !== "false" : undefined,
     });
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ scheduledTasks }));

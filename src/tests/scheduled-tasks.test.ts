@@ -498,4 +498,108 @@ describe("Scheduled Tasks Integration", () => {
       expect(tasks.count).toBe(2);
     });
   });
+
+  describe("One-Time Schedules", () => {
+    test("create one-time schedule with delayMs computes nextRunAt", () => {
+      const before = Date.now();
+      const schedule = createScheduledTask({
+        name: "one-time-delay-test",
+        taskTemplate: "One-time delay task",
+        scheduleType: "one_time",
+        nextRunAt: new Date(before + 60000).toISOString(),
+        createdByAgentId: testAgent.id,
+      });
+
+      expect(schedule.scheduleType).toBe("one_time");
+      expect(schedule.nextRunAt).toBeDefined();
+      expect(schedule.enabled).toBe(true);
+      expect(schedule.cronExpression).toBeUndefined();
+      expect(schedule.intervalMs).toBeUndefined();
+    });
+
+    test("create one-time schedule with runAt stores nextRunAt", () => {
+      const runAt = new Date(Date.now() + 120000).toISOString();
+      const schedule = createScheduledTask({
+        name: "one-time-runat-test",
+        taskTemplate: "One-time runAt task",
+        scheduleType: "one_time",
+        nextRunAt: runAt,
+        createdByAgentId: testAgent.id,
+      });
+
+      expect(schedule.scheduleType).toBe("one_time");
+      expect(schedule.nextRunAt).toBe(runAt);
+    });
+
+    test("one-time schedule does not require cronExpression or intervalMs", () => {
+      const schedule = createScheduledTask({
+        name: "one-time-no-cron-test",
+        taskTemplate: "No cron needed",
+        scheduleType: "one_time",
+        nextRunAt: new Date(Date.now() + 60000).toISOString(),
+      });
+
+      expect(schedule.scheduleType).toBe("one_time");
+      expect(schedule.cronExpression).toBeUndefined();
+      expect(schedule.intervalMs).toBeUndefined();
+    });
+
+    test("executing one-time schedule auto-disables it", async () => {
+      const schedule = createScheduledTask({
+        name: "one-time-exec-test",
+        taskTemplate: "Execute and disable",
+        scheduleType: "one_time",
+        nextRunAt: new Date(Date.now() - 1000).toISOString(), // due now
+        createdByAgentId: testAgent.id,
+      });
+
+      // Run it manually
+      await runScheduleNow(schedule.id);
+
+      const updated = getScheduledTaskById(schedule.id);
+      expect(updated).not.toBeNull();
+      expect(updated!.enabled).toBe(false);
+      expect(updated!.lastRunAt).toBeDefined();
+      expect(updated!.nextRunAt).toBeUndefined();
+    });
+
+    test("one-time schedules hidden by default in list", () => {
+      // The executed one-time schedule from the previous test should be hidden
+      const allSchedules = getScheduledTasks({ hideCompleted: true });
+      const executedOneTime = allSchedules.find((s) => s.name === "one-time-exec-test");
+      expect(executedOneTime).toBeUndefined();
+
+      // But visible when hideCompleted is false
+      const allIncluding = getScheduledTasks({ hideCompleted: false });
+      const found = allIncluding.find((s) => s.name === "one-time-exec-test");
+      expect(found).toBeDefined();
+      expect(found!.scheduleType).toBe("one_time");
+    });
+
+    test("filter by scheduleType works", () => {
+      const oneTimeOnly = getScheduledTasks({
+        scheduleType: "one_time",
+        hideCompleted: false,
+      });
+      expect(oneTimeOnly.length).toBeGreaterThan(0);
+      for (const s of oneTimeOnly) {
+        expect(s.scheduleType).toBe("one_time");
+      }
+
+      const recurringOnly = getScheduledTasks({ scheduleType: "recurring" });
+      for (const s of recurringOnly) {
+        expect(s.scheduleType).toBe("recurring");
+      }
+    });
+
+    test("existing recurring schedules default to scheduleType recurring", () => {
+      const schedule = createScheduledTask({
+        name: "recurring-default-test",
+        taskTemplate: "Should be recurring",
+        cronExpression: "0 * * * *",
+      });
+
+      expect(schedule.scheduleType).toBe("recurring");
+    });
+  });
 });

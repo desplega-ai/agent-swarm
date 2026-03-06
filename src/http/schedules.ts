@@ -40,6 +40,48 @@ export async function handleSchedules(
       return true;
     }
 
+    const isOneTime = body.scheduleType === "one_time";
+
+    // Validate params based on schedule type
+    if (isOneTime) {
+      if (body.cronExpression || body.intervalMs) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            error:
+              "One-time schedules cannot use cronExpression or intervalMs. Use delayMs or runAt.",
+          }),
+        );
+        return true;
+      }
+      if (!body.delayMs && !body.runAt) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "One-time schedules require either delayMs or runAt." }));
+        return true;
+      }
+      if (body.delayMs && body.runAt) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Provide either delayMs or runAt, not both." }));
+        return true;
+      }
+      if (body.runAt && new Date(body.runAt).getTime() <= Date.now()) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "runAt must be in the future." }));
+        return true;
+      }
+    } else {
+      if (body.delayMs || body.runAt) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            error:
+              "delayMs and runAt are only for one-time schedules. Set scheduleType to 'one_time'.",
+          }),
+        );
+        return true;
+      }
+    }
+
     // Validate cron expression
     if (body.cronExpression) {
       try {
@@ -72,7 +114,11 @@ export async function handleSchedules(
     try {
       // Calculate nextRunAt before creation
       let nextRunAt: string | undefined;
-      if (body.enabled !== false) {
+      if (body.enabled === false) {
+        nextRunAt = undefined;
+      } else if (isOneTime) {
+        nextRunAt = body.delayMs ? new Date(Date.now() + body.delayMs).toISOString() : body.runAt;
+      } else {
         const tempSchedule = {
           cronExpression: body.cronExpression || null,
           intervalMs: body.intervalMs || null,
@@ -98,6 +144,7 @@ export async function handleSchedules(
         nextRunAt,
         timezone: body.timezone,
         model: body.model,
+        scheduleType: body.scheduleType,
       });
 
       res.writeHead(201, { "Content-Type": "application/json" });
@@ -141,10 +188,19 @@ export async function handleSchedules(
           source: "schedule",
         });
 
-        updateScheduledTask(schedule.id, {
-          lastRunAt: now,
-          lastUpdatedAt: now,
-        });
+        if (schedule.scheduleType === "one_time") {
+          updateScheduledTask(schedule.id, {
+            lastRunAt: now,
+            nextRunAt: null,
+            enabled: false,
+            lastUpdatedAt: now,
+          });
+        } else {
+          updateScheduledTask(schedule.id, {
+            lastRunAt: now,
+            lastUpdatedAt: now,
+          });
+        }
 
         return createdTask;
       })();
@@ -192,6 +248,17 @@ export async function handleSchedules(
       return true;
     }
 
+    // Reject updates on completed one-time schedules
+    if (existing.scheduleType === "one_time" && !existing.enabled && existing.lastRunAt) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: "One-time schedule has already executed. Create a new one instead.",
+        }),
+      );
+      return true;
+    }
+
     // Validate new cron expression if provided
     if (body.cronExpression) {
       try {
@@ -225,21 +292,28 @@ export async function handleSchedules(
 
     // Recalculate nextRunAt when timing fields or enabled status changes
     const newEnabled = body.enabled !== undefined ? body.enabled : existing.enabled;
-    if (!newEnabled) {
-      body.nextRunAt = null;
-    } else if (
-      body.cronExpression !== undefined ||
-      body.intervalMs !== undefined ||
-      (body.enabled === true && !existing.enabled)
-    ) {
-      const merged = {
-        cronExpression: body.cronExpression ?? existing.cronExpression,
-        intervalMs: body.intervalMs ?? existing.intervalMs,
-        timezone: body.timezone ?? existing.timezone,
-      };
-      if (merged.cronExpression || merged.intervalMs) {
-        // biome-ignore lint/suspicious/noExplicitAny: need partial ScheduledTask for calculateNextRun
-        body.nextRunAt = calculateNextRun(merged as any);
+    if (existing.scheduleType === "one_time") {
+      // One-time schedules: no recalculation via cron/interval
+      if (!newEnabled) {
+        body.nextRunAt = null;
+      }
+    } else {
+      if (!newEnabled) {
+        body.nextRunAt = null;
+      } else if (
+        body.cronExpression !== undefined ||
+        body.intervalMs !== undefined ||
+        (body.enabled === true && !existing.enabled)
+      ) {
+        const merged = {
+          cronExpression: body.cronExpression ?? existing.cronExpression,
+          intervalMs: body.intervalMs ?? existing.intervalMs,
+          timezone: body.timezone ?? existing.timezone,
+        };
+        if (merged.cronExpression || merged.intervalMs) {
+          // biome-ignore lint/suspicious/noExplicitAny: need partial ScheduledTask for calculateNextRun
+          body.nextRunAt = calculateNextRun(merged as any);
+        }
       }
     }
 

@@ -374,12 +374,19 @@ export const ScheduledTaskSchema = z
     lastErrorAt: z.iso.datetime().optional(),
     lastErrorMessage: z.string().optional(),
     model: z.enum(["haiku", "sonnet", "opus"]).optional(),
+    scheduleType: z.enum(["recurring", "one_time"]).default("recurring"),
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
   })
-  .refine((data) => data.cronExpression || data.intervalMs, {
-    message: "Either cronExpression or intervalMs must be provided",
-  });
+  .refine(
+    (data) => {
+      if (data.scheduleType === "one_time") return true;
+      return data.cronExpression || data.intervalMs;
+    },
+    {
+      message: "Either cronExpression or intervalMs must be provided for recurring schedules",
+    },
+  );
 
 export type ScheduledTask = z.infer<typeof ScheduledTaskSchema>;
 

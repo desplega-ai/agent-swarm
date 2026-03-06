@@ -6,6 +6,7 @@ import { useAgents } from "@/api/hooks/use-agents";
 import { useCreateSchedule, useScheduledTasks, useUpdateSchedule } from "@/api/hooks/use-schedules";
 import type { ScheduledTask } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -333,10 +334,34 @@ export default function SchedulesPage() {
         ),
       },
       {
+        field: "scheduleType",
+        headerName: "Type",
+        width: 110,
+        cellRenderer: (params: { value?: string }) => (
+          <Badge
+            variant="outline"
+            className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${
+              params.value === "one_time"
+                ? "border-amber-500/30 text-amber-400"
+                : "border-emerald-500/30 text-emerald-400"
+            }`}
+          >
+            {params.value === "one_time" ? "One-time" : "Recurring"}
+          </Badge>
+        ),
+      },
+      {
         headerName: "Schedule",
         width: 200,
         minWidth: 160,
         valueGetter: (params) => {
+          if (params.data?.scheduleType === "one_time") {
+            return params.data?.nextRunAt
+              ? `at ${formatSmartTime(params.data.nextRunAt)}`
+              : params.data?.lastRunAt
+                ? `ran ${formatSmartTime(params.data.lastRunAt)}`
+                : "—";
+          }
           if (params.data?.cronExpression) return params.data.cronExpression;
           if (params.data?.intervalMs) return `every ${formatInterval(params.data.intervalMs)}`;
           return "—";

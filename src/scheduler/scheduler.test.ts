@@ -108,6 +108,7 @@ describe("calculateNextRun", () => {
       enabled: true,
       timezone: "UTC",
       consecutiveErrors: 0,
+      scheduleType: "recurring" as const,
       createdAt: new Date().toISOString(),
       lastUpdatedAt: new Date().toISOString(),
     } as Parameters<typeof calculateNextRun>[0];
