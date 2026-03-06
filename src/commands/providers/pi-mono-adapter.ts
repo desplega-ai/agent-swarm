@@ -1,3 +1,5 @@
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { SessionErrorTracker } from "../../utils/error-tracker.ts";
 import { parsePiModelIdentifier, validatePiAuthForModel } from "./pi-config.ts";
 import {
@@ -14,6 +16,7 @@ import type {
 } from "./types.ts";
 
 const HOOK_SCRIPT_PATH = new URL("../../hooks/hook.ts", import.meta.url).pathname;
+const HOOK_SCRIPT_RELATIVE = "src/hooks/hook.ts";
 
 type PiSessionLike = {
   sessionId?: string;
@@ -33,6 +36,10 @@ interface PiUsageSnapshot {
   cacheWriteTokens?: number;
   numTurns?: number;
 }
+
+type PiResourceLoaderLike = {
+  reload?: () => Promise<void>;
+};
 
 function tryNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
@@ -176,6 +183,74 @@ function getSessionId(session: PiSessionLike): string | null {
   return null;
 }
 
+async function resolveHookScriptPath(
+  context: ProviderStartContext,
+): Promise<string | null> {
+  const candidates = [
+    HOOK_SCRIPT_PATH,
+    join(process.cwd(), HOOK_SCRIPT_RELATIVE),
+    context.env.WORKSPACE_DIR ? join(context.env.WORKSPACE_DIR, HOOK_SCRIPT_RELATIVE) : undefined,
+  ].filter((value): value is string => Boolean(value));
+
+  for (const candidate of candidates) {
+    if (await Bun.file(candidate).exists()) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+async function resolveHookCommand(context: ProviderStartContext): Promise<string[]> {
+  const binaryCandidates = [
+    "/usr/local/bin/agent-swarm",
+    Bun.which("agent-swarm"),
+    process.execPath?.includes("agent-swarm") ? process.execPath : undefined,
+  ].filter((value, index, list): value is string => Boolean(value) && list.indexOf(value) === index);
+
+  for (const binaryPath of binaryCandidates) {
+    if (await Bun.file(binaryPath).exists()) {
+      return [binaryPath, "hook"];
+    }
+  }
+
+  const hookScriptPath = await resolveHookScriptPath(context);
+  if (hookScriptPath) {
+    return ["bun", hookScriptPath];
+  }
+
+  throw new Error("Unable to locate agent-swarm hook entrypoint");
+}
+
+async function resolvePiMcpAdapterExtensionFactory(
+  context: ProviderStartContext,
+): Promise<((api: unknown) => void) | null> {
+  const candidatePaths = [
+    context.env.PI_MCP_ADAPTER_PATH,
+    context.env.PI_MCP_ADAPTER_DIR ? join(context.env.PI_MCP_ADAPTER_DIR, "index.ts") : undefined,
+    join(process.cwd(), "node_modules", "pi-mcp-adapter", "index.ts"),
+    "/opt/pi-mcp-adapter/index.ts",
+  ].filter((value): value is string => Boolean(value));
+
+  for (const candidatePath of candidatePaths) {
+    if (!(await Bun.file(candidatePath).exists())) {
+      continue;
+    }
+
+    try {
+      const module = (await import(candidatePath)) as { default?: unknown };
+      if (typeof module.default === "function") {
+        return module.default as (api: unknown) => void;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[pi] Failed to load MCP adapter from ${candidatePath}: ${message}`);
+    }
+  }
+
+  return null;
+}
+
 async function runHookInvocation(
   context: ProviderStartContext,
   invocation: HookInvocation,
@@ -186,7 +261,9 @@ async function runHookInvocation(
     ...invocation.payload,
   };
 
-  const proc = Bun.spawn(["bun", HOOK_SCRIPT_PATH], {
+  const command = await resolveHookCommand(context);
+
+  const proc = Bun.spawn(command, {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
@@ -260,6 +337,22 @@ export class PiMonoAdapter implements ProviderAdapter {
       try {
         validatePiAuthForModel(context.model, context.env);
 
+        // Pi SDK reads some paths/credentials directly from process.env.
+        const envForwardKeys = [
+          "PI_PACKAGE_DIR",
+          "PI_CODING_AGENT_DIR",
+          "PI_AGENT_DIR",
+          "ANTHROPIC_API_KEY",
+          "OPENROUTER_API_KEY",
+          "OPENAI_API_KEY",
+        ] as const;
+        for (const key of envForwardKeys) {
+          const value = context.env[key];
+          if (value && !process.env[key]) {
+            process.env[key] = value;
+          }
+        }
+
         const piSdk = (await import("@mariozechner/pi-coding-agent")) as Record<string, unknown>;
         const piAi = (await import("@mariozechner/pi-ai")) as Record<string, unknown>;
 
@@ -273,6 +366,7 @@ export class PiMonoAdapter implements ProviderAdapter {
 
         const SessionManager = piSdk.SessionManager as
           | {
+              create?: (cwd: string, sessionDir?: string) => unknown;
               list?: (
                 cwd: string,
                 sessionDir?: string,
@@ -282,6 +376,9 @@ export class PiMonoAdapter implements ProviderAdapter {
             }
           | undefined;
         const AuthStorage = piSdk.AuthStorage as { create?: () => unknown } | undefined;
+        const DefaultResourceLoader = piSdk.DefaultResourceLoader as
+          | (new (options?: Record<string, unknown>) => PiResourceLoaderLike)
+          | undefined;
         const ModelRegistry = piSdk.ModelRegistry as
           | (new (
               ...args: unknown[]
@@ -294,17 +391,28 @@ export class PiMonoAdapter implements ProviderAdapter {
         const { providerId, modelId } = parsePiModelIdentifier(context.model);
 
         const cwd = context.env.WORKSPACE_DIR || process.cwd();
+        const sessionDir = context.env.PI_SESSION_DIR || join(cwd, ".pi-sessions");
+        const homeDir = context.env.HOME || process.env.HOME;
+        const agentDir =
+          context.env.PI_AGENT_DIR ||
+          context.env.PI_CODING_AGENT_DIR ||
+          (homeDir ? join(homeDir, ".pi", "agent") : undefined);
+        await mkdir(sessionDir, { recursive: true });
 
         let sessionManager: unknown;
         const resumeSessionId = context.resumeSessionId;
         if (resumeSessionId && SessionManager?.list && SessionManager?.open) {
-          const sessions = await SessionManager.list(cwd);
+          const sessions = await SessionManager.list(cwd, sessionDir);
           const match = sessions.find(
             (session) => typeof session.id === "string" && session.id.startsWith(resumeSessionId),
           );
           if (match?.path) {
-            sessionManager = SessionManager.open(match.path);
+            sessionManager = SessionManager.open(match.path, sessionDir);
           }
+        }
+
+        if (!sessionManager && SessionManager?.create) {
+          sessionManager = SessionManager.create(cwd, sessionDir);
         }
 
         if (!sessionManager && SessionManager?.inMemory) {
@@ -312,14 +420,66 @@ export class PiMonoAdapter implements ProviderAdapter {
         }
 
         const authStorage = AuthStorage?.create ? AuthStorage.create() : undefined;
+        const runtimeAuthStorage = authStorage as
+          | { setRuntimeApiKey?: (provider: string, apiKey: string) => void }
+          | undefined;
+        if (typeof runtimeAuthStorage?.setRuntimeApiKey === "function") {
+          const runtimeKeys: Array<[string, string | undefined]> = [
+            ["anthropic", context.env.ANTHROPIC_API_KEY],
+            ["openrouter", context.env.OPENROUTER_API_KEY],
+            ["openai", context.env.OPENAI_API_KEY],
+          ];
+
+          for (const [providerId, key] of runtimeKeys) {
+            if (!key) continue;
+            runtimeAuthStorage.setRuntimeApiKey(providerId, key);
+          }
+        }
+
         const modelRegistry = ModelRegistry ? new ModelRegistry(authStorage) : undefined;
         const model = getModel ? getModel(providerId, modelId) : undefined;
+        const createResourceLoader = async (): Promise<unknown> => {
+          if (!DefaultResourceLoader) {
+            return undefined;
+          }
+
+          const extensionFactories: Array<(api: unknown) => void> = [];
+          const mcpAdapterFactory = await resolvePiMcpAdapterExtensionFactory(context);
+          if (mcpAdapterFactory) {
+            extensionFactories.push(mcpAdapterFactory);
+          } else {
+            console.warn("[pi] MCP adapter extension unavailable; running without MCP bridge");
+          }
+
+          const additionalSkillPaths: string[] = [];
+          if (homeDir) {
+            additionalSkillPaths.push(join(homeDir, ".claude", "skills"));
+          }
+
+          const loaderOptions: Record<string, unknown> = {
+            cwd,
+            ...(agentDir ? { agentDir } : {}),
+            ...(context.systemPrompt ? { appendSystemPrompt: context.systemPrompt } : {}),
+            ...(extensionFactories.length > 0 ? { extensionFactories } : {}),
+            ...(additionalSkillPaths.length > 0 ? { additionalSkillPaths } : {}),
+          };
+
+          const loader = new DefaultResourceLoader(loaderOptions);
+          if (typeof loader.reload === "function") {
+            await loader.reload();
+          }
+          return loader;
+        };
+        const resourceLoader = await createResourceLoader();
 
         const createOptions: Record<string, unknown> = {};
+        createOptions.cwd = cwd;
+        if (agentDir) createOptions.agentDir = agentDir;
         if (sessionManager) createOptions.sessionManager = sessionManager;
         if (authStorage) createOptions.authStorage = authStorage;
         if (modelRegistry) createOptions.modelRegistry = modelRegistry;
         if (model) createOptions.model = model;
+        if (resourceLoader) createOptions.resourceLoader = resourceLoader;
 
         const result = (await createAgentSession(createOptions)) as
           | { session?: PiSessionLike }
