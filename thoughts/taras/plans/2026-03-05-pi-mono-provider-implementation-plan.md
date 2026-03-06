@@ -5,7 +5,7 @@ branch: main
 repository: agent-swarm
 topic: "HARNESS_PROVIDER runtime adapters (claude + pi-mono)"
 tags: [plan, provider, runner, pi-mono, hooks, session-lifecycle, compatibility]
-status: draft
+status: in_progress
 autonomy: autopilot
 research: thoughts/taras/research/2026-03-05-pi-mono-provider-research.md
 last_updated: 2026-03-05
@@ -140,9 +140,9 @@ Define provider selection and adapter contracts without altering behavior.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Typecheck passes: `bun run tsc:check`
-- [ ] Lint/format passes: `bun run lint:fix`
-- [ ] Existing runner tests pass unchanged: `bun test src/tests/runner*.test.ts`
+- [x] Typecheck passes: `bun run tsc:check`
+- [x] Lint/format passes: `bun run lint:fix`
+- [x] Existing runner tests pass unchanged: `bun test src/tests/runner*.test.ts`
 
 #### Manual Verification:
 - [ ] With no `HARNESS_PROVIDER`, runtime resolves to `claude`.
@@ -187,9 +187,9 @@ Move Claude-specific process and stream-json parsing logic out of `runner.ts` in
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Runner lifecycle tests pass: `bun test src/tests/runner*.test.ts`
-- [ ] Cancellation tests pass: `bun test src/tests/task-cancellation.test.ts`
-- [ ] Typecheck passes: `bun run tsc:check`
+- [x] Runner lifecycle tests pass: `bun test src/tests/runner*.test.ts`
+- [x] Cancellation tests pass: `bun test src/tests/task-cancellation.test.ts`
+- [x] Typecheck passes: `bun run tsc:check`
 
 #### Manual Verification:
 - [ ] Diff inspection confirms no changes to Claude command flags.
@@ -231,9 +231,9 @@ Centralize how provider events are converted into session-id updates, logs, cost
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Session logs tests pass: `bun test src/tests/session-logs.test.ts`
-- [ ] Session costs tests pass: `bun test src/tests/session-costs.test.ts`
-- [ ] New normalization tests pass: `bun test src/tests/runner-provider-normalization.test.ts`
+- [x] Session logs tests pass: `bun test src/tests/session-logs.test.ts`
+- [x] Session costs tests pass: `bun test src/tests/session-costs.test.ts`
+- [x] New normalization tests pass: `bun test src/tests/runner-provider-normalization.test.ts`
 
 #### Manual Verification:
 - [ ] `session_logs` rows still include expected line ordering and `cli` value.
@@ -281,9 +281,9 @@ Implement pi execution path behind `HARNESS_PROVIDER=pi` with explicit auth reso
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Dependencies install cleanly: `bun install`
-- [ ] Typecheck passes: `bun run tsc:check`
-- [ ] Pi adapter tests pass: `bun test src/tests/pi-provider*.test.ts`
+- [x] Dependencies install cleanly: `bun install`
+- [x] Typecheck passes: `bun run tsc:check`
+- [x] Pi adapter tests pass: `bun test src/tests/pi-provider*.test.ts`
 
 #### Manual Verification:
 - [ ] `HARNESS_PROVIDER=pi` with missing auth fails with explicit missing key message.
@@ -332,9 +332,9 @@ Recreate current continuation behavior for pi while preserving existing Claude l
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Pause/resume tests pass: `bun test src/tests/task-pause-resume.test.ts`
-- [ ] Session attach/continuity tests pass: `bun test src/tests/session-attach.test.ts`
-- [ ] Cancellation tests pass: `bun test src/tests/task-cancellation.test.ts`
+- [x] Pause/resume tests pass: `bun test src/tests/task-pause-resume.test.ts`
+- [x] Session attach/continuity tests pass: `bun test src/tests/session-attach.test.ts`
+- [x] Cancellation tests pass: `bun test src/tests/task-cancellation.test.ts`
 
 #### Manual Verification:
 - [ ] Parent/child task in pi mode continues with expected context behavior.
@@ -370,7 +370,7 @@ Ensure hook behavior remains equivalent when tool and lifecycle events originate
 
 #### Automated Verification:
 - [ ] Hook-related tests pass: `bun test src/tests/hook*.test.ts`
-- [ ] Runner regression tests pass: `bun test src/tests/runner*.test.ts`
+- [x] Runner regression tests pass: `bun test src/tests/runner*.test.ts`
 
 #### Manual Verification:
 - [ ] PreToolUse blocking behavior still triggers when task is cancelled.
@@ -405,9 +405,9 @@ Document operational behavior and freeze rollout checks for safe adoption.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Lint/format passes: `bun run lint:fix`
-- [ ] Typecheck passes: `bun run tsc:check`
-- [ ] Full tests pass: `bun test`
+- [x] Lint/format passes: `bun run lint:fix`
+- [x] Typecheck passes: `bun run tsc:check`
+- [x] Full tests pass: `bun test`
 
 #### Manual Verification:
 - [ ] New developer can run Claude mode and pi mode locally from docs alone.

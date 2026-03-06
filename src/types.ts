@@ -64,6 +64,12 @@ export const AgentTaskSourceSchema = z.enum([
 ]);
 export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 
+export const TaskRuntimeMetadataSchema = z.object({
+  provider: z.enum(["claude", "pi"]).optional(),
+  sessionId: z.string().optional(),
+  sessionPath: z.string().optional(),
+});
+
 export const AgentTaskSchema = z.object({
   id: z.uuid(),
   agentId: z.uuid().nullable(), // Nullable for unassigned tasks
@@ -123,6 +129,7 @@ export const AgentTaskSchema = z.object({
   // Session attachment (optional)
   parentTaskId: z.uuid().optional(),
   claudeSessionId: z.string().optional(),
+  runtimeMetadata: TaskRuntimeMetadataSchema.optional(),
 
   // Model selection (optional — defaults to "opus" via runner)
   model: z.enum(["haiku", "sonnet", "opus"]).optional(),

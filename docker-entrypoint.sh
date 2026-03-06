@@ -144,6 +144,46 @@ else
 EOF
 fi
 
+# Keep a Claude-compatible config path for adapters that import claude-code MCP settings.
+mkdir -p /home/worker/.claude
+cp /workspace/.mcp.json /home/worker/.claude/claude_desktop_config.json
+
+# Create Pi MCP adapter config (imports Claude config and keeps an explicit local server entry).
+echo "Creating Pi MCP config in /home/worker/.pi/agent/mcp.json..."
+mkdir -p /home/worker/.pi/agent
+if [ -n "$AGENT_ID" ]; then
+    cat > /home/worker/.pi/agent/mcp.json << EOF
+{
+  "imports": ["claude-code"],
+  "mcpServers": {
+    "agent-swarm": {
+      "url": "${MCP_URL}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${API_KEY}",
+        "X-Agent-ID": "${AGENT_ID}"
+      },
+      "lifecycle": "eager"
+    }
+  }
+}
+EOF
+else
+    cat > /home/worker/.pi/agent/mcp.json << EOF
+{
+  "imports": ["claude-code"],
+  "mcpServers": {
+    "agent-swarm": {
+      "url": "${MCP_URL}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${API_KEY}"
+      },
+      "lifecycle": "eager"
+    }
+  }
+}
+EOF
+fi
+
 # Configure GitHub authentication if token is provided
 echo ""
 echo "=== GitHub Authentication ==="

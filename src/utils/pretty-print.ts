@@ -69,6 +69,94 @@ function formatToolInput(input: Record<string, unknown>): string {
   return ` (${formatted})`;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+function asRecordArray(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null);
+}
+
+function readToolName(value: Record<string, unknown>): string {
+  const toolCall = asRecord(value.toolCall);
+  const candidate =
+    (typeof value.name === "string" ? value.name : null) ||
+    (typeof value.toolName === "string" ? value.toolName : null) ||
+    (toolCall && typeof toolCall.name === "string" ? toolCall.name : null) ||
+    "unknown";
+  return formatToolName(candidate);
+}
+
+function readToolInput(value: Record<string, unknown>): Record<string, unknown> {
+  const toolCall = asRecord(value.toolCall);
+  return (
+    asRecord(value.input) ||
+    asRecord(value.toolInput) ||
+    asRecord(value.args) ||
+    (toolCall ? asRecord(toolCall.input) : null) ||
+    {}
+  );
+}
+
+function printAssistantText(prefix: string, text: string): void {
+  console.log(`${prefix} ${c.green}◆${c.reset} ${c.bold}Assistant:${c.reset}`);
+  const lines = text.split("\n");
+  for (const l of lines.slice(0, 5)) {
+    console.log(`${prefix}    ${truncate(l, 100)}`);
+  }
+  if (lines.length > 5) {
+    console.log(`${prefix}    ${c.dim}... (${lines.length - 5} more lines)${c.reset}`);
+  }
+}
+
+function printToolCall(prefix: string, toolName: string, input: Record<string, unknown>): void {
+  console.log(
+    `${prefix} ${c.magenta}▶${c.reset} Tool: ${c.magenta}${toolName}${c.reset}${formatToolInput(input)}`,
+  );
+}
+
+function printResult(prefix: string, text: string, isError = false): void {
+  const icon = isError ? `${c.red}✗${c.reset}` : `${c.green}✓${c.reset}`;
+  console.log(`${prefix} ${icon} Result: ${truncate(text, 100)}`);
+}
+
+function prettyPrintPiMessage(message: Record<string, unknown>, prefix: string): void {
+  const role = typeof message.role === "string" ? message.role : "";
+  const content = asRecordArray(message.content);
+
+  if (role === "assistant") {
+    for (const block of content) {
+      const blockType = typeof block.type === "string" ? block.type : "";
+      if (blockType === "text") {
+        const text = typeof block.text === "string" ? block.text : "";
+        if (text) printAssistantText(prefix, text);
+        continue;
+      }
+
+      if (blockType === "toolCall" || blockType === "tool_use" || blockType === "toolUse") {
+        const toolName = readToolName(block);
+        const input = readToolInput(block);
+        printToolCall(prefix, toolName, input);
+      }
+    }
+    return;
+  }
+
+  if (role === "toolResult" || role === "user" || role === "tool") {
+    for (const block of content) {
+      const blockType = typeof block.type === "string" ? block.type : "";
+      if (blockType === "tool_result" || blockType === "toolResult") {
+        const rawResult = block.content ?? block.result ?? block.output;
+        const result =
+          typeof rawResult === "string" ? rawResult : rawResult ? JSON.stringify(rawResult) : "";
+        const isError = Boolean(block.is_error ?? block.isError);
+        if (result) printResult(prefix, result, isError);
+      }
+    }
+  }
+}
+
 /** Pretty print a single JSON line from Claude output */
 export function prettyPrintLine(line: string, role: string): void {
   try {
@@ -87,6 +175,15 @@ export function prettyPrintLine(line: string, role: string): void {
     const prefix = `${c.dim}[${role}]${c.reset}`;
 
     switch (type) {
+      case "turn_start":
+      case "turn_end":
+      case "message_start":
+      case "message_update":
+      case "agent_start":
+      case "tool_execution_update":
+        // Pi emits high-frequency lifecycle deltas; suppress these for readability.
+        return;
+
       case "system": {
         const subtype = json.subtype as string;
         if (subtype === "init") {
@@ -127,21 +224,11 @@ export function prettyPrintLine(line: string, role: string): void {
         for (const block of content) {
           if (block.type === "text") {
             const text = block.text as string;
-            console.log(`${prefix} ${c.green}◆${c.reset} ${c.bold}Assistant:${c.reset}`);
-            // Print text with nice indentation, truncate long lines
-            const lines = text.split("\n");
-            for (const l of lines.slice(0, 5)) {
-              console.log(`${prefix}    ${truncate(l, 100)}`);
-            }
-            if (lines.length > 5) {
-              console.log(`${prefix}    ${c.dim}... (${lines.length - 5} more lines)${c.reset}`);
-            }
+            printAssistantText(prefix, text);
           } else if (block.type === "tool_use") {
             const toolName = formatToolName((block.name as string) || "unknown");
             const input = (block.input as Record<string, unknown>) || {};
-            console.log(
-              `${prefix} ${c.magenta}▶${c.reset} Tool: ${c.magenta}${toolName}${c.reset}${formatToolInput(input)}`,
-            );
+            printToolCall(prefix, toolName, input);
           } else if (block.type === "thinking") {
             const thinking = block.thinking as string;
             console.log(`${prefix} ${c.blue}💭${c.reset} ${c.dim}Thinking...${c.reset}`);
@@ -165,8 +252,7 @@ export function prettyPrintLine(line: string, role: string): void {
 
         if (toolResult) {
           const isError = toolResult.includes("Error") || toolResult.includes("error");
-          const icon = isError ? `${c.red}✗${c.reset}` : `${c.green}✓${c.reset}`;
-          console.log(`${prefix} ${icon} Result: ${truncate(toolResult, 100)}`);
+          printResult(prefix, toolResult, isError);
         } else if (message) {
           const content = message.content as Array<Record<string, unknown>>;
           if (content) {
@@ -180,8 +266,7 @@ export function prettyPrintLine(line: string, role: string): void {
                       ? JSON.stringify(rawResult)
                       : "";
                 const isError = block.is_error as boolean;
-                const icon = isError ? `${c.red}✗${c.reset}` : `${c.green}✓${c.reset}`;
-                console.log(`${prefix} ${icon} Result: ${truncate(result, 100)}`);
+                printResult(prefix, result, isError);
               }
             }
           }
@@ -214,6 +299,41 @@ export function prettyPrintLine(line: string, role: string): void {
             console.log(`${prefix}    ${c.dim}... (${lines.length - 3} more lines)${c.reset}`);
           }
         }
+        break;
+      }
+
+      case "message_end": {
+        const message = asRecord(json.message);
+        if (message) {
+          prettyPrintPiMessage(message, prefix);
+        }
+        break;
+      }
+
+      case "tool_execution_start": {
+        const toolName = readToolName(json);
+        const input = readToolInput(json);
+        printToolCall(prefix, toolName, input);
+        break;
+      }
+
+      case "tool_execution_end": {
+        const error = json.error;
+        if (typeof error === "string" && error.trim()) {
+          printResult(prefix, error, true);
+          break;
+        }
+
+        const result = json.result ?? json.output ?? json.stdout;
+        if (typeof result === "string" && result.trim()) {
+          printResult(prefix, result, false);
+        }
+        break;
+      }
+
+      case "provider_error": {
+        const error = (json.error as string) || (json.message as string) || JSON.stringify(json);
+        console.log(`${prefix} ${c.red}✗ Error:${c.reset} ${truncate(error, 100)}`);
         break;
       }
 

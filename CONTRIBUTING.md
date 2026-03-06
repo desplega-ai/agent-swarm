@@ -35,6 +35,20 @@ cp .env.docker.example .env
 # Edit .env with your API_KEY
 ```
 
+Provider runtime configuration:
+
+- `HARNESS_PROVIDER=claude` (default) keeps the existing Claude CLI runtime path.
+- `HARNESS_PROVIDER=pi` enables the pi-mono runtime adapter.
+- Unknown `HARNESS_PROVIDER` values fall back to `claude` with a warning.
+
+When using `HARNESS_PROVIDER=pi`, required auth depends on the model family:
+
+- `ANTHROPIC_API_KEY` for Anthropic/Claude aliases (`haiku`, `sonnet`, `opus`, `claude-*`)
+- `OPENROUTER_API_KEY` for `openrouter/...` models
+- `OPENAI_API_KEY` for `openai/...` models
+
+If a required key is missing in pi mode, worker startup fails fast with an explicit error. There is no silent fallback to Claude for auth failures.
+
 ---
 
 ## Running the Project
