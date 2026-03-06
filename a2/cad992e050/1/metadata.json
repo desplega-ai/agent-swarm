@@ -1,0 +1,41 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "a2cad992e050",
+  "session_id": "ses_34062dd03ffeQDqACw1NliCDjE",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-06T01:26:11.344264Z",
+  "branch": "feat/pi-harness-support",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "bun.lock",
+    "docker-entrypoint.sh",
+    "src/commands/providers/pi-mono-adapter.ts",
+    "src/tests/pretty-print.test.ts",
+    ".github/workflows/ci.yml",
+    ".github/workflows/merge-gate.yml",
+    "Dockerfile.worker",
+    "package.json",
+    "scripts/swarm-delegation-e2e.ts",
+    "src/utils/pretty-print.ts"
+  ],
+  "agent": "OpenCode",
+  "turn_id": "ef0a4d4b8f99",
+  "checkpoint_transcript_start": 26,
+  "transcript_lines_at_start": 26,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-06T01:26:11.092359Z",
+    "agent_lines": 1211,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 1211,
+    "agent_percentage": 100
+  }
+}
