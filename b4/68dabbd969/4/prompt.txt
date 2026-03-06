@@ -1,0 +1,790 @@
+# Create Plan
+
+A thin wrapper that invokes the `desplega:planning` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse autonomy mode from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - If provided file has `autonomy:` in frontmatter, use that as default
+   - Otherwise, ask the user via AskUserQuestion:
+
+   ```
+   How much should I check in with you during planning?
+   - Autopilot: Research and create plan independently, present for final review
+   - Critical questions (Recommended): Ask only for major design decisions
+   - Verbose: Check in at each step, validate approach throughout
+   ```
+
+2. **ALWAYS invoke the `desplega:planning` skill:**
+   - Pass any file paths or task descriptions
+   - Pass the autonomy mode determined above
+   - Let the skill handle all planning logic
+
+3. **If no input provided:**
+   - Respond with:
+   ```
+   I'll help you create a detailed implementation plan. Please provide:
+   1. The task description
+   2. Any relevant context, constraints, or specific requirements
+   3. Links to related research or previous implementations
+   ```
+
+## Example Usage
+
+```
+/create-plan @thoughts/<username|shared>/research/my-feature.md
+/create-plan --autonomy=autopilot implement user authentication
+/create-plan --autonomy=verbose add caching layer
+```
+
+
+ARGUMENTS: I want to implement scheduled tasks that are one time, i.e. do this in 30 min. I think we could re-use the schedules for that (maybe adding a new column or something)
+
+---
+
+Tool loaded.
+
+---
+
+Tool loaded.
+
+---
+
+Base directory for this skill: /Users/taras/.claude/plugins/cache/desplega-ai-toolbox/desplega/1.4.1/skills/planning
+
+# Planning
+
+You are creating detailed implementation plans through an interactive, iterative process. Be skeptical, thorough, and collaborative.
+
+## Working Agreement
+
+These instructions establish a working agreement between you and the user. The key principles are:
+
+1. **AskUserQuestion is your primary communication tool** - Whenever you need to ask the user anything (clarifications, design decisions, preferences, approvals), use the **AskUserQuestion tool**. Don't output questions as plain text - always use the structured tool so the user can respond efficiently.
+
+2. **Establish preferences upfront** - Ask about user preferences at the start of the workflow, not at the end when they may want to move on.
+
+3. **Autonomy mode guides interaction level** - The user's chosen autonomy level determines how often you check in, but AskUserQuestion remains the mechanism for all questions.
+
+### User Preferences
+
+Before starting planning (unless autonomy is Autopilot), establish these preferences:
+
+**Commit After Each Phase** - Use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like me to create a commit after each phase once manual verification passes?" | 1. Yes, commit after each phase passes (Recommended), 2. No, I'll handle commits myself |
+
+Store this preference and act on it during implementation (see "Commit Integration" section).
+
+**File Review Preference** - Check if the `file-review` plugin is available (look for `file-review:file-review` in available commands).
+
+If file-review plugin is installed, use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like to use file-review for inline feedback on the plan when it's ready?" | 1. Yes, open file-review when plan is ready (Recommended), 2. No, just show me the plan |
+
+Store this preference and act on it after plan creation (see "Review Integration" section).
+
+## When to Use
+
+This skill activates when:
+- User invokes `/create-plan` command
+- Another skill references `**REQUIRED SUB-SKILL:** Use desplega:planning`
+- User asks to plan an implementation or create a technical spec
+
+## Autonomy Mode
+
+At the start of planning, adapt your interaction level based on the autonomy mode:
+
+| Mode | Behavior |
+|------|----------|
+| **Autopilot** | Research independently, create complete plan, present for final review only |
+| **Critical** (Default) | Get buy-in at major decision points, present design options for approval |
+| **Verbose** | Check in at each step, validate understanding, confirm before each phase |
+
+The autonomy mode is passed by the invoking command. If not specified, default to **Critical**.
+
+## Process Steps
+
+### Step 1: Context Gathering & Initial Analysis
+
+1. **Read all mentioned files immediately and FULLY:**
+   - Research documents, related plans, JSON/data files
+   - **IMPORTANT**: Use Read tool WITHOUT limit/offset parameters
+   - **CRITICAL**: Read files yourself before spawning sub-tasks
+
+2. **Spawn initial research tasks:**
+   - Use **codebase-locator** agent to find all files related to the task
+   - Use **codebase-analyzer** agent to understand current implementation
+   - Use **thoughts-locator** agent to find existing thoughts documents
+   - Use context7 MCP for library/framework insights
+
+3. **Read all files identified by research tasks**
+
+4. **Analyze and verify understanding:**
+   - Identify discrepancies or misunderstandings
+   - Note assumptions needing verification
+
+5. **Present understanding and questions (if not Autopilot):**
+
+   First, present your findings as text:
+   ```
+   Based on the research of the codebase, I understand we need to [summary].
+
+   I've found that:
+   - [Current implementation detail with file:line reference]
+   - [Relevant pattern or constraint discovered]
+   ```
+
+   Then, if there are questions that research couldn't answer, use **AskUserQuestion** with:
+
+   | Question | Options |
+   |----------|---------|
+   | "[Specific technical question]" | Provide relevant options based on the choices available |
+   | "[Design preference question]" | Provide relevant options based on the choices available |
+
+### Step 2: Research & Discovery
+
+1. **If the user corrects any misunderstanding:**
+   - Spawn new research tasks to verify
+   - Read specific files/directories mentioned
+
+2. **Create a research todo list** using TodoWrite
+
+3. **Spawn parallel sub-tasks:**
+   - **codebase-locator** - Find specific files
+   - **codebase-analyzer** - Understand implementation details
+   - **codebase-pattern-finder** - Find similar features to model after
+
+4. **Present findings and design options (if not Autopilot):**
+
+   First, present findings as text:
+   ```
+   **Current State:**
+   - [Key discovery about existing code]
+   ```
+
+   Then, use **AskUserQuestion** to present design options:
+
+   | Question | Options |
+   |----------|---------|
+   | "Which approach aligns best with your vision?" | 1. [Option A] - [brief description], 2. [Option B] - [brief description] |
+
+   Include pros/cons in the option descriptions to help the user decide.
+
+### Step 3: Plan Structure Development
+
+1. **Create initial plan outline (if not Autopilot):**
+
+   Present the outline as text:
+   ```
+   Here's my proposed plan structure:
+
+   ## Overview
+   [1-2 sentence summary]
+
+   ## Implementation Phases:
+   1. [Phase name] - [what it accomplishes]
+   2. [Phase name] - [what it accomplishes]
+   ```
+
+   Then, use **AskUserQuestion** to get approval:
+
+   | Question | Options |
+   |----------|---------|
+   | "Does this phasing make sense?" | 1. Yes, proceed with this structure, 2. No, let's discuss changes |
+
+2. **Get feedback on structure** before writing details
+
+### Step 4: Detailed Plan Writing
+
+Before proceeding, exit plan mode to write the plan file.
+
+Write the plan to `thoughts/<username|shared>/plans/YYYY-MM-DD-description.md`.
+
+**Path selection:** Use the user's name (e.g., `thoughts/taras/plans/`) if known from context. Fall back to `thoughts/shared/plans/` when unclear.
+
+**CRITICAL**: Every phase MUST include a `### Success Criteria:` section with both `#### Automated Verification:` and `#### Manual Verification:` subsections. See "Success Criteria Requirements" section at the end of this document for the exact format.
+
+**Template:** Read and follow the template at `cc-plugin/base/skills/planning/template.md`
+
+The template includes:
+- Standard plan sections (Overview, Current State, Desired End State, etc.)
+- Multiple phase examples with proper Success Criteria structure
+- Correct heading hierarchy throughout
+
+### Step 5: Review and Iterate
+
+1. **Present draft plan location:**
+   ```
+   I've created the implementation plan at:
+   `thoughts/<username|shared>/plans/YYYY-MM-DD-description.md`
+
+   Please review it.
+   ```
+
+2. **Iterate based on feedback** (if not Autopilot)
+
+3. **Finalize the plan** - DO NOT START implementation
+
+## Review Integration
+
+If the `file-review` plugin is available and the user selected "Yes" during User Preferences setup:
+- After creating plans, invoke `/file-review:file-review <path>`
+- If user selected "No" or autonomy mode is Autopilot, skip this step
+
+## Commit Integration
+
+If the user selected "Yes" to commits during User Preferences setup:
+- After each phase's manual verification passes, create a commit with a descriptive message
+- Commit message format: `[phase N] <brief description of what the phase accomplished>`
+- Only commit after explicit confirmation that manual verification passed
+- If user selected "No", skip commits entirely - the user will handle them
+
+## Important Guidelines
+
+1. **Be Skeptical**: Question vague requirements, verify with code
+2. **Be Interactive**: Don't write full plan in one shot (unless Autopilot)
+3. **Be Thorough**: Read context files COMPLETELY, include file:line references
+4. **Be Practical**: Focus on incremental, testable changes
+5. **No Open Questions**: Research or clarify immediately, don't leave questions in plan
+
+## Success Criteria Requirements (MANDATORY)
+
+**Every phase MUST have a Success Criteria section.** Plans without proper success criteria are incomplete.
+
+### Required Structure
+
+Each phase must end with this exact structure:
+
+```markdown
+### Success Criteria:
+
+#### Automated Verification:
+- [ ] [Command that can be run]: `command here`
+- [ ] [Another automated check]: `command here`
+
+#### Manual Verification:
+- [ ] [Human testing step]
+- [ ] [Another manual check]
+
+**Implementation Note**: [When to pause for confirmation]
+```
+
+### Heading Hierarchy
+
+Use these exact heading levels (this is critical for consistency):
+- `### Success Criteria:` (h3) - section header
+- `#### Automated Verification:` (h4) - subsection
+- `#### Manual Verification:` (h4) - subsection
+
+### What Goes Where
+
+| Type | Examples |
+|------|----------|
+| **Automated** | `make test`, `npm run lint`, `tsc --noEmit`, `ls path/to/file`, `grep pattern file` |
+| **Manual** | UI interactions, visual checks, performance testing, edge case validation |
+
+### Validation Checklist
+
+Before finalizing any plan, verify:
+- [ ] Every phase has `### Success Criteria:` section
+- [ ] Each has `#### Automated Verification:` with runnable commands
+- [ ] Each has `#### Manual Verification:` with human testing steps
+- [ ] All items use checkbox format `- [ ]`
+- [ ] Automated checks are actual commands (not descriptions)
+
+
+ARGUMENTS: Implement one-time scheduled tasks (e.g. "do this in 30 min") by extending the existing schedules system, possibly adding a new column. --autonomy=autopilot
+
+---
+
+Tool loaded.
+
+---
+
+<task-notification>
+<task-id>a1349907aebc56ac8</task-id>
+<tool-use-id>toolu_01HFQgXd1gwqM11r6qvXytyx</tool-use-id>
+<status>completed</status>
+<summary>Agent "Find schedule execution logic" completed</summary>
+<result>
+
+Taras, here are the results organized by purpose.
+
+---
+
+## File Locations for Schedule Execution / Cron / Timer-Based Task Creation
+
+### Scheduler Core (the runner/polling loop)
+- `/Users/taras/Documents/code/agent-swarm/src/scheduler/scheduler.ts` - Main scheduler logic (exports `startScheduler`, `stopScheduler`, `runScheduleNow`, `calculateNextRun`)
+- `/Users/taras/Documents/code/agent-swarm/src/scheduler/index.ts` - Re-exports from `scheduler.ts`
+
+### Scheduler Startup / Lifecycle Integration
+- `/Users/taras/Documents/code/agent-swarm/src/http/index.ts` - Dynamically imports and calls `startScheduler` (line 180) and `stopScheduler` (line 122) as part of HTTP server lifecycle
+
+### MCP Tools (schedule CRUD + manual trigger)
+- `/Users/taras/Documents/code/agent-swarm/src/tools/schedules/index.ts` - Barrel export for all schedule tools
+- `/Users/taras/Documents/code/agent-swarm/src/tools/schedules/create-schedule.ts` - `create-schedule` MCP tool (imports `calculateNextRun`)
+- `/Users/taras/Documents/code/agent-swarm/src/tools/schedules/update-schedule.ts` - `update-schedule` MCP tool (imports `calculateNextRun`)
+- `/Users/taras/Documents/code/agent-swarm/src/tools/schedules/delete-schedule.ts` - `delete-schedule` MCP tool
+- `/Users/taras/Documents/code/agent-swarm/src/tools/schedules/list-schedules.ts` - `list-schedules` MCP tool
+- `/Users/taras/Documents/code/agent-swarm/src/tools/schedules/run-schedule-now.ts` - `run-schedule-now` MCP tool (imports `runScheduleNow`)
+- `/Users/taras/Documents/code/agent-swarm/src/tools/tool-config.ts` - Tool configuration (references schedule tools)
+
+### MCP Tool Registration
+- `/Users/taras/Documents/code/agent-swarm/src/server.ts` - Imports schedule tool registrations from `./tools/schedules` (line 47)
+
+### HTTP API Routes
+- `/Users/taras/Documents/code/agent-swarm/src/http/schedules.ts` - HTTP route handler for schedules API (imports `calculateNextRun`)
+
+### Database Layer
+- `/Users/taras/Documents/code/agent-swarm/src/be/db.ts` - Contains schedule-related query functions (53 occurrences of "schedule")
+- `/Users/taras/Documents/code/agent-swarm/src/be/migrations/001_initial.sql` - Schema definition for schedules table (7 occurrences of "schedule")
+
+### Type Definitions
+- `/Users/taras/Documents/code/agent-swarm/src/types.ts` - Schedule-related type definitions (6 occurrences of "schedule")
+
+### Test Files
+- `/Users/taras/Documents/code/agent-swarm/src/scheduler/scheduler.test.ts` - Unit tests for `calculateNextRun`
+- `/Users/taras/Documents/code/agent-swarm/src/tests/scheduler-backoff.test.ts` - Scheduler backoff behavior tests
+- `/Users/taras/Documents/code/agent-swarm/src/tests/scheduled-tasks.test.ts` - Scheduled task creation tests (imports `calculateNextRun`, `runScheduleNow`)
+- `/Users/taras/Documents/code/agent-swarm/src/tests/scheduled-tasks-api.test.ts` - API-level schedule tests
+- `/Users/taras/Documents/code/agent-swarm/src/tests/model-control.test.ts` - Tests model propagation from schedule to task (imports `runScheduleNow`)
+- `/Users/taras/Documents/code/agent-swarm/src/tests/http-api-integration.test.ts` - HTTP integration tests (references schedules)
+
+### Dashboard UI (new-ui)
+- `/Users/taras/Documents/code/agent-swarm/new-ui/src/pages/schedules/page.tsx` - Schedules list page
+- `/Users/taras/Documents/code/agent-swarm/new-ui/src/pages/schedules/[id]/page.tsx` - Individual schedule detail page
+- `/Users/taras/Documents/code/agent-swarm/new-ui/src/api/hooks/use-schedules.ts` - React hooks for schedule API calls
+- `/Users/taras/Documents/code/agent-swarm/new-ui/src/api/hooks/use-tasks.ts` - Task hooks (references schedules)
+- `/Users/taras/Documents/code/agent-swarm/new-ui/src/api/hooks/index.ts` - Hook barrel exports
+- `/Users/taras/Documents/code/agent-swarm/new-ui/src/api/types.ts` - API type definitions for schedules
+- `/Users/taras/Documents/code/agent-swarm/new-ui/src/api/client.ts` - API client (schedule endpoints)
+- `/Users/taras/Documents/code/agent-swarm/new-ui/src/app/router.tsx` - Route definitions for schedule pages
+- `/Users/taras/Documents/code/agent-swarm/new-ui/src/components/layout/app-sidebar.tsx` - Sidebar navigation (schedules link)
+- `/Users/taras/Documents/code/agent-swarm/new-ui/src/components/layout/breadcrumbs.tsx` - Breadcrumb config for schedules
+- `/Users/taras/Documents/code/agent-swarm/new-ui/src/components/shared/command-menu.tsx` - Command palette (schedule navigation)
+- `/Users/taras/Documents/code/agent-swarm/new-ui/src/hooks/use-keyboard-shortcuts.ts` - Keyboard shortcuts (schedule navigation)
+- `/Users/taras/Documents/code/agent-swarm/new-ui/src/pages/tasks/page.tsx` - Tasks page (references schedule)
+
+### Documentation
+- `/Users/taras/Documents/code/agent-swarm/docs-site/content/docs/concepts/scheduling.mdx` - Scheduling concept documentation
+- `/Users/taras/Documents/code/agent-swarm/docs-site/content/docs/concepts/task-lifecycle.mdx` - Task lifecycle docs (references schedules)
+- `/Users/taras/Documents/code/agent-swarm/docs-site/content/docs/reference/mcp-tools.mdx` - MCP tools reference (schedule tools)
+- `/Users/taras/Documents/code/agent-swarm/docs-site/content/docs/reference/environment-variables.mdx` - Env vars reference (schedule-related)
+- `/Users/taras/Documents/code/agent-swarm/docs-site/content/docs/architecture/overview.mdx` - Architecture overview (references scheduler)
+- `/Users/taras/Documents/code/agent-swarm/docs-site/content/docs/index.mdx` - Docs index
+- `/Users/taras/Documents/code/agent-swarm/MCP.md` - MCP tools reference
+- `/Users/taras/Documents/code/agent-swarm/README.md` - Project readme
+- `/Users/taras/Documents/code/agent-swarm/CHANGELOG.md` - Changelog entries for schedule features
+
+### Configuration
+- `/Users/taras/Documents/code/agent-swarm/.env.example` - Environment variable template (schedule-related vars)
+- `/Users/taras/Documents/code/agent-swarm/docs/ENVS.md` - Environment variable documentation
+
+### Historical Plans / Research (thoughts/)
+- `/Users/taras/Documents/code/agent-swarm/thoughts/shared/research/2026-01-15-scheduled-tasks.md` - Original scheduled tasks research
+- `/Users/taras/Documents/code/agent-swarm/thoughts/shared/plans/2026-01-15-scheduled-tasks-implementation.md` - Implementation plan for scheduled tasks
+
+### Slack Integration
+- `/Users/taras/Documents/code/agent-swarm/src/slack/router.ts` - Slack router (references schedules)
+- `/Users/taras/Documents/code/agent-swarm/src/slack/watcher.ts` - Slack watcher (references schedules)
+
+### Related Directories Summary
+- `src/scheduler/` - 3 files (core scheduler logic + test)
+- `src/tools/schedules/` - 6 files (MCP tool definitions)
+- `new-ui/src/pages/schedules/` - 2 files (UI pages)</result>
+<usage><total_tokens>20362</total_tokens><tool_uses>10</tool_uses><duration_ms>50334</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-Documents-code-agent-swarm/tasks/a1349907aebc56ac8.output
+
+---
+
+Tool loaded.
+
+---
+
+<task-notification>
+<task-id>a49749a59e65757a9</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<status>completed</status>
+<summary>Agent "Research schedules system" completed</summary>
+<result>
+
+Now I have all the pieces. Here is the comprehensive analysis.
+
+---
+
+## Analysis: Schedules Feature
+
+### Overview
+
+The schedules feature provides a cron/interval-based task automation system. A "schedule" is a persistent definition that, when due, automatically creates agent tasks from a template. The system supports cron expressions (via `cron-parser`), fixed-interval milliseconds, error backoff with auto-disable, downtime recovery, and manual ad-hoc runs. Schedules are exposed through five MCP tools, a REST API, and a background polling loop.
+
+### Entry Points
+
+Three distinct access layers exist:
+
+1. **MCP Tools** -- registered at `/Users/taras/Documents/code/agent-swarm/src/server.ts:163-168` behind the `scheduling` capability gate
+2. **HTTP REST API** -- routed at `/Users/taras/Documents/code/agent-swarm/src/http/index.ts:97` via `handleSchedules()`
+3. **Background Scheduler** -- started at `/Users/taras/Documents/code/agent-swarm/src/http/index.ts:179-182` behind the same `scheduling` capability gate
+
+---
+
+### 1. Database Schema
+
+**File:** `/Users/taras/Documents/code/agent-swarm/src/be/migrations/001_initial.sql:216-239`
+
+The `scheduled_tasks` table has these columns:
+
+| Column | Type | Default | Constraint |
+|---|---|---|---|
+| `id` | TEXT | (none) | PRIMARY KEY |
+| `name` | TEXT | (none) | NOT NULL, UNIQUE |
+| `description` | TEXT | (none) | nullable |
+| `cronExpression` | TEXT | (none) | nullable |
+| `intervalMs` | INTEGER | (none) | nullable |
+| `taskTemplate` | TEXT | (none) | NOT NULL |
+| `taskType` | TEXT | (none) | nullable |
+| `tags` | TEXT | `'[]'` | JSON array string |
+| `priority` | INTEGER | `50` | |
+| `targetAgentId` | TEXT | (none) | nullable |
+| `enabled` | INTEGER | `1` | boolean as int |
+| `lastRunAt` | TEXT | (none) | nullable ISO datetime |
+| `nextRunAt` | TEXT | (none) | nullable ISO datetime |
+| `createdByAgentId` | TEXT | (none) | nullable |
+| `timezone` | TEXT | `'UTC'` | |
+| `consecutiveErrors` | INTEGER | `0` | |
+| `lastErrorAt` | TEXT | (none) | nullable |
+| `lastErrorMessage` | TEXT | (none) | nullable |
+| `model` | TEXT | (none) | nullable; "haiku"/"sonnet"/"opus" |
+| `createdAt` | TEXT | (none) | NOT NULL |
+| `lastUpdatedAt` | TEXT | (none) | NOT NULL |
+
+**Table-level CHECK constraint** at line 238: `CHECK (cronExpression IS NOT NULL OR intervalMs IS NOT NULL)` -- at least one timing mechanism is required.
+
+**Indexes** at lines 365-366:
+- `idx_scheduled_tasks_enabled` on `enabled`
+- `idx_scheduled_tasks_nextRunAt` on `nextRunAt`
+
+**Relationship to tasks:** The `agent_tasks` table has a `scheduleId TEXT` column (line 103) and an index `idx_agent_tasks_schedule_id` (line 333). When a schedule fires, the created task's `scheduleId` is set to the schedule's `id`, and its `source` is set to `'schedule'` (one of the valid CHECK values at line 76).
+
+---
+
+### 2. Type Definitions
+
+**File:** `/Users/taras/Documents/code/agent-swarm/src/types.ts:356-384`
+
+`ScheduledTaskSchema` is a Zod object with a `.refine()` that enforces `cronExpression || intervalMs`. The derived type `ScheduledTask` is used throughout. The `AgentTaskSchema` at line 131 includes an optional `scheduleId` field for linking tasks back to their originating schedule.
+
+The `AgentTaskSourceSchema` at line 63 includes `"schedule"` as a valid source value.
+
+---
+
+### 3. Database Query Functions
+
+**File:** `/Users/taras/Documents/code/agent-swarm/src/be/db.ts`
+
+#### Row-to-domain mapping (`db.ts:3914-3938`)
+`rowToScheduledTask()` converts SQLite row data to the `ScheduledTask` type. Key transformations: `enabled` integer to boolean (line 3926), `tags` JSON string to array (line 3923), nullable fields to `undefined`, and `model` cast to the union type (line 3934).
+
+#### CRUD functions:
+
+- **`getScheduledTasks(filters?)`** (lines 3945-3964) -- queries with optional `enabled` (boolean-to-int) and `name` (LIKE partial match) filters, ordered by `name ASC`.
+
+- **`getScheduledTaskById(id)`** (lines 3967-3971) -- single lookup by primary key.
+
+- **`getScheduledTaskByName(name)`** (lines 3974-3978) -- single lookup by exact name (the `name` column is UNIQUE).
+
+- **`createScheduledTask(data)`** (lines 3998-4031) -- generates a UUID, sets timestamps, inserts with `RETURNING *`, and maps back through `rowToScheduledTask()`. Tags are JSON-stringified (line 4018), enabled defaults to `1` if not explicitly false (line 4021).
+
+- **`updateScheduledTask(id, data)`** (lines 4055-4146) -- dynamically builds a SET clause from only the provided fields. Always appends `lastUpdatedAt` (line 4135-4136). Uses `RETURNING *` for the updated row. If no fields are provided, returns the existing record unchanged (line 4131-4132).
+
+- **`deleteScheduledTask(id)`** (lines 4149-4151) -- returns `true` if `changes > 0`.
+
+- **`getDueScheduledTasks()`** (lines 4158-4167) -- the critical query for the scheduler loop. Selects rows where `enabled = 1 AND nextRunAt IS NOT NULL AND nextRunAt <= ?` (current ISO timestamp), ordered by `nextRunAt ASC`.
+
+#### Task creation with schedule linking (`db.ts:1686-1741`)
+`createTaskExtended()` accepts a `scheduleId` in its options (line 1648) and inserts it into the `agent_tasks` row (line 1738). The task's `source` is set to `"schedule"` by the caller. Tasks can be filtered by `scheduleId` via `getAllTasks()` (lines 995-997) and `countTasks()` (lines 1076-1078).
+
+---
+
+### 4. Scheduler Engine (Polling Loop)
+
+**File:** `/Users/taras/Documents/code/agent-swarm/src/scheduler/scheduler.ts`
+
+#### Startup (`startScheduler`, lines 182-196)
+Called from `/Users/taras/Documents/code/agent-swarm/src/http/index.ts:180-182` when the `scheduling` capability is enabled. Default polling interval is 10 seconds, overridable via `SCHEDULER_INTERVAL_MS` env var. On startup:
+1. Immediately calls `recoverMissedSchedules()` (line 191)
+2. Then calls `processSchedules()` once
+3. Sets up a `setInterval` to call `processSchedules()` every `intervalMs`
+
+#### Downtime recovery (`recoverMissedSchedules`, lines 19-58)
+Fetches all due schedules via `getDueScheduledTasks()`. For each schedule where `nextRunAt` was missed by more than 15 seconds (line 26, filters out normal timing jitter), it fires exactly ONE catch-up task. The created task gets an extra `"recovered"` tag (line 38). After creating the task, it recalculates `nextRunAt` and updates `lastRunAt`. Everything runs in a SQLite transaction (lines 34-52).
+
+#### Normal execution (`processSchedules` / `executeSchedule`, lines 201-218, 107-176)
+`processSchedules()` uses an `isProcessing` mutex flag (line 203) to prevent overlapping runs. It fetches all due schedules and iterates through them sequentially.
+
+`executeSchedule()` for each due schedule:
+1. Wraps task creation + schedule update in a SQLite transaction (lines 109-135)
+2. Calls `createTaskExtended()` with the schedule's `taskTemplate` as the task description, plus metadata: `creatorAgentId`, `taskType`, `tags` (appending `"scheduled"` and `"schedule:<name>"`), `priority`, `agentId` (from `targetAgentId`), `model`, `scheduleId`, and `source: "schedule"` (lines 112-121)
+3. Calculates the next run time via `calculateNextRun()` (line 123)
+4. Updates the schedule: `lastRunAt`, `nextRunAt`, and resets error tracking (`consecutiveErrors: 0`, `lastErrorAt: null`, `lastErrorMessage: null`) (lines 124-132)
+
+#### Error handling with exponential backoff (lines 87-175)
+On failure, the error count increments. The backoff table (lines 88-94) is: 1min, 5min, 15min, 30min, 1hr (cap). `getBackoffMs()` (lines 98-101) uses the error count as an index into this array, clamping at the last entry.
+
+If `consecutiveErrors` reaches `MAX_CONSECUTIVE_ERRORS` (5, line 96), the schedule is auto-disabled (`enabled = false`, lines 163-167). Otherwise, `nextRunAt` is pushed forward by the backoff duration (lines 169-171). The error message is truncated to 500 characters (line 159).
+
+#### Next-run calculation (`calculateNextRun`, lines 66-85)
+- If `cronExpression` is set: uses `CronExpressionParser.parse()` from the `cron-parser` library with the schedule's timezone, calls `.next()` to get the next occurrence, returns its ISO string.
+- If `intervalMs` is set: adds the interval to `fromTime` and returns the result as ISO string.
+- Throws if neither is set.
+
+#### Manual run (`runScheduleNow`, lines 237-272)
+Creates a task identically to normal execution but with an additional `"manual-run"` tag (line 254). Critically, it only updates `lastRunAt` -- it does NOT update `nextRunAt` (lines 262-266), so the regular schedule cadence is preserved.
+
+#### Shutdown (`stopScheduler`, lines 223-230)
+Clears the interval and resets the `isProcessing` flag.
+
+---
+
+### 5. MCP Tools
+
+**File:** `/Users/taras/Documents/code/agent-swarm/src/tools/schedules/`
+
+All five tools are registered on the MCP server at `/Users/taras/Documents/code/agent-swarm/src/server.ts:163-168` behind `hasCapability("scheduling")`.
+
+#### `create-schedule` (`create-schedule.ts`)
+- Requires `X-Agent-ID` header (line 115)
+- Validates that either `cronExpression` or `intervalMs` is provided (line 126)
+- Validates cron syntax via `CronExpressionParser.parse()` (lines 139-152)
+- Checks name uniqueness via `getScheduledTaskByName()` (lines 155-164)
+- Validates `targetAgentId` exists via `getAgentById()` (lines 167-178)
+- Calculates initial `nextRunAt` if enabled (lines 182-189)
+- Sets `createdByAgentId` to the calling agent's ID (line 204)
+
+#### `update-schedule` (`update-schedule.ts`)
+- Finds schedule by either `scheduleId` or `name` (lines 100-104)
+- **Authorization check** at lines 117-129: only the schedule creator or a lead agent can update
+- Recalculates `nextRunAt` when timing fields change or when re-enabling a disabled schedule (lines 195-211)
+- When disabling, clears `nextRunAt` (lines 208-210)
+
+#### `delete-schedule` (`delete-schedule.ts`)
+- Finds by `scheduleId` or `name` (lines 58-62)
+- **Authorization check** at lines 74-87: same creator-or-lead policy
+- Annotation: `destructiveHint: true` (line 18)
+
+#### `list-schedules` (`list-schedules.ts`)
+- Accepts optional `enabled` and `name` filters (lines 16-18)
+- Annotation: `readOnlyHint: true` (line 13)
+- Returns both text-formatted list and structured content with count
+
+#### `run-schedule-now` (`run-schedule-now.ts`)
+- Finds by `scheduleId` or `name` (lines 54-58)
+- Rejects disabled schedules (lines 70-83)
+- Delegates to `runScheduleNow()` from the scheduler module (line 86)
+- Re-fetches the schedule to return updated `lastRunAt` (line 89)
+
+---
+
+### 6. HTTP REST API
+
+**File:** `/Users/taras/Documents/code/agent-swarm/src/http/schedules.ts`
+
+Routed from `/Users/taras/Documents/code/agent-swarm/src/http/index.ts:97`.
+
+| Method | Path | Handler lines | Description |
+|---|---|---|---|
+| `POST` | `/api/schedules` | 24-110 | Create schedule |
+| `POST` | `/api/schedules/:id/run` | 113-161 | Manual run (returns both schedule and created task) |
+| `GET` | `/api/schedules/:id` | 164-177 | Get single schedule |
+| `PUT` | `/api/schedules/:id` | 180-249 | Update schedule |
+| `DELETE` | `/api/schedules/:id` | 253-266 | Delete schedule |
+
+The HTTP API has the same validation logic as the MCP tools (cron syntax, name uniqueness, target agent existence) but does NOT enforce creator-or-lead authorization -- that check only exists in the MCP tools.
+
+Notable difference in `POST /api/schedules/:id/run` (line 132-150): unlike the MCP tool which delegates to `runScheduleNow()`, the HTTP handler implements the task creation inline in a transaction and returns both the updated schedule AND the created task object in the response body (`{ schedule, task }`).
+
+The `PUT` handler (lines 226-244) recalculates `nextRunAt` when: (a) timing fields change, (b) a disabled schedule is re-enabled. When disabling, it sets `nextRunAt` to `null`.
+
+---
+
+### 7. Capability Gating
+
+**File:** `/Users/taras/Documents/code/agent-swarm/src/server.ts:72-78`
+
+The `scheduling` capability is in `DEFAULT_CAPABILITIES` (line 72), so it is enabled by default. It can be controlled via the `CAPABILITIES` env var. When enabled:
+- MCP tools are registered (lines 163-168)
+- The scheduler polling loop starts on server boot (http/index.ts:179-182)
+- The scheduler is stopped on server shutdown (http/index.ts:121-123)
+
+Note: The HTTP REST API routes in `handleSchedules()` are NOT gated by the capability check -- they are always registered in the handler chain (http/index.ts:97). The capability gate only controls MCP tool registration and the background scheduler loop.
+
+---
+
+### Schedule Lifecycle Summary
+
+1. **Creation**: A schedule is created via MCP tool (`create-schedule`) or HTTP API (`POST /api/schedules`). The initial `nextRunAt` is calculated from the cron/interval if `enabled` is true. The `createdByAgentId` is set from the calling agent (MCP) or left null (HTTP, unless provided in body).
+
+2. **Polling**: Every 10 seconds (default), `processSchedules()` calls `getDueScheduledTasks()` which queries `WHERE enabled = 1 AND nextRunAt IS NOT NULL AND nextRunAt <= now`. Due schedules are executed sequentially.
+
+3. **Execution**: For each due schedule, a new `agent_tasks` row is created via `createTaskExtended()` with `source: "schedule"`, `scheduleId` linking back, and tags `["scheduled", "schedule:<name>"]`. The schedule's `lastRunAt` is updated and `nextRunAt` is recalculated.
+
+4. **Task pickup**: The created task enters the normal task pool with status `"unassigned"` (or `"pending"` if `targetAgentId` maps to `agentId`). Worker agents pick it up through the standard task assignment flow.
+
+5. **Error backoff**: If task creation fails, `consecutiveErrors` increments, `nextRunAt` is pushed forward by exponential backoff (1m/5m/15m/30m/1h). After 5 consecutive errors, the schedule is auto-disabled.
+
+6. **Recovery**: On server startup, `recoverMissedSchedules()` fires one catch-up task per missed schedule (with a `"recovered"` tag), skipping anything missed by less than 15 seconds.
+
+7. **Manual run**: Via `run-schedule-now` MCP tool or `POST /api/schedules/:id/run`, a task is created immediately without affecting `nextRunAt`.
+
+8. **Deletion**: Removes the `scheduled_tasks` row. Previously created `agent_tasks` rows retain their `scheduleId` reference (no foreign key constraint exists on `agent_tasks.scheduleId`).
+
+---
+
+### Key Files
+
+- `/Users/taras/Documents/code/agent-swarm/src/be/migrations/001_initial.sql` -- schema definition
+- `/Users/taras/Documents/code/agent-swarm/src/types.ts` -- `ScheduledTaskSchema` and `ScheduledTask` type
+- `/Users/taras/Documents/code/agent-swarm/src/be/db.ts` -- all CRUD + `getDueScheduledTasks()`
+- `/Users/taras/Documents/code/agent-swarm/src/scheduler/scheduler.ts` -- polling loop, execution, backoff, recovery
+- `/Users/taras/Documents/code/agent-swarm/src/scheduler/index.ts` -- re-exports
+- `/Users/taras/Documents/code/agent-swarm/src/http/schedules.ts` -- REST API handlers
+- `/Users/taras/Documents/code/agent-swarm/src/http/index.ts` -- scheduler start/stop on server lifecycle
+- `/Users/taras/Documents/code/agent-swarm/src/server.ts` -- MCP tool registration + capability gating
+- `/Users/taras/Documents/code/agent-swarm/src/tools/schedules/create-schedule.ts`
+- `/Users/taras/Documents/code/agent-swarm/src/tools/schedules/update-schedule.ts`
+- `/Users/taras/Documents/code/agent-swarm/src/tools/schedules/delete-schedule.ts`
+- `/Users/taras/Documents/code/agent-swarm/src/tools/schedules/list-schedules.ts`
+- `/Users/taras/Documents/code/agent-swarm/src/tools/schedules/run-schedule-now.ts`</result>
+<usage><total_tokens>51997</total_tokens><tool_uses>43</tool_uses><duration_ms>149898</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-Documents-code-agent-swarm/tasks/a49749a59e65757a9.output
+
+---
+
+# File Review
+
+Launch the file-review tool to add inline review comments to a markdown file.
+
+## CLI Flags
+
+| Flag | Description |
+|------|-------------|
+| `--bg` | Run in background mode (don't wait for app to close) |
+| `--silent` | Suppress comment output when app closes |
+| `--json` | Output comments as JSON when app closes (default: human-readable) |
+
+## Instructions
+
+When the user invokes `/file-review [path]`:
+
+### If no path provided
+
+Check for recently created or modified files in the current session that would benefit from review:
+- Plan files in `thoughts/shared/plans/`
+- Research documents in `thoughts/shared/research/`
+- Any markdown files created or significantly updated during the conversation
+
+Propose these files to the user:
+```
+I found these files from our session that might benefit from review:
+1. thoughts/shared/plans/2026-01-13-feature-plan.md (created today)
+2. thoughts/shared/research/2026-01-13-analysis.md (updated recently)
+
+Which would you like to review? Or provide a different path.
+```
+
+### If path provided
+
+1. **Verify the file exists** and is readable
+
+2. **Check if file-review is installed:**
+   ```bash
+   which file-review
+   ```
+
+   If not found, tell the user:
+   ```
+   The file-review tool is not installed. Install via Homebrew:
+
+   brew tap desplega-ai/tap && brew install file-review
+
+   Or invoke the `file-review:install` skill for manual installation from source.
+   ```
+
+3. **Launch the file-review GUI:**
+
+   **Default (foreground)** - no `--bg` flag:
+   ```bash
+   file-review "<absolute_path>" [--silent] [--json]
+   ```
+   Wait for the process to complete. When user quits the app, comments are printed to stdout (unless `--silent`). Continue to step 4.
+
+   **Background mode** - with `--bg` flag:
+   ```bash
+   file-review "<absolute_path>" [--silent] [--json] &
+   ```
+   Runs in background. Inform user and wait for them to confirm when done.
+
+4. **Inform the user:**
+   ```
+   I've opened file-review for <filename>.
+
+   Shortcuts: ⌘K (add comment), ⌘S (save), ⌘Q (quit), ⌘/ (help)
+   ```
+
+   If running in foreground: proceed to step 5 automatically when app closes.
+   If running in background: add "Let me know when you're done reviewing!"
+
+5. **After review is complete:**
+
+   When the app closes, it outputs review comments to stdout in this format:
+   ```
+   === Review Comments (N) ===
+
+   [abc123] Line 15 (inline):
+       "highlighted code"
+       → Comment text here
+
+   [def456] Lines 20-25 (line):
+       "multi-line"
+       "content"
+       → Another comment
+   ```
+
+   Or with `--json`:
+   ```json
+   [{"id": "abc123", "comment": "...", "type": "inline", "start_line": 15, "end_line": 15, "content": "..."}]
+   ```
+
+   - Present the comment output to the user
+   - Invoke the **file-review:process-review** skill: for each comment, use AskUserQuestion to offer options (Apply edit / Acknowledge / Skip)
+   - After addressing each comment, remove its markers from the file
+   - Show a final summary of changes made
+
+## Keyboard Shortcuts Reference
+
+| Shortcut | Action |
+|----------|--------|
+| ⌘K | Add comment to selection |
+| ⌘S | Save file |
+| ⌘Q | Quit application |
+| ⌘/ | Show all shortcuts |
+| ⌘T | Toggle theme (light/dark) |
+| ⌘⇧V | Toggle vim mode |
+| ⌘O | Open file |
+
+---
+
+Tool loaded.
+
+---
+
+Tool loaded.
