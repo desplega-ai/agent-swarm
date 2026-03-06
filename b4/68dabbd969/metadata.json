@@ -8,6 +8,7 @@
     "new-ui/src/api/types.ts",
     "new-ui/src/pages/schedules/[id]/page.tsx",
     "new-ui/src/pages/schedules/page.tsx",
+    "package.json",
     "src/be/db.ts",
     "src/be/migrations/001_initial.sql",
     "src/be/migrations/002_one_time_schedules.sql",
@@ -43,6 +44,13 @@
       "context": "/b4/68dabbd969/2/context.md",
       "content_hash": "/b4/68dabbd969/2/content_hash.txt",
       "prompt": "/b4/68dabbd969/2/prompt.txt"
+    },
+    {
+      "metadata": "/b4/68dabbd969/3/metadata.json",
+      "transcript": "/b4/68dabbd969/3/full.jsonl",
+      "context": "/b4/68dabbd969/3/context.md",
+      "content_hash": "/b4/68dabbd969/3/content_hash.txt",
+      "prompt": "/b4/68dabbd969/3/prompt.txt"
     }
   ],
   "token_usage": {
