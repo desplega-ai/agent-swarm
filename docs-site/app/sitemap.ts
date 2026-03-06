@@ -4,7 +4,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const baseUrl = "https://docs.agent-swarm.dev";
 
   const docPages = [
-    "",
     "/docs",
     "/docs/getting-started",
     "/docs/architecture/overview",
@@ -30,6 +29,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     url: `${baseUrl}${path}`,
     lastModified: new Date(),
     changeFrequency: "weekly" as const,
-    priority: path === "" || path === "/docs" ? 1 : 0.8,
+    priority: path === "/docs" ? 1 : 0.8,
   }));
 }

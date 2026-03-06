@@ -35,19 +35,19 @@ export function Navbar() {
 
         <div className="hidden md:flex items-center gap-6">
           <a
-            href="#features"
+            href="/#features"
             className="text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
           >
             Features
           </a>
           <a
-            href="#how-it-works"
+            href="/#how-it-works"
             className="text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
           >
             How It Works
           </a>
           <a
-            href="#architecture"
+            href="/#architecture"
             className="text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
           >
             Architecture
@@ -109,9 +109,9 @@ export function Navbar() {
             className="md:hidden overflow-hidden bg-white/95 backdrop-blur-xl border-b border-zinc-200"
           >
             <div className="px-6 py-4 flex flex-col gap-3">
-              <a href="#features" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Features</a>
-              <a href="#how-it-works" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">How It Works</a>
-              <a href="#architecture" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Architecture</a>
+              <a href="/#features" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Features</a>
+              <a href="/#how-it-works" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">How It Works</a>
+              <a href="/#architecture" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Architecture</a>
               <a href="/blog" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Blog</a>
               <a href="/examples" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Examples</a>
               <div className="h-px bg-zinc-200" />

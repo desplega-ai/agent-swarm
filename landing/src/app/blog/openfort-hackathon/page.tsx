@@ -421,9 +421,9 @@ const client = createX402Client({ signer });`}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 my-6">
               <div className="rounded-xl bg-zinc-50 border border-zinc-200 p-4">
-                <h4 className="text-[13px] font-semibold text-zinc-500 uppercase tracking-wider mb-3">
+                <h3 className="text-[13px] font-semibold text-zinc-500 uppercase tracking-wider mb-3">
                   Stack
-                </h4>
+                </h3>
                 <ul className="space-y-1.5">
                   {[
                     "Next.js 16",
@@ -442,9 +442,9 @@ const client = createX402Client({ signer });`}
                 </ul>
               </div>
               <div className="rounded-xl bg-zinc-50 border border-zinc-200 p-4">
-                <h4 className="text-[13px] font-semibold text-zinc-500 uppercase tracking-wider mb-3">
+                <h3 className="text-[13px] font-semibold text-zinc-500 uppercase tracking-wider mb-3">
                   Ghost Styles
-                </h4>
+                </h3>
                 <div className="flex flex-wrap gap-1.5">
                   {[
                     "Classic",
