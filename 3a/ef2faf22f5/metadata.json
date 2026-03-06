@@ -1,0 +1,31 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "3aef2faf22f5",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "package.json",
+    "src/agentmail/handlers.ts",
+    "src/agentmail/index.ts",
+    "src/http/webhooks.ts",
+    "src/tests/agentmail-filters.test.ts",
+    "src/tests/http-api-integration.test.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/3a/ef2faf22f5/0/metadata.json",
+      "transcript": "/3a/ef2faf22f5/0/full.jsonl",
+      "context": "/3a/ef2faf22f5/0/context.md",
+      "content_hash": "/3a/ef2faf22f5/0/content_hash.txt",
+      "prompt": "/3a/ef2faf22f5/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  }
+}
