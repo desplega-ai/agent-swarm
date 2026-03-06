@@ -1,0 +1,511 @@
+# Implement Plan
+
+A thin wrapper that invokes the `desplega:implementing` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse autonomy mode from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - If plan file has `autonomy:` in frontmatter, use that as default
+   - Otherwise, default to **Critical** (don't prompt - implementation is more straightforward)
+
+2. **ALWAYS invoke the `desplega:implementing` skill:**
+   - Pass the plan file path
+   - Pass the autonomy mode determined above
+   - Let the skill handle all implementation logic
+
+3. **If no plan path provided:**
+   - Respond with: "I need a plan file to proceed. Please provide the path to the plan you would like me to implement."
+
+## Example Usage
+
+```
+/implement-plan thoughts/<username|shared>/plans/2026-01-14-my-feature.md
+/implement-plan --autonomy=autopilot @plans/feature.md
+/implement-plan --autonomy=verbose @current-plan.md
+```
+
+
+ARGUMENTS: plans/2026-03-06-one-time-scheduled-tasks.md
+
+---
+
+Tool loaded.
+
+---
+
+Tool loaded.
+
+---
+
+Base directory for this skill: /Users/taras/.claude/plugins/cache/desplega-ai-toolbox/desplega/1.4.1/skills/implementing
+
+# Implementing
+
+You are implementing an approved technical plan, executing it phase by phase with verification at each step.
+
+## Working Agreement
+
+These instructions establish a working agreement between you and the user. The key principles are:
+
+1. **AskUserQuestion is your primary communication tool** - Whenever you need to ask the user anything (clarifications, preferences, decisions, confirmations), use the **AskUserQuestion tool**. Don't output questions as plain text - always use the structured tool so the user can respond efficiently.
+
+2. **Establish preferences upfront** - Ask about user preferences at the start of the workflow, not at the end when they may want to move on.
+
+3. **Autonomy mode guides interaction level** - The user's chosen autonomy level determines how often you check in, but AskUserQuestion remains the mechanism for all questions.
+
+### User Preferences
+
+Before starting implementation (unless autonomy is Autopilot), establish these preferences:
+
+**File Review Preference** - Check if the `file-review` plugin is available (look for `file-review:file-review` in available commands).
+
+If file-review plugin is installed, use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like to use file-review for inline feedback on code changes during implementation?" | 1. Yes, open file-review for significant changes (Recommended), 2. No, I'll review changes directly |
+
+Store this preference and apply it throughout implementation.
+
+## When to Use
+
+This skill activates when:
+- User invokes `/implement-plan` command
+- Another skill references `**REQUIRED SUB-SKILL:** Use desplega:implementing`
+- User asks to execute or implement an existing plan
+
+## Autonomy Mode
+
+Adapt your behavior based on the autonomy mode:
+
+| Mode | Behavior |
+|------|----------|
+| **Autopilot** | Execute all phases, pause only for manual verification or blockers |
+| **Critical** (Default) | Pause between phases for approval, ask when mismatches found |
+| **Verbose** | Check in frequently, confirm before each major change |
+
+The autonomy mode is passed by the invoking command. If not specified, default to **Critical**.
+
+## Initial Setup Questions
+
+After establishing user preferences, use **AskUserQuestion** to gather implementation-specific details:
+
+### 1. Branch/Worktree Setup
+
+First, check the current branch: `git branch --show-current`
+
+Then check if the `wts` plugin is available (look for `wts:wts` in available skills).
+
+**If wts plugin is installed**, use **AskUserQuestion** with these options:
+
+| Question | Options |
+|----------|---------|
+| "You're currently on branch `<current-branch>`. Where would you like to implement?" | 1. Continue on current branch, 2. Create a new branch, 3. Create a wts worktree |
+
+**If wts plugin is NOT installed**, use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "You're currently on branch `<current-branch>`. Where would you like to implement?" | 1. Continue on current branch, 2. Create a new branch |
+
+### 2. Commit Strategy
+
+Use **AskUserQuestion** with these options:
+
+| Question | Options |
+|----------|---------|
+| "How would you like to handle commits during implementation?" | 1. Commit after each phase (Recommended for complex plans), 2. Commit at the end (Single commit for all changes), 3. Let me decide as I go |
+
+If "Commit after each phase" is selected:
+- After completing each phase's verification, create a commit with message: `[Phase N] <phase name>`
+- Use the plan's phase descriptions for commit messages
+
+Store these preferences and apply them throughout the implementation.
+
+## Getting Started
+
+When given a plan path:
+1. Read the plan completely
+2. Check for existing checkmarks (`- [x]`)
+3. **Read files fully** - never use limit/offset parameters
+4. Think deeply about how the pieces fit together
+5. Create a todo list to track progress
+6. Start implementing if you understand what needs to be done
+
+If no plan path provided, ask for one.
+
+## Implementation Philosophy
+
+Plans are carefully designed, but reality can be messy. Your job is to:
+- Follow the plan's intent while adapting to what you find
+- Implement each phase fully before moving to the next
+- Verify your work makes sense in the broader codebase context
+- Update checkboxes in the plan as you complete sections
+
+When things don't match the plan exactly, think about why and communicate clearly.
+
+## Handling Mismatches
+
+If you encounter a mismatch (and autonomy mode is not Autopilot):
+- STOP and think deeply about why the plan can't be followed
+- Use **AskUserQuestion** to present the issue and get direction:
+
+| Question | Options |
+|----------|---------|
+| "Issue in Phase [N]: Expected [what the plan says], Found [actual situation]. Why this matters: [explanation]. How should I proceed?" | 1. Adapt plan to match reality, 2. Proceed as originally planned, 3. Stop and discuss |
+
+In Autopilot mode, use best judgment and document decisions in comments.
+
+## Verification Approach
+
+After implementing a phase:
+1. Run the success criteria checks (usually `make format` or folder-specific `Makefile`s)
+2. Fix any issues before proceeding
+3. Update progress in both the plan and your todos
+4. Check off completed items in the plan file using Edit
+
+### Pause for Human Verification (if not Autopilot or executing multiple phases)
+
+```
+Phase [N] Complete - Ready for Manual Verification
+
+Automated verification passed:
+- [List automated checks that passed]
+
+Please perform the manual verification steps listed in the plan:
+- [List manual verification items from the plan]
+
+Let me know when manual testing is complete so I can proceed to Phase [N+1].
+```
+
+If instructed to execute multiple phases consecutively, skip the pause until the last phase.
+
+Do not check off manual testing items until confirmed by the user.
+
+## If You Get Stuck
+
+When something isn't working as expected:
+1. Make sure you've read and understood all relevant code
+2. Consider if the codebase has evolved since the plan was written
+3. Present the mismatch clearly and ask for guidance (unless Autopilot)
+4. Use sub-tasks sparingly for targeted debugging
+
+## Resuming Work
+
+If the plan has existing checkmarks:
+- Trust that completed work is done
+- Pick up from the first unchecked item
+- Verify previous work only if something seems off
+
+Remember: You're implementing a solution, not just checking boxes. Keep the end goal in mind.
+
+
+ARGUMENTS: thoughts/taras/plans/2026-03-06-one-time-scheduled-tasks.md --autonomy=critical
+
+---
+
+Tool loaded.
+
+---
+
+Tool loaded.
+
+---
+
+Tool loaded.
+
+---
+
+Tool loaded.
+
+---
+
+<task-notification>
+<task-id>af9bdf11f87e6e852</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<status>completed</status>
+<summary>Agent "Read Phase 1 relevant files" completed</summary>
+<result>
+
+I now have all the information needed. Here is the full analysis.
+
+---
+
+## Analysis: Scheduled Tasks Implementation
+
+### Overview
+
+Scheduled tasks allow recurring agent task creation via cron expressions or fixed intervals. The system stores schedule definitions in a `scheduled_tasks` SQLite table, runs a 10-second polling loop to find due schedules, creates agent tasks from templates, and tracks error state with exponential backoff. Schedules are managed through three MCP tools: create, update, and list.
+
+### Relevant Files
+
+- `/Users/taras/Documents/code/agent-swarm/src/types.ts` -- Zod schema (lines 356-384)
+- `/Users/taras/Documents/code/agent-swarm/src/be/db.ts` -- DB types and CRUD functions (lines 3890-4168)
+- `/Users/taras/Documents/code/agent-swarm/src/be/migrations/001_initial.sql` -- Table DDL (lines 216-239), indexes (lines 364-366)
+- `/Users/taras/Documents/code/agent-swarm/src/scheduler/scheduler.ts` -- Scheduler engine (lines 1-273)
+- `/Users/taras/Documents/code/agent-swarm/src/tools/schedules/create-schedule.ts` -- MCP create tool (lines 1-237)
+- `/Users/taras/Documents/code/agent-swarm/src/tools/schedules/update-schedule.ts` -- MCP update tool (lines 1-253)
+- `/Users/taras/Documents/code/agent-swarm/src/tools/schedules/list-schedules.ts` -- MCP list tool (lines 1-107)
+
+---
+
+### 1. Schema and Type Definition
+
+#### SQL Table (`001_initial.sql:216-239`)
+
+```sql
+CREATE TABLE IF NOT EXISTS scheduled_tasks (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    ...
+    CHECK (cronExpression IS NOT NULL OR intervalMs IS NOT NULL)
+);
+```
+
+Columns:
+| Column | SQL Type | Default | Nullable |
+|---|---|---|---|
+| `id` | TEXT | (PK) | No |
+| `name` | TEXT, UNIQUE | -- | No |
+| `description` | TEXT | -- | Yes |
+| `cronExpression` | TEXT | -- | Yes |
+| `intervalMs` | INTEGER | -- | Yes |
+| `taskTemplate` | TEXT | -- | No |
+| `taskType` | TEXT | -- | Yes |
+| `tags` | TEXT | `'[]'` | Yes |
+| `priority` | INTEGER | `50` | Yes |
+| `targetAgentId` | TEXT | -- | Yes |
+| `enabled` | INTEGER | `1` | Yes |
+| `lastRunAt` | TEXT | -- | Yes |
+| `nextRunAt` | TEXT | -- | Yes |
+| `createdByAgentId` | TEXT | -- | Yes |
+| `timezone` | TEXT | `'UTC'` | Yes |
+| `consecutiveErrors` | INTEGER | `0` | Yes |
+| `lastErrorAt` | TEXT | -- | Yes |
+| `lastErrorMessage` | TEXT | -- | Yes |
+| `model` | TEXT | -- | Yes |
+| `createdAt` | TEXT | -- | No |
+| `lastUpdatedAt` | TEXT | -- | No |
+
+A CHECK constraint enforces that at least one of `cronExpression` or `intervalMs` is non-null.
+
+Two indexes exist (`001_initial.sql:365-366`): on `enabled` and on `nextRunAt`.
+
+#### Zod Schema (`types.ts:356-384`)
+
+`ScheduledTaskSchema` is a `z.object(...)` with a `.refine()` that mirrors the SQL CHECK constraint: either `cronExpression` or `intervalMs` must be truthy (`types.ts:380-382`).
+
+Key field types:
+- `enabled`: `z.boolean().default(true)` -- the Zod layer uses boolean; the DB stores it as integer 0/1.
+- `tags`: `z.array(z.string()).default([])` -- Zod uses an array; the DB stores JSON-serialized text.
+- `model`: `z.enum(["haiku", "sonnet", "opus"]).optional()` -- constrained enum.
+- `consecutiveErrors`: `z.number().int().min(0).default(0)` -- error tracking counter.
+
+The `ScheduledTask` TypeScript type is inferred from this schema at `types.ts:384`.
+
+#### DB Row Type (`db.ts:3890-3912`)
+
+`ScheduledTaskRow` is a raw SQLite row type where:
+- `enabled` is `number` (0 or 1)
+- `tags` is `string | null` (JSON string)
+- All optional fields are `| null`
+
+#### Row-to-Domain Mapper (`db.ts:3914-3938`)
+
+`rowToScheduledTask()` converts a `ScheduledTaskRow` into a `ScheduledTask`:
+- `null` values become `undefined` via `?? undefined`
+- `tags` is `JSON.parse()`'d from its string form (`db.ts:3923`)
+- `enabled` is converted from integer to boolean: `row.enabled === 1` (`db.ts:3926`)
+- `consecutiveErrors` defaults to `0` when null (`db.ts:3931`)
+- `model` is cast to the union type `"haiku" | "sonnet" | "opus" | null` (`db.ts:3934`)
+
+---
+
+### 2. CRUD Functions (db.ts)
+
+#### `createScheduledTask()` (`db.ts:3998-4032`)
+
+- Takes a `CreateScheduledTaskData` interface (`db.ts:3981-3996`), which has required fields `name` and `taskTemplate`, with everything else optional.
+- Generates a UUID via `crypto.randomUUID()` and sets `createdAt`/`lastUpdatedAt` to current ISO time.
+- Inserts with `RETURNING *` and maps the result through `rowToScheduledTask()`.
+- Defaults: `tags` to `[]` (serialized as JSON), `priority` to `50`, `enabled` to `1` (true unless explicitly `false`), `timezone` to `"UTC"`.
+
+#### `updateScheduledTask()` (`db.ts:4055-4147`)
+
+- Takes an `id` and `UpdateScheduledTaskData` (`db.ts:4034-4053`).
+- `UpdateScheduledTaskData` includes all fields from Create plus `lastRunAt`, `nextRunAt`, `consecutiveErrors`, `lastErrorAt`, `lastErrorMessage`, and `lastUpdatedAt`. Also allows `targetAgentId` and `model` to be `null` (for clearing).
+- Builds a dynamic SQL `SET` clause by checking each field for `!== undefined`.
+- `tags` are `JSON.stringify()`'d (`db.ts:4088`), `enabled` is converted to 0/1 (`db.ts:4100`).
+- Always appends `lastUpdatedAt` to the SET clause (`db.ts:4135`), defaulting to current time.
+- If no updates are provided, returns the existing record via `getScheduledTaskById()` (`db.ts:4131-4133`).
+- Uses `UPDATE ... RETURNING *` and maps through `rowToScheduledTask()`.
+
+#### `getScheduledTasks()` (`db.ts:3945-3964`)
+
+- Accepts optional `ScheduledTaskFilters` (`db.ts:3940-3943`): `enabled` (boolean) and `name` (string, partial match via `LIKE`).
+- Builds dynamic WHERE with `AND enabled = ?` and `AND name LIKE ?` (with `%` wildcards).
+- Orders by `name ASC`.
+
+#### `getScheduledTaskById()` (`db.ts:3967-3971`)
+
+Simple `SELECT * WHERE id = ?`, returns `ScheduledTask | null`.
+
+#### `getScheduledTaskByName()` (`db.ts:3974-3978`)
+
+Simple `SELECT * WHERE name = ?`, returns `ScheduledTask | null`. Exact match (not LIKE).
+
+#### `deleteScheduledTask()` (`db.ts:4149-4152`)
+
+`DELETE WHERE id = ?`, returns `boolean` based on `result.changes > 0`.
+
+#### `getDueScheduledTasks()` (`db.ts:4158-4168`)
+
+Selects all rows where `enabled = 1 AND nextRunAt IS NOT NULL AND nextRunAt <= ?` (current ISO timestamp), ordered by `nextRunAt ASC`. This is the query the scheduler polls on.
+
+---
+
+### 3. Scheduler Engine (`scheduler/scheduler.ts`)
+
+#### Module State (lines 11-12)
+
+Two module-level variables control the polling loop:
+- `schedulerInterval` -- the `setInterval` handle
+- `isProcessing` -- a mutex flag to prevent concurrent polling cycles
+
+#### `startScheduler()` (lines 182-196)
+
+- Guards against double-start.
+- Calls `recoverMissedSchedules()` first, then starts `processSchedules()`.
+- Sets up a repeating `setInterval` (default 10,000ms) that calls `processSchedules()`.
+
+#### `processSchedules()` (lines 201-218)
+
+- Checks the `isProcessing` mutex; returns immediately if already running.
+- Calls `getDueScheduledTasks()` to get all schedules with `nextRunAt <= now`.
+- Iterates and calls `executeSchedule()` for each, catching errors per-schedule.
+
+#### `executeSchedule()` (lines 107-176)
+
+On **success** (lines 108-138):
+- Runs in a DB transaction.
+- Creates an agent task via `createTaskExtended()` with: `taskTemplate` as the task description, `source: "schedule"`, tags `["scheduled", "schedule:<name>"]`, and passes through `taskType`, `priority`, `targetAgentId`, `model`, `scheduleId`, `createdByAgentId`.
+- Calculates next run via `calculateNextRun()`.
+- Updates the schedule: sets `lastRunAt`, `nextRunAt`, resets `consecutiveErrors` to 0, clears `lastErrorAt` and `lastErrorMessage`.
+
+On **failure** (lines 139-175):
+- Increments `consecutiveErrors`.
+- Truncates error message to 500 chars (`line 159`).
+- If errors reach `MAX_CONSECUTIVE_ERRORS` (5), auto-disables the schedule (`enabled = false`) at line 163-167.
+- Otherwise, applies exponential backoff to `nextRunAt` using the backoff table (lines 88-94): 1min, 5min, 15min, 30min, 1hr cap.
+
+#### `calculateNextRun()` (lines 66-85)
+
+- If `cronExpression` exists: parses with `cron-parser`'s `CronExpressionParser.parse()`, using the schedule's `timezone`, and returns `.next().toISOString()`.
+- If `intervalMs` exists: adds interval to `fromTime` and returns ISO string.
+- Throws if neither is set.
+
+#### `recoverMissedSchedules()` (lines 19-58)
+
+Called once at startup. For each due schedule:
+- Skips if `nextRunAt` is absent.
+- Skips if missed by less than 15 seconds (timing jitter threshold, line 26).
+- Creates ONE catch-up task with an extra `"recovered"` tag (line 38).
+- Calculates and sets the next run time.
+- Runs the create + update in a DB transaction.
+
+#### `runScheduleNow()` (lines 237-272)
+
+Manual trigger endpoint:
+- Looks up the schedule by ID; throws if not found or disabled.
+- Creates a task with an extra `"manual-run"` tag (line 254).
+- Updates `lastRunAt` only -- does NOT update `nextRunAt`, so the regular schedule continues unaffected (line 262-263).
+- Runs in a transaction.
+
+---
+
+### 4. MCP Tools
+
+#### `create-schedule` (`create-schedule.ts`)
+
+Input validation flow (lines 115-178):
+1. Requires `X-Agent-ID` header (line 115).
+2. Requires at least one of `cronExpression` or `intervalMs` (line 126).
+3. Validates cron syntax via `CronExpressionParser.parse()` (lines 139-152).
+4. Checks for duplicate `name` via `getScheduledTaskByName()` (lines 155-164).
+5. Validates `targetAgentId` exists via `getAgentById()` (lines 167-178).
+
+Then (lines 180-206):
+- Calculates initial `nextRunAt` using `calculateNextRun()` only if `enabled !== false`.
+- Calls `createScheduledTask()` with all fields plus `createdByAgentId` from the requesting agent.
+
+#### `update-schedule` (`update-schedule.ts`)
+
+Lookup (lines 100-104): Finds the schedule by `scheduleId` (UUID) or `name` (string), checked in that order.
+
+Authorization (lines 117-129): Only the schedule's `createdByAgentId` or any lead agent (`isLead === true`) can update.
+
+Validation (lines 131-175):
+- Validates new cron expression syntax.
+- Validates new `targetAgentId` if non-null.
+- Checks new name doesn't conflict with existing schedules.
+
+Next-run recalculation (lines 195-211): Recalculates `nextRunAt` if `cronExpression`, `intervalMs`, or `timezone` changes, OR if the schedule is being re-enabled (`enabled === true && !schedule.enabled`). When disabling, sets `nextRunAt` to `undefined`.
+
+#### `list-schedules` (`list-schedules.ts`)
+
+Accepts optional `enabled` (boolean) and `name` (string) filters (lines 16-18). Passes them to `getScheduledTasks()`. Returns both structured content (array of schedule objects) and a text summary with inline formatting (lines 67-74): `"- name (status) [schedule] next: timestamp"`.
+
+---
+
+### Data Flow: Schedule Execution Cycle
+
+1. **Creation**: MCP `create-schedule` tool validates input, calculates initial `nextRunAt`, calls `createScheduledTask()` in `db.ts` which inserts into `scheduled_tasks`.
+2. **Polling**: `startScheduler()` in `scheduler.ts` sets a 10s interval calling `processSchedules()`.
+3. **Due detection**: `getDueScheduledTasks()` queries `WHERE enabled = 1 AND nextRunAt <= now`.
+4. **Execution**: `executeSchedule()` creates an agent task via `createTaskExtended()` with `source: "schedule"` and `scheduleId` linking.
+5. **Advancement**: After task creation, `calculateNextRun()` computes the next occurrence and `updateScheduledTask()` persists it.
+6. **Error handling**: Failures increment `consecutiveErrors`, apply backoff delays, and auto-disable after 5 consecutive errors.
+7. **Recovery**: On startup, `recoverMissedSchedules()` fires one catch-up task per overdue schedule (missed by >15s).
+
+### Key Patterns
+
+- **Polling loop with mutex**: `isProcessing` flag at `scheduler.ts:12` prevents overlapping poll cycles.
+- **Transactional atomicity**: Task creation and schedule updates are wrapped in `getDb().transaction()` to ensure both succeed or both roll back (`scheduler.ts:109`, `scheduler.ts:247`).
+- **Exponential backoff**: Error backoff table at `scheduler.ts:88-94` with 5 tiers from 1min to 1hr cap.
+- **Circuit breaker**: Auto-disable after `MAX_CONSECUTIVE_ERRORS` (5) at `scheduler.ts:96,163`.
+- **Boolean/integer bridging**: `enabled` stored as SQLite integer 0/1, converted to boolean in `rowToScheduledTask()` and back in create/update functions.
+- **JSON-in-TEXT**: `tags` stored as JSON string in SQLite, parsed/serialized in the mapper and write functions.
+
+### Configuration
+
+- Scheduler polling interval: 10,000ms default, configurable via `startScheduler(intervalMs)` parameter (`scheduler.ts:182`).
+- Missed schedule jitter threshold: 15,000ms (`scheduler.ts:26`).
+- Max consecutive errors before auto-disable: 5 (`scheduler.ts:96`).
+- Backoff tiers: 1m, 5m, 15m, 30m, 1h (`scheduler.ts:88-94`).
+
+### Current Column Summary (all layers aligned)
+
+Every column defined in the SQL DDL has a corresponding field in `ScheduledTaskRow`, `rowToScheduledTask()`, the Zod `ScheduledTaskSchema`, `CreateScheduledTaskData`, and `UpdateScheduledTaskData`. There are no schema mismatches between the layers. The schedule type is purely recurring -- there is no concept of a one-time (non-repeating) schedule in the current implementation.</result>
+<usage><total_tokens>35206</total_tokens><tool_uses>15</tool_uses><duration_ms>103402</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-Documents-code-agent-swarm/tasks/af9bdf11f87e6e852.output
+
+---
+
+<task-notification>
+<task-id>b46785a2e</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-Documents-code-agent-swarm/tasks/b46785a2e.output</output-file>
+<status>completed</status>
+<summary>Background command "Start API server in background" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-Documents-code-agent-swarm/tasks/b46785a2e.output
+
+---
+
+did you perform manual e2es?
+
+---
+
+ok, bump tha version, commit the changes and push (disregard the workflow unstaged files!)
