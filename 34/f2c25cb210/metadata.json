@@ -1,0 +1,38 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "34f2c25cb210",
+  "strategy": "manual-commit",
+  "branch": "taras/build-swarm-automation-workflow-engine-with-nodes",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/server.ts",
+    "src/tests/tool-annotations.test.ts",
+    "src/tools/tool-config.ts",
+    "src/tools/workflows/create-workflow.ts",
+    "src/tools/workflows/delete-workflow.ts",
+    "src/tools/workflows/get-workflow-run.ts",
+    "src/tools/workflows/get-workflow.ts",
+    "src/tools/workflows/index.ts",
+    "src/tools/workflows/list-workflow-runs.ts",
+    "src/tools/workflows/list-workflows.ts",
+    "src/tools/workflows/retry-workflow-run.ts",
+    "src/tools/workflows/trigger-workflow.ts",
+    "src/tools/workflows/update-workflow.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/34/f2c25cb210/0/metadata.json",
+      "transcript": "/34/f2c25cb210/0/full.jsonl",
+      "context": "/34/f2c25cb210/0/context.md",
+      "content_hash": "/34/f2c25cb210/0/content_hash.txt",
+      "prompt": "/34/f2c25cb210/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 35,
+    "cache_creation_tokens": 44405,
+    "cache_read_tokens": 760668,
+    "output_tokens": 6720,
+    "api_call_count": 23
+  }
+}
