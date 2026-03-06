@@ -179,7 +179,7 @@ describe("Heartbeat Triage", () => {
   // ==========================================================================
 
   describe("Code-Level Triage", () => {
-    test("detects stalled tasks", () => {
+    test("detects stalled tasks", async () => {
       const agent = createAgent({ name: "stall-worker", isLead: false, status: "busy" });
       const task = createTaskExtended("Stalled task", { agentId: agent.id });
       startTask(task.id);
@@ -188,16 +188,16 @@ describe("Heartbeat Triage", () => {
       const oldTime = new Date(Date.now() - 45 * 60 * 1000).toISOString();
       getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
 
-      const findings = codeLevelTriage();
+      const findings = await codeLevelTriage();
       expect(findings.stalledTasks.length).toBe(1);
       expect(findings.escalationNeeded).toBe(true);
     });
 
-    test("auto-assigns pool tasks to idle workers", () => {
+    test("auto-assigns pool tasks to idle workers", async () => {
       const worker = createAgent({ name: "idle-worker", isLead: false, status: "idle" });
       createTaskExtended("Pool task 1");
 
-      const findings = codeLevelTriage();
+      const findings = await codeLevelTriage();
       expect(findings.autoAssigned.length).toBe(1);
       expect(findings.autoAssigned[0]!.agentId).toBe(worker.id);
 
@@ -207,23 +207,23 @@ describe("Heartbeat Triage", () => {
       expect(task?.agentId).toBe(worker.id);
     });
 
-    test("auto-assignment skips lead agents", () => {
+    test("auto-assignment skips lead agents", async () => {
       createAgent({ name: "idle-lead", isLead: true, status: "idle" });
       createTaskExtended("Pool task");
 
-      const findings = codeLevelTriage();
+      const findings = await codeLevelTriage();
       expect(findings.autoAssigned.length).toBe(0);
     });
 
-    test("auto-assignment skips offline workers", () => {
+    test("auto-assignment skips offline workers", async () => {
       createAgent({ name: "offline-worker", isLead: false, status: "offline" });
       createTaskExtended("Pool task");
 
-      const findings = codeLevelTriage();
+      const findings = await codeLevelTriage();
       expect(findings.autoAssigned.length).toBe(0);
     });
 
-    test("auto-assignment respects worker capacity", () => {
+    test("auto-assignment respects worker capacity", async () => {
       const worker = createAgent({ name: "full-worker", isLead: false, status: "idle" });
       // maxTasks defaults to 1 — fill capacity
       const existingTask = createTaskExtended("Existing task", { agentId: worker.id });
@@ -231,36 +231,36 @@ describe("Heartbeat Triage", () => {
 
       createTaskExtended("Pool task");
 
-      const findings = codeLevelTriage();
+      const findings = await codeLevelTriage();
       expect(findings.autoAssigned.length).toBe(0);
     });
 
-    test("fixes worker with busy status but no active tasks", () => {
+    test("fixes worker with busy status but no active tasks", async () => {
       createAgent({ name: "ghost-busy", isLead: false, status: "busy" });
 
-      const findings = codeLevelTriage();
+      const findings = await codeLevelTriage();
       expect(findings.workerHealthFixes.length).toBe(1);
       expect(findings.workerHealthFixes[0]!.oldStatus).toBe("busy");
       expect(findings.workerHealthFixes[0]!.newStatus).toBe("idle");
     });
 
-    test("fixes worker with idle status but active tasks", () => {
+    test("fixes worker with idle status but active tasks", async () => {
       const worker = createAgent({ name: "ghost-idle", isLead: false, status: "idle" });
       const task = createTaskExtended("Active task", { agentId: worker.id });
       startTask(task.id);
       // Force status back to idle (simulate race)
       updateAgentStatus(worker.id, "idle");
 
-      const findings = codeLevelTriage();
+      const findings = await codeLevelTriage();
       expect(
         findings.workerHealthFixes.some((f) => f.oldStatus === "idle" && f.newStatus === "busy"),
       ).toBe(true);
     });
 
-    test("no escalation when no stalled tasks", () => {
+    test("no escalation when no stalled tasks", async () => {
       createAgent({ name: "healthy-worker", isLead: false, status: "idle" });
 
-      const findings = codeLevelTriage();
+      const findings = await codeLevelTriage();
       expect(findings.escalationNeeded).toBe(false);
     });
   });
@@ -270,18 +270,18 @@ describe("Heartbeat Triage", () => {
   // ==========================================================================
 
   describe("runHeartbeatSweep", () => {
-    test("bails early when gate returns false (empty state)", () => {
+    test("bails early when gate returns false (empty state)", async () => {
       // No tasks, no agents — gate should bail
       // Should not throw
-      runHeartbeatSweep();
+      await runHeartbeatSweep();
     });
 
-    test("runs full triage when gate detects issues", () => {
+    test("runs full triage when gate detects issues", async () => {
       const worker = createAgent({ name: "idle-worker", isLead: false, status: "idle" });
       createAgent({ name: "lead", isLead: true, status: "idle" });
       createTaskExtended("Pool task");
 
-      runHeartbeatSweep();
+      await runHeartbeatSweep();
 
       // Verify task was auto-assigned
       const tasks = getDb()
@@ -290,7 +290,7 @@ describe("Heartbeat Triage", () => {
       expect(tasks.length).toBe(1);
     });
 
-    test("creates triage task for lead when stalled tasks found", () => {
+    test("creates triage task for lead when stalled tasks found", async () => {
       const lead = createAgent({ name: "triage-lead", isLead: true, status: "idle" });
       const worker = createAgent({ name: "stall-worker", isLead: false, status: "busy" });
       const task = createTaskExtended("Stalled task", { agentId: worker.id });
@@ -300,7 +300,7 @@ describe("Heartbeat Triage", () => {
       const oldTime = new Date(Date.now() - 45 * 60 * 1000).toISOString();
       getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
 
-      runHeartbeatSweep();
+      await runHeartbeatSweep();
 
       // Verify triage task was created for lead
       const triageTasks = getDb()
@@ -310,7 +310,7 @@ describe("Heartbeat Triage", () => {
       expect(triageTasks[0]!.task).toContain("Stalled Tasks");
     });
 
-    test("does not create duplicate triage tasks for same stalled set", () => {
+    test("does not create duplicate triage tasks for same stalled set", async () => {
       const lead = createAgent({ name: "triage-lead", isLead: true, status: "idle" });
       const worker = createAgent({ name: "stall-worker", isLead: false, status: "busy" });
       const task = createTaskExtended("Stalled task", { agentId: worker.id });
@@ -319,8 +319,8 @@ describe("Heartbeat Triage", () => {
       const oldTime = new Date(Date.now() - 45 * 60 * 1000).toISOString();
       getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
 
-      runHeartbeatSweep();
-      runHeartbeatSweep();
+      await runHeartbeatSweep();
+      await runHeartbeatSweep();
 
       const triageTasks = getDb()
         .query("SELECT id FROM agent_tasks WHERE taskType = 'heartbeat' AND agentId = ?")
@@ -328,7 +328,7 @@ describe("Heartbeat Triage", () => {
       expect(triageTasks.length).toBe(1);
     });
 
-    test("cleans stale sessions even when preflight gate bails", () => {
+    test("cleans stale sessions even when preflight gate bails", async () => {
       const worker = createAgent({ name: "worker", isLead: false, status: "offline" });
       const staleTime = new Date(Date.now() - 40 * 60 * 1000).toISOString();
       getDb().run(
@@ -337,7 +337,7 @@ describe("Heartbeat Triage", () => {
         ["test-stale-session", worker.id, staleTime, staleTime],
       );
 
-      runHeartbeatSweep();
+      await runHeartbeatSweep();
 
       const remaining = getDb()
         .query("SELECT COUNT(*) as count FROM active_sessions WHERE id = ?")

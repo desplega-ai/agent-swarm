@@ -5970,3 +5970,33 @@ export function getWorkflowRunStepsByRunId(runId: string): WorkflowRunStep[] {
     .all(runId)
     .map(rowToWorkflowRunStep);
 }
+
+// --- Stuck Workflow Run Recovery ---
+
+export interface StuckWorkflowRun {
+  runId: string;
+  stepId: string;
+  nodeId: string;
+  taskStatus: string;
+  taskOutput: string | null;
+  workflowId: string;
+}
+
+export function getStuckWorkflowRuns(): StuckWorkflowRun[] {
+  return getDb()
+    .prepare<StuckWorkflowRun, []>(
+      `SELECT
+        wr.id as runId,
+        wrs.id as stepId,
+        wrs.nodeId,
+        at.status as taskStatus,
+        at.output as taskOutput,
+        wr.workflowId
+      FROM workflow_runs wr
+      JOIN workflow_run_steps wrs ON wrs.runId = wr.id AND wrs.status = 'waiting'
+      JOIN agent_tasks at ON at.workflowRunStepId = wrs.id
+      WHERE wr.status = 'waiting'
+        AND at.status IN ('completed', 'failed', 'cancelled')`,
+    )
+    .all();
+}
