@@ -113,36 +113,25 @@ fi
 
 # Create .mcp.json in /workspace (project-level config)
 echo "Creating MCP config in /workspace..."
+# Build base MCP config with jq
+MCP_JSON=$(jq -n \
+  --arg url "${MCP_URL}/mcp" \
+  --arg apiKey "Bearer ${API_KEY}" \
+  '{mcpServers: {"agent-swarm": {type: "http", url: $url, headers: {Authorization: $apiKey}}}}')
+
+# Add X-Agent-ID header if set
 if [ -n "$AGENT_ID" ]; then
-    cat > /workspace/.mcp.json << EOF
-{
-  "mcpServers": {
-    "agent-swarm": {
-      "type": "http",
-      "url": "${MCP_URL}/mcp",
-      "headers": {
-        "Authorization": "Bearer ${API_KEY}",
-        "X-Agent-ID": "${AGENT_ID}"
-      }
-    }
-  }
-}
-EOF
-else
-    cat > /workspace/.mcp.json << EOF
-{
-  "mcpServers": {
-    "agent-swarm": {
-      "type": "http",
-      "url": "${MCP_URL}/mcp",
-      "headers": {
-        "Authorization": "Bearer ${API_KEY}"
-      }
-    }
-  }
-}
-EOF
+    MCP_JSON=$(echo "$MCP_JSON" | jq --arg agentId "$AGENT_ID" \
+      '.mcpServers["agent-swarm"].headers["X-Agent-ID"] = $agentId')
 fi
+
+# Add agentmail-mcp if API key is present
+if [ -n "$AGENTMAIL_API_KEY" ]; then
+    MCP_JSON=$(echo "$MCP_JSON" | jq --arg key "$AGENTMAIL_API_KEY" \
+      '.mcpServers.agentmail = {command: "npx", args: ["-y", "agentmail-mcp"], env: {AGENTMAIL_API_KEY: $key}}')
+fi
+
+echo "$MCP_JSON" > /workspace/.mcp.json
 
 # Configure GitHub authentication if token is provided
 echo ""
@@ -210,36 +199,6 @@ else
     echo "Skipping repo clone (no AGENT_ID)"
 fi
 echo "==============================="
-
-# Install the desplega-ai marketplace
-echo ""
-echo "=== Marketplace Installation ==="
-
-if command -v claude >/dev/null 2>&1; then
-    echo "Installing desplega-ai/ai-toolbox marketplace..."
-    claude plugin marketplace add desplega-ai/ai-toolbox || echo "Toolbox marketplace add failed, continuing..."
-
-    echo "Installing plugins from desplega-ai-toolbox..."
-    claude plugin install desplega@desplega-ai-toolbox --scope user || echo "Plugin install failed, continuing..."
-    claude plugin install agent-swarm@desplega-ai-toolbox --scope user || echo "Plugin install failed, continuing..."
-    claude plugin install wts@desplega-ai-toolbox --scope user || echo "Plugin install failed, continuing..."
-
-    echo "Installing desplega-ai/qa-use marketplace..."
-    claude plugin marketplace add desplega-ai/qa-use || echo "qa-use marketplace add failed, continuing..."
-
-    echo "Installing plugins from desplega.ai..."
-    claude plugin install qa-use@desplega.ai --scope user || echo "Plugin install failed, continuing..."
-
-    echo "Installing context-mode plugin..."
-    claude plugin marketplace add mksglu/claude-context-mode || echo "context-mode marketplace add failed, continuing..."
-    claude plugin install context-mode@claude-context-mode --scope user || echo "context-mode plugin install failed, continuing..."
-
-    echo "Marketplace installation completed"
-else
-    echo "WARNING: claude CLI not found, skipping marketplace installation"
-fi
-echo "==============================="
-
 
 
 # Find existing startup script in /workspace (start-up.sh, .bash, .js, .ts, .bun, or bare)
@@ -420,21 +379,8 @@ fi
 echo ""
 echo "=== Workspace Initialization ==="
 
-# Configure wts for agent use (no tmux, no auto-Claude)
-echo "Configuring wts for agent mode..."
-mkdir -p /home/worker/.wts
-cat > /home/worker/.wts/config.json << EOF
-{
-  "defaults": {
-    "autoTmux": false,
-    "autoClaude": false
-  }
-}
-EOF
-
+# Create todos.md if it doesn't exist
 PERSONAL_DIR="/workspace/personal"
-mkdir -p "$PERSONAL_DIR"
-
 if [ ! -f "$PERSONAL_DIR/todos.md" ]; then
     echo "Creating personal todos.md..."
     cat > "$PERSONAL_DIR/todos.md" << EOF
@@ -447,25 +393,14 @@ else
     echo "Personal todo.md already exists, skipping creation"
 fi
 
-SHARED_DIR="/workspace/shared/thoughts"
-
-# Create shared thoughts directories
+# Create agent-specific thoughts directories (requires AGENT_ID at runtime)
 if [ -n "$AGENT_ID" ]; then
+    SHARED_DIR="/workspace/shared/thoughts"
     AGENT_THOUGHTS_DIR="$SHARED_DIR/$AGENT_ID"
     echo "Creating shared thoughts directories for agent ID $AGENT_ID..."
     mkdir -p "$AGENT_THOUGHTS_DIR/plans"
     mkdir -p "$AGENT_THOUGHTS_DIR/research"
 fi
-
-# shared always
-echo "Creating shared thoughts directories..."
-mkdir -p "$SHARED_DIR/shared/plans"
-mkdir -p "$SHARED_DIR/shared/research"
-
-# Memory directories (auto-indexed by PostToolUse hook)
-echo "Creating memory directories..."
-mkdir -p "$PERSONAL_DIR/memory"
-mkdir -p "/workspace/shared/memory"
 
 echo "==============================="
 echo ""

@@ -20,40 +20,30 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Use pipefail so pipe failures are caught
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Install comprehensive development tools
+# Install all system packages in a single layer
+# Step 1: bootstrap curl/gnupg so we can add external apt repos
+# Step 2: add NodeSource + GitHub CLI repos, then install everything
 # NOTE: intentionally NOT using --no-install-recommends here — this is a full
 # dev environment where agents build arbitrary projects; recommended packages
 # (setuptools, wheel, less, dev headers, etc.) prevent subtle breakage.
-RUN apt-get update && apt-get install -y \
-    # Essential tools
-    curl wget ca-certificates gnupg lsb-release \
-    # Version control
-    git git-lfs \
-    # Editors
-    vim nano \
-    # Build tools
-    build-essential make cmake gcc g++ \
-    # Python
-    python3 python3-pip python3-venv \
-    # Common utilities
-    jq tree htop unzip zip tar gzip sqlite3 \
-    # Network tools
-    openssh-client \
-    # sudo for package installation
-    sudo \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Node.js 22.x (LTS)
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install GitHub CLI
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+       | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
     && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends gh \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+       | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update && apt-get install -y \
+    wget lsb-release \
+    git git-lfs \
+    vim nano \
+    build-essential make cmake gcc g++ \
+    python3 python3-pip python3-venv \
+    jq tree htop unzip zip tar gzip sqlite3 \
+    openssh-client \
+    sudo \
+    nodejs \
+    gh \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Bun (for running JS/TS projects)
@@ -80,6 +70,21 @@ ENV PATH="/home/worker/.bun/bin:$PATH"
 RUN HOME=/home/worker curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/home/worker/.local/bin:$PATH"
 
+# Install Claude marketplace plugins (build-time cache)
+RUN mkdir -p /home/worker/.claude \
+    && claude plugin marketplace add desplega-ai/ai-toolbox || true \
+    && claude plugin install desplega@desplega-ai-toolbox --scope user || true \
+    && claude plugin install agent-swarm@desplega-ai-toolbox --scope user || true \
+    && claude plugin install wts@desplega-ai-toolbox --scope user || true \
+    && claude plugin marketplace add desplega-ai/qa-use || true \
+    && claude plugin install qa-use@desplega.ai --scope user || true \
+    && claude plugin marketplace add mksglu/claude-context-mode || true \
+    && claude plugin install context-mode@claude-context-mode --scope user || true
+
+# Configure wts for agent mode (no tmux, no auto-Claude)
+RUN mkdir -p /home/worker/.wts \
+    && echo '{"defaults":{"autoTmux":false,"autoClaude":false}}' > /home/worker/.wts/config.json
+
 # Setup .claude directory and settings
 RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
     && echo '{"hasCompletedOnboarding":true,"bypassPermissionsModeAccepted":true}' > /home/worker/.claude.json \
@@ -97,21 +102,21 @@ RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
   } \
 }' > /home/worker/.claude/settings.json
 
-# Copy binary from builder
+# Install global npm tools (pinned versions for cache stability)
 USER root
+RUN npm install -g \
+    pm2@6.0.14 \
+    @sentry/cli@3.3.0 \
+    @desplega.ai/wts@0.2.2 \
+    @desplega.ai/localtunnel@2.2.0 \
+    @desplega.ai/qa-use@2.8.7 \
+    && qa-use install-deps
+
+# Copy binary from builder (changes on every code change — keep late)
 COPY --from=builder /build/agent-swarm /usr/local/bin/agent-swarm
 RUN chmod +x /usr/local/bin/agent-swarm
 
-# Install global tools (pinned versions, consolidated to reduce layers)
-RUN npm install -g \
-    pm2@6.0.14 \
-    @sentry/cli@3.2.2 \
-    @desplega.ai/wts@latest \
-    @desplega.ai/localtunnel \
-    @desplega.ai/qa-use@latest \
-    && qa-use install-deps
-
-# Copy commands
+# Copy commands (changes on code change — keep late)
 COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/
 COPY --chown=worker:worker plugin/agents/* /home/worker/.claude/agents/
 COPY --chown=worker:worker plugin/skills/ /home/worker/.claude/skills/
@@ -123,9 +128,13 @@ RUN chmod +x /docker-entrypoint.sh
 
 USER worker
 WORKDIR /workspace
-VOLUME ["/logs"]
 
-RUN mkdir -p ./personal ./shared
+# Create static workspace directories (build-time)
+RUN mkdir -p /workspace/personal /workspace/shared/thoughts/shared/plans \
+    /workspace/shared/thoughts/shared/research \
+    /workspace/personal/memory /workspace/shared/memory
+
+VOLUME ["/logs"]
 VOLUME ["/workspace/personal", "/workspace/shared"]
 
 # Expose service port for PM2 processes
