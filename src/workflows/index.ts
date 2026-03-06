@@ -5,7 +5,26 @@ export { interpolate } from "./template";
 
 import { workflowEventBus } from "./event-bus";
 import { setupWorkflowResumeListener } from "./resume";
+import { evaluateWorkflowTriggers } from "./triggers";
 
 export function initWorkflows(): void {
   setupWorkflowResumeListener(workflowEventBus);
+
+  // Subscribe to events for trigger matching
+  const triggerEvents = [
+    "task.created",
+    "task.completed",
+    "github.pull_request.opened",
+    "github.pull_request.closed",
+    "github.issue.opened",
+    "github.issue_comment.created",
+    "github.pull_request_review.submitted",
+    "slack.message",
+    "agentmail.message.received",
+  ];
+  for (const event of triggerEvents) {
+    workflowEventBus.on(event, (data: unknown) => {
+      evaluateWorkflowTriggers(event, data);
+    });
+  }
 }

@@ -27,6 +27,7 @@ import {
   isGitHubEnabled,
   verifyWebhookSignature,
 } from "../github";
+import { workflowEventBus } from "../workflows/event-bus";
 import { matchRoute } from "./utils";
 
 export async function handleWebhooks(
@@ -113,6 +114,50 @@ export async function handleWebhooks(
           break;
         default:
           console.log(`[GitHub] Ignoring unsupported event type: ${eventType}`);
+      }
+
+      // Emit workflow trigger event for matching event types
+      switch (eventType) {
+        case "pull_request": {
+          const pr = body as unknown as PullRequestEvent;
+          workflowEventBus.emit(`github.pull_request.${pr.action}`, {
+            repo: pr.repository.full_name,
+            number: pr.pull_request.number,
+            title: pr.pull_request.title,
+            body: pr.pull_request.body,
+            action: pr.action,
+          });
+          break;
+        }
+        case "issues": {
+          const iss = body as unknown as IssueEvent;
+          workflowEventBus.emit(`github.issue.${iss.action}`, {
+            repo: iss.repository.full_name,
+            number: iss.issue.number,
+            title: iss.issue.title,
+            action: iss.action,
+          });
+          break;
+        }
+        case "issue_comment": {
+          const ic = body as unknown as CommentEvent;
+          workflowEventBus.emit("github.issue_comment.created", {
+            repo: ic.repository.full_name,
+            number: ic.issue?.number,
+            action: ic.action,
+          });
+          break;
+        }
+        case "pull_request_review": {
+          const prr = body as unknown as PullRequestReviewEvent;
+          workflowEventBus.emit("github.pull_request_review.submitted", {
+            repo: prr.repository.full_name,
+            number: prr.pull_request.number,
+            state: prr.review.state,
+            action: prr.action,
+          });
+          break;
+        }
       }
 
       res.writeHead(200, { "Content-Type": "application/json" });
