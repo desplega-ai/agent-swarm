@@ -30,6 +30,13 @@
       "context": "/a2/cad992e050/1/context.md",
       "content_hash": "/a2/cad992e050/1/content_hash.txt",
       "prompt": "/a2/cad992e050/1/prompt.txt"
+    },
+    {
+      "metadata": "/a2/cad992e050/2/metadata.json",
+      "transcript": "/a2/cad992e050/2/full.jsonl",
+      "context": "/a2/cad992e050/2/context.md",
+      "content_hash": "/a2/cad992e050/2/content_hash.txt",
+      "prompt": "/a2/cad992e050/2/prompt.txt"
     }
   ],
   "token_usage": {
