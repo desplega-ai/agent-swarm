@@ -6,9 +6,12 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import type { Workflow, WorkflowDefinition, WorkflowNode } from "../types";
+import { type CodeMatchConfig, executeCodeMatch } from "./nodes/code-match";
 import { type CreateTaskConfig, executeCreateTask } from "./nodes/create-task";
+import { type DelegateToAgentConfig, executeDelegateToAgent } from "./nodes/delegate-to-agent";
 import { executeLlmClassify, type LlmClassifyConfig } from "./nodes/llm-classify";
 import { executePropertyMatch, type PropertyMatchConfig } from "./nodes/property-match";
+import { executeSendMessage, type SendMessageConfig } from "./nodes/send-message";
 
 export interface NodeResult {
   mode: "instant" | "async";
@@ -142,6 +145,20 @@ async function executeNode(
 
     case "llm-classify":
       return executeLlmClassify(node.config as unknown as LlmClassifyConfig, ctx);
+
+    case "send-message":
+      return executeSendMessage(node.config as unknown as SendMessageConfig, ctx);
+
+    case "delegate-to-agent":
+      return executeDelegateToAgent(
+        node.config as unknown as DelegateToAgentConfig,
+        ctx,
+        runId,
+        stepId,
+      );
+
+    case "code-match":
+      return executeCodeMatch(node.config as unknown as CodeMatchConfig, ctx);
 
     default:
       throw new Error(`Unknown node type: ${node.type}`);
