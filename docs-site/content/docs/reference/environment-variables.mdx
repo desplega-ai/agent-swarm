@@ -21,6 +21,11 @@ Complete reference for all environment variables used by Agent Swarm.
 | `SCHEDULER_INTERVAL_MS` | `10000` | Polling interval for scheduled tasks (ms) |
 | `OPENAI_API_KEY` | — | OpenAI key for memory embeddings |
 | `CAPABILITIES` | All enabled | Comma-separated feature flags |
+| `HEARTBEAT_INTERVAL_MS` | `90000` | Heartbeat sweep interval (ms) |
+| `HEARTBEAT_DISABLE` | `false` | Set to `true` to disable the heartbeat module |
+| `HEARTBEAT_STALL_THRESHOLD_MIN` | `30` | Minutes before an in-progress task is considered stalled |
+| `HEARTBEAT_STALE_CLEANUP_MIN` | `30` | Minutes before stale resources (sessions, reviewing tasks) are cleaned up |
+| `HEARTBEAT_MAX_AUTO_ASSIGN` | `5` | Max pool tasks to auto-assign per sweep |
 
 ## Docker Worker Variables
 
