@@ -1,0 +1,44 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "b468dabbd969",
+  "session_id": "265674b4-6d46-4639-9b23-3e4f0f06d33c",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-06T15:54:01.729523Z",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "new-ui/src/api/types.ts",
+    "new-ui/src/pages/schedules/[id]/page.tsx",
+    "new-ui/src/pages/schedules/page.tsx",
+    "src/be/db.ts",
+    "src/be/migrations/001_initial.sql",
+    "src/http/schedules.ts",
+    "src/http/stats.ts",
+    "src/scheduler/scheduler.test.ts",
+    "src/scheduler/scheduler.ts",
+    "src/tests/scheduled-tasks.test.ts",
+    "src/tools/schedules/create-schedule.ts",
+    "src/tools/schedules/list-schedules.ts",
+    "src/tools/schedules/update-schedule.ts",
+    "src/types.ts",
+    "thoughts/taras/plans/2026-03-06-one-time-scheduled-tasks.md"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "fb02252b66ff",
+  "token_usage": {
+    "input_tokens": 32,
+    "cache_creation_tokens": 158225,
+    "cache_read_tokens": 551292,
+    "output_tokens": 11174,
+    "api_call_count": 16
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-06T15:54:01.625574Z",
+    "agent_lines": 687,
+    "human_added": 211,
+    "human_modified": 39,
+    "human_removed": 0,
+    "total_committed": 937,
+    "agent_percentage": 73.31910352187833
+  }
+}
