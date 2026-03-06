@@ -12,7 +12,7 @@ on:
 jobs:
   lint-and-typecheck:
     name: Lint and Type Check
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -34,7 +34,7 @@ jobs:
 
   test:
     name: Run Tests
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository

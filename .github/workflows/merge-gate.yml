@@ -47,7 +47,7 @@ jobs:
     name: Lint and Type Check
     needs: detect-changes
     if: needs.detect-changes.outputs.code == 'true'
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -71,7 +71,7 @@ jobs:
     name: Run Tests
     needs: detect-changes
     if: needs.detect-changes.outputs.code == 'true'
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -92,7 +92,7 @@ jobs:
     name: Docker Build Test
     needs: detect-changes
     if: needs.detect-changes.outputs.code == 'true'
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
 
     strategy:
       matrix:
@@ -117,7 +117,7 @@ jobs:
     name: New UI Lint and Type Check
     needs: detect-changes
     if: needs.detect-changes.outputs.new-ui == 'true'
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: new-ui
