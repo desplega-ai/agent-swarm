@@ -1,0 +1,37 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "3aef2faf22f5",
+  "session_id": "ses_34062dd03ffeQDqACw1NliCDjE",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-06T08:14:47.462607Z",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "src/agentmail/handlers.ts",
+    "src/agentmail/index.ts",
+    "src/http/webhooks.ts",
+    "src/tests/agentmail-filters.test.ts",
+    "src/tests/http-api-integration.test.ts",
+    "package.json"
+  ],
+  "agent": "OpenCode",
+  "turn_id": "ef0a4d4b8f99",
+  "checkpoint_transcript_start": 26,
+  "transcript_lines_at_start": 26,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-06T08:14:47.206413Z",
+    "agent_lines": 310,
+    "human_added": 545,
+    "human_modified": 23,
+    "human_removed": 0,
+    "total_committed": 878,
+    "agent_percentage": 35.30751708428246
+  }
+}
