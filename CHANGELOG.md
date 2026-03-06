@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Database migration system with numbered `.sql` files and incremental runner (#133)
+- Lightweight code-level heartbeat module for swarm triage without spinning up Claude sessions (#124)
+  - 3-tier approach: preflight gate, code-level triage, Claude escalation
+  - Auto-assignment of pool tasks to idle workers
+  - Stall detection for in-progress tasks
+  - Worker health status correction
+  - Configurable via `HEARTBEAT_*` environment variables
+
+### Changed
+- Migrated inline `try { ALTER TABLE } catch {}` schema blocks to `src/be/migrations/` folder
+
 ## [1.35.2] - 2026-03-05
 
 ### Fixed

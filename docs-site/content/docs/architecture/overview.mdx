@@ -36,6 +36,10 @@ The MCP (Model Context Protocol) server is the central coordination point. It:
 
 The server runs on port `3013` by default and is implemented in `src/http/` (modular route handlers) with tool definitions in `src/server.ts`.
 
+It also runs two background subsystems:
+- **Scheduler** — Polls for scheduled tasks and creates them at the configured interval
+- **Heartbeat** — A lightweight triage module that sweeps the swarm every 90 seconds (configurable via `HEARTBEAT_INTERVAL_MS`). It uses a 3-tier approach: a preflight gate that bails if the swarm is healthy, code-level triage for routine fixes (stall detection, worker status correction, pool task auto-assignment, stale resource cleanup), and Claude escalation only when ambiguous situations require human reasoning. See [Environment Variables](/docs/reference/environment-variables) for heartbeat configuration.
+
 ### Lead Agent
 
 The lead agent is the coordinator. It:
@@ -112,8 +116,11 @@ agent-swarm/
 │   │   └── ...          # Additional route modules
 │   ├── server.ts        # MCP server setup & tool registration
 │   ├── tools/           # MCP tool implementations
+│   ├── heartbeat/       # Lightweight swarm triage module
+│   │   └── heartbeat.ts # 3-tier heartbeat (gate → code triage → escalation)
 │   ├── be/              # Backend (database, business logic)
-│   │   └── db.ts        # SQLite database
+│   │   ├── db.ts        # SQLite database
+│   │   └── migrations/  # Database migration system
 │   ├── artifact-sdk/    # Artifact SDK (serve files/apps via localtunnel)
 │   ├── commands/        # CLI command implementations
 │   │   ├── runner.ts    # Task runner (polls and spawns sessions)
