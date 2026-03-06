@@ -7,6 +7,7 @@ import {
 } from "../be/db";
 import type { Workflow, WorkflowDefinition, WorkflowNode } from "../types";
 import { type CreateTaskConfig, executeCreateTask } from "./nodes/create-task";
+import { executeLlmClassify, type LlmClassifyConfig } from "./nodes/llm-classify";
 import { executePropertyMatch, type PropertyMatchConfig } from "./nodes/property-match";
 
 export interface NodeResult {
@@ -138,6 +139,9 @@ async function executeNode(
 
     case "create-task":
       return executeCreateTask(node.config as unknown as CreateTaskConfig, ctx, runId, stepId);
+
+    case "llm-classify":
+      return executeLlmClassify(node.config as unknown as LlmClassifyConfig, ctx);
 
     default:
       throw new Error(`Unknown node type: ${node.type}`);
