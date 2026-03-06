@@ -1,0 +1,35 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "6bc9c5f4e8dc",
+  "session_id": "649c5e4f-14d9-405d-af1a-b62bfb8ff08d",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-06T17:55:34.556457Z",
+  "branch": "taras/build-swarm-automation-workflow-engine-with-nodes",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/be/db.ts",
+    "src/heartbeat/heartbeat.ts",
+    "src/tests/heartbeat.test.ts",
+    "src/tests/workflow-recovery.test.ts",
+    "src/workflows/index.ts",
+    "src/workflows/recovery.ts"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "21f26b3376b9",
+  "token_usage": {
+    "input_tokens": 51,
+    "cache_creation_tokens": 131446,
+    "cache_read_tokens": 1603720,
+    "output_tokens": 11603,
+    "api_call_count": 38
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-06T17:55:34.45871Z",
+    "agent_lines": 271,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 271,
+    "agent_percentage": 100
+  }
+}
