@@ -13,7 +13,7 @@ export function useAgents(includeTasks = false) {
 export function useAgent(id: string) {
   return useQuery({
     queryKey: ["agent", id],
-    queryFn: () => api.fetchAgent(id),
+    queryFn: () => api.fetchAgent(id, false),
     enabled: !!id,
   });
 }
