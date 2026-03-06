@@ -103,3 +103,7 @@ ARGUMENTS: /Users/taras/Documents/code/agent-swarm/.humanlayer/tasks/build-swarm
 ---
 
 Tool loaded.
+
+---
+
+Tool loaded.

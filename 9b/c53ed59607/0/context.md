@@ -32,3 +32,7 @@ You have access to spe...
 
 Tool loaded.
 
+### Prompt 6
+
+Tool loaded.
+
