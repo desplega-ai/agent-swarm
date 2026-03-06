@@ -1,0 +1,48 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "b468dabbd969",
+  "session_id": "ses_34082f762ffe3oTR5A38BDpGp4",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-06T15:54:13.115424Z",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "src/tools/schedules/create-schedule.ts",
+    "new-ui/src/api/types.ts",
+    "src/scheduler/scheduler.ts",
+    "src/tests/scheduled-tasks.test.ts",
+    "new-ui/src/pages/schedules/[id]/page.tsx",
+    "src/be/migrations/001_initial.sql",
+    "thoughts/taras/plans/2026-03-06-one-time-scheduled-tasks.md",
+    "src/tools/schedules/list-schedules.ts",
+    "new-ui/src/pages/schedules/page.tsx",
+    "package.json",
+    "src/be/migrations/002_one_time_schedules.sql",
+    "src/http/stats.ts",
+    "src/scheduler/scheduler.test.ts",
+    "src/tools/schedules/update-schedule.ts",
+    "src/types.ts",
+    "src/be/db.ts",
+    "src/http/schedules.ts"
+  ],
+  "agent": "OpenCode",
+  "turn_id": "b58836c37a62",
+  "checkpoint_transcript_start": 27,
+  "transcript_lines_at_start": 27,
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-06T15:54:12.726478Z",
+    "agent_lines": 976,
+    "human_added": 23,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 999,
+    "agent_percentage": 97.69769769769769
+  }
+}
