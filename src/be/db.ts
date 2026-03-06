@@ -31,6 +31,12 @@ import type {
   SwarmRepo,
   VersionableField,
   VersionMeta,
+  Workflow,
+  WorkflowDefinition,
+  WorkflowRun,
+  WorkflowRunStatus,
+  WorkflowRunStep,
+  WorkflowRunStepStatus,
 } from "../types";
 import { runMigrations } from "./migrations/runner";
 
@@ -681,6 +687,8 @@ type AgentTaskRow = {
   claudeSessionId: string | null;
   model: string | null;
   scheduleId: string | null;
+  workflowRunId: string | null;
+  workflowRunStepId: string | null;
   createdAt: string;
   lastUpdatedAt: string;
   finishedAt: string | null;
@@ -725,6 +733,8 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     claudeSessionId: row.claudeSessionId ?? undefined,
     model: (row.model as "haiku" | "sonnet" | "opus" | null) ?? undefined,
     scheduleId: row.scheduleId ?? undefined,
+    workflowRunId: row.workflowRunId ?? undefined,
+    workflowRunStepId: row.workflowRunStepId ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     finishedAt: row.finishedAt ?? undefined,
@@ -1294,6 +1304,17 @@ export function completeTask(id: string, output?: string): AgentTask | null {
         newValue: "completed",
       });
     } catch {}
+    try {
+      import("../workflows/event-bus").then(({ workflowEventBus }) => {
+        workflowEventBus.emit("task.completed", {
+          taskId: id,
+          output,
+          agentId: row.agentId,
+          workflowRunId: row.workflowRunId,
+          workflowRunStepId: row.workflowRunStepId,
+        });
+      });
+    } catch {}
   }
 
   return row ? rowToAgentTask(row) : null;
@@ -1312,6 +1333,17 @@ export function failTask(id: string, reason: string): AgentTask | null {
         oldValue: oldTask.status,
         newValue: "failed",
         metadata: { reason },
+      });
+    } catch {}
+    try {
+      import("../workflows/event-bus").then(({ workflowEventBus }) => {
+        workflowEventBus.emit("task.failed", {
+          taskId: id,
+          failureReason: reason,
+          agentId: row.agentId,
+          workflowRunId: row.workflowRunId,
+          workflowRunStepId: row.workflowRunStepId,
+        });
       });
     } catch {}
   }
@@ -1341,6 +1373,16 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
         oldValue: oldTask.status,
         newValue: "cancelled",
         metadata: reason ? { reason } : undefined,
+      });
+    } catch {}
+    try {
+      import("../workflows/event-bus").then(({ workflowEventBus }) => {
+        workflowEventBus.emit("task.cancelled", {
+          taskId: id,
+          agentId: row.agentId,
+          workflowRunId: row.workflowRunId,
+          workflowRunStepId: row.workflowRunStepId,
+        });
       });
     } catch {}
   }
@@ -1646,6 +1688,8 @@ export interface CreateTaskOptions {
   parentTaskId?: string;
   model?: string;
   scheduleId?: string;
+  workflowRunId?: string;
+  workflowRunStepId?: string;
 }
 
 /**
@@ -1702,8 +1746,9 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         slackChannelId, slackThreadTs, slackUserId,
         githubRepo, githubEventType, githubNumber, githubCommentId, githubAuthor, githubUrl,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
-        mentionMessageId, mentionChannelId, epicId, parentTaskId, model, scheduleId, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        mentionMessageId, mentionChannelId, epicId, parentTaskId, model, scheduleId,
+        workflowRunId, workflowRunStepId, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -1736,6 +1781,8 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.parentTaskId ?? null,
       options?.model ?? null,
       options?.scheduleId ?? null,
+      options?.workflowRunId ?? null,
+      options?.workflowRunStepId ?? null,
       now,
       now,
     );
@@ -1749,6 +1796,20 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       taskId: id,
       newValue: status,
       metadata: { source: options?.source ?? "mcp" },
+    });
+  } catch {}
+
+  try {
+    import("../workflows/event-bus").then(({ workflowEventBus }) => {
+      workflowEventBus.emit("task.created", {
+        taskId: row.id,
+        task: row.task,
+        source: row.source,
+        tags: options?.tags ?? [],
+        agentId: row.agentId,
+        workflowRunId: row.workflowRunId,
+        workflowRunStepId: row.workflowRunStepId,
+      });
     });
   } catch {}
 
@@ -5574,4 +5635,338 @@ export function getUnassignedPoolTasks(limit: number = 10): AgentTask[] {
     )
     .all(limit)
     .map(rowToAgentTask);
+}
+
+// ============================================================================
+// Workflow CRUD
+// ============================================================================
+
+type WorkflowRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  enabled: number;
+  definition: string;
+  webhookSecret: string | null;
+  createdByAgentId: string | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+};
+
+function rowToWorkflow(row: WorkflowRow): Workflow {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description ?? undefined,
+    enabled: row.enabled === 1,
+    definition: JSON.parse(row.definition) as WorkflowDefinition,
+    webhookSecret: row.webhookSecret ?? undefined,
+    createdByAgentId: row.createdByAgentId ?? undefined,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+export function createWorkflow(data: {
+  name: string;
+  description?: string;
+  definition: WorkflowDefinition;
+  createdByAgentId?: string;
+}): Workflow {
+  const id = crypto.randomUUID();
+  const webhookSecret = crypto.randomUUID();
+  const row = getDb()
+    .prepare<WorkflowRow, [string, string, string | null, string, string, string | null]>(
+      `INSERT INTO workflows (id, name, description, definition, webhookSecret, createdByAgentId)
+       VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      data.name,
+      data.description ?? null,
+      JSON.stringify(data.definition),
+      webhookSecret,
+      data.createdByAgentId ?? null,
+    );
+  if (!row) throw new Error("Failed to create workflow");
+  return rowToWorkflow(row);
+}
+
+export function getWorkflow(id: string): Workflow | null {
+  const row = getDb()
+    .prepare<WorkflowRow, [string]>("SELECT * FROM workflows WHERE id = ?")
+    .get(id);
+  return row ? rowToWorkflow(row) : null;
+}
+
+export function getWorkflowByWebhookSecret(secret: string): Workflow | null {
+  const row = getDb()
+    .prepare<WorkflowRow, [string]>("SELECT * FROM workflows WHERE webhookSecret = ?")
+    .get(secret);
+  return row ? rowToWorkflow(row) : null;
+}
+
+export function listWorkflows(filters?: { enabled?: boolean }): Workflow[] {
+  let query = "SELECT * FROM workflows WHERE 1=1";
+  const params: (string | number)[] = [];
+  if (filters?.enabled !== undefined) {
+    query += " AND enabled = ?";
+    params.push(filters.enabled ? 1 : 0);
+  }
+  query += " ORDER BY name ASC";
+  return getDb()
+    .prepare<WorkflowRow, (string | number)[]>(query)
+    .all(...params)
+    .map(rowToWorkflow);
+}
+
+export function updateWorkflow(
+  id: string,
+  data: {
+    name?: string;
+    description?: string;
+    enabled?: boolean;
+    definition?: WorkflowDefinition;
+  },
+): Workflow | null {
+  const updates: string[] = [];
+  const params: (string | number | null)[] = [];
+  if (data.name !== undefined) {
+    updates.push("name = ?");
+    params.push(data.name);
+  }
+  if (data.description !== undefined) {
+    updates.push("description = ?");
+    params.push(data.description);
+  }
+  if (data.enabled !== undefined) {
+    updates.push("enabled = ?");
+    params.push(data.enabled ? 1 : 0);
+  }
+  if (data.definition !== undefined) {
+    updates.push("definition = ?");
+    params.push(JSON.stringify(data.definition));
+  }
+  if (updates.length === 0) return getWorkflow(id);
+  updates.push("lastUpdatedAt = ?");
+  params.push(new Date().toISOString());
+  params.push(id);
+  const row = getDb()
+    .prepare<WorkflowRow, (string | number | null)[]>(
+      `UPDATE workflows SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
+    )
+    .get(...params);
+  return row ? rowToWorkflow(row) : null;
+}
+
+export function deleteWorkflow(id: string): boolean {
+  const result = getDb().run("DELETE FROM workflows WHERE id = ?", [id]);
+  return result.changes > 0;
+}
+
+// ============================================================================
+// Workflow Run CRUD
+// ============================================================================
+
+type WorkflowRunRow = {
+  id: string;
+  workflowId: string;
+  status: string;
+  triggerData: string | null;
+  context: string | null;
+  error: string | null;
+  startedAt: string;
+  lastUpdatedAt: string;
+  finishedAt: string | null;
+};
+
+function rowToWorkflowRun(row: WorkflowRunRow): WorkflowRun {
+  return {
+    id: row.id,
+    workflowId: row.workflowId,
+    status: row.status as WorkflowRunStatus,
+    triggerData: row.triggerData ? JSON.parse(row.triggerData) : undefined,
+    context: row.context ? (JSON.parse(row.context) as Record<string, unknown>) : undefined,
+    error: row.error ?? undefined,
+    startedAt: row.startedAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+    finishedAt: row.finishedAt ?? undefined,
+  };
+}
+
+export function createWorkflowRun(data: {
+  id: string;
+  workflowId: string;
+  triggerData?: unknown;
+}): WorkflowRun {
+  const row = getDb()
+    .prepare<WorkflowRunRow, [string, string, string | null]>(
+      `INSERT INTO workflow_runs (id, workflowId, triggerData) VALUES (?, ?, ?) RETURNING *`,
+    )
+    .get(data.id, data.workflowId, data.triggerData ? JSON.stringify(data.triggerData) : null);
+  if (!row) throw new Error("Failed to create workflow run");
+  return rowToWorkflowRun(row);
+}
+
+export function getWorkflowRun(id: string): WorkflowRun | null {
+  const row = getDb()
+    .prepare<WorkflowRunRow, [string]>("SELECT * FROM workflow_runs WHERE id = ?")
+    .get(id);
+  return row ? rowToWorkflowRun(row) : null;
+}
+
+export function updateWorkflowRun(
+  id: string,
+  data: {
+    status?: WorkflowRunStatus;
+    context?: Record<string, unknown>;
+    error?: string;
+    finishedAt?: string;
+  },
+): WorkflowRun | null {
+  const updates: string[] = [];
+  const params: (string | null)[] = [];
+  if (data.status !== undefined) {
+    updates.push("status = ?");
+    params.push(data.status);
+  }
+  if (data.context !== undefined) {
+    updates.push("context = ?");
+    params.push(JSON.stringify(data.context));
+  }
+  if (data.error !== undefined) {
+    updates.push("error = ?");
+    params.push(data.error);
+  }
+  if (data.finishedAt !== undefined) {
+    updates.push("finishedAt = ?");
+    params.push(data.finishedAt);
+  }
+  if (updates.length === 0) return getWorkflowRun(id);
+  updates.push("lastUpdatedAt = ?");
+  params.push(new Date().toISOString());
+  params.push(id);
+  const row = getDb()
+    .prepare<WorkflowRunRow, (string | null)[]>(
+      `UPDATE workflow_runs SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
+    )
+    .get(...params);
+  return row ? rowToWorkflowRun(row) : null;
+}
+
+export function listWorkflowRuns(workflowId: string): WorkflowRun[] {
+  return getDb()
+    .prepare<WorkflowRunRow, [string]>(
+      "SELECT * FROM workflow_runs WHERE workflowId = ? ORDER BY startedAt DESC",
+    )
+    .all(workflowId)
+    .map(rowToWorkflowRun);
+}
+
+// ============================================================================
+// Workflow Run Step CRUD
+// ============================================================================
+
+type WorkflowRunStepRow = {
+  id: string;
+  runId: string;
+  nodeId: string;
+  nodeType: string;
+  status: string;
+  input: string | null;
+  output: string | null;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
+function rowToWorkflowRunStep(row: WorkflowRunStepRow): WorkflowRunStep {
+  return {
+    id: row.id,
+    runId: row.runId,
+    nodeId: row.nodeId,
+    nodeType: row.nodeType,
+    status: row.status as WorkflowRunStepStatus,
+    input: row.input ? JSON.parse(row.input) : undefined,
+    output: row.output ? JSON.parse(row.output) : undefined,
+    error: row.error ?? undefined,
+    startedAt: row.startedAt,
+    finishedAt: row.finishedAt ?? undefined,
+  };
+}
+
+export function createWorkflowRunStep(data: {
+  id: string;
+  runId: string;
+  nodeId: string;
+  nodeType: string;
+  input?: unknown;
+}): WorkflowRunStep {
+  const row = getDb()
+    .prepare<WorkflowRunStepRow, [string, string, string, string, string | null]>(
+      `INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, input)
+       VALUES (?, ?, ?, ?, 'running', ?) RETURNING *`,
+    )
+    .get(
+      data.id,
+      data.runId,
+      data.nodeId,
+      data.nodeType,
+      data.input ? JSON.stringify(data.input) : null,
+    );
+  if (!row) throw new Error("Failed to create workflow run step");
+  return rowToWorkflowRunStep(row);
+}
+
+export function getWorkflowRunStep(id: string): WorkflowRunStep | null {
+  const row = getDb()
+    .prepare<WorkflowRunStepRow, [string]>("SELECT * FROM workflow_run_steps WHERE id = ?")
+    .get(id);
+  return row ? rowToWorkflowRunStep(row) : null;
+}
+
+export function updateWorkflowRunStep(
+  id: string,
+  data: {
+    status?: WorkflowRunStepStatus;
+    output?: unknown;
+    error?: string;
+    finishedAt?: string;
+  },
+): WorkflowRunStep | null {
+  const updates: string[] = [];
+  const params: (string | null)[] = [];
+  if (data.status !== undefined) {
+    updates.push("status = ?");
+    params.push(data.status);
+  }
+  if (data.output !== undefined) {
+    updates.push("output = ?");
+    params.push(JSON.stringify(data.output));
+  }
+  if (data.error !== undefined) {
+    updates.push("error = ?");
+    params.push(data.error);
+  }
+  if (data.finishedAt !== undefined) {
+    updates.push("finishedAt = ?");
+    params.push(data.finishedAt);
+  }
+  if (updates.length === 0) return getWorkflowRunStep(id);
+  params.push(id);
+  const row = getDb()
+    .prepare<WorkflowRunStepRow, (string | null)[]>(
+      `UPDATE workflow_run_steps SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
+    )
+    .get(...params);
+  return row ? rowToWorkflowRunStep(row) : null;
+}
+
+export function getWorkflowRunStepsByRunId(runId: string): WorkflowRunStep[] {
+  return getDb()
+    .prepare<WorkflowRunStepRow, [string]>(
+      "SELECT * FROM workflow_run_steps WHERE runId = ? ORDER BY startedAt ASC",
+    )
+    .all(runId)
+    .map(rowToWorkflowRunStep);
 }

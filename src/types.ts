@@ -61,6 +61,7 @@ export const AgentTaskSourceSchema = z.enum([
   "agentmail",
   "system",
   "schedule",
+  "workflow",
 ]);
 export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 
@@ -129,6 +130,10 @@ export const AgentTaskSchema = z.object({
 
   // Schedule linking (optional — set when task was created by a schedule)
   scheduleId: z.uuid().optional(),
+
+  // Workflow linking (optional — set when task was created by a workflow)
+  workflowRunId: z.string().uuid().nullable().optional(),
+  workflowRunStepId: z.string().uuid().nullable().optional(),
 });
 
 export const AgentStatusSchema = z.enum(["idle", "busy", "offline"]);
@@ -532,3 +537,98 @@ export const ActiveSessionSchema = z.object({
 });
 
 export type ActiveSession = z.infer<typeof ActiveSessionSchema>;
+
+// ============================================================================
+// Workflow Engine Types
+// ============================================================================
+
+export const WorkflowNodeTypeSchema = z.enum([
+  "trigger-new-task",
+  "trigger-task-completed",
+  "trigger-webhook",
+  "trigger-email",
+  "trigger-slack-message",
+  "trigger-github-event",
+  "llm-classify",
+  "property-match",
+  "code-match",
+  "create-task",
+  "send-message",
+  "delegate-to-agent",
+]);
+export type WorkflowNodeType = z.infer<typeof WorkflowNodeTypeSchema>;
+
+export const WorkflowNodeSchema = z.object({
+  id: z.string(),
+  type: WorkflowNodeTypeSchema,
+  label: z.string().optional(),
+  config: z.record(z.string(), z.unknown()),
+});
+export type WorkflowNode = z.infer<typeof WorkflowNodeSchema>;
+
+export const WorkflowEdgeSchema = z.object({
+  id: z.string(),
+  source: z.string(),
+  sourcePort: z.string(),
+  target: z.string(),
+});
+export type WorkflowEdge = z.infer<typeof WorkflowEdgeSchema>;
+
+export const WorkflowDefinitionSchema = z.object({
+  nodes: z.array(WorkflowNodeSchema),
+  edges: z.array(WorkflowEdgeSchema),
+});
+export type WorkflowDefinition = z.infer<typeof WorkflowDefinitionSchema>;
+
+export const WorkflowSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  description: z.string().optional(),
+  enabled: z.boolean(),
+  definition: WorkflowDefinitionSchema,
+  webhookSecret: z.string().optional(),
+  createdByAgentId: z.string().uuid().optional(),
+  createdAt: z.string(),
+  lastUpdatedAt: z.string(),
+});
+export type Workflow = z.infer<typeof WorkflowSchema>;
+
+export const WorkflowRunStatusSchema = z.enum(["running", "waiting", "completed", "failed"]);
+export type WorkflowRunStatus = z.infer<typeof WorkflowRunStatusSchema>;
+
+export const WorkflowRunSchema = z.object({
+  id: z.string().uuid(),
+  workflowId: z.string().uuid(),
+  status: WorkflowRunStatusSchema,
+  triggerData: z.unknown().optional(),
+  context: z.record(z.string(), z.unknown()).optional(),
+  error: z.string().optional(),
+  startedAt: z.string(),
+  lastUpdatedAt: z.string(),
+  finishedAt: z.string().optional(),
+});
+export type WorkflowRun = z.infer<typeof WorkflowRunSchema>;
+
+export const WorkflowRunStepStatusSchema = z.enum([
+  "pending",
+  "running",
+  "waiting",
+  "completed",
+  "failed",
+  "skipped",
+]);
+export type WorkflowRunStepStatus = z.infer<typeof WorkflowRunStepStatusSchema>;
+
+export const WorkflowRunStepSchema = z.object({
+  id: z.string().uuid(),
+  runId: z.string().uuid(),
+  nodeId: z.string(),
+  nodeType: z.string(),
+  status: WorkflowRunStepStatusSchema,
+  input: z.unknown().optional(),
+  output: z.unknown().optional(),
+  error: z.string().optional(),
+  startedAt: z.string(),
+  finishedAt: z.string().optional(),
+});
+export type WorkflowRunStep = z.infer<typeof WorkflowRunStepSchema>;
