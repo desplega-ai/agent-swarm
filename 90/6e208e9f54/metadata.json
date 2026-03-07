@@ -3,7 +3,7 @@
   "checkpoint_id": "906e208e9f54",
   "strategy": "manual-commit",
   "branch": "taras/build-swarm-automation-workflow-engine-with-nodes",
-  "checkpoints_count": 5,
+  "checkpoints_count": 8,
   "files_touched": [
     "package.json",
     "scripts/e2e-workflow-test.sh",
@@ -26,13 +26,20 @@
       "context": "/90/6e208e9f54/0/context.md",
       "content_hash": "/90/6e208e9f54/0/content_hash.txt",
       "prompt": "/90/6e208e9f54/0/prompt.txt"
+    },
+    {
+      "metadata": "/90/6e208e9f54/1/metadata.json",
+      "transcript": "/90/6e208e9f54/1/full.jsonl",
+      "context": "/90/6e208e9f54/1/context.md",
+      "content_hash": "/90/6e208e9f54/1/content_hash.txt",
+      "prompt": "/90/6e208e9f54/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 378,
-    "cache_creation_tokens": 593427,
-    "cache_read_tokens": 7151139,
-    "output_tokens": 35064,
-    "api_call_count": 72
+    "input_tokens": 533,
+    "cache_creation_tokens": 1016676,
+    "cache_read_tokens": 12860831,
+    "output_tokens": 88066,
+    "api_call_count": 143
   }
 }

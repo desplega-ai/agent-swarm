@@ -1,0 +1,38 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "906e208e9f54",
+  "session_id": "d4d710c8-16c2-4e5d-af4c-1f04de39c64e",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-07T18:24:29.741971Z",
+  "branch": "taras/build-swarm-automation-workflow-engine-with-nodes",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "scripts/e2e-workflow-test.sh",
+    "src/tests/workflow-engine-errors.test.ts",
+    "src/tests/workflow-http.test.ts",
+    "src/tests/workflow-nodes-phase6.test.ts",
+    "src/tests/workflow-property-match.test.ts",
+    "src/tests/workflow-recovery.test.ts",
+    "src/tests/workflow-resume-retry.test.ts",
+    "src/tests/workflow-triggers.test.ts",
+    "src/workflows/event-bus.ts"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "9e06a33906ae",
+  "token_usage": {
+    "input_tokens": 155,
+    "cache_creation_tokens": 423249,
+    "cache_read_tokens": 5709692,
+    "output_tokens": 53002,
+    "api_call_count": 71
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-07T18:24:29.39907Z",
+    "agent_lines": 1794,
+    "human_added": 883,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 2677,
+    "agent_percentage": 67.01531565184908
+  }
+}
