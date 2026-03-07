@@ -73,7 +73,25 @@ export function runMigrations(db: Database): void {
   `);
 
   // 2. Load migration files
-  const migrationsDir = import.meta.dir;
+  // import.meta.dir resolves to /$bunfs/root in compiled binaries, which isn't scannable.
+  // Fall back to MIGRATIONS_DIR env var (set in Dockerfile) for compiled binary support.
+  const migrationsDir = (() => {
+    const dir = import.meta.dir;
+    try {
+      readdirSync(dir);
+      return dir;
+    } catch {
+      const fallback = process.env.MIGRATIONS_DIR;
+      if (fallback) return fallback;
+      console.warn(
+        "[migrations] Cannot read migrations directory and MIGRATIONS_DIR not set — skipping",
+      );
+      return null;
+    }
+  })();
+
+  if (!migrationsDir) return;
+
   const files = readdirSync(migrationsDir)
     .filter((f) => f.endsWith(".sql"))
     .sort();
