@@ -24,6 +24,10 @@ import type {
   TasksResponse,
   TaskWithLogs,
   UsageSummaryResponse,
+  Workflow,
+  WorkflowRun,
+  WorkflowRunWithSteps,
+  WorkflowsResponse,
 } from "./types";
 
 class ApiClient {
@@ -657,6 +661,90 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/repos/${id}`;
     const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to delete repo: ${res.status}`);
+    return res.json();
+  }
+  // Workflows
+  async fetchWorkflows(): Promise<WorkflowsResponse> {
+    const url = `${this.getBaseUrl()}/api/workflows`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch workflows: ${res.status}`);
+    return { workflows: await res.json() };
+  }
+
+  async fetchWorkflow(id: string): Promise<Workflow> {
+    const url = `${this.getBaseUrl()}/api/workflows/${id}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch workflow: ${res.status}`);
+    return res.json();
+  }
+
+  async updateWorkflow(
+    id: string,
+    data: Partial<Pick<Workflow, "name" | "description" | "enabled">>,
+  ): Promise<Workflow> {
+    const url = `${this.getBaseUrl()}/api/workflows/${id}`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`Failed to update workflow: ${res.status}`);
+    return res.json();
+  }
+
+  async deleteWorkflow(id: string): Promise<void> {
+    const url = `${this.getBaseUrl()}/api/workflows/${id}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to delete workflow: ${res.status}`);
+  }
+
+  async triggerWorkflow(
+    id: string,
+    triggerData?: Record<string, unknown>,
+  ): Promise<{ runId: string }> {
+    const url = `${this.getBaseUrl()}/api/workflows/${id}/trigger`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ triggerData }),
+    });
+    if (!res.ok) throw new Error(`Failed to trigger workflow: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchWorkflowRuns(workflowId: string): Promise<WorkflowRun[]> {
+    const url = `${this.getBaseUrl()}/api/workflows/${workflowId}/runs`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch workflow runs: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchAllWorkflowRuns(): Promise<WorkflowRun[]> {
+    const { workflows } = await this.fetchWorkflows();
+    const allRuns: WorkflowRun[] = [];
+    for (const w of workflows) {
+      const runs = await this.fetchWorkflowRuns(w.id);
+      allRuns.push(...runs);
+    }
+    return allRuns.sort(
+      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
+    );
+  }
+
+  async fetchWorkflowRun(id: string): Promise<WorkflowRunWithSteps> {
+    const url = `${this.getBaseUrl()}/api/workflow-runs/${id}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch workflow run: ${res.status}`);
+    return res.json();
+  }
+
+  async retryWorkflowRun(id: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/workflow-runs/${id}/retry`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) throw new Error(`Failed to retry workflow run: ${res.status}`);
     return res.json();
   }
 }

@@ -16,6 +16,9 @@ const ScheduleDetailPage = lazy(() => import("@/pages/schedules/[id]/page"));
 const UsagePage = lazy(() => import("@/pages/usage/page"));
 const ConfigPage = lazy(() => import("@/pages/config/page"));
 const ReposPage = lazy(() => import("@/pages/repos/page"));
+const WorkflowsPage = lazy(() => import("@/pages/workflows/page"));
+const WorkflowDetailPage = lazy(() => import("@/pages/workflows/[id]/page"));
+const WorkflowRunDetailPage = lazy(() => import("@/pages/workflow-runs/[id]/page"));
 const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
 
 export const router = createBrowserRouter([
@@ -35,6 +38,9 @@ export const router = createBrowserRouter([
       { path: "services", element: <ServicesPage /> },
       { path: "schedules", element: <SchedulesPage /> },
       { path: "schedules/:id", element: <ScheduleDetailPage /> },
+      { path: "workflows", element: <WorkflowsPage /> },
+      { path: "workflows/:id", element: <WorkflowDetailPage /> },
+      { path: "workflow-runs/:id", element: <WorkflowRunDetailPage /> },
       { path: "usage", element: <UsagePage /> },
       { path: "config", element: <ConfigPage /> },
       { path: "repos", element: <ReposPage /> },
