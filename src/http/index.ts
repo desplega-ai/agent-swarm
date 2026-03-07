@@ -11,6 +11,7 @@ import { closeDb } from "../be/db";
 import { initGitHub } from "../github";
 import { stopHeartbeat } from "../heartbeat";
 import { startSlackApp, stopSlackApp } from "../slack";
+import { initWorkflows } from "../workflows";
 import { handleActiveSessions } from "./active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
 import { handleConfig } from "./config";
@@ -27,6 +28,7 @@ import { handleStats } from "./stats";
 import { handleTasks } from "./tasks";
 import { getPathSegments, parseQueryParams, setCorsHeaders } from "./utils";
 import { handleWebhooks } from "./webhooks";
+import { handleWorkflows } from "./workflows";
 
 const port = parseInt(process.env.PORT || process.argv[2] || "3013", 10);
 const apiKey = process.env.API_KEY || "";
@@ -95,6 +97,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleActiveSessions(req, res, pathSegments, queryParams, myAgentId),
     () => handleEpics(req, res, pathSegments, queryParams, myAgentId),
     () => handleSchedules(req, res, pathSegments, queryParams, myAgentId),
+    () => handleWorkflows(req, res, pathSegments, queryParams, myAgentId),
     () => handleConfig(req, res, pathSegments, queryParams),
     () => handleRepos(req, res, pathSegments, queryParams),
     () => handleMemory(req, res, pathSegments, myAgentId),
@@ -174,6 +177,9 @@ httpServer
 
     // Initialize AgentMail webhook handler (if configured)
     initAgentMail();
+
+    // Initialize workflow engine (trigger subscriptions + resume listener)
+    initWorkflows();
 
     // Start scheduler (if enabled)
     if (hasCapability("scheduling")) {

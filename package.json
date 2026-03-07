@@ -58,6 +58,8 @@
     "deploy:update": "bun deploy/update.ts",
     "deploy:uninstall": "bun deploy/uninstall.ts",
     "deploy:docker": "bun deploy/docker-push.ts",
+    "e2e:workflows": "bun scripts/e2e-workflow-test.ts",
+    "e2e:workflows:docker": "bun scripts/e2e-workflow-test.ts --with-docker",
     "docs:mcp": "bun scripts/generate-mcp-docs.ts",
     "pm2-start": "pm2 start ecosystem.config.cjs",
     "pm2-stop": "pm2 stop ecosystem.config.cjs",
@@ -76,6 +78,7 @@
     "bun": ">=1.0.26"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.41",
     "@desplega.ai/localtunnel": "^2.2.0",
     "@inkjs/ui": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.25.1",
@@ -85,6 +88,7 @@
     "@x402/core": "^2.5.0",
     "@x402/evm": "^2.5.0",
     "@x402/fetch": "^2.5.0",
+    "ai": "^6.0.116",
     "cron-parser": "^5.4.0",
     "date-fns": "^4.1.0",
     "hono": "^4.12.3",
@@ -94,6 +98,7 @@
     "react-devtools-core": "^7.0.1",
     "svix": "^1.62.0",
     "viem": "^2.46.3",
-    "zod": "^4.2.1"
+    "zod": "^4.2.1",
+    "zod-to-json-schema": "^3.25.1"
   }
 }

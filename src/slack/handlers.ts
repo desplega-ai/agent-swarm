@@ -8,6 +8,7 @@ import {
   getLeadAgent,
   getTasksByAgentId,
 } from "../be/db";
+import { workflowEventBus } from "../workflows/event-bus";
 import type { SlackFile } from "./files";
 import { extractTaskFromMessage, routeMessage } from "./router";
 
@@ -340,6 +341,15 @@ export function registerMessageHandler(app: App): void {
       console.log(`[Slack] Ignoring message from unauthorized user ${msg.user}`);
       return;
     }
+
+    // Emit workflow trigger event for Slack messages
+    workflowEventBus.emit("slack.message", {
+      channel: msg.channel,
+      text: msg.text,
+      user: msg.user,
+      ts: msg.ts,
+      threadTs: msg.thread_ts,
+    });
 
     // Build effective text that includes attachment metadata
     const effectiveText = buildEffectiveText(msg.text, msg.files);

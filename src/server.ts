@@ -66,10 +66,23 @@ import { registerUnregisterServiceTool } from "./tools/unregister-service";
 // Profiles capability
 import { registerUpdateProfileTool } from "./tools/update-profile";
 import { registerUpdateServiceStatusTool } from "./tools/update-service-status";
+// Workflows capability
+import {
+  registerCreateWorkflowTool,
+  registerDeleteWorkflowTool,
+  registerGetWorkflowRunTool,
+  registerGetWorkflowTool,
+  registerListWorkflowRunsTool,
+  registerListWorkflowsTool,
+  registerRetryWorkflowRunTool,
+  registerTriggerWorkflowTool,
+  registerUpdateWorkflowTool,
+} from "./tools/workflows";
 
 // Capability-based feature flags
 // Default: all capabilities enabled
-const DEFAULT_CAPABILITIES = "core,task-pool,messaging,profiles,services,scheduling,epics,memory";
+const DEFAULT_CAPABILITIES =
+  "core,task-pool,messaging,profiles,services,scheduling,epics,memory,workflows";
 const CAPABILITIES = new Set(
   (process.env.CAPABILITIES || DEFAULT_CAPABILITIES).split(",").map((s) => s.trim()),
 );
@@ -184,6 +197,19 @@ export function createServer() {
     registerMemorySearchTool(server);
     registerMemoryGetTool(server);
     registerInjectLearningTool(server);
+  }
+
+  // Workflows capability - DAG-based automation workflows
+  if (hasCapability("workflows")) {
+    registerCreateWorkflowTool(server);
+    registerListWorkflowsTool(server);
+    registerGetWorkflowTool(server);
+    registerUpdateWorkflowTool(server);
+    registerDeleteWorkflowTool(server);
+    registerTriggerWorkflowTool(server);
+    registerListWorkflowRunsTool(server);
+    registerGetWorkflowRunTool(server);
+    registerRetryWorkflowRunTool(server);
   }
 
   return server;

@@ -106,6 +106,7 @@ describe("Tool Annotations & Classification", () => {
       "delete-epic",
       "delete-schedule",
       "delete-config",
+      "delete-workflow",
       "unregister-service",
     ];
 
@@ -281,6 +282,39 @@ describe("Tool Annotations & Classification", () => {
     }
   });
 
+  test("workflow tools are all deferred", () => {
+    const workflowTools = [
+      "create-workflow",
+      "list-workflows",
+      "get-workflow",
+      "update-workflow",
+      "delete-workflow",
+      "trigger-workflow",
+      "list-workflow-runs",
+      "get-workflow-run",
+      "retry-workflow-run",
+    ];
+    for (const tool of workflowTools) {
+      expect(DEFERRED_TOOLS.has(tool)).toBe(true);
+    }
+  });
+
+  test("all 9 workflow tools are registered in the server", () => {
+    const workflowTools = [
+      "create-workflow",
+      "list-workflows",
+      "get-workflow",
+      "update-workflow",
+      "delete-workflow",
+      "trigger-workflow",
+      "list-workflow-runs",
+      "get-workflow-run",
+      "retry-workflow-run",
+    ];
+    const missing = workflowTools.filter((t) => !tools[t]);
+    expect(missing).toEqual([]);
+  });
+
   test("service tools are all deferred", () => {
     const serviceTools = [
       "register-service",
@@ -306,7 +340,7 @@ describe("Tool Annotations & Classification", () => {
     const count = Object.keys(tools).length;
     // We expect all tools to be registered when all capabilities are enabled (default)
     expect(count).toBeGreaterThanOrEqual(45);
-    expect(count).toBeLessThanOrEqual(55);
+    expect(count).toBeLessThanOrEqual(65);
   });
 
   test("core tools are fewer than deferred tools", () => {

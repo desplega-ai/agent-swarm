@@ -6,6 +6,7 @@ import {
   getAgentMailInboxMapping,
   getAllAgents,
 } from "../be/db";
+import { workflowEventBus } from "../workflows/event-bus";
 import type { AgentMailMessage, AgentMailWebhookPayload } from "./types";
 
 /**
@@ -92,6 +93,16 @@ export async function handleMessageReceived(
   const subject = message.subject || "(no subject)";
   const body = message.text || message.html || "";
   const preview = body.length > 500 ? `${body.substring(0, 500)}...` : body;
+
+  // Emit workflow trigger event
+  workflowEventBus.emit("agentmail.message.received", {
+    inboxId: inbox_id,
+    from,
+    subject,
+    body: preview,
+    threadId: thread_id,
+    messageId: message_id,
+  });
 
   // Check for thread continuity - find existing task for this thread
   const existingTask = findTaskByAgentMailThread(thread_id);
