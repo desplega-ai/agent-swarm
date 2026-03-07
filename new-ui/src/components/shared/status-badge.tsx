@@ -1,9 +1,22 @@
 import { Loader2 } from "lucide-react";
-import type { AgentStatus, AgentTaskStatus, EpicStatus, ServiceStatus } from "@/api/types";
+import type {
+  AgentStatus,
+  AgentTaskStatus,
+  EpicStatus,
+  ServiceStatus,
+  WorkflowRunStatus,
+  WorkflowRunStepStatus,
+} from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-type Status = AgentStatus | AgentTaskStatus | EpicStatus | ServiceStatus;
+type Status =
+  | AgentStatus
+  | AgentTaskStatus
+  | EpicStatus
+  | ServiceStatus
+  | WorkflowRunStatus
+  | WorkflowRunStepStatus;
 
 interface StatusConfig {
   label: string;
@@ -71,6 +84,18 @@ const statusConfig: Record<string, StatusConfig> = {
   },
   unhealthy: { label: "UNHEALTHY", dot: "bg-red-500", text: "text-red-600 dark:text-red-400" },
   stopped: { label: "STOPPED", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
+
+  // Workflow run statuses
+  running: {
+    label: "RUNNING",
+    dot: "bg-amber-500",
+    text: "text-amber-600 dark:text-amber-400",
+    spinner: true,
+  },
+  waiting: { label: "WAITING", dot: "bg-yellow-500", text: "text-yellow-600 dark:text-yellow-400" },
+
+  // Workflow step statuses
+  skipped: { label: "SKIPPED", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
 } satisfies Record<string, StatusConfig>;
 
 interface StatusBadgeProps {

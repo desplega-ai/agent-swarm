@@ -395,3 +395,96 @@ export interface SwarmRepo {
 export interface SwarmReposResponse {
   repos: SwarmRepo[];
 }
+
+// Workflow types
+export type WorkflowNodeType =
+  | "trigger-new-task"
+  | "trigger-task-completed"
+  | "trigger-webhook"
+  | "trigger-email"
+  | "trigger-slack-message"
+  | "trigger-github-event"
+  | "llm-classify"
+  | "property-match"
+  | "code-match"
+  | "create-task"
+  | "send-message"
+  | "delegate-to-agent";
+
+export interface WorkflowNode {
+  id: string;
+  type: WorkflowNodeType;
+  label?: string;
+  config: Record<string, unknown>;
+}
+
+export interface WorkflowEdge {
+  id: string;
+  source: string;
+  sourcePort: string;
+  target: string;
+}
+
+export interface WorkflowDefinition {
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+}
+
+export interface Workflow {
+  id: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  definition: WorkflowDefinition;
+  webhookSecret?: string;
+  createdByAgentId?: string;
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+
+export type WorkflowRunStatus = "running" | "waiting" | "completed" | "failed";
+
+export interface WorkflowRun {
+  id: string;
+  workflowId: string;
+  status: WorkflowRunStatus;
+  triggerData?: unknown;
+  context?: Record<string, unknown>;
+  error?: string;
+  startedAt: string;
+  lastUpdatedAt: string;
+  finishedAt?: string;
+}
+
+export type WorkflowRunStepStatus =
+  | "pending"
+  | "running"
+  | "waiting"
+  | "completed"
+  | "failed"
+  | "skipped";
+
+export interface WorkflowRunStep {
+  id: string;
+  runId: string;
+  nodeId: string;
+  nodeType: string;
+  status: WorkflowRunStepStatus;
+  input?: unknown;
+  output?: unknown;
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
+}
+
+export interface WorkflowRunWithSteps extends WorkflowRun {
+  steps: WorkflowRunStep[];
+}
+
+export interface WorkflowsResponse {
+  workflows: Workflow[];
+}
+
+export interface WorkflowRunsResponse {
+  runs: WorkflowRun[];
+}
