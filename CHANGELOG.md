@@ -18,6 +18,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - Migrated inline `try { ALTER TABLE } catch {}` schema blocks to `src/be/migrations/` folder
 
+## [1.36.0] - 2026-03-06
+
+### Added
+- One-time (delayed) scheduled tasks alongside recurring schedules
+  - New `scheduleType` field: `recurring` (default) or `one_time`
+  - `create-schedule` accepts `delayMs` (relative delay) or `runAt` (absolute ISO datetime) for one-time schedules
+  - One-time schedules auto-disable after execution
+  - `list-schedules` hides completed one-time schedules by default (`hideCompleted`)
+  - UI shows type badges (amber=one-time, emerald=recurring)
+- AgentMail webhook domain filters: `AGENTMAIL_INBOX_DOMAIN_FILTER` and `AGENTMAIL_SENDER_DOMAIN_FILTER` env vars to filter incoming webhooks by inbox and sender domain
+
+### Changed
+- Docker worker improvements: streamlined `Dockerfile.worker` and `docker-entrypoint.sh`
+
 ## [1.35.2] - 2026-03-05
 
 ### Fixed

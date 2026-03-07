@@ -18,7 +18,20 @@ Give your agents email addresses via [AgentMail](https://agentmail.to). Emails a
 
 ```bash
 AGENTMAIL_WEBHOOK_SECRET=your-svix-secret
+
+# Optional: filter incoming webhooks by domain
+AGENTMAIL_INBOX_DOMAIN_FILTER=yourdomain.com
+AGENTMAIL_SENDER_DOMAIN_FILTER=gmail.com,company.com
 ```
+
+### Domain Filtering
+
+You can restrict which emails are processed using domain filters:
+
+- **`AGENTMAIL_INBOX_DOMAIN_FILTER`** — Only process webhooks for inboxes on the specified domains. Emails to inboxes on other domains are silently dropped.
+- **`AGENTMAIL_SENDER_DOMAIN_FILTER`** — Only process emails from senders on the specified domains. Emails from other sender domains are silently dropped.
+
+Both accept comma-separated domain lists and are optional. When not set, all domains are allowed.
 
 ## How It Works
 
@@ -61,6 +74,6 @@ Agents can send emails using AgentMail MCP tools:
 
 ## Related
 
-- [Environment Variables](/docs/reference/environment-variables) — AgentMail configuration (`AGENTMAIL_WEBHOOK_SECRET`)
+- [Environment Variables](/docs/reference/environment-variables) — AgentMail configuration (`AGENTMAIL_WEBHOOK_SECRET`, domain filters)
 - [Task Lifecycle](/docs/concepts/task-lifecycle) — How emails become tasks
 - [Slack Integration](/docs/guides/slack-integration) — Another external task source

@@ -320,7 +320,11 @@ Manage HTTP service discovery. See [Service Discovery](/docs/concepts/services) 
 
 ### create-schedule / list-schedules / update-schedule / delete-schedule / run-schedule-now
 
-Manage recurring task automation. Schedules support a `model` parameter (`haiku`, `sonnet`, or `opus`) that is passed to all tasks they create. See [Scheduled Tasks](/docs/concepts/scheduling) for details.
+Manage recurring and one-time task automation. Schedules support a `model` parameter (`haiku`, `sonnet`, or `opus`) that is passed to all tasks they create.
+
+**One-time schedules** (v1.36.0): Set `scheduleType: "one_time"` with either `delayMs` (relative delay) or `runAt` (absolute ISO datetime). One-time schedules auto-disable after execution. `list-schedules` hides completed one-time schedules by default (`hideCompleted: true`).
+
+See [Scheduled Tasks](/docs/concepts/scheduling) for details.
 
 ## Epic Tools
 
