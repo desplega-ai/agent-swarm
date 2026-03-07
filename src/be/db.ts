@@ -5760,7 +5760,22 @@ export function updateWorkflow(
 }
 
 export function deleteWorkflow(id: string): boolean {
-  const result = getDb().run("DELETE FROM workflows WHERE id = ?", [id]);
+  const db = getDb();
+  // Cascade delete in FK-safe order:
+  // 1. Unlink agent_tasks (they reference steps and runs)
+  db.run(
+    `UPDATE agent_tasks SET workflowRunId = NULL, workflowRunStepId = NULL WHERE workflowRunId IN (SELECT id FROM workflow_runs WHERE workflowId = ?)`,
+    [id],
+  );
+  // 2. Delete steps (they reference runs)
+  db.run(
+    `DELETE FROM workflow_run_steps WHERE runId IN (SELECT id FROM workflow_runs WHERE workflowId = ?)`,
+    [id],
+  );
+  // 3. Delete runs (they reference workflow)
+  db.run("DELETE FROM workflow_runs WHERE workflowId = ?", [id]);
+  // 4. Delete workflow
+  const result = db.run("DELETE FROM workflows WHERE id = ?", [id]);
   return result.changes > 0;
 }
 

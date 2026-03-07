@@ -81,6 +81,59 @@ describe("Phase 6 Node Types", () => {
       expect(result.nextPort).toBe("sandboxed");
     });
 
+    test("handles number return by converting to string", () => {
+      const config = {
+        code: "(input) => 42",
+        outputPorts: ["42", "other"],
+      };
+      const result = executeCodeMatch(config, {});
+      expect(result.nextPort).toBe("42");
+    });
+
+    test("throws when user code throws at runtime", () => {
+      const config = {
+        code: "(input) => { throw new Error('kaboom'); }",
+        outputPorts: ["true", "false"],
+      };
+      expect(() => executeCodeMatch(config, {})).toThrow("kaboom");
+    });
+
+    test("blocks require access (sandbox returns undefined for require)", () => {
+      const config = {
+        code: "(input) => typeof require === 'undefined' ? 'sandboxed' : 'exposed'",
+        outputPorts: ["sandboxed", "exposed"],
+      };
+      const result = executeCodeMatch(config, {});
+      expect(result.nextPort).toBe("sandboxed");
+    });
+
+    test("blocks fetch access (sandbox returns undefined for fetch)", () => {
+      const config = {
+        code: "(input) => typeof fetch === 'undefined' ? 'sandboxed' : 'exposed'",
+        outputPorts: ["sandboxed", "exposed"],
+      };
+      const result = executeCodeMatch(config, {});
+      expect(result.nextPort).toBe("sandboxed");
+    });
+
+    test("blocks setTimeout access (sandbox returns undefined)", () => {
+      const config = {
+        code: "(input) => typeof setTimeout === 'undefined' ? 'sandboxed' : 'exposed'",
+        outputPorts: ["sandboxed", "exposed"],
+      };
+      const result = executeCodeMatch(config, {});
+      expect(result.nextPort).toBe("sandboxed");
+    });
+
+    test("blocks globalThis access (sandbox returns undefined)", () => {
+      const config = {
+        code: "(input) => typeof globalThis === 'undefined' ? 'sandboxed' : 'exposed'",
+        outputPorts: ["sandboxed", "exposed"],
+      };
+      const result = executeCodeMatch(config, {});
+      expect(result.nextPort).toBe("sandboxed");
+    });
+
     test("throws when code returns a port not in outputPorts", () => {
       const config = {
         code: "(input) => 'unknown-port'",

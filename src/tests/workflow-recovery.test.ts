@@ -132,6 +132,45 @@ describe("Workflow Recovery", () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Recovery: task cancelled → run marked failed with "Task cancelled" message
+  // ---------------------------------------------------------------------------
+  describe("recoverStuckWorkflowRuns() with cancelled task", () => {
+    test("marks run as failed with 'Task cancelled' when linked task is cancelled", async () => {
+      const workflow = createWorkflow({
+        name: "recovery-test-cancelled",
+        definition: WAITING_WORKFLOW_DEF,
+      });
+
+      const runId = await startWorkflowExecution(workflow, { source: "test" });
+
+      const runBefore = getWorkflowRun(runId);
+      expect(runBefore?.status).toBe("waiting");
+
+      const tasks = getAllTasks();
+      const workflowTask = tasks.find((t) => t.workflowRunId === runId);
+      expect(workflowTask).toBeDefined();
+
+      // Simulate the task being cancelled
+      getDb().run(
+        "UPDATE agent_tasks SET status = 'cancelled', finishedAt = datetime('now') WHERE id = ?",
+        [workflowTask!.id],
+      );
+
+      const recovered = await recoverStuckWorkflowRuns();
+      expect(recovered).toBe(1);
+
+      const runAfter = getWorkflowRun(runId);
+      expect(runAfter?.status).toBe("failed");
+      expect(runAfter?.error).toBe("Task cancelled");
+
+      const steps = getWorkflowRunStepsByRunId(runId);
+      const ctStep = steps.find((s) => s.nodeId === "ct1")!;
+      expect(ctStep.status).toBe("failed");
+      expect(ctStep.error).toBe("Task cancelled");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // No stuck runs → returns 0
   // ---------------------------------------------------------------------------
   describe("recoverStuckWorkflowRuns() with no stuck runs", () => {

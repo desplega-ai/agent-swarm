@@ -322,6 +322,207 @@ describe("Workflow HTTP API", () => {
   });
 
   // ---------------------------------------------------------------------------
+  // POST /api/workflow-runs/:id/retry — retry a failed run
+  // ---------------------------------------------------------------------------
+  describe("Retry failed run", () => {
+    test("POST /api/workflow-runs/:id/retry retries a failed run", async () => {
+      const createRes = await fetch(`${baseUrl}/api/workflows`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Agent-ID": "agent-1" },
+        body: JSON.stringify({
+          name: "test-retry-workflow",
+          definition: {
+            nodes: [
+              { id: "t1", type: "trigger-webhook", config: {} },
+              { id: "a1", type: "create-task", config: { template: "Retry test task" } },
+            ],
+            edges: [{ id: "e1", source: "t1", sourcePort: "default", target: "a1" }],
+          },
+        }),
+      });
+      const { id: workflowId } = (await createRes.json()) as { id: string };
+
+      const triggerRes = await fetch(`${baseUrl}/api/workflows/${workflowId}/trigger`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Agent-ID": "agent-1" },
+        body: JSON.stringify({}),
+      });
+      const { runId } = (await triggerRes.json()) as { runId: string };
+
+      // Get run detail to find step ID, then manually fail via DB
+      const runDetailRes = await fetch(`${baseUrl}/api/workflow-runs/${runId}`, {
+        headers: { "X-Agent-ID": "agent-1" },
+      });
+      const runDetail = (await runDetailRes.json()) as {
+        steps: Array<{ id: string; nodeId: string }>;
+      };
+      const taskStep = runDetail.steps.find((s) => s.nodeId === "a1")!;
+
+      const { getDb } = await import("../be/db");
+      getDb().run("UPDATE workflow_run_steps SET status = 'failed', error = 'test' WHERE id = ?", [
+        taskStep.id,
+      ]);
+      getDb().run("UPDATE workflow_runs SET status = 'failed', error = 'test' WHERE id = ?", [
+        runId,
+      ]);
+
+      const retryRes = await fetch(`${baseUrl}/api/workflow-runs/${runId}/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Agent-ID": "agent-1" },
+      });
+      expect(retryRes.status).toBe(200);
+      const retryBody = (await retryRes.json()) as { success: boolean };
+      expect(retryBody.success).toBe(true);
+    });
+
+    test("POST /api/workflow-runs/:id/retry returns 400 for non-failed run", async () => {
+      const createRes = await fetch(`${baseUrl}/api/workflows`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Agent-ID": "agent-1" },
+        body: JSON.stringify({
+          name: "test-retry-not-failed",
+          definition: {
+            nodes: [
+              { id: "t1", type: "trigger-webhook", config: {} },
+              { id: "a1", type: "create-task", config: { template: "Retry test" } },
+            ],
+            edges: [{ id: "e1", source: "t1", sourcePort: "default", target: "a1" }],
+          },
+        }),
+      });
+      const { id: wfId } = (await createRes.json()) as { id: string };
+
+      const triggerRes = await fetch(`${baseUrl}/api/workflows/${wfId}/trigger`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Agent-ID": "agent-1" },
+        body: JSON.stringify({}),
+      });
+      const { runId } = (await triggerRes.json()) as { runId: string };
+
+      const retryRes = await fetch(`${baseUrl}/api/workflow-runs/${runId}/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Agent-ID": "agent-1" },
+      });
+      expect(retryRes.status).toBe(400);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Trigger edge cases: disabled workflow, webhook secret auth
+  // ---------------------------------------------------------------------------
+  describe("Trigger edge cases", () => {
+    test("POST trigger returns 400 when workflow is disabled", async () => {
+      const createRes = await fetch(`${baseUrl}/api/workflows`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Agent-ID": "agent-1" },
+        body: JSON.stringify({
+          name: "test-disabled-workflow",
+          definition: {
+            nodes: [{ id: "t1", type: "trigger-webhook", config: {} }],
+            edges: [],
+          },
+        }),
+      });
+      const { id } = (await createRes.json()) as { id: string };
+
+      // Disable the workflow
+      await fetch(`${baseUrl}/api/workflows/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "X-Agent-ID": "agent-1" },
+        body: JSON.stringify({ enabled: false }),
+      });
+
+      const triggerRes = await fetch(`${baseUrl}/api/workflows/${id}/trigger`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Agent-ID": "agent-1" },
+        body: JSON.stringify({}),
+      });
+      expect(triggerRes.status).toBe(400);
+      const body = (await triggerRes.json()) as { error: string };
+      expect(body.error).toBe("Workflow is disabled");
+    });
+
+    test("POST trigger returns 401 without agentId and wrong secret", async () => {
+      const createRes = await fetch(`${baseUrl}/api/workflows`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Agent-ID": "agent-1" },
+        body: JSON.stringify({
+          name: "test-secret-auth",
+          definition: {
+            nodes: [{ id: "t1", type: "trigger-webhook", config: {} }],
+            edges: [],
+          },
+        }),
+      });
+      const { id } = (await createRes.json()) as { id: string };
+
+      const triggerRes = await fetch(`${baseUrl}/api/workflows/${id}/trigger?secret=wrong`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(triggerRes.status).toBe(401);
+    });
+
+    test("POST trigger returns 404 for unknown workflow", async () => {
+      const triggerRes = await fetch(`${baseUrl}/api/workflows/does-not-exist/trigger`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Agent-ID": "agent-1" },
+        body: JSON.stringify({}),
+      });
+      expect(triggerRes.status).toBe(404);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // PUT edge cases
+  // ---------------------------------------------------------------------------
+  describe("PUT edge cases", () => {
+    test("PUT /api/workflows/:id returns 404 for unknown id", async () => {
+      const res = await fetch(`${baseUrl}/api/workflows/does-not-exist`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "X-Agent-ID": "agent-1" },
+        body: JSON.stringify({ name: "nope" }),
+      });
+      expect(res.status).toBe(404);
+    });
+
+    test("PUT /api/workflows/:id with invalid definition returns 400", async () => {
+      const createRes = await fetch(`${baseUrl}/api/workflows`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Agent-ID": "agent-1" },
+        body: JSON.stringify({
+          name: "test-put-invalid-def",
+          definition: {
+            nodes: [{ id: "t1", type: "trigger-webhook", config: {} }],
+            edges: [],
+          },
+        }),
+      });
+      const { id } = (await createRes.json()) as { id: string };
+
+      const res = await fetch(`${baseUrl}/api/workflows/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "X-Agent-ID": "agent-1" },
+        body: JSON.stringify({ definition: { invalid: true } }),
+      });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // GET edge cases
+  // ---------------------------------------------------------------------------
+  describe("GET edge cases", () => {
+    test("GET /api/workflow-runs/:id returns 404 for unknown run", async () => {
+      const res = await fetch(`${baseUrl}/api/workflow-runs/does-not-exist`, {
+        headers: { "X-Agent-ID": "agent-1" },
+      });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // POST /api/workflows — validation: invalid definition rejected
   // ---------------------------------------------------------------------------
   describe("Validation", () => {

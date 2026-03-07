@@ -6,7 +6,7 @@ export interface WorkflowEventBus {
   off(event: string, handler: (data: unknown) => void): void;
 }
 
-class InProcessEventBus implements WorkflowEventBus {
+export class InProcessEventBus implements WorkflowEventBus {
   private emitter = new EventEmitter();
 
   constructor() {

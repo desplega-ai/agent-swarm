@@ -90,8 +90,14 @@ export async function handleWorkflows(
   // DELETE /api/workflows/:id
   if (matchRoute(req.method, pathSegments, "DELETE", ["api", "workflows", null], true)) {
     const id = pathSegments[2]!;
-    const deleted = deleteWorkflow(id);
-    res.writeHead(deleted ? 204 : 404);
+    try {
+      const deleted = deleteWorkflow(id);
+      res.writeHead(deleted ? 204 : 404);
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: String(err) }));
+      return true;
+    }
     res.end();
     return true;
   }
