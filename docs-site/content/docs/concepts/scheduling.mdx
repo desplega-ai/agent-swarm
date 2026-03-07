@@ -1,13 +1,13 @@
 ---
 title: Scheduled Tasks
-description: Automate recurring tasks with cron-based scheduling
+description: Automate recurring and one-time tasks with cron-based and delayed scheduling
 ---
 
 # Scheduled Tasks
 
-Agent Swarm supports cron-based scheduling to automate recurring tasks. Schedules automatically create tasks at specified intervals.
+Agent Swarm supports both **recurring** and **one-time** schedules to automate task creation. Recurring schedules create tasks at specified intervals, while one-time schedules run once at a specific time or after a delay, then auto-disable.
 
-## Creating a Schedule
+## Creating a Recurring Schedule
 
 ```
 create-schedule(
@@ -28,14 +28,39 @@ create-schedule(
 )
 ```
 
+## Creating a One-Time Schedule
+
+One-time schedules run once and then auto-disable. Use `delayMs` for a relative delay or `runAt` for an absolute time:
+
+```
+create-schedule(
+  name: "deploy-reminder",
+  scheduleType: "one_time",
+  taskTemplate: "Remind the team about the deployment at 3 PM",
+  delayMs: 1800000
+)
+```
+
+```
+create-schedule(
+  name: "scheduled-report",
+  scheduleType: "one_time",
+  taskTemplate: "Generate the quarterly report",
+  runAt: "2026-03-15T09:00:00Z"
+)
+```
+
 ## Schedule Properties
 
 | Property | Description |
 |----------|-------------|
 | `name` | Unique name for the schedule |
 | `taskTemplate` | Task description created each time |
-| `cronExpression` | Cron expression (e.g., `0 9 * * *` for daily at 9 AM) |
-| `intervalMs` | Alternative: interval in milliseconds |
+| `scheduleType` | `recurring` (default) or `one_time` |
+| `cronExpression` | Cron expression for recurring schedules (e.g., `0 9 * * *`) |
+| `intervalMs` | Interval in milliseconds for recurring schedules |
+| `delayMs` | Delay in milliseconds for one-time schedules |
+| `runAt` | ISO datetime for one-time schedules (e.g., `2026-03-15T09:00:00Z`) |
 | `timezone` | Timezone for cron schedules (default: UTC) |
 | `targetAgentId` | Agent to assign tasks to (omit for task pool) |
 | `priority` | Task priority 0-100 (default: 50) |
@@ -52,7 +77,10 @@ create-schedule(
 list-schedules()
 list-schedules(enabled: true)
 list-schedules(name: "daily")
+list-schedules(scheduleType: "one_time")
 ```
+
+By default, completed one-time schedules are hidden. Pass `hideCompleted: false` to include them.
 
 ### Update a Schedule
 
@@ -97,6 +125,7 @@ When a schedule is due:
 3. If `targetAgentId` is set, the task is assigned to that agent; otherwise it goes into the unassigned pool
 4. If `model` is set, the task inherits that model setting
 5. The schedule's `lastRunAt` is updated
+6. **One-time schedules** are automatically disabled after execution
 
 Only the schedule creator or the lead agent can update or delete schedules.
 

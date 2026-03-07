@@ -86,6 +86,8 @@ Complete reference for all environment variables used by Agent Swarm.
 |----------|-------------|
 | `AGENTMAIL_DISABLE` | Set to `true` to skip AgentMail integration |
 | `AGENTMAIL_WEBHOOK_SECRET` | Svix signing secret for webhook verification |
+| `AGENTMAIL_INBOX_DOMAIN_FILTER` | Comma-separated domains to allow for incoming inbox webhooks (e.g., `yourdomain.com,example.com`). Unmatched inbox domains are silently dropped |
+| `AGENTMAIL_SENDER_DOMAIN_FILTER` | Comma-separated sender domains to allow (e.g., `gmail.com,company.com`). Unmatched sender domains are silently dropped |
 
 ## Sentry Integration
 

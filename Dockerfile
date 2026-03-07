@@ -35,11 +35,15 @@ RUN chmod +x /usr/local/bin/agent-swarm-api
 # Copy package.json for version info
 COPY package.json ./
 
+# Copy migration SQL files (compiled binary can't read from /$bunfs virtual filesystem)
+COPY src/be/migrations/*.sql /app/migrations/
+
 # Create data directory for SQLite (WAL mode needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
 RUN mkdir -p /app/data
 
 ENV PORT=3013
 ENV DATABASE_PATH=/app/data/agent-swarm-db.sqlite
+ENV MIGRATIONS_DIR=/app/migrations
 
 VOLUME /app/data
 
