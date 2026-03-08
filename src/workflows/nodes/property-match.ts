@@ -9,7 +9,9 @@ export interface PropertyMatchCondition {
 export interface PropertyMatchConfig {
   conditions?: PropertyMatchCondition[];
   mode?: "all" | "any"; // default: "all"
-  // Flat single-condition format (used by workflow definitions)
+  // Flat single-condition format — workflow definitions created via the API/UI
+  // store property-match nodes as { property, operator, value } rather than
+  // the conditions array format used in code/tests. Both formats are supported.
   property?: string;
   operator?: PropertyMatchCondition["op"];
   value?: unknown;
@@ -21,19 +23,31 @@ export function executePropertyMatch(
 ): NodeResult {
   const mode = config.mode ?? "all";
   const conditions = normalizeConditions(config);
+  if (conditions === null) {
+    return {
+      mode: "instant",
+      nextPort: "false",
+      output: { passed: false, results: [], error: "No valid conditions configured" },
+    };
+  }
   const results = conditions.map((cond) => evaluateCondition(cond, ctx));
   const passed = mode === "all" ? results.every(Boolean) : results.some(Boolean);
   return { mode: "instant", nextPort: passed ? "true" : "false", output: { passed, results } };
 }
 
-function normalizeConditions(config: PropertyMatchConfig): PropertyMatchCondition[] {
+function normalizeConditions(config: PropertyMatchConfig): PropertyMatchCondition[] | null {
   if (config.conditions && config.conditions.length > 0) {
     return config.conditions;
   }
   if (config.property && config.operator) {
     return [{ field: config.property, op: config.operator, value: config.value }];
   }
-  return [];
+  if (config.property && !config.operator) {
+    console.warn(
+      `[workflow] property-match node has "property" (${config.property}) but no "operator" — node will fail`,
+    );
+  }
+  return null;
 }
 
 function evaluateCondition(cond: PropertyMatchCondition, ctx: Record<string, unknown>): boolean {

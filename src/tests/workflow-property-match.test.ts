@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, jest, test } from "bun:test";
 import { executePropertyMatch, type PropertyMatchConfig } from "../workflows/nodes/property-match";
 
 function match(config: PropertyMatchConfig, ctx: Record<string, unknown>): boolean {
@@ -321,12 +321,43 @@ describe("executePropertyMatch()", () => {
   // No conditions (empty/missing)
   // ---------------------------------------------------------------------------
   describe("no conditions", () => {
-    test("empty conditions array passes with mode all", () => {
-      expect(match({ conditions: [] }, {})).toBe(true);
+    test("empty conditions array fails the node", () => {
+      expect(match({ conditions: [] }, {})).toBe(false);
     });
 
-    test("no conditions and no flat config passes with mode all", () => {
-      expect(match({} as PropertyMatchConfig, {})).toBe(true);
+    test("no conditions and no flat config fails the node", () => {
+      expect(match({} as PropertyMatchConfig, {})).toBe(false);
+    });
+
+    test("flat config with property but no operator fails the node and warns", () => {
+      const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+      expect(
+        match({ property: "trigger.source" } as PropertyMatchConfig, {
+          trigger: { source: "api" },
+        }),
+      ).toBe(false);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toContain('no "operator"');
+      warnSpy.mockRestore();
+    });
+
+    test("returns error output when no valid conditions", () => {
+      const result = executePropertyMatch({} as PropertyMatchConfig, {});
+      expect(result.nextPort).toBe("false");
+      const output = result.output as { passed: boolean; error: string };
+      expect(output.passed).toBe(false);
+      expect(output.error).toBe("No valid conditions configured");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Flat config with mode: "any"
+  // ---------------------------------------------------------------------------
+  describe("flat config with mode: any", () => {
+    test("flat config respects mode setting", () => {
+      expect(match({ property: "a", operator: "eq", value: "x", mode: "any" }, { a: "x" })).toBe(
+        true,
+      );
     });
   });
 
