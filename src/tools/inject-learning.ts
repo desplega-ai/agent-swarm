@@ -67,11 +67,11 @@ export const registerInjectLearningTool = (server: McpServer) => {
         };
       }
 
-      // Create agent-scoped memory for the target worker
+      // Create swarm-scoped memory — lead learnings are organizational knowledge visible to all workers
       const content = `[Lead Feedback — ${category}]\n\n${learning}`;
       const memory = createMemory({
         agentId: targetAgentId,
-        scope: "agent",
+        scope: "swarm",
         name: `Lead feedback: ${category} — ${learning.slice(0, 60)}`,
         content,
         source: "manual",

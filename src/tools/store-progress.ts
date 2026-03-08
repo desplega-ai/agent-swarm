@@ -198,11 +198,13 @@ export const registerStoreProgressTool = (server: McpServer) => {
             }
 
             // Auto-promote high-value completions to swarm memory (P3)
+            // Epic-linked tasks are also promoted so workers on the same epic can see each other's learnings
             const shouldShareWithSwarm =
               status === "completed" &&
               (result.task!.taskType === "research" ||
                 result.task!.tags?.includes("knowledge") ||
-                result.task!.tags?.includes("shared"));
+                result.task!.tags?.includes("shared") ||
+                result.task!.epicId != null);
 
             if (shouldShareWithSwarm) {
               try {
