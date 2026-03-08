@@ -426,6 +426,7 @@ export const EpicSchema = z.object({
   slackThreadTs: z.string().optional(),
   githubRepo: z.string().optional(),
   githubMilestone: z.string().optional(),
+  nextSteps: z.string().optional(), // Lead's notes on what to do next for this epic
   createdAt: z.iso.datetime(),
   lastUpdatedAt: z.iso.datetime(),
   startedAt: z.iso.datetime().optional(),

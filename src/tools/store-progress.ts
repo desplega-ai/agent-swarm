@@ -8,8 +8,10 @@ import {
   failTask,
   getAgentById,
   getDb,
+  getEpicWithProgress,
   getLeadAgent,
   getTaskById,
+  markEpicsProgressNotified,
   updateAgentStatusFromCapacity,
   updateMemoryEmbedding,
   updateTaskProgress,
@@ -251,16 +253,45 @@ export const registerStoreProgressTool = (server: McpServer) => {
                 followUpDescription = `Worker task failed — action needed.\n\nAgent: ${agentName}\nTask: "${taskDesc}"\n\nFailure reason: ${reason}\n\nDecide whether to reassign, retry, or handle the failure. Use \`get-task-details\` with taskId "${taskId}" for full details.`;
               }
 
+              // Enrich follow-up with epic context if task belongs to an epic
+              let epicContext = "";
+              if (result.task.epicId) {
+                const epic = getEpicWithProgress(result.task.epicId);
+                if (epic) {
+                  epicContext = `\n\n## Epic Context\n`;
+                  epicContext += `**Epic:** ${epic.name}\n`;
+                  epicContext += `**Goal:** ${epic.goal}\n`;
+                  epicContext += `**Progress:** ${epic.progress}% (${epic.taskStats.completed}/${epic.taskStats.total} tasks)\n`;
+                  if (epic.plan) {
+                    epicContext += `**Plan:**\n${epic.plan.slice(0, 1000)}\n`;
+                  }
+                  if (epic.nextSteps) {
+                    epicContext += `**Next Steps:**\n${epic.nextSteps}\n`;
+                  }
+                  epicContext += `\n**Action Required:** Review the output above in the context of this epic. `;
+                  epicContext += `If the epic goal is not yet met, create the next task(s) with epicId="${result.task.epicId}". `;
+                  epicContext += `If blocked or unclear, notify the stakeholder. `;
+                  epicContext += `If the goal is met, update the epic status to completed.`;
+                }
+              }
+
               // If the original task came from Slack, forward context so lead can reply
-              createTaskExtended(followUpDescription, {
+              createTaskExtended(followUpDescription + epicContext, {
                 agentId: leadAgent.id,
                 source: "system",
                 taskType: "follow-up",
                 parentTaskId: taskId,
+                epicId: result.task.epicId || undefined,
                 slackChannelId: result.task.slackChannelId,
                 slackThreadTs: result.task.slackThreadTs,
                 slackUserId: result.task.slackUserId,
               });
+
+              // Deduplicate: mark epic progress as notified so epic_progress_changed
+              // doesn't re-fire for this same task completion
+              if (result.task.epicId) {
+                markEpicsProgressNotified([result.task.epicId]);
+              }
 
               console.log(
                 `[store-progress] Created follow-up task for lead (${leadAgent.name}) — ${status} task ${taskId.slice(0, 8)} by ${agentName}`,

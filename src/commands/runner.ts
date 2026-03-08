@@ -919,6 +919,9 @@ Note: Claims are first-come-first-serve. If claim fails, pick another.`;
           id: string;
           name: string;
           goal: string;
+          plan?: string;
+          prd?: string;
+          nextSteps?: string;
           status: string;
           progress: number;
           taskStats: {
@@ -950,6 +953,13 @@ Note: Claims are first-come-first-serve. If claim fails, pick another.`;
         prompt += `**Goal:** ${epic.goal}\n`;
         prompt += `**Progress:** ${epic.progress}% complete (${epic.taskStats.completed}/${epic.taskStats.total} tasks)\n`;
         prompt += `**Status:** ${epic.status}\n\n`;
+
+        if (epic.plan) {
+          prompt += `**Plan:**\n${epic.plan.slice(0, 2000)}\n\n`;
+        }
+        if (epic.prd) {
+          prompt += `**PRD:**\n${epic.prd.slice(0, 1000)}\n\n`;
+        }
 
         // Show finished tasks
         const completed = finishedTasks.filter((t) => t.status === "completed");
