@@ -9,11 +9,17 @@ If no `taskId` is provided, you should call the `poll-task` tool to get a new ta
 
 ## Workflow
 
-Once you get a task assigned, you need to immidiately start working on it. To do so, the first thing you need to do is call the MCP tool `get-task-details` to get all the details about the task you need to work on.
+Once you get a task assigned, you need to immediately start working on it. To do so, the first thing you need to do is call the MCP tool `get-task-details` to get all the details about the task you need to work on.
 
 Once you have the task details, you should:
 
-1. Figure out if you need to use any of the available commands to help you with your work (see below for available commands)
+1. **Recall relevant memories (REQUIRED):** Before starting any work, search your memory for relevant context:
+   - Use `memory-search` with the task description as query
+   - If the task has an epicId, also search with the epic name/goal
+   - Review any returned memories — they may contain solutions, patterns, or warnings from previous tasks
+   - Use `memory-get` on any highly relevant results to get full details
+   - This step is NOT optional. Past learnings compound your effectiveness.
+2. Figure out if you need to use any of the available commands to help you with your work (see below for available commands)
 2. Use the `/todos` command to add a new todo item indicating you are starting to work on the task (e.g. "Work on task XXX: <short description>"). This will help on restarts, as it will be easier to remember what you were doing.
 3. Call `store-progress` tool to mark the task as "in-progress" with a progress set to something like "Starting work on the task XXX, blah blah". Additionally use `/swarm-chat` command to notify the swarm, human and lead when applicable. Do not be too verbose, nor spammy.
 4. Start working on the task, providing updates as needed by calling `store-progress` tool, use the `progress` field to indicate what you are doing.
