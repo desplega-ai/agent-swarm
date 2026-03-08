@@ -23,6 +23,7 @@ export type ProviderEvent =
   | { type: "result"; cost: CostData; output?: string; isError: boolean; errorCategory?: string }
   | { type: "error"; message: string; category?: string }
   | { type: "raw_log"; content: string }
+  | { type: "raw_stderr"; content: string }
   | { type: "custom"; name: string; data: unknown };
 
 /** Configuration passed to a provider adapter to create a session. */
@@ -61,6 +62,8 @@ export interface ProviderResult {
   output?: string;
   isError: boolean;
   errorCategory?: string;
+  /** Human-readable failure reason built from error tracking. */
+  failureReason?: string;
 }
 
 /** Main contract for a harness provider adapter. */
