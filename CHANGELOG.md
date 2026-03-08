@@ -7,6 +7,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Workflow automation engine with DAG-based node execution (#142)
+  - Trigger nodes: task created/completed, GitHub events, Slack messages, email, webhooks
+  - Condition nodes: property-match, code-match (sandboxed JS), LLM-classify
+  - Action nodes: create-task, send-message, delegate-to-agent
+  - Template interpolation with `{{variable}}` syntax in node configs
+  - Async node support with pause/resume for long-running actions
+  - Stuck run recovery and retry-from-failure support
+  - 9 MCP tools for workflow CRUD, triggering, and run management
+  - REST API endpoints for workflows and runs
+- Workflows UI with React Flow graph visualization (#144)
+  - Interactive DAG visualization with dagre auto-layout
+  - Custom node components (TriggerNode, ConditionNode, ActionNode) with status overlays
+  - Workflow runs table with execution status tracking
+  - Step detail drill-down panel
+  - Workflows section in dashboard sidebar under Operations
+- E2E workflow test with Docker worker integration
 - Database migration system with numbered `.sql` files and incremental runner (#133)
 - Lightweight code-level heartbeat module for swarm triage without spinning up Claude sessions (#124)
   - 3-tier approach: preflight gate, code-level triage, Claude escalation
@@ -17,6 +33,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - Migrated inline `try { ALTER TABLE } catch {}` schema blocks to `src/be/migrations/` folder
+
+### Fixed
+- API migration Dockerfile fix for workflow schema
 
 ## [1.36.0] - 2026-03-06
 
