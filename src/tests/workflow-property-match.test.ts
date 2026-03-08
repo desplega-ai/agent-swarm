@@ -269,6 +269,68 @@ describe("executePropertyMatch()", () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Flat config format (property/operator/value)
+  // ---------------------------------------------------------------------------
+  describe("flat config format", () => {
+    test("matches with flat property/operator/value config", () => {
+      expect(
+        match(
+          { property: "trigger.source", operator: "eq", value: "api" },
+          { trigger: { source: "api" } },
+        ),
+      ).toBe(true);
+    });
+
+    test("rejects with flat config when value does not match", () => {
+      expect(
+        match(
+          { property: "trigger.source", operator: "eq", value: "slack" },
+          { trigger: { source: "api" } },
+        ),
+      ).toBe(false);
+    });
+
+    test("flat config with exists operator", () => {
+      expect(
+        match({ property: "trigger.epicId", operator: "exists" }, { trigger: { epicId: "abc" } }),
+      ).toBe(true);
+    });
+
+    test("flat config with exists operator when missing", () => {
+      expect(match({ property: "trigger.epicId", operator: "exists" }, { trigger: {} })).toBe(
+        false,
+      );
+    });
+
+    test("conditions array takes priority over flat config", () => {
+      expect(
+        match(
+          {
+            conditions: [{ field: "a", op: "eq", value: "x" }],
+            property: "b",
+            operator: "eq",
+            value: "y",
+          },
+          { a: "x", b: "nope" },
+        ),
+      ).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // No conditions (empty/missing)
+  // ---------------------------------------------------------------------------
+  describe("no conditions", () => {
+    test("empty conditions array passes with mode all", () => {
+      expect(match({ conditions: [] }, {})).toBe(true);
+    });
+
+    test("no conditions and no flat config passes with mode all", () => {
+      expect(match({} as PropertyMatchConfig, {})).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Output structure
   // ---------------------------------------------------------------------------
   describe("output structure", () => {

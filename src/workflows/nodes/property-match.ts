@@ -7,8 +7,12 @@ export interface PropertyMatchCondition {
 }
 
 export interface PropertyMatchConfig {
-  conditions: PropertyMatchCondition[];
+  conditions?: PropertyMatchCondition[];
   mode?: "all" | "any"; // default: "all"
+  // Flat single-condition format (used by workflow definitions)
+  property?: string;
+  operator?: PropertyMatchCondition["op"];
+  value?: unknown;
 }
 
 export function executePropertyMatch(
@@ -16,9 +20,20 @@ export function executePropertyMatch(
   ctx: Record<string, unknown>,
 ): NodeResult {
   const mode = config.mode ?? "all";
-  const results = config.conditions.map((cond) => evaluateCondition(cond, ctx));
+  const conditions = normalizeConditions(config);
+  const results = conditions.map((cond) => evaluateCondition(cond, ctx));
   const passed = mode === "all" ? results.every(Boolean) : results.some(Boolean);
   return { mode: "instant", nextPort: passed ? "true" : "false", output: { passed, results } };
+}
+
+function normalizeConditions(config: PropertyMatchConfig): PropertyMatchCondition[] {
+  if (config.conditions && config.conditions.length > 0) {
+    return config.conditions;
+  }
+  if (config.property && config.operator) {
+    return [{ field: config.property, op: config.operator, value: config.value }];
+  }
+  return [];
 }
 
 function evaluateCondition(cond: PropertyMatchCondition, ctx: Record<string, unknown>): boolean {
