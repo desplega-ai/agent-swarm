@@ -18,8 +18,21 @@ import { join } from "node:path";
 const COMMANDS_DIR = join(import.meta.dir, "commands");
 const PI_SKILLS_DIR = join(import.meta.dir, "pi-skills");
 
-/** Only these commands get converted to pi-mono skills */
-const SKILLS_TO_CONVERT = ["work-on-task", "start-worker", "start-leader", "swarm-chat"];
+/** All commands to convert to pi-mono skills */
+const SKILLS_TO_CONVERT = [
+  "work-on-task",
+  "start-worker",
+  "start-leader",
+  "swarm-chat",
+  "close-issue",
+  "create-pr",
+  "implement-issue",
+  "investigate-sentry-issue",
+  "respond-github",
+  "review-offered-task",
+  "review-pr",
+  "todos",
+];
 
 function convertToPiSkill(name: string, content: string): string {
   let result = content;
@@ -103,20 +116,9 @@ If the task is straightforward with clear instructions, proceed normally without
   result = result.replace(/\/desplega:create-plan/g, "plan creation");
   result = result.replace(/\/desplega:implement-plan/g, "plan implementation");
 
-  // 7. /todos command → file-based tracking
-  result = result.replace(
-    /\d+\. Use the `\/todos` command to add a new todo item indicating[^\n]*\n/g,
-    "1. Track your progress by maintaining a todo list in `/workspace/personal/todos.md` — add a line indicating you are starting to work on the task (e.g. \"- [ ] Work on task XXX: <short description>\"). This will help on restarts, as it will be easier to remember what you were doing.\n",
-  );
-  result = result.replace(
-    /If you used the `\/todos` command to add a todo item when starting the task, make sure to mark it as completed or remove it as needed\./g,
-    "If you added a todo item when starting the task, make sure to mark it as completed in `/workspace/personal/todos.md`.",
-  );
-  result = result.replace(/- `\/todos`[^\n]*\n/g, "");
-  result = result.replace(
-    /- Use the `\/todos` command to manage your personal todo list\.\n/g,
-    "",
-  );
+  // 7. /todos references — now converted to /skill:todos by step 4
+  //    Just clean up backtick formatting around the converted refs
+  result = result.replace(/`\/todos`/g, "`/skill:todos`");
 
   // 8. Clean up "the `/skill:swarm-chat` command" → "`/skill:swarm-chat`"
   //    At this point step 4 already converted /swarm-chat → /skill:swarm-chat

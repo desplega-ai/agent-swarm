@@ -692,11 +692,14 @@ Both CLIs are installed; `HARNESS_PROVIDER` selects which one the runner uses at
 - `<!-- claude-only -->` / `<!-- pi-only -->` conditional markers
 - Wording: "command" → "skill", emoji removal, trailing whitespace cleanup
 
-Currently converted (4 of 12):
-- `plugin/commands/work-on-task.md` → `plugin/pi-skills/work-on-task/SKILL.md`
-- `plugin/commands/start-worker.md` → `plugin/pi-skills/start-worker/SKILL.md`
-- `plugin/commands/start-leader.md` → `plugin/pi-skills/start-leader/SKILL.md`
-- `plugin/commands/swarm-chat.md` → `plugin/pi-skills/swarm-chat/SKILL.md`
+All 12 commands converted:
+- work-on-task, start-worker, start-leader, swarm-chat (core swarm)
+- close-issue, create-pr, implement-issue, review-pr, respond-github (GitHub workflows)
+- investigate-sentry-issue (Sentry triage)
+- review-offered-task (task offer flow)
+- todos (file-based todo management)
+
+Tests: `src/tests/build-pi-skills.test.ts` (68 tests) — verifies frontmatter, no /desplega: leaks, /skill: prefix, no markers, no trailing whitespace.
 
 #### 5. Environment updates
 **File**: `.env.docker.example`

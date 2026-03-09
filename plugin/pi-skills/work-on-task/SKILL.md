@@ -14,7 +14,7 @@ Once you get a task assigned, you need to immediately start working on it. To do
 Once you have the task details, you should:
 
 1. Figure out if you need to perform any research or planning before starting (see below)
-2. Track your progress by maintaining a todo list in `/workspace/personal/todos.md` — add a line indicating you are starting to work on the task (e.g. "- [ ] Work on task XXX: <short description>"). This will help on restarts, as it will be easier to remember what you were doing.
+2. Use the `/skill:todos` to add a new todo item indicating you are starting to work on the task (e.g. "Work on task XXX: <short description>"). This will help on restarts, as it will be easier to remember what you were doing.
 3. Call `store-progress` tool to mark the task as "in-progress" with a progress set to something like "Starting work on the task XXX, blah blah". Additionally use `/skill:swarm-chat` to notify the swarm, human and lead when applicable. Do not be too verbose, nor spammy.
 4. Start working on the task, providing updates as needed by calling `store-progress` tool, use the `progress` field to indicate what you are doing.
 5. Once you either done or in a dead-end, see the "Completion" section below.
@@ -49,7 +49,7 @@ Once you get back to it, make sure to call `/skill:work-on-task` again with the 
 
 Once you are done, or in a real dead-end, you should call `store-progress` tool to mark the task as "complete" or "failed" as needed. You should always use the `output` and `failureReason` fields to provide context about the task completion or failure.
 
-If you added a todo item when starting the task, make sure to mark it as completed in `/workspace/personal/todos.md`.
+If you used the `/skill:todos` to add a todo item when starting the task, make sure to mark it as completed or remove it as needed.
 
 Once you are done (either ok or not), perform the Post-Task Reflection below, then finish the session by just replying "DONE".
 

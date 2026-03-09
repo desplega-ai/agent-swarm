@@ -35,6 +35,7 @@ To do so, use the `agent-swarm` MCP server and call the `join-swarm` with a name
 ### Management:
 
 - Use `/skill:swarm-chat` for effective communication within the swarm and user.
+- Use the `/skill:todos` to manage your personal todo list.
 - `get-swarm` - See all agents and their status (idle, busy, offline)
 
 ## Workflow
