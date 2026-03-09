@@ -35,6 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Migrated inline `try { ALTER TABLE } catch {}` schema blocks to `src/be/migrations/` folder
 
 ### Fixed
+- `property-match` workflow node crash when config uses flat format (`property`/`operator`/`value`) instead of `conditions` array (#146)
 - API migration Dockerfile fix for workflow schema
 
 ## [1.36.0] - 2026-03-06
