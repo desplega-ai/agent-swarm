@@ -218,7 +218,9 @@ class PiMonoSession implements ProviderSession {
             type: "assistant",
             message: {
               role: "assistant",
-              content: [{ type: "tool_use", id: event.toolCallId, name: event.toolName, input: event.args }],
+              content: [
+                { type: "tool_use", id: event.toolCallId, name: event.toolName, input: event.args },
+              ],
               model,
             },
           }),
@@ -236,7 +238,8 @@ class PiMonoSession implements ProviderSession {
                 {
                   type: "tool_result",
                   tool_use_id: event.toolCallId,
-                  content: typeof event.result === "string" ? event.result : JSON.stringify(event.result),
+                  content:
+                    typeof event.result === "string" ? event.result : JSON.stringify(event.result),
                 },
               ],
             },
