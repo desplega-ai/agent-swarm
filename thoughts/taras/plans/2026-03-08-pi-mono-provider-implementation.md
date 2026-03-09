@@ -713,14 +713,14 @@ The SKILL.md format uses YAML frontmatter (name, description) + markdown instruc
 - [x] Auth validation works: entrypoint validates provider-specific credentials with actionable errors
 - [x] Pi-mono persists session files across restarts (verified — resume E2E kept same session ID)
 - [x] MCP tools accessible from pi-mono session inside Docker (verified — store-progress tool used in basic E2E)
-- [ ] Skills work: `/work-on-task` triggers correctly in pi-mono (deferred — skill conversion not done)
+- [x] Skills work: `/work-on-task` triggers correctly in pi-mono (skill conversion done — `plugin/pi-skills/` created with work-on-task, start-worker, start-leader, swarm-chat)
 
 **Implementation Notes**:
 - Dockerfile installs pi-mono CLI globally via `npm install -g @mariozechner/pi-coding-agent`
 - Entrypoint validates auth per provider: `CLAUDE_CODE_OAUTH_TOKEN` for claude, `ANTHROPIC_API_KEY` or `auth.json` for pi
 - `HARNESS_PROVIDER` env var defaults to `claude` in both Dockerfile and entrypoint
 - Startup banner now shows the active harness provider
-- Pi-mono skill conversion (Phase 5.4) deferred — not blocking for initial support
+- Pi-mono skill conversion (Phase 5.4) complete — `plugin/pi-skills/` contains work-on-task, start-worker, start-leader, swarm-chat skills in SKILL.md format
 
 ---
 

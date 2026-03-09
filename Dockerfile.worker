@@ -128,6 +128,9 @@ COPY --chown=worker:worker plugin/commands/* /home/worker/.claude/commands/
 COPY --chown=worker:worker plugin/agents/* /home/worker/.claude/agents/
 COPY --chown=worker:worker plugin/skills/ /home/worker/.claude/skills/
 
+# Copy pi-mono skills (used when HARNESS_PROVIDER=pi)
+COPY --chown=worker:worker plugin/pi-skills/ /home/worker/.pi/agent/skills/
+
 # Create directories and copy entrypoint
 RUN mkdir -p /workspace /logs && chown worker:worker /workspace /logs
 COPY --chown=worker:worker docker-entrypoint.sh /docker-entrypoint.sh
