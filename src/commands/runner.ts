@@ -1081,11 +1081,9 @@ async function spawnProviderProcess(
         }
         break;
       case "result":
-        saveCostData(
-          { ...event.cost, taskId: realTaskId, sessionId: opts.runnerSessionId },
-          opts.apiUrl,
-          opts.apiKey,
-        ).catch((err) => console.warn(`[runner] Failed to save cost: ${err}`));
+        // Cost save is handled in waitForCompletion().then() to ensure
+        // it completes before the process exits (fire-and-forget here
+        // races with container shutdown).
         break;
       case "raw_log":
         prettyPrintLine(event.content, opts.role);
@@ -1151,6 +1149,19 @@ async function spawnProviderProcess(
         console.warn(
           `[${opts.role}] Task ${effectiveTaskId.slice(0, 8)} exited with code ${result.exitCode}. YOLO mode - continuing...`,
         );
+      }
+    }
+
+    // Save cost data (awaited to ensure it completes before container exits)
+    if (result.cost) {
+      try {
+        await saveCostData(
+          { ...result.cost, taskId: realTaskId, sessionId: opts.runnerSessionId },
+          opts.apiUrl,
+          opts.apiKey,
+        );
+      } catch (err) {
+        console.warn(`[runner] Failed to save cost: ${err}`);
       }
     }
 

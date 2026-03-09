@@ -71,8 +71,11 @@ RUN HOME=/home/worker curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/home/worker/.local/bin:$PATH"
 
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
+# PI_PACKAGE_DIR tells pi-mono where to find its package.json at runtime
+# (needed because bun --compile makes process.execPath resolve to the binary location)
 RUN sudo npm install -g @mariozechner/pi-coding-agent \
     && mkdir -p /home/worker/.pi/agent
+ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@mariozechner/pi-coding-agent
 
 # Install Claude marketplace plugins (build-time cache)
 RUN mkdir -p /home/worker/.claude \
