@@ -796,19 +796,24 @@ The script:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] All new tests pass: `bun test src/tests/provider-adapter.test.ts src/tests/claude-adapter.test.ts src/tests/pi-mono-adapter.test.ts`
-- [ ] All existing tests pass: `bun test`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
+- [x] All new tests pass: `bun test src/tests/provider-adapter.test.ts src/tests/claude-adapter.test.ts src/tests/pi-mono-adapter.test.ts` — 34 tests, 0 failures
+- [x] All existing tests pass: `bun test` — 1151 tests, 0 failures
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
-- [ ] E2E: Claude worker picks up task → completes → cost recorded → session ID recorded
-- [ ] E2E: Pi-mono worker picks up task → completes → cost recorded → session ID recorded
+- [ ] E2E: Claude worker picks up task → completes → cost recorded → session ID recorded (requires Docker + credentials)
+- [ ] E2E: Pi-mono worker picks up task → completes → cost recorded → session ID recorded (requires Docker + credentials)
 - [ ] E2E: Cancel a task on each provider → tool_call blocked with cancellation reason
 - [ ] E2E: Resume a paused task on Claude
 - [ ] E2E: Resume a paused task on pi-mono (using SessionManager)
 - [ ] E2E: Tool loop detection triggers on both providers
 - [ ] E2E: Session summarization produces memory entry on both providers
+
+**Phase 6 Implementation Notes:**
+- Created 3 test files: provider-adapter (factory + types), claude-adapter (CLI args, stream parsing, retry), pi-mono-adapter (symlinks, model mapping, events, cost)
+- E2E script at `scripts/e2e-provider-test.ts` validates API layer; full provider session testing requires Docker + LLM credentials
+- Manual E2E items above are deferred to post-merge Docker testing — they require live API keys and cannot run in CI
 
 **Implementation Note**: After E2E passes on both providers, the feature is complete. Final review before merging.
 
