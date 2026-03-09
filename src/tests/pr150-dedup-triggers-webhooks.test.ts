@@ -5,8 +5,10 @@ import {
   createAgent,
   createTaskExtended,
   createWorkflow,
+  findTaskByGitHub,
   findTaskByVcs,
   getAllTasks,
+  getTaskById,
   initDb,
 } from "../be/db";
 import { handlePullRequest } from "../github/handlers";
@@ -97,9 +99,13 @@ describe("handlePullRequest review_requested dedup", () => {
     expect(result.created).toBe(true);
     expect(result.taskId).toBeDefined();
 
-    // Verify the task exists in DB
+    // Verify the task exists in DB with correct vcs fields
     const task = findTaskByVcs("org/repo", 100);
     expect(task).not.toBeNull();
+    expect(task?.vcsProvider).toBe("github");
+    expect(task?.vcsRepo).toBe("org/repo");
+    expect(task?.vcsNumber).toBe(100);
+    expect(task?.vcsEventType).toBe("pull_request");
   });
 
   test("skips duplicate review task when active task already exists for the PR", async () => {
@@ -459,5 +465,77 @@ describe("PullRequestEvent type", () => {
       },
     };
     expect(withoutChangedFiles.pull_request.changed_files).toBeUndefined();
+  });
+});
+
+// ===========================================================================
+// 5. GitHub vcsProvider fields & backward-compat alias
+// ===========================================================================
+
+describe("GitHub vcsProvider fields", () => {
+  test("createTaskExtended with source=github sets vcsProvider=github", () => {
+    const task = createTaskExtended("[GitHub PR #400] vcsProvider test", {
+      agentId: "lead-001",
+      source: "github",
+      vcsProvider: "github",
+      taskType: "github-pr",
+      vcsRepo: "org/vcs-test",
+      vcsEventType: "pull_request",
+      vcsNumber: 400,
+      vcsAuthor: "tester",
+      vcsUrl: "https://github.com/org/vcs-test/pull/400",
+    });
+
+    expect(task.vcsProvider).toBe("github");
+    expect(task.vcsRepo).toBe("org/vcs-test");
+    expect(task.vcsNumber).toBe(400);
+    expect(task.vcsEventType).toBe("pull_request");
+    expect(task.vcsAuthor).toBe("tester");
+    expect(task.vcsUrl).toBe("https://github.com/org/vcs-test/pull/400");
+
+    // Verify round-trip through getTaskById
+    const retrieved = getTaskById(task.id);
+    expect(retrieved?.vcsProvider).toBe("github");
+    expect(retrieved?.vcsRepo).toBe("org/vcs-test");
+  });
+
+  test("findTaskByGitHub is a backward-compat alias for findTaskByVcs", () => {
+    createTaskExtended("[GitHub PR #401] alias test", {
+      agentId: "lead-001",
+      source: "github",
+      vcsProvider: "github",
+      vcsRepo: "org/alias-test",
+      vcsNumber: 401,
+    });
+
+    const viaVcs = findTaskByVcs("org/alias-test", 401);
+    const viaAlias = findTaskByGitHub("org/alias-test", 401);
+    expect(viaVcs).not.toBeNull();
+    expect(viaAlias).not.toBeNull();
+    expect(viaVcs?.id).toBe(viaAlias?.id);
+  });
+
+  test("handlePullRequest sets vcsProvider=github on created tasks", async () => {
+    const event = makePREvent({
+      pull_request: {
+        number: 402,
+        title: "VCS provider PR",
+        body: null,
+        html_url: "https://github.com/org/repo/pull/402",
+        user: { login: "vcstester" },
+        head: { ref: "feat-vcs", sha: "vcs123" },
+        base: { ref: "main" },
+        merged: false,
+      },
+    });
+
+    const result = await handlePullRequest(event);
+    expect(result.created).toBe(true);
+
+    const task = getTaskById(result.taskId!);
+    expect(task?.vcsProvider).toBe("github");
+    expect(task?.source).toBe("github");
+    expect(task?.vcsRepo).toBe("org/repo");
+    expect(task?.vcsNumber).toBe(402);
   });
 });
