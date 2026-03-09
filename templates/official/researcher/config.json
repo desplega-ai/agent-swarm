@@ -1,0 +1,23 @@
+{
+  "name": "researcher",
+  "displayName": "Researcher",
+  "description": "Research-focused worker that gathers information, analyzes data, and produces documentation",
+  "version": "1.0.0",
+  "category": "official",
+  "icon": "search",
+  "author": "Desplega <contact@agent-swarm.dev>",
+  "createdAt": "2026-03-09",
+  "lastUpdatedAt": "2026-03-09",
+  "agentDefaults": {
+    "role": "worker",
+    "capabilities": ["research", "analysis", "documentation"],
+    "maxTasks": 2
+  },
+  "files": {
+    "claudeMd": "CLAUDE.md",
+    "soulMd": "SOUL.md",
+    "identityMd": "IDENTITY.md",
+    "toolsMd": "TOOLS.md",
+    "setupScript": "start-up.sh"
+  }
+}

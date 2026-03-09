@@ -1,4 +1,5 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import type { TemplateResponse } from "../../templates/schema.ts";
 import {
   generateDefaultClaudeMd,
   generateDefaultIdentityMd,
@@ -16,6 +17,7 @@ import {
 import { resolveCredentialPools } from "../utils/credentials.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
+import { interpolate } from "../workflows/template.ts";
 
 /** Save PM2 process list for persistence across container restarts */
 async function savePm2State(role: string): Promise<void> {
@@ -1349,6 +1351,66 @@ async function checkCompletedProcesses(
   }
 }
 
+const TEMPLATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+async function fetchTemplate(
+  templateId: string,
+  registryUrl: string,
+  cacheDir: string,
+): Promise<TemplateResponse | null> {
+  const safeId = templateId.replace(/[/@]/g, "_");
+  const cachePath = `${cacheDir}/${safeId}.json`;
+
+  // Check local cache
+  try {
+    const info = await stat(cachePath);
+    if (Date.now() - info.mtimeMs < TEMPLATE_CACHE_TTL_MS) {
+      const cached = await readFile(cachePath, "utf-8");
+      return JSON.parse(cached) as TemplateResponse;
+    }
+  } catch {
+    // No cache or expired, continue to fetch
+  }
+
+  // Fetch from registry
+  try {
+    const resp = await fetch(`${registryUrl}/api/templates/${templateId}`);
+    if (!resp.ok) {
+      console.warn(`[template] Registry returned ${resp.status} for ${templateId}`);
+      // Fall back to expired cache if available
+      try {
+        const cached = await readFile(cachePath, "utf-8");
+        console.log(`[template] Using expired cache for ${templateId}`);
+        return JSON.parse(cached) as TemplateResponse;
+      } catch {
+        return null;
+      }
+    }
+
+    const template = (await resp.json()) as TemplateResponse;
+
+    // Cache the response
+    try {
+      await mkdir(cacheDir, { recursive: true });
+      await writeFile(cachePath, JSON.stringify(template), "utf-8");
+    } catch {
+      console.warn(`[template] Could not cache template to ${cachePath}`);
+    }
+
+    return template;
+  } catch (err) {
+    console.warn(`[template] Failed to fetch from registry: ${err}`);
+    // Fall back to expired cache
+    try {
+      const cached = await readFile(cachePath, "utf-8");
+      console.log(`[template] Using expired cache for ${templateId}`);
+      return JSON.parse(cached) as TemplateResponse;
+    } catch {
+      return null;
+    }
+  }
+}
+
 export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   const { role, defaultPrompt, metadataType } = config;
 
@@ -1534,6 +1596,37 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // Generate default templates if missing (runner registers via POST /api/agents
         // which doesn't generate templates like join-swarm does)
         if (!agentSoulMd || !agentIdentityMd || !agentToolsMd || !agentClaudeMd) {
+          // Try TEMPLATE_ID-based template first
+          const templateId = process.env.TEMPLATE_ID;
+          const registryUrl =
+            process.env.TEMPLATE_REGISTRY_URL || "https://templates.agent-swarm.dev";
+
+          if (templateId) {
+            const template = await fetchTemplate(
+              templateId,
+              registryUrl,
+              "/workspace/.template-cache",
+            );
+            if (template) {
+              const ctx = {
+                agent: {
+                  name: agentProfileName || agentName,
+                  role: role,
+                  description: agentDescription || "",
+                  capabilities: (config.capabilities || []).join(", "),
+                },
+              };
+              if (!agentSoulMd) agentSoulMd = interpolate(template.files.soulMd, ctx);
+              if (!agentIdentityMd) agentIdentityMd = interpolate(template.files.identityMd, ctx);
+              if (!agentToolsMd) agentToolsMd = interpolate(template.files.toolsMd, ctx);
+              if (!agentClaudeMd) agentClaudeMd = interpolate(template.files.claudeMd, ctx);
+              if (!agentSetupScript)
+                agentSetupScript = interpolate(template.files.setupScript, ctx);
+              console.log(`[${role}] Applied template: ${templateId}`);
+            }
+          }
+
+          // Fallback to generic defaults for any still-missing fields
           const agentInfo = {
             name: agentProfileName || agentName,
             role: role,

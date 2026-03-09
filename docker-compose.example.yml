@@ -65,6 +65,8 @@ services:
 
       # Important: Lead agent role
       - AGENT_ROLE=lead
+      # Template for initial profile (fetched on first boot)
+      - TEMPLATE_ID=official/lead
 
       # - MCP_BASE_URL=${MCP_BASE_URL:-http://api:3013}
       # If in the same Docker network, use the service name
@@ -101,6 +103,8 @@ services:
       # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
       - AGENT_ID=38d36438-58a0-45b5-8602-a5d52b07c2f1
       - AGENT_ROLE=worker
+      # Template for initial profile (fetched on first boot)
+      - TEMPLATE_ID=official/coder
 
       # - MCP_BASE_URL=${MCP_BASE_URL:-http://api:3013}
       # If in the same Docker network, use the service name
@@ -137,6 +141,8 @@ services:
       # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
       - AGENT_ID=c1e2f3a4-5678-90ab-cdef-1234567890ab
       - AGENT_ROLE=worker
+      # Template for initial profile (fetched on first boot)
+      - TEMPLATE_ID=official/coder
 
       # - MCP_BASE_URL=${MCP_BASE_URL:-http://api:3013}
       # If in the same Docker network, use the service name

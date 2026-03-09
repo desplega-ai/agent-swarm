@@ -81,6 +81,11 @@ src/
   github/       # GitHub webhook handlers
   slack/        # Slack integration
 new-ui/          # Dashboard (Next.js app)
+templates/       # Template data (official + community)
+  official/      # 5 official templates (lead, coder, researcher, reviewer, tester)
+  community/     # Community-contributed templates
+  schema.ts      # Shared TypeScript types
+templates-ui/    # Templates registry (Next.js app)
 ```
 
 ## Code Style
@@ -93,6 +98,7 @@ new-ui/          # Dashboard (Next.js app)
 ## Related
 
 - [UI Dashboard](./new-ui/) - Next.js monitoring dashboard
+- [Templates Registry](./templates-ui/) - Template gallery and compose builder
 - [MCP.md](./MCP.md) - MCP tools reference
 - [DEPLOYMENT.md](./DEPLOYMENT.md) - Production deployment
 - [CONTRIBUTING.md](./CONTRIBUTING.md) - Development setup
@@ -119,6 +125,8 @@ curl -H "Authorization: Bearer 123123" -H "X-Agent-ID: <uuid>" http://localhost:
 - `MCP_BASE_URL` - API server URL (default: http://localhost:3013)
 - `SLACK_DISABLE=true` / `GITHUB_DISABLE=true` - Disable integrations locally
 - `HARNESS_PROVIDER` - Provider selection: `claude` (default) or `pi` (pi-mono)
+- `TEMPLATE_ID` - Template for initial worker profile (e.g., `official/coder`). Fetched from registry on first boot.
+- `TEMPLATE_REGISTRY_URL` - Templates registry URL (default: https://templates.agent-swarm.dev)
 
 **Local Docker Compose (builds from source):**
 ```bash
