@@ -167,13 +167,19 @@ export async function handlePullRequest(
       return { created: false };
     }
 
-    // Check if there's an existing task for this PR (e.g., bot created it)
+    // Check if there's an existing active task for this PR — skip duplicate review tasks
     const existingTask = findTaskByGitHub(repository.full_name, pr.number);
+    if (existingTask) {
+      console.log(
+        `[GitHub] Skipping review task for PR #${pr.number} — active task ${existingTask.id} already exists`,
+      );
+      return { created: false };
+    }
 
     // Create review task
     const lead = findLeadAgent();
     const suggestions = getCommandSuggestions("github-pr");
-    const taskDescription = `[GitHub PR #${pr.number}] ${pr.title}\n\nReview requested from: @${GITHUB_BOT_NAME}\nFrom: ${sender.login}\nRepo: ${repository.full_name}\nBranch: ${pr.head.ref} → ${pr.base.ref}\nURL: ${pr.html_url}\n\nContext:\n${pr.body || pr.title}\n\n---\n${existingTask ? `Related task: ${existingTask.id}\n🔀 Consider routing to the same agent working on the related task.\n` : ""}${DELEGATION_INSTRUCTION}\n${suggestions}`;
+    const taskDescription = `[GitHub PR #${pr.number}] ${pr.title}\n\nReview requested from: @${GITHUB_BOT_NAME}\nFrom: ${sender.login}\nRepo: ${repository.full_name}\nBranch: ${pr.head.ref} → ${pr.base.ref}\nURL: ${pr.html_url}\n\nContext:\n${pr.body || pr.title}\n\n---\n${DELEGATION_INSTRUCTION}\n${suggestions}`;
 
     const task = createTaskExtended(taskDescription, {
       agentId: lead?.id ?? "",

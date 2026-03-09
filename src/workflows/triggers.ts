@@ -71,6 +71,10 @@ function matchEventFilters(
     if (eventType !== expectedEvent) return false;
   }
   if (config.matchRepo && data.repo !== config.matchRepo) return false;
+  // Filter by allowed actions (e.g., actions: ["opened", "closed"])
+  if (config.actions && Array.isArray(config.actions)) {
+    if (!config.actions.includes(data.action)) return false;
+  }
   return true;
 }
 
