@@ -4,8 +4,9 @@
 # Images are built from local Dockerfiles (no registry pull).
 #
 # Prerequisites:
-#   .env must contain: API_KEY, CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY
-#   (or OPENROUTER_API_KEY instead of ANTHROPIC_API_KEY for pi-mono)
+#   .env must contain: API_KEY, CLAUDE_CODE_OAUTH_TOKEN, OPENROUTER_API_KEY
+#   Optionally set PI_MODEL to override the pi-mono model (default: openrouter/anthropic/claude-sonnet-4)
+#   Or use ANTHROPIC_API_KEY instead of OPENROUTER_API_KEY (comment swap in pi-worker env)
 #
 # Usage:
 #   docker compose -f docker-compose.local.yml up --build
@@ -78,9 +79,11 @@ services:
 
     environment:
       - HARNESS_PROVIDER=pi
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      # Or use OpenRouter instead:
-      # - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # Model for pi-mono via OpenRouter (required — pi-mono has no default for OpenRouter)
+      - MODEL_OVERRIDE=${PI_MODEL:-openrouter/anthropic/claude-sonnet-4}
+      # Or use Anthropic directly (no MODEL_OVERRIDE needed, defaults to opus):
+      # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - API_KEY=${API_KEY}
       - AGENT_ID=bbbbbbbb-0000-0000-0000-000000000002
       - AGENT_ROLE=worker
