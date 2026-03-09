@@ -10,12 +10,7 @@ import {
 } from "../be/db";
 import { GITLAB_BOT_NAME } from "../gitlab/auth";
 import { handleIssue, handleMergeRequest, handleNote, handlePipeline } from "../gitlab/handlers";
-import type {
-  IssueEvent,
-  MergeRequestEvent,
-  NoteEvent,
-  PipelineEvent,
-} from "../gitlab/types";
+import type { IssueEvent, MergeRequestEvent, NoteEvent, PipelineEvent } from "../gitlab/types";
 
 const TEST_DB_PATH = "./test-gitlab-handlers.sqlite";
 
@@ -391,9 +386,7 @@ describe("handleIssue", () => {
         url: "https://gitlab.com/group/project/-/issues/21",
         author_id: 1,
       },
-      assignees: [
-        { id: 99, name: "Bot", username: GITLAB_BOT_NAME, avatar_url: "" },
-      ],
+      assignees: [{ id: 99, name: "Bot", username: GITLAB_BOT_NAME, avatar_url: "" }],
     });
 
     const result = await handleIssue(event);
