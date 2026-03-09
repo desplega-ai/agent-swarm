@@ -1,0 +1,77 @@
+name: Community Template Submission
+description: Submit a new worker template for the Agent Swarm Templates Registry
+title: "[Template] "
+labels: ["template", "community"]
+body:
+  - type: input
+    id: template-name
+    attributes:
+      label: Template Name
+      description: A short, lowercase name for your template (e.g., "devops", "writer")
+      placeholder: my-template
+    validations:
+      required: true
+
+  - type: input
+    id: display-name
+    attributes:
+      label: Display Name
+      description: Human-readable name shown in the gallery
+      placeholder: DevOps Engineer
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What does this template do? What kind of agent does it configure?
+      placeholder: A DevOps-focused agent that manages CI/CD pipelines, infrastructure, and deployments
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Agent Type
+      options:
+        - Worker
+        - Lead
+    validations:
+      required: true
+
+  - type: input
+    id: role
+    attributes:
+      label: Role
+      description: The agent role (e.g., "worker", "lead")
+      placeholder: worker
+    validations:
+      required: true
+
+  - type: textarea
+    id: capabilities
+    attributes:
+      label: Capabilities
+      description: List the agent's capabilities (one per line)
+      placeholder: |
+        devops
+        ci-cd
+        infrastructure
+        monitoring
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Why is this template useful?
+      description: Describe the use case and how this template helps users
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any additional information, links, or examples

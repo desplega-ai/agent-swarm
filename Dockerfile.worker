@@ -169,6 +169,7 @@ ENV WORKER_SYSTEM_PROMPT_FILE=""
 ENV LEAD_SYSTEM_PROMPT=""
 ENV LEAD_SYSTEM_PROMPT_FILE=""
 ENV STARTUP_SCRIPT_STRICT=true
+ENV TEMPLATE_REGISTRY_URL=https://templates.agent-swarm.dev
 ENV PM2_HOME=/workspace/.pm2
 ENV PATH="/home/worker/.local/bin:/home/worker/.bun/bin:$PATH"
 

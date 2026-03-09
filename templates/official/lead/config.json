@@ -1,0 +1,24 @@
+{
+  "name": "lead",
+  "displayName": "Lead",
+  "description": "Orchestrator agent that coordinates workers, manages epics, and handles Slack communication",
+  "version": "1.0.0",
+  "category": "official",
+  "icon": "crown",
+  "author": "Desplega <contact@agent-swarm.dev>",
+  "createdAt": "2026-03-09",
+  "lastUpdatedAt": "2026-03-09",
+  "agentDefaults": {
+    "role": "lead",
+    "capabilities": ["coordination", "planning", "communication"],
+    "maxTasks": 2,
+    "isLead": true
+  },
+  "files": {
+    "claudeMd": "CLAUDE.md",
+    "soulMd": "SOUL.md",
+    "identityMd": "IDENTITY.md",
+    "toolsMd": "TOOLS.md",
+    "setupScript": "start-up.sh"
+  }
+}

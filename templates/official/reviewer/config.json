@@ -1,0 +1,23 @@
+{
+  "name": "reviewer",
+  "displayName": "Reviewer",
+  "description": "Code review specialist that ensures quality, security, and adherence to best practices",
+  "version": "1.0.0",
+  "category": "official",
+  "icon": "eye",
+  "author": "Desplega <contact@agent-swarm.dev>",
+  "createdAt": "2026-03-09",
+  "lastUpdatedAt": "2026-03-09",
+  "agentDefaults": {
+    "role": "worker",
+    "capabilities": ["code-review", "security", "testing"],
+    "maxTasks": 3
+  },
+  "files": {
+    "claudeMd": "CLAUDE.md",
+    "soulMd": "SOUL.md",
+    "identityMd": "IDENTITY.md",
+    "toolsMd": "TOOLS.md",
+    "setupScript": "start-up.sh"
+  }
+}
