@@ -817,6 +817,7 @@ The script:
 - E2E script at `scripts/e2e-provider-test.ts` validates API layer; full provider session testing requires Docker + LLM credentials
 - Manual E2E items above are deferred to post-merge Docker testing — they require live API keys and cannot run in CI
 - **CI fix (96388cd)**: Docker build failed with EACCES — `npm install -g` ran as `worker` user, added `sudo`. Test suite reported "1 error" from dangling `Bun.file().text()` promise in symlink test — replaced with synchronous `readFileSync`.
+- **Known issue**: Cost save returns 500 on both providers — the runner's internal task IDs (from pool_tasks_available triggers) don't match DB task IDs. Pre-existing runner behavior, not adapter-related. Needs separate investigation.
 
 **Implementation Note**: After E2E passes on both providers, the feature is complete. Final review before merging.
 
