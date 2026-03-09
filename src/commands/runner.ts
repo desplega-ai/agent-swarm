@@ -1040,7 +1040,10 @@ async function spawnProviderProcess(
   logDir: string,
   isYolo: boolean,
 ): Promise<RunningTask> {
-  const effectiveTaskId = opts.taskId || crypto.randomUUID();
+  // Real task ID from DB (may be undefined for pool_tasks_available triggers)
+  const realTaskId = opts.taskId;
+  // Correlation ID for logs/display — always defined
+  const effectiveTaskId = realTaskId || crypto.randomUUID();
 
   // Resolve env first so we can use MODEL_OVERRIDE from config
   const freshEnv = await fetchResolvedEnv(opts.apiUrl, opts.apiKey, opts.agentId);
@@ -1071,13 +1074,15 @@ async function spawnProviderProcess(
   session.onEvent((event) => {
     switch (event.type) {
       case "session_init":
-        saveProviderSessionId(opts.apiUrl, opts.apiKey, effectiveTaskId, event.sessionId).catch(
-          (err) => console.warn(`[runner] Failed to save session ID: ${err}`),
-        );
+        if (realTaskId) {
+          saveProviderSessionId(opts.apiUrl, opts.apiKey, realTaskId, event.sessionId).catch(
+            (err) => console.warn(`[runner] Failed to save session ID: ${err}`),
+          );
+        }
         break;
       case "result":
         saveCostData(
-          { ...event.cost, sessionId: opts.runnerSessionId },
+          { ...event.cost, taskId: realTaskId, sessionId: opts.runnerSessionId },
           opts.apiUrl,
           opts.apiKey,
         ).catch((err) => console.warn(`[runner] Failed to save cost: ${err}`));
