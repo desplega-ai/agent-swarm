@@ -1,0 +1,116 @@
+# Local development Docker Compose — builds from source
+#
+# Runs a minimal swarm: API + Claude lead + Pi-mono worker
+# Both agent services share the same worker image (only env vars differ).
+#
+# Prerequisites:
+#   .env must contain: API_KEY, CLAUDE_CODE_OAUTH_TOKEN, OPENROUTER_API_KEY
+#   Optionally set PI_MODEL to override the pi-mono model (default: openrouter/anthropic/claude-sonnet-4)
+#   Or use ANTHROPIC_API_KEY instead of OPENROUTER_API_KEY (comment swap in pi-worker env)
+#
+# Usage:
+#   docker compose -f docker-compose.local.yml up --build
+#   docker compose -f docker-compose.local.yml down
+
+services:
+  api:
+    container_name: swarm-api
+    build:
+      context: .
+      dockerfile: Dockerfile
+    stop_grace_period: 60s
+
+    environment:
+      - API_KEY=${API_KEY}
+      - SLACK_DISABLE=true
+      - GITHUB_DISABLE=true
+
+    ports:
+      - "3013:3013"
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3013/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+    restart: unless-stopped
+
+  lead:
+    container_name: swarm-lead
+    image: swarm-worker:local
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    stop_grace_period: 60s
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    environment:
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - API_KEY=${API_KEY}
+      - AGENT_ID=23b94e8e-4fd3-465c-b525-1bcb050bb214
+      - AGENT_ROLE=lead
+      - MCP_BASE_URL=http://api:3013
+      - YOLO=true
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_EMAIL=${GITHUB_EMAIL:-dev@localhost}
+      - GITHUB_NAME=${GITHUB_NAME:-Lead Agent}
+
+    ports:
+      - "3020:3000"
+
+    volumes:
+      - local_logs:/logs
+      - local_shared:/workspace/shared
+      - local_lead:/workspace/personal
+
+    restart: unless-stopped
+
+  pi-worker:
+    container_name: swarm-pi-worker
+    image: swarm-worker:local
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    depends_on:
+      api:
+        condition: service_healthy
+    stop_grace_period: 60s
+
+    environment:
+      - HARNESS_PROVIDER=pi
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # Model for pi-mono via OpenRouter (required — pi-mono has no default for OpenRouter)
+      - MODEL_OVERRIDE=${PI_MODEL:-openrouter/anthropic/claude-sonnet-4}
+      # Or use Anthropic directly (no MODEL_OVERRIDE needed, defaults to opus):
+      # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - API_KEY=${API_KEY}
+      - AGENT_ID=cfecf31f-d3bb-4a5b-ab29-43bc49082031
+      - AGENT_ROLE=worker
+      - MCP_BASE_URL=http://api:3013
+      - YOLO=true
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_EMAIL=${GITHUB_EMAIL:-dev@localhost}
+      - GITHUB_NAME=${GITHUB_NAME:-Pi Worker}
+
+    ports:
+      - "3021:3000"
+
+    volumes:
+      - local_logs:/logs
+      - local_shared:/workspace/shared
+      - local_pi_worker:/workspace/personal
+      - local_pi_agent:/home/worker/.pi/agent
+
+    restart: unless-stopped
+
+volumes:
+  local_logs:
+  local_shared:
+  local_lead:
+  local_pi_worker:
+  local_pi_agent:

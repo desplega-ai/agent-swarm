@@ -149,10 +149,11 @@ async function shutdown() {
   });
 }
 
-// Only register SIGINT handler once (avoid duplicates on hot reload)
+// Only register signal handlers once (avoid duplicates on hot reload)
 if (!globalState.__sigintRegistered) {
   globalState.__sigintRegistered = true;
   process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
 
 httpServer

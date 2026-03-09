@@ -88,6 +88,34 @@ jobs:
       - name: Run tests
         run: bun test
 
+  pi-skills-freshness:
+    name: Pi-Skills Freshness Check
+    needs: detect-changes
+    if: needs.detect-changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Rebuild pi-skills and check for drift
+        run: |
+          bun run build:pi-skills
+          if [ -n "$(git diff --name-only plugin/pi-skills/)" ]; then
+            echo "::error::pi-skills are out of date! Run 'bun run build:pi-skills' and commit the changes."
+            git diff --stat plugin/pi-skills/
+            exit 1
+          fi
+          echo "pi-skills are up to date."
+
   docker-build:
     name: Docker Build Test
     needs: detect-changes
@@ -145,7 +173,7 @@ jobs:
 
   gate:
     name: Merge Gate
-    needs: [detect-changes, lint-and-typecheck, test, docker-build, new-ui-lint]
+    needs: [detect-changes, lint-and-typecheck, test, pi-skills-freshness, docker-build, new-ui-lint]
     if: always()
     runs-on: ubuntu-latest
 
