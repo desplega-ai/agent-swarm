@@ -13,6 +13,7 @@ import {
   trackErrorFromJson,
 } from "../utils/error-tracker.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
+import { detectVcsProvider } from "../vcs/index.ts";
 
 /** Task file data written to /tmp for hook to read */
 interface TaskFileData {
@@ -72,24 +73,6 @@ async function fetchRepoConfig(
   } catch {
     return null;
   }
-}
-
-function isGitHubRepo(url: string): boolean {
-  return url.includes("github.com") || /^[\w.-]+\/[\w.-]+$/.test(url);
-}
-
-function isGitLabRepo(url: string): boolean {
-  return url.includes("gitlab.com") || url.includes("gitlab.");
-}
-
-/**
- * Detect the VCS provider for a repository URL.
- * Returns 'github', 'gitlab', or null for unknown.
- */
-function detectVcsProvider(url: string): "github" | "gitlab" | null {
-  if (isGitLabRepo(url)) return "gitlab";
-  if (isGitHubRepo(url)) return "github";
-  return null;
 }
 
 /** Read CLAUDE.md from a repo directory, returning null if not found */

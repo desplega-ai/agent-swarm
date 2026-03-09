@@ -36,13 +36,9 @@ export function initGitLab(): void {
 export function verifyGitLabWebhook(tokenHeader: string | undefined): boolean {
   if (!webhookSecret) return false;
   if (!tokenHeader) return false;
-  // Timing-safe comparison
+  // timingSafeEqual throws on different lengths, so guard first
   if (tokenHeader.length !== webhookSecret.length) return false;
-  let result = 0;
-  for (let i = 0; i < tokenHeader.length; i++) {
-    result |= tokenHeader.charCodeAt(i) ^ webhookSecret.charCodeAt(i);
-  }
-  return result === 0;
+  return crypto.timingSafeEqual(Buffer.from(tokenHeader), Buffer.from(webhookSecret));
 }
 
 /** Get the GitLab API token for making API calls. */

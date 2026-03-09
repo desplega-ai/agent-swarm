@@ -309,7 +309,7 @@ export async function handleWebhooks(
         console.error(err.stack);
       }
       res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Internal server error", message: errorMessage }));
+      res.end(JSON.stringify({ error: "Internal server error" }));
     }
     return true;
   }
