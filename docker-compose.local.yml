@@ -73,11 +73,12 @@ services:
   pi-worker:
     container_name: swarm-pi-worker
     image: swarm-worker:local
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
     depends_on:
       api:
         condition: service_healthy
-      lead:
-        condition: service_started
     stop_grace_period: 60s
 
     environment:
