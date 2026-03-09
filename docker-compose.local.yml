@@ -52,7 +52,7 @@ services:
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
-      - AGENT_ID=aaaaaaaa-0000-0000-0000-000000000001
+      - AGENT_ID=23b94e8e-4fd3-465c-b525-1bcb050bb214
       - AGENT_ROLE=lead
       - MCP_BASE_URL=http://api:3013
       - YOLO=true
@@ -89,7 +89,7 @@ services:
       # Or use Anthropic directly (no MODEL_OVERRIDE needed, defaults to opus):
       # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - API_KEY=${API_KEY}
-      - AGENT_ID=bbbbbbbb-0000-0000-0000-000000000002
+      - AGENT_ID=cfecf31f-d3bb-4a5b-ab29-43bc49082031
       - AGENT_ROLE=worker
       - MCP_BASE_URL=http://api:3013
       - YOLO=true
