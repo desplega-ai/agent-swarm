@@ -126,6 +126,10 @@ export async function handleWebhooks(
             title: pr.pull_request.title,
             body: pr.pull_request.body,
             action: pr.action,
+            merged: pr.pull_request.merged ?? false,
+            html_url: pr.pull_request.html_url,
+            user_login: pr.pull_request.user.login,
+            changed_files: pr.pull_request.changed_files,
           });
           break;
         }
