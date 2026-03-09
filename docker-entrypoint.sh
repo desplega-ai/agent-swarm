@@ -5,9 +5,9 @@ set -e
 HARNESS_PROVIDER="${HARNESS_PROVIDER:-claude}"
 
 if [ "$HARNESS_PROVIDER" = "pi" ]; then
-    # Pi-mono auth: ANTHROPIC_API_KEY or auth.json must exist
-    if [ -z "$ANTHROPIC_API_KEY" ] && [ ! -f "$HOME/.pi/agent/auth.json" ]; then
-        echo "Error: ANTHROPIC_API_KEY or ~/.pi/agent/auth.json required for pi provider"
+    # Pi-mono auth: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or auth.json must exist
+    if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ] && [ ! -f "$HOME/.pi/agent/auth.json" ]; then
+        echo "Error: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or ~/.pi/agent/auth.json required for pi provider"
         exit 1
     fi
 else
