@@ -4,7 +4,6 @@ import { motion } from "framer-motion";
 import {
   Shield,
   Code2,
-  Puzzle,
   Brain,
   Server,
   Shuffle,
