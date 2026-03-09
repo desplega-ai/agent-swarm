@@ -682,13 +682,21 @@ Both CLIs are installed; `HARNESS_PROVIDER` selects which one the runner uses at
 - Mount `~/.pi/agent/` as a persistent volume (for session files, auth.json)
 
 #### 4. Pi-mono skill conversion
-**File**: `plugin/pi-skills/` (new directory)
-**Changes**: Convert key plugin commands to pi-mono `SKILL.md` format:
+**File**: `plugin/pi-skills/` (generated directory)
+**Source of truth**: `plugin/commands/*.md` — edit these, then run `bun run build:pi-skills`
+**Build script**: `plugin/build-pi-skills.ts` — generates pi-mono `SKILL.md` files with transformations:
+- Frontmatter: `description` + `argument-hint` → `name` + `description`
+- Slash syntax: `/work-on-task` → `/skill:work-on-task`
+- `/todos` command → file-based `/workspace/personal/todos.md`
+- `/desplega:*` commands → generic descriptions
+- `<!-- claude-only -->` / `<!-- pi-only -->` conditional markers
+- Wording: "command" → "skill", emoji removal, trailing whitespace cleanup
+
+Currently converted (4 of 12):
 - `plugin/commands/work-on-task.md` → `plugin/pi-skills/work-on-task/SKILL.md`
 - `plugin/commands/start-worker.md` → `plugin/pi-skills/start-worker/SKILL.md`
 - `plugin/commands/start-leader.md` → `plugin/pi-skills/start-leader/SKILL.md`
-
-The SKILL.md format uses YAML frontmatter (name, description) + markdown instructions. Convert the essential commands; non-essential ones can be deferred.
+- `plugin/commands/swarm-chat.md` → `plugin/pi-skills/swarm-chat/SKILL.md`
 
 #### 5. Environment updates
 **File**: `.env.docker.example`
@@ -884,7 +892,7 @@ docker stop test-worker 2>/dev/null
 
 - **Pi-mono package availability**: The pi-mono SDK packages (`@mariozechner/pi-agent-core` for `AgentSession`/`ExtensionAPI` types, `@mariozechner/pi-ai` for TypeBox re-exports) need to be on npm. Verify early in Phase 3. If not published, use git dependencies. Note: `@mariozechner/pi-coding-agent` is the CLI — we may only need the core/ai packages as library dependencies, not the full CLI.
 - **pi-mcp-adapter HTTP support** (**CRITICAL — gate Phase 3**): The `pi-mcp-adapter` extension primarily targets stdio-based MCP servers. Test it against the swarm’s Streamable HTTP endpoint as the very first step of Phase 3. If HTTP support is incomplete, either contribute upstream or fall back to native `ToolDefinition` conversion (Approach A from research). This is a potential blocker.
-- **Skill format convergence**: Deferred. Use harness-specific skill directories for now.
+- **Skill format convergence**: Resolved. `plugin/commands/*.md` is now the single source of truth. `bun run build:pi-skills` generates `plugin/pi-skills/` from them using `plugin/build-pi-skills.ts`. Uses `<!-- claude-only -->` / `<!-- pi-only -->` markers for provider-specific sections. Only 4 of 12 commands are converted (work-on-task, start-worker, start-leader, swarm-chat).
 
 ## References
 - Research: `thoughts/taras/research/2026-03-08-pi-mono-deep-dive.md`
