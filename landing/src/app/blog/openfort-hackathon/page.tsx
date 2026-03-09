@@ -827,6 +827,26 @@ SVG saved (5910 characters)`}
                 </a>
               ))}
             </div>
+
+            <div className="mt-8 pt-6 border-t border-zinc-100">
+              <h3 className="text-[13px] font-semibold text-zinc-500 uppercase tracking-wider mb-3">
+                Related Posts
+              </h3>
+              <a
+                href="/blog/swarm-metrics"
+                className="group flex items-center gap-3 p-3 -mx-3 rounded-lg hover:bg-zinc-50 transition-colors"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-[14px] font-medium text-zinc-800 group-hover:text-amber-800 transition-colors">
+                    How 6 AI Agents Shipped 44 Tasks in One Weekend
+                  </p>
+                  <p className="text-[12px] text-zinc-500 mt-0.5">
+                    Real metrics from a 48-hour production run of the Agent Swarm.
+                  </p>
+                </div>
+                <ArrowRight className="w-4 h-4 text-zinc-400 group-hover:text-amber-600 shrink-0" />
+              </a>
+            </div>
           </footer>
         </div>
       </article>
