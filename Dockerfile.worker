@@ -70,6 +70,10 @@ ENV PATH="/home/worker/.bun/bin:$PATH"
 RUN HOME=/home/worker curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/home/worker/.local/bin:$PATH"
 
+# Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
+RUN npm install -g @mariozechner/pi-coding-agent \
+    && mkdir -p /home/worker/.pi/agent
+
 # Install Claude marketplace plugins (build-time cache)
 RUN mkdir -p /home/worker/.claude \
     && claude plugin marketplace add desplega-ai/ai-toolbox || true \
@@ -142,6 +146,7 @@ EXPOSE 3000
 
 # Environment
 ENV AGENT_ROLE=worker
+ENV HARNESS_PROVIDER=claude
 ENV WORKER_YOLO=false
 ENV MCP_BASE_URL=http://host.docker.internal:3013
 ENV WORKER_LOG_DIR=/logs
