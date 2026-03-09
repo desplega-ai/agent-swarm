@@ -46,6 +46,12 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     gh \
     && rm -rf /var/lib/apt/lists/*
 
+# Install GitLab CLI (glab) for GitLab integration
+RUN GLAB_VERSION=$(curl -s "https://gitlab.com/api/v4/projects/34675721/releases" | jq -r '.[0].tag_name' | sed 's/^v//') \
+    && curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_Linux_x86_64.deb" -o /tmp/glab.deb \
+    && dpkg -i /tmp/glab.deb \
+    && rm /tmp/glab.deb
+
 # Install Bun (for running JS/TS projects)
 RUN curl -fsSL https://bun.sh/install | bash
 ENV BUN_INSTALL="/root/.bun"

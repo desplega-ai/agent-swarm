@@ -332,8 +332,9 @@ export interface Epic {
   planDocPath?: string;
   slackChannelId?: string;
   slackThreadTs?: string;
-  githubRepo?: string;
-  githubMilestone?: string;
+  vcsProvider?: "github" | "gitlab";
+  vcsRepo?: string;
+  vcsMilestone?: string;
   createdAt: string;
   lastUpdatedAt: string;
   startedAt?: string;

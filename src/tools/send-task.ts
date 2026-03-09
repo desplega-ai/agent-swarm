@@ -55,11 +55,11 @@ export const registerSendTaskTool = (server: McpServer) => {
           .describe(
             "Parent task ID for session continuity. Child task will resume the parent's Claude session. Auto-routes to the same worker unless agentId is explicitly provided.",
           ),
-        githubRepo: z
+        vcsRepo: z
           .string()
           .optional()
           .describe(
-            "GitHub repo identifier (e.g., 'desplega-ai/agent-swarm'). Links the task to a registered repo for workspace context.",
+            "VCS repo identifier (e.g., 'desplega-ai/agent-swarm' for GitHub or 'group/project' for GitLab). Links the task to a registered repo for workspace context.",
           ),
         model: z
           .enum(["haiku", "sonnet", "opus"])
@@ -92,7 +92,7 @@ export const registerSendTaskTool = (server: McpServer) => {
         dependsOn,
         epicId,
         parentTaskId,
-        githubRepo,
+        vcsRepo,
         model,
         allowDuplicate,
       },
@@ -131,8 +131,8 @@ export const registerSendTaskTool = (server: McpServer) => {
         };
       }
 
-      // Validate epicId and auto-inherit githubRepo from epic if not explicitly provided
-      let effectiveGithubRepo = githubRepo;
+      // Validate epicId and auto-inherit vcsRepo from epic if not explicitly provided
+      let effectiveVcsRepo = vcsRepo;
       if (epicId) {
         const epic = getEpicById(epicId);
         if (!epic) {
@@ -145,8 +145,8 @@ export const registerSendTaskTool = (server: McpServer) => {
             },
           };
         }
-        if (!githubRepo && epic.githubRepo) {
-          effectiveGithubRepo = epic.githubRepo;
+        if (!vcsRepo && epic.vcsRepo) {
+          effectiveVcsRepo = epic.vcsRepo;
         }
       }
 
@@ -193,7 +193,7 @@ export const registerSendTaskTool = (server: McpServer) => {
             dependsOn,
             epicId,
             parentTaskId,
-            githubRepo: effectiveGithubRepo,
+            vcsRepo: effectiveVcsRepo,
             model,
           });
 
@@ -240,7 +240,7 @@ export const registerSendTaskTool = (server: McpServer) => {
             dependsOn,
             epicId,
             parentTaskId,
-            githubRepo: effectiveGithubRepo,
+            vcsRepo: effectiveVcsRepo,
             model,
           });
 
@@ -261,7 +261,7 @@ export const registerSendTaskTool = (server: McpServer) => {
           dependsOn,
           epicId,
           parentTaskId,
-          githubRepo: effectiveGithubRepo,
+          vcsRepo: effectiveVcsRepo,
           model,
         });
 

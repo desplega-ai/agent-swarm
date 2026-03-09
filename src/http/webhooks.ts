@@ -27,6 +27,20 @@ import {
   isGitHubEnabled,
   verifyWebhookSignature,
 } from "../github";
+import type {
+  IssueEvent as GitLabIssueEvent,
+  MergeRequestEvent,
+  NoteEvent,
+  PipelineEvent,
+} from "../gitlab";
+import {
+  handleIssue as handleGitLabIssue,
+  handleMergeRequest,
+  handleNote,
+  handlePipeline,
+  isGitLabEnabled,
+  verifyGitLabWebhook,
+} from "../gitlab";
 import { workflowEventBus } from "../workflows/event-bus";
 import { matchRoute } from "./utils";
 
@@ -169,6 +183,128 @@ export async function handleWebhooks(
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       console.error(`[GitHub] ❌ Error handling ${eventType} event: ${errorMessage}`);
+      if (err instanceof Error && err.stack) {
+        console.error(err.stack);
+      }
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Internal server error", message: errorMessage }));
+    }
+    return true;
+  }
+
+  // ============================================================================
+  // GitLab Webhook Endpoint
+  // ============================================================================
+
+  // POST /api/gitlab/webhook - Handle GitLab webhook events
+  if (matchRoute(req.method, pathSegments, "POST", ["api", "gitlab", "webhook"])) {
+    if (!isGitLabEnabled()) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "GitLab integration not configured" }));
+      return true;
+    }
+
+    // Verify X-Gitlab-Token header
+    const token = req.headers["x-gitlab-token"] as string | undefined;
+    if (!verifyGitLabWebhook(token)) {
+      console.log("[GitLab] Invalid webhook token");
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid token" }));
+      return true;
+    }
+
+    // Read and parse body
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const rawBody = Buffer.concat(chunks).toString();
+
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Invalid JSON body" }));
+      return true;
+    }
+
+    const objectKind = body.object_kind as string | undefined;
+    console.log(`[GitLab] Received ${objectKind} event`);
+
+    let result: { created: boolean; taskId?: string } = { created: false };
+
+    try {
+      switch (objectKind) {
+        case "merge_request":
+          result = await handleMergeRequest(body as unknown as MergeRequestEvent);
+          break;
+        case "issue":
+          result = await handleGitLabIssue(body as unknown as GitLabIssueEvent);
+          break;
+        case "note":
+          result = await handleNote(body as unknown as NoteEvent);
+          break;
+        case "pipeline":
+          result = await handlePipeline(body as unknown as PipelineEvent);
+          break;
+        default:
+          console.log(`[GitLab] Ignoring unsupported event type: ${objectKind}`);
+      }
+
+      // Emit workflow trigger events for GitLab
+      switch (objectKind) {
+        case "merge_request": {
+          const mr = body as unknown as MergeRequestEvent;
+          const action = mr.object_attributes.action;
+          workflowEventBus.emit(`gitlab.merge_request.${action}`, {
+            repo: mr.project.path_with_namespace,
+            number: mr.object_attributes.iid,
+            title: mr.object_attributes.title,
+            body: mr.object_attributes.description,
+            action,
+            merged: mr.object_attributes.state === "merged",
+            html_url: mr.object_attributes.url,
+            user_login: mr.user.username,
+          });
+          break;
+        }
+        case "issue": {
+          const iss = body as unknown as GitLabIssueEvent;
+          workflowEventBus.emit(`gitlab.issue.${iss.object_attributes.action}`, {
+            repo: iss.project.path_with_namespace,
+            number: iss.object_attributes.iid,
+            title: iss.object_attributes.title,
+            action: iss.object_attributes.action,
+          });
+          break;
+        }
+        case "note": {
+          const note = body as unknown as NoteEvent;
+          workflowEventBus.emit("gitlab.note.created", {
+            repo: note.project.path_with_namespace,
+            number: note.merge_request?.iid ?? note.issue?.iid,
+            action: "created",
+          });
+          break;
+        }
+        case "pipeline": {
+          const pl = body as unknown as PipelineEvent;
+          workflowEventBus.emit(`gitlab.pipeline.${pl.object_attributes.status}`, {
+            repo: pl.project.path_with_namespace,
+            number: pl.merge_request?.iid,
+            status: pl.object_attributes.status,
+            action: pl.object_attributes.status,
+          });
+          break;
+        }
+      }
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(result));
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error(`[GitLab] Error handling ${objectKind} event: ${errorMessage}`);
       if (err instanceof Error && err.stack) {
         console.error(err.stack);
       }

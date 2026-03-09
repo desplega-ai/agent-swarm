@@ -5,7 +5,7 @@ import {
   createAgent,
   createTaskExtended,
   createWorkflow,
-  findTaskByGitHub,
+  findTaskByVcs,
   getAllTasks,
   initDb,
 } from "../be/db";
@@ -75,7 +75,7 @@ afterAll(async () => {
 });
 
 // ===========================================================================
-// 1. handlers.ts — review_requested dedup via findTaskByGitHub
+// 1. handlers.ts — review_requested dedup via findTaskByVcs
 // ===========================================================================
 
 describe("handlePullRequest review_requested dedup", () => {
@@ -98,7 +98,7 @@ describe("handlePullRequest review_requested dedup", () => {
     expect(result.taskId).toBeDefined();
 
     // Verify the task exists in DB
-    const task = findTaskByGitHub("org/repo", 100);
+    const task = findTaskByVcs("org/repo", 100);
     expect(task).not.toBeNull();
   });
 
@@ -108,15 +108,15 @@ describe("handlePullRequest review_requested dedup", () => {
       agentId: "lead-001",
       source: "github",
       taskType: "github-pr",
-      githubRepo: "org/repo",
-      githubEventType: "pull_request",
-      githubNumber: 200,
-      githubAuthor: "bob",
-      githubUrl: "https://github.com/org/repo/pull/200",
+      vcsRepo: "org/repo",
+      vcsEventType: "pull_request",
+      vcsNumber: 200,
+      vcsAuthor: "bob",
+      vcsUrl: "https://github.com/org/repo/pull/200",
     });
 
     // Verify active task exists
-    const existing = findTaskByGitHub("org/repo", 200);
+    const existing = findTaskByVcs("org/repo", 200);
     expect(existing).not.toBeNull();
 
     // Now trigger review_requested for the same PR

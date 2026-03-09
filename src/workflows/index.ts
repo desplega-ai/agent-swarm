@@ -15,11 +15,21 @@ export function initWorkflows(): void {
   const triggerEvents = [
     "task.created",
     "task.completed",
+    // GitHub events
     "github.pull_request.opened",
     "github.pull_request.closed",
     "github.issue.opened",
     "github.issue_comment.created",
     "github.pull_request_review.submitted",
+    // GitLab events
+    "gitlab.merge_request.open",
+    "gitlab.merge_request.close",
+    "gitlab.merge_request.merge",
+    "gitlab.issue.open",
+    "gitlab.note.created",
+    "gitlab.pipeline.failed",
+    "gitlab.pipeline.success",
+    // Other
     "slack.message",
     "agentmail.message.received",
   ];

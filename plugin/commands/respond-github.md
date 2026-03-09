@@ -1,15 +1,19 @@
 ---
-description: Respond to a GitHub issue or pull request
+description: Respond to a GitHub issue/PR or GitLab issue/MR
 argument-hint: <issue-or-pr-number-or-url>
 ---
 
-# Respond to GitHub
+# Respond to VCS Issue/PR/MR
 
-Post a response to a GitHub issue or pull request.
+Post a response to a GitHub issue/PR or GitLab issue/MR.
+
+**Provider detection:** Check the URL or remote to determine the VCS provider:
+- If GitHub → use `gh issue comment` / `gh pr comment`
+- If GitLab → use `glab issue note` / `glab mr note`
 
 ## Arguments
 
-- `issue-or-pr-number-or-url`: Either a number (e.g., `123`) or a full GitHub URL (e.g., `https://github.com/owner/repo/issues/123` or `https://github.com/owner/repo/pull/123`)
+- `issue-or-pr-number-or-url`: Either a number (e.g., `123`) or a full URL (e.g., `https://github.com/owner/repo/issues/123` or `https://gitlab.com/group/project/-/issues/123`)
 
 ## Workflow
 

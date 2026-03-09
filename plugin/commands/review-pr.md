@@ -1,11 +1,15 @@
 ---
-description: Review a GitHub pull request and provide detailed feedback
-argument-hint: <pr-number-or-url>
+description: Review a pull request (GitHub) or merge request (GitLab) and provide detailed feedback
+argument-hint: <pr-or-mr-number-or-url>
 ---
 
-# Review Pull Request
+# Review Pull Request / Merge Request
 
-Review a GitHub pull request by analyzing the changes and providing structured feedback.
+Review a pull request (GitHub) or merge request (GitLab) by analyzing the changes and providing structured feedback.
+
+**Provider detection:** Check the remote URL or the provided URL to determine the VCS provider:
+- If GitHub → use `gh pr` commands
+- If GitLab → use `glab mr` commands
 
 ## Arguments
 

@@ -32,7 +32,11 @@ function matchTriggerNode(node: WorkflowNode, eventType: string, eventData: unkn
 
     case "trigger-github-event":
       if (!eventType.startsWith("github.")) return false;
-      return matchEventFilters(node.config as Record<string, unknown>, eventType, data);
+      return matchEventFilters(node.config as Record<string, unknown>, eventType, "github", data);
+
+    case "trigger-gitlab-event":
+      if (!eventType.startsWith("gitlab.")) return false;
+      return matchEventFilters(node.config as Record<string, unknown>, eventType, "gitlab", data);
 
     case "trigger-slack-message":
       if (eventType !== "slack.message") return false;
@@ -64,10 +68,11 @@ function matchTaskFilters(config: Record<string, unknown>, data: Record<string, 
 function matchEventFilters(
   config: Record<string, unknown>,
   eventType: string,
+  provider: "github" | "gitlab",
   data: Record<string, unknown>,
 ): boolean {
   if (config.matchEventType) {
-    const expectedEvent = `github.${config.matchEventType}`;
+    const expectedEvent = `${provider}.${config.matchEventType}`;
     if (eventType !== expectedEvent) return false;
   }
   if (config.matchRepo && data.repo !== config.matchRepo) return false;

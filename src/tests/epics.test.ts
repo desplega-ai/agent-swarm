@@ -92,8 +92,8 @@ describe("Epics Integration", () => {
         leadAgentId: leadAgent.id,
         researchDocPath: "/thoughts/research/test.md",
         planDocPath: "/thoughts/plans/test.md",
-        githubRepo: "desplega-ai/agent-swarm",
-        githubMilestone: "v1.0",
+        vcsRepo: "desplega-ai/agent-swarm",
+        vcsMilestone: "v1.0",
       });
 
       expect(epic.id).toBeDefined();
@@ -107,7 +107,7 @@ describe("Epics Integration", () => {
       expect(epic.createdByAgentId).toBe(testAgent.id);
       expect(epic.leadAgentId).toBe(leadAgent.id);
       expect(epic.researchDocPath).toBe("/thoughts/research/test.md");
-      expect(epic.githubRepo).toBe("desplega-ai/agent-swarm");
+      expect(epic.vcsRepo).toBe("desplega-ai/agent-swarm");
     });
 
     test("should auto-create a channel when creating an epic", () => {
