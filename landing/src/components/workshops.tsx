@@ -140,28 +140,6 @@ export function Workshops() {
           team to write code.
         </motion.p>
 
-        <motion.p
-          initial={{ opacity: 0 }}
-          whileInView={{ opacity: 1 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.4, delay: 0.2 }}
-          className="text-center text-sm text-zinc-400 mb-16"
-        >
-          Presented by{" "}
-          <span className="text-zinc-700 font-medium">Taras Yarema</span>{" "}
-          (CTO) &{" "}
-          <span className="text-zinc-700 font-medium">Eze Cura</span>{" "}
-          (CEO) |{" "}
-          <a
-            href="https://desplega.sh"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-amber-700 hover:text-amber-600 transition-colors"
-          >
-            desplega.sh
-          </a>
-        </motion.p>
-
         {/* Two options grid */}
         <div className="grid lg:grid-cols-2 gap-8 mb-16">
           {/* Option 1: Hands-on Workshop */}
@@ -315,7 +293,7 @@ export function Workshops() {
           className="text-center mb-12"
         >
           <a
-            href="mailto:hello@desplega.sh?subject=Agentic%20SDLC%20Workshop%20Inquiry"
+            href="mailto:contact@desplega.sh?subject=Agentic%20SDLC%20Workshop%20Inquiry"
             className="group inline-flex items-center gap-2 rounded-xl bg-amber-600 px-8 py-4 text-sm font-semibold text-white hover:bg-amber-500 transition-all shadow-xl shadow-amber-600/20"
           >
             Book a Free Workshop
