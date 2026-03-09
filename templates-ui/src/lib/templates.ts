@@ -2,6 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import type { TemplateConfig, TemplateResponse } from "../../../templates/schema";
 
+/** Rejects path components that aren't strictly alphanumeric/hyphen/underscore. */
+function sanitizePathComponent(component: string): string {
+  if (!/^[a-zA-Z0-9_-]+$/.test(component)) {
+    throw new Error(`Invalid path component: ${component}`);
+  }
+  return component;
+}
+
 // Check both paths: local dev (../templates) and Vercel build (src/data/templates)
 function getTemplatesDir(): string {
   const localPath = path.join(process.cwd(), "..", "templates");
@@ -24,7 +32,7 @@ export function getCategories(): string[] {
 }
 
 export function getTemplateNames(category: string): string[] {
-  const dir = path.join(getTemplatesDir(), category);
+  const dir = path.join(getTemplatesDir(), sanitizePathComponent(category));
   if (!fs.existsSync(dir)) return [];
   return fs
     .readdirSync(dir, { withFileTypes: true })
@@ -38,8 +46,8 @@ export function getTemplateConfig(
 ): TemplateConfig {
   const configPath = path.join(
     getTemplatesDir(),
-    category,
-    name,
+    sanitizePathComponent(category),
+    sanitizePathComponent(name),
     "config.json"
   );
   const raw = fs.readFileSync(configPath, "utf-8");
@@ -56,7 +64,7 @@ export function getTemplateFiles(
   name: string
 ): TemplateResponse["files"] {
   const config = getTemplateConfig(category, name);
-  const dir = path.join(getTemplatesDir(), category, name);
+  const dir = path.join(getTemplatesDir(), sanitizePathComponent(category), sanitizePathComponent(name));
 
   return {
     claudeMd: config.files.claudeMd

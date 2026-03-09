@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAllTemplates, getTemplate, parseTemplateId } from "@/lib/templates";
 
+// Intentional: public registry API, consumed by agent-swarm workers and external tools
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",

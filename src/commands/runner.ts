@@ -1358,7 +1358,7 @@ async function fetchTemplate(
   registryUrl: string,
   cacheDir: string,
 ): Promise<TemplateResponse | null> {
-  const safeId = templateId.replace(/[/@]/g, "_");
+  const safeId = templateId.replace(/[^a-zA-Z0-9_-]/g, "_");
   const cachePath = `${cacheDir}/${safeId}.json`;
 
   // Check local cache
@@ -1645,6 +1645,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             if (!profile.identityMd) profileUpdate.identityMd = agentIdentityMd;
             if (!profile.toolsMd) profileUpdate.toolsMd = agentToolsMd;
             if (!profile.claudeMd && agentClaudeMd) profileUpdate.claudeMd = agentClaudeMd;
+            if (!profile.setupScript && agentSetupScript)
+              profileUpdate.setupScript = agentSetupScript;
 
             await fetch(`${apiUrl}/api/agents/${agentId}/profile`, {
               method: "PUT",
