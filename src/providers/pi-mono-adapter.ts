@@ -144,9 +144,7 @@ class PiMonoSession implements ProviderSession {
   private config: ProviderSessionConfig;
   private createdSymlink: boolean;
   private logFileHandle: ReturnType<ReturnType<typeof Bun.file>["writer"]>;
-  /** Buffer for streaming message_update tokens — flushed on message_end */
-  private messageBuffer = "";
-  /** Track last emitted message to avoid duplicates across turns */
+  /** Track last emitted message text to avoid duplicates across turns */
   private lastEmittedMessage = "";
 
   constructor(agentSession: AgentSession, config: ProviderSessionConfig, createdSymlink: boolean) {
@@ -183,40 +181,33 @@ class PiMonoSession implements ProviderSession {
 
   private handleAgentEvent(event: AgentSessionEvent): void {
     switch (event.type) {
-      case "message_update": {
-        // Buffer streaming tokens — flushed as a single log on message_end
+      case "message_end": {
+        // Extract text from the final message (skip duplicates across turns)
         const msg = event.message;
         if (msg && "content" in msg) {
-          const content = Array.isArray(msg.content)
+          const text = Array.isArray(msg.content)
             ? msg.content
                 .filter((c: unknown) => (c as { type: string }).type === "text")
                 .map((c: unknown) => (c as { text?: string }).text || "")
                 .join("")
-            : String(msg.content || "");
-          if (content) {
-            this.messageBuffer = content;
+                .trim()
+            : String(msg.content || "").trim();
+          if (text && text !== this.lastEmittedMessage) {
+            const model = this.agentSession.model?.name ?? this.config.model;
+            this.emit({
+              type: "raw_log",
+              content: JSON.stringify({
+                type: "assistant",
+                message: {
+                  role: "assistant",
+                  content: [{ type: "text", text }],
+                  model,
+                },
+              }),
+            });
+            this.lastEmittedMessage = text;
           }
         }
-        break;
-      }
-      case "message_end": {
-        // Flush the buffered message as a single log entry (skip duplicates)
-        if (this.messageBuffer && this.messageBuffer !== this.lastEmittedMessage) {
-          const model = this.agentSession.model?.name ?? this.config.model;
-          this.emit({
-            type: "raw_log",
-            content: JSON.stringify({
-              type: "assistant",
-              message: {
-                role: "assistant",
-                content: [{ type: "text", text: this.messageBuffer }],
-                model,
-              },
-            }),
-          });
-          this.lastEmittedMessage = this.messageBuffer;
-        }
-        this.messageBuffer = "";
         break;
       }
       case "tool_execution_start": {

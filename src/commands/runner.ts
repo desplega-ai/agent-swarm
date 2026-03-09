@@ -533,6 +533,12 @@ async function flushLogBuffer(
 ): Promise<void> {
   if (buffer.lines.length === 0) return;
 
+  // Snapshot and clear buffer immediately to prevent duplicate flushes
+  // (fire-and-forget callers would otherwise race on the same buffer)
+  const lines = buffer.lines;
+  buffer.lines = [];
+  buffer.lastFlush = Date.now();
+
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "X-Agent-ID": opts.agentId,
@@ -550,7 +556,7 @@ async function flushLogBuffer(
         iteration: opts.iteration,
         taskId: opts.taskId,
         cli: opts.cli || "claude",
-        lines: buffer.lines,
+        lines,
       }),
     });
 
@@ -560,10 +566,6 @@ async function flushLogBuffer(
   } catch (error) {
     console.warn(`[runner] Error pushing logs: ${error}`);
   }
-
-  // Clear buffer after flush
-  buffer.lines = [];
-  buffer.lastFlush = Date.now();
 }
 
 /** Save session cost data to the API */
