@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { ArrowLeft, ExternalLink, CheckCircle, Wallet, Zap } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "x402 Payment Session — AI Agents Pay for Services with Crypto | Agent Swarm",
+  title: "x402 Payment Session — AI Agents Pay for Services with Crypto — Agent Swarm",
   description:
     "Watch a real session where the Agent Swarm used x402 protocol to autonomously pay $0.05 USDC on Base mainnet and generate an AI image — no human wallet interaction.",
   openGraph: {
@@ -12,6 +12,7 @@ export const metadata: Metadata = {
     url: "https://agent-swarm.dev/examples/x402",
     siteName: "Agent Swarm",
     type: "article",
+    publishedTime: "2026-02-28T00:00:00Z",
     images: [
       {
         url: "https://blob.imference.com/large/37f7ee3b-616b-402f-8cb3-d69896165e3f.webp",

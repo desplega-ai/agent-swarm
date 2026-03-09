@@ -814,6 +814,10 @@ SVG saved (5910 characters)`}
                   href: "https://github.com/desplega-ai/agent-swarm",
                   label: "Agent Swarm",
                 },
+                {
+                  href: "https://agent-swarm.dev/blog/swarm-metrics",
+                  label: "Swarm Metrics Post",
+                },
               ].map(({ href, label }) => (
                 <a
                   key={href}
