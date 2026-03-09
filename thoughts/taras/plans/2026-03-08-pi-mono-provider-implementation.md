@@ -6,7 +6,7 @@ branch: main
 repository: agent-swarm
 topic: "Pi-mono provider adapter implementation — ProviderAdapter abstraction, ClaudeAdapter extraction, PiMonoAdapter, hooks extension, Docker support"
 tags: [plan, implementation, provider, pi-mono, adapter, refactor, docker, hooks]
-status: implemented
+status: completed
 autonomy: critical
 based_on: thoughts/taras/research/2026-03-08-pi-mono-deep-dive.md
 last_updated: 2026-03-09
