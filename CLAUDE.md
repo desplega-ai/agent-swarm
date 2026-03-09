@@ -118,6 +118,19 @@ curl -H "Authorization: Bearer 123123" -H "X-Agent-ID: <uuid>" http://localhost:
 - `API_KEY` - Auth token for API requests
 - `MCP_BASE_URL` - API server URL (default: http://localhost:3013)
 - `SLACK_DISABLE=true` / `GITHUB_DISABLE=true` - Disable integrations locally
+- `HARNESS_PROVIDER` - Provider selection: `claude` (default) or `pi` (pi-mono)
+
+**Local Docker Compose (builds from source):**
+```bash
+# Runs: API + Claude lead + Pi-mono worker
+docker compose -f docker-compose.local.yml up --build
+
+# Tear down
+docker compose -f docker-compose.local.yml down
+```
+Requires `.env` with `API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` (or `OPENROUTER_API_KEY`).
+
+**Production Docker Compose (pulls from registry):** See `docker-compose.example.yml`.
 
 ---
 

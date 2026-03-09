@@ -1,0 +1,109 @@
+# Local development Docker Compose — builds from source
+#
+# Runs a minimal swarm: API + Claude lead + Pi-mono worker
+# Images are built from local Dockerfiles (no registry pull).
+#
+# Prerequisites:
+#   .env must contain: API_KEY, CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY
+#   (or OPENROUTER_API_KEY instead of ANTHROPIC_API_KEY for pi-mono)
+#
+# Usage:
+#   docker compose -f docker-compose.local.yml up --build
+#   docker compose -f docker-compose.local.yml down
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    stop_grace_period: 60s
+
+    environment:
+      - API_KEY=${API_KEY}
+      - SLACK_DISABLE=true
+      - GITHUB_DISABLE=true
+
+    ports:
+      - "3013:3013"
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3013/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+    restart: unless-stopped
+
+  lead:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    stop_grace_period: 60s
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    environment:
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - API_KEY=${API_KEY}
+      - AGENT_ID=aaaaaaaa-0000-0000-0000-000000000001
+      - AGENT_ROLE=lead
+      - MCP_BASE_URL=http://api:3013
+      - YOLO=true
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_EMAIL=${GITHUB_EMAIL:-dev@localhost}
+      - GITHUB_NAME=${GITHUB_NAME:-Lead Agent}
+
+    ports:
+      - "3020:3000"
+
+    volumes:
+      - local_logs:/logs
+      - local_shared:/workspace/shared
+      - local_lead:/workspace/personal
+
+    restart: unless-stopped
+
+  pi-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    stop_grace_period: 60s
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    environment:
+      - HARNESS_PROVIDER=pi
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # Or use OpenRouter instead:
+      # - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - API_KEY=${API_KEY}
+      - AGENT_ID=bbbbbbbb-0000-0000-0000-000000000002
+      - AGENT_ROLE=worker
+      - MCP_BASE_URL=http://api:3013
+      - YOLO=true
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_EMAIL=${GITHUB_EMAIL:-dev@localhost}
+      - GITHUB_NAME=${GITHUB_NAME:-Pi Worker}
+
+    ports:
+      - "3021:3000"
+
+    volumes:
+      - local_logs:/logs
+      - local_shared:/workspace/shared
+      - local_pi_worker:/workspace/personal
+      - local_pi_agent:/home/worker/.pi/agent
+
+    restart: unless-stopped
+
+volumes:
+  local_logs:
+  local_shared:
+  local_lead:
+  local_pi_worker:
+  local_pi_agent:
