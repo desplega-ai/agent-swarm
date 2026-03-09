@@ -22,6 +22,7 @@ import {
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
 import { type TSchema, Type } from "@sinclair/typebox";
+import { createSwarmHooksExtension } from "./pi-mono-extension";
 import { McpHttpClient } from "./pi-mono-mcp-client";
 import type {
   CostData,
@@ -356,12 +357,22 @@ export class PiMonoAdapter implements ProviderAdapter {
     // 3. Resolve model
     const model = resolveModel(config.model);
 
-    // 4. Create resource loader with system prompt injection
-    const resourceLoader = new DefaultResourceLoader({
-      appendSystemPrompt: config.systemPrompt || undefined,
+    // 4. Create swarm hooks extension
+    const swarmExtension = createSwarmHooksExtension({
+      apiUrl: config.apiUrl,
+      apiKey: config.apiKey,
+      agentId: config.agentId,
+      taskId: config.taskId,
+      isLead: config.role === "lead",
     });
 
-    // 5. Build session options
+    // 5. Create resource loader with system prompt + extension
+    const resourceLoader = new DefaultResourceLoader({
+      appendSystemPrompt: config.systemPrompt || undefined,
+      extensionFactories: [swarmExtension],
+    });
+
+    // 6. Build session options
     const sessionOptions: CreateAgentSessionOptions = {
       cwd: config.cwd,
       model,
@@ -369,7 +380,7 @@ export class PiMonoAdapter implements ProviderAdapter {
       resourceLoader,
     };
 
-    // 6. Create the session
+    // 7. Create the session
     const { session } = await createAgentSession(sessionOptions);
 
     return new PiMonoSession(session, config, createdSymlink);
