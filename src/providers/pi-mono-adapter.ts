@@ -83,9 +83,12 @@ function resolveModel(modelStr: string) {
     }
   }
 
-  // Try parsing "provider/model-id" format
+  // Try parsing "provider/model-id" format (split on first "/" only —
+  // OpenRouter model IDs contain slashes, e.g. "openrouter/google/gemini-2.5-flash-lite")
   if (modelStr.includes("/")) {
-    const [provider, modelId] = modelStr.split("/", 2);
+    const slashIdx = modelStr.indexOf("/");
+    const provider = modelStr.slice(0, slashIdx);
+    const modelId = modelStr.slice(slashIdx + 1);
     try {
       return getModel(provider as "anthropic", modelId as never);
     } catch {

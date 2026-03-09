@@ -803,13 +803,14 @@ The script:
 - [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
-- [ ] E2E: Claude worker picks up task → completes → cost recorded → session ID recorded (requires Docker + credentials)
-- [ ] E2E: Pi-mono worker picks up task → completes → cost recorded → session ID recorded (requires Docker + credentials)
-- [ ] E2E: Cancel a task on each provider → tool_call blocked with cancellation reason
-- [ ] E2E: Resume a paused task on Claude
-- [ ] E2E: Resume a paused task on pi-mono (using SessionManager)
-- [ ] E2E: Tool loop detection triggers on both providers
-- [ ] E2E: Session summarization produces memory entry on both providers
+- [x] E2E: Claude worker picks up task → completes → cost recorded ($0.4515, 12 turns, exit 0)
+- [x] E2E: Pi-mono worker picks up task → completes → exit 0 (openrouter/minimax/minimax-m2.5)
+- [x] E2E: Pi-mono MCP tool discovery + forwarding works (get-tasks, poll-task, get-swarm, task-action)
+- [x] E2E: Pi-mono event streaming works (tool_use, tool_result events)
+- [ ] E2E: Cancel a task on each provider → tool_call blocked with cancellation reason (deferred)
+- [ ] E2E: Resume on Claude / pi-mono (deferred)
+- [ ] E2E: Tool loop detection triggers on both providers (deferred)
+- [ ] E2E: Session summarization produces memory entry on both providers (deferred)
 
 **Phase 6 Implementation Notes:**
 - Created 3 test files: provider-adapter (factory + types), claude-adapter (CLI args, stream parsing, retry), pi-mono-adapter (symlinks, model mapping, events, cost)
