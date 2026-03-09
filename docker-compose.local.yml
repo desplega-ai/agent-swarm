@@ -1,7 +1,7 @@
 # Local development Docker Compose — builds from source
 #
 # Runs a minimal swarm: API + Claude lead + Pi-mono worker
-# Images are built from local Dockerfiles (no registry pull).
+# Both agent services share the same worker image (only env vars differ).
 #
 # Prerequisites:
 #   .env must contain: API_KEY, CLAUDE_CODE_OAUTH_TOKEN, OPENROUTER_API_KEY
@@ -14,6 +14,7 @@
 
 services:
   api:
+    container_name: swarm-api
     build:
       context: .
       dockerfile: Dockerfile
@@ -37,6 +38,8 @@ services:
     restart: unless-stopped
 
   lead:
+    container_name: swarm-lead
+    image: swarm-worker:local
     build:
       context: .
       dockerfile: Dockerfile.worker
@@ -68,14 +71,14 @@ services:
     restart: unless-stopped
 
   pi-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.worker
-    stop_grace_period: 60s
-
+    container_name: swarm-pi-worker
+    image: swarm-worker:local
     depends_on:
       api:
         condition: service_healthy
+      lead:
+        condition: service_started
+    stop_grace_period: 60s
 
     environment:
       - HARNESS_PROVIDER=pi
