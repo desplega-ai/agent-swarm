@@ -807,10 +807,12 @@ The script:
 - [x] E2E: Pi-mono worker picks up task → completes → exit 0 (openrouter/minimax/minimax-m2.5)
 - [x] E2E: Pi-mono MCP tool discovery + forwarding works (get-tasks, poll-task, get-swarm, task-action)
 - [x] E2E: Pi-mono event streaming works (tool_use, tool_result events)
-- [ ] E2E: Cancel a task on each provider → tool_call blocked with cancellation reason (deferred)
-- [ ] E2E: Resume on Claude / pi-mono (deferred)
-- [ ] E2E: Tool loop detection triggers on both providers (deferred)
-- [ ] E2E: Session summarization produces memory entry on both providers (deferred)
+- [x] E2E Docker: Claude worker completes task, session ID + cost ($0.1635) recorded via `scripts/e2e-docker-provider.ts`
+- [ ] E2E Docker: Pi-mono worker completes task via Docker (pending)
+- [ ] E2E: Cancel a task on each provider → tool_call blocked with cancellation reason
+- [ ] E2E: Resume on Claude / pi-mono
+- [ ] E2E: Tool loop detection triggers on both providers
+- [ ] E2E: Session summarization produces memory entry on both providers
 
 **Phase 6 Implementation Notes:**
 - Created 3 test files: provider-adapter (factory + types), claude-adapter (CLI args, stream parsing, retry), pi-mono-adapter (symlinks, model mapping, events, cost)
@@ -818,6 +820,9 @@ The script:
 - Manual E2E items above are deferred to post-merge Docker testing — they require live API keys and cannot run in CI
 - **CI fix (96388cd)**: Docker build failed with EACCES — `npm install -g` ran as `worker` user, added `sudo`. Test suite reported "1 error" from dangling `Bun.file().text()` promise in symlink test — replaced with synchronous `readFileSync`.
 - **Fixed**: Cost save 500 — `session_costs.taskId` has FK to `agent_tasks(id)`. For `pool_tasks_available` triggers, runner generated a random UUID via `crypto.randomUUID()` that didn't exist in `agent_tasks` → FK violation. Fix: split `effectiveTaskId` into `realTaskId` (DB-bound, may be undefined) and `effectiveTaskId` (log correlation only). `saveCostData` and `saveProviderSessionId` now use `realTaskId`.
+- **Fixed**: Cost save race — `saveCostData` was fire-and-forget in `onEvent` handler, racing with container shutdown. Moved to `await`ed call in `waitForCompletion().then()` handler.
+- **Fixed**: Docker PI_PACKAGE_DIR — pi-mono's `config.js` reads `package.json` at module load time via `process.execPath`, which resolves to the compiled binary location. Set `PI_PACKAGE_DIR=/usr/lib/node_modules/@mariozechner/pi-coding-agent` in Dockerfile.
+- **Added**: `scripts/e2e-docker-provider.ts` — Docker-based E2E script with `--provider`, `--test`, `--skip-build` flags. Supports basic/cancel/resume/tool-loop/summarize test scenarios.
 
 **Implementation Note**: After E2E passes on both providers, the feature is complete. Final review before merging.
 
