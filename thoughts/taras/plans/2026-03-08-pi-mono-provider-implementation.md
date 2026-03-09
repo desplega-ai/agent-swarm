@@ -456,20 +456,26 @@ class PiMonoAdapter implements ProviderAdapter {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Dependencies installed: `bun install` succeeds
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Existing tests pass: `bun test`
+- [x] Dependencies installed: `bun install` succeeds
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Existing tests pass: `bun test` (1117 pass, 0 fail)
 
 #### Manual Verification:
-- [ ] `HARNESS_PROVIDER=pi bun run start:http` starts without errors
-- [ ] A simple task ("Say hi") completes via pi-mono adapter
-- [ ] Session ID is captured and persisted
-- [ ] Cost data is captured and persisted
-- [ ] `HARNESS_PROVIDER=claude` still works identically (regression check)
-- [ ] AGENTS.md symlink created and cleaned up properly
+- [x] `HARNESS_PROVIDER=pi bun run start:http` starts without errors
+- [ ] A simple task ("Say hi") completes via pi-mono adapter (requires running worker E2E)
+- [ ] Session ID is captured and persisted (requires E2E)
+- [ ] Cost data is captured and persisted (requires E2E)
+- [x] `HARNESS_PROVIDER=claude` still works identically (regression check — server starts, tests pass)
+- [x] AGENTS.md symlink created and cleaned up properly (code review verified)
 
-**Implementation Note**: This phase requires pi-mono packages to be installable via bun. Verify package availability early. If packages are not on npm, we may need git dependencies or a local path. Pause for confirmation after dependency installation.
+**Implementation Notes**:
+- pi-mono packages installed via bun from npm: `@mariozechner/pi-coding-agent@0.57.1`, `@mariozechner/pi-agent-core@0.57.1`, `@mariozechner/pi-ai@0.57.1`
+- `pi-mcp-adapter` does not exist as npm package. Instead, wrote a minimal MCP HTTP client (`src/providers/pi-mono-mcp-client.ts`) that performs the Streamable HTTP MCP handshake, discovers tools, and forwards tool calls.
+- MCP tools are registered as `customTools: ToolDefinition[]` on `createAgentSession()` — no extension needed for tool discovery.
+- Used `Type.Unsafe()` from TypeBox to convert MCP JSON Schema to TypeBox TSchema without manual conversion.
+- `DefaultResourceLoader` uses `appendSystemPrompt` (static string), not a getter function.
+- `InputSource` only allows "interactive" | "rpc" | "extension" — used "rpc" for programmatic prompts.
 
 ---
 
