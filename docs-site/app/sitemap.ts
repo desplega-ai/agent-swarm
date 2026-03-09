@@ -14,6 +14,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/docs/concepts/epics",
     "/docs/concepts/services",
     "/docs/concepts/scheduling",
+    "/docs/concepts/workflows",
     "/docs/guides/deployment",
     "/docs/guides/slack-integration",
     "/docs/guides/github-integration",

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { ArrowLeft, ArrowRight, Zap } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "Examples — Real Agent Swarm Sessions | Agent Swarm",
+  title: "Examples — Real Agent Swarm Sessions — Agent Swarm",
   description:
     "See what AI agent swarms can do. Real session transcripts showing autonomous task execution, crypto payments, and more.",
   openGraph: {
