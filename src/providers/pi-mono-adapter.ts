@@ -144,6 +144,10 @@ class PiMonoSession implements ProviderSession {
   private config: ProviderSessionConfig;
   private createdSymlink: boolean;
   private logFileHandle: ReturnType<ReturnType<typeof Bun.file>["writer"]>;
+  /** Buffer for streaming message_update tokens — flushed on message_end */
+  private messageBuffer = "";
+  /** Track last emitted message to avoid duplicates across turns */
+  private lastEmittedMessage = "";
 
   constructor(agentSession: AgentSession, config: ProviderSessionConfig, createdSymlink: boolean) {
     this.agentSession = agentSession;
@@ -180,7 +184,7 @@ class PiMonoSession implements ProviderSession {
   private handleAgentEvent(event: AgentSessionEvent): void {
     switch (event.type) {
       case "message_update": {
-        // Emit raw_log for streaming content
+        // Buffer streaming tokens — flushed as a single log on message_end
         const msg = event.message;
         if (msg && "content" in msg) {
           const content = Array.isArray(msg.content)
@@ -190,29 +194,61 @@ class PiMonoSession implements ProviderSession {
                 .join("")
             : String(msg.content || "");
           if (content) {
-            this.emit({ type: "raw_log", content });
+            this.messageBuffer = content;
           }
         }
         break;
       }
-      case "tool_execution_start":
+      case "message_end": {
+        // Flush the buffered message as a single log entry (skip duplicates)
+        if (this.messageBuffer && this.messageBuffer !== this.lastEmittedMessage) {
+          const model = this.agentSession.model?.name ?? this.config.model;
+          this.emit({
+            type: "raw_log",
+            content: JSON.stringify({
+              type: "assistant",
+              message: {
+                role: "assistant",
+                content: [{ type: "text", text: this.messageBuffer }],
+                model,
+              },
+            }),
+          });
+          this.lastEmittedMessage = this.messageBuffer;
+        }
+        this.messageBuffer = "";
+        break;
+      }
+      case "tool_execution_start": {
+        const model = this.agentSession.model?.name ?? this.config.model;
         this.emit({
           type: "raw_log",
           content: JSON.stringify({
-            type: "tool_use",
-            name: event.toolName,
-            id: event.toolCallId,
+            type: "assistant",
+            message: {
+              role: "assistant",
+              content: [{ type: "tool_use", id: event.toolCallId, name: event.toolName, input: event.args }],
+              model,
+            },
           }),
         });
         break;
+      }
       case "tool_execution_end":
         this.emit({
           type: "raw_log",
           content: JSON.stringify({
-            type: "tool_result",
-            name: event.toolName,
-            id: event.toolCallId,
-            isError: event.isError,
+            type: "assistant",
+            message: {
+              role: "assistant",
+              content: [
+                {
+                  type: "tool_result",
+                  tool_use_id: event.toolCallId,
+                  content: typeof event.result === "string" ? event.result : JSON.stringify(event.result),
+                },
+              ],
+            },
           }),
         });
         break;

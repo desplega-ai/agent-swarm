@@ -891,6 +891,22 @@ docker stop test-worker 2>/dev/null
 - **E2E tests**: Real Claude CLI / pi-mono sessions against the API server. Keep tasks trivial ("Say hi") to minimize cost and time.
 - **Regression tests**: Every phase verifies `HARNESS_PROVIDER=claude` (or unset) still works identically.
 
+## Post-Implementation Fixes (2026-03-09)
+
+### Graceful SIGTERM Handling
+- **API server** (`src/http/index.ts`): Added `process.on("SIGTERM", shutdown)` — previously only handled SIGINT, causing Docker Compose `down` to hang until the 60s grace period expired
+- **Workers** already handled SIGTERM correctly in `runner.ts`
+
+### Pi-mono Session Log Quality
+- **Problem**: Pi-mono logged every streaming token as a separate "System" message in the UI (dozens of grey bubbles per response)
+- **Root cause**: `message_update` events emitted a `raw_log` for each token; Claude buffers by newline boundaries
+- **Fix** (`src/providers/pi-mono-adapter.ts`):
+  - Buffer `message_update` tokens, flush as a single log entry on `message_end`
+  - Dedup identical messages across turns (tracked via `lastEmittedMessage`)
+  - Include `model` in emitted JSON so the UI displays it
+  - Wrap `tool_execution_start/end` in the `{ type: "assistant", message: { content: [...] } }` format the UI parser expects (previously emitted standalone JSON that was silently skipped)
+- **Result**: Pi-mono tasks now render clean Agent messages with model info and tool use/result blocks, matching Claude's display quality
+
 ## Remaining Items to Verify During Implementation
 
 - **Pi-mono package availability**: The pi-mono SDK packages (`@mariozechner/pi-agent-core` for `AgentSession`/`ExtensionAPI` types, `@mariozechner/pi-ai` for TypeBox re-exports) need to be on npm. Verify early in Phase 3. If not published, use git dependencies. Note: `@mariozechner/pi-coding-agent` is the CLI — we may only need the core/ai packages as library dependencies, not the full CLI.
