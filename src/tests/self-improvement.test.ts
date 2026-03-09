@@ -4,6 +4,7 @@ import {
   closeDb,
   completeTask,
   createAgent,
+  createEpic,
   createMemory,
   createTaskExtended,
   failTask,
@@ -214,7 +215,31 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldShareWithSwarm).toBe(true);
     });
 
-    test("regular task does NOT promote to swarm scope", () => {
+    test("epic-linked task promotes to swarm scope", () => {
+      const epic = createEpic({
+        name: "Test Epic for Promotion",
+        goal: "Test that epic-linked tasks promote to swarm scope",
+        createdByAgentId: leadId,
+      });
+
+      const task = createTaskExtended("Implement feature X for epic", {
+        agentId: workerId,
+        source: "mcp",
+        priority: 50,
+        taskType: "implementation",
+        epicId: epic.id,
+      });
+
+      const shouldShareWithSwarm =
+        task.taskType === "research" ||
+        task.tags?.includes("knowledge") ||
+        task.tags?.includes("shared") ||
+        task.epicId != null;
+
+      expect(shouldShareWithSwarm).toBe(true);
+    });
+
+    test("regular task without epicId does NOT promote to swarm scope", () => {
       const task = createTaskExtended("Fix a typo", {
         agentId: workerId,
         source: "mcp",
@@ -226,7 +251,8 @@ describe("Self-Improvement Mechanisms", () => {
       const shouldShareWithSwarm =
         task.taskType === "research" ||
         task.tags?.includes("knowledge") ||
-        task.tags?.includes("shared");
+        task.tags?.includes("shared") ||
+        task.epicId != null;
 
       expect(shouldShareWithSwarm).toBe(false);
     });
@@ -245,7 +271,8 @@ describe("Self-Improvement Mechanisms", () => {
         status === "completed" &&
         (task.taskType === "research" ||
           task.tags?.includes("knowledge") ||
-          task.tags?.includes("shared"));
+          task.tags?.includes("shared") ||
+          task.epicId != null);
 
       expect(shouldShareWithSwarm).toBe(false);
     });
@@ -256,7 +283,7 @@ describe("Self-Improvement Mechanisms", () => {
   // ==========================================================================
 
   describe("inject-learning tool logic", () => {
-    test("lead agent can inject learning into worker memory", () => {
+    test("lead agent can inject learning into worker memory (swarm-scoped)", () => {
       const callerAgent = getAgentById(leadId);
       expect(callerAgent).not.toBeNull();
       expect(callerAgent!.isLead).toBe(true);
@@ -267,14 +294,14 @@ describe("Self-Improvement Mechanisms", () => {
 
       const memory = createMemory({
         agentId: workerId,
-        scope: "agent",
+        scope: "swarm",
         name: `Lead feedback: ${category} — ${learning.slice(0, 60)}`,
         content,
         source: "manual",
       });
 
       expect(memory.agentId).toBe(workerId);
-      expect(memory.scope).toBe("agent");
+      expect(memory.scope).toBe("swarm");
       expect(memory.content).toContain("[Lead Feedback — best-practice]");
       expect(memory.content).toContain(learning);
     });

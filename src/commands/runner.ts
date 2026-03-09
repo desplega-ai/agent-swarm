@@ -863,6 +863,9 @@ Note: Claims are first-come-first-serve. If claim fails, pick another.`;
           id: string;
           name: string;
           goal: string;
+          plan?: string;
+          prd?: string;
+          nextSteps?: string;
           status: string;
           progress: number;
           taskStats: {
@@ -894,6 +897,13 @@ Note: Claims are first-come-first-serve. If claim fails, pick another.`;
         prompt += `**Goal:** ${epic.goal}\n`;
         prompt += `**Progress:** ${epic.progress}% complete (${epic.taskStats.completed}/${epic.taskStats.total} tasks)\n`;
         prompt += `**Status:** ${epic.status}\n\n`;
+
+        if (epic.plan) {
+          prompt += `**Plan:**\n${epic.plan.slice(0, 2000)}\n\n`;
+        }
+        if (epic.prd) {
+          prompt += `**PRD:**\n${epic.prd.slice(0, 1000)}\n\n`;
+        }
 
         // Show finished tasks
         const completed = finishedTasks.filter((t) => t.status === "completed");
@@ -1016,6 +1026,59 @@ async function fetchRelevantMemories(
     return `\n\n### Relevant Past Knowledge\n\nThese memories from your previous sessions may be useful. Use \`memory-get\` with the memory ID to retrieve full details.\n\n${memoryContext}\n`;
   } catch {
     // Non-blocking — don't fail task start because of memory search
+    return null;
+  }
+}
+
+async function fetchEpicNameAndGoal(
+  apiUrl: string,
+  apiKey: string,
+  epicId: string,
+): Promise<{ name: string; goal: string } | null> {
+  try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+    const response = await fetch(`${apiUrl}/api/epics/${epicId}`, { headers });
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as { name: string; goal: string };
+    return { name: data.name, goal: data.goal };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchEpicTaskContext(
+  apiUrl: string,
+  apiKey: string,
+  epicId: string,
+  currentTaskId: string,
+): Promise<string | null> {
+  try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+    const response = await fetch(`${apiUrl}/api/tasks?epicId=${epicId}&status=completed&limit=5`, {
+      headers,
+    });
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as {
+      tasks: Array<{ id: string; task: string; output?: string }>;
+    };
+    const tasks = data.tasks || [];
+
+    const relevant = tasks.filter((t) => t.id !== currentTaskId);
+    if (relevant.length === 0) return null;
+
+    let context = "\n\n### Recent Epic Task Completions\n\n";
+    context += "These tasks were recently completed in the same epic:\n\n";
+    for (const t of relevant.slice(0, 5)) {
+      context += `- **${t.task.slice(0, 100)}**: ${(t.output || "no output").slice(0, 200)}\n`;
+    }
+    return context;
+  } catch {
     return null;
   }
 }
@@ -1608,8 +1671,20 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             continue;
           }
 
-          // Build prompt with resume context
-          const resumePrompt = buildResumePrompt(task);
+          // Build prompt with resume context + memory injection
+          let resumePrompt = buildResumePrompt(task);
+
+          // Inject relevant memories for resumed tasks
+          const resumeMemoryContext = await fetchRelevantMemories(
+            apiUrl,
+            apiKey,
+            agentId,
+            task.task,
+          );
+          if (resumeMemoryContext) {
+            resumePrompt += resumeMemoryContext;
+            console.log(`[${role}] Injected relevant memories into resumed task prompt`);
+          }
 
           // Resolve --resume: prefer own session ID, then parent's
           let resumeAdditionalArgs = opts.additionalArgs || [];
@@ -1753,16 +1828,57 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
           // Enrich prompt with relevant memories from past sessions
           if (trigger.type === "task_assigned" || trigger.type === "task_offered") {
-            const taskDesc =
+            const task =
               trigger.task && typeof trigger.task === "object" && "task" in trigger.task
-                ? (trigger.task as { task: string }).task
+                ? (trigger.task as { task: string; epicId?: string; id?: string })
                 : null;
-            if (taskDesc) {
-              const memoryContext = await fetchRelevantMemories(apiUrl, apiKey, agentId, taskDesc);
+            if (task?.task) {
+              // Enrich search query with epic context for better memory retrieval
+              let searchQuery = task.task;
+              if (task.epicId) {
+                const epicContext = await fetchEpicNameAndGoal(apiUrl, apiKey, task.epicId);
+                if (epicContext) {
+                  searchQuery = `[Epic: ${epicContext.name}] ${epicContext.goal}\n\n${task.task}`;
+                }
+              }
+
+              const memoryContext = await fetchRelevantMemories(
+                apiUrl,
+                apiKey,
+                agentId,
+                searchQuery,
+              );
               if (memoryContext) {
                 triggerPrompt += memoryContext;
                 console.log(`[${role}] Injected relevant memories into task prompt`);
               }
+
+              // Inject recent completed task summaries from the same epic
+              if (task.epicId && task.id) {
+                const epicTaskContext = await fetchEpicTaskContext(
+                  apiUrl,
+                  apiKey,
+                  task.epicId,
+                  task.id,
+                );
+                if (epicTaskContext) {
+                  triggerPrompt += epicTaskContext;
+                  console.log(`[${role}] Injected epic task context into prompt`);
+                }
+              }
+            }
+          }
+
+          // For epic progress triggers, search memories related to the epic goals
+          if (trigger.type === "epic_progress_changed" && trigger.epics) {
+            const epics = trigger.epics as Array<{
+              epic: { name: string; goal: string };
+            }>;
+            const epicQueries = epics.map((e) => `${e.epic.name}: ${e.epic.goal}`).join("\n");
+            const memoryContext = await fetchRelevantMemories(apiUrl, apiKey, agentId, epicQueries);
+            if (memoryContext) {
+              triggerPrompt += memoryContext;
+              console.log(`[${role}] Injected memories into epic progress prompt`);
             }
           }
 

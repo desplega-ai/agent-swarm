@@ -363,3 +363,13 @@ Safety Rails:
 
 7. **Lead session continuity:** Should the lead write `nextSteps` to the epic before session ends?
    - **Decision:** Yes. The lead should persist its reasoning about next steps to the epic’s `nextSteps` field so the next session can pick up seamlessly.
+
+---
+
+## Implementation Status
+
+The **memory compounding** and **epic context** portions of this research have been implemented:
+- **Plan**: `thoughts/taras/plans/2026-03-08-memory-self-improvement-enhancements.md` (status: implemented)
+- **PR**: https://github.com/desplega-ai/agent-swarm/pull/148 (v1.37.0)
+- **What was implemented**: Auto-promotion of epic-linked learnings, stricter memory prompting, epic-aware follow-ups with plan/nextSteps, server-side memory injection, dedup of follow-up vs epic_progress_changed triggers, `nextSteps` field on epics (decision #7 above)
+- **What remains**: The drive loop itself (epic state machine, heartbeat, goal evaluation, investment limits) — decisions #1-3 and #5 above

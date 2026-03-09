@@ -33,6 +33,7 @@ export const registerUpdateEpicTool = (server: McpServer) => {
         slackThreadTs: z.string().optional(),
         githubRepo: z.string().optional(),
         githubMilestone: z.string().optional(),
+        nextSteps: z.string().optional().describe("Notes on what to do next for this epic"),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
@@ -133,6 +134,7 @@ export const registerUpdateEpicTool = (server: McpServer) => {
         if (args.slackThreadTs !== undefined) updateData.slackThreadTs = args.slackThreadTs;
         if (args.githubRepo !== undefined) updateData.githubRepo = args.githubRepo;
         if (args.githubMilestone !== undefined) updateData.githubMilestone = args.githubMilestone;
+        if (args.nextSteps !== undefined) updateData.nextSteps = args.nextSteps;
 
         const updatedEpic = updateEpic(epic.id, updateData);
 
