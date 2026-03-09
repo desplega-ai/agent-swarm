@@ -17,6 +17,7 @@ export interface PullRequestEvent extends GitHubWebhookEvent {
     base: { ref: string };
     merged: boolean;
     merged_by?: { login: string };
+    changed_files?: number;
   };
   requested_reviewer?: { login: string; id: number }; // Added for review_requested/review_request_removed events
 }
