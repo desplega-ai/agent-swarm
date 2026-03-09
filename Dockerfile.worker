@@ -47,8 +47,8 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitLab CLI (glab) for GitLab integration
-RUN GLAB_VERSION=$(curl -s "https://gitlab.com/api/v4/projects/34675721/releases" | jq -r '.[0].tag_name' | sed 's/^v//') \
-    && curl -fsSL "https://gitlab.com/gitlab-org/cli/-/releases/v${GLAB_VERSION}/downloads/glab_${GLAB_VERSION}_Linux_x86_64.deb" -o /tmp/glab.deb \
+ARG GLAB_VERSION=1.89.0
+RUN curl -fsSL "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/generic/glab/${GLAB_VERSION}/glab_${GLAB_VERSION}_linux_amd64.deb" -o /tmp/glab.deb \
     && dpkg -i /tmp/glab.deb \
     && rm /tmp/glab.deb
 
