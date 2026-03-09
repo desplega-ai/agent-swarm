@@ -6,11 +6,12 @@ branch: main
 repository: agent-swarm
 topic: "Pi-mono provider adapter implementation — ProviderAdapter abstraction, ClaudeAdapter extraction, PiMonoAdapter, hooks extension, Docker support"
 tags: [plan, implementation, provider, pi-mono, adapter, refactor, docker, hooks]
-status: draft
+status: implemented
 autonomy: critical
 based_on: thoughts/taras/research/2026-03-08-pi-mono-deep-dive.md
-last_updated: 2026-03-08
+last_updated: 2026-03-09
 last_updated_by: Claude (claude-opus-4-6)
+pr: https://github.com/desplega-ai/agent-swarm/pull/151
 ---
 
 # Pi-Mono Provider Adapter Implementation Plan
@@ -814,6 +815,7 @@ The script:
 - Created 3 test files: provider-adapter (factory + types), claude-adapter (CLI args, stream parsing, retry), pi-mono-adapter (symlinks, model mapping, events, cost)
 - E2E script at `scripts/e2e-provider-test.ts` validates API layer; full provider session testing requires Docker + LLM credentials
 - Manual E2E items above are deferred to post-merge Docker testing — they require live API keys and cannot run in CI
+- **CI fix (96388cd)**: Docker build failed with EACCES — `npm install -g` ran as `worker` user, added `sudo`. Test suite reported "1 error" from dangling `Bun.file().text()` promise in symlink test — replaced with synchronous `readFileSync`.
 
 **Implementation Note**: After E2E passes on both providers, the feature is complete. Final review before merging.
 
