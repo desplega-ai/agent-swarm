@@ -713,7 +713,7 @@ The SKILL.md format uses YAML frontmatter (name, description) + markdown instruc
 - [x] Auth validation works: entrypoint validates provider-specific credentials with actionable errors
 - [x] Pi-mono persists session files across restarts (verified — resume E2E kept same session ID)
 - [x] MCP tools accessible from pi-mono session inside Docker (verified — store-progress tool used in basic E2E)
-- [x] Skills work: `/work-on-task` triggers correctly in pi-mono (skill conversion done — `plugin/pi-skills/` created with work-on-task, start-worker, start-leader, swarm-chat)
+- [x] Skills work: `/work-on-task` triggers correctly in pi-mono (skill conversion done — `plugin/pi-skills/` created with work-on-task, start-worker, start-leader, swarm-chat; verified via `pi --print` that all 4 skills are discovered by pi-mono in Docker)
 
 **Implementation Notes**:
 - Dockerfile installs pi-mono CLI globally via `npm install -g @mariozechner/pi-coding-agent`
