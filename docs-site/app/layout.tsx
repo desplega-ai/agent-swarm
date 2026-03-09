@@ -10,6 +10,18 @@ export const metadata: Metadata = {
   },
   description:
     "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants.",
+  keywords: [
+    "agent swarm",
+    "documentation",
+    "multi-agent orchestration",
+    "claude code",
+    "codex",
+    "gemini cli",
+    "AI coding",
+    "MCP tools",
+    "task lifecycle",
+    "developer tools",
+  ],
   metadataBase: new URL("https://docs.agent-swarm.dev"),
   openGraph: {
     title: "Agent Swarm Documentation",

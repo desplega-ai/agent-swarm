@@ -135,6 +135,7 @@ async function executeNode(
     case "trigger-email":
     case "trigger-slack-message":
     case "trigger-github-event":
+    case "trigger-gitlab-event":
       return { mode: "instant", nextPort: "default", output: ctx.trigger };
 
     case "property-match":

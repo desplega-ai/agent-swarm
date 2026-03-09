@@ -9,6 +9,7 @@ import { hasCapability } from "@/server";
 import { initAgentMail } from "../agentmail";
 import { closeDb } from "../be/db";
 import { initGitHub } from "../github";
+import { initGitLab } from "../gitlab";
 import { stopHeartbeat } from "../heartbeat";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { initWorkflows } from "../workflows";
@@ -175,6 +176,9 @@ httpServer
 
     // Initialize GitHub webhook handler (if configured)
     initGitHub();
+
+    // Initialize GitLab webhook handler (if configured)
+    initGitLab();
 
     // Initialize AgentMail webhook handler (if configured)
     initAgentMail();

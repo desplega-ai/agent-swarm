@@ -64,8 +64,9 @@ export async function handleCore(
   // API key authentication (if API_KEY is configured)
   // Skip auth for webhooks (they have their own signature verification)
   const isGitHubWebhook = req.url?.startsWith("/api/github/webhook");
+  const isGitLabWebhook = req.url?.startsWith("/api/gitlab/webhook");
   const isAgentMailWebhook = req.url?.startsWith("/api/agentmail/webhook");
-  if (apiKey && !isGitHubWebhook && !isAgentMailWebhook) {
+  if (apiKey && !isGitHubWebhook && !isGitLabWebhook && !isAgentMailWebhook) {
     const authHeader = req.headers.authorization;
     const providedKey = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
 

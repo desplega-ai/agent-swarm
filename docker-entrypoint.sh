@@ -164,7 +164,34 @@ if [ -n "$GITHUB_TOKEN" ]; then
     echo "GitHub authentication configured successfully"
     echo "Git user: $GIT_NAME <$GIT_EMAIL>"
 else
-    echo "WARNING: GITHUB_TOKEN not set - git push operations will fail"
+    echo "WARNING: GITHUB_TOKEN not set - GitHub git push operations will fail"
+fi
+echo "=============================="
+
+# Configure GitLab authentication if token is provided
+echo ""
+echo "=== GitLab Authentication ==="
+if [ -n "$GITLAB_TOKEN" ]; then
+    echo "Configuring GitLab authentication..."
+
+    # Configure glab CLI with the token
+    GITLAB_HOST="${GITLAB_URL:-https://gitlab.com}"
+    # Strip protocol for glab host config
+    GITLAB_HOST_BARE=$(echo "$GITLAB_HOST" | sed 's|https\?://||')
+    echo "$GITLAB_TOKEN" | glab auth login --hostname "$GITLAB_HOST_BARE" --stdin 2>/dev/null || true
+
+    # Set git user config for GitLab commits (use GitLab-specific env vars or fall back to GitHub ones)
+    GITLAB_GIT_EMAIL="${GITLAB_EMAIL:-${GITHUB_EMAIL:-worker-agent@desplega.ai}}"
+    GITLAB_GIT_NAME="${GITLAB_NAME:-${GITHUB_NAME:-Worker Agent}}"
+    # Only override git config if GitHub didn't set it already
+    if [ -z "$GITHUB_TOKEN" ]; then
+        git config --global user.email "$GITLAB_GIT_EMAIL"
+        git config --global user.name "$GITLAB_GIT_NAME"
+    fi
+
+    echo "GitLab authentication configured successfully (host: $GITLAB_HOST_BARE)"
+else
+    echo "GITLAB_TOKEN not set - GitLab integration disabled for this worker"
 fi
 echo "=============================="
 

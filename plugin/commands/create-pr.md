@@ -1,11 +1,15 @@
 ---
-description: Create a GitHub pull request from the current branch
+description: Create a pull request (GitHub) or merge request (GitLab) from the current branch
 argument-hint: [base-branch]
 ---
 
-# Create Pull Request
+# Create Pull Request / Merge Request
 
-Create a GitHub pull request from the current branch with an auto-generated title and description.
+Create a pull request (GitHub) or merge request (GitLab) from the current branch with an auto-generated title and description.
+
+**Provider detection:** Check the remote URL to determine the VCS provider:
+- If the remote contains `github.com` → use `gh` CLI
+- If the remote contains `gitlab.com` or `gitlab.` → use `glab` CLI
 
 ## Arguments
 
@@ -62,8 +66,9 @@ Based on the commits and changes:
   - Any testing done
   - Related issues (if applicable)
 
-### 6. Create the PR
+### 6. Create the PR/MR
 
+**For GitHub:**
 ```bash
 gh pr create \
   --title "Your generated title" \
@@ -71,19 +76,20 @@ gh pr create \
   --base main
 ```
 
-Or interactively if you want the user to review:
-
+**For GitLab:**
 ```bash
-gh pr create --web
+glab mr create \
+  --title "Your generated title" \
+  --description "Your generated description" \
+  --target-branch main
 ```
 
-### 7. Report the PR URL
+### 7. Report the PR/MR URL
 
-After creation, provide the PR URL to the user:
+After creation, provide the URL to the user:
 
-```bash
-gh pr view --json url --jq '.url'
-```
+**GitHub:** `gh pr view --json url --jq '.url'`
+**GitLab:** `glab mr view --web`
 
 ## Tips
 

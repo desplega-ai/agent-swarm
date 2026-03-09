@@ -58,6 +58,7 @@ export const AgentTaskSourceSchema = z.enum([
   "slack",
   "api",
   "github",
+  "gitlab",
   "agentmail",
   "system",
   "schedule",
@@ -101,13 +102,14 @@ export const AgentTaskSchema = z.object({
   slackThreadTs: z.string().optional(),
   slackUserId: z.string().optional(),
 
-  // GitHub-specific metadata (optional)
-  githubRepo: z.string().optional(),
-  githubEventType: z.string().optional(),
-  githubNumber: z.number().int().optional(),
-  githubCommentId: z.number().int().optional(),
-  githubAuthor: z.string().optional(),
-  githubUrl: z.string().optional(),
+  // VCS metadata (GitHub / GitLab — provider-agnostic)
+  vcsProvider: z.enum(["github", "gitlab"]).optional(),
+  vcsRepo: z.string().optional(),
+  vcsEventType: z.string().optional(),
+  vcsNumber: z.number().int().optional(),
+  vcsCommentId: z.number().int().optional(),
+  vcsAuthor: z.string().optional(),
+  vcsUrl: z.string().optional(),
 
   // AgentMail-specific metadata (optional)
   agentmailInboxId: z.string().optional(),
@@ -424,8 +426,9 @@ export const EpicSchema = z.object({
   planDocPath: z.string().optional(),
   slackChannelId: z.string().optional(),
   slackThreadTs: z.string().optional(),
-  githubRepo: z.string().optional(),
-  githubMilestone: z.string().optional(),
+  vcsProvider: z.enum(["github", "gitlab"]).optional(),
+  vcsRepo: z.string().optional(),
+  vcsMilestone: z.string().optional(),
   nextSteps: z.string().optional(), // Lead's notes on what to do next for this epic
   createdAt: z.iso.datetime(),
   lastUpdatedAt: z.iso.datetime(),
@@ -550,6 +553,7 @@ export const WorkflowNodeTypeSchema = z.enum([
   "trigger-email",
   "trigger-slack-message",
   "trigger-github-event",
+  "trigger-gitlab-event",
   "llm-classify",
   "property-match",
   "code-match",

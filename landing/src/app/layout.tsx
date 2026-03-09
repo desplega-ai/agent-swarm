@@ -5,6 +5,18 @@ export const metadata: Metadata = {
   title: "Agent Swarm — Multi-Agent Orchestration for AI Coding Assistants",
   description:
     "Run a team of AI coding agents that coordinate autonomously. A lead agent delegates tasks to Docker-isolated workers with persistent memory. Open source, MCP-powered.",
+  keywords: [
+    "agent swarm",
+    "multi-agent",
+    "AI coding assistants",
+    "claude code",
+    "MCP",
+    "orchestration",
+    "autonomous agents",
+    "AI agents",
+    "open source",
+    "developer tools",
+  ],
   icons: {
     icon: "/favicon.ico",
     apple: "/apple-touch-icon.png",
