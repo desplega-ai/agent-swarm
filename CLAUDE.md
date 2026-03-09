@@ -251,6 +251,12 @@ bun run tsc:check       # TypeScript type check
 bun test                # Unit tests
 ```
 
+**If you changed `plugin/commands/*.md`:** Rebuild pi-mono skills and commit the result:
+```bash
+bun run build:pi-skills  # Regenerate plugin/pi-skills/ from commands
+```
+CI enforces freshness — the merge gate will fail if generated pi-skills are out of date.
+
 **new-ui/ (dashboard):**
 ```bash
 cd new-ui
