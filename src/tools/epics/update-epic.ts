@@ -31,8 +31,8 @@ export const registerUpdateEpicTool = (server: McpServer) => {
         planDocPath: z.string().optional(),
         slackChannelId: z.string().optional(),
         slackThreadTs: z.string().optional(),
-        githubRepo: z.string().optional(),
-        githubMilestone: z.string().optional(),
+        vcsRepo: z.string().optional(),
+        vcsMilestone: z.string().optional(),
         nextSteps: z.string().optional().describe("Notes on what to do next for this epic"),
       }),
       outputSchema: z.object({
@@ -132,8 +132,8 @@ export const registerUpdateEpicTool = (server: McpServer) => {
         if (args.planDocPath !== undefined) updateData.planDocPath = args.planDocPath;
         if (args.slackChannelId !== undefined) updateData.slackChannelId = args.slackChannelId;
         if (args.slackThreadTs !== undefined) updateData.slackThreadTs = args.slackThreadTs;
-        if (args.githubRepo !== undefined) updateData.githubRepo = args.githubRepo;
-        if (args.githubMilestone !== undefined) updateData.githubMilestone = args.githubMilestone;
+        if (args.vcsRepo !== undefined) updateData.vcsRepo = args.vcsRepo;
+        if (args.vcsMilestone !== undefined) updateData.vcsMilestone = args.vcsMilestone;
         if (args.nextSteps !== undefined) updateData.nextSteps = args.nextSteps;
 
         const updatedEpic = updateEpic(epic.id, updateData);

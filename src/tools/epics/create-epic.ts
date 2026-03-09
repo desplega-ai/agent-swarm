@@ -23,8 +23,8 @@ export const registerCreateEpicTool = (server: McpServer) => {
         planDocPath: z.string().optional().describe("Path to plan document"),
         slackChannelId: z.string().optional(),
         slackThreadTs: z.string().optional(),
-        githubRepo: z.string().optional(),
-        githubMilestone: z.string().optional(),
+        vcsRepo: z.string().optional(),
+        vcsMilestone: z.string().optional(),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),

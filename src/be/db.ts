@@ -671,12 +671,13 @@ type AgentTaskRow = {
   slackChannelId: string | null;
   slackThreadTs: string | null;
   slackUserId: string | null;
-  githubRepo: string | null;
-  githubEventType: string | null;
-  githubNumber: number | null;
-  githubCommentId: number | null;
-  githubAuthor: string | null;
-  githubUrl: string | null;
+  vcsProvider: string | null;
+  vcsRepo: string | null;
+  vcsEventType: string | null;
+  vcsNumber: number | null;
+  vcsCommentId: number | null;
+  vcsAuthor: string | null;
+  vcsUrl: string | null;
   agentmailInboxId: string | null;
   agentmailMessageId: string | null;
   agentmailThreadId: string | null;
@@ -717,12 +718,13 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     slackChannelId: row.slackChannelId ?? undefined,
     slackThreadTs: row.slackThreadTs ?? undefined,
     slackUserId: row.slackUserId ?? undefined,
-    githubRepo: row.githubRepo ?? undefined,
-    githubEventType: row.githubEventType ?? undefined,
-    githubNumber: row.githubNumber ?? undefined,
-    githubCommentId: row.githubCommentId ?? undefined,
-    githubAuthor: row.githubAuthor ?? undefined,
-    githubUrl: row.githubUrl ?? undefined,
+    vcsProvider: (row.vcsProvider as "github" | "gitlab" | null) ?? undefined,
+    vcsRepo: row.vcsRepo ?? undefined,
+    vcsEventType: row.vcsEventType ?? undefined,
+    vcsNumber: row.vcsNumber ?? undefined,
+    vcsCommentId: row.vcsCommentId ?? undefined,
+    vcsAuthor: row.vcsAuthor ?? undefined,
+    vcsUrl: row.vcsUrl ?? undefined,
     agentmailInboxId: row.agentmailInboxId ?? undefined,
     agentmailMessageId: row.agentmailMessageId ?? undefined,
     agentmailThreadId: row.agentmailThreadId ?? undefined,
@@ -921,21 +923,24 @@ export function getTasksByStatus(status: AgentTaskStatus): AgentTask[] {
 }
 
 /**
- * Find a task by GitHub repo and issue/PR number
- * Returns the most recent non-completed/failed task for this GitHub entity
+ * Find a task by VCS repo and issue/PR/MR number.
+ * Returns the most recent non-completed/failed task for this VCS entity.
  */
-export function findTaskByGitHub(githubRepo: string, githubNumber: number): AgentTask | null {
+export function findTaskByVcs(vcsRepo: string, vcsNumber: number): AgentTask | null {
   const row = getDb()
     .prepare<AgentTaskRow, [string, number]>(
       `SELECT * FROM agent_tasks
-       WHERE githubRepo = ? AND githubNumber = ?
+       WHERE vcsRepo = ? AND vcsNumber = ?
        AND status NOT IN ('completed', 'failed')
        ORDER BY createdAt DESC
        LIMIT 1`,
     )
-    .get(githubRepo, githubNumber);
+    .get(vcsRepo, vcsNumber);
   return row ? rowToAgentTask(row) : null;
 }
+
+/** @deprecated Use findTaskByVcs instead */
+export const findTaskByGitHub = findTaskByVcs;
 
 export interface TaskFilters {
   status?: AgentTaskStatus;
@@ -1673,12 +1678,13 @@ export interface CreateTaskOptions {
   slackChannelId?: string;
   slackThreadTs?: string;
   slackUserId?: string;
-  githubRepo?: string;
-  githubEventType?: string;
-  githubNumber?: number;
-  githubCommentId?: number;
-  githubAuthor?: string;
-  githubUrl?: string;
+  vcsProvider?: "github" | "gitlab";
+  vcsRepo?: string;
+  vcsEventType?: string;
+  vcsNumber?: number;
+  vcsCommentId?: number;
+  vcsAuthor?: string;
+  vcsUrl?: string;
   agentmailInboxId?: string;
   agentmailMessageId?: string;
   agentmailThreadId?: string;
@@ -1744,11 +1750,11 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         id, agentId, creatorAgentId, task, status, source,
         taskType, tags, priority, dependsOn, offeredTo, offeredAt,
         slackChannelId, slackThreadTs, slackUserId,
-        githubRepo, githubEventType, githubNumber, githubCommentId, githubAuthor, githubUrl,
+        vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, epicId, parentTaskId, model, scheduleId,
         workflowRunId, workflowRunStepId, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -1766,12 +1772,13 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.slackChannelId ?? null,
       options?.slackThreadTs ?? null,
       options?.slackUserId ?? null,
-      options?.githubRepo ?? null,
-      options?.githubEventType ?? null,
-      options?.githubNumber ?? null,
-      options?.githubCommentId ?? null,
-      options?.githubAuthor ?? null,
-      options?.githubUrl ?? null,
+      options?.vcsProvider ?? null,
+      options?.vcsRepo ?? null,
+      options?.vcsEventType ?? null,
+      options?.vcsNumber ?? null,
+      options?.vcsCommentId ?? null,
+      options?.vcsAuthor ?? null,
+      options?.vcsUrl ?? null,
       options?.agentmailInboxId ?? null,
       options?.agentmailMessageId ?? null,
       options?.agentmailThreadId ?? null,
@@ -4269,8 +4276,9 @@ type EpicRow = {
   planDocPath: string | null;
   slackChannelId: string | null;
   slackThreadTs: string | null;
-  githubRepo: string | null;
-  githubMilestone: string | null;
+  vcsProvider: string | null;
+  vcsRepo: string | null;
+  vcsMilestone: string | null;
   nextSteps: string | null;
   createdAt: string;
   lastUpdatedAt: string;
@@ -4297,8 +4305,9 @@ function rowToEpic(row: EpicRow): Epic {
     planDocPath: row.planDocPath ?? undefined,
     slackChannelId: row.slackChannelId ?? undefined,
     slackThreadTs: row.slackThreadTs ?? undefined,
-    githubRepo: row.githubRepo ?? undefined,
-    githubMilestone: row.githubMilestone ?? undefined,
+    vcsProvider: (row.vcsProvider as "github" | "gitlab" | null) ?? undefined,
+    vcsRepo: row.vcsRepo ?? undefined,
+    vcsMilestone: row.vcsMilestone ?? undefined,
     nextSteps: row.nextSteps ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
@@ -4375,8 +4384,9 @@ export interface CreateEpicData {
   planDocPath?: string;
   slackChannelId?: string;
   slackThreadTs?: string;
-  githubRepo?: string;
-  githubMilestone?: string;
+  vcsProvider?: "github" | "gitlab";
+  vcsRepo?: string;
+  vcsMilestone?: string;
 }
 
 export function createEpic(data: CreateEpicData): Epic {
@@ -4399,9 +4409,9 @@ export function createEpic(data: CreateEpicData): Epic {
       `INSERT INTO epics (
         id, name, description, goal, prd, plan, status, priority, tags,
         createdByAgentId, leadAgentId, channelId, researchDocPath, planDocPath,
-        slackChannelId, slackThreadTs, githubRepo, githubMilestone,
+        slackChannelId, slackThreadTs, vcsProvider, vcsRepo, vcsMilestone,
         createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -4419,8 +4429,9 @@ export function createEpic(data: CreateEpicData): Epic {
       data.planDocPath ?? null,
       data.slackChannelId ?? null,
       data.slackThreadTs ?? null,
-      data.githubRepo ?? null,
-      data.githubMilestone ?? null,
+      data.vcsProvider ?? null,
+      data.vcsRepo ?? null,
+      data.vcsMilestone ?? null,
       now,
       now,
     );
@@ -4459,8 +4470,9 @@ export interface UpdateEpicData {
   planDocPath?: string;
   slackChannelId?: string;
   slackThreadTs?: string;
-  githubRepo?: string;
-  githubMilestone?: string;
+  vcsProvider?: "github" | "gitlab";
+  vcsRepo?: string;
+  vcsMilestone?: string;
   nextSteps?: string;
 }
 
@@ -4535,13 +4547,17 @@ export function updateEpic(id: string, data: UpdateEpicData): Epic | null {
     updates.push("slackThreadTs = ?");
     params.push(data.slackThreadTs);
   }
-  if (data.githubRepo !== undefined) {
-    updates.push("githubRepo = ?");
-    params.push(data.githubRepo);
+  if (data.vcsProvider !== undefined) {
+    updates.push("vcsProvider = ?");
+    params.push(data.vcsProvider);
   }
-  if (data.githubMilestone !== undefined) {
-    updates.push("githubMilestone = ?");
-    params.push(data.githubMilestone);
+  if (data.vcsRepo !== undefined) {
+    updates.push("vcsRepo = ?");
+    params.push(data.vcsRepo);
+  }
+  if (data.vcsMilestone !== undefined) {
+    updates.push("vcsMilestone = ?");
+    params.push(data.vcsMilestone);
   }
   if (data.nextSteps !== undefined) {
     updates.push("nextSteps = ?");

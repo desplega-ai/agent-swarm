@@ -1,4 +1,4 @@
-import { createTaskExtended, failTask, findTaskByGitHub, getAllAgents } from "../be/db";
+import { createTaskExtended, failTask, findTaskByVcs, getAllAgents } from "../be/db";
 import { detectMention, extractMentionContext, GITHUB_BOT_NAME, isBotAssignee } from "./mentions";
 import { addIssueReaction, addReaction } from "./reactions";
 import type {
@@ -105,12 +105,13 @@ export async function handlePullRequest(
     const task = createTaskExtended(taskDescription, {
       agentId: lead?.id ?? "",
       source: "github",
+      vcsProvider: "github",
       taskType: "github-pr",
-      githubRepo: repository.full_name,
-      githubEventType: "pull_request",
-      githubNumber: pr.number,
-      githubAuthor: sender.login,
-      githubUrl: pr.html_url,
+      vcsRepo: repository.full_name,
+      vcsEventType: "pull_request",
+      vcsNumber: pr.number,
+      vcsAuthor: sender.login,
+      vcsUrl: pr.html_url,
     });
 
     if (lead) {
@@ -138,7 +139,7 @@ export async function handlePullRequest(
     }
 
     // Find the related task
-    const task = findTaskByGitHub(repository.full_name, pr.number);
+    const task = findTaskByVcs(repository.full_name, pr.number);
     if (!task) {
       console.log(`[GitHub] No active task found for PR #${pr.number} to cancel`);
       return { created: false };
@@ -168,7 +169,7 @@ export async function handlePullRequest(
     }
 
     // Check if there's an existing active task for this PR — skip duplicate review tasks
-    const existingTask = findTaskByGitHub(repository.full_name, pr.number);
+    const existingTask = findTaskByVcs(repository.full_name, pr.number);
     if (existingTask) {
       console.log(
         `[GitHub] Skipping review task for PR #${pr.number} — active task ${existingTask.id} already exists`,
@@ -184,12 +185,13 @@ export async function handlePullRequest(
     const task = createTaskExtended(taskDescription, {
       agentId: lead?.id ?? "",
       source: "github",
+      vcsProvider: "github",
       taskType: "github-pr",
-      githubRepo: repository.full_name,
-      githubEventType: "pull_request",
-      githubNumber: pr.number,
-      githubAuthor: sender.login,
-      githubUrl: pr.html_url,
+      vcsRepo: repository.full_name,
+      vcsEventType: "pull_request",
+      vcsNumber: pr.number,
+      vcsAuthor: sender.login,
+      vcsUrl: pr.html_url,
     });
 
     if (lead) {
@@ -217,7 +219,7 @@ export async function handlePullRequest(
     }
 
     // Find the related task
-    const task = findTaskByGitHub(repository.full_name, pr.number);
+    const task = findTaskByVcs(repository.full_name, pr.number);
     if (!task) {
       console.log(`[GitHub] No active task found for PR #${pr.number} to cancel`);
       return { created: false };
@@ -238,7 +240,7 @@ export async function handlePullRequest(
   // Handle closed action - PR was merged or closed without merge
   if (action === "closed") {
     // Find the related task
-    const task = findTaskByGitHub(repository.full_name, pr.number);
+    const task = findTaskByVcs(repository.full_name, pr.number);
     if (!task) {
       // No task for this PR, nothing to notify
       return { created: false };
@@ -261,12 +263,13 @@ export async function handlePullRequest(
     const notifyTask = createTaskExtended(taskDescription, {
       agentId: lead?.id ?? "",
       source: "github",
+      vcsProvider: "github",
       taskType: "github-pr-status",
-      githubRepo: repository.full_name,
-      githubEventType: "pull_request",
-      githubNumber: pr.number,
-      githubAuthor: sender.login,
-      githubUrl: pr.html_url,
+      vcsRepo: repository.full_name,
+      vcsEventType: "pull_request",
+      vcsNumber: pr.number,
+      vcsAuthor: sender.login,
+      vcsUrl: pr.html_url,
     });
 
     console.log(
@@ -279,7 +282,7 @@ export async function handlePullRequest(
   // Handle synchronize action - new commits pushed to PR
   if (action === "synchronize") {
     // Find the related task
-    const task = findTaskByGitHub(repository.full_name, pr.number);
+    const task = findTaskByVcs(repository.full_name, pr.number);
     if (!task) {
       // No task for this PR, nothing to notify
       return { created: false };
@@ -297,12 +300,13 @@ export async function handlePullRequest(
     const notifyTask = createTaskExtended(taskDescription, {
       agentId: lead?.id ?? "",
       source: "github",
+      vcsProvider: "github",
       taskType: "github-pr-update",
-      githubRepo: repository.full_name,
-      githubEventType: "pull_request",
-      githubNumber: pr.number,
-      githubAuthor: sender.login,
-      githubUrl: pr.html_url,
+      vcsRepo: repository.full_name,
+      vcsEventType: "pull_request",
+      vcsNumber: pr.number,
+      vcsAuthor: sender.login,
+      vcsUrl: pr.html_url,
     });
 
     console.log(
@@ -341,12 +345,13 @@ export async function handlePullRequest(
   const task = createTaskExtended(taskDescription, {
     agentId: lead?.id ?? "",
     source: "github",
+    vcsProvider: "github",
     taskType: "github-pr",
-    githubRepo: repository.full_name,
-    githubEventType: "pull_request",
-    githubNumber: pr.number,
-    githubAuthor: sender.login,
-    githubUrl: pr.html_url,
+    vcsRepo: repository.full_name,
+    vcsEventType: "pull_request",
+    vcsNumber: pr.number,
+    vcsAuthor: sender.login,
+    vcsUrl: pr.html_url,
   });
 
   if (lead) {
@@ -394,12 +399,13 @@ export async function handleIssue(
     const task = createTaskExtended(taskDescription, {
       agentId: lead?.id ?? "",
       source: "github",
+      vcsProvider: "github",
       taskType: "github-issue",
-      githubRepo: repository.full_name,
-      githubEventType: "issues",
-      githubNumber: issue.number,
-      githubAuthor: sender.login,
-      githubUrl: issue.html_url,
+      vcsRepo: repository.full_name,
+      vcsEventType: "issues",
+      vcsNumber: issue.number,
+      vcsAuthor: sender.login,
+      vcsUrl: issue.html_url,
     });
 
     if (lead) {
@@ -427,7 +433,7 @@ export async function handleIssue(
     }
 
     // Find the related task
-    const task = findTaskByGitHub(repository.full_name, issue.number);
+    const task = findTaskByVcs(repository.full_name, issue.number);
     if (!task) {
       console.log(`[GitHub] No active task found for issue #${issue.number} to cancel`);
       return { created: false };
@@ -472,12 +478,13 @@ export async function handleIssue(
   const task = createTaskExtended(taskDescription, {
     agentId: lead?.id ?? "",
     source: "github",
+    vcsProvider: "github",
     taskType: "github-issue",
-    githubRepo: repository.full_name,
-    githubEventType: "issues",
-    githubNumber: issue.number,
-    githubAuthor: sender.login,
-    githubUrl: issue.html_url,
+    vcsRepo: repository.full_name,
+    vcsEventType: "issues",
+    vcsNumber: issue.number,
+    vcsAuthor: sender.login,
+    vcsUrl: issue.html_url,
   });
 
   if (lead) {
@@ -532,7 +539,7 @@ export async function handleComment(
   const targetUrl = target?.html_url ?? comment.html_url;
 
   // Check if there's an existing task for this PR/Issue
-  const existingTask = targetNumber ? findTaskByGitHub(repository.full_name, targetNumber) : null;
+  const existingTask = targetNumber ? findTaskByVcs(repository.full_name, targetNumber) : null;
 
   // Build task description
   const context = extractMentionContext(comment.body);
@@ -543,13 +550,14 @@ export async function handleComment(
   const task = createTaskExtended(taskDescription, {
     agentId: lead?.id ?? "",
     source: "github",
+    vcsProvider: "github",
     taskType: "github-comment",
-    githubRepo: repository.full_name,
-    githubEventType: eventType,
-    githubNumber: targetNumber,
-    githubCommentId: comment.id,
-    githubAuthor: sender.login,
-    githubUrl: targetUrl,
+    vcsRepo: repository.full_name,
+    vcsEventType: eventType,
+    vcsNumber: targetNumber,
+    vcsCommentId: comment.id,
+    vcsAuthor: sender.login,
+    vcsUrl: targetUrl,
   });
 
   if (lead) {
@@ -619,7 +627,7 @@ export async function handlePullRequestReview(
   }
 
   // Find any existing task for this PR
-  const existingTask = findTaskByGitHub(repository.full_name, pr.number);
+  const existingTask = findTaskByVcs(repository.full_name, pr.number);
 
   // Only notify for PRs where bot is creator or already has a task
   const isBotCreator = isBotAssignee(pr.user.login);
@@ -648,12 +656,13 @@ export async function handlePullRequestReview(
   const task = createTaskExtended(taskDescription, {
     agentId: lead?.id ?? "",
     source: "github",
+    vcsProvider: "github",
     taskType: "github-review",
-    githubRepo: repository.full_name,
-    githubEventType: "pull_request_review",
-    githubNumber: pr.number,
-    githubAuthor: sender.login,
-    githubUrl: review.html_url,
+    vcsRepo: repository.full_name,
+    vcsEventType: "pull_request_review",
+    vcsNumber: pr.number,
+    vcsAuthor: sender.login,
+    vcsUrl: review.html_url,
   });
 
   if (lead) {
@@ -729,7 +738,7 @@ export async function handleCheckRun(
   let relatedTask = null;
   let prNumber = 0;
   for (const pr of check_run.pull_requests) {
-    const task = findTaskByGitHub(repository.full_name, pr.number);
+    const task = findTaskByVcs(repository.full_name, pr.number);
     if (task) {
       relatedTask = task;
       prNumber = pr.number;
@@ -760,12 +769,13 @@ export async function handleCheckRun(
   const task = createTaskExtended(taskDescription, {
     agentId: lead?.id ?? "",
     source: "github",
+    vcsProvider: "github",
     taskType: "github-ci",
-    githubRepo: repository.full_name,
-    githubEventType: "check_run",
-    githubNumber: prNumber,
-    githubAuthor: "",
-    githubUrl: check_run.html_url,
+    vcsRepo: repository.full_name,
+    vcsEventType: "check_run",
+    vcsNumber: prNumber,
+    vcsAuthor: "",
+    vcsUrl: check_run.html_url,
   });
 
   console.log(
@@ -805,7 +815,7 @@ export async function handleCheckSuite(
   let relatedTask = null;
   let prNumber = 0;
   for (const pr of check_suite.pull_requests) {
-    const task = findTaskByGitHub(repository.full_name, pr.number);
+    const task = findTaskByVcs(repository.full_name, pr.number);
     if (task) {
       relatedTask = task;
       prNumber = pr.number;
@@ -833,12 +843,13 @@ export async function handleCheckSuite(
   const task = createTaskExtended(taskDescription, {
     agentId: lead?.id ?? "",
     source: "github",
+    vcsProvider: "github",
     taskType: "github-ci",
-    githubRepo: repository.full_name,
-    githubEventType: "check_suite",
-    githubNumber: prNumber,
-    githubAuthor: "",
-    githubUrl: repository.html_url,
+    vcsRepo: repository.full_name,
+    vcsEventType: "check_suite",
+    vcsNumber: prNumber,
+    vcsAuthor: "",
+    vcsUrl: repository.html_url,
   });
 
   console.log(
@@ -881,7 +892,7 @@ export async function handleWorkflowRun(
   let relatedTask = null;
   let prNumber = 0;
   for (const pr of workflow_run.pull_requests) {
-    const task = findTaskByGitHub(repository.full_name, pr.number);
+    const task = findTaskByVcs(repository.full_name, pr.number);
     if (task) {
       relatedTask = task;
       prNumber = pr.number;
@@ -908,12 +919,13 @@ export async function handleWorkflowRun(
   const task = createTaskExtended(taskDescription, {
     agentId: lead?.id ?? "",
     source: "github",
+    vcsProvider: "github",
     taskType: "github-ci",
-    githubRepo: repository.full_name,
-    githubEventType: "workflow_run",
-    githubNumber: prNumber,
-    githubAuthor: "",
-    githubUrl: workflow_run.html_url,
+    vcsRepo: repository.full_name,
+    vcsEventType: "workflow_run",
+    vcsNumber: prNumber,
+    vcsAuthor: "",
+    vcsUrl: workflow_run.html_url,
   });
 
   console.log(

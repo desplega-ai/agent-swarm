@@ -302,9 +302,25 @@ const BASE_PROMPT_GUIDELINES = `
 const BASE_PROMPT_SYSTEM = `
 ### System packages available
 
-You have a full Ubuntu environment with some packages pre-installed: node, bun, python3, curl, wget, git, gh, jq, etc.
+You have a full Ubuntu environment with some packages pre-installed: node, bun, python3, curl, wget, git, gh, glab, jq, etc.
 
 If you need to install additional packages, use "sudo apt-get install {package_name}".
+
+### VCS CLI Tools (GitHub & GitLab)
+
+Both \`gh\` (GitHub CLI) and \`glab\` (GitLab CLI) are available. Use the right tool based on the repository provider:
+
+- **GitHub repos**: Use \`gh\` — \`gh pr create\`, \`gh issue view\`, \`gh repo clone\`, etc.
+- **GitLab repos**: Use \`glab\` — \`glab mr create\`, \`glab issue view\`, \`glab repo clone\`, etc.
+
+Check the task's \`vcsProvider\` field or the repo URL to determine which CLI to use. Key differences:
+| Operation | GitHub (\`gh\`) | GitLab (\`glab\`) |
+|---|---|---|
+| Create PR/MR | \`gh pr create\` | \`glab mr create\` |
+| View PR/MR | \`gh pr view\` | \`glab mr view\` |
+| Review | \`gh pr review\` | \`glab mr approve\` / \`glab mr note\` |
+| Comment on issue | \`gh issue comment\` | \`glab issue note\` |
+| Clone | \`gh repo clone\` | \`glab repo clone\` |
 `;
 
 const BASE_PROMPT_SERVICES = `

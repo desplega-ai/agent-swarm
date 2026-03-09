@@ -1,15 +1,19 @@
 ---
-description: Close a GitHub issue with a summary comment
+description: Close a GitHub or GitLab issue with a summary comment
 argument-hint: <issue-number-or-url>
 ---
 
 # Close Issue
 
-Close a GitHub issue with an appropriate closing comment summarizing the resolution.
+Close a GitHub or GitLab issue with an appropriate closing comment summarizing the resolution.
+
+**Provider detection:** Check the URL or remote to determine the VCS provider:
+- If GitHub → use `gh issue close` / `gh issue comment`
+- If GitLab → use `glab issue close` / `glab issue note`
 
 ## Arguments
 
-- `issue-number-or-url`: Either an issue number (e.g., `123`) or a full GitHub issue URL (e.g., `https://github.com/owner/repo/issues/123`)
+- `issue-number-or-url`: Either an issue number (e.g., `123`) or a full issue URL (e.g., `https://github.com/owner/repo/issues/123` or `https://gitlab.com/group/project/-/issues/123`)
 
 ## Workflow
 

@@ -13,6 +13,7 @@ import {
   trackErrorFromJson,
 } from "../utils/error-tracker.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
+import { detectVcsProvider } from "../vcs/index.ts";
 
 /** Task file data written to /tmp for hook to read */
 interface TaskFileData {
@@ -53,14 +54,14 @@ async function savePm2State(role: string): Promise<void> {
   }
 }
 
-/** Fetch repo config for a task's githubRepo (e.g., "desplega-ai/agent-swarm") */
+/** Fetch repo config for a task's vcsRepo (e.g., "desplega-ai/agent-swarm") */
 async function fetchRepoConfig(
   apiUrl: string,
   apiKey: string,
-  githubRepo: string,
+  vcsRepo: string,
 ): Promise<{ url: string; name: string; clonePath: string; defaultBranch: string } | null> {
   try {
-    const repoName = githubRepo.split("/").pop() || githubRepo;
+    const repoName = vcsRepo.split("/").pop() || vcsRepo;
     const resp = await fetch(`${apiUrl}/api/repos?name=${encodeURIComponent(repoName)}`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
@@ -68,14 +69,10 @@ async function fetchRepoConfig(
     const data = (await resp.json()) as {
       repos: Array<{ url: string; name: string; clonePath: string; defaultBranch: string }>;
     };
-    return data.repos.find((r) => r.url.includes(githubRepo)) ?? data.repos[0] ?? null;
+    return data.repos.find((r) => r.url.includes(vcsRepo)) ?? data.repos[0] ?? null;
   } catch {
     return null;
   }
-}
-
-function isGitHubRepo(url: string): boolean {
-  return url.includes("github.com") || /^[\w.-]+\/[\w.-]+$/.test(url);
 }
 
 /** Read CLAUDE.md from a repo directory, returning null if not found */
@@ -107,8 +104,11 @@ async function ensureRepoForTask(
 
     if (!gitHeadExists) {
       console.log(`[${role}] Cloning ${name} to ${clonePath}...`);
-      if (isGitHubRepo(url)) {
+      const provider = detectVcsProvider(url);
+      if (provider === "github") {
         await Bun.$`gh repo clone ${url} ${clonePath} -- --branch ${defaultBranch} --single-branch`.quiet();
+      } else if (provider === "gitlab") {
+        await Bun.$`glab repo clone ${url} ${clonePath} -- --branch ${defaultBranch} --single-branch`.quiet();
       } else {
         await Bun.$`git clone --branch ${defaultBranch} --single-branch ${url} ${clonePath}`.quiet();
       }
@@ -2271,15 +2271,15 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           // Extract model from task data for per-task model selection
           const taskModel = (trigger.task as { model?: string } | undefined)?.model;
 
-          // Handle repo context for tasks with githubRepo
-          const taskGithubRepo = (trigger.task as { githubRepo?: string } | undefined)?.githubRepo;
-          if (taskGithubRepo && apiUrl) {
-            const repoConfig = await fetchRepoConfig(apiUrl, apiKey, taskGithubRepo);
+          // Handle repo context for tasks with vcsRepo (GitHub/GitLab)
+          const taskVcsRepo = (trigger.task as { vcsRepo?: string } | undefined)?.vcsRepo;
+          if (taskVcsRepo && apiUrl) {
+            const repoConfig = await fetchRepoConfig(apiUrl, apiKey, taskVcsRepo);
             // Fall back to convention-based config if repo is not registered
             const effectiveConfig = repoConfig ?? {
-              url: taskGithubRepo,
-              name: taskGithubRepo.split("/").pop() || taskGithubRepo,
-              clonePath: `/workspace/repos/${taskGithubRepo.split("/").pop() || taskGithubRepo}`,
+              url: taskVcsRepo,
+              name: taskVcsRepo.split("/").pop() || taskVcsRepo,
+              clonePath: `/workspace/repos/${taskVcsRepo.split("/").pop() || taskVcsRepo}`,
               defaultBranch: "main",
             };
             currentRepoContext = await ensureRepoForTask(effectiveConfig, role);
