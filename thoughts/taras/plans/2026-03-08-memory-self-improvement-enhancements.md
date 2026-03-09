@@ -146,14 +146,14 @@ createMemory({
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Tests pass: `bun test src/tests/self-improvement.test.ts`
-- [ ] All tests pass: `bun test`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Tests pass: `bun test src/tests/self-improvement.test.ts`
+- [x] All tests pass: `bun test`
 
 #### Manual Verification:
-- [ ] Start server, create a task with epicId, complete it via store-progress, verify both agent-scoped AND swarm-scoped memories exist in the DB
-- [ ] Use inject-learning tool, verify the created memory has scope "swarm"
+- [x] Start server, create a task with epicId, complete it via store-progress, verify both agent-scoped AND swarm-scoped memories exist in the DB
+- [x] Use inject-learning tool, verify the created memory has scope "swarm"
 
 **Implementation Note**: After completing this phase, pause for manual confirmation.
 
@@ -215,14 +215,14 @@ When you receive a follow-up about a completed or failed worker task:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] All tests pass: `bun test`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] All tests pass: `bun test`
 
 #### Manual Verification:
-- [ ] Read the rendered system prompt for a worker agent and verify the memory instructions are prominent and directive
-- [ ] Read the work-on-task.md file and verify the memory check step is clearly positioned before any work begins
-- [ ] Start a worker, assign a task, observe in logs/session that it calls memory-search early
+- [x] Read the rendered system prompt for a worker agent and verify the memory instructions are prominent and directive
+- [x] Read the work-on-task.md file and verify the memory check step is clearly positioned before any work begins
+- [x] Start a worker, assign a task, observe in logs/session that it calls memory-search early
 
 **Implementation Note**: After completing this phase, pause for manual confirmation.
 
@@ -314,17 +314,17 @@ Also update:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Migration applies cleanly on fresh DB: `rm agent-swarm-db.sqlite && bun run start:http` (check startup logs)
-- [ ] Migration applies cleanly on existing DB: `bun run start:http` (check startup logs)
-- [ ] All tests pass: `bun test`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Migration applies cleanly on fresh DB: `rm agent-swarm-db.sqlite && bun run start:http` (check startup logs)
+- [x] Migration applies cleanly on existing DB: `bun run start:http` (check startup logs)
+- [x] All tests pass: `bun test`
 
 #### Manual Verification:
-- [ ] Create an epic with a plan, assign a task to it, complete the task. Verify the follow-up task description includes epic context (goal, plan, progress, action directive).
-- [ ] Verify the follow-up task has the correct `epicId` set.
-- [ ] Check that `epic_progress_changed` does NOT re-fire for the same task completion (dedup via `progressNotifiedAt`).
-- [ ] Test the `update-epic` tool with `nextSteps` field — verify it persists and appears in `get-epic-details`.
+- [x] Create an epic with a plan, assign a task to it, complete the task. Verify the follow-up task description includes epic context (goal, plan, progress, action directive).
+- [x] Verify the follow-up task has the correct `epicId` set.
+- [x] Check that `epic_progress_changed` does NOT re-fire for the same task completion (dedup via `progressNotifiedAt`).
+- [x] Test the `update-epic` tool with `nextSteps` field — verify it persists and appears in `get-epic-details`.
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. This is the riskiest phase — the dual-mechanism deduplication needs careful testing.
 
@@ -432,15 +432,15 @@ if (trigger.type === "epic_progress_changed" && trigger.epics) {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] All tests pass: `bun test`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] All tests pass: `bun test`
 
 #### Manual Verification:
-- [ ] Start server and worker. Create some memories manually. Assign a task and observe in worker logs that the prompt includes "Relevant Past Knowledge" section.
-- [ ] Create an epic with 2 tasks. Complete task 1, then assign task 2. Verify task 2's prompt includes both memory context AND "Recent Epic Task Completions" section with task 1's summary.
-- [ ] Pause a worker mid-task (kill container). Resume it. Verify the resumed task gets memory injection.
-- [ ] Trigger an `epic_progress_changed` event. Verify the lead's prompt includes memory context related to the epic goals.
+- [x] Start server and worker. Create some memories manually. Assign a task and observe in worker logs that the prompt includes "Relevant Past Knowledge" section.
+- [x] Create an epic with 2 tasks. Complete task 1, then assign task 2. Verify task 2's prompt includes both memory context AND "Recent Epic Task Completions" section with task 1's summary.
+- [x] Pause a worker mid-task (kill container). Resume it. Verify the resumed task gets memory injection.
+- [x] Trigger an `epic_progress_changed` event. Verify the lead's prompt includes memory context related to the epic goals.
 
 **Implementation Note**: After completing this phase, pause for manual confirmation.
 
@@ -476,8 +476,37 @@ curl -X POST -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/j
 # Verify: follow-up task has epic context, swarm memory exists, next task gets memory injection
 ```
 
+## Implementation Summary
+
+**Implemented**: 2026-03-09 by Claude
+**PR**: https://github.com/desplega-ai/agent-swarm/pull/148
+**Version**: 1.37.0
+**Branch**: `feat/memory-self-improvement-enhancements`
+
+### Commits
+1. `ec03155` — Phase 1: Broaden auto-promotion of learnings
+2. `1c71f0a` — Phase 2: Strengthen memory prompting across agent roles
+3. `210b478` — Phase 3: Epic-aware follow-up tasks and deduplication
+4. `6e7c611` — Phase 4: Server-side memory injection enrichment
+5. `7a114f0` — Bump version to 1.37.0
+
+### E2E Verification
+- All 1118 unit tests pass
+- Migration 005 applies cleanly on fresh and existing DBs
+- Live server E2E: swarm memory promotion, inject-learning scope, epic-aware follow-ups, nextSteps, dedup all confirmed
+- Docker worker E2E: server-side memory injection (`task_assigned` trigger) confirmed — worker received 4 "Relevant Past Knowledge" entries and 2 "Recent Epic Task Completions"
+- Prompt-based enforcement (Phase 2) confirmed as fallback for `pool_tasks_available` triggers
+
+### What's Left (from "What We're NOT Doing")
+The drive loop (epic state machine, goal evaluation loop) remains a separate effort — see the drive loop research below.
+
 ## References
-- `thoughts/taras/research/2026-03-08-drive-loop-concept.md` — Drive loop research with codebase analysis
-- `thoughts/taras/research/2026-03-08-openclaw-memory-patterns.md` — OpenClaw memory patterns (web research)
-- `thoughts/researcher/plans/2026-02-20-agent-self-improvement-plan.md` — Original P7 proposal
-- `thoughts/researcher/research/2026-02-20-agent-self-improvement.md` — Gap analysis (Gap 9)
+
+### Upstream research (2026-03-08 learning loop session)
+- `thoughts/taras/research/2026-03-08-drive-loop-concept.md` — Drive loop research with codebase analysis. This plan implements the **memory compounding** and **epic context** portions identified in that research. The drive loop itself (epic state machine, heartbeat, goal evaluation) is deferred to a separate plan.
+- `thoughts/taras/research/2026-03-08-openclaw-memory-patterns.md` — OpenClaw memory patterns (web research). Informed the auto-promotion and memory injection design.
+- `thoughts/swarm-researcher/research/2026-02-23-openclaw-vs-agent-swarm-comparison.md` — OpenClaw vs agent-swarm comparison
+
+### Original gap analysis
+- `thoughts/researcher/plans/2026-02-20-agent-self-improvement-plan.md` — Original P7 proposal (memory injection at task start)
+- `thoughts/researcher/research/2026-02-20-agent-self-improvement.md` — Gap analysis identifying Gap 9 (agents don't call memory-search). This plan addresses Gap 9 via both server-side injection (Phase 4) and prompt enforcement (Phase 2).
