@@ -9,7 +9,7 @@ export {
   verifyGitLabWebhook,
 } from "./auth";
 export { handleIssue, handleMergeRequest, handleNote, handlePipeline } from "./handlers";
-export { addGitLabReaction, postGitLabComment } from "./reactions";
+export { addGitLabNoteReaction, addGitLabReaction, postGitLabComment } from "./reactions";
 export type {
   GitLabWebhookEvent,
   IssueEvent,

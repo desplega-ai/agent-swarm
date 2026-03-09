@@ -10,7 +10,7 @@
 
 import { createTaskExtended, failTask, findTaskByVcs, getAllAgents } from "../be/db";
 import { GITLAB_BOT_NAME } from "./auth";
-import { addGitLabReaction } from "./reactions";
+import { addGitLabNoteReaction, addGitLabReaction } from "./reactions";
 import type { IssueEvent, MergeRequestEvent, NoteEvent, PipelineEvent } from "./types";
 
 // ── Dedup cache (same pattern as GitHub) ──
@@ -267,10 +267,11 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
   });
 
   try {
-    await addGitLabReaction(
+    await addGitLabNoteReaction(
       repo,
       note.noteable_type === "MergeRequest" ? "mr" : "issue",
       targetNumber!,
+      note.id,
       "eyes",
     );
   } catch {}
