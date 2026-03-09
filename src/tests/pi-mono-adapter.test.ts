@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { PiMonoAdapter } from "../providers/pi-mono-adapter";
 
@@ -43,10 +43,18 @@ describe("AGENTS.md symlink management", () => {
     writeFileSync(join(testDir, "CLAUDE.md"), "# Claude");
     writeFileSync(join(testDir, "AGENTS.md"), "# Real AGENTS.md");
 
+    const claudeMd = join(testDir, "CLAUDE.md");
     const agentsMd = join(testDir, "AGENTS.md");
-    const content = Bun.file(agentsMd).text();
-    // Should NOT be replaced
+
+    // Simulate createAgentsMdSymlink — should NOT overwrite existing AGENTS.md
+    if (existsSync(claudeMd) && !existsSync(agentsMd)) {
+      symlinkSync("CLAUDE.md", agentsMd);
+    }
+
+    // AGENTS.md should still be a real file, not a symlink
     expect(existsSync(agentsMd)).toBe(true);
+    const content = readFileSync(agentsMd, "utf-8");
+    expect(content).toBe("# Real AGENTS.md");
   });
 
   test("no-op when CLAUDE.md does not exist", () => {
