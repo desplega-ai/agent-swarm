@@ -687,7 +687,7 @@ Both CLIs are installed; `HARNESS_PROVIDER` selects which one the runner uses at
 **Build script**: `plugin/build-pi-skills.ts` — generates pi-mono `SKILL.md` files with transformations:
 - Frontmatter: `description` + `argument-hint` → `name` + `description`
 - Slash syntax: `/work-on-task` → `/skill:work-on-task`
-- `/todos` command → file-based `/workspace/personal/todos.md`
+- `/todos` → `/skill:todos` (todos is now a proper pi-mono skill)
 - `/desplega:*` commands → generic descriptions
 - `<!-- claude-only -->` / `<!-- pi-only -->` conditional markers
 - Wording: "command" → "skill", emoji removal, trailing whitespace cleanup
@@ -716,7 +716,7 @@ Tests: `src/tests/build-pi-skills.test.ts` (68 tests) — verifies frontmatter, 
 - [x] Docker builds: `docker build -f Dockerfile.worker -t agent-swarm-worker .` (verified Phase 6 Docker E2E)
 - [x] Lint passes: `bun run lint:fix`
 - [x] Type check passes: `bun run tsc:check`
-- [x] Tests pass: `bun test` (1117 pass, 0 fail)
+- [x] Tests pass: `bun test` (1233 pass, 0 fail)
 
 #### Manual Verification:
 - [x] Same image, Claude provider: `docker run -e HARNESS_PROVIDER=claude --env-file .env.docker agent-swarm-worker` — completes a task (verified Phase 6 Docker E2E — $0.1635)
@@ -724,7 +724,7 @@ Tests: `src/tests/build-pi-skills.test.ts` (68 tests) — verifies frontmatter, 
 - [x] Auth validation works: entrypoint validates provider-specific credentials with actionable errors
 - [x] Pi-mono persists session files across restarts (verified — resume E2E kept same session ID)
 - [x] MCP tools accessible from pi-mono session inside Docker (verified — store-progress tool used in basic E2E)
-- [x] Skills work: `/work-on-task` triggers correctly in pi-mono (skill conversion done — `plugin/pi-skills/` created with work-on-task, start-worker, start-leader, swarm-chat; verified via `pi --print` that all 4 skills are discovered by pi-mono in Docker)
+- [x] Skills work: `/work-on-task` triggers correctly in pi-mono (all 12 commands converted to pi-mono skills via `bun run build:pi-skills`; verified via `pi --print` that skills are discovered by pi-mono in Docker)
 
 **Implementation Notes**:
 - Dockerfile installs pi-mono CLI globally via `npm install -g @mariozechner/pi-coding-agent`
@@ -895,7 +895,7 @@ docker stop test-worker 2>/dev/null
 
 - **Pi-mono package availability**: The pi-mono SDK packages (`@mariozechner/pi-agent-core` for `AgentSession`/`ExtensionAPI` types, `@mariozechner/pi-ai` for TypeBox re-exports) need to be on npm. Verify early in Phase 3. If not published, use git dependencies. Note: `@mariozechner/pi-coding-agent` is the CLI — we may only need the core/ai packages as library dependencies, not the full CLI.
 - **pi-mcp-adapter HTTP support** (**CRITICAL — gate Phase 3**): The `pi-mcp-adapter` extension primarily targets stdio-based MCP servers. Test it against the swarm’s Streamable HTTP endpoint as the very first step of Phase 3. If HTTP support is incomplete, either contribute upstream or fall back to native `ToolDefinition` conversion (Approach A from research). This is a potential blocker.
-- **Skill format convergence**: Resolved. `plugin/commands/*.md` is now the single source of truth. `bun run build:pi-skills` generates `plugin/pi-skills/` from them using `plugin/build-pi-skills.ts`. Uses `<!-- claude-only -->` / `<!-- pi-only -->` markers for provider-specific sections. Only 4 of 12 commands are converted (work-on-task, start-worker, start-leader, swarm-chat).
+- **Skill format convergence**: Resolved. `plugin/commands/*.md` is now the single source of truth. `bun run build:pi-skills` generates `plugin/pi-skills/` from them using `plugin/build-pi-skills.ts`. Uses `<!-- claude-only -->` / `<!-- pi-only -->` markers for provider-specific sections. All 12 commands converted with 68 tests.
 
 ## References
 - Research: `thoughts/taras/research/2026-03-08-pi-mono-deep-dive.md`
