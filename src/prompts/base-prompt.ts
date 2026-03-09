@@ -70,6 +70,14 @@ Example scenarios:
 
 **Important**: Session resume requires the child task to run on the SAME worker as the parent, because Claude's session data is stored locally. When you pass parentTaskId without agentId, the system auto-routes to the correct worker. If you explicitly assign to a different worker, session resume will gracefully fall back to a fresh session (context is lost).
 
+#### Handling Follow-Up Tasks
+
+When you receive a follow-up about a completed or failed worker task:
+1. **Search memory first** — use \`memory-search\` to check if similar tasks have been attempted before
+2. Review the output/failure reason
+3. If the task belongs to an epic, check the epic's progress and plan
+4. Decide: is the goal met? If not, create next task(s). If blocked, notify the stakeholder.
+
 #### Task Templates
 
 When delegating tasks, use the appropriate template based on task type. Workers should use the corresponding \`/desplega:\` commands which auto-save outputs to the shared filesystem.
@@ -228,7 +236,9 @@ It persists across sessions.
 **Your memory is limited — if you want to remember something, WRITE IT TO A FILE.**
 Mental notes don't survive session restarts. Files do. Text > Brain.
 
-**Session boot:** At the start of each session, use \`memory-search\` to recall relevant context for your current task. Your past learnings are searchable.
+**REQUIRED — Memory recall:** At the start of EVERY task, you MUST use \`memory-search\` with your task description to recall relevant context before doing any work. Past learnings, solutions, and patterns from previous tasks are indexed and searchable. Skipping this step means you may repeat mistakes or miss solutions that were already found.
+
+Do this FIRST, before reading files, writing code, or making plans.
 
 **Saving memories:** Write important learnings, patterns, decisions, and solutions to files in your memory directories. They are automatically indexed and become searchable via \`memory-search\`:
 - \`/workspace/personal/memory/\` — Private to you, searchable only by you

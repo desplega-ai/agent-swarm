@@ -4271,6 +4271,7 @@ type EpicRow = {
   slackThreadTs: string | null;
   githubRepo: string | null;
   githubMilestone: string | null;
+  nextSteps: string | null;
   createdAt: string;
   lastUpdatedAt: string;
   startedAt: string | null;
@@ -4298,6 +4299,7 @@ function rowToEpic(row: EpicRow): Epic {
     slackThreadTs: row.slackThreadTs ?? undefined,
     githubRepo: row.githubRepo ?? undefined,
     githubMilestone: row.githubMilestone ?? undefined,
+    nextSteps: row.nextSteps ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     startedAt: row.startedAt ?? undefined,
@@ -4459,6 +4461,7 @@ export interface UpdateEpicData {
   slackThreadTs?: string;
   githubRepo?: string;
   githubMilestone?: string;
+  nextSteps?: string;
 }
 
 export function updateEpic(id: string, data: UpdateEpicData): Epic | null {
@@ -4539,6 +4542,10 @@ export function updateEpic(id: string, data: UpdateEpicData): Epic | null {
   if (data.githubMilestone !== undefined) {
     updates.push("githubMilestone = ?");
     params.push(data.githubMilestone);
+  }
+  if (data.nextSteps !== undefined) {
+    updates.push("nextSteps = ?");
+    params.push(data.nextSteps);
   }
 
   params.push(id);
