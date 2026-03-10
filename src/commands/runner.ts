@@ -744,6 +744,7 @@ async function registerAgent(opts: {
   agentId: string;
   name: string;
   isLead: boolean;
+  role?: string;
   capabilities?: string[];
   maxTasks?: number;
 }): Promise<void> {
@@ -761,6 +762,7 @@ async function registerAgent(opts: {
     body: JSON.stringify({
       name: opts.name,
       isLead: opts.isLead,
+      role: opts.role,
       capabilities: opts.capabilities,
       maxTasks: opts.maxTasks,
     }),
@@ -1419,7 +1421,8 @@ async function fetchTemplate(
 }
 
 export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
-  const { role, defaultPrompt, metadataType } = config;
+  const { defaultPrompt, metadataType } = config;
+  let role = config.role;
 
   // Create provider adapter based on HARNESS_PROVIDER env var (default: claude)
   const adapter = createProviderAdapter(process.env.HARNESS_PROVIDER || "claude");
@@ -1439,7 +1442,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   const apiUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
   const swarmUrl = process.env.SWARM_URL || "localhost";
 
-  const capabilities = config.capabilities;
+  let capabilities = config.capabilities;
 
   // Agent identity fields — populated after registration by fetching full profile
   let agentSoulMd: string | undefined;
@@ -1531,9 +1534,38 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let iteration = 0;
 
   if (!isAiLoop) {
+    // Fetch template early (before registration) so defaults can be applied
+    const templateId = process.env.TEMPLATE_ID;
+    const registryUrl = process.env.TEMPLATE_REGISTRY_URL || "https://templates.agent-swarm.dev";
+    let cachedTemplate: TemplateResponse | null = null;
+
+    if (templateId) {
+      try {
+        cachedTemplate = await fetchTemplate(templateId, registryUrl, "/workspace/.template-cache");
+        if (cachedTemplate) {
+          console.log(`[${role}] Fetched template: ${templateId}`);
+
+          // Apply agentDefaults as fallbacks (env/config takes precedence)
+          const defaults = cachedTemplate.config.agentDefaults;
+          if (config.role === "worker" && defaults.role) {
+            role = defaults.role;
+          }
+          if (!capabilities?.length && defaults.capabilities?.length) {
+            capabilities = defaults.capabilities;
+          }
+        }
+      } catch (err) {
+        console.warn(`[${role}] Failed to fetch template ${templateId}: ${err}`);
+      }
+    }
+
     // Runner-level polling mode with parallel execution support
-    const defaultConcurrent = role === "lead" ? "2" : "1";
-    const maxConcurrent = parseInt(process.env.MAX_CONCURRENT_TASKS || defaultConcurrent, 10);
+    const isLeadFromConfig = config.role === "lead";
+    const isLead = isLeadFromConfig || (cachedTemplate?.config.agentDefaults?.isLead ?? false);
+    const defaultMaxTasks = isLead ? 2 : 1;
+    const maxConcurrent = process.env.MAX_CONCURRENT_TASKS
+      ? parseInt(process.env.MAX_CONCURRENT_TASKS, 10)
+      : (cachedTemplate?.config.agentDefaults?.maxTasks ?? defaultMaxTasks);
     console.log(`[${role}] Mode: runner-level polling (use --ai-loop for AI-based polling)`);
     console.log(`[${role}] Max concurrent tasks: ${maxConcurrent}`);
 
@@ -1553,15 +1585,19 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     setupShutdownHandlers(role, apiConfig, () => state);
 
     // Register agent before starting
-    const agentName = process.env.AGENT_NAME || `${role}-${agentId.slice(0, 8)}`;
+    const agentName =
+      process.env.AGENT_NAME ||
+      cachedTemplate?.config.displayName ||
+      `${role}-${agentId.slice(0, 8)}`;
     try {
       await registerAgent({
         apiUrl,
         apiKey,
         agentId,
         name: agentName,
-        isLead: role === "lead",
-        capabilities: config.capabilities,
+        role,
+        isLead,
+        capabilities,
         maxTasks: maxConcurrent,
       });
       console.log(`[${role}] Registered as "${agentName}" (ID: ${agentId})`);
@@ -1603,34 +1639,24 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // Generate default templates if missing (runner registers via POST /api/agents
         // which doesn't generate templates like join-swarm does)
         if (!agentSoulMd || !agentIdentityMd || !agentToolsMd || !agentClaudeMd) {
-          // Try TEMPLATE_ID-based template first
-          const templateId = process.env.TEMPLATE_ID;
-          const registryUrl =
-            process.env.TEMPLATE_REGISTRY_URL || "https://templates.agent-swarm.dev";
-
-          if (templateId) {
-            const template = await fetchTemplate(
-              templateId,
-              registryUrl,
-              "/workspace/.template-cache",
-            );
-            if (template) {
-              const ctx = {
-                agent: {
-                  name: agentProfileName || agentName,
-                  role: role,
-                  description: agentDescription || "",
-                  capabilities: (config.capabilities || []).join(", "),
-                },
-              };
-              if (!agentSoulMd) agentSoulMd = interpolate(template.files.soulMd, ctx);
-              if (!agentIdentityMd) agentIdentityMd = interpolate(template.files.identityMd, ctx);
-              if (!agentToolsMd) agentToolsMd = interpolate(template.files.toolsMd, ctx);
-              if (!agentClaudeMd) agentClaudeMd = interpolate(template.files.claudeMd, ctx);
-              if (!agentSetupScript)
-                agentSetupScript = interpolate(template.files.setupScript, ctx);
-              console.log(`[${role}] Applied template: ${templateId}`);
-            }
+          // Use already-fetched template (from pre-registration step)
+          if (cachedTemplate) {
+            const ctx = {
+              agent: {
+                name: agentProfileName || agentName,
+                role: role,
+                description: agentDescription || "",
+                capabilities: (capabilities || []).join(", "),
+              },
+            };
+            if (!agentSoulMd) agentSoulMd = interpolate(cachedTemplate.files.soulMd, ctx);
+            if (!agentIdentityMd)
+              agentIdentityMd = interpolate(cachedTemplate.files.identityMd, ctx);
+            if (!agentToolsMd) agentToolsMd = interpolate(cachedTemplate.files.toolsMd, ctx);
+            if (!agentClaudeMd) agentClaudeMd = interpolate(cachedTemplate.files.claudeMd, ctx);
+            if (!agentSetupScript)
+              agentSetupScript = interpolate(cachedTemplate.files.setupScript, ctx);
+            console.log(`[${role}] Applied template: ${templateId}`);
           }
 
           // Fallback to generic defaults for any still-missing fields
