@@ -50,6 +50,9 @@ Complete reference for all environment variables used by Agent Swarm.
 | `WORKER1_PORT` | No | `3021` | Host port for worker-1 service. Example — see `LEAD_PORT`. |
 | `WORKER2_PORT` | No | `3022` | Host port for worker-2 service. Example — see `LEAD_PORT`. |
 | `PM2_HOME` | No | `/workspace/.pm2` | PM2 state directory |
+| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code) or `pi` (pi-mono) |
+| `TEMPLATE_ID` | No | — | Template for initial profile on first boot (e.g., `official/coder`) |
+| `TEMPLATE_REGISTRY_URL` | No | `https://templates.agent-swarm.dev` | URL of the templates registry |
 
 ## Git Configuration
 
@@ -79,6 +82,18 @@ Complete reference for all environment variables used by Agent Swarm.
 | `GITHUB_APP_ID` | GitHub App ID (for bot reactions) |
 | `GITHUB_APP_PRIVATE_KEY` | GitHub App private key (base64-encoded) |
 | `GITHUB_DISABLE` | Set to `true` to disable GitHub |
+
+## GitLab Integration
+
+| Variable | Description |
+|----------|-------------|
+| `GITLAB_TOKEN` | GitLab PAT or Group Access Token for API calls |
+| `GITLAB_URL` | GitLab instance URL (default: `https://gitlab.com`) |
+| `GITLAB_WEBHOOK_SECRET` | Shared secret for webhook verification |
+| `GITLAB_BOT_NAME` | Bot username for @mention detection (default: `agent-swarm-bot`) |
+| `GITLAB_EMAIL` | Git commit email for GitLab repos |
+| `GITLAB_NAME` | Git commit name for GitLab repos |
+| `GITLAB_DISABLE` | Set to `true` to disable GitLab integration |
 
 ## AgentMail Integration
 

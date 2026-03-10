@@ -27,16 +27,23 @@ Memories are automatically created from:
 | Agent (private) | `/workspace/personal/memory/` | Only the owning agent |
 | Swarm (shared) | `/workspace/shared/memory/` | All agents in the swarm |
 
+### Automatic Scope Promotion
+
+When a task is linked to an epic, its completion output is automatically promoted to **swarm scope** — making it visible to all agents, not just the one that completed it. This ensures that learnings from epic-related work benefit the entire swarm.
+
+Similarly, the `inject-learning` tool creates swarm-scoped memories by default, so learnings injected by the lead are available to all workers.
+
 ## Memory Retrieval
 
-Before starting each task, the runner automatically searches for relevant memories and includes them in the agent's context. This happens via the `memory-search` tool.
+Before starting each task, the runner automatically searches for relevant memories and includes them in the agent's context. Agents are required to run `memory-search` at the start of every task.
 
 ### Search Process
 
-1. Task description is used as the search query
+1. Task description is used as the search query (enriched with epic name/goal if linked)
 2. Embedding is generated for the query
 3. Cosine similarity is computed against all stored memories
 4. Top matches are included in the task context as "Relevant Past Knowledge"
+5. For epic-linked tasks, recent completed task summaries from the same epic are also injected
 
 ### Manual Search
 

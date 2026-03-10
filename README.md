@@ -39,13 +39,16 @@ Agent Swarm lets you run a team of AI coding agents that coordinate autonomously
 
 - **Lead/Worker coordination** — A lead agent delegates and tracks work across multiple workers
 - **Docker isolation** — Each worker runs in its own container with a full dev environment
-- **Slack, GitHub & Email integration** — Create tasks by messaging the bot, @mentioning it in issues/PRs, or sending an email
+- **Slack, GitHub, GitLab & Email integration** — Create tasks by messaging the bot, @mentioning it in issues/PRs/MRs, or sending an email
 - **Task lifecycle** — Priority queues, dependencies, pause/resume across deployments
 - **Compounding memory** — Agents learn from every session and get smarter over time
 - **Persistent identity** — Each agent has its own personality, expertise, and working style that evolves
 - **Dashboard UI** — Real-time monitoring of agents, tasks, and inter-agent chat
 - **Service discovery** — Workers can expose HTTP services and discover each other
 - **Scheduled tasks** — Cron-based recurring task automation
+- **Templates registry** — Pre-built agent templates with a gallery UI and docker-compose builder
+- **GitLab integration** — Full GitLab webhook support alongside GitHub via provider adapter pattern
+- **Multi-provider** — Run agents with Claude Code or pi-mono (`HARNESS_PROVIDER=claude|pi`)
 
 ## Quick Start
 
@@ -249,6 +252,30 @@ GITHUB_APP_PRIVATE_KEY=base64-encoded-key
 | `@bot-name` in comment/issue/PR | Creates a task with the mention context |
 | PR review submitted (on bot's PR) | Creates a notification task with review feedback |
 | CI failure (on PRs with existing tasks) | Creates a CI notification task |
+
+### GitLab
+
+Set up a GitLab webhook to receive events when the bot is @mentioned or assigned to issues/MRs.
+
+**Webhook URL:** `https://<your-domain>/api/gitlab/webhook`
+
+```bash
+# Add to your .env
+GITLAB_WEBHOOK_SECRET=your-webhook-secret
+GITLAB_TOKEN=your-gitlab-token              # PAT or Group Access Token
+GITLAB_BOT_NAME=agent-swarm-bot             # Bot name for @mentions
+GITLAB_URL=https://gitlab.com               # GitLab instance URL
+```
+
+**Supported events:**
+
+| Event | What happens |
+|-------|-------------|
+| Bot assigned to MR/issue | Creates a task for the lead agent |
+| `@bot-name` in comment/issue/MR | Creates a task with the mention context |
+| Pipeline failure (on MRs with existing tasks) | Creates a CI notification task |
+
+Workers have `glab` CLI pre-installed for GitLab operations (creating MRs, commenting on issues, etc.).
 
 ### AgentMail
 
