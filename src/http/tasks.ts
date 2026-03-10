@@ -76,6 +76,7 @@ export async function handleTasks(
         priority: body.priority || 50,
         dependsOn: body.dependsOn || undefined,
         offeredTo: body.offeredTo || undefined,
+        dir: body.dir || undefined,
         parentTaskId: body.parentTaskId || undefined,
         source: body.source || "api",
       });

@@ -6,7 +6,7 @@
  * discovered at session creation and registered as custom tools.
  */
 
-import { existsSync, symlinkSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, symlinkSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { getModel } from "@mariozechner/pi-ai";
 import type {
@@ -125,9 +125,8 @@ function createAgentsMdSymlink(cwd: string): boolean {
 function cleanupAgentsMdSymlink(cwd: string): void {
   const agentsMd = join(cwd, "AGENTS.md");
   try {
-    // Only remove if it's a symlink (don't delete real files)
-    const stats = Bun.file(agentsMd);
-    if (stats) {
+    // Only remove if it's actually a symlink — never delete real AGENTS.md files
+    if (existsSync(agentsMd) && lstatSync(agentsMd).isSymbolicLink()) {
       unlinkSync(agentsMd);
     }
   } catch {

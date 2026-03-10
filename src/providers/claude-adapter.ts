@@ -61,6 +61,7 @@ class ClaudeSession implements ProviderSession {
     );
 
     this.proc = Bun.spawn(cmd, {
+      cwd: this.config.cwd,
       env: {
         ...(config.env || process.env),
         TASK_FILE: taskFilePath,

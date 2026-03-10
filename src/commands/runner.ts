@@ -1,3 +1,4 @@
+import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import type { TemplateResponse } from "../../templates/schema.ts";
 import {
@@ -317,6 +318,8 @@ async function getPausedTasksFromAPI(config: ApiConfig): Promise<
     progress?: string;
     claudeSessionId?: string;
     parentTaskId?: string;
+    dir?: string;
+    vcsRepo?: string;
     finishedAt?: string;
     output?: string;
     status?: string;
@@ -347,6 +350,8 @@ async function getPausedTasksFromAPI(config: ApiConfig): Promise<
         progress?: string;
         claudeSessionId?: string;
         parentTaskId?: string;
+        dir?: string;
+        vcsRepo?: string;
         finishedAt?: string;
         output?: string;
         status?: string;
@@ -1103,6 +1108,7 @@ async function spawnProviderProcess(
     iteration: number;
     taskId?: string;
     model?: string;
+    cwd?: string;
   },
   logDir: string,
   isYolo: boolean,
@@ -1125,7 +1131,7 @@ async function spawnProviderProcess(
     taskId: effectiveTaskId,
     apiUrl: opts.apiUrl,
     apiKey: opts.apiKey,
-    cwd: process.cwd(),
+    cwd: opts.cwd || process.cwd(),
     logFile: opts.logFile,
     additionalArgs: opts.additionalArgs,
     iteration: opts.iteration,
@@ -1269,6 +1275,7 @@ async function runProviderIteration(
     apiKey: string;
     agentId: string;
     taskId?: string;
+    cwd?: string;
   },
 ): Promise<ProviderResult> {
   const freshEnv = await fetchResolvedEnv(opts.apiUrl, opts.apiKey, opts.agentId);
@@ -1283,7 +1290,7 @@ async function runProviderIteration(
     taskId: opts.taskId || crypto.randomUUID(),
     apiUrl: opts.apiUrl,
     apiKey: opts.apiKey,
-    cwd: process.cwd(),
+    cwd: opts.cwd || process.cwd(),
     logFile: opts.logFile,
     additionalArgs: opts.additionalArgs,
     env: freshEnv as Record<string, string>,
@@ -1819,6 +1826,38 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           };
           await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
 
+          // Resolve cwd for resumed task (mirrors normal task path: task.dir > vcsRepo clonePath)
+          let resumeCwd: string | undefined;
+          if (task.dir) {
+            try {
+              if (existsSync(task.dir) && statSync(task.dir).isDirectory()) {
+                resumeCwd = task.dir;
+              } else {
+                console.warn(
+                  `[${role}] Resume task dir "${task.dir}" does not exist or is not a directory, falling back to default cwd`,
+                );
+              }
+            } catch {
+              console.warn(
+                `[${role}] Failed to check resume task dir "${task.dir}", falling back to default cwd`,
+              );
+            }
+          }
+
+          if (!resumeCwd && task.vcsRepo && apiUrl) {
+            const repoConfig = await fetchRepoConfig(apiUrl, apiKey, task.vcsRepo);
+            const effectiveConfig = repoConfig ?? {
+              url: task.vcsRepo,
+              name: task.vcsRepo.split("/").pop() || task.vcsRepo,
+              clonePath: `/workspace/repos/${task.vcsRepo.split("/").pop() || task.vcsRepo}`,
+              defaultBranch: "main",
+            };
+            const repoContext = await ensureRepoForTask(effectiveConfig, role);
+            if (repoContext?.clonePath) {
+              resumeCwd = repoContext.clonePath;
+            }
+          }
+
           const runningTask = await spawnProviderProcess(
             adapter,
             {
@@ -1834,6 +1873,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               iteration,
               taskId: task.id,
               model: (task as { model?: string }).model,
+              cwd: resumeCwd,
             },
             logDir,
             isYolo,
@@ -2017,11 +2057,54 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             currentRepoContext = undefined;
           }
 
+          // Resolve effective working directory (priority: task.dir > repoContext.clonePath > process.cwd())
+          const taskDir = (trigger.task as { dir?: string } | undefined)?.dir;
+          let effectiveCwd: string | undefined;
+
+          if (taskDir) {
+            try {
+              if (existsSync(taskDir) && statSync(taskDir).isDirectory()) {
+                effectiveCwd = taskDir;
+              } else {
+                console.warn(
+                  `[${role}] Task dir "${taskDir}" does not exist or is not a directory, falling back to default cwd`,
+                );
+              }
+            } catch {
+              console.warn(
+                `[${role}] Failed to check task dir "${taskDir}", falling back to default cwd`,
+              );
+            }
+          }
+
+          if (!effectiveCwd && currentRepoContext?.clonePath) {
+            effectiveCwd = currentRepoContext.clonePath;
+          }
+
+          // Annotate prompt with working directory context
+          if (effectiveCwd && effectiveCwd !== process.cwd()) {
+            triggerPrompt += `\n\n---\n**Working Directory**: You are starting in \`${effectiveCwd}\`. `;
+            if (taskDir) {
+              triggerPrompt += "This was explicitly set on the task.";
+            } else if (currentRepoContext?.clonePath) {
+              triggerPrompt += "This is the repository clone path for this task's VCS repo.";
+            }
+            triggerPrompt +=
+              " You can still access any path on the filesystem — this is just your starting directory.";
+          }
+
+          // Warn in system prompt when task dir was specified but doesn't exist
+          let cwdWarning = "";
+          if (taskDir && !effectiveCwd) {
+            cwdWarning = `\n\nNote: The task requested working directory "${taskDir}" but it does not exist. Falling back to default directory.`;
+          }
+
           // Rebuild system prompt with per-task repo context
           const taskBasePrompt = buildSystemPrompt();
-          const taskSystemPrompt = additionalSystemPrompt
-            ? `${taskBasePrompt}\n\n${additionalSystemPrompt}`
-            : taskBasePrompt;
+          const taskSystemPrompt =
+            (additionalSystemPrompt
+              ? `${taskBasePrompt}\n\n${additionalSystemPrompt}`
+              : taskBasePrompt) + cwdWarning;
 
           iteration++;
           const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -2031,6 +2114,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           console.log(`\n[${role}] === Iteration ${iteration} ===`);
           console.log(`[${role}] Logging to: ${logFile}`);
           console.log(`[${role}] Prompt: ${triggerPrompt.slice(0, 100)}...`);
+          if (effectiveCwd) {
+            console.log(`[${role}] Working directory: ${effectiveCwd}`);
+          }
 
           const metadata = {
             type: metadataType,
@@ -2059,6 +2145,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               iteration,
               taskId: trigger.taskId,
               model: taskModel,
+              cwd: effectiveCwd,
             },
             logDir,
             isYolo,
