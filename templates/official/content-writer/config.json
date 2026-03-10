@@ -1,0 +1,23 @@
+{
+  "name": "content-writer",
+  "displayName": "Content Writer",
+  "description": "Content creation specialist that generates SEO-optimized blog posts, release notes, how-to guides, and location pages in TSX format with meme generation",
+  "version": "1.0.0",
+  "category": "official",
+  "icon": "pen-tool",
+  "author": "Agent Swarm <contact@agent-swarm.dev>",
+  "createdAt": "2026-03-10",
+  "lastUpdatedAt": "2026-03-10",
+  "agentDefaults": {
+    "role": "worker",
+    "capabilities": ["content-writing", "seo", "tsx", "meme-generation"],
+    "maxTasks": 2
+  },
+  "files": {
+    "claudeMd": "CLAUDE.md",
+    "soulMd": "SOUL.md",
+    "identityMd": "IDENTITY.md",
+    "toolsMd": "TOOLS.md",
+    "setupScript": "start-up.sh"
+  }
+}
