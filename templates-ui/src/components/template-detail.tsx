@@ -97,12 +97,12 @@ export function TemplateDetail({ template, category }: TemplateDetailProps) {
 
       {/* File tabs */}
       <div>
-        <div className="flex border-b border-border">
+        <div className="flex overflow-x-auto overflow-y-hidden border-b border-border">
           {fileTabs.map((tab) => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+              className={`shrink-0 whitespace-nowrap px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
                 activeTab === tab.key
                   ? "border-primary text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground"

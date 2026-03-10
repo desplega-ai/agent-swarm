@@ -6,11 +6,12 @@ export function Header() {
   return (
     <header className="border-b border-border bg-card">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
-        <Link href="/" className="flex items-center gap-3">
-          <Image src="/logo.png" alt="Agent Swarm" width={32} height={32} />
-          <span className="text-lg font-semibold">Agent Swarm Templates</span>
+        <Link href="/" className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <Image src="/logo.png" alt="Agent Swarm" width={32} height={32} className="shrink-0" priority />
+          <span className="text-lg font-semibold truncate hidden sm:inline">Agent Swarm Templates</span>
+          <span className="text-lg font-semibold sm:hidden">Templates</span>
         </Link>
-        <nav className="flex items-center gap-4">
+        <nav className="flex items-center gap-2 sm:gap-4 shrink-0">
           <Link
             href="/builder"
             className="text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -18,7 +19,7 @@ export function Header() {
             Builder
           </Link>
           <a
-            href="https://agent-swarm.dev"
+            href="https://docs.agent-swarm.dev"
             target="_blank"
             rel="noopener noreferrer"
             className="text-sm text-muted-foreground hover:text-foreground transition-colors"

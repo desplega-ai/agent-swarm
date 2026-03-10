@@ -30,8 +30,18 @@ interface GeneratedService {
   isLead: boolean;
 }
 
+let uuidCounter = 0;
+
 function generateUUID(): string {
-  return crypto.randomUUID();
+  // Use a deterministic counter-based UUID to avoid SSR/client hydration mismatch.
+  // Users should replace these with real UUIDs in their .env.
+  uuidCounter++;
+  const hex = uuidCounter.toString(16).padStart(12, "0");
+  return `00000000-0000-4000-8000-${hex}`;
+}
+
+export function resetUUIDCounter() {
+  uuidCounter = 0;
 }
 
 function buildServices(config: ComposeConfig): GeneratedService[] {
@@ -63,6 +73,7 @@ function buildServices(config: ComposeConfig): GeneratedService[] {
 }
 
 export function generateCompose(config: ComposeConfig): string {
+  resetUUIDCounter();
   const services = buildServices(config);
   const lines: string[] = [];
 
@@ -172,6 +183,7 @@ export function generateCompose(config: ComposeConfig): string {
 }
 
 export function generateEnv(config: ComposeConfig): string {
+  resetUUIDCounter();
   const services = buildServices(config);
   const lines: string[] = [];
 

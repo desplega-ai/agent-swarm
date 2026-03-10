@@ -107,7 +107,7 @@ export function ComposePreview({ compose, env }: ComposePreviewProps) {
           </button>
         </div>
       </div>
-      <div className="overflow-x-auto p-4">
+      <div className="overflow-auto max-h-[calc(100vh-20rem)] p-4">
         <pre className="text-sm font-mono leading-relaxed">
           <code>{highlightYaml(content)}</code>
         </pre>

@@ -35,7 +35,10 @@ export function TemplateCard({ template }: TemplateCardProps) {
   const Icon = iconMap[template.icon] ?? Code;
 
   return (
-    <Link href={`/${template.category}/${template.name}`}>
+    <Link
+      href={`/${template.category}/${template.name}`}
+      aria-label={`${template.displayName} — ${template.agentDefaults.role} template`}
+    >
       <Card className="h-full transition-colors hover:border-primary/50 hover:bg-card/80">
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between">

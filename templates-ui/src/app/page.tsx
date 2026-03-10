@@ -1,7 +1,19 @@
+import type { Metadata } from "next";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { TemplateGallery } from "@/components/template-gallery";
 import { getAllTemplates } from "@/lib/templates";
+
+export const metadata: Metadata = {
+  title: "Browse Templates",
+  description:
+    "Browse pre-configured agent templates for your swarm. Lead agents, coders, researchers, reviewers, and testers — ready to deploy.",
+  openGraph: {
+    title: "Browse Agent Swarm Templates",
+    description:
+      "Browse pre-configured agent templates for your swarm. Lead agents, coders, researchers, reviewers, and testers — ready to deploy.",
+  },
+};
 
 export default function Home() {
   const templates = getAllTemplates();
