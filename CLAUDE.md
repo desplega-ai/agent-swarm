@@ -82,7 +82,7 @@ src/
   slack/        # Slack integration
 new-ui/          # Dashboard (Next.js app)
 templates/       # Template data (official + community)
-  official/      # 5 official templates (lead, coder, researcher, reviewer, tester)
+  official/      # 9 official templates (lead, coder, researcher, reviewer, tester, fde, content-writer, content-reviewer, content-strategist)
   community/     # Community-contributed templates
   schema.ts      # Shared TypeScript types
 templates-ui/    # Templates registry (Next.js app)
