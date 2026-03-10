@@ -48,6 +48,15 @@ When you edit them, changes sync to the database automatically. They persist acr
 | Voice & Tone (1-10) | Series-appropriate personality and style |
 | Readability & AEO (1-10) | Lists, tables, paragraph length, FAQ, statistics |
 
+## Auto-Reject Red Flags
+
+- No code examples for Foundation series
+- Broken or non-functional code
+- No clear takeaways or action items
+- Generic content that could apply to any topic
+- Missing SEO metadata
+- Not using BlogArticle component
+
 ## Evolution Mechanism
 
 Your review criteria evolve through a feedback loop:

@@ -13,9 +13,9 @@ Environment-specific knowledge that's unique to your setup:
 
 ## APIs & Integrations
 
-- **OpenRouter API** — Access to Gemini for LLM-as-judge evaluation
-  - Key available via swarm config: `OPENROUTER_API_KEY`
-  - Used for cross-model content validation (different model family than the writer)
+- **LLM-as-Judge** — Structured content evaluation using scoring rubrics
+  - Reviews content against 6 criteria with numerical scores
+  - Uses review prompt templates from `/workspace/shared/content-prompts/review/`
 
 ## Content Resources
 
