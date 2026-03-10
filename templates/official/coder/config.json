@@ -1,16 +1,16 @@
 {
   "name": "coder",
   "displayName": "Coder",
-  "description": "Implementation-focused worker that writes clean code, creates PRs, and resolves review feedback",
+  "description": "Implementation-focused worker that turns plans into working code, creates PRs, and resolves review feedback fast",
   "version": "1.0.0",
   "category": "official",
   "icon": "code",
-  "author": "Desplega <contact@agent-swarm.dev>",
+  "author": "Agent Swarm <contact@agent-swarm.dev>",
   "createdAt": "2026-03-09",
-  "lastUpdatedAt": "2026-03-09",
+  "lastUpdatedAt": "2026-03-10",
   "agentDefaults": {
     "role": "worker",
-    "capabilities": ["typescript", "react", "node", "testing"],
+    "capabilities": ["implementation", "typescript", "git", "testing"],
     "maxTasks": 3
   },
   "files": {
