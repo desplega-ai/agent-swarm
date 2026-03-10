@@ -29,6 +29,12 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
     echo ""
     echo "=== Archil Mount ==="
 
+    # Ensure /dev/fuse exists (needed in some VM environments like Fly.io Firecracker)
+    if [ ! -e /dev/fuse ]; then
+        sudo mknod /dev/fuse c 10 229
+        sudo chmod 666 /dev/fuse
+    fi
+
     if [ -n "$ARCHIL_SHARED_DISK_NAME" ]; then
         echo "Mounting shared disk ($ARCHIL_SHARED_DISK_NAME) at /workspace/shared..."
         sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
