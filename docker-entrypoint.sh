@@ -37,12 +37,12 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
 
     if [ -n "$ARCHIL_SHARED_DISK_NAME" ]; then
         echo "Mounting shared disk ($ARCHIL_SHARED_DISK_NAME) at /workspace/shared..."
-        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
+        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --shared "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
     fi
 
     if [ -n "$ARCHIL_PERSONAL_DISK_NAME" ]; then
         echo "Mounting personal disk ($ARCHIL_PERSONAL_DISK_NAME) at /workspace/personal..."
-        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
+        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --shared "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
     fi
     echo "===================="
 fi

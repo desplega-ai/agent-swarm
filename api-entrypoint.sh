@@ -15,13 +15,13 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
   if [ -n "$ARCHIL_API_DISK_NAME" ]; then
     echo "Mounting API disk ($ARCHIL_API_DISK_NAME) at /mnt/data..."
     mkdir -p /mnt/data
-    archil mount "$ARCHIL_API_DISK_NAME" /mnt/data --region "$ARCHIL_REGION"
+    archil mount --shared "$ARCHIL_API_DISK_NAME" /mnt/data --region "$ARCHIL_REGION"
   fi
 
   if [ -n "$ARCHIL_SHARED_DISK_NAME" ]; then
     echo "Mounting shared disk ($ARCHIL_SHARED_DISK_NAME) at /workspace/shared..."
     mkdir -p /workspace/shared
-    archil mount "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
+    archil mount --shared "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
   fi
   echo "===================="
 
