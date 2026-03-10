@@ -1,0 +1,578 @@
+# Implement Plan
+
+A thin wrapper that invokes the `desplega:implementing` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse autonomy mode from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - If plan file has `autonomy:` in frontmatter, use that as default
+   - Otherwise, default to **Critical** (don't prompt - implementation is more straightforward)
+
+2. **ALWAYS invoke the `desplega:implementing` skill:**
+   - Pass the plan file path
+   - Pass the autonomy mode determined above
+   - Let the skill handle all implementation logic
+
+3. **If no plan path provided:**
+   - Respond with: "I need a plan file to proceed. Please provide the path to the plan you would like me to implement."
+
+## Example Usage
+
+```
+/implement-plan thoughts/<username|shared>/plans/2026-01-14-my-feature.md
+/implement-plan --autonomy=autopilot @plans/feature.md
+/implement-plan --autonomy=verbose @current-plan.md
+```
+
+
+ARGUMENTS: thoughts/taras/plans/2026-03-10-task-working-directory.md
+
+---
+
+<task-notification>
+<task-id>a2f5eb6952860e85e</task-id>
+<tool-use-id>toolu_01JouDNxuMYDdwtD529PhwVN</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-10-feat-task-working-dir/tasks/a2f5eb6952860e85e.output</output-file>
+<status>completed</status>
+<summary>Agent "Find HTTP tasks handler" completed</summary>
+<result>Perfect. Here's the information you requested:
+
+**File Path:**
+`/Users/taras/worktrees/agent-swarm/2026-03-10-feat/task-working-dir/src/http/tasks.ts`
+
+**Line Numbers:**
+Lines 71–81 (the createTaskExtended() call within the POST /api/tasks handler)
+
+**Fields Passed:**
+```typescript
+createTaskExtended(body.task, {
+  agentId: body.agentId || undefined,
+  creatorAgentId: myAgentId || undefined,
+  taskType: body.taskType || undefined,
+  tags: body.tags || undefined,
+  priority: body.priority || 50,
+  dependsOn: body.dependsOn || undefined,
+  offeredTo: body.offeredTo || undefined,
+  parentTaskId: body.parentTaskId || undefined,
+  source: body.source || "api",
+})
+```
+
+The function takes the task description as the first argument and an options object with 9 fields: agentId, creatorAgentId, taskType, tags, priority (defaults to 50), dependsOn, offeredTo, parentTaskId, and source (defaults to "api").</result>
+<usage><total_tokens>53716</total_tokens><tool_uses>3</tool_uses><duration_ms>10767</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-10-feat-task-working-dir/tasks/a2f5eb6952860e85e.output
+
+---
+
+<task-notification>
+<task-id>a96652070630e8852</task-id>
+<tool-use-id>toolu_01E84TDDfjsX8oePuo1ADrzi</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-10-feat-task-working-dir/tasks/a96652070630e8852.output</output-file>
+<status>completed</status>
+<summary>Agent "Find runner spawn and cwd" completed</summary>
+<result>Excellent. Now I have all the information needed. Let me compile the comprehensive report:
+
+## Summary of Findings in `/Users/taras/worktrees/agent-swarm/2026-03-10-feat/task-working-dir/src/commands/runner.ts`
+
+### 1. `spawnProviderProcess()` Function Signature and Opts Type
+**Lines 1091-1109:**
+```typescript
+async function spawnProviderProcess(
+  adapter: ReturnType<typeof createProviderAdapter>,
+  opts: {
+    prompt: string;
+    logFile: string;
+    systemPrompt?: string;
+    additionalArgs?: string[];
+    role: string;
+    apiUrl: string;
+    apiKey: string;
+    agentId: string;
+    runnerSessionId: string;
+    iteration: number;
+    taskId?: string;
+    model?: string;
+  },
+  logDir: string,
+  isYolo: boolean,
+): Promise<RunningTask>
+```
+
+### 2. `cwd: process.cwd()` Locations in ProviderSessionConfig
+
+**Location 1 - Line 1128** (in `spawnProviderProcess()`):
+```typescript
+const config: ProviderSessionConfig = {
+  prompt: opts.prompt,
+  systemPrompt: opts.systemPrompt || "",
+  model,
+  role: opts.role,
+  agentId: opts.agentId,
+  taskId: effectiveTaskId,
+  apiUrl: opts.apiUrl,
+  apiKey: opts.apiKey,
+  cwd: process.cwd(),
+  logFile: opts.logFile,
+```
+
+**Location 2 - Line 1286** (in `runProviderIteration()`):
+```typescript
+const config: ProviderSessionConfig = {
+  prompt: opts.prompt,
+  systemPrompt: opts.systemPrompt || "",
+  model,
+  role: opts.role,
+  agentId: opts.agentId,
+  taskId: opts.taskId || crypto.randomUUID(),
+  apiUrl: opts.apiUrl,
+  apiKey: opts.apiKey,
+  cwd: process.cwd(),
+  logFile: opts.logFile,
+```
+
+### 3. Trigger Handling Block with `triggerPrompt` and `currentRepoContext` (Lines 2004-2065)
+
+**How `triggerPrompt` is constructed:**
+- **Line 1924**: Initial construction: `let triggerPrompt = buildPromptForTrigger(trigger, prompt);`
+- **Lines 1927-1966**: Memory enrichment for `task_assigned` and `task_offered` triggers:
+  - Lines 1942-1950: Appends memory context via `triggerPrompt += memoryContext;`
+  - Lines 1954-1964: Appends epic task context via `triggerPrompt += epicTaskContext;`
+- **Lines 1969-1980**: For `epic_progress_changed` triggers, appends epic-related memories
+
+**How `currentRepoContext` is used (Lines 2004-2018):**
+```typescript
+// Handle repo context for tasks with vcsRepo (GitHub/GitLab)
+const taskVcsRepo = (trigger.task as { vcsRepo?: string } | undefined)?.vcsRepo;
+if (taskVcsRepo && apiUrl) {
+  const repoConfig = await fetchRepoConfig(apiUrl, apiKey, taskVcsRepo);
+  // Fall back to convention-based config if repo is not registered
+  const effectiveConfig = repoConfig ?? {
+    url: taskVcsRepo,
+    name: taskVcsRepo.split("/").pop() || taskVcsRepo,
+    clonePath: `/workspace/repos/${taskVcsRepo.split("/").pop() || taskVcsRepo}`,
+    defaultBranch: "main",
+  };
+  currentRepoContext = await ensureRepoForTask(effectiveConfig, role);
+} else {
+  currentRepoContext = undefined;
+}
+```
+
+**The actual call to `spawnProviderProcess()` (Lines 2047-2065):**
+```typescript
+const runningTask = await spawnProviderProcess(
+  adapter,
+  {
+    prompt: triggerPrompt,
+    logFile,
+    systemPrompt: taskSystemPrompt,
+    additionalArgs: effectiveAdditionalArgs,
+    role,
+    apiUrl,
+    apiKey,
+    agentId,
+    runnerSessionId: sessionId,
+    iteration,
+    taskId: trigger.taskId,
+    model: taskModel,
+  },
+  logDir,
+  isYolo,
+);
+```
+
+### 4. `runProviderIteration()` Function and Opts Type
+**Lines 1260-1272:**
+```typescript
+async function runProviderIteration(
+  adapter: ReturnType<typeof createProviderAdapter>,
+  opts: {
+    prompt: string;
+    logFile: string;
+    systemPrompt?: string;
+    additionalArgs?: string[];
+    role: string;
+    apiUrl: string;
+    apiKey: string;
+    agentId: string;
+    taskId?: string;
+  },
+): Promise<ProviderResult>
+```</result>
+<usage><total_tokens>58066</total_tokens><tool_uses>9</tool_uses><duration_ms>25856</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-10-feat-task-working-dir/tasks/a96652070630e8852.output
+
+---
+
+# Review Document
+
+A thin wrapper that invokes the `desplega:reviewing` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse flags from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - Check for `--output=append|separate` flag (sets output mode preference, skipping the preference question)
+   - Otherwise, default to **Critical** autonomy
+
+2. **ALWAYS invoke the `desplega:reviewing` skill:**
+   - Pass the document path
+   - Pass the autonomy mode determined above
+   - Pass the output mode if specified
+   - Let the skill handle all review logic
+
+3. **If no path provided:**
+   - Respond with: "I need a document to review. Please provide the path to the research, plan, or brainstorm document you'd like me to review."
+
+## Example Usage
+
+```
+/review thoughts/taras/research/2026-03-09-new-base-skills.md
+/review --autonomy=autopilot --output=append thoughts/taras/plans/2026-03-09-feature.md
+/review --output=separate thoughts/shared/brainstorms/2026-03-09-idea.md
+```
+
+
+ARGUMENTS: implementation
+
+---
+
+<task-notification>
+<task-id>a17a749fffd7bc035</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-10-feat-task-working-dir/tasks/a17a749fffd7bc035.output</output-file>
+<status>completed</status>
+<summary>Agent "Review adapter changes" completed</summary>
+<result>Perfect. Let me review both files against your requirements:
+
+## claude-adapter.ts Review
+
+**✓ PASS: `cwd: this.config.cwd` added to `Bun.spawn()` options**
+- Line 63-71: The `Bun.spawn()` call in the `ClaudeSession` constructor correctly includes `cwd: this.config.cwd`
+
+**Checking for OTHER `Bun.spawn()` calls:**
+I've reviewed the entire file and confirmed there is **only ONE** `Bun.spawn()` call at line 63. The retry logic (lines 269-318) does NOT spawn a new process directly — it creates a new `ClaudeSession` instance, which will use the same `cwd` from `this.config` passed to its constructor (line 302). So the retry is properly covered.
+
+**Result: NO ISSUES** in claude-adapter.ts
+
+---
+
+## pi-mono-adapter.ts Review
+
+**✓ PASS: `lstatSync` added to imports**
+- Line 9: `lstatSync` is correctly imported from `node:fs`
+
+**✓ PASS: `cleanupAgentsMdSymlink` properly checks `isSymbolicLink()`**
+- Lines 125-135: The function correctly:
+  - Checks `existsSync(agentsMd)` first
+  - Then checks `lstatSync(agentsMd).isSymbolicLink()` before unlinking
+  - Only calls `unlinkSync()` if both conditions are true
+  - Safely ignores cleanup errors in the catch block
+
+**✓ PASS: `createAgentsMdSymlink` correctly skips creating symlink when AGENTS.md exists**
+- Lines 110-123: The function checks:
+  - Line 114: `if (existsSync(claudeMd) && !existsSync(agentsMd))` — this correctly ensures it only creates the symlink if `AGENTS.md` does NOT exist
+  - If the repo already has a real `AGENTS.md` file, the symlink is NOT created (correct behavior)
+  - Returns `false` if skipped, `true` if created
+
+**Result: NO ISSUES** in pi-mono-adapter.ts
+
+---
+
+## Summary
+
+Both adapter files are correctly implemented:
+- **claude-adapter.ts**: `cwd` properly passed to `Bun.spawn()`, retry logic inherits the cwd correctly
+- **pi-mono-adapter.ts**: `lstatSync` imported, symlink cleanup checks `isSymbolicLink()`, creation logic respects existing real AGENTS.md files
+
+No issues found.</result>
+<usage><total_tokens>57828</total_tokens><tool_uses>2</tool_uses><duration_ms>9770</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-10-feat-task-working-dir/tasks/a17a749fffd7bc035.output
+
+---
+
+<task-notification>
+<task-id>a181be34c88f14eb6</task-id>
+<tool-use-id>toolu_015AAhubP4m4tF9bJeohZBzu</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-10-feat-task-working-dir/tasks/a181be34c88f14eb6.output</output-file>
+<status>completed</status>
+<summary>Agent "Review send-task and HTTP changes" completed</summary>
+<result>Perfect. Now let me create a comprehensive summary report:
+
+## Review Summary: `dir` Field Implementation
+
+I've completed a thorough review of the `dir` field across the API layer, MCP tools, and workflow nodes. Here are my findings:
+
+### 1. **src/tools/send-task.ts** ✅ COMPLETE
+- **Input Schema**: `dir` is properly defined (lines 58-63) with full description
+- **Destructuring**: `dir` is correctly destructured in handler (line 100)
+- **All Three `createTaskExtended()` Calls**: `dir` is passed to ALL three calls:
+  - **Unassigned path** (line 202): ✅
+  - **Offered path** (line 250): ✅
+  - **Direct assignment path** (line 272): ✅
+
+### 2. **src/http/tasks.ts** ✅ COMPLETE
+- **POST Handler**: `dir: body.dir || undefined` is added (line 79)
+- **Only Task Creation Endpoint**: The POST `/api/tasks` endpoint (lines 54-92) is the only one that creates tasks in this file. No other endpoints need `dir` support.
+
+### 3. **src/types.ts** ✅ COMPLETE
+- **AgentTaskSchema**: `dir: z.string().optional()` is properly placed (line 127)
+- Positioned correctly after `epicId` and before `parentTaskId`
+
+### 4. **Other MCP Tools** - ISSUES FOUND
+
+#### **src/tools/task-action.ts** ❌ MISSING `dir` SUPPORT
+- The `create` action (lines 94-113) calls `createTaskExtended()` but does NOT include `dir` in the options
+- `dir` is not in the input schema (lines 39-68)
+- This means agents using `task-action` with the "create" action cannot specify a working directory
+
+#### **src/tools/inbox-delegate.ts** ❌ MISSING `dir` SUPPORT
+- Task creation (lines 122-131) does NOT pass `dir` to `createTaskExtended()`
+- `dir` is not in the input schema (lines 21-44)
+- Delegated inbox messages cannot be assigned a working directory
+
+### 5. **Workflow Nodes** - ISSUES FOUND
+
+#### **src/workflows/nodes/create-task.ts** ❌ MISSING `dir` SUPPORT
+- `CreateTaskConfig` interface (lines 5-11) does NOT include `dir` field
+- `createTaskExtended()` call (line 21) does NOT pass `dir`
+- Workflow tasks cannot be created with a working directory
+
+#### **src/workflows/nodes/delegate-to-agent.ts** ❌ MISSING `dir` SUPPORT
+- `DelegateToAgentConfig` interface (lines 5-10) does NOT include `dir` field
+- `createTaskExtended()` call (line 20) does NOT pass `dir`
+- Workflow delegation tasks cannot be created with a working directory
+
+### 6. **Database Layer** ✅ COMPLETE
+- **CreateTaskOptions interface** (src/be/db.ts line 1696): `dir?: string;` is properly defined
+- **createTaskExtended()** implementation (line 1791): `options?.dir ?? null` is correctly passed to the INSERT statement
+
+---
+
+## Issues Summary
+
+**Critical Missing Implementations:**
+1. `task-action.ts` - Missing `dir` in input schema and handler for "create" action
+2. `inbox-delegate.ts` - Missing `dir` in input schema and task creation
+3. `create-task.ts` workflow node - Missing `dir` in config and task creation
+4. `delegate-to-agent.ts` workflow node - Missing `dir` in config and task creation
+
+All these tools/nodes create tasks via `createTaskExtended()`, which fully supports `dir`. The omission is inconsistent with `send-task.ts` and `http/tasks.ts`, which both support it completely.</result>
+<usage><total_tokens>76080</total_tokens><tool_uses>11</tool_uses><duration_ms>29489</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-10-feat-task-working-dir/tasks/a181be34c88f14eb6.output
+
+---
+
+<task-notification>
+<task-id>a71ce0e0e789e0626</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-10-feat-task-working-dir/tasks/a71ce0e0e789e0626.output</output-file>
+<status>completed</status>
+<summary>Agent "Review db.ts changes" completed</summary>
+<result>## Review Report: `dir` Field Implementation in src/be/db.ts
+
+I've completed a thorough review of the `dir` field implementation across all four locations you specified. Here are my findings:
+
+### Finding Summary: NO ISSUES FOUND ✓
+
+All implementations are correct and properly aligned.
+
+---
+
+### 1. **AgentTaskRow Type** (lines 656-701)
+- **Position:** Line 687 (field #31 in the type)
+- **Placement:** After `epicId` and before `parentTaskId` ✓
+- **Type:** `dir: string | null` ✓
+
+### 2. **rowToAgentTask() Function** (lines 703-750)
+- **Position:** Line 735 (field #31 in the return object)
+- **Expression:** `dir: row.dir ?? undefined` ✓
+- **Placement:** Matches AgentTaskRow structure exactly ✓
+
+### 3. **CreateTaskOptions Interface** (lines 1670-1702)
+- **Position:** Line 1696
+- **Type:** `dir?: string` ✓
+- **Placement:** Logically positioned after `epicId` and before `parentTaskId` ✓
+
+### 4. **createTaskExtended() Function** (lines 1739-1828)
+- **INSERT Column List (lines 1752-1758):** `dir` is column #29 ✓
+- **VALUES Placeholders (line 1760):** 36 placeholders total ✓
+- **Column Count:** 36 columns ✓
+- **Placeholder Count:** 36 placeholders ✓
+- **Value Binding (line 1791):** `options?.dir ?? null` at position #29 ✓
+- **Placement Match:** All columns and values align perfectly ✓
+
+---
+
+### Files Reviewed:
+- `/Users/taras/worktrees/agent-swarm/2026-03-10-feat/task-working-dir/src/be/db.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-10-feat/task-working-dir/src/be/migrations/001_initial.sql`
+- `/Users/taras/worktrees/agent-swarm/2026-03-10-feat/task-working-dir/src/be/migrations/006_vcs_provider.sql`
+- `/Users/taras/worktrees/agent-swarm/2026-03-10-feat/task-working-dir/src/be/migrations/007_task_dir.sql`
+
+The `dir` field is clean, consistent, and correctly implemented throughout the codebase. No corrections needed.</result>
+<usage><total_tokens>71299</total_tokens><tool_uses>18</tool_uses><duration_ms>62653</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-10-feat-task-working-dir/tasks/a71ce0e0e789e0626.output
+
+---
+
+<task-notification>
+<task-id>a0447ea65df134e45</task-id>
+<tool-use-id>toolu_01GAh41UYwzNH5yZBZRropBt</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-10-feat-task-working-dir/tasks/a0447ea65df134e45.output</output-file>
+<status>completed</status>
+<summary>Agent "Review runner.ts changes" completed</summary>
+<result>Excellent! Now I have all the information I need. Let me compile a comprehensive report.
+
+## Comprehensive Review Report: src/commands/runner.ts CWD Resolution and Prompt Annotation
+
+### 1. **Import Analysis** ✅ NO CONFLICT
+**Lines 1-2:**
+```typescript
+import { existsSync, statSync } from "node:fs";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+```
+- **Status**: Clean separation, no conflict
+- `existsSync` and `statSync` are synchronous from `node:fs` (used once each at lines 2029)
+- `mkdir`, `readFile`, `writeFile`, `stat` are async from `node:fs/promises` (used 2, 3, 1, 1 times respectively)
+- No naming collisions or double imports
+
+### 2. **CWD Resolution Logic** ✅ CORRECT
+**Lines 2023-2045:**
+The fallback chain is properly implemented:
+1. **Line 2029**: Checks `existsSync(taskDir) && statSync(taskDir).isDirectory()` — valid, uses sync APIs correctly
+2. **Line 2030**: Sets `effectiveCwd = taskDir` if valid
+3. **Lines 2032-2039**: Catches exceptions and logs warnings appropriately
+4. **Lines 2043-2044**: Falls back to `currentRepoContext?.clonePath` if `taskDir` is not set or invalid
+5. **Implicit**: Falls back to `process.cwd()` at runtime (line 1130, 1289 in the config)
+
+**Priority order is correct**: `task.dir > clonePath > process.cwd()`
+
+### 3. **Prompt Annotation** ✅ CORRECT FORMATTING
+**Lines 2047-2057:**
+```typescript
+if (effectiveCwd && effectiveCwd !== process.cwd()) {
+  triggerPrompt += `\n\n---\n**Working Directory**: You are starting in \`${effectiveCwd}\`. `;
+  // ... conditional additions
+  triggerPrompt += " You can still access any path on the filesystem — this is just your starting directory.";
+}
+```
+- **Status**: Appends cleanly to `triggerPrompt` with proper formatting
+- Includes separator (`---`), markdown bold, and backticks for code formatting
+- Conditional text explains the source (task-set vs. repo context)
+- No formatting issues detected
+
+### 4. **CWD Warning Integration** ✅ CORRECT
+**Lines 2060-2070:**
+```typescript
+let cwdWarning = "";
+if (taskDir && !effectiveCwd) {
+  cwdWarning = `\n\nNote: The task requested working directory "${taskDir}" but it does not exist. Falling back to default directory.`;
+}
+const taskSystemPrompt = (additionalSystemPrompt ? `${taskBasePrompt}\n\n${additionalSystemPrompt}` : taskBasePrompt) + cwdWarning;
+```
+- **Status**: Properly integrates with system prompt
+- Only warns when task explicitly set a dir but it doesn't exist
+- Appends to system prompt cleanly with newline spacing
+
+### 5. **Function Signature: spawnProviderProcess** ✅ HAS CWD
+**Lines 1092-1107:**
+```typescript
+async function spawnProviderProcess(
+  adapter: ReturnType<typeof createProviderAdapter>,
+  opts: {
+    // ... other fields
+    cwd?: string;  // Line 1107
+  }
+```
+- ✅ Has `cwd?: string` in opts
+- ✅ Used correctly at line 1130: `cwd: opts.cwd || process.cwd(),`
+
+### 6. **Function Signature: runProviderIteration** ✅ HAS CWD
+**Lines 1262-1274:**
+```typescript
+async function runProviderIteration(
+  adapter: ReturnType<typeof createProviderAdapter>,
+  opts: {
+    // ... other fields
+    cwd?: string;  // Line 1274
+  }
+```
+- ✅ Has `cwd?: string` in opts
+- ✅ Used correctly at line 1289: `cwd: opts.cwd || process.cwd(),`
+
+### 7. **Call Sites - CWD Parameter Check** ⚠️ TWO ISSUES FOUND
+
+| Call Site | Location | Function | Has cwd? | Status |
+|-----------|----------|----------|----------|--------|
+| Resume | Line 1825-1843 | `spawnProviderProcess` | ❌ NO | **MISSING** |
+| Trigger | Line 2096-2115 | `spawnProviderProcess` | ✅ YES | **CORRECT** (line 2111) |
+| Iteration | Line 2180-2189 | `runProviderIteration` | ❌ NO | **MISSING** |
+
+**Issue #1 - Resume Call (Line 1825):**
+```typescript
+// MISSING cwd parameter
+const runningTask = await spawnProviderProcess(
+  adapter,
+  {
+    prompt: resumePrompt,
+    logFile,
+    systemPrompt: resolvedSystemPrompt,
+    additionalArgs: resumeAdditionalArgs,
+    role,
+    apiUrl,
+    apiKey,
+    agentId,
+    runnerSessionId: sessionId,
+    iteration,
+    taskId: task.id,
+    model: (task as { model?: string }).model,
+    // ⚠️ cwd: ??? -- MISSING, will default to process.cwd()
+  },
+  logDir,
+  isYolo,
+);
+```
+
+**Issue #2 - Iteration Call (Line 2180):**
+```typescript
+// MISSING cwd parameter
+const iterationResult = await runProviderIteration(adapter, {
+  prompt,
+  logFile,
+  systemPrompt: resolvedSystemPrompt,
+  additionalArgs: opts.additionalArgs,
+  role,
+  apiUrl,
+  apiKey,
+  agentId,
+  // ⚠️ cwd: ??? -- MISSING, will default to process.cwd()
+});
+```
+
+### Summary of Issues
+
+1. **Import conflict**: ✅ NONE - proper separation of sync and async imports
+2. **CWD resolution logic**: ✅ CORRECT - fallback chain works as expected
+3. **Prompt annotation**: ✅ CORRECT - clean formatting, proper markdown
+4. **System prompt integration**: ✅ CORRECT - cwdWarning appends cleanly
+5. **Function signatures**: ✅ BOTH have `cwd?: string` in opts
+6. **Runtime fallback**: ✅ BOTH use `opts.cwd || process.cwd()`
+7. **Call sites**: ⚠️ **2 MISSING `cwd` parameters**:
+   - **Resume call** (line 1825): Should pass `cwd` from task context
+   - **Iteration call** (line 2180): Should pass `cwd` from opts (if available)
+
+The trigger call (line 2096) correctly passes `cwd: effectiveCwd`, but the resume and iteration calls are missing this parameter. This means resumed tasks and iteration-based work will always use `process.cwd()` instead of respecting the task's working directory preference.</result>
+<usage><total_tokens>65770</total_tokens><tool_uses>11</tool_uses><duration_ms>91839</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-10-feat-task-working-dir/tasks/a0447ea65df134e45.output
+
+---
+
+pls create a pr

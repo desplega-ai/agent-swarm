@@ -1,0 +1,34 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "8e4bc4d33c90",
+  "strategy": "manual-commit",
+  "branch": "feat/task-working-dir",
+  "checkpoints_count": 7,
+  "files_touched": [
+    "src/be/db.ts",
+    "src/be/migrations/007_task_dir.sql",
+    "src/commands/runner.ts",
+    "src/http/tasks.ts",
+    "src/providers/claude-adapter.ts",
+    "src/providers/pi-mono-adapter.ts",
+    "src/tools/send-task.ts",
+    "src/tools/task-action.ts",
+    "src/types.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/8e/4bc4d33c90/0/metadata.json",
+      "transcript": "/8e/4bc4d33c90/0/full.jsonl",
+      "context": "/8e/4bc4d33c90/0/context.md",
+      "content_hash": "/8e/4bc4d33c90/0/content_hash.txt",
+      "prompt": "/8e/4bc4d33c90/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 122,
+    "cache_creation_tokens": 105259,
+    "cache_read_tokens": 4881392,
+    "output_tokens": 19792,
+    "api_call_count": 64
+  }
+}
