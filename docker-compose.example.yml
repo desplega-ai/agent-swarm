@@ -218,6 +218,9 @@ services:
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/content-reviewer
+      # Content reviewer uses Gemini via OpenRouter
+      - HARNESS_PROVIDER=pi
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
 
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013

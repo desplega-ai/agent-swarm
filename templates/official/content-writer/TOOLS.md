@@ -12,7 +12,7 @@ Environment-specific knowledge that's unique to your setup:
 
 ## Repos
 
-- **desplega-ai-landing** — Next.js landing site where blog posts are published
+- **Landing site** — Next.js landing site where blog posts are published
   - Blog posts: `app/blog/[slug]/page.tsx`
   - Images: `public/images/`
   - Post registry: `lib/blog.ts`
