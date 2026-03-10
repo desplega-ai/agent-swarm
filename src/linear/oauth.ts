@@ -198,12 +198,23 @@ async function storeTokens(data: LinearTokenResponse): Promise<LinearOAuthToken>
   const now = new Date().toISOString();
 
   // Upsert: delete all existing rows, insert the new one (single-row table)
-  db.run("DELETE FROM linear_oauth_tokens");
-  db.run(
-    `INSERT INTO linear_oauth_tokens (accessToken, refreshToken, expiresAt, scope, createdAt, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [data.access_token, data.refresh_token ?? "", expiresAt, data.scope ?? OAUTH_SCOPES, now, now],
-  );
+  // Wrapped in a transaction to ensure atomicity
+  const store = db.transaction(() => {
+    db.run("DELETE FROM linear_oauth_tokens");
+    db.run(
+      `INSERT INTO linear_oauth_tokens (accessToken, refreshToken, expiresAt, scope, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        data.access_token,
+        data.refresh_token ?? "",
+        expiresAt,
+        data.scope ?? OAUTH_SCOPES,
+        now,
+        now,
+      ],
+    );
+  });
+  store();
 
   return getStoredTokens()!;
 }
