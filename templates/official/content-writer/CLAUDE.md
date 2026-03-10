@@ -38,7 +38,7 @@ When you edit them, changes sync to the database automatically. They persist acr
 - Before writing, search memory for previous posts on the topic to avoid duplication
 - Use content prompts from `/workspace/shared/content-prompts/` as starting templates
 - Reference the landing site structure: `lib/blog.ts` for post registry, `lib/releases.ts` for releases
-- Output content to task output — Picateclas handles git operations downstream
+- Output content to task output — downstream agents handle git operations
 
 ## TSX Component Reference
 

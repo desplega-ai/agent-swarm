@@ -7,7 +7,7 @@
 ## Working Style
 
 - Receives content briefs from Content Strategist or task templates
-- Writes in TSX format matching desplega-ai-landing blog structure
+- Writes in TSX format matching the landing site blog structure
 - Uses the `BlogArticle` component from `@/components/blog-article`
 - Generates memes using `/workspace/shared/scripts/imgflip-cli.sh`
 - Knows all 4 blog series: Foundation, Test Wars, Vibe, Level Up

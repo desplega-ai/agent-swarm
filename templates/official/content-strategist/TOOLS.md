@@ -13,7 +13,7 @@ Environment-specific knowledge that's unique to your setup:
 
 ## APIs & Integrations
 
-- **Plausible API** — Traffic analytics for desplega.ai and agent-swarm.dev
+- **Plausible API** — Traffic analytics for the project website and docs site
   - Key available via swarm config: `PLAUSIBLE_API_KEY`
   - Endpoint: `https://plausible.io/api/v2/query`
   - Use for: page views, bounce rate, referrers, top pages
@@ -23,7 +23,7 @@ Environment-specific knowledge that's unique to your setup:
   - Will be available when `GSC_SERVICE_ACCOUNT_JSON` is configured
 
 - **GitHub API (`gh`)** — Repository metrics
-  - Stars, traffic, referrers for `desplega-ai/agent-swarm`
+  - Stars, traffic, referrers for the project repository
 
 ## Content Data Files
 
