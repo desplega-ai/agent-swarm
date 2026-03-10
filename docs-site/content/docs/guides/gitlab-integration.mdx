@@ -1,0 +1,93 @@
+---
+title: GitLab Integration
+description: Set up GitLab webhooks for automated task creation from merge requests, issues, and comments
+---
+
+# GitLab Integration
+
+Agent Swarm supports GitLab alongside GitHub through a provider adapter pattern. GitLab webhooks create tasks from MR reviews, issue assignments, and @mentions — just like the GitHub integration.
+
+## Setup
+
+1. Go to your GitLab project or group **Settings > Webhooks**
+2. Set the webhook URL: `https://your-server.com/api/gitlab/webhook`
+3. Set a secret token for verification
+4. Select the events you want to receive
+
+### Events to Enable
+
+- **Merge request events**
+- **Issue events**
+- **Note (comment) events**
+- **Pipeline events**
+
+## Configuration
+
+```bash
+# Required for GitLab webhooks
+GITLAB_WEBHOOK_SECRET=your-webhook-secret
+
+# GitLab API access (PAT or Group Access Token)
+GITLAB_TOKEN=your-gitlab-token
+
+# Optional: GitLab instance URL (default: https://gitlab.com)
+GITLAB_URL=https://gitlab.com
+
+# Optional: Bot name for @mentions (default: agent-swarm-bot)
+GITLAB_BOT_NAME=your-bot-name
+
+# Optional: Disable GitLab integration
+GITLAB_DISABLE=true
+```
+
+## Supported Events
+
+| Event | What happens |
+|-------|-------------|
+| Bot assigned to MR/issue | Creates a task for the lead agent |
+| `@bot-name` in comment/issue/MR | Creates a task with the mention context |
+| Pipeline failure (on MRs with existing tasks) | Creates a CI notification task |
+
+## Worker Git Configuration
+
+Workers have `glab` CLI pre-installed for GitLab operations. Configure git credentials for GitLab repos:
+
+```bash
+GITLAB_TOKEN=your-gitlab-token    # For git operations and glab CLI
+GITLAB_EMAIL=worker@example.com   # Git commit email for GitLab repos
+GITLAB_NAME=Worker Agent          # Git commit name for GitLab repos
+```
+
+The runner automatically detects whether a task targets a GitHub or GitLab repository and uses the appropriate CLI tool (`gh` or `glab`).
+
+## VCS Provider Detection
+
+Agent Swarm uses a provider adapter pattern to support both GitHub and GitLab. When a task is created from a webhook event, the `vcsProvider` field is set automatically. Workers use this to select the right CLI:
+
+| Operation | GitHub (`gh`) | GitLab (`glab`) |
+|---|---|---|
+| Create PR/MR | `gh pr create` | `glab mr create` |
+| View PR/MR | `gh pr view` | `glab mr view` |
+| Review | `gh pr review` | `glab mr approve` / `glab mr note` |
+| Comment on issue | `gh issue comment` | `glab issue note` |
+| Clone | `gh repo clone` | `glab repo clone` |
+
+## Workflow Triggers
+
+GitLab events can trigger [workflows](/docs/concepts/workflows):
+
+- `gitlab.merge_request.opened`
+- `gitlab.merge_request.merged`
+- `gitlab.merge_request.closed`
+- `gitlab.issue.opened`
+- `gitlab.issue.closed`
+- `gitlab.note.created`
+- `gitlab.pipeline.failed`
+- `gitlab.pipeline.success`
+
+## Related
+
+- [GitHub Integration](/docs/guides/github-integration) — GitHub webhook setup
+- [Environment Variables](/docs/reference/environment-variables) — GitLab configuration variables
+- [Workflows](/docs/concepts/workflows) — Automate actions on GitLab events
+- [Task Lifecycle](/docs/concepts/task-lifecycle) — How webhook events become tasks

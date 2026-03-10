@@ -31,7 +31,7 @@ The MCP (Model Context Protocol) server is the central coordination point. It:
 - Exposes tools via the MCP protocol (both STDIO and HTTP transports)
 - Manages agent registration and task assignment
 - Stores all state in a SQLite database
-- Handles integrations (Slack, GitHub, AgentMail webhooks)
+- Handles integrations (Slack, GitHub, GitLab, AgentMail webhooks)
 - Runs the task scheduler for recurring automation
 
 The server runs on port `3013` by default and is implemented in `src/http/` (modular route handlers) with tool definitions in `src/server.ts`.
@@ -70,7 +70,7 @@ Each worker container includes:
 - **Languages**: Python 3, Node.js 22, Bun
 - **Build tools**: gcc, g++, make, cmake
 - **Process manager**: PM2 (for background services)
-- **CLI tools**: GitHub CLI (`gh`), sqlite3
+- **CLI tools**: GitHub CLI (`gh`), GitLab CLI (`glab`), sqlite3
 - **Agent tools**: `wts` (git worktree manager)
 - **Utilities**: git, git-lfs, vim, nano, jq, curl, wget, ssh
 - **Sudo access**: Workers can install packages with `sudo apt-get install`
@@ -125,12 +125,19 @@ agent-swarm/
 │   │   └── migrations/  # Database migration system
 │   ├── workflows/      # Workflow automation engine (DAG executor, triggers, nodes)
 │   ├── artifact-sdk/    # Artifact SDK (serve files/apps via localtunnel)
+│   ├── providers/       # AI provider adapters
+│   │   ├── types.ts     # ProviderAdapter interface
+│   │   ├── claude-adapter.ts  # Claude Code adapter
+│   │   └── pi-mono-adapter.ts # Pi-mono adapter
+│   ├── gitlab/          # GitLab webhook handlers
 │   ├── commands/        # CLI command implementations
 │   │   ├── runner.ts    # Task runner (polls and spawns sessions)
 │   │   ├── worker.ts    # Worker agent command
 │   │   ├── lead.ts      # Lead agent command
 │   │   └── artifact.ts  # Artifact serve/list/stop commands
 │   └── hooks/           # Claude Code hooks
+├── templates/           # Agent templates (official + community)
+├── templates-ui/        # Templates registry (Next.js app)
 ├── deploy/              # Deployment scripts
 ├── scripts/             # Utility scripts
 ├── new-ui/              # Dashboard UI (React + AG Grid)
@@ -147,7 +154,7 @@ agent-swarm/
 | Runtime | Bun |
 | API Protocol | MCP (Model Context Protocol) |
 | Database | SQLite (via `bun:sqlite`) |
-| AI Runtime | Claude Code (headless) |
+| AI Runtime | Claude Code (headless) or pi-mono (via `HARNESS_PROVIDER`) |
 | Containerization | Docker |
 | Process Management | PM2 |
 | Memory Embeddings | OpenAI `text-embedding-3-small` |

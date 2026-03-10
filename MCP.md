@@ -63,6 +63,16 @@
   - [memory-search](#memory-search)
   - [memory-get](#memory-get)
   - [inject-learning](#inject-learning)
+- [Workflows Tools](#workflows-tools)
+  - [create-workflow](#create-workflow)
+  - [list-workflows](#list-workflows)
+  - [get-workflow](#get-workflow)
+  - [update-workflow](#update-workflow)
+  - [delete-workflow](#delete-workflow)
+  - [trigger-workflow](#trigger-workflow)
+  - [list-workflow-runs](#list-workflow-runs)
+  - [get-workflow-run](#get-workflow-run)
+  - [retry-workflow-run](#retry-workflow-run)
 
 ---
 
@@ -463,7 +473,7 @@ View all scheduled tasks with optional filters. Use this to discover existing sc
 
 **Create Scheduled Task**
 
-Create a new scheduled task that will automatically create agent tasks at specified intervals. Either cronExpression or intervalMs must be provided.
+Create a new scheduled task. For recurring: provide cronExpression or intervalMs. For one-time: provide delayMs or runAt with scheduleType 'one_time'.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -539,8 +549,8 @@ Create a new epic (project) to organize related tasks.
 | `planDocPath` | `string` | No | - | Path to plan document |
 | `slackChannelId` | `string` | No | - | - |
 | `slackThreadTs` | `string` | No | - | - |
-| `githubRepo` | `string` | No | - | - |
-| `githubMilestone` | `string` | No | - | - |
+| `vcsRepo` | `string` | No | - | - |
+| `vcsMilestone` | `string` | No | - | - |
 
 ### list-epics
 
@@ -587,8 +597,9 @@ Update an existing epic. Only the creator, lead agent, or swarm lead can update.
 | `planDocPath` | `string` | No | - | - |
 | `slackChannelId` | `string` | No | - | - |
 | `slackThreadTs` | `string` | No | - | - |
-| `githubRepo` | `string` | No | - | - |
-| `githubMilestone` | `string` | No | - | - |
+| `vcsRepo` | `string` | No | - | - |
+| `vcsMilestone` | `string` | No | - | - |
+| `nextSteps` | `string` | No | - | Notes on what to do next for this epic |
 
 ### delete-epic
 
@@ -658,6 +669,104 @@ Allows the lead agent to push learnings into a worker's memory. The learning wil
 |-----------|------|----------|---------|-------------|
 | `agentId` | `uuid` | Yes | - | Target worker agent ID |
 | `learning` | `string` | Yes | - | The learning content to inject |
+
+## Workflows Tools
+
+*Workflows*
+
+### create-workflow
+
+**Create Workflow**
+
+Create a new automation workflow with a trigger → condition → action DAG definition.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | Yes | - | Unique name for the workflow |
+| `description` | `string` | No | - | Description of what this workflow does |
+
+### list-workflows
+
+**List Workflows**
+
+List all automation workflows, optionally filtered by enabled status.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `enabled` | `boolean` | No | - | Filter by enabled status (omit to return all) |
+
+### get-workflow
+
+**Get Workflow**
+
+Get a workflow by ID, including its full DAG definition.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | Workflow ID |
+
+### update-workflow
+
+**Update Workflow**
+
+Update an existing workflow's name, description, definition, or enabled state.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | Workflow ID to update |
+| `name` | `string` | No | - | New name for the workflow |
+| `description` | `string` | No | - | New description |
+| `enabled` | `boolean` | No | - | Enable or disable the workflow |
+
+### delete-workflow
+
+**Delete Workflow**
+
+Delete a workflow by ID. This also removes all associated runs and steps.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | Workflow ID to delete |
+
+### trigger-workflow
+
+**Trigger Workflow**
+
+Manually trigger a workflow execution, optionally passing trigger data as context.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | Workflow ID to trigger |
+
+### list-workflow-runs
+
+**List Workflow Runs**
+
+List all execution runs for a given workflow.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `workflowId` | `string` | Yes | - | Workflow ID to list runs for |
+
+### get-workflow-run
+
+**Get Workflow Run**
+
+Get details of a workflow run by ID, including all steps and their statuses.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | Workflow run ID |
+
+### retry-workflow-run
+
+**Retry Workflow Run**
+
+Retry a failed workflow run from the beginning. The run must be in 'failed' status.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `runId` | `string` | Yes | - | Workflow run ID to retry |
 
 ## Other Tools
 

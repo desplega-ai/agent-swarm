@@ -7,6 +7,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Templates registry for agent workers (#155, #156)
+  - 6 official templates: lead, coder, researcher, reviewer, tester, forward-deployed-engineer
+  - Templates UI (Next.js) with gallery, detail pages, and interactive docker-compose builder
+  - `TEMPLATE_ID` env var for initial profile fetching on first boot (e.g., `official/coder`)
+  - `TEMPLATE_REGISTRY_URL` env var for custom registry endpoints
+  - Template idempotency: existing profile fields are never overwritten
+  - GitHub issue/PR templates for community template submissions
+- GitLab integration with Provider Adapter Pattern (#153)
+  - `POST /api/gitlab/webhook` route with timing-safe secret verification
+  - Handlers for merge_request, issue, note (comments), and pipeline events
+  - Bot mention detection via `GITLAB_BOT_NAME` env var
+  - GitLab trigger events for workflow engine (`gitlab.merge_request.*`, `gitlab.issue.*`, etc.)
+  - `glab` CLI installed in worker Docker image
+  - VCS provider detection for automatic `gh`/`glab`/`git` clone selection
+  - New env vars: `GITLAB_TOKEN`, `GITLAB_URL`, `GITLAB_WEBHOOK_SECRET`, `GITLAB_BOT_NAME`, `GITLAB_EMAIL`, `GITLAB_NAME`
+- ProviderAdapter abstraction with pi-mono support (#151)
+  - `ProviderAdapter` interface decouples the runner from Claude CLI
+  - `ClaudeAdapter` extracted from monolithic runner (~600 lines)
+  - `PiMonoAdapter` with MCP tool discovery, event normalization, and cost tracking
+  - All 6 swarm hook events mapped to pi-mono extension handlers
+  - Selected via `HARNESS_PROVIDER=claude|pi` env var
+  - Docker multi-provider support in Dockerfile.worker and entrypoint
+
+### Changed
+- Memory system enhancements (#148)
+  - Epic-linked task completions auto-promote to swarm scope (visible to all workers)
+  - `inject-learning` creates swarm-scoped memories
+  - Mandatory `memory-search` directive in base prompt
+  - Follow-up tasks include epic context (goal, plan, progress, nextSteps)
+  - Server-side memory injection enriched with epic name/goal and recent task summaries
+  - New `nextSteps` column on epics (migration 005)
+- Base prompt updated with VCS CLI comparison table (gh vs glab)
+- DB migration 006: renames `github*` columns to `vcs*`, adds `vcsProvider` column
+
+### Fixed
+- Prevent duplicate review tasks and fix PR Lifecycle workflow (#150)
+  - Dedup guard for review task creation
+  - Action filtering fixes in webhook handlers
+  - Webhook enrichment improvements
+
 - Workflow automation engine with DAG-based node execution (#142)
   - Trigger nodes: task created/completed, GitHub events, Slack messages, email, webhooks
   - Condition nodes: property-match, code-match (sandboxed JS), LLM-classify
