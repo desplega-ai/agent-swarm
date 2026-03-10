@@ -123,8 +123,8 @@ export const AgentTaskSchema = z.object({
   // Epic association (optional)
   epicId: z.uuid().optional(),
 
-  // Working directory (optional — full filesystem path for the agent process)
-  dir: z.string().optional(),
+  // Working directory (optional — must be an absolute path for the agent process)
+  dir: z.string().min(1).startsWith("/").optional(),
 
   // Session attachment (optional)
   parentTaskId: z.uuid().optional(),

@@ -319,6 +319,7 @@ async function getPausedTasksFromAPI(config: ApiConfig): Promise<
     claudeSessionId?: string;
     parentTaskId?: string;
     dir?: string;
+    vcsRepo?: string;
     finishedAt?: string;
     output?: string;
     status?: string;
@@ -1824,14 +1825,36 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           };
           await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
 
-          // Resolve cwd for resumed task
+          // Resolve cwd for resumed task (mirrors normal task path: task.dir > vcsRepo clonePath)
           let resumeCwd: string | undefined;
           if (task.dir) {
             try {
               if (existsSync(task.dir) && statSync(task.dir).isDirectory()) {
                 resumeCwd = task.dir;
+              } else {
+                console.warn(
+                  `[${role}] Resume task dir "${task.dir}" does not exist or is not a directory, falling back to default cwd`,
+                );
               }
-            } catch {}
+            } catch {
+              console.warn(
+                `[${role}] Failed to check resume task dir "${task.dir}", falling back to default cwd`,
+              );
+            }
+          }
+
+          if (!resumeCwd && task.vcsRepo && apiUrl) {
+            const repoConfig = await fetchRepoConfig(apiUrl, apiKey, task.vcsRepo);
+            const effectiveConfig = repoConfig ?? {
+              url: task.vcsRepo,
+              name: task.vcsRepo.split("/").pop() || task.vcsRepo,
+              clonePath: `/workspace/repos/${task.vcsRepo.split("/").pop() || task.vcsRepo}`,
+              defaultBranch: "main",
+            };
+            const repoContext = await ensureRepoForTask(effectiveConfig, role);
+            if (repoContext?.clonePath) {
+              resumeCwd = repoContext.clonePath;
+            }
           }
 
           const runningTask = await spawnProviderProcess(
