@@ -55,6 +55,12 @@ export const registerSendTaskTool = (server: McpServer) => {
           .describe(
             "Parent task ID for session continuity. Child task will resume the parent's Claude session. Auto-routes to the same worker unless agentId is explicitly provided.",
           ),
+        dir: z
+          .string()
+          .optional()
+          .describe(
+            "Working directory (full path) for the agent to start in. If the directory doesn't exist, falls back to the default working directory.",
+          ),
         vcsRepo: z
           .string()
           .optional()
@@ -91,6 +97,7 @@ export const registerSendTaskTool = (server: McpServer) => {
         priority,
         dependsOn,
         epicId,
+        dir,
         parentTaskId,
         vcsRepo,
         model,
@@ -192,6 +199,7 @@ export const registerSendTaskTool = (server: McpServer) => {
             priority,
             dependsOn,
             epicId,
+            dir,
             parentTaskId,
             vcsRepo: effectiveVcsRepo,
             model,
@@ -239,6 +247,7 @@ export const registerSendTaskTool = (server: McpServer) => {
             priority,
             dependsOn,
             epicId,
+            dir,
             parentTaskId,
             vcsRepo: effectiveVcsRepo,
             model,
@@ -260,6 +269,7 @@ export const registerSendTaskTool = (server: McpServer) => {
           priority,
           dependsOn,
           epicId,
+          dir,
           parentTaskId,
           vcsRepo: effectiveVcsRepo,
           model,

@@ -684,6 +684,7 @@ type AgentTaskRow = {
   mentionMessageId: string | null;
   mentionChannelId: string | null;
   epicId: string | null;
+  dir: string | null;
   parentTaskId: string | null;
   claudeSessionId: string | null;
   model: string | null;
@@ -731,6 +732,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     mentionMessageId: row.mentionMessageId ?? undefined,
     mentionChannelId: row.mentionChannelId ?? undefined,
     epicId: row.epicId ?? undefined,
+    dir: row.dir ?? undefined,
     parentTaskId: row.parentTaskId ?? undefined,
     claudeSessionId: row.claudeSessionId ?? undefined,
     model: (row.model as "haiku" | "sonnet" | "opus" | null) ?? undefined,
@@ -1691,6 +1693,7 @@ export interface CreateTaskOptions {
   mentionMessageId?: string;
   mentionChannelId?: string;
   epicId?: string;
+  dir?: string;
   parentTaskId?: string;
   model?: string;
   scheduleId?: string;
@@ -1752,9 +1755,9 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         slackChannelId, slackThreadTs, slackUserId,
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
-        mentionMessageId, mentionChannelId, epicId, parentTaskId, model, scheduleId,
+        mentionMessageId, mentionChannelId, epicId, dir, parentTaskId, model, scheduleId,
         workflowRunId, workflowRunStepId, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -1785,6 +1788,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.mentionMessageId ?? null,
       options?.mentionChannelId ?? null,
       options?.epicId ?? null,
+      options?.dir ?? null,
       options?.parentTaskId ?? null,
       options?.model ?? null,
       options?.scheduleId ?? null,
