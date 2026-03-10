@@ -6,6 +6,12 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
   echo ""
   echo "=== Archil Mount ==="
 
+  # Ensure /dev/fuse exists (needed in some VM environments like Fly.io Firecracker)
+  if [ ! -e /dev/fuse ]; then
+    mknod /dev/fuse c 10 229
+    chmod 666 /dev/fuse
+  fi
+
   if [ -n "$ARCHIL_API_DISK_NAME" ]; then
     echo "Mounting API disk ($ARCHIL_API_DISK_NAME) at /mnt/data..."
     mkdir -p /mnt/data

@@ -39,7 +39,7 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     vim nano \
     build-essential make cmake gcc g++ \
     python3 python3-pip python3-venv \
-    jq tree htop unzip zip tar gzip sqlite3 libfuse2 \
+    jq tree htop unzip zip tar gzip sqlite3 fuse3 libfuse2 \
     openssh-client \
     sudo \
     nodejs \
