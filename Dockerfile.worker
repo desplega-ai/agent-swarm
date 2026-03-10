@@ -146,7 +146,9 @@ RUN mkdir -p /workspace /logs && chown worker:worker /workspace /logs
 COPY --chown=worker:worker docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-USER worker
+# NOTE: Entrypoint runs as root to perform FUSE mounts (required in Fly.io
+# Firecracker — sudo alone doesn't grant CAP_SYS_ADMIN). The entrypoint
+# re-execs itself as worker after mounts are done.
 WORKDIR /workspace
 
 # Create static workspace directories (build-time)

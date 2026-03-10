@@ -1,6 +1,48 @@
 #!/bin/bash
 set -e
 
+# ---------------------------------------------------------------------------
+# Phase 1: Root operations (FUSE setup + Archil mounts)
+# In Fly.io Firecracker, FUSE mounts require actual root — sudo doesn't
+# grant CAP_SYS_ADMIN. When running as root, do privileged ops then re-exec
+# as worker for the rest of the entrypoint.
+# ---------------------------------------------------------------------------
+if [ "$(id -u)" = "0" ] && [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
+    echo ""
+    echo "=== Archil Mount (root) ==="
+
+    # Ensure /dev/fuse exists (needed in Fly.io Firecracker)
+    if [ ! -e /dev/fuse ]; then
+        mknod /dev/fuse c 10 229
+        chmod 666 /dev/fuse
+    fi
+
+    if [ -n "$ARCHIL_SHARED_DISK_NAME" ]; then
+        echo "Mounting shared disk ($ARCHIL_SHARED_DISK_NAME) at /workspace/shared..."
+        archil mount --shared "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
+    fi
+
+    if [ -n "$ARCHIL_PERSONAL_DISK_NAME" ]; then
+        echo "Mounting personal disk ($ARCHIL_PERSONAL_DISK_NAME) at /workspace/personal..."
+        archil mount --shared "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
+    fi
+    echo "===================="
+
+    # Re-exec this same script as worker user (preserving all env vars)
+    export HOME=/home/worker
+    exec su -m -s /bin/bash worker -- "$0" "$@"
+fi
+
+# If running as root without Archil, still drop to worker
+if [ "$(id -u)" = "0" ]; then
+    export HOME=/home/worker
+    exec su -m -s /bin/bash worker -- "$0" "$@"
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 2: Worker operations (everything below runs as worker user)
+# ---------------------------------------------------------------------------
+
 # Validate required environment variables based on provider
 HARNESS_PROVIDER="${HARNESS_PROVIDER:-claude}"
 
@@ -22,31 +64,6 @@ if [ -z "$API_KEY" ]; then
     echo "Error: API_KEY environment variable is required"
     exit 1
 fi
-
-# ---- Archil disk mounts ----
-# Skipped when ARCHIL_MOUNT_TOKEN is not set (local dev / environments without Archil)
-if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
-    echo ""
-    echo "=== Archil Mount ==="
-
-    # Ensure /dev/fuse exists (needed in some VM environments like Fly.io Firecracker)
-    if [ ! -e /dev/fuse ]; then
-        sudo mknod /dev/fuse c 10 229
-        sudo chmod 666 /dev/fuse
-    fi
-
-    if [ -n "$ARCHIL_SHARED_DISK_NAME" ]; then
-        echo "Mounting shared disk ($ARCHIL_SHARED_DISK_NAME) at /workspace/shared..."
-        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --shared "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
-    fi
-
-    if [ -n "$ARCHIL_PERSONAL_DISK_NAME" ]; then
-        echo "Mounting personal disk ($ARCHIL_PERSONAL_DISK_NAME) at /workspace/personal..."
-        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --shared "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
-    fi
-    echo "===================="
-fi
-# ---- End Archil mount ----
 
 # Role defaults to worker, can be set to "lead"
 ROLE="${AGENT_ROLE:-worker}"
@@ -118,10 +135,11 @@ echo "=========================="
 cleanup() {
     echo ""
     # Unmount Archil disks (flushes pending data to backing store)
+    # Mounts were done by root, so unmount needs sudo
     if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
         echo "Unmounting Archil disks..."
-        archil unmount /workspace/shared 2>/dev/null || true
-        archil unmount /workspace/personal 2>/dev/null || true
+        sudo archil unmount /workspace/shared 2>/dev/null || true
+        sudo archil unmount /workspace/personal 2>/dev/null || true
     fi
     echo "Shutting down PM2 processes..."
     pm2 kill 2>/dev/null || true
