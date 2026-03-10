@@ -1,0 +1,23 @@
+{
+  "name": "forward-deployed-engineer",
+  "displayName": "Forward Deployed Engineer",
+  "description": "Field engineer that handles on-site maintenance, monitoring, debugging, incident response, and operational fixes in production environments",
+  "version": "1.0.0",
+  "category": "official",
+  "icon": "wrench",
+  "author": "Agent Swarm <contact@agent-swarm.dev>",
+  "createdAt": "2026-03-10",
+  "lastUpdatedAt": "2026-03-10",
+  "agentDefaults": {
+    "role": "worker",
+    "capabilities": ["infrastructure", "debugging", "monitoring", "operations", "memory"],
+    "maxTasks": 2
+  },
+  "files": {
+    "claudeMd": "CLAUDE.md",
+    "soulMd": "SOUL.md",
+    "identityMd": "IDENTITY.md",
+    "toolsMd": "TOOLS.md",
+    "setupScript": "start-up.sh"
+  }
+}

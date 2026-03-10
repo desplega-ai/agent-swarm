@@ -1,16 +1,16 @@
 {
   "name": "tester",
   "displayName": "Tester",
-  "description": "QA specialist that writes and runs tests, validates functionality, and ensures reliability",
+  "description": "QA specialist that verifies features through browser automation, runs E2E tests, and catches regressions with evidence-based reporting",
   "version": "1.0.0",
   "category": "official",
   "icon": "test-tube",
-  "author": "Desplega <contact@agent-swarm.dev>",
+  "author": "Agent Swarm <contact@agent-swarm.dev>",
   "createdAt": "2026-03-09",
-  "lastUpdatedAt": "2026-03-09",
+  "lastUpdatedAt": "2026-03-10",
   "agentDefaults": {
     "role": "worker",
-    "capabilities": ["testing", "qa", "automation"],
+    "capabilities": ["testing", "qa", "browser-automation", "e2e"],
     "maxTasks": 2
   },
   "files": {
