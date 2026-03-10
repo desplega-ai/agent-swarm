@@ -31,7 +31,7 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
     archil unmount /mnt/data 2>/dev/null || true
     archil unmount /workspace/shared 2>/dev/null || true
   }
-  trap cleanup_archil EXIT SIGINT SIGTERM
+  trap cleanup_archil EXIT INT TERM
 fi
 
 # Print version banner and run the server
