@@ -11,6 +11,7 @@ import { closeDb } from "../be/db";
 import { initGitHub } from "../github";
 import { initGitLab } from "../gitlab";
 import { stopHeartbeat } from "../heartbeat";
+import { initLinear } from "../linear";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { initWorkflows } from "../workflows";
 import { handleActiveSessions } from "./active-sessions";
@@ -19,6 +20,7 @@ import { handleConfig } from "./config";
 import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
 import { handleEcosystem } from "./ecosystem";
 import { handleEpics } from "./epics";
+import { handleLinear } from "./linear";
 import { handleMcp } from "./mcp";
 import { handleMemory } from "./memory";
 import { handlePoll } from "./poll";
@@ -91,6 +93,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handlePoll(req, res, pathSegments, myAgentId),
     () => handleSessionData(req, res, pathSegments, queryParams, myAgentId),
     () => handleEcosystem(req, res, pathSegments, myAgentId),
+    () => handleLinear(req, res, pathSegments),
     () => handleWebhooks(req, res, pathSegments),
     () => handleAgentsRest(req, res, pathSegments, queryParams, myAgentId),
     () => handleTasks(req, res, pathSegments, queryParams, myAgentId),
@@ -182,6 +185,9 @@ httpServer
 
     // Initialize AgentMail webhook handler (if configured)
     initAgentMail();
+
+    // Initialize Linear integration (if configured)
+    initLinear();
 
     // Initialize workflow engine (trigger subscriptions + resume listener)
     initWorkflows();

@@ -11,6 +11,7 @@ import {
   updateAgentStatus,
 } from "../be/db";
 import { initGitHub, resetGitHub } from "../github";
+import { initLinear, resetLinear } from "../linear";
 import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
@@ -81,7 +82,8 @@ export async function handleCore(
   const isGitHubWebhook = req.url?.startsWith("/api/github/webhook");
   const isGitLabWebhook = req.url?.startsWith("/api/gitlab/webhook");
   const isAgentMailWebhook = req.url?.startsWith("/api/agentmail/webhook");
-  if (apiKey && !isGitHubWebhook && !isGitLabWebhook && !isAgentMailWebhook) {
+  const isLinearOAuth = req.url?.startsWith("/api/linear/");
+  if (apiKey && !isGitHubWebhook && !isGitLabWebhook && !isAgentMailWebhook && !isLinearOAuth) {
     const authHeader = req.headers.authorization;
     const providedKey = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
@@ -105,6 +107,9 @@ export async function handleCore(
 
       resetGitHub();
       if (initGitHub()) integrations.push("github");
+
+      resetLinear();
+      if (initLinear()) integrations.push("linear");
 
       // Slack: stop and restart to pick up new token
       await stopSlackApp();
