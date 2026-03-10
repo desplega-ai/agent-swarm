@@ -57,9 +57,11 @@ export const registerSendTaskTool = (server: McpServer) => {
           ),
         dir: z
           .string()
+          .min(1)
+          .startsWith("/")
           .optional()
           .describe(
-            "Working directory (full path) for the agent to start in. If the directory doesn't exist, falls back to the default working directory.",
+            "Working directory (absolute path) for the agent to start in. If the directory doesn't exist, falls back to the default working directory.",
           ),
         vcsRepo: z
           .string()

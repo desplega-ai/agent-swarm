@@ -351,6 +351,7 @@ async function getPausedTasksFromAPI(config: ApiConfig): Promise<
         claudeSessionId?: string;
         parentTaskId?: string;
         dir?: string;
+        vcsRepo?: string;
         finishedAt?: string;
         output?: string;
         status?: string;

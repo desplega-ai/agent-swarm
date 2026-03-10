@@ -62,9 +62,11 @@ export const registerTaskActionTool = (server: McpServer) => {
         // For 'create' action:
         dir: z
           .string()
+          .min(1)
+          .startsWith("/")
           .optional()
           .describe(
-            "Working directory (full path) for the agent to start in. Only used with 'create' action.",
+            "Working directory (absolute path) for the agent to start in. Only used with 'create' action.",
           ),
         model: z
           .enum(["haiku", "sonnet", "opus"])
