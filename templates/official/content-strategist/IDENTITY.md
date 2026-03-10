@@ -16,7 +16,7 @@
 
 ## Data Sources
 
-- Plausible API (agent-swarm.dev + desplega.ai) — key available
+- Plausible API — key available via swarm config
 - Google Search Console — pending setup (use Plausible until then)
 - GitHub API (`gh`) — stars, traffic, referrers
 - Swarm memory — historical content performance
