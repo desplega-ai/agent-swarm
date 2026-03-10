@@ -23,6 +23,25 @@ if [ -z "$API_KEY" ]; then
     exit 1
 fi
 
+# ---- Archil disk mounts ----
+# Skipped when ARCHIL_MOUNT_TOKEN is not set (local dev / environments without Archil)
+if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
+    echo ""
+    echo "=== Archil Mount ==="
+
+    if [ -n "$ARCHIL_SHARED_DISK_NAME" ]; then
+        echo "Mounting shared disk ($ARCHIL_SHARED_DISK_NAME) at /workspace/shared..."
+        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
+    fi
+
+    if [ -n "$ARCHIL_PERSONAL_DISK_NAME" ]; then
+        echo "Mounting personal disk ($ARCHIL_PERSONAL_DISK_NAME) at /workspace/personal..."
+        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
+    fi
+    echo "===================="
+fi
+# ---- End Archil mount ----
+
 # Role defaults to worker, can be set to "lead"
 ROLE="${AGENT_ROLE:-worker}"
 MCP_URL="${MCP_BASE_URL:-http://host.docker.internal:3013}"
@@ -92,6 +111,12 @@ echo "=========================="
 # Cleanup function for graceful shutdown
 cleanup() {
     echo ""
+    # Unmount Archil disks (flushes pending data to backing store)
+    if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
+        echo "Unmounting Archil disks..."
+        archil unmount /workspace/shared 2>/dev/null || true
+        archil unmount /workspace/personal 2>/dev/null || true
+    fi
     echo "Shutting down PM2 processes..."
     pm2 kill 2>/dev/null || true
 }
