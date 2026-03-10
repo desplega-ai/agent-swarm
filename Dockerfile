@@ -24,6 +24,8 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     wget \
+    curl \
+    libfuse2 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -38,8 +40,12 @@ COPY package.json ./
 # Copy migration SQL files (compiled binary can't read from /$bunfs virtual filesystem)
 COPY src/be/migrations/*.sql /app/migrations/
 
+# Install archil CLI for FUSE/R2-backed disk mounts
+RUN curl https://s3.amazonaws.com/archil-client/install | sh
+
 # Create data directory for SQLite (WAL mode needs .sqlite, .sqlite-wal, .sqlite-shm on same filesystem)
-RUN mkdir -p /app/data
+# Create Archil mount point directories
+RUN mkdir -p /app/data /mnt/data /workspace/shared
 
 ENV PORT=3013
 ENV DATABASE_PATH=/app/data/agent-swarm-db.sqlite
@@ -53,9 +59,7 @@ EXPOSE 3013
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -qO- http://localhost:3013/health || exit 1
 
-# Print version on startup and run the server
-CMD echo "=== Agent Swarm API v$(cat /app/package.json | grep '\"version\"' | cut -d'"' -f4) ===" && \
-    echo "Port: $PORT" && \
-    echo "Database: $DATABASE_PATH" && \
-    echo "==============================" && \
-    exec /usr/local/bin/agent-swarm-api
+COPY api-entrypoint.sh /api-entrypoint.sh
+RUN chmod +x /api-entrypoint.sh
+
+ENTRYPOINT ["/api-entrypoint.sh"]
