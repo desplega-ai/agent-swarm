@@ -3,6 +3,7 @@
  *
  * Provides `isLinearEnabled()`, `initLinear()`, and `resetLinear()`.
  */
+import { resetLinearClient } from "./client";
 
 let initialized = false;
 
@@ -28,6 +29,7 @@ export function isLinearEnabled(): boolean {
  */
 export function resetLinear(): void {
   initialized = false;
+  resetLinearClient();
 }
 
 /**
