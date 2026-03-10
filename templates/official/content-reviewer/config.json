@@ -1,7 +1,7 @@
 {
   "name": "content-reviewer",
   "displayName": "Content Reviewer",
-  "description": "Content quality gate using LLM-as-judge pattern with a different model than the writer, providing structured scoring and evolving review criteria",
+  "description": "Content quality gate using LLM-as-judge pattern, providing structured scoring and evolving review criteria",
   "version": "1.0.0",
   "category": "official",
   "icon": "check-circle",
