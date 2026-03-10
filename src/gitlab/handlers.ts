@@ -9,6 +9,7 @@
  */
 
 import { createTaskExtended, failTask, findTaskByVcs, getAllAgents } from "../be/db";
+import { resolveEventTaskDescription } from "../events/template-resolver";
 import { GITLAB_BOT_NAME } from "./auth";
 import { addGitLabNoteReaction, addGitLabReaction } from "./reactions";
 import type { IssueEvent, MergeRequestEvent, NoteEvent, PipelineEvent } from "./types";
@@ -91,7 +92,25 @@ export async function handleMergeRequest(
       }
 
       const context = mr.description ? extractMentionContext(mr.description) : "";
-      const taskDesc = `[GitLab MR #${mr.iid}] ${mr.title}\n\nRepo: ${repo}\nAuthor: @${user.username}\nBranch: ${mr.source_branch} → ${mr.target_branch}\nURL: ${mr.url}\n\n${context ? `Context: ${context}\n\n` : ""}${getCommandSuggestions("mr")}${DELEGATION_INSTRUCTION}`;
+      const taskDesc =
+        resolveEventTaskDescription("gitlab", "merge_request.mention", {
+          mr: {
+            iid: mr.iid,
+            title: mr.title,
+            description: mr.description ?? "",
+            url: mr.url,
+            source_branch: mr.source_branch,
+            target_branch: mr.target_branch,
+            author: user.username,
+          },
+          repo: { full_name: repo, url: project.web_url },
+          sender: { login: user.username },
+          action,
+          mention_context: context,
+          delegation_instruction: DELEGATION_INSTRUCTION,
+          suggestions: getCommandSuggestions("mr"),
+        }) ??
+        `[GitLab MR #${mr.iid}] ${mr.title}\n\nRepo: ${repo}\nAuthor: @${user.username}\nBranch: ${mr.source_branch} → ${mr.target_branch}\nURL: ${mr.url}\n\n${context ? `Context: ${context}\n\n` : ""}${getCommandSuggestions("mr")}${DELEGATION_INSTRUCTION}`;
 
       const task = createTaskExtended(taskDesc, {
         agentId: lead?.id ?? null,
@@ -172,7 +191,22 @@ export async function handleIssue(
       }
 
       const context = issue.description ? extractMentionContext(issue.description) : "";
-      const taskDesc = `[GitLab Issue #${issue.iid}] ${issue.title}\n\nRepo: ${repo}\nAuthor: @${user.username}\nURL: ${issue.url}\n\n${context ? `Context: ${context}\n\n` : ""}${getCommandSuggestions("issue")}${DELEGATION_INSTRUCTION}`;
+      const taskDesc =
+        resolveEventTaskDescription("gitlab", "issue.mention", {
+          issue: {
+            iid: issue.iid,
+            title: issue.title,
+            description: issue.description ?? "",
+            url: issue.url,
+          },
+          repo: { full_name: repo, url: project.web_url },
+          sender: { login: user.username },
+          action,
+          mention_context: context,
+          delegation_instruction: DELEGATION_INSTRUCTION,
+          suggestions: getCommandSuggestions("issue"),
+        }) ??
+        `[GitLab Issue #${issue.iid}] ${issue.title}\n\nRepo: ${repo}\nAuthor: @${user.username}\nURL: ${issue.url}\n\n${context ? `Context: ${context}\n\n` : ""}${getCommandSuggestions("issue")}${DELEGATION_INSTRUCTION}`;
 
       const task = createTaskExtended(taskDesc, {
         agentId: lead?.id ?? null,
@@ -250,7 +284,23 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
   // Check if there's already an active task for this entity
   const existingTask = targetNumber ? findTaskByVcs(repo, targetNumber) : null;
 
-  const taskDesc = `[GitLab Comment on ${entityLabel}] @${user.username} mentioned bot\n\nRepo: ${repo}\nURL: ${targetUrl}\n\nComment:\n${context}${existingTask ? `\n\n_Note: There's an active task (${existingTask.id}) for this ${entityLabel}._` : ""}${DELEGATION_INSTRUCTION}`;
+  const commentEventType =
+    note.noteable_type === "MergeRequest"
+      ? "merge_request.comment_mention"
+      : "issue.comment_mention";
+  const taskDesc =
+    resolveEventTaskDescription("gitlab", commentEventType, {
+      note: { body: note.note, url: note.url },
+      target: { type: note.noteable_type, iid: targetNumber ?? 0, title: entityLabel },
+      repo: { full_name: repo, url: project.web_url },
+      sender: { login: user.username },
+      action: "created",
+      mention_context: context,
+      related_task_id: existingTask?.id ?? "",
+      delegation_instruction: DELEGATION_INSTRUCTION,
+      suggestions: "",
+    }) ??
+    `[GitLab Comment on ${entityLabel}] @${user.username} mentioned bot\n\nRepo: ${repo}\nURL: ${targetUrl}\n\nComment:\n${context}${existingTask ? `\n\n_Note: There's an active task (${existingTask.id}) for this ${entityLabel}._` : ""}${DELEGATION_INSTRUCTION}`;
 
   const task = createTaskExtended(taskDesc, {
     agentId: lead?.id ?? null,
@@ -308,7 +358,28 @@ export async function handlePipeline(
   }
 
   const lead = findLeadAgent();
-  const taskDesc = `[GitLab CI Failed] Pipeline #${pipeline.id} failed for MR #${mrIid}\n\nRepo: ${repo}\nMR: ${event.merge_request.title}\nURL: ${event.merge_request.url}\nBranch: ${event.merge_request.source_branch}\n\nThe CI pipeline has failed. Please investigate and fix the issues.${DELEGATION_INSTRUCTION}`;
+  const taskDesc =
+    resolveEventTaskDescription("gitlab", "pipeline.failed", {
+      pipeline: {
+        id: pipeline.id,
+        status: pipeline.status,
+        url: `${project.web_url}/-/pipelines/${pipeline.id}`,
+        ref: pipeline.ref,
+        sha: "",
+        source: pipeline.source,
+      },
+      mr: {
+        iid: mrIid,
+        title: event.merge_request.title,
+        url: event.merge_request.url,
+      },
+      repo: { full_name: repo, url: project.web_url },
+      sender: { login: "" },
+      action: "failed",
+      related_task_id: existingTask.id,
+      delegation_instruction: DELEGATION_INSTRUCTION,
+    }) ??
+    `[GitLab CI Failed] Pipeline #${pipeline.id} failed for MR #${mrIid}\n\nRepo: ${repo}\nMR: ${event.merge_request.title}\nURL: ${event.merge_request.url}\nBranch: ${event.merge_request.source_branch}\n\nThe CI pipeline has failed. Please investigate and fix the issues.${DELEGATION_INSTRUCTION}`;
 
   const task = createTaskExtended(taskDesc, {
     agentId: lead?.id ?? null,

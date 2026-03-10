@@ -99,6 +99,12 @@ export const DEFERRED_TOOLS = new Set([
   "get-inbox-message",
   "register-agentmail-inbox",
 
+  // Event prompt templates (4)
+  "set-event-prompt-template",
+  "get-event-prompt-template",
+  "list-event-prompt-templates",
+  "delete-event-prompt-template",
+
   // Other (3)
   "cancel-task",
   "inject-learning",
