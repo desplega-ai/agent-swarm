@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Github, BookOpen, LayoutDashboard, Menu, X, Newspaper, Play } from "lucide-react";
+import { Github, BookOpen, LayoutDashboard, Menu, X, Newspaper, Play, Blocks } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 export function Navbar() {
@@ -64,6 +64,15 @@ export function Navbar() {
           >
             Examples
           </a>
+          <a
+            href="https://templates.agent-swarm.dev"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
+          >
+            <Blocks className="w-4 h-4" />
+            Templates
+          </a>
           <div className="w-px h-5 bg-zinc-200" />
           <a
             href="https://docs.agent-swarm.dev"
@@ -114,6 +123,9 @@ export function Navbar() {
               <a href="/#architecture" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Architecture</a>
               <a href="/blog" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Blog</a>
               <a href="/examples" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Examples</a>
+              <a href="https://templates.agent-swarm.dev" target="_blank" rel="noopener noreferrer" onClick={() => setMobileOpen(false)} className="flex items-center gap-2 text-sm font-medium text-zinc-600 py-2">
+                <Blocks className="w-4 h-4" /> Templates
+              </a>
               <div className="h-px bg-zinc-200" />
               <a href="https://docs.agent-swarm.dev" className="flex items-center gap-2 text-sm font-medium text-zinc-600 py-2">
                 <BookOpen className="w-4 h-4" /> Docs

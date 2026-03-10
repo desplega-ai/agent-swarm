@@ -16,6 +16,11 @@ export const baseOptions: BaseLayoutProps = {
       url: "/docs",
     },
     {
+      text: "Templates",
+      url: "https://templates.agent-swarm.dev",
+      external: true,
+    },
+    {
       text: "GitHub",
       url: "https://github.com/desplega-ai/agent-swarm",
       external: true,

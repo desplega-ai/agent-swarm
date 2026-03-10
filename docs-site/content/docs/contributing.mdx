@@ -1,0 +1,149 @@
+---
+title: Contributing
+description: Guidelines for contributing to Agent Swarm
+---
+
+# Contributing
+
+Agent Swarm is open source and welcomes contributions from the community. Whether you're fixing a bug, adding a feature, creating a template, or improving documentation — we appreciate your help.
+
+## Getting Started
+
+1. **Fork the repository** — [desplega-ai/agent-swarm](https://github.com/desplega-ai/agent-swarm)
+2. **Clone your fork** and create a branch:
+   ```bash
+   git clone https://github.com/<your-username>/agent-swarm.git
+   cd agent-swarm
+   git checkout -b my-feature
+   ```
+3. **Install dependencies**:
+   ```bash
+   bun install
+   ```
+
+## Code Contributions
+
+### Development Workflow
+
+```bash
+# Start the API server in dev mode
+bun run dev:http
+
+# Run a worker locally
+bun run worker
+
+# Lint and format
+bun run lint:fix
+bun run format
+
+# Type-check
+bun run tsc:check
+```
+
+### Pull Request Guidelines
+
+- **One concern per PR** — keep changes focused and reviewable
+- **Write clear commit messages** — describe _why_, not just _what_
+- **Follow existing patterns** — match the codebase's style and conventions
+- **Test your changes** — run `bun run lint` and `bun run tsc:check` before submitting
+- **Keep PRs small** — large PRs are harder to review. Break big features into smaller incremental PRs when possible
+
+### Code Style
+
+- TypeScript throughout, strict mode
+- Use `bun` as the package manager and runtime
+- Prefer explicit types over `any`
+- Follow the existing project structure (commands in `src/commands/`, tools in `src/tools/`, hooks in `src/hooks/`)
+
+## Contributing Templates
+
+Templates are a great way to contribute — they let other teams bootstrap specialized agents quickly.
+
+### Creating a Template
+
+1. Create a directory under `templates/community/<your-template-name>/`
+2. Add the required files:
+
+```
+templates/community/your-template/
+├── config.json      # Template metadata and agent defaults
+├── SOUL.md          # Agent persona and values
+├── IDENTITY.md      # Expertise, working style
+├── CLAUDE.md        # Instructions and notes
+├── TOOLS.md         # Environment-specific knowledge
+└── start-up.sh      # Setup script (runs on container start)
+```
+
+3. Define your `config.json`:
+
+```json
+{
+  "name": "your-template",
+  "displayName": "Your Template",
+  "description": "A short description of what this agent specializes in",
+  "version": "1.0.0",
+  "category": "community",
+  "icon": "bot",
+  "author": "Your Name <you@example.com>",
+  "agentDefaults": {
+    "role": "worker",
+    "capabilities": ["your", "capabilities"],
+    "maxTasks": 3
+  },
+  "files": {
+    "claudeMd": "CLAUDE.md",
+    "soulMd": "SOUL.md",
+    "identityMd": "IDENTITY.md",
+    "toolsMd": "TOOLS.md",
+    "setupScript": "start-up.sh"
+  }
+}
+```
+
+4. Use `{{agent.name}}`, `{{agent.role}}`, and `{{agent.capabilities}}` placeholders in your identity files — they get interpolated at agent startup.
+
+5. Submit a PR. Community templates are reviewed for quality and safety before merging.
+
+### Template Guidelines
+
+- **Clear purpose** — the template should serve a specific, well-defined role
+- **Good defaults** — capabilities, max tasks, and identity files should make sense out of the box
+- **Documentation** — include a brief description and any setup notes in the template's `CLAUDE.md`
+- **No secrets** — never include API keys, tokens, or credentials in template files
+
+Browse existing templates at [templates.agent-swarm.dev](https://templates.agent-swarm.dev) for inspiration.
+
+## Documentation
+
+The docs site lives in `docs-site/` and uses [Fumadocs](https://fumadocs.dev) with MDX content.
+
+### Editing Docs
+
+1. Content files are in `docs-site/content/docs/`
+2. Add new pages as `.mdx` files in the appropriate directory
+3. Register new pages in the section's `meta.json`
+4. Build and verify:
+   ```bash
+   cd docs-site
+   pnpm install
+   pnpm build
+   ```
+
+### Landing Page
+
+The landing page lives in `landing/` and is built with Next.js, Tailwind CSS, and Framer Motion.
+
+## Reporting Issues
+
+- Use [GitHub Issues](https://github.com/desplega-ai/agent-swarm/issues) for bugs and feature requests
+- Include reproduction steps, expected vs. actual behavior, and relevant logs
+- Check existing issues before opening a new one
+
+## Community
+
+- [Discord](https://discord.gg/KZgfyyDVZa) — chat, ask questions, share your swarm setups
+- [GitHub Discussions](https://github.com/desplega-ai/agent-swarm/discussions) — longer-form conversations
+
+## License
+
+Agent Swarm is released under the [MIT License](https://github.com/desplega-ai/agent-swarm/blob/main/LICENSE). By contributing, you agree that your contributions will be licensed under the same terms.
