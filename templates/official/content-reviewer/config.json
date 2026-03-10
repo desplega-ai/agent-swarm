@@ -1,0 +1,23 @@
+{
+  "name": "content-reviewer",
+  "displayName": "Content Reviewer",
+  "description": "Content quality gate using LLM-as-judge pattern with a different model than the writer, providing structured scoring and evolving review criteria",
+  "version": "1.0.0",
+  "category": "official",
+  "icon": "check-circle",
+  "author": "Agent Swarm <contact@agent-swarm.dev>",
+  "createdAt": "2026-03-10",
+  "lastUpdatedAt": "2026-03-10",
+  "agentDefaults": {
+    "role": "worker",
+    "capabilities": ["content-review", "quality-assurance", "llm-as-judge"],
+    "maxTasks": 2
+  },
+  "files": {
+    "claudeMd": "CLAUDE.md",
+    "soulMd": "SOUL.md",
+    "identityMd": "IDENTITY.md",
+    "toolsMd": "TOOLS.md",
+    "setupScript": "start-up.sh"
+  }
+}
