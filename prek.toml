@@ -1,0 +1,65 @@
+# Pre-push hooks matching CI merge gate checks
+# See .github/workflows/merge-gate.yml
+default_install_hook_types = ["pre-push"]
+
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "biome-lint"
+name = "Biome lint"
+language = "system"
+entry = "bun run lint"
+always_run = true
+pass_filenames = false
+stages = ["pre-push"]
+fail_fast = true
+
+[[repos.hooks]]
+id = "typecheck"
+name = "TypeScript type check"
+language = "system"
+entry = "bun run tsc:check"
+always_run = true
+pass_filenames = false
+stages = ["pre-push"]
+fail_fast = true
+
+[[repos.hooks]]
+id = "test"
+name = "Unit tests"
+language = "system"
+entry = "bun test"
+always_run = true
+pass_filenames = false
+stages = ["pre-push"]
+
+[[repos.hooks]]
+id = "pi-skills-freshness"
+name = "Pi-skills freshness check"
+language = "system"
+entry = "bash -c 'bun run build:pi-skills && test -z \"$(git diff --name-only plugin/pi-skills/)\"'"
+always_run = true
+pass_filenames = false
+stages = ["pre-push"]
+
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "new-ui-lint"
+name = "New UI Biome lint"
+language = "system"
+entry = "bash -c 'cd new-ui && pnpm lint'"
+files = "^new-ui/"
+pass_filenames = false
+stages = ["pre-push"]
+
+[[repos.hooks]]
+id = "new-ui-typecheck"
+name = "New UI TypeScript type check"
+language = "system"
+entry = "bash -c 'cd new-ui && pnpm exec tsc --noEmit'"
+files = "^new-ui/"
+pass_filenames = false
+stages = ["pre-push"]

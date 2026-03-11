@@ -31,9 +31,7 @@ export function validateClaudeCredentials(
 ): "oauth" | "api_key" {
   if (env.CLAUDE_CODE_OAUTH_TOKEN) return "oauth";
   if (env.ANTHROPIC_API_KEY) return "api_key";
-  throw new Error(
-    "No Claude credentials found. Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY.",
-  );
+  throw new Error("No Claude credentials found. Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY.");
 }
 
 /**
