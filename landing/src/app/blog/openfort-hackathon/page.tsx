@@ -19,6 +19,7 @@ export const metadata: Metadata = {
     "Openfort Hackathon: Teaching Agents to Pay — Agent Swarm Blog",
   description:
     "We shipped x402 payment capability into Agent Swarm — AI agents can now autonomously pay for API services using crypto. Built with Openfort managed wallets on Base mainnet.",
+  authors: [{ name: "Agent Swarm", url: "https://agent-swarm.dev" }],
   openGraph: {
     title: "Openfort Hackathon: Teaching Agents to Pay",
     description:
