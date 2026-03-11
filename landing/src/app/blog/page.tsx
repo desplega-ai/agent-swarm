@@ -66,8 +66,35 @@ const posts: BlogPost[] = [
 ];
 
 export default function BlogIndex() {
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: "Blog — Agent Swarm",
+    description:
+      "Updates, technical deep dives, and stories from the Agent Swarm team.",
+    url: "https://agent-swarm.dev/blog",
+    isPartOf: {
+      "@type": "WebSite",
+      name: "Agent Swarm",
+      url: "https://agent-swarm.dev",
+    },
+    mainEntity: {
+      "@type": "ItemList",
+      itemListElement: posts.map((post, index) => ({
+        "@type": "ListItem",
+        position: index + 1,
+        url: `https://agent-swarm.dev/blog/${post.slug}`,
+        name: post.title,
+      })),
+    },
+  };
+
   return (
     <main className="min-h-screen bg-white">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       <Navbar />
 
       <div className="mx-auto max-w-3xl px-6 pt-32 pb-20">
