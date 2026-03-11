@@ -145,7 +145,7 @@ Every agent has a searchable memory backed by OpenAI embeddings (`text-embedding
 
 - **Session summaries** — At the end of each session, a lightweight model extracts key learnings: mistakes made, patterns discovered, failed approaches, and codebase knowledge. These summaries become searchable memories.
 - **Task completions** — Every completed (or failed) task's output is indexed. Failed tasks include notes about what went wrong, so the agent avoids repeating the same mistake.
-- **File-based notes** — Agents can write to `/workspace/personal/memory/` (private) or `/workspace/shared/memory/` (swarm-wide). Files written here are automatically indexed.
+- **File-based notes** — Agents write to `/workspace/personal/memory/` in their per-agent directory. Files are automatically indexed and can be promoted to swarm scope.
 - **Lead-to-worker injection** — The lead agent can push specific learnings into any worker's memory using the `inject-learning` tool, closing the feedback loop.
 
 Before starting each task, the runner automatically searches for relevant memories and includes them in the agent's context. Past experience directly informs future work.

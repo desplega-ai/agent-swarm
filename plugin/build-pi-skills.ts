@@ -73,7 +73,7 @@ function convertToPiSkill(name: string, content: string): string {
 As you start working on a task, consider whether you need to:
 
 - **Research**: For research tasks, gather information from the web, codebase, or documentation before starting implementation.
-- **Create a plan**: For development tasks, create a detailed plan before implementing. Write it to \`/workspace/personal/plans/\` or \`/workspace/shared/thoughts/shared/plans/\`.
+- **Create a plan**: For development tasks, create a detailed plan before implementing. Write it to \`/workspace/personal/plans/\`.
 - **Implement a plan**: If you already have a plan, follow it step by step.
 
 ### Communication
