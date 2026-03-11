@@ -30,8 +30,13 @@ The shared Archil disk at `/workspace/shared` is mounted with `--shared` on all 
 - `inject-learning.ts`, `store-progress.ts`: Write to database only, not filesystem — **not affected**
 - `memory-search` MCP tool: Queries indexed database — **not affected by path changes**
 - `slack-download-file.ts:14`: Hardcoded default `/workspace/shared/downloads/slack/` — needs update
-- Archil `mkdir` on unowned dirs auto-grants ownership to the creator
+- Archil `mkdir` on unowned dirs auto-grants ownership to the creator **at the first new parent level** (see Appendix A)
 - Archil `--shared` mounts are always fully readable by all clients
+- **CRITICAL**: `mkdir -p thoughts/agent-1/plans` when `thoughts/` doesn't exist auto-grants delegation on `thoughts/` (the parent), NOT `thoughts/agent-1/`. This blocks all other agents from writing inside `thoughts/`. Fix: pre-create top-level dirs, then agents `mkdir` only their subdirs (grants delegation at the correct subdir level).
+- Write failures on `--shared` mounts produce **"Read-only file system"** errors (not EPERM/EACCES)
+- A single Archil client can hold multiple non-overlapping delegations simultaneously (verified)
+- `archil checkout` requires the target path to already exist (fails with "does not exist" otherwise)
+- Unmounting releases ALL delegations; remounting starts fresh
 
 **Note on `misc/`**: This directory is a new addition (not analyzed in the research). It serves as a catch-all for unanticipated agent writes — agents doing ad-hoc work (temp files, scratch data, tool outputs) need somewhere safe to write that doesn't pollute the structured `thoughts/`/`memory/`/`downloads/` hierarchy. Without it, agents would fail on any write that doesn't fit the three predefined categories.
 
@@ -60,19 +65,37 @@ The shared Archil disk at `/workspace/shared` is mounted with `--shared` on all 
     └── worker-2/
 ```
 
-Boot flow per agent:
+Boot flow — two-phase (API pre-creates, workers checkout):
+
+**API machine** (boots first — deploy script waits for "started"):
 ```
 archil mount --shared {disk} /workspace/shared
-→ archil checkout thoughts/$AGENT_ID      → mkdir -p plans/ research/ brainstorms/
-→ archil checkout memory/$AGENT_ID        → (empty, agent writes as needed)
-→ archil checkout downloads/$AGENT_ID     → mkdir -p slack/
-→ archil checkout misc/$AGENT_ID          → (empty, catch-all)
+→ mkdir thoughts/ memory/ downloads/ misc/     # creates top-level dirs, gets parent delegations
+→ archil unmount /workspace/shared              # releases parent delegations
+→ archil mount --shared {disk} /workspace/shared # remount clean (no delegations)
 ```
+
+**Worker/Lead machines** (boot after API):
+```
+archil mount --shared {disk} /workspace/shared   # top-level dirs already exist (API created them)
+→ mkdir thoughts/$AGENT_ID                        # auto-grants delegation on thoughts/$AGENT_ID (NOT thoughts/)
+→ mkdir memory/$AGENT_ID                          # auto-grants delegation on memory/$AGENT_ID
+→ mkdir downloads/$AGENT_ID                       # auto-grants delegation on downloads/$AGENT_ID
+→ mkdir misc/$AGENT_ID                            # auto-grants delegation on misc/$AGENT_ID
+→ archil checkout thoughts/$AGENT_ID              # persistent ownership (survives reboots)
+→ archil checkout memory/$AGENT_ID
+→ archil checkout downloads/$AGENT_ID
+→ archil checkout misc/$AGENT_ID
+→ mkdir -p thoughts/$AGENT_ID/{plans,research,brainstorms}
+→ mkdir -p downloads/$AGENT_ID/slack
+```
+
+**Why two phases?** Archil `mkdir` auto-grants delegation at the **first new directory** in the path. If `thoughts/` doesn't exist, `mkdir -p thoughts/agent-1/plans` grants delegation on `thoughts/` (the parent), blocking all other agents. By having the API pre-create top-level dirs and release ownership, workers' `mkdir thoughts/$AGENT_ID` correctly grants delegation at the subdir level only.
 
 Agent runtime:
 - Write to own dirs: ✅ (owned via checkout)
 - Read any agent's dirs: ✅ (shared mount)
-- Write to another agent's dir: ❌ EPERM → hook hints "use your own dir"
+- Write to another agent's dir: ❌ "Read-only file system" → hook hints "use your own dir"
 - Write to non-existent top-level: ❌ hook hints "use misc/$AGENT_ID/"
 
 ## Quick Verification Reference
@@ -103,35 +126,46 @@ Key files:
 
 Four phases, each independently deployable and verifiable:
 
-1. **Entrypoint**: Expand per-agent checkout to cover all write targets. Deploy and verify mounts. Also discover the exact FUSE error pattern for non-owned writes.
+1. **Entrypoint**: Two-phase setup — API pre-creates top-level dirs and releases ownership, workers create per-agent subdirs and checkout. Includes retry backoff for boot race safety.
 2. **Prompting**: Update base-prompt.ts to describe the new directory layout. Works with or without Archil.
 3. **Hook guardrails**: Add PreToolUse prevention (primary, proactive) and PostToolUse detection (secondary, safety net) for non-owned write attempts.
 4. **Tool path updates**: Update hardcoded paths in slack download tool and pi-skills.
 
 ---
 
-## Phase 1: Entrypoint — Per-Agent Directory Checkout
+## Phase 1: Entrypoint — Two-Phase Directory Setup
 
 ### Overview
-Expand the `docker-entrypoint.sh` checkout block to cover `thoughts/$AGENT_ID`, `memory/$AGENT_ID`, `downloads/$AGENT_ID`, and `misc/$AGENT_ID`. Remove the broken `mkdir -p thoughts/shared/...` block. Deploy and test.
+Implement a two-phase boot sequence: the API machine pre-creates top-level directories and releases ownership, then workers create their per-agent subdirectories and claim ownership via checkout. This avoids the parent-delegation problem where `mkdir -p thoughts/$AGENT_ID/plans` would auto-grant ownership of the entire `thoughts/` directory to the first agent to boot, blocking all others (see Appendix A for the test that discovered this).
 
 ### Changes Required:
 
-#### 1. Entrypoint checkout expansion
+#### 1. API entrypoint — pre-create top-level dirs
 **File**: `docker-entrypoint.sh`
-**Changes**:
+**Location**: After the `archil mount --shared` call for the shared disk, add a block for the API role:
 
-Remove the broken shared mkdir block (currently around lines 55-58):
 ```bash
-# REMOVE:
-mkdir -p /workspace/shared/thoughts/shared/plans \
-         /workspace/shared/thoughts/shared/research \
-         /workspace/shared/memory 2>/dev/null || true
+# --- API: Pre-create top-level shared directories ---
+# The API boots first (deploy script waits for "started" state).
+# We create the top-level category dirs so that workers' mkdir
+# auto-grants delegation at the subdir level (not the parent).
+# Then we unmount/remount to release the parent delegations.
+if [ "$AGENT_ROLE" = "api" ] && [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
+    echo "Pre-creating shared directory structure..."
+    for category in thoughts memory downloads misc; do
+        mkdir -p "/workspace/shared/$category" 2>/dev/null || true
+    done
+    # Release parent delegations (mkdir auto-granted them)
+    sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil unmount /workspace/shared 2>/dev/null || true
+    sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --shared \
+        --region "$ARCHIL_REGION" "$ARCHIL_SHARED_DISK_NAME" /workspace/shared
+    echo "Shared directory structure ready (delegations released)"
+fi
 ```
 
-Replace the per-agent checkout block (currently around lines 477-486) with an expanded version.
-
-**Primary approach: `mkdir -p` first** — Archil auto-grants ownership to the client that creates a directory on a `--shared` mount. This is simpler and avoids the question of whether `checkout` works on non-existent paths. Explicit `checkout` is used only as a fallback for dirs that already exist (e.g., on container restart where dirs persist from a previous boot).
+#### 2. Worker/Lead entrypoint — per-agent checkout
+**File**: `docker-entrypoint.sh`
+**Location**: Remove the broken shared mkdir block (currently around lines 55-58). Replace the per-agent checkout block (currently around lines 477-486).
 
 ```bash
 if [ -n "$AGENT_ID" ]; then
@@ -139,27 +173,28 @@ if [ -n "$AGENT_ID" ]; then
 
     echo "Setting up per-agent directories for $AGENT_ID..."
 
-    # IMPORTANT: The shared disk is already mounted via `archil mount --shared`
-    # earlier in the entrypoint. That single mount gives this agent READ access
-    # to the ENTIRE disk — including all other agents' directories.
+    # The shared disk is already mounted via `archil mount --shared`.
+    # Read access to ALL directories (including other agents') is automatic.
+    # Here we claim WRITE ownership of this agent's own subdirectories only.
     #
-    # What we're doing here is claiming WRITE ownership of this agent's own
-    # subdirectories only. Other agents' dirs (e.g., thoughts/worker-2/) are
-    # visible and readable but not writable by this agent.
-    #
-    # On Archil --shared mounts, mkdir auto-grants ownership to the creator.
-    # On non-Archil (local dev), this is just a regular mkdir.
+    # IMPORTANT: Top-level dirs (thoughts/, memory/, downloads/, misc/) are
+    # pre-created by the API machine at boot. This ensures our mkdir below
+    # auto-grants delegation at the SUBDIR level (e.g., thoughts/$AGENT_ID),
+    # not the parent level (thoughts/). See Appendix A in the plan for details.
+
     for category in "thoughts" "memory" "downloads" "misc"; do
         AGENT_DIR="$AGENT_SHARED/$category/$AGENT_ID"
+
+        # Create our subdir (auto-grants delegation on $AGENT_ID level)
         mkdir -p "$AGENT_DIR" 2>/dev/null || true
 
-        # Fallback: if dir already existed (previous boot), claim via checkout
+        # Checkout for persistent ownership (survives reboots where dir already exists)
         if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
             sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil checkout "$AGENT_DIR" 2>/dev/null || true
         fi
     done
 
-    # Create standard subdirectories (within owned dirs, so these always succeed)
+    # Create standard subdirectories (within owned dirs, always succeeds)
     mkdir -p "$AGENT_SHARED/thoughts/$AGENT_ID/plans"
     mkdir -p "$AGENT_SHARED/thoughts/$AGENT_ID/research"
     mkdir -p "$AGENT_SHARED/thoughts/$AGENT_ID/brainstorms"
@@ -169,24 +204,41 @@ if [ -n "$AGENT_ID" ]; then
 fi
 ```
 
-**Key clarification**: This block only sets up WRITE ownership for this agent's dirs. **Read access to ALL directories (including other agents') is already provided by the `archil mount --shared` call earlier in the entrypoint.** The lead can `cat /workspace/shared/thoughts/worker-1/plans/foo.md` without any checkout — reads are universal on `--shared` mounts.
+#### 3. Worker entrypoint — retry with backoff (safety net)
+**File**: `docker-entrypoint.sh`
+**Location**: Wrap the mkdir/checkout loop above in a retry mechanism in case workers boot before the API finishes pre-creating dirs:
+
+```bash
+# Safety net: if top-level dirs don't exist yet (API still booting),
+# retry a few times with backoff
+if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
+    for attempt in 1 2 3; do
+        if [ -d "$AGENT_SHARED/thoughts" ]; then
+            break
+        fi
+        echo "Waiting for shared directory structure (attempt $attempt/3)..."
+        sleep 3
+    done
+fi
+```
 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Entrypoint runs without errors: `fly logs -a <app> --no-tail | grep -E "(Checking out|Per-agent directories ready|Error)"`
+- [ ] Entrypoint runs without errors: `fly logs -a <app> --no-tail | grep -E "(Pre-creating|Per-agent directories ready|Error)"`
 - [ ] All machines start successfully: `fly machines list -a <app>` shows all `started`
 - [ ] Agent can write to own dir: SSH in and `echo test > /workspace/shared/thoughts/$AGENT_ID/test.txt`
 - [ ] Agent can read other's dir: SSH in as agent-1 and `cat /workspace/shared/thoughts/agent-2/test.txt`
 
 #### Manual Verification:
-- [ ] Deploy to test swarm (e.g., zynap) and confirm all workers + lead boot cleanly
-- [ ] **ERROR DISCOVERY**: SSH into a worker and attempt `echo test > /workspace/shared/thoughts/OTHER_AGENT_ID/test.txt` — record the exact error message (EPERM? EACCES? "Permission denied"? "Read-only file system"?). This error pattern will be used in Phase 3.
-- [ ] **MULTIPLE CHECKOUTS VALIDATION**: Verify `archil delegations /workspace/shared` shows each agent holding 4 checkouts (thoughts, memory, downloads, misc). This validates that a single Archil client can hold multiple non-overlapping delegations simultaneously — the entire entrypoint design depends on this.
-- [ ] **READ PROPAGATION TEST**: On worker-1, write `echo hello > /workspace/shared/thoughts/worker-1/test.txt`. Then immediately on worker-2, `cat /workspace/shared/thoughts/worker-1/test.txt`. Note any delay. If reads take more than a few seconds to propagate, document this as a known limitation for cross-agent coordination.
-- [ ] Verify existing `thoughts/shared/` directory (if present) is still readable but not writable
+- [ ] Deploy to test swarm and confirm all workers + lead boot cleanly
+- [ ] **DELEGATION CHECK**: `archil delegations /workspace/shared` on each worker shows 4 delegations at the subdir level (e.g., `thoughts/agent-1`, NOT `thoughts/`)
+- [ ] **CROSS-AGENT WRITE BLOCKED**: SSH into worker-1, try `echo test > /workspace/shared/thoughts/agent-2/test.txt` — verify "Read-only file system" error
+- [ ] **CROSS-AGENT READ WORKS**: SSH into worker-1, `cat /workspace/shared/thoughts/agent-2/test.txt` — verify content is readable
+- [ ] **READ PROPAGATION TEST**: Worker-1 writes a file, worker-2 reads it immediately — note any delay
+- [ ] Verify existing `thoughts/shared/` directory (if present) is still readable
 
-**Implementation Note**: After completing this phase, deploy and test on a live swarm. The error discovery here is critical input for Phase 3. Pause for confirmation before proceeding.
+**Implementation Note**: The error pattern for non-owned writes is confirmed: **"Read-only file system"** (not EPERM/EACCES). This will be used in Phase 3. Pause for confirmation before proceeding.
 
 ---
 
@@ -234,7 +286,7 @@ Update the workspace directory structure description to describe the per-agent l
 ## Phase 3: Hook Guardrails — Write Failure Detection
 
 ### Overview
-Add PostToolUse error detection in `hook.ts` that catches write failures to non-owned directories on the shared disk and returns a helpful hint to the agent. Uses the exact error pattern discovered in Phase 1.
+Add PreToolUse write prevention (primary, proactive) and PostToolUse error detection (secondary, safety net) in `hook.ts` and `pi-mono-extension.ts`. The error pattern for non-owned writes is **"Read-only file system"** (confirmed in Appendix A testing).
 
 ### Changes Required:
 
@@ -397,6 +449,118 @@ After all phases:
 
 ---
 
+## Appendix A: Live Archil Checkout Testing
+
+_Tested 2026-03-11 on `swarm-test-archil` (Fly.io, AMS region). Two worker machines (`test-agent-1`, `test-agent-2`) with a shared Archil disk._
+
+### Test environment
+```
+App: swarm-test-archil (deploys/test in agent-swarm-internal)
+Workers: 7810621a9e29e8 (test-agent-1), 683435ef716518 (test-agent-2)
+Shared disk: dsk-00000000000069cb
+```
+
+### Test 1: Multiple checkouts per client ✅
+Worker-2 successfully held 6+ delegations simultaneously:
+```bash
+# On worker-2 after mkdir + checkout:
+archil delegations /workspace/shared
+# Result:
+#   /workspace/shared/thoughts (Active)
+#   /workspace/shared/memory (Active)
+#   /workspace/shared/thoughts/test-agent-2 (Active)
+#   /workspace/shared/misc (Active)
+#   /workspace/shared/memory/test-agent-2 (Active)
+#   /workspace/shared/downloads (Active)
+```
+**Conclusion**: A single Archil client CAN hold multiple non-overlapping delegations.
+
+### Test 2: Parent delegation problem ❌ (discovered)
+Worker-2 ran `mkdir -p /workspace/shared/thoughts/test-agent-2/plans` (first agent to create `thoughts/`):
+```bash
+archil delegations /workspace/shared
+# Result: /workspace/shared/thoughts (Active)  ← owns ALL of thoughts/!
+```
+Worker-1 then tried to create its subdir:
+```bash
+mkdir -p /workspace/shared/thoughts/test-agent-1/plans
+# Result: mkdir: cannot create directory '/workspace/shared/thoughts/test-agent-1': Read-only file system
+```
+**Root cause**: `mkdir -p` auto-grants delegation at the **first new parent directory**. Since `thoughts/` didn't exist, worker-2 got delegation on `thoughts/` (not `thoughts/test-agent-2/`), blocking all other agents.
+
+### Test 3: Cross-agent reads ✅
+Worker-1 successfully read worker-2's file:
+```bash
+# On worker-1:
+cat /workspace/shared/thoughts/test-agent-2/plans/test.txt
+# Result: hello from agent-2
+```
+
+### Test 4: Cross-agent writes blocked ✅
+Worker-1 correctly blocked from writing to worker-2's dir:
+```bash
+echo "intruder" > /workspace/shared/thoughts/test-agent-2/plans/hack.txt
+# Result: bash: /workspace/shared/thoughts/test-agent-2/plans/hack.txt: Read-only file system
+```
+**Error pattern confirmed: "Read-only file system"** (not EPERM or EACCES).
+
+### Test 5: Unmount/remount/checkout fix ✅
+Worker-2 unmounted, remounted, then checked out only its subdir:
+```bash
+archil unmount /workspace/shared
+archil mount --shared --region aws-eu-west-1 $ARCHIL_SHARED_DISK_NAME /workspace/shared
+archil checkout /workspace/shared/thoughts/test-agent-2
+archil checkout /workspace/shared/memory/test-agent-2
+
+archil delegations /workspace/shared
+# Result:
+#   /workspace/shared/thoughts/test-agent-2 (Active)  ← correct! subdir only
+#   /workspace/shared/memory/test-agent-2 (Active)
+```
+**Conclusion**: Unmounting releases ALL delegations. Checkout on existing subdirs grants delegation at the correct level.
+
+### Test 6: Worker-1 mkdir after parent delegation released ✅
+With worker-2 no longer owning `thoughts/` (only `thoughts/test-agent-2`), worker-1 successfully created its subdir:
+```bash
+# On worker-1 (after unmount/remount):
+mkdir -p /workspace/shared/thoughts/test-agent-1/plans
+# Result: exit 0 (success!)
+
+echo "hello from agent-1" > /workspace/shared/thoughts/test-agent-1/plans/my-plan.txt
+# Result: exit 0 (success!)
+
+archil checkout /workspace/shared/thoughts/test-agent-1
+# Result: exit 0
+
+archil delegations /workspace/shared
+# Result: /workspace/shared/thoughts/test-agent-1 (Active)  ← correct!
+```
+
+### Test 7: archil checkout requires existing path ❌
+```bash
+archil checkout /workspace/shared/thoughts/test-agent-2
+# Before dir exists: 'checkout' operation failed because path does not exist
+# After mkdir: exit 0 (success)
+```
+**Conclusion**: `archil checkout` cannot create directories. Path must exist first.
+
+### Summary of findings
+
+| Behavior | Result |
+|----------|--------|
+| Multiple checkouts per client | ✅ Works (6+ simultaneous) |
+| Cross-agent reads | ✅ Works perfectly |
+| Cross-agent write blocking | ✅ "Read-only file system" |
+| `mkdir` delegation level | ⚠️ First NEW parent level |
+| `checkout` on non-existent path | ❌ Fails |
+| Unmount releases all delegations | ✅ Works |
+| Unmount/remount/checkout narrows delegation | ✅ Works |
+| Concurrent subdir ownership | ✅ Works (when parent unowned) |
+
+**Key insight**: The API must pre-create top-level dirs and release ownership before workers boot. This ensures workers' `mkdir thoughts/$AGENT_ID` grants delegation at the subdir level (correct) instead of the parent level (broken).
+
+---
+
 ## Review Errata
 
 _Reviewed: 2026-03-11 by Claude_
@@ -425,3 +589,6 @@ _(none remaining)_
 - [x] Phase 4 item 4 (`work-on-task.md:68`) had wrong change description — corrected: references `shared/memory/`, not `thoughts/shared/` (bot review #2, #5)
 - [x] Research open questions #2 (multiple checkouts) and #3 (read propagation delay) — added explicit validation steps to Phase 1 manual verification (bot review #3)
 - [x] Research open question #4 (AGENT_ID stability) — added orphaned directory note to "What We're NOT Doing" as explicit tech debt (bot review #3)
+- [x] **Parent delegation problem discovered via live testing** — `mkdir -p thoughts/$AGENT_ID/plans` auto-grants delegation on `thoughts/` (the parent), not `thoughts/$AGENT_ID`. Fix: two-phase boot — API pre-creates top-level dirs, workers create subdirs. See Appendix A.
+- [x] **Error pattern confirmed** — non-owned writes produce "Read-only file system" (not EPERM/EACCES). Phase 3 updated.
+- [x] **Research open questions #2 and #3 answered** — multiple checkouts per client: ✅ works. Read propagation: needs live test but reads confirmed working cross-agent.
