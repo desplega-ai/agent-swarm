@@ -2141,7 +2141,7 @@ These files sync to the database automatically when you edit them. They persist 
 
 - Use \`memory-search\` to recall past experience before starting new tasks
 - Write important learnings to \`/workspace/personal/memory/\` files
-- Share useful knowledge to \`/workspace/shared/memory/\` for the swarm
+- Share useful knowledge by writing to \`/workspace/shared/memory/<your-id>/\` so all agents can find it via \`memory-search\`
 
 ## Notes
 

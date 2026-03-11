@@ -269,7 +269,7 @@ Upload a file (image, document, etc.) to a Slack channel or thread. Use inboxMes
 
 **Download file from Slack**
 
-Download a file from Slack by file ID or URL. Files are saved to /workspace/shared/downloads/slack/ by default.
+Download a file from Slack by file ID or URL. Files are saved to /workspace/shared/downloads/{agentId}/slack/ by default.
 
 *No parameters*
 
