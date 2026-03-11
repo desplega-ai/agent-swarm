@@ -1,0 +1,762 @@
+# Create Plan
+
+A thin wrapper that invokes the `desplega:planning` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse autonomy mode from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - If provided file has `autonomy:` in frontmatter, use that as default
+   - Otherwise, ask the user via AskUserQuestion:
+
+   ```
+   How much should I check in with you during planning?
+   - Autopilot: Research and create plan independently, present for final review
+   - Critical questions (Recommended): Ask only for major design decisions
+   - Verbose: Check in at each step, validate approach throughout
+   ```
+
+2. **ALWAYS invoke the `desplega:planning` skill:**
+   - Pass any file paths or task descriptions
+   - Pass the autonomy mode determined above
+   - Let the skill handle all planning logic
+
+3. **If no input provided:**
+   - Respond with:
+   ```
+   I'll help you create a detailed implementation plan. Please provide:
+   1. The task description
+   2. Any relevant context, constraints, or specific requirements
+   3. Links to related research or previous implementations
+   ```
+
+## Example Usage
+
+```
+/create-plan @thoughts/<username|shared>/research/my-feature.md
+/create-plan --autonomy=autopilot implement user authentication
+/create-plan --autonomy=verbose add caching layer
+```
+
+
+ARGUMENTS: thoughts/taras/research/2026-03-11-codex-native-support-feasibility.md
+
+---
+
+Base directory for this skill: /Users/taras/.ccs/instances/work/plugins/cache/desplega-ai-toolbox/desplega/1.5.1/skills/planning
+
+# Planning
+
+You are creating detailed implementation plans through an interactive, iterative process. Be skeptical, thorough, and collaborative.
+
+## Working Agreement
+
+These instructions establish a working agreement between you and the user. The key principles are:
+
+1. **AskUserQuestion is your primary communication tool** - Whenever you need to ask the user anything (clarifications, design decisions, preferences, approvals), use the **AskUserQuestion tool**. Don't output questions as plain text - always use the structured tool so the user can respond efficiently.
+
+2. **Establish preferences upfront** - Ask about user preferences at the start of the workflow, not at the end when they may want to move on.
+
+3. **Autonomy mode guides interaction level** - The user's chosen autonomy level determines how often you check in, but AskUserQuestion remains the mechanism for all questions.
+
+### User Preferences
+
+Before starting planning (unless autonomy is Autopilot), establish these preferences:
+
+**Commit After Each Phase** - Use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like me to create a commit after each phase once manual verification passes?" | 1. Yes, commit after each phase passes (Recommended), 2. No, I'll handle commits myself |
+
+Store this preference and act on it during implementation (see "Commit Integration" section).
+
+**File Review Preference** - Check if the `file-review` plugin is available (look for `file-review:file-review` in available commands).
+
+If file-review plugin is installed, use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like to use file-review for inline feedback on the plan when it's ready?" | 1. Yes, open file-review when plan is ready (Recommended), 2. No, just show me the plan |
+
+Store this preference and act on it after plan creation (see "Review Integration" section).
+
+## When to Use
+
+This skill activates when:
+- User invokes `/create-plan` command
+- Another skill references `**REQUIRED SUB-SKILL:** Use desplega:planning`
+- User asks to plan an implementation or create a technical spec
+
+## Autonomy Mode
+
+At the start of planning, adapt your interaction level based on the autonomy mode:
+
+| Mode | Behavior |
+|------|----------|
+| **Autopilot** | Research independently, create complete plan, present for final review only |
+| **Critical** (Default) | Get buy-in at major decision points, present design options for approval |
+| **Verbose** | Check in at each step, validate understanding, confirm before each phase |
+
+The autonomy mode is passed by the invoking command. If not specified, default to **Critical**.
+
+## Process Steps
+
+### Step 1: Context Gathering & Initial Analysis
+
+1. **Read all mentioned files immediately and FULLY:**
+   - Research documents, related plans, JSON/data files
+   - **IMPORTANT**: Use Read tool WITHOUT limit/offset parameters
+   - **CRITICAL**: Read files yourself before spawning sub-tasks
+
+2. **Spawn initial research tasks:**
+   - Use **codebase-locator** agent to find all files related to the task
+   - Use **codebase-analyzer** agent to understand current implementation
+   - Use **thoughts-locator** agent to find existing thoughts documents
+   - Use context7 MCP for library/framework insights
+
+3. **Read all files identified by research tasks**
+
+4. **Analyze and verify understanding:**
+   - Identify discrepancies or misunderstandings
+   - Note assumptions needing verification
+
+5. **Present understanding and questions (if not Autopilot):**
+
+   First, present your findings as text:
+   ```
+   Based on the research of the codebase, I understand we need to [summary].
+
+   I've found that:
+   - [Current implementation detail with file:line reference]
+   - [Relevant pattern or constraint discovered]
+   ```
+
+   Then, if there are questions that research couldn't answer, use **AskUserQuestion** with:
+
+   | Question | Options |
+   |----------|---------|
+   | "[Specific technical question]" | Provide relevant options based on the choices available |
+   | "[Design preference question]" | Provide relevant options based on the choices available |
+
+### Step 2: Research & Discovery
+
+1. **If the user corrects any misunderstanding:**
+   - Spawn new research tasks to verify
+   - Read specific files/directories mentioned
+
+2. **Create a research todo list** using TodoWrite
+
+3. **Spawn parallel sub-tasks:**
+   - **codebase-locator** - Find specific files
+   - **codebase-analyzer** - Understand implementation details
+   - **codebase-pattern-finder** - Find similar features to model after
+
+4. **Present findings and design options (if not Autopilot):**
+
+   First, present findings as text:
+   ```
+   **Current State:**
+   - [Key discovery about existing code]
+   ```
+
+   Then, use **AskUserQuestion** to present design options:
+
+   | Question | Options |
+   |----------|---------|
+   | "Which approach aligns best with your vision?" | 1. [Option A] - [brief description], 2. [Option B] - [brief description] |
+
+   Include pros/cons in the option descriptions to help the user decide.
+
+### Step 3: Plan Structure Development
+
+1. **Create initial plan outline (if not Autopilot):**
+
+   Present the outline as text:
+   ```
+   Here's my proposed plan structure:
+
+   ## Overview
+   [1-2 sentence summary]
+
+   ## Implementation Phases:
+   1. [Phase name] - [what it accomplishes]
+   2. [Phase name] - [what it accomplishes]
+   ```
+
+   Then, use **AskUserQuestion** to get approval:
+
+   | Question | Options |
+   |----------|---------|
+   | "Does this phasing make sense?" | 1. Yes, proceed with this structure, 2. No, let's discuss changes |
+
+2. **Get feedback on structure** before writing details
+
+### Step 4: Detailed Plan Writing
+
+Before proceeding, exit plan mode to write the plan file.
+
+Write the plan to `thoughts/<username|shared>/plans/YYYY-MM-DD-description.md`.
+
+**Path selection:** Use the user's name (e.g., `thoughts/taras/plans/`) if known from context. Fall back to `thoughts/shared/plans/` when unclear.
+
+**CRITICAL**: Every phase MUST include a `### Success Criteria:` section with both `#### Automated Verification:` and `#### Manual Verification:` subsections. See "Success Criteria Requirements" section at the end of this document for the exact format.
+
+**Template:** Read and follow the template at `cc-plugin/base/skills/planning/template.md`
+
+The template includes:
+- Standard plan sections (Overview, Current State, Desired End State, etc.)
+- Multiple phase examples with proper Success Criteria structure
+- Correct heading hierarchy throughout
+
+### Step 5: Review and Iterate
+
+1. **Present draft plan location:**
+   ```
+   I've created the implementation plan at:
+   `thoughts/<username|shared>/plans/YYYY-MM-DD-description.md`
+
+   Please review it.
+   ```
+
+2. **Iterate based on feedback** (if not Autopilot)
+
+3. **Offer structured review:**
+   - After iteration, offer: "Would you like me to run `/review` on this plan for completeness and gap analysis?"
+   - If yes, invoke the `desplega:reviewing` skill on the plan document
+
+4. **Finalize the plan** - DO NOT START implementation
+
+5. **Workflow handoff:**
+   After the plan is finalized (and optionally reviewed), use **AskUserQuestion** with:
+
+   | Question | Options |
+   |----------|---------|
+   | "The plan is ready. What's the next step?" | 1. Implement this plan (→ `/implement-plan`), 2. Run a review first (→ `/review`), 3. Done for now (park the plan) |
+
+   Based on the answer:
+   - **Implement**: Suggest the `/implement-plan` command with the plan file path
+   - **Review**: Invoke the `desplega:reviewing` skill on the plan document
+   - **Done**: Set the plan's `status` to `ready` or `parked` as appropriate
+
+## Review Integration
+
+If the `file-review` plugin is available and the user selected "Yes" during User Preferences setup:
+- After creating plans, invoke `/file-review:file-review <path>`
+- If user selected "No" or autonomy mode is Autopilot, skip this step
+
+## Commit Integration
+
+If the user selected "Yes" to commits during User Preferences setup:
+- After each phase's manual verification passes, create a commit with a descriptive message
+- Commit message format: `[phase N] <brief description of what the phase accomplished>`
+- Only commit after explicit confirmation that manual verification passed
+- If user selected "No", skip commits entirely - the user will handle them
+
+## Important Guidelines
+
+1. **Be Skeptical**: Question vague requirements, verify with code
+2. **Be Interactive**: Don't write full plan in one shot (unless Autopilot)
+3. **Be Thorough**: Read context files COMPLETELY, include file:line references
+4. **Be Practical**: Focus on incremental, testable changes
+5. **No Open Questions**: Research or clarify immediately, don't leave questions in plan
+
+## Success Criteria Requirements (MANDATORY)
+
+**Every phase MUST have a Success Criteria section.** Plans without proper success criteria are incomplete.
+
+### Required Structure
+
+Each phase must end with this exact structure:
+
+```markdown
+### Success Criteria:
+
+#### Automated Verification:
+- [ ] [Command that can be run]: `command here`
+- [ ] [Another automated check]: `command here`
+
+#### Manual Verification:
+- [ ] [Human testing step]
+- [ ] [Another manual check]
+
+**Implementation Note**: [When to pause for confirmation]
+```
+
+### Heading Hierarchy
+
+Use these exact heading levels (this is critical for consistency):
+- `### Success Criteria:` (h3) - section header
+- `#### Automated Verification:` (h4) - subsection
+- `#### Manual Verification:` (h4) - subsection
+
+### What Goes Where
+
+| Type | Examples |
+|------|----------|
+| **Automated** | `make test`, `npm run lint`, `tsc --noEmit`, `ls path/to/file`, `grep pattern file` |
+| **Manual** | UI interactions, visual checks, performance testing, edge case validation |
+
+### Validation Checklist
+
+Before finalizing any plan, verify:
+- [ ] Every phase has `### Success Criteria:` section
+- [ ] Each has `#### Automated Verification:` with runnable commands
+- [ ] Each has `#### Manual Verification:` with human testing steps
+- [ ] All items use checkbox format `- [ ]`
+- [ ] Automated checks are actual commands (not descriptions)
+
+
+ARGUMENTS: thoughts/taras/research/2026-03-11-codex-native-support-feasibility.md --autonomy=autopilot
+
+---
+
+<task-notification>
+<task-id>af325665586cbc465</task-id>
+<tool-use-id>toolu_01QytZCabiftwzBCQa17DHfT</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/af325665586cbc465.output</output-file>
+<status>completed</status>
+<summary>Agent "Analyze runner + Docker setup" completed</summary>
+<result>You've hit your limit · resets 9pm (Europe/Madrid)</result>
+<usage><total_tokens>10</total_tokens><tool_uses>4</tool_uses><duration_ms>5909</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/af325665586cbc465.output
+
+---
+
+<task-notification>
+<task-id>afa7abebe28b674e5</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/afa7abebe28b674e5.output</output-file>
+<status>completed</status>
+<summary>Agent "Analyze deep reference doc" completed</summary>
+<result>You've hit your limit · resets 9pm (Europe/Madrid)</result>
+<usage><total_tokens>4</total_tokens><tool_uses>1</tool_uses><duration_ms>3474</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/afa7abebe28b674e5.output
+
+---
+
+<task-notification>
+<task-id>a0e533da153bb9472</task-id>
+<tool-use-id>toolu_01QLeLWqs3Dm1h9BDNJt9pxt</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/a0e533da153bb9472.output</output-file>
+<status>completed</status>
+<summary>Agent "Analyze provider abstraction" completed</summary>
+<result>You've hit your limit · resets 9pm (Europe/Madrid)</result>
+<usage><total_tokens>30</total_tokens><tool_uses>7</tool_uses><duration_ms>14521</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/a0e533da153bb9472.output
+
+---
+
+<task-notification>
+<task-id>a8f5328791bc79ab5</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/a8f5328791bc79ab5.output</output-file>
+<status>completed</status>
+<summary>Agent "Analyze UI session log viewer" completed</summary>
+<result>You've hit your limit · resets 9pm (Europe/Madrid)</result>
+<usage><total_tokens>0</total_tokens><tool_uses>0</tool_uses><duration_ms>192</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/a8f5328791bc79ab5.output
+
+---
+
+continue where you left, you may re-trigger agents
+
+---
+
+Base directory for this skill: /Users/taras/.ccs/instances/work/plugins/cache/desplega-ai-toolbox/desplega/1.5.1/skills/reviewing
+
+# Reviewing
+
+You are performing a structured critique of a document (research, plan, or brainstorm) to identify gaps, weaknesses, and quality issues.
+
+## Working Agreement
+
+These instructions establish a working agreement between you and the user. The key principles are:
+
+1. **AskUserQuestion is your primary communication tool** - Whenever you need to ask the user anything (clarifications, preferences, decisions), use the **AskUserQuestion tool**. Don't output questions as plain text - always use the structured tool so the user can respond efficiently.
+
+2. **Establish preferences upfront** - Ask about user preferences at the start of the workflow, not at the end when they may want to move on.
+
+3. **Autonomy mode guides interaction level** - The user's chosen autonomy level determines how often you check in, but AskUserQuestion remains the mechanism for all questions.
+
+### User Preferences
+
+Before starting review (unless autonomy is Autopilot), establish these preferences:
+
+**Output Mode** - Use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "How should I present the review findings?" | 1. Append errata section to the document (Recommended), 2. Write a separate review file to thoughts/*/reviews/ |
+
+**File Review Preference** - Check if the `file-review` plugin is available (look for `file-review:file-review` in available commands).
+
+If file-review plugin is installed, use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like to use file-review for inline feedback after the automated review?" | 1. Yes, open file-review after review (Recommended), 2. No, the automated review is sufficient |
+
+Store these preferences and act on them during the review process.
+
+## When to Use
+
+This skill activates when:
+- User invokes `/review` command
+- Another skill references the reviewing skill at completion
+- User asks to review, critique, or check a document
+
+## Autonomy Mode
+
+At the start of review, adapt your interaction level based on the autonomy mode:
+
+| Mode | Behavior |
+|------|----------|
+| **Autopilot** | Run full review, auto-fix minor issues, present summary at end |
+| **Critical** (Default) | Ask about Critical/Important findings, auto-fix Minor ones |
+| **Verbose** | Walk through each finding, confirm before any changes |
+
+The autonomy mode is passed by the invoking command. If not specified, default to **Critical**.
+
+## Process Steps
+
+### Step 1: Read & Classify
+
+Read the input document fully. Determine the document type from its path and content structure:
+
+| Path contains | Type |
+|---------------|------|
+| `/research/` | Research document |
+| `/plans/` | Plan |
+| `/brainstorms/` | Brainstorm |
+
+If the type is ambiguous, infer from content structure or use **AskUserQuestion** to clarify.
+
+### Step 2: Structural Check
+
+Verify required sections exist based on document type:
+
+**Research documents:**
+- YAML frontmatter with required fields (date, researcher, topic, status)
+- Research Question section
+- Summary section
+- Detailed Findings with file:line references
+- Code References table
+- Open Questions section
+
+**Plans:**
+- YAML frontmatter with required fields (date, planner, topic, status)
+- Overview section
+- Current State Analysis
+- Desired End State with Key Discoveries
+- What We're NOT Doing
+- Phases with Changes Required and Success Criteria (both Automated and Manual Verification)
+- Quick Verification Reference
+
+**Brainstorms:**
+- YAML frontmatter with required fields (date, author, topic, status)
+- Context section
+- Exploration section with Q&A pairs
+- Synthesis section
+- Next Steps section
+
+### Step 3: Content Analysis
+
+Apply type-specific quality criteria:
+
+**Research documents:**
+- Are findings supported by specific file:line references?
+- Are there claims without evidence from the codebase?
+- Are there obvious areas that weren't investigated?
+- Are open questions actually open (not answerable from the findings)?
+
+**Plans:**
+- Are there missing phases or gaps in the implementation sequence?
+- Are success criteria specific enough to be actionable?
+- Are there unstated assumptions about the codebase?
+- Is error handling or rollback addressed?
+- Is there scope creep risk (doing more than stated)?
+
+**Brainstorms:**
+- Were important angles left unexplored?
+- Were conclusions reached prematurely before sufficient exploration?
+- Are constraints and requirements clearly identified?
+- Is the document ready to feed into research or planning?
+
+### Step 4: Gap Identification
+
+Look for what's missing or assumed:
+- Cross-reference claims against the codebase if needed (spawn **codebase-analyzer** agent for verification)
+- Identify unstated assumptions
+- Check for internal contradictions
+- Verify external references are still valid
+
+### Step 5: Present Findings
+
+Categorize all findings into three severity levels:
+
+| Severity | Meaning | Action |
+|----------|---------|--------|
+| **Critical** | Blocks correctness or completeness — must be addressed | Discuss with user |
+| **Important** | Significant gap or weakness — should be addressed | Discuss with user (or auto-fix in Autopilot) |
+| **Minor** | Formatting, typos, small inconsistencies | Auto-fix unless Verbose mode |
+
+Present a summary as text output with findings grouped by severity.
+
+### Step 6: Apply or Discuss
+
+Based on output mode preference:
+
+**If "Append errata":**
+- Auto-fix Minor issues directly in the document
+- For Critical/Important items, append a `## Review Errata` section at the end of the document with:
+  ```
+  ## Review Errata
+
+  _Reviewed: YYYY-MM-DD by [reviewer]_
+
+  ### Critical
+  - [ ] [Finding description and recommended action]
+
+  ### Important
+  - [ ] [Finding description and recommended action]
+
+  ### Resolved
+  - [x] [Minor issue] — auto-fixed
+  ```
+
+**If "Separate file":**
+- Write review to `thoughts/*/reviews/YYYY-MM-DD-review-of-<original-slug>.md`
+- Include all findings with references back to the original document
+
+### Step 7: Workflow Handoff
+
+After the review is complete, determine the document type (from frontmatter, file path, or content) and propose the appropriate next step.
+
+Use **AskUserQuestion** with context-dependent options:
+
+**If reviewing a brainstorm document:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this brainstorm?" | 1. Start research (→ `/research`), 2. Create a plan directly (→ `/create-plan`), 3. Done for now |
+
+**If reviewing a research document:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this research?" | 1. Create a plan (→ `/create-plan`), 2. Done for now |
+
+**If reviewing a plan document:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this plan?" | 1. Start implementation (→ `/implement-plan`), 2. Done for now |
+
+**If reviewing a post-implementation verification:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next?" | 1. Done — mark as complete, 2. Address remaining items |
+
+**If document type is unclear**, ask a generic question:
+
+| Question | Options |
+|----------|---------|
+| "Review complete. Would you like to proceed to the next workflow step?" | 1. Yes, suggest next step, 2. Done for now |
+
+## No Rewriting Rule
+
+**CRITICAL**: The reviewer identifies issues — the reviewer does NOT rewrite the document. Present findings and let the original author address them. The only exception is Minor auto-fixes (typos, formatting).
+
+## Review Integration
+
+If the `file-review` plugin is available and the user selected "Yes" during User Preferences setup:
+- After the automated review, invoke `/file-review:file-review <path>` for inline human comments
+- Process feedback with `file-review:process-review` skill
+- If user selected "No" or autonomy mode is Autopilot, skip this step
+
+
+ARGUMENTS: do a final review of the research in the bg and let me know your thoughts, then ill think if ill review it myself
+
+---
+
+<task-notification>
+<task-id>a6e6f3393a6a6bfff</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/a6e6f3393a6a6bfff.output</output-file>
+<status>completed</status>
+<summary>Agent "Review plan against codebase" completed</summary>
+<result>
+
+I now have all the information needed. Let me compile the full verification report.
+
+---
+
+## Plan Verification Report: Native Codex Support
+
+### 1. Provider Types Accuracy (`src/providers/types.ts`)
+
+- **VERIFIED**: `ProviderAdapter` interface has `name`, `createSession(config)`, and `canResume(sessionId)` -- matches plan description exactly.
+- **VERIFIED**: `ProviderSession` interface has `sessionId`, `onEvent()`, `waitForCompletion()`, `abort()` -- matches plan.
+- **VERIFIED**: `ProviderEvent` union has all types the plan references: `session_init`, `message`, `tool_start`, `tool_end`, `result`, `error`, `raw_log`, `raw_stderr`, `custom`.
+- **VERIFIED**: `ProviderSessionConfig` has `resumeSessionId` at line 40 and `additionalArgs` at line 44.
+- **VERIFIED**: `CostData` fields match what the plan describes. 
+- **INACCURATE**: The plan's `CostData` example (line 283-295) omits `cacheWriteTokens` which exists in the real interface at `types.ts:10`. Minor, but the Codex adapter should account for it.
+
+### 2. Factory Registration (`src/providers/index.ts`)
+
+- **VERIFIED**: Switch statement structure at lines 16-23 with `"claude"` and `"pi"` cases, plus a `default` that throws. The plan's proposed addition of a `"codex"` case is structurally correct.
+- **VERIFIED**: Error message currently reads `Supported: claude, pi` -- plan correctly notes it needs updating.
+
+### 3. Pi-mono `raw_log` Format (`src/providers/pi-mono-adapter.ts:181-254`)
+
+- **VERIFIED**: The plan's claimed JSON format for `raw_log` events matches exactly:
+  - `message_end` -> `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"..."}],"model":"..."}}` (lines 196-206)
+  - `tool_execution_start` -> `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"...","name":"...","input":"..."}],"model":"..."}}` (lines 214-226)
+  - `tool_execution_end` -> `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_result","tool_use_id":"...","content":"..."}]}}` (lines 230-246)
+- **VERIFIED**: Deduplication via `lastEmittedMessage` at line 147, checked at line 194.
+- **INACCURATE**: Plan line 252 says the format for tool start is `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"item_001","name":"Bash","input":{"command":"bun test"}}],"model":"o3"}}`. The pi-mono adapter uses the field name `input` (line 221), not `args`. The plan's example is correct on this point (it uses `input`), so this is fine.
+- **MISSING**: The pi-mono adapter also handles `auto_retry_start` events (lines 248-253), emitting them as `raw_stderr`. The plan does not mention any Codex equivalent, though this may not be applicable.
+
+### 4. Runner Event Handling (`src/commands/runner.ts:1098-1200`)
+
+- **VERIFIED**: `spawnProviderProcess` at line 1098 creates a `ProviderSessionConfig`, calls `adapter.createSession(config)`, then subscribes via `session.onEvent()` at line 1149.
+- **VERIFIED**: `session_init` event saves the provider session ID at lines 1151-1156 via `saveProviderSessionId()`.
+- **VERIFIED**: `raw_log` events are buffered via `LogBuffer` at lines 1163-1181, with `LOG_BUFFER_SIZE` and `LOG_FLUSH_INTERVAL_MS` controlling flush.
+- **VERIFIED**: The `result` event case at lines 1158-1162 explicitly defers cost saving to `waitForCompletion().then()` (line 1190).
+- **VERIFIED**: The runner is provider-agnostic -- it interacts only through the `ProviderAdapter`/`ProviderSession` interfaces. The plan's claim that no runner changes are needed (beyond Phase 4's hook equivalents) is accurate.
+
+### 5. Runner Resume Logic (`src/commands/runner.ts:1819-1832`)
+
+- **VERIFIED**: Resume uses `additionalArgs` with `--resume` flag appended at lines 1820-1832.
+- **VERIFIED**: Prefers task's own `claudeSessionId` first (line 1821), falls back to parent's session ID (lines 1826-1831).
+- **VERIFIED**: `resumeSessionId` is NOT set in the runner's `ProviderSessionConfig` anywhere (grep confirms zero usages in runner.ts). The plan's claim that `resumeSessionId` is "passive" is accurate.
+- **VERIFIED**: `canResume()` is defined on both adapters but never called by the runner (grep shows no calls in runner.ts). The plan correctly identifies this.
+
+### 6. Docker Entrypoint Auth (`docker-entrypoint.sh:1-19`)
+
+- **VERIFIED**: Lines 7-19 show the auth validation pattern: `if "$HARNESS_PROVIDER" = "pi"` checks for pi-specific auth, `else` falls through to Claude auth checking `CLAUDE_CODE_OAUTH_TOKEN`.
+- **VERIFIED**: The plan's proposed `elif [ "$HARNESS_PROVIDER" = "codex" ]` insertion point and pattern is structurally correct -- it would go between the `pi` block (line 7) and the `else` (line 13).
+- **INACCURATE**: The plan (line 392-398) shows the codex block as an `elif` after the pi block. This is correct structurally, but the plan does not mention that the current `else` block (Claude) at line 13 would need to become `elif [ "$HARNESS_PROVIDER" = "claude" ]` or remain as the default `else`. As written, adding `elif codex` before the existing `else` would work correctly since `else` catches Claude as the default.
+
+### 7. Dockerfile CLI Installs (`Dockerfile.worker:76-86`)
+
+- **VERIFIED**: Claude CLI installed at line 77 via `curl -fsSL https://claude.ai/install.sh | bash`.
+- **VERIFIED**: Pi-mono installed at lines 83-84 via `sudo npm install -g @mariozechner/pi-coding-agent`.
+- **VERIFIED**: The plan's proposed insertion point "after the pi-mono install block (line ~85)" is accurate -- line 85 sets `PI_PACKAGE_DIR`, and the Codex install would go after that.
+- **VERIFIED**: The plan correctly proposes using `npm install -g @openai/codex@<version>`, following the same pattern as pi-mono.
+
+### 8. Hook Equivalents in Pi-mono (`src/providers/pi-mono-extension.ts`)
+
+- **VERIFIED**: Pi-mono implements hooks via an extension factory pattern at line 380 (`createSwarmHooksExtension`), registering handlers for `session_start`, `tool_call`, `tool_result`, `context`, `input`, and `session_shutdown`.
+- **VERIFIED**: Cancellation check is in `tool_call` handler at lines 407-419, using `isTaskCancelled()` which calls `GET /cancelled-tasks?taskId=...`.
+- **VERIFIED**: Heartbeat is in `tool_result` handler at lines 480-485, using `PUT /api/active-sessions/heartbeat/{taskId}`.
+- **VERIFIED**: Tool loop detection is in `tool_call` handler at lines 422-441, using imported `checkToolLoop` from `../hooks/tool-loop-detection`.
+- **VERIFIED**: Memory auto-index is in `tool_result` handler at lines 536-541, checking paths against `/workspace/personal/memory/` and `/workspace/shared/memory/`.
+
+**MISSING -- Plan significantly underestimates hook scope**: The plan's Phase 4 lists only cancellation, heartbeat, loop detection, and memory auto-index. The pi-mono extension has substantially more functionality that the plan does not address:
+
+| Pi-mono Extension Feature | Plan Mentions? |
+|---|---|
+| Cancellation check (`tool_call`) | Yes |
+| Heartbeat (`tool_result`) | Yes |
+| Tool loop detection (`tool_call`) | Yes |
+| Memory auto-index (`tool_result`) | Yes |
+| **Ping server** (`session_start`) | No |
+| **Clear tool history** (`session_start`) | No |
+| **Concurrent context injection** for leads (`session_start`) | No |
+| **Poll-task blocking** (`tool_call`) | No |
+| **Shared disk write prevention** (`tool_call` + `tool_result`) | No |
+| **Activity timestamp** (`tool_result`) | No |
+| **Identity file sync** (SOUL.md, IDENTITY.md, TOOLS.md) (`tool_result` + `session_shutdown`) | No |
+| **Setup script sync** (`tool_result` + `session_shutdown`) | No |
+| **Goal reminder on context compaction** (`context`) | No |
+| **Cancellation at prompt start** (`input`) | No |
+| **Session summarization** (`session_shutdown`) | No |
+| **Mark agent offline** (`session_shutdown`) | No |
+| **Store-progress reminders** (`tool_result`) | No |
+
+The plan says "duplicate the pattern" for cancellation/heartbeat/loop detection, but omits ~12 additional behaviors. Many of these (server ping, activity timestamp, tool history clear, agent offline) are operationally important for the swarm to function correctly. Without activity timestamps, the agent will appear stale. Without ping/close, the agent won't show proper online/offline status.
+
+### 9. Session Log Viewer Format (`new-ui/src/components/shared/session-log-viewer.tsx`)
+
+- **VERIFIED**: The viewer parses JSON from `log.content` at line 64.
+- **VERIFIED**: Expected structure is `{ type?: string, message?: { role?: string, content?: unknown, model?: string } }` at lines 59-62.
+- **VERIFIED**: Supports `ContentBlock` types: `text`, `tool_use`, `tool_result`, `thinking` (lines 10-33).
+- **VERIFIED**: `tool_use` expects `id`, `name`, `input` fields (lines 90-96).
+- **VERIFIED**: `tool_result` expects `tool_use_id`, `content` fields (lines 97-104).
+- **VERIFIED**: `thinking` expects `thinking` field (lines 88-89).
+- **VERIFIED**: Role determination at lines 111-112: `parsed.type === "assistant"` OR `parsed.message.role === "assistant"` maps to `"assistant"`, else `"user"`.
+- **VERIFIED**: The plan's proposed `raw_log` JSON formats (Phase 3) match exactly what this viewer expects to parse.
+
+### 10. Other Files in `src/providers/`
+
+The plan does not mention:
+- **`src/providers/pi-mono-mcp-client.ts`** -- A standalone MCP HTTP client used by pi-mono to discover and call swarm MCP tools. The Codex adapter needs equivalent MCP connectivity. However, Codex connects to MCP via its `config.toml` `[mcp_servers]` section (Phase 5), so it handles MCP natively -- this file would not be needed. The plan's approach is correct here.
+- **`src/providers/claude-adapter.ts`** -- The plan mentions it for reference but does not detail it. Notably, the Claude adapter has an internal auto-retry mechanism (lines 280-315) where on certain failures it strips `--resume` from args and retries. The plan does not discuss whether Codex needs similar retry logic.
+
+### Additional Findings
+
+**No TODO/FIXME/HACK comments** exist in any file under `src/providers/`.
+
+**`resumeSessionId` in Claude adapter**: At `claude-adapter.ts:292`, `resumeSessionId` is explicitly set to `undefined` during retry, confirming it is deliberately unused in practice. The plan's characterization as "passive" is accurate.
+
+**Phase ordering assessment**: The phases have correct dependencies:
+- Phase 1 (JSON-RPC client) is foundational -- no dependencies.
+- Phase 2 (adapter lifecycle) depends on Phase 1.
+- Phase 3 (event mapping) depends on Phase 2.
+- Phase 4 (hook equivalents) depends on Phase 3 for the notification handler.
+- Phase 5 (Docker) is independent of Phases 3-4 and could theoretically run in parallel with them.
+- Phase 6 (unit tests) depends on Phases 1-4.
+- Phase 7 (E2E) depends on everything.
+
+The ordering is sound.
+
+**Cancellation in the runner**: The plan's Phase 4 proposes checking cancellation inside the adapter's event handler (on `item/started`). The runner itself also checks cancellation in its polling loop at `runner.ts:1937-1964`, calling `session.abort()`. These are complementary -- the runner-level check handles cancellation between tool calls (polling interval), while the adapter-level check handles it during tool execution. Both pi-mono (via extension) and Claude (via hooks) do adapter-level cancellation. The plan's approach is consistent.
+
+### Summary of Issues
+
+**VERIFIED claims**: 23
+
+**INACCURATE claims**: 2 (minor)
+1. `CostData` example omits `cacheWriteTokens` field
+2. Entrypoint `elif` insertion -- technically works as described but worth noting the `else` default behavior
+
+**MISSING from plan**: 3 (one significant)
+1. **Significant**: ~12 hook-equivalent behaviors from pi-mono-extension.ts are not mentioned in Phase 4. Without activity timestamps, server pings, agent offline marking, identity file sync, goal reminders, session summarization, and poll-task blocking, a Codex worker will have degraded operational parity with Claude/pi-mono workers.
+2. Claude adapter has auto-retry logic on failure -- plan does not discuss whether Codex needs this.
+3. `pi-mono-mcp-client.ts` exists as a provider utility file not mentioned by the plan (correctly not needed for Codex, but worth acknowledging).
+
+### Key Files Referenced
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/thoughts/taras/plans/2026-03-11-codex-native-support.md`
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/types.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/index.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/pi-mono-adapter.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/pi-mono-extension.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/pi-mono-mcp-client.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/claude-adapter.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/commands/runner.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/docker-entrypoint.sh`
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/Dockerfile.worker`
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/new-ui/src/components/shared/session-log-viewer.tsx`</result>
+<usage><total_tokens>54795</total_tokens><tool_uses>18</tool_uses><duration_ms>132076</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/a6e6f3393a6a6bfff.output
+
+---
+
+ok please tackle them! make it consistent!
+
+---
+
+nice, continue if there are things left from the feedback
+
+---
+
+commit and push a pr with it pls
