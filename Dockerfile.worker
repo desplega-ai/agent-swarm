@@ -39,7 +39,7 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     vim nano \
     build-essential make cmake gcc g++ \
     python3 python3-pip python3-venv \
-    jq tree htop unzip zip tar gzip sqlite3 \
+    jq tree htop unzip zip tar gzip sqlite3 fuse3 libfuse2 \
     openssh-client \
     sudo \
     nodejs \
@@ -126,6 +126,9 @@ RUN npm install -g \
     @desplega.ai/qa-use@2.8.7 \
     && qa-use install-deps
 
+# Install archil CLI for FUSE/R2-backed disk mounts
+RUN curl https://s3.amazonaws.com/archil-client/install | sh
+
 # Copy binary from builder (changes on every code change — keep late)
 COPY --from=builder /build/agent-swarm /usr/local/bin/agent-swarm
 RUN chmod +x /usr/local/bin/agent-swarm
@@ -146,13 +149,13 @@ RUN chmod +x /docker-entrypoint.sh
 USER worker
 WORKDIR /workspace
 
-# Create static workspace directories (build-time)
-RUN mkdir -p /workspace/personal /workspace/shared/thoughts/shared/plans \
-    /workspace/shared/thoughts/shared/research \
-    /workspace/personal/memory /workspace/shared/memory
+# Create mount-point directories (must be empty for Archil FUSE mounts)
+RUN mkdir -p /workspace/personal /workspace/shared
 
+# NOTE: Do NOT use VOLUME for /workspace/shared or /workspace/personal.
+# Fly.io's init sets up volume mount points that prevent FUSE from mounting
+# on top of them (EINVAL). Archil FUSE mounts replace Docker volumes here.
 VOLUME ["/logs"]
-VOLUME ["/workspace/personal", "/workspace/shared"]
 
 # Expose service port for PM2 processes
 EXPOSE 3000

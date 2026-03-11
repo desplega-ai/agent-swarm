@@ -1,0 +1,23 @@
+{
+  "name": "content-strategist",
+  "displayName": "Content Strategist",
+  "description": "Content strategy and analytics specialist that decides what to write, manages the content calendar, and feeds performance data back to the review process",
+  "version": "1.0.0",
+  "category": "official",
+  "icon": "bar-chart",
+  "author": "Agent Swarm <contact@agent-swarm.dev>",
+  "createdAt": "2026-03-10",
+  "lastUpdatedAt": "2026-03-10",
+  "agentDefaults": {
+    "role": "worker",
+    "capabilities": ["content-strategy", "analytics", "seo-analysis"],
+    "maxTasks": 2
+  },
+  "files": {
+    "claudeMd": "CLAUDE.md",
+    "soulMd": "SOUL.md",
+    "identityMd": "IDENTITY.md",
+    "toolsMd": "TOOLS.md",
+    "setupScript": "start-up.sh"
+  }
+}

@@ -23,6 +23,55 @@ if [ -z "$API_KEY" ]; then
     exit 1
 fi
 
+# ---- Archil disk mounts ----
+# Skipped when ARCHIL_MOUNT_TOKEN is not set (local dev / environments without Archil)
+if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
+    echo ""
+    echo "=== Archil Mount ==="
+
+    # Ensure /dev/fuse exists (needed in some VM environments like Fly.io Firecracker)
+    if [ ! -e /dev/fuse ]; then
+        sudo mknod /dev/fuse c 10 229
+        sudo chmod 666 /dev/fuse
+    fi
+
+    if [ -n "$ARCHIL_SHARED_DISK_NAME" ]; then
+        echo "Mounting shared disk ($ARCHIL_SHARED_DISK_NAME) at /workspace/shared..."
+        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --shared "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
+    fi
+
+    # --- API: Pre-create top-level shared directories ---
+    # The API boots first (deploy script waits for "started" state).
+    # We create the top-level category dirs so that workers' mkdir
+    # auto-grants delegation at the subdir level (not the parent).
+    # Then we unmount/remount to release the parent delegations.
+    if [ "$AGENT_ROLE" = "api" ] && [ -n "$ARCHIL_SHARED_DISK_NAME" ]; then
+        echo "Pre-creating shared directory structure..."
+        for category in thoughts memory downloads misc; do
+            mkdir -p "/workspace/shared/$category" 2>/dev/null || true
+        done
+        # Release parent delegations (mkdir auto-granted them)
+        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil unmount /workspace/shared 2>/dev/null || true
+        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --shared \
+            --region "$ARCHIL_REGION" "$ARCHIL_SHARED_DISK_NAME" /workspace/shared
+        echo "Shared directory structure ready (delegations released)"
+    fi
+
+    if [ -n "$ARCHIL_PERSONAL_DISK_NAME" ]; then
+        echo "Mounting personal disk ($ARCHIL_PERSONAL_DISK_NAME) at /workspace/personal..."
+        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
+    fi
+    echo "===================="
+fi
+# ---- End Archil mount ----
+
+# Create personal workspace subdirectories (after FUSE mount, since Archil
+# requires empty mount points — these dirs can't exist at build time).
+# Personal disk is exclusive (rw), so this always succeeds.
+# NOTE: Shared disk subdirectories are created per-agent below (see
+# "Setting up per-agent directories" block), NOT here.
+mkdir -p /workspace/personal/memory 2>/dev/null || true
+
 # Role defaults to worker, can be set to "lead"
 ROLE="${AGENT_ROLE:-worker}"
 MCP_URL="${MCP_BASE_URL:-http://host.docker.internal:3013}"
@@ -92,6 +141,12 @@ echo "=========================="
 # Cleanup function for graceful shutdown
 cleanup() {
     echo ""
+    # Unmount Archil disks (flushes pending data to backing store)
+    if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
+        echo "Unmounting Archil disks..."
+        archil unmount /workspace/shared 2>/dev/null || true
+        archil unmount /workspace/personal 2>/dev/null || true
+    fi
     echo "Shutting down PM2 processes..."
     pm2 kill 2>/dev/null || true
 }
@@ -432,13 +487,55 @@ else
     echo "Personal todo.md already exists, skipping creation"
 fi
 
-# Create agent-specific thoughts directories (requires AGENT_ID at runtime)
+# Set up per-agent directories on the shared disk (requires AGENT_ID at runtime)
+# Each agent gets exclusive write access to its own subdirectories under each
+# category (thoughts, memory, downloads, misc). All agents can read everything
+# via the --shared mount.
 if [ -n "$AGENT_ID" ]; then
-    SHARED_DIR="/workspace/shared/thoughts"
-    AGENT_THOUGHTS_DIR="$SHARED_DIR/$AGENT_ID"
-    echo "Creating shared thoughts directories for agent ID $AGENT_ID..."
-    mkdir -p "$AGENT_THOUGHTS_DIR/plans"
-    mkdir -p "$AGENT_THOUGHTS_DIR/research"
+    AGENT_SHARED="/workspace/shared"
+
+    # Safety net: if top-level dirs don't exist yet (API still booting),
+    # retry a few times with backoff
+    if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
+        for attempt in 1 2 3; do
+            if [ -d "$AGENT_SHARED/thoughts" ]; then
+                break
+            fi
+            echo "Waiting for shared directory structure (attempt $attempt/3)..."
+            sleep 3
+        done
+    fi
+
+    echo "Setting up per-agent directories for $AGENT_ID..."
+
+    # The shared disk is already mounted via `archil mount --shared`.
+    # Read access to ALL directories (including other agents') is automatic.
+    # Here we claim WRITE ownership of this agent's own subdirectories only.
+    #
+    # IMPORTANT: Top-level dirs (thoughts/, memory/, downloads/, misc/) are
+    # pre-created by the API machine at boot. This ensures our mkdir below
+    # auto-grants delegation at the SUBDIR level (e.g., thoughts/$AGENT_ID),
+    # not the parent level (thoughts/). See Appendix A in the plan for details.
+
+    for category in "thoughts" "memory" "downloads" "misc"; do
+        AGENT_DIR="$AGENT_SHARED/$category/$AGENT_ID"
+
+        # Create our subdir (auto-grants delegation on $AGENT_ID level)
+        mkdir -p "$AGENT_DIR" 2>/dev/null || true
+
+        # Checkout for persistent ownership (survives reboots where dir already exists)
+        if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
+            sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil checkout "$AGENT_DIR" 2>/dev/null || true
+        fi
+    done
+
+    # Create standard subdirectories (within owned dirs, always succeeds)
+    mkdir -p "$AGENT_SHARED/thoughts/$AGENT_ID/plans"
+    mkdir -p "$AGENT_SHARED/thoughts/$AGENT_ID/research"
+    mkdir -p "$AGENT_SHARED/thoughts/$AGENT_ID/brainstorms"
+    mkdir -p "$AGENT_SHARED/downloads/$AGENT_ID/slack"
+
+    echo "Per-agent directories ready for $AGENT_ID"
 fi
 
 echo "==============================="

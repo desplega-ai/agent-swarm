@@ -72,6 +72,31 @@ interface CancelledTasksResponse {
 }
 
 /**
+ * Check if a path is under the agent's own subdirectory on the shared disk.
+ * Shared disk categories: thoughts, memory, downloads, misc.
+ * Each agent can only write to /workspace/shared/{category}/{agentId}/
+ */
+function isOwnedSharedPath(path: string, agentId: string): boolean {
+  const sharedCategories = ["thoughts", "memory", "downloads", "misc"];
+  return sharedCategories.some((cat) => path.startsWith(`/workspace/shared/${cat}/${agentId}/`));
+}
+
+/**
+ * Build the shared disk write warning message for a given agent ID.
+ */
+function sharedDiskWriteWarning(agentId: string): string {
+  return (
+    `⚠️ This write will fail: You don't have write access to this directory.\n\n` +
+    `On shared workspaces, each agent can only write to their own directories:\n` +
+    `- /workspace/shared/thoughts/${agentId}/\n` +
+    `- /workspace/shared/memory/${agentId}/\n` +
+    `- /workspace/shared/downloads/${agentId}/\n` +
+    `- /workspace/shared/misc/${agentId}/\n\n` +
+    `You CAN read any file on the shared disk. For writes, use your own subdirectory.`
+  );
+}
+
+/**
  * Hook response for blocking actions
  * See: https://code.claude.com/docs/en/hooks
  */
@@ -805,6 +830,21 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
           return;
         }
       }
+
+      // Shared disk write prevention (Archil only — skip in local dev)
+      if (process.env.ARCHIL_MOUNT_TOKEN) {
+        const preAgentId = process.env.AGENT_ID;
+        if (preAgentId && (msg.tool_name === "Write" || msg.tool_name === "Edit")) {
+          const targetPath =
+            (msg.tool_input as { file_path?: string } | undefined)?.file_path ?? "";
+          if (
+            targetPath.startsWith("/workspace/shared/") &&
+            !isOwnedSharedPath(targetPath, preAgentId)
+          ) {
+            console.log(sharedDiskWriteWarning(preAgentId));
+          }
+        }
+      }
       break;
     }
 
@@ -828,6 +868,34 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
         }).catch((e) => {
           console.debug("Failed to update agent activity timestamp:", e);
         });
+      }
+
+      // Shared disk write failure detection (Archil only — safety net)
+      if (process.env.ARCHIL_MOUNT_TOKEN) {
+        const postAgentId = process.env.AGENT_ID;
+        if (
+          postAgentId &&
+          (msg.tool_name === "Write" || msg.tool_name === "Edit" || msg.tool_name === "Bash")
+        ) {
+          const toolResponse = msg.tool_response as
+            | { output?: string; stderr?: string }
+            | undefined;
+          const responseStr = JSON.stringify(toolResponse ?? "");
+          if (responseStr.includes("Read-only file system")) {
+            const postTargetPath =
+              (msg.tool_input as { file_path?: string; command?: string } | undefined)?.file_path ??
+              "";
+            if (
+              postTargetPath.startsWith("/workspace/shared/") &&
+              !isOwnedSharedPath(postTargetPath, postAgentId)
+            ) {
+              console.log(sharedDiskWriteWarning(postAgentId));
+            } else if (!postTargetPath) {
+              // Bash tool — no file_path, just warn generically
+              console.log(sharedDiskWriteWarning(postAgentId));
+            }
+          }
+        }
       }
 
       if (agentInfo) {

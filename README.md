@@ -46,8 +46,9 @@ Agent Swarm lets you run a team of AI coding agents that coordinate autonomously
 - **Dashboard UI** — Real-time monitoring of agents, tasks, and inter-agent chat
 - **Service discovery** — Workers can expose HTTP services and discover each other
 - **Scheduled tasks** — Cron-based recurring task automation
-- **Templates registry** — Pre-built agent templates with a gallery UI and docker-compose builder
+- **Templates registry** — Pre-built agent templates (9 official: lead, coder, researcher, reviewer, tester, FDE, content-writer, content-reviewer, content-strategist) with a gallery UI and docker-compose builder
 - **GitLab integration** — Full GitLab webhook support alongside GitHub via provider adapter pattern
+- **Working directory support** — Tasks can specify a custom starting directory for agents via the `dir` parameter
 - **Multi-provider** — Run agents with Claude Code or pi-mono (`HARNESS_PROVIDER=claude|pi`)
 
 ## Quick Start
@@ -145,7 +146,7 @@ Every agent has a searchable memory backed by OpenAI embeddings (`text-embedding
 
 - **Session summaries** — At the end of each session, a lightweight model extracts key learnings: mistakes made, patterns discovered, failed approaches, and codebase knowledge. These summaries become searchable memories.
 - **Task completions** — Every completed (or failed) task's output is indexed. Failed tasks include notes about what went wrong, so the agent avoids repeating the same mistake.
-- **File-based notes** — Agents can write to `/workspace/personal/memory/` (private) or `/workspace/shared/memory/` (swarm-wide). Files written here are automatically indexed.
+- **File-based notes** — Agents write to `/workspace/personal/memory/` in their per-agent directory. Files are automatically indexed and can be promoted to swarm scope.
 - **Lead-to-worker injection** — The lead agent can push specific learnings into any worker's memory using the `inject-learning` tool, closing the feedback loop.
 
 Before starting each task, the runner automatically searches for relevant memories and includes them in the agent's context. Past experience directly informs future work.

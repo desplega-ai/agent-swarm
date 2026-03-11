@@ -11,7 +11,7 @@ export const MAX_FILE_SIZE = 1073741824;
 /**
  * Default download directory for Slack files
  */
-export const DEFAULT_DOWNLOAD_DIR = "/workspace/shared/downloads/slack";
+export const DEFAULT_DOWNLOAD_DIR = `/workspace/shared/downloads/${process.env.AGENT_ID || "default"}/slack`;
 
 /**
  * File object from Slack API (partial, commonly used fields)
