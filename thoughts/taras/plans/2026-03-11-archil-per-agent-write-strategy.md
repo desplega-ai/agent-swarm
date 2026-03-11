@@ -12,7 +12,7 @@ autonomy: critical
 
 ## Overview
 
-Implement per-agent write isolation on the shared Archil disk. Each agent gets exclusive write ownership of its own subdirectories (`thoughts/$AGENT_ID/`, `memory/$AGENT_ID/`, `downloads/$AGENT_ID/`, `misc/$AGENT_ID/`). All agents can read everything via the `--shared` mount. Write failures to non-owned directories are caught by a PostToolUse hook guardrail that hints the agent to use its own subdirectory.
+Implement per-agent write isolation on the shared Archil disk. Each agent gets exclusive write ownership of its own subdirectories (`thoughts/$AGENT_ID/`, `memory/$AGENT_ID/`, `downloads/$AGENT_ID/`, `misc/$AGENT_ID/`). All agents can read everything via the `--shared` mount. Write attempts to non-owned directories are intercepted by a PreToolUse hook guardrail (proactive) that warns the agent before the write fails, with a PostToolUse safety net for writes that bypass PreToolUse (e.g., Bash-based writes).
 
 ## Current State Analysis
 
@@ -32,6 +32,8 @@ The shared Archil disk at `/workspace/shared` is mounted with `--shared` on all 
 - `slack-download-file.ts:14`: Hardcoded default `/workspace/shared/downloads/slack/` — needs update
 - Archil `mkdir` on unowned dirs auto-grants ownership to the creator
 - Archil `--shared` mounts are always fully readable by all clients
+
+**Note on `misc/`**: This directory is a new addition (not analyzed in the research). It serves as a catch-all for unanticipated agent writes — agents doing ad-hoc work (temp files, scratch data, tool outputs) need somewhere safe to write that doesn't pollute the structured `thoughts/`/`memory/`/`downloads/` hierarchy. Without it, agents would fail on any write that doesn't fit the three predefined categories.
 
 ## Desired End State
 
@@ -95,6 +97,7 @@ Key files:
 - **Database discovery layer** — memory-search already provides this. Plan/research discovery is handled by `ls /workspace/shared/thoughts/*/plans/` in prompts.
 - **Data migration** — existing `thoughts/shared/` files remain readable. No move needed.
 - **Deploy script changes** — `deploy-swarm.ts` doesn't need changes (Archil disk names and env vars stay the same).
+- **Orphaned directory cleanup** — if `AGENT_ID` changes (e.g., machine replacement), the old agent's dirs remain on disk. Acceptable tech debt for v1 — dirs are small and readable by all agents. Cleanup can be added later if needed.
 
 ## Implementation Approach
 
@@ -102,7 +105,7 @@ Four phases, each independently deployable and verifiable:
 
 1. **Entrypoint**: Expand per-agent checkout to cover all write targets. Deploy and verify mounts. Also discover the exact FUSE error pattern for non-owned writes.
 2. **Prompting**: Update base-prompt.ts to describe the new directory layout. Works with or without Archil.
-3. **Hook guardrails**: Add PostToolUse error detection for non-owned write failures. Uses the error pattern discovered in Phase 1.
+3. **Hook guardrails**: Add PreToolUse prevention (primary, proactive) and PostToolUse detection (secondary, safety net) for non-owned write attempts.
 4. **Tool path updates**: Update hardcoded paths in slack download tool and pi-skills.
 
 ---
@@ -179,8 +182,9 @@ fi
 #### Manual Verification:
 - [ ] Deploy to test swarm (e.g., zynap) and confirm all workers + lead boot cleanly
 - [ ] **ERROR DISCOVERY**: SSH into a worker and attempt `echo test > /workspace/shared/thoughts/OTHER_AGENT_ID/test.txt` — record the exact error message (EPERM? EACCES? "Permission denied"? "Read-only file system"?). This error pattern will be used in Phase 3.
+- [ ] **MULTIPLE CHECKOUTS VALIDATION**: Verify `archil delegations /workspace/shared` shows each agent holding 4 checkouts (thoughts, memory, downloads, misc). This validates that a single Archil client can hold multiple non-overlapping delegations simultaneously — the entire entrypoint design depends on this.
+- [ ] **READ PROPAGATION TEST**: On worker-1, write `echo hello > /workspace/shared/thoughts/worker-1/test.txt`. Then immediately on worker-2, `cat /workspace/shared/thoughts/worker-1/test.txt`. Note any delay. If reads take more than a few seconds to propagate, document this as a known limitation for cross-agent coordination.
 - [ ] Verify existing `thoughts/shared/` directory (if present) is still readable but not writable
-- [ ] Verify `archil delegations /workspace/shared` shows each agent's checkouts
 
 **Implementation Note**: After completing this phase, deploy and test on a live swarm. The error discovery here is critical input for Phase 3. Pause for confirmation before proceeding.
 
@@ -318,7 +322,7 @@ const DEFAULT_DOWNLOAD_DIR = `/workspace/shared/downloads/${process.env.AGENT_ID
 
 #### 4. Plugin commands
 **File**: `plugin/commands/work-on-task.md`
-**Changes** (around line 68): Update `thoughts/shared/` references to `thoughts/{agentId}/`.
+**Changes** (around line 68): Update `shared/memory/` reference to `memory/{agentId}/` (this line references the memory path, not thoughts).
 
 #### 5. Plugin build script
 **File**: `plugin/build-pi-skills.ts`
@@ -416,3 +420,8 @@ _(none remaining)_
 - [x] Phase 4 grep sweep — expanded to include `templates/`, `docs-site/`, `README.md`, `MCP.md`
 - [x] Phase 3 PreToolUse vs PostToolUse — PreToolUse is now primary (proactive), PostToolUse is safety net
 - [x] Rollback notes — skipped per Taras: whole thing is a no-op in non-Archil case
+- [x] Overview said "PostToolUse hook guardrail" as primary — updated to describe PreToolUse as primary, PostToolUse as safety net (bot review #4)
+- [x] `misc/` directory not in research — added justification note in Current State Analysis (bot review #1)
+- [x] Phase 4 item 4 (`work-on-task.md:68`) had wrong change description — corrected: references `shared/memory/`, not `thoughts/shared/` (bot review #2, #5)
+- [x] Research open questions #2 (multiple checkouts) and #3 (read propagation delay) — added explicit validation steps to Phase 1 manual verification (bot review #3)
+- [x] Research open question #4 (AGENT_ID stability) — added orphaned directory note to "What We're NOT Doing" as explicit tech debt (bot review #3)
