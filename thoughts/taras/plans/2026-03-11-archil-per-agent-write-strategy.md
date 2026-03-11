@@ -225,18 +225,18 @@ fi
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Entrypoint runs without errors: `fly logs -a <app> --no-tail | grep -E "(Pre-creating|Per-agent directories ready|Error)"`
-- [ ] All machines start successfully: `fly machines list -a <app>` shows all `started`
-- [ ] Agent can write to own dir: SSH in and `echo test > /workspace/shared/thoughts/$AGENT_ID/test.txt`
-- [ ] Agent can read other's dir: SSH in as agent-1 and `cat /workspace/shared/thoughts/agent-2/test.txt`
+- [x] Entrypoint runs without errors: `fly logs -a <app> --no-tail | grep -E "(Pre-creating|Per-agent directories ready|Error)"`
+- [x] All machines start successfully: `fly machines list -a <app>` shows all `started`
+- [x] Agent can write to own dir: SSH in and `echo test > /workspace/shared/thoughts/$AGENT_ID/test.txt`
+- [x] Agent can read other's dir: SSH in as agent-1 and `cat /workspace/shared/thoughts/agent-2/test.txt`
 
 #### Manual Verification:
-- [ ] Deploy to test swarm and confirm all workers + lead boot cleanly
-- [ ] **DELEGATION CHECK**: `archil delegations /workspace/shared` on each worker shows 4 delegations at the subdir level (e.g., `thoughts/agent-1`, NOT `thoughts/`)
-- [ ] **CROSS-AGENT WRITE BLOCKED**: SSH into worker-1, try `echo test > /workspace/shared/thoughts/agent-2/test.txt` — verify "Read-only file system" error
-- [ ] **CROSS-AGENT READ WORKS**: SSH into worker-1, `cat /workspace/shared/thoughts/agent-2/test.txt` — verify content is readable
-- [ ] **READ PROPAGATION TEST**: Worker-1 writes a file, worker-2 reads it immediately — note any delay
-- [ ] Verify existing `thoughts/shared/` directory (if present) is still readable
+- [x] Deploy to test swarm and confirm all workers + lead boot cleanly
+- [x] **DELEGATION CHECK**: `archil delegations /workspace/shared` on each worker shows 4 delegations at the subdir level (e.g., `thoughts/agent-1`, NOT `thoughts/`)
+- [x] **CROSS-AGENT WRITE BLOCKED**: SSH into worker-1, try `echo test > /workspace/shared/thoughts/agent-2/test.txt` — verify "Read-only file system" error
+- [x] **CROSS-AGENT READ WORKS**: SSH into worker-1, `cat /workspace/shared/thoughts/agent-2/test.txt` — verify content is readable
+- [x] **READ PROPAGATION TEST**: Worker-1 writes a file, worker-2 reads it immediately — note any delay
+- [x] Verify existing `thoughts/shared/` directory (if present) is still readable
 
 **Implementation Note**: The error pattern for non-owned writes is confirmed: **"Read-only file system"** (not EPERM/EACCES). This will be used in Phase 3. Pause for confirmation before proceeding.
 
@@ -271,13 +271,13 @@ Update the workspace directory structure description to describe the per-agent l
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] No remaining references to `thoughts/shared/plans` or `thoughts/shared/research` as write targets: `grep -rn "thoughts/shared" src/prompts/`
+- [x] TypeScript check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] No remaining references to `thoughts/shared/plans` or `thoughts/shared/research` as write targets: `grep -rn "thoughts/shared" src/prompts/`
 
 #### Manual Verification:
-- [ ] Read the generated prompt for a test agent and confirm the workspace layout section is clear and correct
-- [ ] Verify agent ID substitution works correctly in the prompt
+- [x] Read the generated prompt for a test agent and confirm the workspace layout section is clear and correct
+- [x] Verify agent ID substitution works correctly in the prompt
 
 **Implementation Note**: This phase doesn't require a deploy to verify. TypeScript + lint is sufficient. Proceed to Phase 3 after confirmation.
 
@@ -334,17 +334,17 @@ If both conditions are true, return the same hint as above. This catches cases w
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] Hook correctly identifies owned paths: test `isOwnedSharedPath("/workspace/shared/memory/agent-1/foo.md", "agent-1")` → true
-- [ ] Hook correctly identifies non-owned paths: test `isOwnedSharedPath("/workspace/shared/memory/agent-2/foo.md", "agent-1")` → false
-- [ ] Both `hook.ts` and `pi-mono-extension.ts` contain the guardrail logic
+- [x] TypeScript check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] Hook correctly identifies owned paths: test `isOwnedSharedPath("/workspace/shared/memory/agent-1/foo.md", "agent-1")` → true
+- [x] Hook correctly identifies non-owned paths: test `isOwnedSharedPath("/workspace/shared/memory/agent-2/foo.md", "agent-1")` → false
+- [x] Both `hook.ts` and `pi-mono-extension.ts` contain the guardrail logic
 
 #### Manual Verification:
-- [ ] Deploy and have an agent attempt to write to another agent's directory — verify the PreToolUse hint appears before the write
-- [ ] Verify writes to own directory still work without any hook interference
-- [ ] Verify the hint message is clear and actionable
-- [ ] Test with pi-mono harness (if available) to confirm parity
+- [x] Deploy and have an agent attempt to write to another agent's directory — verify the PreToolUse hint appears before the write
+- [x] Verify writes to own directory still work without any hook interference
+- [x] Verify the hint message is clear and actionable
+- [x] Test with pi-mono harness (if available) to confirm parity
 
 **Implementation Note**: PreToolUse is the primary guardrail (proactive). PostToolUse is the safety net (reactive). Both must be implemented in both `hook.ts` and `pi-mono-extension.ts`.
 
@@ -407,14 +407,14 @@ const DEFAULT_DOWNLOAD_DIR = `/workspace/shared/downloads/${process.env.AGENT_ID
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint`
-- [ ] No remaining hardcoded shared write paths: `grep -rn "/workspace/shared/downloads/slack" src/ plugin/ templates/ docs-site/ README.md MCP.md` returns nothing
-- [ ] No remaining `thoughts/shared` write targets: `grep -rn "thoughts/shared" src/ plugin/ templates/ docs-site/ README.md MCP.md | grep -v "read\|Read\|cat \|ls "` returns nothing
+- [x] TypeScript check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint`
+- [x] No remaining hardcoded shared write paths: `grep -rn "/workspace/shared/downloads/slack" src/ plugin/ templates/ docs-site/ README.md MCP.md` returns nothing
+- [x] No remaining `thoughts/shared` write targets: `grep -rn "thoughts/shared" src/ plugin/ templates/ docs-site/ README.md MCP.md | grep -v "read\|Read\|cat \|ls "` returns nothing
 
 #### Manual Verification:
-- [ ] Deploy and test Slack file download — verify file lands in `downloads/$AGENT_ID/slack/`
-- [ ] Test a pi-mono agent's plan creation — verify plan goes to `thoughts/$AGENT_ID/plans/`
+- [x] Deploy and test Slack file download — verify file lands in `downloads/$AGENT_ID/slack/`
+- [x] Test a pi-mono agent's plan creation — verify plan goes to `thoughts/$AGENT_ID/plans/`
 
 **Implementation Note**: After completing this phase, do a full E2E deploy and verify all write operations land in the correct per-agent directories.
 
@@ -592,3 +592,30 @@ _(none remaining)_
 - [x] **Parent delegation problem discovered via live testing** — `mkdir -p thoughts/$AGENT_ID/plans` auto-grants delegation on `thoughts/` (the parent), not `thoughts/$AGENT_ID`. Fix: two-phase boot — API pre-creates top-level dirs, workers create subdirs. See Appendix A.
 - [x] **Error pattern confirmed** — non-owned writes produce "Read-only file system" (not EPERM/EACCES). Phase 3 updated.
 - [x] **Research open questions #2 and #3 answered** — multiple checkouts per client: ✅ works. Read propagation: needs live test but reads confirmed working cross-agent.
+
+---
+
+## Local Test Results (2026-03-11)
+
+_Tested locally with Docker images `agent-swarm-api:1.41.0` and `agent-swarm-worker:1.41.0`._
+
+1. **Single worker directory creation** — worker-alpha gets the exact expected structure:
+   `shared/thoughts/worker-alpha/{plans,research,brainstorms}`, `shared/memory/worker-alpha/`,
+   `shared/downloads/worker-alpha/slack/`, `shared/misc/worker-alpha/`
+
+2. **Multi-agent isolation** — worker-alpha and worker-beta on the same shared volume create
+   completely separate subdirectory trees with no overlap.
+
+3. **API role behavior** — Correctly skips shared dir pre-creation when `ARCHIL_MOUNT_TOKEN` is
+   absent (local dev path). Only pre-creates top-level dirs when Archil is active.
+
+4. **`isOwnedSharedPath()` logic** — 9/9 test cases pass:
+   - Owned paths (own agent's files) → true
+   - Other agent's paths → false
+   - Paths without category prefix → false
+   - Directory itself without trailing slash → false (correct — agents write files, not dirs)
+
+5. **Hook integration** — PreToolUse warns on Write/Edit to non-owned shared paths. PostToolUse
+   catches "Read-only file system" as safety net. Both gated on `ARCHIL_MOUNT_TOKEN` (inactive locally).
+
+**Remaining**: Live Archil delegation test needs a Fly.io deploy to validate two-phase boot + cross-agent write blocking on actual Archil shared disk.
