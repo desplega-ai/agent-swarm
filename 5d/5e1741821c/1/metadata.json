@@ -1,0 +1,31 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "5d5e1741821c",
+  "session_id": "fc539ee8-59c4-4516-85af-a8fad94c3455",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-11T22:39:00.961625Z",
+  "branch": "feat/codex-support",
+  "checkpoints_count": 6,
+  "files_touched": [
+    "thoughts/taras/research/2026-03-11-codex-adapter-deep-reference.md",
+    "thoughts/taras/research/2026-03-11-codex-native-support-feasibility.md"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "ed79e185899a",
+  "token_usage": {
+    "input_tokens": 129,
+    "cache_creation_tokens": 143868,
+    "cache_read_tokens": 5565325,
+    "output_tokens": 37850,
+    "api_call_count": 59
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-11T22:39:00.177833Z",
+    "agent_lines": 1014,
+    "human_added": 770,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 1784,
+    "agent_percentage": 56.83856502242153
+  }
+}

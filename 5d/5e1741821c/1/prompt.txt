@@ -1,0 +1,2315 @@
+# Research Codebase
+
+A thin wrapper that invokes the `desplega:researching` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse autonomy mode from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - If document frontmatter has `autonomy:` field, use that as default
+   - Otherwise, ask the user via AskUserQuestion:
+
+   ```
+   How much should I check in with you during this research?
+   - Autopilot: Work independently, only present final results
+   - Critical questions (Recommended): Ask only when blocked or for major decisions
+   - Verbose: Check in frequently, validate approach at each step
+   ```
+
+2. **ALWAYS invoke the `desplega:researching` skill:**
+   - Pass the research query (everything after the flag)
+   - Pass the autonomy mode determined above
+   - Let the skill handle all research logic
+
+3. **If no query provided:**
+   - Respond with: "I'm ready to research the codebase. Please provide your research question or area of interest."
+
+## Example Usage
+
+```
+/research how does the authentication system work
+/research --autonomy=autopilot document all API endpoints
+/research --autonomy=verbose analyze the database schema
+```
+
+
+ARGUMENTS: based on https://github.com/desplega-ai/agent-swarm/issues/100 and the latest changes we did to support the pi harness, how reasonable it would be to support codex (natively)
+
+---
+
+Base directory for this skill: /Users/taras/.ccs/instances/work/plugins/cache/desplega-ai-toolbox/desplega/1.5.1/skills/researching
+
+# Researching
+
+You are conducting comprehensive research across the codebase to answer questions by spawning parallel sub-agents and synthesizing their findings.
+
+## Working Agreement
+
+These instructions establish a working agreement between you and the user. The key principles are:
+
+1. **AskUserQuestion is your primary communication tool** - Whenever you need to ask the user anything (clarifications, scope questions, direction decisions), use the **AskUserQuestion tool**. Don't output questions as plain text - always use the structured tool so the user can respond efficiently.
+
+2. **Establish preferences upfront** - Ask about user preferences at the start of the workflow, not at the end when they may want to move on.
+
+3. **Autonomy mode guides interaction level** - The user's chosen autonomy level determines how often you check in, but AskUserQuestion remains the mechanism for all questions.
+
+### User Preferences
+
+Before starting research (unless autonomy is Autopilot), establish these preferences:
+
+**File Review Preference** - Check if the `file-review` plugin is available (look for `file-review:file-review` in available commands).
+
+If file-review plugin is installed, use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like to use file-review for inline feedback on the research document when it's ready?" | 1. Yes, open file-review when document is ready (Recommended), 2. No, just show me the document |
+
+Store this preference and act on it after document creation (see "Review Integration" section).
+
+## When to Use
+
+This skill activates when:
+- User invokes `/research` command
+- Another skill references `**REQUIRED SUB-SKILL:** Use desplega:researching`
+- User asks to document or understand a codebase area
+
+## Autonomy Mode
+
+At the start of research, adapt your interaction level based on the autonomy mode:
+
+| Mode | Behavior |
+|------|----------|
+| **Autopilot** | Work independently, minimize AskUserQuestion, present comprehensive results at end |
+| **Critical** (Default) | Ask only when blocked or for major scope/direction decisions |
+| **Verbose** | Check in frequently, validate approach at each step, confirm before proceeding |
+
+The autonomy mode is passed by the invoking command. If not specified, default to **Critical**.
+
+## Critical Constraints
+
+- DO NOT suggest improvements or changes unless explicitly asked
+- DO NOT perform root cause analysis unless explicitly asked
+- DO NOT propose future enhancements unless explicitly asked
+- DO NOT critique the implementation or identify problems
+- DO NOT recommend refactoring, optimization, or architectural changes
+- ONLY describe what exists, where it exists, how it works
+- You are creating a technical map/documentation of the existing system
+
+## Research Process
+
+### Before Starting
+
+Perform a quick analysis of the research query. If anything is unclear and autonomy mode is not Autopilot, use **AskUserQuestion** to clarify:
+
+| Question | Options |
+|----------|---------|
+| "Thank you for your research question: '[user's question]'. To ensure I fully understand your needs, could you please clarify [specific aspect]?" | Provide relevant options based on the specific clarification needed |
+
+### Steps
+
+1. **Read any directly mentioned files first:**
+   - If the user mentions specific files, read them FULLY first
+   - **IMPORTANT**: Use the Read tool WITHOUT limit/offset parameters
+   - **CRITICAL**: Read files yourself before spawning sub-tasks
+
+2. **Analyze and decompose the research question:**
+   - Break down the query into composable research areas
+   - Identify specific components, patterns, or concepts to investigate
+   - Create a research plan using TodoWrite to track subtasks
+   - Consider which directories, files, or architectural patterns are relevant
+
+3. **Spawn parallel sub-agent tasks for comprehensive research:**
+   - Create multiple Task agents to research different aspects concurrently:
+
+   **For codebase research:**
+   - Use **codebase-locator** agent to find WHERE files and components live
+   - Use **codebase-analyzer** agent to understand HOW specific code works
+   - Use **codebase-pattern-finder** agent to find examples of existing patterns
+
+   **For library and framework research:**
+   - Use the context7 MCP to fetch library/framework documentation
+
+   **For web research (only if explicitly requested):**
+   - Use **web-search-researcher** agent for external documentation
+
+   **For nested researches:**
+   - Spawn additional Tasks using `/research <topic>` for deep dives
+
+4. **Wait for all sub-agents to complete and synthesize findings:**
+   - IMPORTANT: Wait for ALL sub-agent tasks to complete before proceeding
+   - Compile all results, prioritize live codebase findings as primary source
+   - Connect findings across different components
+   - Include specific file paths and line numbers
+
+5. **Generate research document:**
+   - If in plan mode, exit plan mode first
+   - Write to `thoughts/<username|shared>/research/YYYY-MM-DD-topic.md`
+   - **Path selection:** Use the user's name (e.g., `thoughts/taras/research/`) if known from context. Fall back to `thoughts/shared/research/` when unclear.
+
+   **Template:** Read and follow the template at `cc-plugin/base/skills/researching/template.md`
+
+   The template includes:
+   - YAML frontmatter with metadata (date, researcher, git info, tags, status)
+   - Standard sections (Research Question, Summary, Detailed Findings, Code References, etc.)
+   - Proper formatting for file:line references
+
+6. **Add GitHub permalinks (if applicable):**
+   - Check if on main branch or commit is pushed
+   - Generate GitHub permalinks for code references
+
+7. **Sync and present findings:**
+   - Present concise summary with key file references
+   - If autonomy mode is not Autopilot, ask if they have follow-up questions
+
+8. **Offer structured review:**
+   - After presenting findings, offer: "Would you like me to run `/review` on this research document for a structured quality check?"
+   - If yes, invoke the `desplega:reviewing` skill on the research document
+
+9. **Handle follow-up questions:**
+   - Append to the same research document
+   - Update frontmatter `last_updated` fields
+   - Spawn new sub-agents as needed
+
+10. **Workflow handoff:**
+    After research is complete (and optionally reviewed), use **AskUserQuestion** with:
+
+    | Question | Options |
+    |----------|---------|
+    | "Research is complete. What's the next step?" | 1. Create a plan based on this research (→ `/create-plan`), 2. Run a review first (→ `/review`), 3. Done for now |
+
+    Based on the answer:
+    - **Plan**: Suggest the `/create-plan` command with the research file as input context
+    - **Review**: Invoke the `desplega:reviewing` skill on the research document
+    - **Done**: No further action needed
+
+## Review Integration
+
+If the `file-review` plugin is available and the user selected "Yes" during User Preferences setup:
+- After creating research documents, invoke `/file-review:file-review <path>`
+- Process feedback with `file-review:process-review` skill
+- If user selected "No" or autonomy mode is Autopilot, skip this step
+
+## Important Notes
+
+- Always use parallel Task agents to maximize efficiency
+- The thoughts/ directory provides historical context
+- Focus on finding concrete file paths and line numbers
+- Research documents should be self-contained
+- **CRITICAL**: You are a documentarian, not an evaluator
+- **REMEMBER**: Document what IS, not what SHOULD BE
+
+
+ARGUMENTS: --autonomy=autopilot based on https://github.com/desplega-ai/agent-swarm/issues/100 and the latest changes we did to support the pi harness, how reasonable it would be to support codex (natively)
+
+---
+
+<task-notification>
+<task-id>a97be3f9f00546bb7</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/a97be3f9f00546bb7.output</output-file>
+<status>completed</status>
+<summary>Agent "Locate harness-related files" completed</summary>
+<result>Here is the complete file map, Taras.
+
+---
+
+## File Locations for Harness Providers, Runner/Worker, Docker, Hooks, and Codex Support
+
+All paths are rooted at `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support`.
+
+---
+
+### 1. Harness Provider System (`src/providers/`)
+
+**Implementation Files (6 files):**
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/types.ts` - Provider/adapter type definitions (HarnessProvider, ProviderAdapter)
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/index.ts` - Provider registry/factory (selects adapter based on HARNESS_PROVIDER)
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/claude-adapter.ts` - Claude Code adapter implementation
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/pi-mono-adapter.ts` - Pi-mono adapter implementation
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/pi-mono-extension.ts` - Pi-mono specific extensions
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/pi-mono-mcp-client.ts` - Pi-mono MCP client
+
+**Test Files (3 files):**
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/tests/provider-adapter.test.ts` - General provider adapter tests
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/tests/claude-adapter.test.ts` - Claude adapter tests
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/tests/pi-mono-adapter.test.ts` - Pi-mono adapter tests
+
+**E2E Scripts (2 files):**
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/scripts/e2e-docker-provider.ts` - E2E test for providers in Docker
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/scripts/e2e-provider-test.ts` - E2E provider test script
+
+**Type Definitions:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/types.ts` - Shared types (likely includes provider-related types)
+
+**Note:** There is NO `src/harness/` or `src/runtime/` directory. All provider logic lives in `src/providers/`.
+
+---
+
+### 2. Runner/Worker Orchestration (`src/commands/`)
+
+**Command Files (6 files):**
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/commands/runner.ts` - Main runner logic (spawns provider sessions, imports from `src/providers`)
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/commands/worker.ts` - Worker command entry point
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/commands/lead.ts` - Lead agent command
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/commands/hook.ts` - Hook command handler
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/commands/artifact.ts` - Artifact command
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/commands/setup.tsx` - Setup command (Ink/React)
+
+**E2E Workflow Scripts:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/scripts/e2e-workflow-test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/scripts/e2e-workflow-test.sh`
+
+---
+
+### 3. Docker Worker Setup
+
+**Dockerfiles:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/Dockerfile.worker` - Worker-specific Dockerfile (references HARNESS_PROVIDER)
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/Dockerfile` - Main/API Dockerfile
+
+**Entrypoint:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/docker-entrypoint.sh` - Docker entrypoint script (references HARNESS_PROVIDER)
+
+**Compose Files:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/docker-compose.local.yml` - Local dev compose (builds from source)
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/docker-compose.example.yml` - Production example compose
+
+**Deploy Scripts:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/deploy/docker-push.ts` - Docker image push script
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/deploy/DEPLOY.md` - Deployment docs
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/deploy/install.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/deploy/update.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/deploy/uninstall.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/deploy/prod-db.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/deploy/agent-swarm.service` - systemd service file
+
+**CI/CD:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/.github/workflows/docker-and-deploy.yml`
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/.github/workflows/merge-gate.yml`
+
+---
+
+### 4. Hooks System (`src/hooks/`)
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/hooks/hook.ts` - Main hook implementation
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/hooks/tool-loop-detection.ts` - Tool loop detection logic
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/hooks/tool-loop-detection.test.ts` - Tests for loop detection
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/commands/hook.ts` - Hook CLI command handler
+
+**Documentation:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/docs-site/content/docs/architecture/hooks.mdx` - Hooks architecture docs
+
+---
+
+### 5. HARNESS_PROVIDER Usage Across the Codebase (17 files)
+
+The env var `HARNESS_PROVIDER` is referenced in these files:
+- `src/providers/index.ts` - Provider selection logic
+- `src/commands/runner.ts` - Runner reads provider selection
+- `src/tests/provider-adapter.test.ts` - Test assertions
+- `Dockerfile.worker` - Docker build/env
+- `docker-entrypoint.sh` - Runtime env setup
+- `docker-compose.local.yml` - Compose env config
+- `docker-compose.example.yml` - Example compose env
+- `scripts/e2e-docker-provider.ts` - E2E test config
+- `scripts/e2e-provider-test.ts` - E2E test config
+- `thoughts/taras/research/2026-03-05-pi-mono-provider-research.md`
+- `thoughts/taras/research/2026-03-08-pi-mono-deep-dive.md`
+- `thoughts/taras/plans/2026-03-08-pi-mono-provider-implementation.md`
+- `docs-site/content/docs/reference/environment-variables.mdx`
+- `docs-site/content/docs/architecture/overview.mdx`
+- `README.md`
+- `CLAUDE.md`
+- `CHANGELOG.md`
+
+---
+
+### 6. Codex Mentions
+
+There is **no dedicated codex provider implementation** or codex-specific code yet. "Codex" appears only in:
+
+- **Branding/description strings** (package.json, README.md, CLAUDE.md, docs-site layout/index) -- project describes itself as supporting "Claude Code, Codex, Gemini CLI"
+- **Research notes** mentioning codex as a future target:
+  - `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/thoughts/taras/research/2026-03-05-pi-mono-provider-research.md` - Mentions Codex/OpenAI auth flow in provider comparison table
+  - `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/thoughts/taras/research/2026-03-08-pi-mono-deep-dive.md` - Lists Codex as future harness, mentions OpenAI/Codex env vars
+  - `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/thoughts/research/2026-02-28-x402-payments-research.md` - Passing mention in payments research
+- **No existing `thoughts/` research or plans specifically about codex support.**
+
+---
+
+### 7. Existing Research/Thoughts on Provider Architecture
+
+These are the most relevant thoughts files for understanding the provider abstraction:
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/thoughts/taras/plans/2026-03-08-pi-mono-provider-implementation.md` - Plan for the pi-mono provider (the most recent provider added)
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/thoughts/taras/research/2026-03-05-pi-mono-provider-research.md` - Research for adding the pi-mono provider
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/thoughts/taras/research/2026-03-08-pi-mono-deep-dive.md` - Deep dive into pi-mono architecture (includes codex/provider comparison tables)
+
+---
+
+### 8. Documentation
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/docs-site/content/docs/architecture/overview.mdx` - Architecture overview (mentions HARNESS_PROVIDER)
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/docs-site/content/docs/architecture/hooks.mdx` - Hooks docs
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/docs-site/content/docs/architecture/agents.mdx` - Agents architecture docs
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/docs-site/content/docs/reference/environment-variables.mdx` - Env var reference (documents HARNESS_PROVIDER)
+
+---
+
+### Summary
+
+The provider system currently has **two adapters**: `claude` (default) and `pi` (pi-mono). There is no `src/harness/` or `src/runtime/` directory -- all provider abstraction lives in `src/providers/` (6 files). The runner at `src/commands/runner.ts` is the main consumer that spawns provider sessions. No codex-specific implementation exists yet; codex appears only in branding text and research notes exploring future provider targets.</result>
+<usage><total_tokens>22170</total_tokens><tool_uses>25</tool_uses><duration_ms>78295</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/a97be3f9f00546bb7.output
+
+---
+
+<task-notification>
+<task-id>aa68624f2833a62ce</task-id>
+<tool-use-id>toolu_01DErhuQUMygnKUcM39KCQ3K</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/aa68624f2833a62ce.output</output-file>
+<status>completed</status>
+<summary>Agent "Find harness implementation patterns" completed</summary>
+<result>
+
+I now have a comprehensive picture of the entire harness/provider system. Let me compile the findings.
+
+---
+
+## Pattern Examples: Harness/Provider System
+
+### Pattern 1: Provider Adapter Interface (the contract)
+
+**Found in**: `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/types.ts`
+
+The core contract every harness must implement:
+
+```typescript
+export interface ProviderAdapter {
+  readonly name: string;
+  createSession(config: ProviderSessionConfig): Promise<ProviderSession>;
+  canResume(sessionId: string): Promise<boolean>;
+}
+```
+
+A session must implement:
+
+```typescript
+export interface ProviderSession {
+  readonly sessionId: string | undefined;
+  onEvent(listener: (event: ProviderEvent) => void): void;
+  waitForCompletion(): Promise<ProviderResult>;
+  abort(): Promise<void>;
+}
+```
+
+Events are normalized via a discriminated union (`ProviderEvent`) with types: `session_init`, `message`, `tool_start`, `tool_end`, `result`, `error`, `raw_log`, `raw_stderr`, `custom`.
+
+`ProviderSessionConfig` (lines 30-47) carries: `prompt`, `systemPrompt`, `model`, `role`, `agentId`, `taskId`, `apiUrl`, `apiKey`, `cwd`, `resumeSessionId?`, `iteration?`, `logFile`, `additionalArgs?`, `env?`.
+
+`ProviderResult` returns: `exitCode`, `sessionId?`, `cost?`, `output?`, `isError`, `errorCategory?`, `failureReason?`.
+
+---
+
+### Pattern 2: Factory / Provider Selection
+
+**Found in**: `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/index.ts`
+
+```typescript
+export function createProviderAdapter(provider: string): ProviderAdapter {
+  switch (provider) {
+    case "claude":
+      return new ClaudeAdapter();
+    case "pi":
+      return new PiMonoAdapter();
+    default:
+      throw new Error(`Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi`);
+  }
+}
+```
+
+Called in the runner at `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/commands/runner.ts:1428`:
+
+```typescript
+const adapter = createProviderAdapter(process.env.HARNESS_PROVIDER || "claude");
+```
+
+---
+
+### Pattern 3: Claude Adapter -- Process Spawning and Stream Parsing
+
+**Found in**: `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/claude-adapter.ts`
+
+**Process spawn** (lines 63-74): Uses `Bun.spawn()` with the `claude` CLI. The command is built in `buildCommand()` (lines 76-101):
+
+```typescript
+private buildCommand(): string[] {
+  const cmd = [
+    "claude",
+    "--model", this.model,
+    "--verbose",
+    "--output-format", "stream-json",
+    "--dangerously-skip-permissions",
+    "--allow-dangerously-skip-permissions",
+    "--permission-mode", "bypassPermissions",
+    "-p", this.config.prompt,
+  ];
+  if (this.config.additionalArgs?.length) cmd.push(...this.config.additionalArgs);
+  if (this.config.systemPrompt) cmd.push("--append-system-prompt", this.config.systemPrompt);
+  return cmd;
+}
+```
+
+**Stream parsing** (lines 113-202): Reads stdout line-by-line as newline-delimited JSON. Parses `stream-json` format:
+- `json.type === "system" && json.subtype === "init"` yields `session_id`
+- `json.type === "result"` yields cost/token data from `json.total_cost_usd`, `json.usage`, `json.duration_ms`, `json.num_turns`
+
+**Task file pattern** (lines 17-39): Writes a JSON file to `/tmp/agent-swarm-task-{pid}.json` containing `{taskId, agentId, startedAt}`. This file is read by the Claude hook process via the `TASK_FILE` env var.
+
+**Stale session retry** (lines 269-318): If the process fails with "session not found" and `--resume` was used, it strips `--resume` and retries with a fresh session automatically.
+
+**Key aspects**:
+- Spawns an external CLI process (`claude`)
+- Parses `stream-json` stdout for events
+- Hooks are external (Claude's hook system reads `TASK_FILE` env var)
+- MCP tools are discovered by Claude via `.mcp.json` on disk
+- Resume uses `--resume <sessionId>` CLI flag
+
+---
+
+### Pattern 4: Pi-mono Adapter -- Library-based Session
+
+**Found in**: `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/pi-mono-adapter.ts`
+
+Pi-mono does NOT spawn a subprocess. It uses the `@mariozechner/pi-coding-agent` library directly (imported at line 17-23).
+
+**Session creation** (lines 359-433 in `PiMonoAdapter.createSession()`):
+1. Creates `AGENTS.md` symlink to `CLAUDE.md` (pi-mono reads `AGENTS.md`, not `CLAUDE.md`)
+2. Discovers MCP tools via `McpHttpClient` -- performs an MCP handshake over HTTP and converts them to pi-mono `ToolDefinition[]`
+3. Resolves model string to pi-ai Model object (maps shortnames like `opus` -> `anthropic/claude-opus-4-20250514`)
+4. Creates a swarm hooks extension via `createSwarmHooksExtension()`
+5. Creates a `DefaultResourceLoader` with `appendSystemPrompt` and `extensionFactories`
+6. Calls `createAgentSession(sessionOptions)` from the library
+
+**Event normalization** (lines 181-254): Subscribes to `AgentSessionEvent` and maps:
+- `message_end` -> `raw_log` (with Claude-compatible JSON structure)
+- `tool_execution_start` -> `raw_log` (tool_use format)
+- `tool_execution_end` -> `raw_log` (tool_result format)
+- `auto_retry_start` -> `raw_stderr`
+
+**Key differences from Claude**:
+- In-process library, no subprocess
+- MCP tools discovered programmatically via `McpHttpClient` (no `.mcp.json` file needed at runtime)
+- Hooks are extension-based (pi-mono extension API), not file-based
+- Model resolution maps shortnames to `provider/model-id` pairs
+- Creates `AGENTS.md` symlink so pi-mono can read the equivalent of `CLAUDE.md`
+- `canResume()` checks `SessionManager` for stored sessions
+
+---
+
+### Pattern 5: MCP Config per Harness
+
+**Claude (Docker entrypoint)** -- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/docker-entrypoint.sh:172-192`
+
+Writes `.mcp.json` to `/workspace/` so the Claude CLI discovers MCP servers:
+
+```bash
+MCP_JSON=$(jq -n \
+  --arg url "${MCP_URL}/mcp" \
+  --arg apiKey "Bearer ${API_KEY}" \
+  '{mcpServers: {"agent-swarm": {type: "http", url: $url, headers: {Authorization: $apiKey}}}}')
+
+if [ -n "$AGENT_ID" ]; then
+    MCP_JSON=$(echo "$MCP_JSON" | jq --arg agentId "$AGENT_ID" \
+      '.mcpServers["agent-swarm"].headers["X-Agent-ID"] = $agentId')
+fi
+echo "$MCP_JSON" > /workspace/.mcp.json
+```
+
+**Claude (local setup)** -- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/commands/setup.tsx:374-401`
+
+The `setup` command writes `.mcp.json` in the project directory with:
+```typescript
+mcpServers[SERVER_NAME] = {
+  type: "http",
+  url: `${mcpBaseUrl}/mcp`,
+  headers: {
+    Authorization: `Bearer ${state.token}`,
+    "X-Agent-ID": generatedAgentId,
+  },
+};
+```
+
+**Pi-mono** -- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/pi-mono-adapter.ts:373-387`
+
+Pi-mono does NOT use `.mcp.json`. Instead, it programmatically connects to the MCP endpoint:
+```typescript
+const mcpClient = new McpHttpClient(config.apiUrl, config.apiKey, config.agentId);
+await mcpClient.initialize();
+const tools = await mcpClient.listTools();
+customTools = mcpToolsToDefinitions(mcpClient, tools);
+```
+
+The `McpHttpClient` (`/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/pi-mono-mcp-client.ts`) performs full MCP handshake (initialize + initialized notification) and tool discovery over Streamable HTTP.
+
+---
+
+### Pattern 6: Hooks Configuration per Harness
+
+**Claude hooks** -- file-based, configured in `.claude/settings.local.json`
+
+From `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/commands/setup.tsx:56-76`:
+```typescript
+const createHooksConfig = () => {
+  const hookCommand = `bunx ${PKG_NAME}@latest hook`;
+  const hookEntry = {
+    matcher: "*",
+    hooks: [{ type: "command", command: hookCommand }],
+  };
+  return {
+    SessionStart: [hookEntry],
+    UserPromptSubmit: [hookEntry],
+    PreToolUse: [hookEntry],
+    PostToolUse: [hookEntry],
+    PreCompact: [hookEntry],
+    Stop: [hookEntry],
+  };
+};
+```
+
+The hook handler itself is `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/hooks/hook.ts`. It reads stdin JSON (`HookMessage`), reads `.mcp.json` to find the server URL, and handles each `hook_event_name` via a switch statement. It runs as a separate process invoked by the Claude CLI on each hook event.
+
+**Pi-mono hooks** -- extension-based, configured in-process
+
+From `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/pi-mono-extension.ts:380-619`:
+```typescript
+export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFactory {
+  return (pi) => {
+    pi.on("session_start", async (_event, _ctx) => { /* SessionStart equivalent */ });
+    pi.on("tool_call", async (event, _ctx) => { /* PreToolUse equivalent */ });
+    pi.on("tool_result", async (event, _ctx) => { /* PostToolUse equivalent */ });
+    pi.on("context", async (_event, _ctx) => { /* PreCompact equivalent */ });
+    pi.on("input", async (_event, _ctx) => { /* UserPromptSubmit equivalent */ });
+    pi.on("session_shutdown", async (_event, ctx) => { /* Stop equivalent */ });
+  };
+}
+```
+
+The extension maps each Claude hook event to a pi-mono event:
+- `SessionStart` -> `session_start`
+- `PreToolUse` -> `tool_call` (can return `{block: true, reason}`)
+- `PostToolUse` -> `tool_result`
+- `PreCompact` -> `context`
+- `UserPromptSubmit` -> `input` (can return `{action: "handled"}`)
+- `Stop` -> `session_shutdown`
+
+The Claude hook checks tool names as `"Write"`, `"Edit"`, `"Bash"` (PascalCase). The pi-mono extension checks `"write"`, `"edit"`, `"bash"` (lowercase).
+
+---
+
+### Pattern 7: Docker Entrypoint Harness Selection
+
+**Found in**: `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/docker-entrypoint.sh:1-19`
+
+```bash
+HARNESS_PROVIDER="${HARNESS_PROVIDER:-claude}"
+
+if [ "$HARNESS_PROVIDER" = "pi" ]; then
+    if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENROUTER_API_KEY" ] && [ ! -f "$HOME/.pi/agent/auth.json" ]; then
+        echo "Error: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or ~/.pi/agent/auth.json required for pi provider"
+        exit 1
+    fi
+else
+    if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+        echo "Error: CLAUDE_CODE_OAUTH_TOKEN environment variable is required"
+        exit 1
+    fi
+fi
+```
+
+The entrypoint validates provider-specific auth, then at line 540 starts the same binary regardless of provider:
+```bash
+exec /usr/local/bin/agent-swarm "$ROLE" "$@"
+```
+
+The binary internally uses `HARNESS_PROVIDER` via `createProviderAdapter()`.
+
+**Dockerfile.worker** (`/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/Dockerfile.worker`): Both CLIs are installed in the same image:
+- Line 77: Claude CLI installed via `curl -fsSL https://claude.ai/install.sh | bash`
+- Line 80-83: pi-mono installed via `sudo npm install -g @mariozechner/pi-coding-agent`
+- Line 141-142: Pi-mono skills copied to `/home/worker/.pi/agent/skills/`
+- Line 165: `ENV HARNESS_PROVIDER=claude` (default)
+
+---
+
+### Pattern 8: Testing Patterns
+
+**Found in**: `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/tests/provider-adapter.test.ts`
+
+Tests the factory and type shapes:
+```typescript
+test("returns ClaudeAdapter for 'claude'", () => {
+  const adapter = createProviderAdapter("claude");
+  expect(adapter).toBeInstanceOf(ClaudeAdapter);
+  expect(adapter.name).toBe("claude");
+});
+
+test("throws for unknown provider", () => {
+  expect(() => createProviderAdapter("unknown")).toThrow(
+    'Unknown HARNESS_PROVIDER: "unknown". Supported: claude, pi',
+  );
+});
+```
+
+Also includes `ProviderEvent` type narrowing tests and `CostData` shape tests.
+
+---
+
+### Summary of All Relevant Files
+
+| File | Role |
+|------|------|
+| `src/providers/types.ts` | Core interfaces: `ProviderAdapter`, `ProviderSession`, `ProviderSessionConfig`, `ProviderEvent`, `ProviderResult`, `CostData` |
+| `src/providers/index.ts` | Factory: `createProviderAdapter()` switch on `"claude"` / `"pi"` |
+| `src/providers/claude-adapter.ts` | Claude implementation: subprocess spawn, `stream-json` parsing, task file, stale session retry |
+| `src/providers/pi-mono-adapter.ts` | Pi-mono implementation: in-process library, MCP tool discovery, model resolution, AGENTS.md symlink |
+| `src/providers/pi-mono-extension.ts` | Pi-mono hooks as extension: maps all 6 Claude hook events to pi-mono extension events |
+| `src/providers/pi-mono-mcp-client.ts` | Minimal MCP HTTP client for pi-mono tool discovery |
+| `src/hooks/hook.ts` | Claude hook handler (runs as separate process via stdin JSON) |
+| `src/commands/setup.tsx` | Local setup: writes `.mcp.json` and hooks config to `.claude/settings.local.json` |
+| `src/commands/runner.ts:1428` | Entry point: `createProviderAdapter(process.env.HARNESS_PROVIDER \|\| "claude")` |
+| `docker-entrypoint.sh` | Docker: validates auth per provider, writes `.mcp.json`, starts binary |
+| `Dockerfile.worker:77-83,141,165` | Installs both CLIs, defaults to `HARNESS_PROVIDER=claude` |
+| `src/tests/provider-adapter.test.ts` | Unit tests for factory, event types, cost data shapes |</result>
+<usage><total_tokens>76134</total_tokens><tool_uses>21</tool_uses><duration_ms>112983</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/aa68624f2833a62ce.output
+
+---
+
+<task-notification>
+<task-id>afb7a9270097f6db1</task-id>
+<tool-use-id>toolu_014msVKAM9jW4pjJCv94pRMU</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/afb7a9270097f6db1.output</output-file>
+<status>completed</status>
+<summary>Agent "Analyze harness provider abstraction" completed</summary>
+<result>
+
+I now have a complete picture. Here is the analysis.
+
+---
+
+## Analysis: Harness/Provider Abstraction
+
+### Overview
+
+The codebase implements a provider abstraction layer in `src/providers/` that allows the runner to execute agent sessions against different CLI harnesses (Claude Code or pi-mono) through a unified interface. The runner (`src/commands/runner.ts`) selects the provider at startup via `HARNESS_PROVIDER` env var and interacts exclusively through the `ProviderAdapter` / `ProviderSession` / `ProviderResult` contracts. Hooks are handled completely differently per provider: Claude uses an external process invoked by Claude Code's hook system, while pi-mono uses an in-process extension API.
+
+### Entry Points
+
+- `src/providers/index.ts:15` -- `createProviderAdapter(provider)` factory function
+- `src/commands/runner.ts:1428` -- adapter instantiation at runner startup
+- `src/hooks/hook.ts:200` -- Claude-specific hook handler (external process)
+- `src/providers/pi-mono-extension.ts:380` -- pi-mono hook equivalent (in-process extension)
+
+### Core Implementation
+
+#### 1. Provider Types Contract (`src/providers/types.ts`)
+
+Four interfaces define the abstraction:
+
+- **`ProviderAdapter`** (line 70): Top-level factory with `name`, `createSession(config)`, and `canResume(sessionId)`.
+- **`ProviderSession`** (line 49): Running session handle with `sessionId`, `onEvent(listener)`, `waitForCompletion()`, and `abort()`.
+- **`ProviderResult`** (line 58): Completion result with `exitCode`, `sessionId`, `cost`, `isError`, `failureReason`.
+- **`ProviderSessionConfig`** (line 30): Input config passed to `createSession` -- prompt, systemPrompt, model, role, agentId, taskId, cwd, env, etc.
+- **`ProviderEvent`** (line 18): Normalized event union (`session_init`, `message`, `tool_start`, `tool_end`, `result`, `error`, `raw_log`, `raw_stderr`, `custom`).
+
+#### 2. Factory (`src/providers/index.ts:15-24`)
+
+`createProviderAdapter(provider)` accepts two values:
+- `"claude"` returns `ClaudeAdapter`
+- `"pi"` returns `PiMonoAdapter`
+- Any other value throws with `Unknown HARNESS_PROVIDER`.
+
+#### 3. Claude Adapter (`src/providers/claude-adapter.ts`)
+
+**Session creation** (`ClaudeAdapter.createSession`, line 329): Writes a task file to `/tmp/agent-swarm-task-{pid}.json` (line 27-31) containing `taskId`, `agentId`, `startedAt`. Then spawns a `ClaudeSession`.
+
+**Process spawning** (`ClaudeSession` constructor, line 50-74): Calls `Bun.spawn()` with the command built by `buildCommand()` (line 76-101). The command is:
+```
+claude --model {model} --verbose --output-format stream-json
+  --dangerously-skip-permissions --allow-dangerously-skip-permissions
+  --permission-mode bypassPermissions -p {prompt}
+  [--append-system-prompt {systemPrompt}]
+  [...additionalArgs]
+```
+The spawned process env includes `TASK_FILE` pointing to the task file (line 67-68).
+
+**Stream processing** (`processStreams`, line 113-202): Reads stdout line-by-line, parses JSON. Extracts `session_id` from `type:"system", subtype:"init"` messages (line 209-212). Extracts cost data from `type:"result"` messages (line 215-245). Tracks errors via `SessionErrorTracker` from stderr (line 163).
+
+**Stale session retry** (`waitForCompletion`, line 266-318): If the process failed with "session not found" error and `--resume` was in the args, it strips `--resume` and retries with a fresh `ClaudeSession`.
+
+**`canResume`** (line 344): Always returns `true` for Claude.
+
+#### 4. Pi-Mono Adapter (`src/providers/pi-mono-adapter.ts`)
+
+**Session creation** (`PiMonoAdapter.createSession`, line 363-419) performs seven steps:
+
+1. **AGENTS.md symlink** (line 371): Creates `AGENTS.md -> CLAUDE.md` symlink since pi-mono reads `AGENTS.md` while the project has `CLAUDE.md`.
+2. **MCP tool discovery** (lines 374-387): Creates an `McpHttpClient`, performs the MCP handshake against the swarm API endpoint, calls `listTools()`, then wraps each tool as a pi-mono `ToolDefinition` via `mcpToolsToDefinitions()` (line 43-64). Each tool's `execute()` calls `mcpClient.callTool()`.
+3. **Model resolution** (line 390): `resolveModel()` (line 67-107) maps shortnames (`opus`, `sonnet`, `haiku`) to `[provider, model-id]` pairs, handles `provider/model-id` format, and falls back to trying common providers.
+4. **Swarm hooks extension** (lines 393-399): Creates via `createSwarmHooksExtension()` from `pi-mono-extension.ts`.
+5. **Resource loader** (lines 402-405): `DefaultResourceLoader` with `appendSystemPrompt` and the extension factory.
+6. **Session creation** (line 416): Calls pi-mono's `createAgentSession()` library function.
+7. Returns `PiMonoSession` wrapping the native `AgentSession`.
+
+**PiMonoSession** (line 137-357): Subscribes to pi-mono's `AgentSessionEvent` stream and normalizes events. `handleAgentEvent()` (line 181-254) maps:
+- `message_end` to `raw_log` with Claude-compatible JSON format
+- `tool_execution_start` to `raw_log` with `tool_use` content
+- `tool_execution_end` to `raw_log` with `tool_result` content
+- `auto_retry_start` to `raw_stderr`
+
+**`runSession()`** (line 257-299): Calls `agentSession.prompt()`, waits for idle via `waitForIdle()` (polls `isStreaming` or subscribes for `agent_end` event), builds cost data from `getSessionStats()`, cleans up the symlink, and disposes the session.
+
+**`canResume`** (line 421-432): Attempts to check pi-mono's `SessionManager` for the session ID.
+
+#### 5. MCP HTTP Client (`src/providers/pi-mono-mcp-client.ts`)
+
+A lightweight client that performs the MCP Streamable HTTP handshake (initialize + initialized notification at lines 72-93), discovers tools (`listTools`, line 96-106), and forwards tool calls (`callTool`, line 109-119). Handles both JSON and SSE response formats (line 56-68). This exists because pi-mono does not natively consume MCP servers the way Claude Code does via `.mcp.json`.
+
+### How Hooks Work Per Provider
+
+#### Claude: External Process Hook (`src/hooks/hook.ts`)
+
+Claude Code invokes `/usr/local/bin/agent-swarm hook` as an external process for each hook event. This is configured in `Dockerfile.worker` at line 109-116 in the `settings.json` hooks config, covering: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PreCompact`, `Stop`.
+
+The hook reads JSON from stdin (line 217), reads MCP config from `.mcp.json` (line 206-213), fetches agent info from the API (line 264-283), then dispatches based on `hook_event_name` (line 685). Tool names in Claude hooks are capitalized (`Write`, `Edit`, `Bash` -- line 837, 878, 907).
+
+The Claude hook additionally manages `~/.claude/CLAUDE.md` backup/restore (lines 159-195) and syncs `claudeMd` content to the server (line 332-355), which is Claude-specific behavior.
+
+#### Pi-Mono: In-Process Extension (`src/providers/pi-mono-extension.ts`)
+
+`createSwarmHooksExtension()` (line 380) returns an `ExtensionFactory` that registers event handlers on the pi-mono extension API (`pi.on(...)`). The mapping is:
+
+| Claude Hook Event | Pi-Mono Extension Event | Line |
+|---|---|---|
+| `SessionStart` | `session_start` | 383 |
+| `PreToolUse` | `tool_call` | 405 |
+| `PostToolUse` | `tool_result` | 478 |
+| `PreCompact` | `context` | 561 |
+| `UserPromptSubmit` | `input` | 586 |
+| `Stop` | `session_shutdown` | 602 |
+
+The pi-mono extension uses lowercase tool names (`write`, `edit`, `bash` -- lines 459, 496, 520) versus Claude's capitalized names. The extension can return `{ block: true, reason }` to block tool calls (line 411-417), while the Claude hook outputs `{ decision: "block", reason }` to stdout (line 518-524).
+
+Both implementations share the same behavioral logic: task cancellation checks, tool loop detection, polling limit checks, shared disk write prevention, heartbeat pings, identity file sync, memory auto-indexing, goal reminders at compaction, and session summarization at shutdown.
+
+### Runner Structure (`src/commands/runner.ts`)
+
+The runner is fully provider-agnostic. At line 1428, `runAgent()` creates the adapter:
+```typescript
+const adapter = createProviderAdapter(process.env.HARNESS_PROVIDER || "claude");
+```
+
+Two functions use the adapter:
+
+- **`spawnProviderProcess()`** (line 1098-1265): Non-blocking spawn for concurrent task execution. Builds a `ProviderSessionConfig`, calls `adapter.createSession(config)`, subscribes to events for log streaming and session ID capture, returns a `RunningTask` with a completion promise.
+- **`runProviderIteration()`** (line 1268-1314): Blocking single-iteration execution for AI-loop mode. Same config construction, but awaits `session.waitForCompletion()` directly.
+
+Both functions resolve env from the API via `fetchResolvedEnv()` (line 1124, 1283) to pick up `MODEL_OVERRIDE` from swarm config.
+
+### Docker Worker Setup Per Provider (`Dockerfile.worker`, `docker-entrypoint.sh`)
+
+**Dockerfile.worker**:
+- Both CLIs are installed: Claude CLI at line 77, pi-mono at line 83.
+- Claude-specific setup: `settings.json` with hooks config (lines 103-117), Claude plugins (lines 88-96).
+- Pi-mono-specific setup: `plugin/pi-skills/` copied to `~/.pi/agent/skills/` (line 142), `PI_PACKAGE_DIR` env set (line 85).
+- Default: `HARNESS_PROVIDER=claude` (line 165).
+
+**docker-entrypoint.sh**:
+- Lines 5-19: Validates auth credentials based on `HARNESS_PROVIDER`. For `"pi"`: requires `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, or `~/.pi/agent/auth.json`. For Claude (default): requires `CLAUDE_CODE_OAUTH_TOKEN`.
+- Line 540: Runs `exec /usr/local/bin/agent-swarm "$ROLE" "$@"` -- the compiled binary that invokes `runAgent()` which then uses the provider abstraction.
+
+### Data Flow
+
+1. Docker container starts, `docker-entrypoint.sh` validates auth per `HARNESS_PROVIDER` (line 5-19)
+2. Entrypoint execs `agent-swarm worker` (line 540)
+3. `runAgent()` in `runner.ts:1423` creates the adapter (line 1428)
+4. Worker poll loop gets a task, calls `spawnProviderProcess()` (line 1098)
+5. Adapter's `createSession()` is called (line 1143):
+   - **Claude**: spawns `claude` CLI process, streams JSON stdout
+   - **Pi-mono**: creates in-process `AgentSession`, discovers MCP tools, registers hooks extension
+6. Events flow through `session.onEvent()` (line 1149) back to the runner for log streaming
+7. Completion flows through `session.waitForCompletion()` (line 1190) for cost saving and task finalization
+
+### Key Files
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/types.ts` -- Provider contract interfaces
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/index.ts` -- Factory function
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/claude-adapter.ts` -- Claude CLI adapter (subprocess)
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/pi-mono-adapter.ts` -- Pi-mono adapter (in-process)
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/pi-mono-extension.ts` -- Pi-mono hooks extension
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/pi-mono-mcp-client.ts` -- Lightweight MCP client for pi-mono
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/hooks/hook.ts` -- Claude Code external hook handler
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/commands/runner.ts` -- Provider-agnostic runner
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/docker-entrypoint.sh` -- Per-provider auth validation
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/Dockerfile.worker` -- Installs both CLIs, configures both skill/command sets</result>
+<usage><total_tokens>72401</total_tokens><tool_uses>24</tool_uses><duration_ms>120065</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/afb7a9270097f6db1.output
+
+---
+
+<task-notification>
+<task-id>a613257e563ae8290</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/a613257e563ae8290.output</output-file>
+<status>completed</status>
+<summary>Agent "Research Codex App Server API" completed</summary>
+<result>I have the full picture of both the Codex API and the existing provider adapter interface. Here is the comprehensive research summary, Taras. I will persist it to the research file.
+
+**Research file**: `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/thoughts/taras/research/2026-03-11-codex-app-server-api.md`
+
+Here is my summary of what I found across all 10 areas, followed by the full content I need to write to that file:
+
+---
+
+## Key Findings Summary
+
+**1. JSON-RPC Protocol**: "JSON-RPC lite" -- same request/response/notification structure as JSON-RPC 2.0 but the `"jsonrpc":"2.0"` field is omitted. Framed as JSONL over stdio. Handshake starts with `initialize` -> `initialized` before any other method.
+
+**2. Spawning**: `codex app-server` as a long-lived child process. Default: stdio. Experimental: `--listen ws://127.0.0.1:4500`. The TypeScript SDK (`@openai/codex-sdk`) wraps this -- spawns the CLI binary and exchanges JSONL over stdin/stdout.
+
+**3. Thread lifecycle**: `thread/start` (create), `thread/resume` (reopen), `thread/fork` (branch history), `thread/archive` / `thread/unarchive`, `thread/list`, `thread/compact/start`, `thread/rollback`.
+
+**4. Turn management**: `turn/start` (begin generation with user input), `turn/steer` (inject input mid-turn without starting new), `turn/interrupt` (cancel in-flight turn, status becomes "interrupted").
+
+**5. Event streaming**: Item lifecycle is always `item/started` -> zero or more `item/*/delta` -> `item/completed`. Turn lifecycle: `turn/started` -> `turn/completed`. Thread events: `thread/started`, `thread/archived`, `thread/unarchived`, `thread/closed`, `thread/status/changed`. Clients can opt out of specific notifications via `initialize.params.capabilities.optOutNotificationMethods`.
+
+**6. MCP integration**: Configured in `config.toml` under `[mcp_servers.<name>]`. Supports stdio (subprocess) and StreamableHttp transports. Tool names prefixed `mcp__<server_name>__<tool>`. Has `enabled_tools`/`disabled_tools` allow/deny lists. Approval via `tool/requestUserInput` with Accept/Decline/Cancel options.
+
+**7. Authentication**: Three modes -- `apiKey` (supply OPENAI_API_KEY), `chatgpt` (managed OAuth), `chatgptAuthTokens` (external tokens from host app). For Docker/headless: `printenv OPENAI_API_KEY | codex login --with-api-key`, or `codex login --device-auth`, or copy `~/.codex/auth.json`. Can force API-only with `forced_login_method = "api"`.
+
+**8. Type generation**: `codex app-server generate-ts --out DIR` and `codex app-server generate-json-schema --out DIR`. Pass `--experimental` to include experimental methods. Output is version-pinned to the binary.
+
+**9. Known issues**: (a) `--dangerously-bypass-approvals-and-sandbox` doesn't actually bypass sandbox for tool child processes (issue #14068), (b) 503 errors when app-server tries upstream wss://chatgpt.com endpoint while `codex exec` works (issue #14056), (c) no RPC to trigger manual compaction when auto-compact fails (issue #9142), (d) approval response RPC gap in strict protocol-only mode (issue #14192), (e) Windows crash on certain builds (issue #12962).
+
+**10. Approval modes**: `approval_policy` in config.toml: `"untrusted"` (default, only safe read-only auto-run), `"on-request"` (model decides), `"never"` (no prompts). CLI flags: `--full-auto` (shortcut for `--sandbox workspace-write --ask-for-approval on-request`), `--dangerously-bypass-approvals-and-sandbox` (alias `--yolo`). Sandbox modes: `read-only`, `workspace-write`, `danger-full-access`.
+
+**Item types**: `userMessage`, `agentMessage`, `plan`, `reasoning`, `commandExecution`, `fileChange`, `mcpToolCall`, `dynamicToolCall`.
+
+**Auth RPC surface**: `account/read`, `account/login/start`, `account/logout`, `account/rateLimits/read`, plus notifications `account/updated`, `account/rateLimits/updated`, `account/chatgptAuthTokens/refresh`.
+
+**Integration relevance for agent-swarm**: The existing `ProviderAdapter` interface (`createSession`, `canResume`, events like `session_init`, `message`, `tool_start`, `tool_end`, `result`, `error`) maps well to the app-server protocol. A Codex adapter would spawn `codex app-server`, perform the `initialize` handshake, use `thread/start` + `turn/start` to execute tasks, map item events to `ProviderEvent`, and use `turn/interrupt` for cancellation. API key auth (`OPENAI_API_KEY` env var) is the cleanest path for Docker workers.
+
+---
+
+Sources:
+- [Codex App Server - Official Docs](https://developers.openai.com/codex/app-server/)
+- [Codex App Server README - GitHub](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)
+- [Codex SDK - Official Docs](https://developers.openai.com/codex/sdk/)
+- [Codex Authentication - Official Docs](https://developers.openai.com/codex/auth/)
+- [Codex MCP Integration - Official Docs](https://developers.openai.com/codex/mcp/)
+- [Codex Configuration Reference](https://developers.openai.com/codex/config-reference/)
+- [Codex CLI Reference](https://developers.openai.com/codex/cli/reference)
+- [Unlocking the Codex harness - OpenAI Blog](https://openai.com/index/unlocking-the-codex-harness/)
+- [InfoQ: Codex App Server Architecture](https://www.infoq.com/news/2026/02/opanai-codex-app-server/)
+- [Codex App Server Protocol Analysis - adwaitx](https://www.adwaitx.com/openai-codex-app-server-json-rpc-protocol/)
+- [Headless Auth Issue #3820](https://github.com/openai/codex/issues/3820)
+- [Sandbox Bypass Issue #14068](https://github.com/openai/codex/issues/14068)
+- [503 Error Issue #14056](https://github.com/openai/codex/issues/14056)
+- [Compaction RPC Issue #9142](https://github.com/openai/codex/issues/9142)
+- [Approval RPC Gap Issue #14192](https://github.com/openai/codex/issues/14192)
+- [Codex Changelog](https://developers.openai.com/codex/changelog/)
+- [Codex CI/CD Auth Guide](https://developers.openai.com/codex/auth/ci-cd-auth)
+- [Codex Advanced Configuration](https://developers.openai.com/codex/config-advanced/)
+- [Codex SDK npm](https://www.npmjs.com/package/@openai/codex-sdk)
+- [Fossies - App Server README Mirror](https://fossies.org/linux/codex-rust/codex-rs/app-server/README.md)</result>
+<usage><total_tokens>43099</total_tokens><tool_uses>41</tool_uses><duration_ms>236395</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/a613257e563ae8290.output
+
+---
+
+i think having codex native is nice, in case people is used to it, and also its harness provide different vibe in terms of usage you know?
+
+---
+
+did you research how the codex server work? i.e. to valiate a solid research with key findigs + links?
+
+---
+
+<task-notification>
+<task-id>adb5220daff39f99a</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/adb5220daff39f99a.output</output-file>
+<status>completed</status>
+<summary>Agent "Research Codex TypeScript SDK" completed</summary>
+<result>
+
+Taras, I've completed extensive research on the `@openai/codex-sdk` TypeScript SDK. Let me write the research file now.
+
+**Research file written to:**
+`/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/thoughts/taras/research/2026-03-11-codex-sdk-deep-dive.md`
+
+Here are the key findings:
+
+---
+
+## Summary
+
+The `@openai/codex-sdk` (latest: **v0.112.0**, 88 dependents on npm) is a TypeScript library that wraps the bundled `codex` Rust binary and communicates via JSONL over stdin/stdout. It provides a higher-level abstraction over the App Server JSON-RPC protocol with a Thread/Turn model. However, for an adapter that needs fine-grained control (like our `ProviderSession` interface), **the raw App Server JSON-RPC approach from the existing feasibility research is the better path**.
+
+## 1. Package Details
+
+- **npm**: `@openai/codex-sdk` v0.112.0 (published March 11, 2026)
+- **Requires**: Node.js 18+
+- **Install**: `npm install @openai/codex-sdk`
+- **88 dependents** on npm
+
+## 2. How It Spawns the App Server
+
+The SDK wraps the bundled `codex` binary from `@openai/codex`. It spawns the CLI process using Node's `child_process.spawn()` with stdio configured as `["pipe", "pipe", "inherit"]` and exchanges JSONL events over stdin/stdout. The process lifecycle is managed automatically -- you do not manually start/stop the app-server.
+
+## 3. TypeScript API Surface
+
+**Source files** in `sdk/typescript/src/`:
+`index.ts`, `codex.ts`, `codexOptions.ts`, `thread.ts`, `threadOptions.ts`, `turnOptions.ts`, `events.ts`, `items.ts`, `exec.ts`, `outputSchemaFile.ts`
+
+**Main class: `Codex`**
+```typescript
+import { Codex } from "@openai/codex-sdk";
+
+const codex = new Codex();                    // default options
+const codex = new Codex({ env: { PATH: "/usr/local/bin" } }); // custom env
+
+// Methods:
+codex.startThread(options?)    // -> Thread
+codex.resumeThread(threadId)   // -> Thread (from saved session)
+```
+
+**Thread class:**
+```typescript
+thread.run(prompt)              // -> Turn (buffers all events, returns final result)
+thread.run(inputArray)          // supports [{ type: "text", text: "..." }, { type: "local_image", path: "..." }]
+thread.runStreamed(prompt)      // -> { events: AsyncGenerator<Event> } (streaming)
+thread.run(prompt, { outputSchema }) // structured JSON output
+```
+
+**Turn result:**
+```typescript
+turn.finalResponse  // string - the agent's final text response
+turn.items          // Item[] - all items produced during the turn
+```
+
+## 4. Session Management
+
+- **Create thread**: `codex.startThread({ workingDirectory, skipGitRepoCheck })`
+- **Resume thread**: `codex.resumeThread(savedThreadId)` -- threads persist in `~/.codex/sessions`
+- **Continue conversation**: Call `thread.run()` repeatedly on the same Thread instance
+- **Config overrides**: Use the `config` option -- SDK flattens JSON objects into dotted TOML paths and passes as `--config key=value` flags
+
+## 5. Event Types (from `runStreamed()`)
+
+7 event types returned by the async generator:
+
+| Event Type | Description |
+|---|---|
+| `thread.started` | Thread has been created |
+| `turn.started` | A turn has begun |
+| `item.started` | An item (message, command, file change, etc.) began |
+| `item.updated` | Incremental delta on an item |
+| `item.completed` | An item finished |
+| `turn.completed` | Turn finished (includes `usage` data) |
+| `turn.failed` | Turn errored |
+| `thread.error` | Thread-level error |
+
+**Item types**: `agentMessage`, `reasoning`, `commandExecution`, `fileChange`, `mcpToolCall`, `webSearch`, `planUpdate`
+
+## 6. Authentication
+
+- The SDK inherits the Node.js process environment by default
+- Set `OPENAI_API_KEY` env var, or pass custom `env` to `new Codex({ env: { ... } })`
+- The SDK auto-injects its required variables (`OPENAI_BASE_URL`, `CODEX_API_KEY`) on top of provided env
+- Also supports ChatGPT subscription auth (browser-based login flow -- not useful for headless/Docker)
+
+## 7. MCP Configuration
+
+MCP servers are **not configured via the SDK API directly**. They go through the `config.toml` file that the `codex` binary reads:
+
+```toml
+[mcp_servers.agent-swarm]
+command = "..."
+# OR for HTTP:
+url = "http://localhost:3013/mcp"
+headers = { Authorization = "Bearer ${API_KEY}" }
+```
+
+You can pass MCP config via the SDK's `config` option using dotted paths:
+```typescript
+const thread = codex.startThread({
+  config: {
+    "mcp_servers.my_server.url": "http://localhost:3013/mcp"
+  }
+});
+```
+
+## 8. Structured Output
+
+```typescript
+import { zodToJsonSchema } from "zod-to-json-schema";
+import { z } from "zod";
+
+const schema = z.object({
+  summary: z.string(),
+  status: z.enum(["ok", "action_required"]),
+});
+
+const turn = await thread.run("Summarize repo status", {
+  outputSchema: zodToJsonSchema(schema, { target: "openAi" }),
+});
+```
+
+## 9. Complete Code Examples
+
+**Basic usage:**
+```typescript
+import { Codex } from "@openai/codex-sdk";
+
+const codex = new Codex();
+const thread = codex.startThread();
+const turn = await thread.run("Diagnose the test failure and propose a fix");
+console.log(turn.finalResponse);
+console.log(turn.items);
+
+// Continue conversation
+const nextTurn = await thread.run("Implement the fix");
+```
+
+**Streaming:**
+```typescript
+const { events } = await thread.runStreamed("Diagnose the test failure");
+for await (const event of events) {
+  switch (event.type) {
+    case "item.completed":
+      console.log("item", event.item);
+      break;
+    case "turn.completed":
+      console.log("usage", event.usage);
+      break;
+  }
+}
+```
+
+**Image input:**
+```typescript
+const turn = await thread.run([
+  { type: "text", text: "Analyze the error in this screenshot." },
+  { type: "local_image", path: "./screenshot.png" },
+]);
+```
+
+## 10. SDK vs Raw App Server JSON-RPC -- Comparison
+
+| Dimension | SDK (`@openai/codex-sdk`) | Raw App Server JSON-RPC |
+|---|---|---|
+| **Process management** | Automatic (spawns + manages codex binary) | Manual (`Bun.spawn("codex app-server")`) |
+| **API style** | High-level: `thread.run(prompt)` | Low-level: `thread/start`, `turn/start`, `item/*` notifications |
+| **Event granularity** | 7 event types via `runStreamed()` | Full JSON-RPC notification stream with deltas |
+| **Thread control** | `startThread()`, `resumeThread()` | `thread/start`, `thread/resume`, `thread/fork`, `thread/rollback`, `thread/compact/start` |
+| **Mid-turn steering** | Not exposed (Issue #12329 open) | `turn/steer` available |
+| **Turn cancellation** | Not exposed (Issue #5494 open) | `turn/interrupt` available |
+| **Auth** | Inherits env or custom env object | `account/login/start` JSON-RPC method |
+| **MCP config** | Via config.toml / config option dotted paths | Via config.toml (same) |
+| **Runtime** | Requires Node.js 18+ | Any runtime that can spawn a process and do JSONL |
+| **Maturity** | "Shipped earlier, smaller surface area" per OpenAI | "First-class integration method maintained moving forward" per OpenAI |
+
+## Verdict for Agent-Swarm Adapter
+
+**The raw App Server JSON-RPC approach is better for our use case.** Here's why:
+
+1. **Missing critical methods**: The SDK does not expose `turn/interrupt` (abort) or `turn/steer` (mid-task guidance) -- both mapped to our `ProviderSession` interface in the feasibility research. Issues #5494 and #12329 are open requesting these.
+
+2. **Node.js dependency**: The SDK requires Node.js 18+. Our workers run on Bun. While Bun has high Node.js compat, it's an unnecessary compatibility risk when the App Server protocol works with any runtime.
+
+3. **OpenAI's own guidance**: "Codex App Server will be the first-class integration method maintained moving forward. By default, clients should use Codex App Server to integrate with Codex."
+
+4. **Less control**: The SDK abstracts away process lifecycle, which is convenient for simple use cases but means we lose control over when to restart, how to handle crashes, and how to manage long-lived server processes.
+
+5. **Event mapping**: The SDK's 7 event types are a strict subset of what the App Server provides. The raw JSONL stream gives us `item/*/delta` for streaming, `thread/compact/start` for context preservation hooks, etc.
+
+The SDK would be appropriate for a quick prototype or CI script, but for a production adapter that needs abort, steering, fine-grained event monitoring, and hook-equivalent behavior, the App Server JSON-RPC is the right choice.
+
+## Known SDK Issues
+
+- **No abort/cancel**: [Issue #5494](https://github.com/openai/codex/issues/5494) -- no way to cancel an active `thread.run()` call
+- **No turn/steer**: [Issue #12329](https://github.com/openai/codex/issues/12329) -- SDK doesn't expose the app-server's `turn/steer` for injecting mid-turn messages
+- **No fork/backtrack**: [Issue #4972](https://github.com/openai/codex/issues/4972) -- conversation fork/backtrack not exposed
+- **Auth issues**: [Issue #7144](https://github.com/openai/codex/issues/7144) -- SDK auth not working in some configurations
+
+## Sources
+
+- [Official Codex SDK Docs](https://developers.openai.com/codex/sdk/)
+- [@openai/codex-sdk on npm](https://www.npmjs.com/package/@openai/codex-sdk)
+- [SDK TypeScript Source (GitHub)](https://github.com/openai/codex/tree/main/sdk/typescript)
+- [SDK README (GitHub)](https://github.com/openai/codex/blob/main/sdk/typescript/README.md)
+- [Codex App Server Docs](https://developers.openai.com/codex/app-server/)
+- [OpenAI Blog: Unlocking the Codex Harness](https://openai.com/index/unlocking-the-codex-harness/)
+- [DEV.to: Codex as Native Agent in TypeScript](https://dev.to/kachurun/openai-codex-as-a-native-agent-in-your-typescript-nodejs-app-kii)
+- [Promptfoo Codex SDK Provider](https://www.promptfoo.dev/docs/providers/openai-codex-sdk/)
+- [OpenAI Cookbook: Build Code Review with Codex SDK](https://cookbook.openai.com/examples/codex/build_code_review_with_codex_sdk)
+- [Codex MCP Config](https://developers.openai.com/codex/mcp/)
+- [Codex Config Reference](https://developers.openai.com/codex/config-reference/)
+- [Codex Changelog](https://developers.openai.com/codex/changelog/)
+- [Issue #5494: Add abort/cancel](https://github.com/openai/codex/issues/5494)
+- [Issue #12329: Expose turn/steer](https://github.com/openai/codex/issues/12329)
+- [Issue #4972: Fork/backtrack API](https://github.com/openai/codex/issues/4972)
+- [Issue #7144: SDK auth issues](https://github.com/openai/codex/issues/7144)
+- [Issue #2772: Original SDK proposal](https://github.com/openai/codex/issues/2772)
+- [Stackademic: Codex SDK for Creating Our Own Codex Agent](https://blog.stackademic.com/openai-codex-sdk-for-creating-our-own-codex-agent-bee5ad08fe57)</result>
+<usage><total_tokens>55057</total_tokens><tool_uses>46</tool_uses><duration_ms>275742</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/adb5220daff39f99a.output
+
+---
+
+<task-notification>
+<task-id>a0c71223f461d6569</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/a0c71223f461d6569.output</output-file>
+<status>completed</status>
+<summary>Agent "Deep Codex adapter specifics research" completed</summary>
+<result>Taras, I don't have access to the Write or Bash tools in this context -- I'm running as a research-only agent with WebSearch, WebFetch, Read, Grep, and Glob. Let me output the file path and a summary so you (or the parent session) can write it.
+
+Here is my complete research output. The full document should be persisted to:
+
+**File path**: `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/thoughts/taras/research/2026-03-11-codex-adapter-deep-reference.md`
+
+## Research Summary
+
+I performed 25+ targeted web searches across official OpenAI docs, GitHub source, npm, Fossies mirrors, community SDKs (Elixir), and issue trackers. Here are the key findings organized by your 8 areas:
+
+### 1. Config File Paths & Structure
+- Global: `~/.codex/config.toml`, Project: `.codex/config.toml` (trusted only), Override: `$CODEX_HOME`
+- Auth at `~/.codex/auth.json`, sessions at `~/.codex/sessions/`
+- Schema at `codex-rs/core/config.schema.json` or `https://developers.openai.com/codex/config-schema.json`
+- Key fields: `model`, `model_provider`, `approval_policy`, `sandbox_mode`, `personality`, `developer_instructions`, `model_instructions_file`, `project_doc_fallback_filenames`, `[model_providers.*]`, `[history]`, `[mcp_servers.*]`
+
+### 2. Instructions System (AGENTS.md)
+- Checks: `AGENTS.override.md` > `AGENTS.md` > fallback filenames per directory, root-to-CWD
+- Three instruction layers: system (built-in prompt), developer (`developer_instructions` config), AGENTS.md (user role)
+- Programmatic injection via `settings.developer_instructions` in `thread/start` params
+- Max 32 KiB combined AGENTS.md content
+
+### 3. MCP Server Configuration
+- STDIO: `command` + `args` + `env` + `cwd`; HTTP: `url` + `bearer_token_env_var` + `http_headers` + `env_http_headers`
+- Tool naming: `mcp__{server}__{tool}`, sanitized to `[a-zA-Z0-9_-]`, max 64 chars with SHA-1 hash fallback
+- No runtime MCP add/remove via App Server -- config.toml only, loaded at session start
+- **6+ open issues** with streamable HTTP reliability
+
+### 4. Approval/Permissions System
+- approval_policy: `"on-request"` (default), `"untrusted"`, `"never"`, `{ reject = {...} }` (granular)
+- sandbox_mode: `"read-only"` / `"workspace-write"` / `"danger-full-access"` (TOML kebab-case vs API camelCase)
+- Approvals arrive as server-initiated JSON-RPC **requests** (with `id`), expect decision response
+- Auto-approve: config `"never"` + `"dangerFullAccess"`, plus fallback handler for `requestApproval` messages
+
+### 5. App Server JSON-RPC Protocol
+- "JSON-RPC lite" -- no `"jsonrpc":"2.0"` field, JSONL over stdio
+- Lifecycle: `initialize` -> `initialized` -> `account/login/start` -> `thread/start` -> `turn/start` -> stream `item/*` notifications -> `turn/completed`
+- Item types: `userMessage`, `agentMessage`, `plan`, `reasoning`, `commandExecution`, `fileChange`, `mcpToolCall`, `dynamicToolCall`
+- `turn/completed` includes `usage: { input_tokens, cached_input_tokens, output_tokens }` -- no cost field
+- Unique: `turn/steer` for mid-turn guidance injection
+- Schema gen: `codex app-server generate-ts --out ./schemas`
+
+### 6. Authentication
+- Three modes: `apiKey` (our use case), `chatgpt` (OAuth), `chatgptAuthTokens` (external tokens)
+- API key flow: `account/login/start` with `type: "apiKey"`, `apiKey: "sk-..."` -> `account/login/completed` notification
+- Auth happens after `initialize`/`initialized`, before `thread/start`
+- `OPENAI_API_KEY` env var may auto-auth but explicit RPC is more reliable
+
+### 7. Process Lifecycle
+- SIGTERM now = SIGINT (graceful shutdown, since PR #13594, March 5 2026)
+- One process can handle multiple threads sequentially
+- Graceful shutdown: `turn/interrupt` -> wait `turn/completed` -> close stdin -> wait exit
+
+### 8. CLI Installation
+- `npm install -g @openai/codex@0.111.0` (latest as of March 11 2026)
+- Binary: `codex`; Homebrew: `brew install --cask codex`
+- Requires Node.js 18+ for npm install (binary is native Rust)
+- SDK: `@openai/codex-sdk` (separate package)
+
+### Critical Gotchas
+- JSON-RPC lite (no `"jsonrpc":"2.0"`)
+- TOML kebab-case vs API camelCase for sandbox/approval values
+- `AGENTS.md` not `CLAUDE.md` -- need symlink
+- No `cost` field in usage data
+- Tool name 64-char limit with hash truncation
+- `codex exec --json` uses `snake_case` (`agent_message`), App Server uses `camelCase` (`agentMessage`)
+
+The full ~700-line document with exact JSON examples, config templates, and source links is ready. I was unable to write it to disk because this agent session lacks the Bash/Write tools. The parent session should write the content above (everything between the heredoc markers I attempted) to the target path.
+
+Sources:
+- [Codex App Server](https://developers.openai.com/codex/app-server/)
+- [GitHub: app-server README](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)
+- [Config Reference](https://developers.openai.com/codex/config-reference/)
+- [Config Basics](https://developers.openai.com/codex/config-basic/)
+- [Sample Configuration](https://developers.openai.com/codex/config-sample/)
+- [Advanced Configuration](https://developers.openai.com/codex/config-advanced/)
+- [MCP Docs](https://developers.openai.com/codex/mcp/)
+- [Authentication](https://developers.openai.com/codex/auth/)
+- [CI/CD Auth](https://developers.openai.com/codex/auth/ci-cd-auth)
+- [AGENTS.md Guide](https://developers.openai.com/codex/guides/agents-md/)
+- [Non-interactive mode](https://developers.openai.com/codex/noninteractive/)
+- [CLI Reference](https://developers.openai.com/codex/cli/reference)
+- [Sandboxing](https://developers.openai.com/codex/concepts/sandboxing/)
+- [Codex Security](https://developers.openai.com/codex/security/)
+- [Codex Prompting Guide](https://developers.openai.com/cookbook/examples/gpt-5/codex_prompting_guide/)
+- [npm: @openai/codex](https://www.npmjs.com/package/@openai/codex)
+- [npm: @openai/codex-sdk](https://www.npmjs.com/package/@openai/codex-sdk)
+- [GitHub: openai/codex](https://github.com/openai/codex)
+- [GitHub Releases](https://github.com/openai/codex/releases)
+- [GitHub: config.md](https://github.com/openai/codex/blob/main/docs/config.md)
+- [GitHub: config.schema.json](https://github.com/openai/codex/blob/main/codex-rs/core/config.schema.json)
+- [GitHub: agents_md.md](https://github.com/openai/codex/blob/main/docs/agents_md.md)
+- [GitHub: exec.md](https://github.com/openai/codex/blob/main/docs/exec.md)
+- [GitHub: authentication.md](https://github.com/openai/codex/blob/main/docs/authentication.md)
+- [Fossies: app-server README](https://fossies.org/linux/codex-rust/codex-rs/app-server/README.md)
+- [Fossies: protocol_v1.md](https://fossies.org/linux/codex-rust/codex-rs/docs/protocol_v1.md)
+- [Elixir SDK Architecture Guide](https://hexdocs.pm/codex_sdk/02-architecture.html)
+- [InfoQ: App Server Architecture](https://www.infoq.com/news/2026/02/opanai-codex-app-server/)
+- [Unlocking the Codex harness (OpenAI blog)](https://openai.com/index/unlocking-the-codex-harness/)
+- [SIGTERM PR #13594](https://github.com/openai/codex/pull/13594)
+- [External auth PR #10012](https://github.com/openai/codex/pull/10012)
+- [Thread/unsubscribe PR #10954](https://github.com/openai/codex/pull/10954)
+- [MCP HTTP issues #4707](https://github.com/openai/codex/issues/4707), [#5208](https://github.com/openai/codex/issues/5208), [#5619](https://github.com/openai/codex/issues/5619), [#6540](https://github.com/openai/codex/issues/6540), [#11284](https://github.com/openai/codex/issues/11284), [#12869](https://github.com/openai/codex/issues/12869), [#13138](https://github.com/openai/codex/issues/13138)
+- [Sandbox bug #6667](https://github.com/openai/codex/issues/6667)
+- [JSON output docs issue #4776](https://github.com/openai/codex/issues/4776)</result>
+<usage><total_tokens>86252</total_tokens><tool_uses>60</tool_uses><duration_ms>695364</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/a0c71223f461d6569.output
+
+---
+
+# Review Document
+
+A thin wrapper that invokes the `desplega:reviewing` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse flags from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - Check for `--output=append|separate` flag (sets output mode preference, skipping the preference question)
+   - Otherwise, default to **Critical** autonomy
+
+2. **ALWAYS invoke the `desplega:reviewing` skill:**
+   - Pass the document path
+   - Pass the autonomy mode determined above
+   - Pass the output mode if specified
+   - Let the skill handle all review logic
+
+3. **If no path provided:**
+   - Respond with: "I need a document to review. Please provide the path to the research, plan, or brainstorm document you'd like me to review."
+
+## Example Usage
+
+```
+/review thoughts/taras/research/2026-03-09-new-base-skills.md
+/review --autonomy=autopilot --output=append thoughts/taras/plans/2026-03-09-feature.md
+/review --output=separate thoughts/shared/brainstorms/2026-03-09-idea.md
+```
+
+
+ARGUMENTS: the research pls
+
+---
+
+Base directory for this skill: /Users/taras/.ccs/instances/work/plugins/cache/desplega-ai-toolbox/desplega/1.5.1/skills/reviewing
+
+# Reviewing
+
+You are performing a structured critique of a document (research, plan, or brainstorm) to identify gaps, weaknesses, and quality issues.
+
+## Working Agreement
+
+These instructions establish a working agreement between you and the user. The key principles are:
+
+1. **AskUserQuestion is your primary communication tool** - Whenever you need to ask the user anything (clarifications, preferences, decisions), use the **AskUserQuestion tool**. Don't output questions as plain text - always use the structured tool so the user can respond efficiently.
+
+2. **Establish preferences upfront** - Ask about user preferences at the start of the workflow, not at the end when they may want to move on.
+
+3. **Autonomy mode guides interaction level** - The user's chosen autonomy level determines how often you check in, but AskUserQuestion remains the mechanism for all questions.
+
+### User Preferences
+
+Before starting review (unless autonomy is Autopilot), establish these preferences:
+
+**Output Mode** - Use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "How should I present the review findings?" | 1. Append errata section to the document (Recommended), 2. Write a separate review file to thoughts/*/reviews/ |
+
+**File Review Preference** - Check if the `file-review` plugin is available (look for `file-review:file-review` in available commands).
+
+If file-review plugin is installed, use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like to use file-review for inline feedback after the automated review?" | 1. Yes, open file-review after review (Recommended), 2. No, the automated review is sufficient |
+
+Store these preferences and act on them during the review process.
+
+## When to Use
+
+This skill activates when:
+- User invokes `/review` command
+- Another skill references the reviewing skill at completion
+- User asks to review, critique, or check a document
+
+## Autonomy Mode
+
+At the start of review, adapt your interaction level based on the autonomy mode:
+
+| Mode | Behavior |
+|------|----------|
+| **Autopilot** | Run full review, auto-fix minor issues, present summary at end |
+| **Critical** (Default) | Ask about Critical/Important findings, auto-fix Minor ones |
+| **Verbose** | Walk through each finding, confirm before any changes |
+
+The autonomy mode is passed by the invoking command. If not specified, default to **Critical**.
+
+## Process Steps
+
+### Step 1: Read & Classify
+
+Read the input document fully. Determine the document type from its path and content structure:
+
+| Path contains | Type |
+|---------------|------|
+| `/research/` | Research document |
+| `/plans/` | Plan |
+| `/brainstorms/` | Brainstorm |
+
+If the type is ambiguous, infer from content structure or use **AskUserQuestion** to clarify.
+
+### Step 2: Structural Check
+
+Verify required sections exist based on document type:
+
+**Research documents:**
+- YAML frontmatter with required fields (date, researcher, topic, status)
+- Research Question section
+- Summary section
+- Detailed Findings with file:line references
+- Code References table
+- Open Questions section
+
+**Plans:**
+- YAML frontmatter with required fields (date, planner, topic, status)
+- Overview section
+- Current State Analysis
+- Desired End State with Key Discoveries
+- What We're NOT Doing
+- Phases with Changes Required and Success Criteria (both Automated and Manual Verification)
+- Quick Verification Reference
+
+**Brainstorms:**
+- YAML frontmatter with required fields (date, author, topic, status)
+- Context section
+- Exploration section with Q&A pairs
+- Synthesis section
+- Next Steps section
+
+### Step 3: Content Analysis
+
+Apply type-specific quality criteria:
+
+**Research documents:**
+- Are findings supported by specific file:line references?
+- Are there claims without evidence from the codebase?
+- Are there obvious areas that weren't investigated?
+- Are open questions actually open (not answerable from the findings)?
+
+**Plans:**
+- Are there missing phases or gaps in the implementation sequence?
+- Are success criteria specific enough to be actionable?
+- Are there unstated assumptions about the codebase?
+- Is error handling or rollback addressed?
+- Is there scope creep risk (doing more than stated)?
+
+**Brainstorms:**
+- Were important angles left unexplored?
+- Were conclusions reached prematurely before sufficient exploration?
+- Are constraints and requirements clearly identified?
+- Is the document ready to feed into research or planning?
+
+### Step 4: Gap Identification
+
+Look for what's missing or assumed:
+- Cross-reference claims against the codebase if needed (spawn **codebase-analyzer** agent for verification)
+- Identify unstated assumptions
+- Check for internal contradictions
+- Verify external references are still valid
+
+### Step 5: Present Findings
+
+Categorize all findings into three severity levels:
+
+| Severity | Meaning | Action |
+|----------|---------|--------|
+| **Critical** | Blocks correctness or completeness — must be addressed | Discuss with user |
+| **Important** | Significant gap or weakness — should be addressed | Discuss with user (or auto-fix in Autopilot) |
+| **Minor** | Formatting, typos, small inconsistencies | Auto-fix unless Verbose mode |
+
+Present a summary as text output with findings grouped by severity.
+
+### Step 6: Apply or Discuss
+
+Based on output mode preference:
+
+**If "Append errata":**
+- Auto-fix Minor issues directly in the document
+- For Critical/Important items, append a `## Review Errata` section at the end of the document with:
+  ```
+  ## Review Errata
+
+  _Reviewed: YYYY-MM-DD by [reviewer]_
+
+  ### Critical
+  - [ ] [Finding description and recommended action]
+
+  ### Important
+  - [ ] [Finding description and recommended action]
+
+  ### Resolved
+  - [x] [Minor issue] — auto-fixed
+  ```
+
+**If "Separate file":**
+- Write review to `thoughts/*/reviews/YYYY-MM-DD-review-of-<original-slug>.md`
+- Include all findings with references back to the original document
+
+### Step 7: Workflow Handoff
+
+After the review is complete, determine the document type (from frontmatter, file path, or content) and propose the appropriate next step.
+
+Use **AskUserQuestion** with context-dependent options:
+
+**If reviewing a brainstorm document:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this brainstorm?" | 1. Start research (→ `/research`), 2. Create a plan directly (→ `/create-plan`), 3. Done for now |
+
+**If reviewing a research document:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this research?" | 1. Create a plan (→ `/create-plan`), 2. Done for now |
+
+**If reviewing a plan document:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this plan?" | 1. Start implementation (→ `/implement-plan`), 2. Done for now |
+
+**If reviewing a post-implementation verification:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next?" | 1. Done — mark as complete, 2. Address remaining items |
+
+**If document type is unclear**, ask a generic question:
+
+| Question | Options |
+|----------|---------|
+| "Review complete. Would you like to proceed to the next workflow step?" | 1. Yes, suggest next step, 2. Done for now |
+
+## No Rewriting Rule
+
+**CRITICAL**: The reviewer identifies issues — the reviewer does NOT rewrite the document. Present findings and let the original author address them. The only exception is Minor auto-fixes (typos, formatting).
+
+## Review Integration
+
+If the `file-review` plugin is available and the user selected "Yes" during User Preferences setup:
+- After the automated review, invoke `/file-review:file-review <path>` for inline human comments
+- Process feedback with `file-review:process-review` skill
+- If user selected "No" or autonomy mode is Autopilot, skip this step
+
+
+ARGUMENTS: --autonomy=critical thoughts/taras/research/2026-03-11-codex-native-support-feasibility.md thoughts/taras/research/2026-03-11-codex-adapter-deep-reference.md
+
+---
+
+<task-notification>
+<task-id>ab5424b29dec6db4d</task-id>
+<tool-use-id>toolu_014J8F7XND1DtALQ68E1rPei</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/ab5424b29dec6db4d.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify research claims against code" completed</summary>
+<result>
+
+I now have all the data needed. Let me compile the verification results.
+
+Taras, here are the verification results for each claim:
+
+---
+
+**1. ProviderAdapter interface at types.ts:70**
+Claim: has `name`, `createSession(config)`, `canResume(sessionId)` at line 70.
+
+**Result: ✅ Correct** -- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/types.ts:70-74`. The interface is at exactly line 70 with all three members. Note the file is `src/providers/types.ts`, not the root `src/types.ts`.
+
+---
+
+**2. ProviderSession interface at types.ts:49**
+Claim: has `sessionId`, `onEvent(listener)`, `waitForCompletion()`, `abort()` at line 49.
+
+**Result: ⚠️ Slightly off** -- The interface is at **line 50**, not 49. Line 49 is the doc comment `/** A running provider session. */`. All four members are present (lines 51-54). Also, `sessionId` is `readonly` and typed `string | undefined`, not just `string`.
+
+---
+
+**3. ProviderEvent at types.ts:18**
+Claim: event types are `session_init`, `message`, `tool_start`, `tool_end`, `result`, `error`, `raw_log`, `raw_stderr`, `custom` at line 18.
+
+**Result: ✅ Correct** -- Lines 18-27. All 9 event types listed are present and accurate.
+
+---
+
+**4. Factory at index.ts:15-24**
+Claim: switch statement with `"claude"` and `"pi"` cases.
+
+**Result: ✅ Correct** -- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/index.ts:15-24`. Function `createProviderAdapter` at line 15, switch on `provider` with cases `"claude"` (line 17, returns `new ClaudeAdapter()`) and `"pi"` (line 19, returns `new PiMonoAdapter()`), default throws. Exact line range matches.
+
+---
+
+**5. Runner at runner.ts:1428**
+Claim: `createProviderAdapter(process.env.HARNESS_PROVIDER || "claude")` exists at line 1428.
+
+**Result: ✅ Correct** -- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/commands/runner.ts:1428`. Exact match: `const adapter = createProviderAdapter(process.env.HARNESS_PROVIDER || "claude");`
+
+---
+
+**6. ClaudeAdapter subprocess spawn**
+Claim: uses `Bun.spawn()` and `buildCommand()` builds the claude CLI command.
+
+**Result: ✅ Correct** -- `Bun.spawn(cmd, ...)` at `claude-adapter.ts:63`. `buildCommand()` is a private method at line 76 that constructs the `claude` CLI array (starts with `"claude"`, adds `--model`, `--verbose`, `--output-format stream-json`, etc.). The `cmd` variable assigned from `this.buildCommand()` at line 57 is passed directly to `Bun.spawn`.
+
+---
+
+**7. Pi-mono AGENTS.md symlink**
+Claim: pi-mono-adapter.ts creates an AGENTS.md -> CLAUDE.md symlink.
+
+**Result: ✅ Correct** -- The `createAgentsMdSymlink` function at `pi-mono-adapter.ts:110-123` calls `symlinkSync("CLAUDE.md", agentsMd)` at line 116, creating `AGENTS.md` pointing to `CLAUDE.md`. Called during `createSession` at line 371.
+
+---
+
+**8. Pi-mono MCP client**
+Claim: McpHttpClient is used for tool discovery.
+
+**Result: ✅ Correct** -- `pi-mono-mcp-client.ts` defines `McpHttpClient` (line 20). In `PiMonoAdapter.createSession` (`pi-mono-adapter.ts:377`), it instantiates `new McpHttpClient(...)`, calls `mcpClient.initialize()` then `mcpClient.listTools()` to discover tools, which are converted via `mcpToolsToDefinitions`.
+
+---
+
+**9. Pi-mono extension hook mapping at pi-mono-extension.ts:380 maps all 6 hook events**
+Claim: `createSwarmHooksExtension` at line 380 maps 6 hook events.
+
+**Result: ✅ Correct** -- Function exported at line 380. The 6 hooks mapped are:
+- `session_start` (line 383)
+- `tool_call` (line 405)
+- `tool_result` (line 478)
+- `context` (line 561)
+- `input` (line 586)
+- `session_shutdown` (line 602)
+
+---
+
+**10. spawnProviderProcess at runner.ts:1098**
+Claim: function exists and calls `adapter.createSession()`.
+
+**Result: ✅ Correct** -- `async function spawnProviderProcess(` at `runner.ts:1098`. It takes `adapter` as its first parameter (line 1099) and calls `adapter.createSession(config)` at line 1143.
+
+---
+
+**Summary: 9 out of 10 claims are exactly correct. 1 is off by one line (ProviderSession at line 50, not 49).** The research doc references `src/types.ts` for claims 1-3; the actual file path is `src/providers/types.ts` -- worth correcting if the research doc uses the shorter path.</result>
+<usage><total_tokens>46308</total_tokens><tool_uses>14</tool_uses><duration_ms>55803</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/ab5424b29dec6db4d.output
+
+---
+
+<task-notification>
+<task-id>bkivoq18q</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/bkivoq18q.output</output-file>
+<status>completed</status>
+<summary>Background command "Launch file-review GUI for feasibility doc" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/bkivoq18q.output
+
+---
+
+<task-notification>
+<task-id>aea0cb16c2dd31fbc</task-id>
+<tool-use-id>toolu_01Mdxev7VSWyBYmcpxx3ndvV</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/aea0cb16c2dd31fbc.output</output-file>
+<status>completed</status>
+<summary>Agent "Analyze event mapping for UI" completed</summary>
+<result>
+
+I now have all the information needed. Let me write the analysis to a file.
+
+## Analysis: Session Event Data Flow (ProviderEvent -> Runner -> API/DB -> UI)
+
+### Overview
+
+Session events flow from provider adapters (Claude CLI or pi-mono) through a normalized `ProviderEvent` union, get buffered in the runner, are batch-POSTed to the API which writes them to the `session_logs` SQLite table, and are finally polled by the dashboard UI which parses the JSON content into a chat-style message view.
+
+### 1. ProviderEvent Type Definition (`src/providers/types.ts:18-27`)
+
+The normalized event union that all adapters must emit:
+
+```typescript
+export type ProviderEvent =
+  | { type: "session_init"; sessionId: string }
+  | { type: "message"; role: "assistant" | "user"; content: string }
+  | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }
+  | { type: "tool_end"; toolCallId: string; toolName: string; result: unknown }
+  | { type: "result"; cost: CostData; output?: string; isError: boolean; errorCategory?: string }
+  | { type: "error"; message: string; category?: string }
+  | { type: "raw_log"; content: string }
+  | { type: "raw_stderr"; content: string }
+  | { type: "custom"; name: string; data: unknown };
+```
+
+Only `raw_log` events are streamed to the DB/UI. The `content` string of a `raw_log` event is the exact line stored in the database.
+
+### 2. Claude Adapter (`src/providers/claude-adapter.ts`)
+
+The Claude adapter spawns `claude` CLI with `--output-format stream-json` (line 83). It reads stdout line by line and emits **every non-empty line** as a `raw_log` event (line 138):
+
+```
+this.emit({ type: "raw_log", content: trimmed });
+```
+
+The `content` field is the raw JSON line from Claude CLI's stream-json output. Claude CLI natively produces JSON objects with shapes like:
+
+- **Init**: `{ type: "system", subtype: "init", session_id: "..." }`
+- **Assistant message**: `{ type: "assistant", message: { role: "assistant", content: [...], model: "..." } }`
+- **Result**: `{ type: "result", total_cost_usd: ..., usage: {...}, ... }`
+
+The adapter also extracts `session_init` (line 209-212) and `result` (line 215-245) events by parsing the JSON, but these are in addition to the raw_log -- the raw line is always emitted.
+
+### 3. Pi-Mono Adapter (`src/providers/pi-mono-adapter.ts`)
+
+The pi-mono adapter subscribes to `AgentSessionEvent` from the pi-coding-agent library (line 160) and normalizes them into the **same JSON format Claude CLI produces**. This is the "magic" -- it constructs Claude-compatible JSON strings inside the `raw_log` content:
+
+**`message_end` event** (lines 183-209): Emits assistant text messages:
+```json
+{
+  "type": "assistant",
+  "message": {
+    "role": "assistant",
+    "content": [{ "type": "text", "text": "..." }],
+    "model": "claude-sonnet-4-20250514"
+  }
+}
+```
+
+**`tool_execution_start` event** (lines 212-227): Emits tool use:
+```json
+{
+  "type": "assistant",
+  "message": {
+    "role": "assistant",
+    "content": [{ "type": "tool_use", "id": "...", "name": "...", "input": {...} }],
+    "model": "..."
+  }
+}
+```
+
+**`tool_execution_end` event** (lines 229-247): Emits tool results:
+```json
+{
+  "type": "assistant",
+  "message": {
+    "role": "assistant",
+    "content": [{ "type": "tool_result", "tool_use_id": "...", "content": "..." }]
+  }
+}
+```
+
+The adapter also has **deduplication**: `lastEmittedMessage` (line 147) tracks the last emitted text to skip duplicate messages across turns (line 194).
+
+Both adapters use an **event queue** pattern: events emitted before `onEvent()` is called are buffered in `eventQueue` and flushed when a listener registers (Claude: lines 103-111/257-264; pi-mono: lines 166-179/341-348).
+
+### 4. Runner Event Consumption (`src/commands/runner.ts:1149-1187`)
+
+The runner registers a listener on `session.onEvent()`. Only `raw_log` events are streamed to the API:
+
+- **`session_init`**: Saves the provider session ID to the API via `PUT /api/tasks/:id/claude-session` (line 1153)
+- **`raw_log`**: Pretty-printed to console, then pushed to a **log buffer** (line 1166)
+- **`raw_stderr`**: Pretty-printed to console only (not stored in DB)
+- **`result`**: Cost saving is deferred to `waitForCompletion().then()` (line 1230-1241)
+
+#### Log Buffering (`runner.ts:517-576`)
+
+The runner uses a `LogBuffer` with two flush triggers:
+- **Size**: `LOG_BUFFER_SIZE = 50` lines (line 525)
+- **Time**: `LOG_FLUSH_INTERVAL_MS = 5000` ms (line 526)
+
+On flush, `flushLogBuffer()` POSTs to `POST /api/session-logs` with:
+```json
+{
+  "sessionId": "<runner-session-id>",
+  "iteration": <number>,
+  "taskId": "<task-id>",
+  "cli": "claude" | "pi",
+  "lines": ["<raw JSON string>", "..."]
+}
+```
+
+A **final flush** occurs after `waitForCompletion()` resolves (lines 1192-1202).
+
+### 5. API Endpoint (`src/http/session-data.ts:24-67`)
+
+`POST /api/session-logs` validates `sessionId` (string), `iteration` (number >= 1), and `lines` (non-empty array), then calls `createSessionLogs()`.
+
+`GET /api/tasks/:id/session-logs` returns all logs for a task via `getSessionLogsByTaskId()`.
+
+### 6. Database Layer (`src/be/db.ts:3281-3304`)
+
+**Table**: `session_logs` (migration `001_initial.sql:168-177`):
+```sql
+CREATE TABLE IF NOT EXISTS session_logs (
+    id TEXT PRIMARY KEY,
+    taskId TEXT,
+    sessionId TEXT NOT NULL,
+    iteration INTEGER NOT NULL,
+    cli TEXT NOT NULL DEFAULT 'claude',
+    content TEXT NOT NULL,
+    lineNumber INTEGER NOT NULL,
+    createdAt TEXT NOT NULL
+);
+```
+
+`createSessionLogs()` inserts all lines in a **single SQLite transaction** using a prepared batch statement. Each line gets a UUID, the `content` is the raw JSON string from the `raw_log` event, and `lineNumber` is the array index within the batch (0-based).
+
+### 7. Dashboard Consumption (`new-ui/src/components/shared/session-log-viewer.tsx`)
+
+The UI polls `GET /api/tasks/:id/session-logs` every 5 seconds (react-query `refetchInterval: 5000` at `new-ui/src/api/hooks/use-tasks.ts:36`).
+
+The `parseSessionLogs()` function (lines 46-125) parses each `SessionLog.content` as JSON and expects this structure:
+
+```typescript
+{
+  type?: string,           // "assistant" determines role
+  message?: {
+    role?: string,         // "assistant" or other
+    content?: ContentBlock[] | string,
+    model?: string
+  }
+}
+```
+
+Where `ContentBlock` is one of:
+- `{ type: "text", text: "..." }` -- rendered as a text paragraph
+- `{ type: "thinking", thinking: "..." }` -- rendered as collapsible thinking bubble
+- `{ type: "tool_use", id: "...", name: "...", input: {...} }` -- rendered as tool call bubble
+- `{ type: "tool_result", tool_use_id: "...", content: "..." }` -- rendered as tool result bubble
+
+Non-JSON lines are treated as `system` role messages with plain text content (lines 66-74).
+
+Role determination (lines 111-112): if `parsed.type === "assistant"` OR `parsed.message.role === "assistant"`, the role is `"assistant"`, otherwise `"user"`.
+
+### Data Flow Summary
+
+```
+Provider (Claude CLI / pi-mono)
+  |
+  | emits ProviderEvent { type: "raw_log", content: "<JSON string>" }
+  v
+Runner session.onEvent() handler
+  |
+  | buffers in LogBuffer (50 lines or 5s)
+  v
+flushLogBuffer() -> POST /api/session-logs
+  |                  { sessionId, iteration, cli, taskId, lines: string[] }
+  v
+createSessionLogs() -> INSERT INTO session_logs (content = each line)
+  |
+  v
+Dashboard polls GET /api/tasks/:id/session-logs every 5s
+  |
+  v
+parseSessionLogs() -> JSON.parse(content) -> extract message.content blocks
+  |
+  v
+SessionLogViewer renders chat bubbles (text, tool_use, tool_result, thinking)
+```
+
+### What a Codex Adapter Must Produce
+
+The `raw_log` content strings must be JSON matching the format the UI parser expects. Specifically, each `raw_log` event's `content` should be a `JSON.stringify()`'d object of shape:
+
+```json
+{
+  "type": "assistant",
+  "message": {
+    "role": "assistant",
+    "content": [
+      { "type": "text", "text": "..." }
+      // or { "type": "tool_use", "id": "...", "name": "...", "input": {...} }
+      // or { "type": "tool_result", "tool_use_id": "...", "content": "..." }
+      // or { "type": "thinking", "thinking": "..." }
+    ],
+    "model": "model-name"
+  }
+}
+```
+
+### Key Files
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/types.ts` -- ProviderEvent union, ProviderSession/ProviderAdapter interfaces
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/index.ts` -- adapter factory (currently supports `"claude"` and `"pi"`)
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/claude-adapter.ts` -- Claude CLI adapter, raw stream-json passthrough
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/pi-mono-adapter.ts` -- Pi-mono adapter with Claude-format normalization
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/commands/runner.ts` -- Runner event consumption, log buffering (lines 517-576), event handler (lines 1149-1187)
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/http/session-data.ts` -- API endpoints for session logs/costs
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/be/db.ts` -- `createSessionLogs()` (line 3281), `getSessionLogsByTaskId()` (line 3306)
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/be/migrations/001_initial.sql` -- `session_logs` table schema (line 168)
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/new-ui/src/components/shared/session-log-viewer.tsx` -- UI parser and renderer
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/new-ui/src/api/hooks/use-tasks.ts` -- polling hook (5s interval)
+
+### Batching Utilities
+
+There are no standalone batching utility modules in the codebase. The log buffering logic is entirely inline in `runner.ts` (the `LogBuffer` interface and `flushLogBuffer` function at lines 517-576). The DB insert batching is handled by SQLite transactions in `createSessionLogs()`. No debounce or throttle utilities exist -- the pi-mono adapter's deduplication via `lastEmittedMessage` is the only event-level filtering.</result>
+<usage><total_tokens>65843</total_tokens><tool_uses>23</tool_uses><duration_ms>122511</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/aea0cb16c2dd31fbc.output
+
+---
+
+<task-notification>
+<task-id>a8d5cb34f0aba0826</task-id>
+<tool-use-id>toolu_01Tt2xZtWkM2DLzgnnDtq7j7</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/a8d5cb34f0aba0826.output</output-file>
+<status>completed</status>
+<summary>Agent "Research Codex subscription auth" completed</summary>
+<result>Now I have comprehensive data on all 10 questions. Let me write the research document.
+
+I'll create the file at the expected path. Since I can't use WebFetch or bash easily due to hooks, I'll write the content directly using an available file creation mechanism. Let me check what tools I have for writing files.
+
+Looking at my available tools, I don't have a direct file write tool visible in my toolset (no `Write`, `Edit`, or `Bash`). Let me provide the complete research findings as my response, Taras, and you can decide how to persist it.
+
+---
+
+Taras, here is the complete research on Codex subscription-based authentication for headless/Docker environments. The research file should be saved to:
+
+**`/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/thoughts/taras/research/2026-03-11-codex-subscription-auth-docker.md`**
+
+## Key Findings Summary
+
+**The core tension**: Subscription-based auth (ChatGPT Plus/Pro) gives access to fast mode and higher rate limits, but was designed for interactive browser flows. Using it in Docker requires workarounds. API key auth is officially recommended for CI/CD but loses subscription benefits (fast mode, credits, 2x rate limits).
+
+---
+
+### 1. ChatGPT Subscription Auth for Codex
+
+Codex supports two auth modes: **ChatGPT OAuth** (subscription-based) and **API key**. When signed in with ChatGPT, Codex uses your subscription's included credits and rate limits. Features like **fast mode** are **only available with ChatGPT sign-in** -- API key auth uses standard API pricing instead.
+
+- Plus ($20/mo): 30-150 local tasks/5hrs with weekly limits, Codex agent access
+- Pro ($200/mo): Unlimited GPT-5.1, largest context windows, Codex agents, early access
+- All ChatGPT plans get **2x Codex rate limits** vs API key
+- Credits system allows purchasing additional usage after hitting included limits
+
+Sources: [Codex Pricing](https://developers.openai.com/codex/pricing/), [Authentication](https://developers.openai.com/codex/auth/)
+
+---
+
+### 2. `codex login` OAuth Flow
+
+The default browser-based OAuth flow:
+
+1. `codex login` opens browser to ChatGPT OAuth endpoint
+2. Uses **PKCE** (Proof Key for Code Exchange) for security
+3. Runs a **local HTTP server on port 1455** for the callback
+4. After browser sign-in, callback returns access token to CLI
+5. Tokens are persisted to `~/.codex/auth.json` (or OS keyring)
+
+**For Docker**: The localhost:1455 callback is the blocker. You cannot complete this flow inside a container without port forwarding or pre-seeded credentials.
+
+Sources: [Authentication](https://developers.openai.com/codex/auth/), [Discussion #4650](https://github.com/openai/codex/discussions/4650)
+
+---
+
+### 3. auth.json Format
+
+Location: `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`). File permissions: `0o600` on Unix.
+
+Structure (inferred from docs and source code references):
+
+```json
+{
+  "auth_mode": "chatgpt",
+  "tokens": {
+    "access_token": "<JWT>",
+    "id_token": "<JWT>",
+    "refresh_token": "<opaque-token>"
+  },
+  "last_refresh": "<ISO-8601 timestamp>"
+}
+```
+
+For API key mode:
+```json
+{
+  "auth_mode": "apikey",
+  "api_key": "<sk-...>"
+}
+```
+
+**Can it be volume-mounted into Docker?** Yes -- this is the officially documented approach for headless environments:
+
+1. Complete `codex login` on a machine with a browser
+2. Copy `~/.codex/auth.json` to the container's `~/.codex/auth.json`
+3. Use `docker cp` or volume mount
+
+**Critical rule from CI/CD docs**: Seed auth.json **only if missing**. Never overwrite on every run -- you'd discard refreshed tokens that Codex wrote during the previous run.
+
+Sources: [CI/CD Auth Guide](https://developers.openai.com/codex/auth/ci-cd-auth), [Discussion #4650](https://github.com/openai/codex/discussions/4650)
+
+---
+
+### 4. Token Refresh
+
+- Codex **auto-refreshes tokens** during active use before they expire
+- Access tokens have a **~1 hour lifespan** (based on JWT `exp` claim, defaults to 3600s)
+- If `last_refresh` is **older than ~8 days**, Codex proactively refreshes the token bundle before continuing
+- Refresh tokens are **single-use** (rotation model) -- after use, a new refresh token is issued
+- After successful refresh, Codex writes new tokens + new `last_refresh` back to auth.json atomically
+- On 401, Codex has a built-in refresh-and-retry path
+
+**Token lifetime summary**:
+- Access token: ~1 hour
+- Refresh trigger: ~8 days since last refresh
+- Full token bundle validity: ~28 days before forced refresh
+
+Sources: [Authentication](https://developers.openai.com/codex/auth/), [CI/CD Auth](https://developers.openai.com/codex/auth/ci-cd-auth), [DeepWiki Auth System](https://deepwiki.com/openai/codex/2.5-authentication-system)
+
+---
+
+### 5. `chatgptAuthTokens` Mode (App Server)
+
+The Codex App Server (used by VS Code extension and embeddable in custom products) supports two ChatGPT auth modes:
+
+1. **`chatgpt`** (managed): Codex owns the OAuth flow, persists tokens, refreshes automatically
+2. **`chatgptAuthTokens`** (external): Host app supplies `idToken` and `accessToken` directly
+
+For `chatgptAuthTokens`:
+- Host app sends tokens via `account/login/start` with `type: "chatgptAuthTokens"`
+- Codex stores tokens in memory (not persisted to disk)
+- When tokens expire, app-server sends `account/chatgptAuthTokens/refresh` request to the host
+- Host must respond with fresh `idToken` and `accessToken` JWTs
+- Codex retries the original request after successful refresh
+
+**For agent-swarm**: This is the most promising path for managed Docker deployments. The swarm API could act as the "host app", manage a pool of ChatGPT OAuth tokens, and supply them to Codex workers via the app-server protocol.
+
+Sources: [Codex App Server](https://developers.openai.com/codex/app-server/), [codex-rs/app-server README](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)
+
+---
+
+### 6. Device Code Auth
+
+`codex login --device-auth` uses OAuth Device Code flow (RFC 8628):
+
+1. Codex requests a device code from `auth.openai.com`
+2. Displays a URL (`https://auth.openai.com/codex/device`) and a one-time code
+3. User opens URL on **any device with a browser**, enters the code
+4. Codex polls the auth server every few seconds for up to **15 minutes**
+5. Once authorized, exchanges for access + refresh tokens with PKCE
+6. Stores tokens in `~/.codex/auth.json`
+
+**Docker viability**: Partially viable.
+- The code display requires interactive terminal (or log scraping)
+- User must manually open URL and enter code on another device
+- **Blocking issue**: Enterprise/Team workspaces may have device code auth **disabled by default** -- workspace admin must explicitly enable it ([Issue #9253](https://github.com/openai/codex/issues/9253))
+- Another issue: device code auth can fail to display code on headless servers and loop back to selection menu ([Issue #12412](https://github.com/openai/codex/issues/12412))
+
+Sources: [CLI Reference](https://developers.openai.com/codex/cli/reference), [Issue #9253](https://github.com/openai/codex/issues/9253), [Issue #12412](https://github.com/openai/codex/issues/12412)
+
+---
+
+### 7. Subscription vs API Key Pricing
+
+| Feature | ChatGPT Subscription Auth | API Key Auth |
+|---|---|---|
+| Fast mode | Yes (uses credits) | No |
+| Rate limits | 2x baseline | 1x baseline |
+| Credits system | Yes (purchase more when exhausted) | N/A (pay-per-token) |
+| Pricing model | Included in subscription + credits | codex-mini: $1.50/$6 per 1M tokens in/out |
+| `codex exec` (non-interactive) | Yes (reuses saved auth) | Yes (`CODEX_API_KEY` env var) |
+| Docker/CI friendliness | Requires auth.json seeding | Simple env var |
+
+**Key insight**: If you want fast mode and subscription rate limits in Docker, you **must** use ChatGPT subscription auth -- there is no way to get these benefits via API key.
+
+Sources: [Codex Pricing](https://developers.openai.com/codex/pricing/), [Speed](https://developers.openai.com/codex/speed/), [Non-interactive Mode](https://developers.openai.com/codex/noninteractive/)
+
+---
+
+### 8. `forced_login_method`
+
+Set in `~/.codex/config.toml` or `.codex/config.toml` (project-level) or via managed config:
+
+```toml
+forced_login_method = "chatgpt"   # Only allow ChatGPT OAuth
+# OR
+forced_login_method = "api"       # Only allow API key
+```
+
+- Default: unset (user chooses)
+- If active credentials don't match restriction, **Codex logs user out and exits**
+- Commonly applied via **managed configuration** in enterprise setups
+- Related: `forced_chatgpt_workspace_id` restricts to a specific workspace
+
+Other auth-related config:
+```toml
+cli_auth_credentials_store = "auto"  # "file" | "keyring" | "auto"
+# "auto" = OS keyring when available, fallback to auth.json
+# "file" = always use auth.json (best for Docker)
+
+chatgpt_base_url = "https://chatgpt.com/backend-api/"  # default
+```
+
+**For Docker**: Set `cli_auth_credentials_store = "file"` to ensure auth.json is used (no keyring in containers).
+
+Sources: [Config Reference](https://developers.openai.com/codex/config-reference/), [Sample Configuration](https://developers.openai.com/codex/config-sample/), [Authentication](https://developers.openai.com/codex/auth/)
+
+---
+
+### 9. Enterprise/Team Accounts
+
+- **SSO/SAML**: Enterprise workspaces use SAML SSO, shared between ChatGPT and API Platform
+- **MFA**: MFA requirements from enterprise policy carry over to Codex auth
+- **Device code may be disabled**: Workspace admins must explicitly enable device code auth -- without it, headless login is impossible for subscription auth ([Issue #9253](https://github.com/openai/codex/issues/9253))
+- **`forced_chatgpt_workspace_id`**: Admins can lock Codex to a specific workspace ID
+- **Managed config distribution**: Enterprise admins deploy `config.toml` via MDM or similar
+
+Sources: [Admin Setup](https://developers.openai.com/codex/enterprise/admin-setup/), [SSO Overview](https://help.openai.com/en/articles/10468051-sso-overview), [Issue #9253](https://github.com/openai/codex/issues/9253)
+
+---
+
+### 10. Known Issues for Headless Auth
+
+| Issue | Description | Impact |
+|---|---|---|
+| [#9253](https://github.com/openai/codex/issues/9253) | Device code auth disabled by default in workspace accounts | Blocks headless login for enterprise users |
+| [#10332](https://github.com/openai/codex/issues/10332) | Race condition: multiple app-server instances cause "refresh token already used" | Critical for multi-agent Docker setups |
+| [#12412](https://github.com/openai/codex/issues/12412) | Device code auth fails to display code on headless servers | Makes device-auth unusable in some environments |
+| [#6498](https://github.com/openai/codex/issues/6498) | Refresh token already used after session timeout | Requires re-login |
+| [#6036](https://github.com/openai/codex/issues/6036) | 401 after refresh token reuse | Single-use rotation causes failures |
+| [#5678](https://github.com/openai/codex/issues/5678) | No re-login prompt on token expiration | Silent failure |
+| [#3820](https://github.com/openai/codex/issues/3820) | Feature request: headless auth for ChatGPT plans | Still open |
+| [#2798](https://github.com/openai/codex/issues/2798) | Feature request: remote/headless OAuth | Still open |
+
+**The #10332 race condition is especially relevant for agent-swarm**: If multiple Codex workers share the same auth.json, concurrent refresh attempts will fail because refresh tokens are single-use. **Each worker needs its own auth.json** or use the `chatgptAuthTokens` app-server mode with centralized token management.
+
+Sources: All linked GitHub issues above.
+
+---
+
+## Recommendations for Agent-Swarm Docker Integration
+
+### Short-term (simplest path)
+1. Use **API key auth** (`CODEX_API_KEY` env var) -- simplest, no token management needed
+2. Accept the trade-off: no fast mode, no subscription rate limits
+
+### Medium-term (subscription auth in Docker)
+1. **Pre-seed auth.json** per worker container via volume mount or Docker secret
+2. Set `cli_auth_credentials_store = "file"` in config.toml
+3. Ensure **one auth.json per worker** -- never share across concurrent workers (race condition #10332)
+4. Use `codex exec` (non-interactive mode) for task execution
+5. Periodically re-seed from a fresh login if tokens stop refreshing
+
+### Long-term (ideal architecture)
+1. Implement **`chatgptAuthTokens` mode via the App Server protocol**
+2. Agent-swarm API acts as the "host app" managing token lifecycle
+3. Central token refresh service avoids the single-use refresh token race condition
+4. Each worker gets tokens injected via the app-server JSON-RPC protocol
+5. This is the most robust path but requires implementing the app-server client protocol
+
+---
+
+Sources:
+- [Codex Authentication](https://developers.openai.com/codex/auth/)
+- [CI/CD Auth Guide](https://developers.openai.com/codex/auth/ci-cd-auth)
+- [Codex App Server](https://developers.openai.com/codex/app-server/)
+- [Config Reference](https://developers.openai.com/codex/config-reference/)
+- [Sample Configuration](https://developers.openai.com/codex/config-sample/)
+- [Non-interactive Mode](https://developers.openai.com/codex/noninteractive/)
+- [Codex Pricing](https://developers.openai.com/codex/pricing/)
+- [Speed](https://developers.openai.com/codex/speed/)
+- [Admin Setup](https://developers.openai.com/codex/enterprise/admin-setup/)
+- [CLI Reference](https://developers.openai.com/codex/cli/reference)
+- [DeepWiki: Authentication System](https://deepwiki.com/openai/codex/2.5-authentication-system)
+- [Discussion #4650: Authorize codex in Docker/SSH](https://github.com/openai/codex/discussions/4650)
+- [Issue #9253: Device code disabled in workspaces](https://github.com/openai/codex/issues/9253)
+- [Issue #10332: Race condition in token refresh](https://github.com/openai/codex/issues/10332)
+- [Issue #3820: Headless auth for ChatGPT plans](https://github.com/openai/codex/issues/3820)
+- [Issue #12412: Device code fails on headless servers](https://github.com/openai/codex/issues/12412)
+- [codex-rs/app-server source](https://github.com/openai/codex/tree/main/codex-rs)</result>
+<usage><total_tokens>46279</total_tokens><tool_uses>43</tool_uses><duration_ms>251754</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/a8d5cb34f0aba0826.output
+
+---
+
+did we consider session follow ups?
+
+---
+
+<task-notification>
+<task-id>ac3a0b95dff30d9f7</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/ac3a0b95dff30d9f7.output</output-file>
+<status>completed</status>
+<summary>Agent "Analyze session resume across tasks" completed</summary>
+<result>
+
+I now have a complete understanding of the session resume lifecycle. Here is the analysis, Taras.
+
+---
+
+## Analysis: Session Resume Lifecycle
+
+### Overview
+
+Session resume allows an agent to continue a previous Claude Code (or pi-mono) conversation when picking up a paused/interrupted task or when a child task inherits its parent's context. The provider's session ID is persisted to the database via the API, and on resume the runner fetches it back and passes it as a `--resume <sessionId>` CLI argument to the Claude process. The `ProviderSessionConfig.resumeSessionId` field exists in the type definition but is not actively used to drive behavior -- the actual resume mechanism is `additionalArgs` containing `--resume`.
+
+### Entry Points
+
+- **`src/commands/runner.ts:1423`** -- `runAgent()`, the main entry point for both lead and worker agents
+- **`src/providers/types.ts:30-47`** -- `ProviderSessionConfig` type defining `resumeSessionId` field
+- **`src/providers/claude-adapter.ts:326`** -- `ClaudeAdapter.createSession()`
+- **`src/providers/pi-mono-adapter.ts:359`** -- `PiMonoAdapter.createSession()`
+
+### Core Implementation
+
+#### 1. Session ID Capture (provider -> DB)
+
+When a provider session starts, it emits a `session_init` event containing the session ID.
+
+**Claude adapter** (`src/providers/claude-adapter.ts:209-211`): Parses `stream-json` stdout for a JSON line with `type: "system"`, `subtype: "init"`, and extracts `session_id`. Stores it in `this._sessionId` and emits `{ type: "session_init", sessionId }`.
+
+**Pi-mono adapter** (`src/providers/pi-mono-adapter.ts:154`): Gets `sessionId` directly from `agentSession.sessionId` at construction time and emits `session_init` immediately.
+
+#### 2. Session ID Persistence (event -> API -> DB)
+
+In both `spawnProviderProcess` (`src/commands/runner.ts:1151-1156`) and `runProviderIteration` (`src/commands/runner.ts:1306-1310`), the runner listens for the `session_init` event and fires a non-blocking call to `saveProviderSessionId()`.
+
+`saveProviderSessionId()` (`src/commands/runner.ts:604-617`) sends `PUT /api/tasks/:id/claude-session` with `{ claudeSessionId }`.
+
+The HTTP handler (`src/http/tasks.ts:95-118`) calls `updateTaskClaudeSessionId()` in `src/be/db.ts:907-917`, which runs:
+```sql
+UPDATE agent_tasks SET claudeSessionId = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *
+```
+
+The `claudeSessionId` column is defined on `agent_tasks` in `src/be/migrations/001_initial.sql:98`.
+
+#### 3. Session ID Retrieval (DB -> runner)
+
+`fetchProviderSessionId()` (`src/commands/runner.ts:620-635`) fetches `GET /api/tasks/:id` and extracts `claudeSessionId` from the response.
+
+#### 4. Resume Decision in the Runner
+
+There are **two distinct resume paths** in the runner-level polling loop:
+
+**Path A -- Resuming paused tasks** (`src/commands/runner.ts:1819-1832`):
+When the runner finds paused tasks via `getPausedTasksFromAPI()`, it attempts resume with this priority:
+1. If the task itself has `task.claudeSessionId` (line 1821), use that: `["--resume", task.claudeSessionId]`
+2. Else if the task has `task.parentTaskId` (line 1826), fetch the parent's session ID via `fetchProviderSessionId()` and use that
+3. Otherwise, start fresh (no `--resume` arg)
+
+**Path B -- New child tasks with parentTaskId** (`src/commands/runner.ts:2048-2065`):
+When the polling loop picks up a new trigger with a `parentTaskId`, it fetches the parent's session ID and adds `["--resume", parentSessionId]` to `effectiveAdditionalArgs`.
+
+Both paths pass `--resume` through `additionalArgs`, NOT through `config.resumeSessionId`.
+
+#### 5. How `--resume` Reaches the Claude Process
+
+`spawnProviderProcess()` (`src/commands/runner.ts:1098-1264`) builds a `ProviderSessionConfig` and passes `additionalArgs` into it (line 1138). The Claude adapter's `buildCommand()` (`src/providers/claude-adapter.ts:76-101`) appends `config.additionalArgs` to the `claude` CLI invocation at line 92-94:
+```typescript
+if (this.config.additionalArgs?.length) {
+  cmd.push(...this.config.additionalArgs);
+}
+```
+This produces a command like: `claude --model opus --verbose ... -p "prompt" --resume abc123`.
+
+#### 6. Stale Session Retry
+
+`ClaudeSession.waitForCompletion()` (`src/providers/claude-adapter.ts:266-319`) has automatic stale-session retry logic. If the process exits non-zero and the error tracker detects a "session not found" error (line 271), AND the config included `--resume` (line 272), it:
+1. Strips `--resume` and its value from `additionalArgs` (lines 278-282)
+2. Sets `resumeSessionId: undefined` on the retry config (line 292)
+3. Creates a new `ClaudeSession` with fresh args and re-runs
+
+#### 7. AI-Loop Mode (Legacy)
+
+In AI-loop mode (`src/commands/runner.ts:2222-2278`), each iteration calls `runProviderIteration()` with `opts.additionalArgs` passed straight from CLI options. There is **no automatic resume between iterations** -- each iteration spawns a completely fresh provider session. The `additionalArgs` are the same on every iteration (whatever was passed at startup).
+
+#### 8. `ProviderSessionConfig.resumeSessionId` Field
+
+The `resumeSessionId` field (`src/providers/types.ts:40`) exists on the config type but serves a **passive/metadata role**. It is:
+- Never read by `ClaudeAdapter.buildCommand()` to construct CLI args
+- Never read by `PiMonoAdapter.createSession()` to configure the pi-mono session
+- Only explicitly referenced when clearing it during stale-session retry (`src/providers/claude-adapter.ts:292`)
+- Set in tests (`src/tests/claude-adapter.test.ts:57`) alongside the matching `additionalArgs`
+
+The actual resume mechanism is entirely through `additionalArgs` containing `["--resume", "<sessionId>"]`.
+
+#### 9. Pi-Mono Resume (`canResume`)
+
+`PiMonoAdapter.canResume()` (`src/providers/pi-mono-adapter.ts:421-432`) checks whether a session file exists via `SessionManager`. However, `canResume()` is defined on the `ProviderAdapter` interface (`src/providers/types.ts:73`) but **is never called** from the runner. The runner does not gate resume on adapter capability -- it always attempts resume if a session ID is available, relying on the stale-session retry in the Claude adapter to recover from failures.
+
+`ClaudeAdapter.canResume()` (`src/providers/claude-adapter.ts:344-346`) always returns `true`.
+
+### Data Flow
+
+```
+1. Provider session starts
+2. Provider emits session_init event with sessionId
+3. Runner catches event -> calls saveProviderSessionId()
+4. PUT /api/tasks/:id/claude-session -> DB: agent_tasks.claudeSessionId = X
+5. [Later] Task is paused or child task created
+6. Runner fetches paused tasks (with claudeSessionId) or fetches parent sessionId
+7. Runner adds ["--resume", sessionId] to additionalArgs
+8. spawnProviderProcess() -> adapter.createSession(config with additionalArgs)
+9. Claude adapter: buildCommand() includes --resume in CLI args
+10. If session not found: retry without --resume (fresh session)
+```
+
+### Key Files
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/commands/runner.ts` -- orchestrator, resume decision logic at lines 1819-1832 (paused tasks) and 2048-2065 (child tasks)
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/claude-adapter.ts` -- `--resume` passed via `additionalArgs` at line 92; stale-session retry at lines 266-319
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/pi-mono-adapter.ts` -- `canResume()` at line 421 (never called); no resume support in `createSession()`
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/providers/types.ts` -- `ProviderSessionConfig.resumeSessionId` at line 40, `ProviderAdapter.canResume()` at line 73
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/be/db.ts` -- `updateTaskClaudeSessionId()` at line 907, `claudeSessionId` column at line 120
+- `/Users/taras/worktrees/agent-swarm/2026-03-11-feat/codex-support/src/http/tasks.ts` -- `PUT /api/tasks/:id/claude-session` handler at line 95
+
+### Summary for Codex Mapping
+
+For a Codex adapter's `thread/resume`, the key points are:
+
+1. **Session ID storage**: Already provider-agnostic -- stored as `claudeSessionId` in `agent_tasks` table, persisted via `PUT /api/tasks/:id/claude-session`. The column name says "claude" but it stores any provider's session ID.
+
+2. **Resume trigger**: The runner decides to resume based on whether `task.claudeSessionId` or a parent's session ID exists. This decision happens at runner level, not adapter level.
+
+3. **Resume delivery mechanism**: Currently Claude-specific -- resume is delivered as `--resume <id>` in `additionalArgs`, which only the Claude adapter's `buildCommand()` consumes. For Codex, the adapter would need to read either `config.resumeSessionId` or `config.additionalArgs` and translate it to Codex's thread/resume API.
+
+4. **`canResume()` is dead code**: The interface method exists but is never called by the runner. Resume is always attempted optimistically.
+
+5. **Each polling iteration creates a fresh session**: There is no cross-iteration session continuity in either runner mode. Resume only happens for paused-task recovery and parent-to-child context inheritance.</result>
+<usage><total_tokens>57357</total_tokens><tool_uses>30</tool_uses><duration_ms>126421</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-11-feat-codex-support/tasks/ac3a0b95dff30d9f7.output
