@@ -7,6 +7,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Working directory (`dir`) support for agent tasks (#159)
+  - `send-task` and `task-action` accept `dir` parameter (absolute path) to set agent starting directory
+  - Runner resolves `dir` for both new and resumed tasks with fallback chain: `task.dir` > `vcsRepo` clone path > default cwd
+  - System prompt annotated with working directory context when non-default
+- Content agent templates: writer, reviewer, strategist (#160, #162)
+  - 3 new official templates: `official/content-writer`, `official/content-reviewer`, `official/content-strategist`
+  - Docker-compose examples for all 3 content agents
+  - Content reviewer configured with Gemini via OpenRouter (`HARNESS_PROVIDER=pi`)
+- Template defaults applied during worker registration (#159)
+  - Templates can now set `name`, `role`, `capabilities`, `maxTasks`, and `isLead` as fallback defaults
+  - Template fetched before registration so defaults apply to the registration call itself
+- Archil FUSE mount support for persistent workspace storage (#166, #168, #169)
+  - `archil` CLI installed in both API and worker Docker images
+  - FUSE3 and libfuse2 packages added to Docker images
+  - Entrypoint-based mount logic for R2-backed persistent disks
+  - Removed `VOLUME` directives for `/workspace/shared` and `/workspace/personal` to allow FUSE mounts
+- Contribution guidelines (CONTRIBUTING.md) with templates linked in docs and landing page (#158)
 - Templates registry for agent workers (#155, #156)
   - 6 official templates: lead, coder, researcher, reviewer, tester, forward-deployed-engineer
   - Templates UI (Next.js) with gallery, detail pages, and interactive docker-compose builder
@@ -29,6 +46,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - All 6 swarm hook events mapped to pi-mono extension handlers
   - Selected via `HARNESS_PROVIDER=claude|pi` env var
   - Docker multi-provider support in Dockerfile.worker and entrypoint
+
+### Changed
+- Template fetching refactored to run before agent registration (cached and reused for identity files)
+- Docker workspace volumes replaced with FUSE mount points for Archil compatibility
+
+### Fixed
+- Archil FUSE mount fixes: read-write mounts, per-agent subdirectory checkout, POSIX signal names in entrypoint, shared flag for mount calls
+- `dir` validation added to MCP tool schemas with inner type cast fix
+- Workspace `mkdir` made non-fatal for read-only Archil mounts
+- VOLUME directives removed from Dockerfile.worker to unblock FUSE mounts on Fly.io
 
 ### Changed
 - Memory system enhancements (#148)
