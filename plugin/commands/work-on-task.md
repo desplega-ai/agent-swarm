@@ -65,7 +65,7 @@ Once you are done (either ok or not), perform the Post-Task Reflection below, th
 After calling `store-progress` to complete or fail a task, do the following before finishing:
 
 1. **Transferable learning?** If you learned something reusable (a pattern, a gotcha, a fix), write it to `/workspace/personal/memory/<descriptive-name>.md`
-2. **Swarm-relevant?** If the learning applies to all agents (not just you), write it to `/workspace/shared/memory/<descriptive-name>.md` instead
+2. **Swarm-relevant?** If the learning applies to all agents (not just you), write it to `/workspace/personal/memory/<descriptive-name>.md` and use the `memory-search` swarm scope to share it
 3. **Identity update?** If you discovered a new area of expertise or working style preference, update your IDENTITY.md
 4. **Tools update?** If you found a new service, API, or tool, update your TOOLS.md
 
