@@ -146,9 +146,7 @@ RUN mkdir -p /workspace /logs && chown worker:worker /workspace /logs
 COPY --chown=worker:worker docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-# NOTE: Entrypoint runs as root to perform FUSE mounts (required in Fly.io
-# Firecracker — sudo alone doesn't grant CAP_SYS_ADMIN). The entrypoint
-# re-execs itself as worker after mounts are done.
+USER worker
 WORKDIR /workspace
 
 # Create static workspace directories (build-time)
@@ -156,8 +154,10 @@ RUN mkdir -p /workspace/personal /workspace/shared/thoughts/shared/plans \
     /workspace/shared/thoughts/shared/research \
     /workspace/personal/memory /workspace/shared/memory
 
+# NOTE: Do NOT use VOLUME for /workspace/shared or /workspace/personal.
+# Fly.io's init sets up volume mount points that prevent FUSE from mounting
+# on top of them (EINVAL). Archil FUSE mounts replace Docker volumes here.
 VOLUME ["/logs"]
-VOLUME ["/workspace/personal", "/workspace/shared"]
 
 # Expose service port for PM2 processes
 EXPOSE 3000
