@@ -2,7 +2,7 @@
 date: 2026-03-11T10:40:00Z
 topic: "Archil Per-Agent Write Strategy Implementation"
 author: Claude
-status: in-progress
+status: completed
 tags: [plan, archil, shared-disk, per-agent, ownership, fly-io]
 research: "thoughts/taras/research/2026-03-11-archil-shared-disk-write-strategies.md"
 autonomy: critical
