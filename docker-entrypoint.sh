@@ -512,7 +512,10 @@ if [ -n "$AGENT_ID" ]; then
         AGENT_DIR="$AGENT_SHARED/$category/$AGENT_ID"
 
         # Create our subdir (auto-grants delegation on $AGENT_ID level)
-        mkdir -p "$AGENT_DIR" 2>/dev/null || true
+        # Use sudo because FUSE mount root is owned by root; UNIX perms
+        # are per-mount (not persisted to R2), so API's chmod doesn't help.
+        sudo mkdir -p "$AGENT_DIR" 2>/dev/null || true
+        sudo chown worker:worker "$AGENT_DIR" 2>/dev/null || true
 
         # Checkout for persistent ownership (survives reboots where dir already exists)
         if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
