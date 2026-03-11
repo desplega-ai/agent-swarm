@@ -30,6 +30,10 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
     echo "Pre-creating shared directory structure..."
     for category in thoughts memory downloads misc; do
       mkdir -p "/workspace/shared/$category" 2>/dev/null || true
+      # API runs as root; make dirs world-writable so worker user can
+      # create per-agent subdirs. Safe because Archil delegations (not
+      # UNIX perms) enforce write isolation between agents.
+      chmod 777 "/workspace/shared/$category" 2>/dev/null || true
     done
     archil unmount /workspace/shared 2>/dev/null || true
     archil mount --shared \
