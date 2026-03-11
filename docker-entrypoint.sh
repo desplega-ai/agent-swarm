@@ -48,6 +48,13 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
 fi
 # ---- End Archil mount ----
 
+# Create workspace subdirectories (after FUSE mount, since Archil requires
+# empty mount points — these dirs can't exist at build time)
+mkdir -p /workspace/personal/memory \
+         /workspace/shared/thoughts/shared/plans \
+         /workspace/shared/thoughts/shared/research \
+         /workspace/shared/memory
+
 # Role defaults to worker, can be set to "lead"
 ROLE="${AGENT_ROLE:-worker}"
 MCP_URL="${MCP_BASE_URL:-http://host.docker.internal:3013}"
