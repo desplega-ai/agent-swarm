@@ -38,8 +38,6 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
     if [ -n "$ARCHIL_SHARED_DISK_NAME" ]; then
         echo "Mounting shared disk ($ARCHIL_SHARED_DISK_NAME) at /workspace/shared..."
         sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --shared "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
-        echo "Checking out shared disk for read-write access..."
-        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil checkout /workspace/shared
     fi
 
     if [ -n "$ARCHIL_PERSONAL_DISK_NAME" ]; then
@@ -52,10 +50,12 @@ fi
 
 # Create workspace subdirectories (after FUSE mount, since Archil requires
 # empty mount points — these dirs can't exist at build time).
-mkdir -p /workspace/personal/memory \
-         /workspace/shared/thoughts/shared/plans \
+# Personal disk is exclusive (rw). Shared disk allows mkdir without checkout
+# but concurrent workers may race, so tolerate failures.
+mkdir -p /workspace/personal/memory 2>/dev/null || true
+mkdir -p /workspace/shared/thoughts/shared/plans \
          /workspace/shared/thoughts/shared/research \
-         /workspace/shared/memory
+         /workspace/shared/memory 2>/dev/null || true
 
 # Role defaults to worker, can be set to "lead"
 ROLE="${AGENT_ROLE:-worker}"
@@ -473,10 +473,14 @@ else
 fi
 
 # Create agent-specific thoughts directories (requires AGENT_ID at runtime)
+# Checkout the agent's own subdirectory for write access on shared Archil mount
 if [ -n "$AGENT_ID" ]; then
     SHARED_DIR="/workspace/shared/thoughts"
     AGENT_THOUGHTS_DIR="$SHARED_DIR/$AGENT_ID"
     echo "Creating shared thoughts directories for agent ID $AGENT_ID..."
+    if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
+        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil checkout "$AGENT_THOUGHTS_DIR" 2>/dev/null || true
+    fi
     mkdir -p "$AGENT_THOUGHTS_DIR/plans"
     mkdir -p "$AGENT_THOUGHTS_DIR/research"
 fi
