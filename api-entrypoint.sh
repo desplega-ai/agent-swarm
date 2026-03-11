@@ -15,7 +15,10 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
   if [ -n "$ARCHIL_API_DISK_NAME" ]; then
     echo "Mounting API disk ($ARCHIL_API_DISK_NAME) at /mnt/data..."
     mkdir -p /mnt/data
-    archil mount --shared "$ARCHIL_API_DISK_NAME" /mnt/data --region "$ARCHIL_REGION"
+    # Exclusive mount (not --shared) — only the API uses this disk, and it
+    # needs reliable read/write for SQLite. Shared mode is slower and can
+    # cause FUSE hangs under load.
+    archil mount "$ARCHIL_API_DISK_NAME" /mnt/data --region "$ARCHIL_REGION"
   fi
 
   if [ -n "$ARCHIL_SHARED_DISK_NAME" ]; then
