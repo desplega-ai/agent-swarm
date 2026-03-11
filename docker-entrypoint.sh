@@ -38,8 +38,6 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
     if [ -n "$ARCHIL_SHARED_DISK_NAME" ]; then
         echo "Mounting shared disk ($ARCHIL_SHARED_DISK_NAME) at /workspace/shared..."
         sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --shared "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
-        # FUSE mount comes up as root; fix ownership so worker user can write
-        sudo chown worker:worker /workspace/shared
     fi
 
     # NOTE: Top-level shared directory pre-creation (thoughts/, memory/, etc.)
