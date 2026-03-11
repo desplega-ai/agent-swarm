@@ -3,6 +3,7 @@ import {
   CREDENTIAL_POOL_VARS,
   resolveCredentialPools,
   selectRandomCredential,
+  validateClaudeCredentials,
 } from "./credentials.ts";
 
 describe("selectRandomCredential", () => {
@@ -105,6 +106,49 @@ describe("resolveCredentialPools", () => {
     resolveCredentialPools(env);
     expect(["oauth1", "oauth2"]).toContain(env.CLAUDE_CODE_OAUTH_TOKEN!);
     expect(["apikey1", "apikey2"]).toContain(env.ANTHROPIC_API_KEY!);
+  });
+});
+
+describe("validateClaudeCredentials", () => {
+  it("returns 'oauth' when CLAUDE_CODE_OAUTH_TOKEN is set", () => {
+    const env = { CLAUDE_CODE_OAUTH_TOKEN: "some-oauth-token" };
+    expect(validateClaudeCredentials(env)).toBe("oauth");
+  });
+
+  it("returns 'api_key' when only ANTHROPIC_API_KEY is set", () => {
+    const env = { ANTHROPIC_API_KEY: "sk-ant-123" };
+    expect(validateClaudeCredentials(env)).toBe("api_key");
+  });
+
+  it("returns 'oauth' when both are set (oauth takes priority)", () => {
+    const env = {
+      CLAUDE_CODE_OAUTH_TOKEN: "some-oauth-token",
+      ANTHROPIC_API_KEY: "sk-ant-123",
+    };
+    expect(validateClaudeCredentials(env)).toBe("oauth");
+  });
+
+  it("throws when neither credential is set", () => {
+    expect(() => validateClaudeCredentials({})).toThrow(
+      "No Claude credentials found. Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY.",
+    );
+  });
+
+  it("treats empty string as missing", () => {
+    const env = { CLAUDE_CODE_OAUTH_TOKEN: "", ANTHROPIC_API_KEY: "" };
+    expect(() => validateClaudeCredentials(env)).toThrow(
+      "No Claude credentials found",
+    );
+  });
+
+  it("treats undefined values as missing", () => {
+    const env: Record<string, string | undefined> = {
+      CLAUDE_CODE_OAUTH_TOKEN: undefined,
+      ANTHROPIC_API_KEY: undefined,
+    };
+    expect(() => validateClaudeCredentials(env)).toThrow(
+      "No Claude credentials found",
+    );
   });
 });
 

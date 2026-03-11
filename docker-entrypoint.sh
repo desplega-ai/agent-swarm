@@ -40,26 +40,17 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
         sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --shared "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
     fi
 
-    # --- API: Pre-create top-level shared directories ---
-    # The API boots first (deploy script waits for "started" state).
-    # We create the top-level category dirs so that workers' mkdir
-    # auto-grants delegation at the subdir level (not the parent).
-    # Then we unmount/remount to release the parent delegations.
-    if [ "$AGENT_ROLE" = "api" ] && [ -n "$ARCHIL_SHARED_DISK_NAME" ]; then
-        echo "Pre-creating shared directory structure..."
-        for category in thoughts memory downloads misc; do
-            mkdir -p "/workspace/shared/$category" 2>/dev/null || true
-        done
-        # Release parent delegations (mkdir auto-granted them)
-        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil unmount /workspace/shared 2>/dev/null || true
-        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --shared \
-            --region "$ARCHIL_REGION" "$ARCHIL_SHARED_DISK_NAME" /workspace/shared
-        echo "Shared directory structure ready (delegations released)"
-    fi
+    # NOTE: Top-level shared directory pre-creation (thoughts/, memory/, etc.)
+    # lives in api-entrypoint.sh, not here. The API boots first and creates
+    # them so workers' mkdir auto-grants delegation at the subdir level.
 
     if [ -n "$ARCHIL_PERSONAL_DISK_NAME" ]; then
         echo "Mounting personal disk ($ARCHIL_PERSONAL_DISK_NAME) at /workspace/personal..."
-        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
+        # --force reclaims stale delegations from previous machine incarnations.
+        # Personal disks are always single-client, so force is safe.
+        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --force "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
+        # FUSE mount comes up as root; fix ownership so worker user can write
+        sudo chown worker:worker /workspace/personal
     fi
     echo "===================="
 fi
@@ -521,7 +512,10 @@ if [ -n "$AGENT_ID" ]; then
         AGENT_DIR="$AGENT_SHARED/$category/$AGENT_ID"
 
         # Create our subdir (auto-grants delegation on $AGENT_ID level)
-        mkdir -p "$AGENT_DIR" 2>/dev/null || true
+        # Use sudo because FUSE mount root is owned by root; UNIX perms
+        # are per-mount (not persisted to R2), so API's chmod doesn't help.
+        sudo mkdir -p "$AGENT_DIR" 2>/dev/null || true
+        sudo chown worker:worker "$AGENT_DIR" 2>/dev/null || true
 
         # Checkout for persistent ownership (survives reboots where dir already exists)
         if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
