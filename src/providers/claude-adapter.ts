@@ -1,4 +1,5 @@
 import { unlink, writeFile } from "node:fs/promises";
+import { validateClaudeCredentials } from "../utils/credentials";
 import {
   parseStderrForErrors,
   SessionErrorTracker,
@@ -328,6 +329,9 @@ export class ClaudeAdapter implements ProviderAdapter {
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
     const model = config.model || "opus";
+
+    const credType = validateClaudeCredentials(config.env || process.env);
+    console.log(`\x1b[2m[claude]\x1b[0m Using credential: ${credType}`);
 
     const taskFilePid = process.pid;
     const taskFilePath = await writeTaskFile(taskFilePid, {
