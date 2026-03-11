@@ -38,11 +38,13 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
     if [ -n "$ARCHIL_SHARED_DISK_NAME" ]; then
         echo "Mounting shared disk ($ARCHIL_SHARED_DISK_NAME) at /workspace/shared..."
         sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --shared "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
+        echo "Checking out shared disk for read-write access..."
+        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil checkout /workspace/shared
     fi
 
     if [ -n "$ARCHIL_PERSONAL_DISK_NAME" ]; then
         echo "Mounting personal disk ($ARCHIL_PERSONAL_DISK_NAME) at /workspace/personal..."
-        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --shared "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
+        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
     fi
     echo "===================="
 fi
@@ -50,11 +52,10 @@ fi
 
 # Create workspace subdirectories (after FUSE mount, since Archil requires
 # empty mount points — these dirs can't exist at build time).
-# Use || true because shared Archil mounts are read-only until checkout.
 mkdir -p /workspace/personal/memory \
          /workspace/shared/thoughts/shared/plans \
          /workspace/shared/thoughts/shared/research \
-         /workspace/shared/memory 2>/dev/null || true
+         /workspace/shared/memory
 
 # Role defaults to worker, can be set to "lead"
 ROLE="${AGENT_ROLE:-worker}"
