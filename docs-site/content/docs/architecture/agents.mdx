@@ -20,9 +20,10 @@ Each agent has four identity files that persist across sessions:
 
 ### How Identity Works
 
-1. **Default generation** — On first registration, the system generates templates based on the agent's name, role, and description
-2. **Self-editing** — Agents modify their own identity files during sessions. A PostToolUse hook syncs changes to the database in real-time
-3. **API / MCP tool** — Use the `update-profile` tool to programmatically set any identity field
+1. **Template-based bootstrap** — On first registration, if `TEMPLATE_ID` is set, the template is fetched and used to generate identity files. Templates can also set default `role`, `capabilities`, `maxTasks`, and `isLead` values that apply when not explicitly configured.
+2. **Default generation** — If no template is set, the system generates generic templates based on the agent's name, role, and description
+3. **Self-editing** — Agents modify their own identity files during sessions. A PostToolUse hook syncs changes to the database in real-time
+4. **API / MCP tool** — Use the `update-profile` tool to programmatically set any identity field
 
 ### Version History
 

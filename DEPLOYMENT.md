@@ -48,6 +48,7 @@ The example `docker-compose.yml` sets up:
 - **API service** (port 3013) - MCP HTTP server
 - **2 Worker agents** - Containerized Claude workers
 - **1 Lead agent** - Coordinator agent
+- **3 Content agents** (optional) - Content writer, reviewer, and strategist using `TEMPLATE_ID` for profile bootstrapping
 
 ### Configuration
 
@@ -178,9 +179,9 @@ The Docker worker image uses a multi-stage build:
 - **Languages**: Python 3, Node.js 22, Bun
 - **Build tools**: gcc, g++, make, cmake
 - **Process manager**: PM2 (for background services)
-- **CLI tools**: GitHub CLI (`gh`), sqlite3
-- **Agent tools**: `wts` (git worktree manager)
-- **Utilities**: git, git-lfs, vim, nano, jq, curl, wget, ssh
+- **CLI tools**: GitHub CLI (`gh`), GitLab CLI (`glab`), sqlite3
+- **Agent tools**: `wts` (git worktree manager), `archil` (FUSE/R2-backed storage)
+- **Utilities**: git, git-lfs, vim, nano, jq, curl, wget, ssh, fuse3
 - **Sudo access**: Worker can install packages with `sudo apt-get install`
 
 **Volumes:**
