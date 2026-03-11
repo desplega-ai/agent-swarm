@@ -136,9 +136,7 @@ describe("validateClaudeCredentials", () => {
 
   it("treats empty string as missing", () => {
     const env = { CLAUDE_CODE_OAUTH_TOKEN: "", ANTHROPIC_API_KEY: "" };
-    expect(() => validateClaudeCredentials(env)).toThrow(
-      "No Claude credentials found",
-    );
+    expect(() => validateClaudeCredentials(env)).toThrow("No Claude credentials found");
   });
 
   it("treats undefined values as missing", () => {
@@ -146,9 +144,7 @@ describe("validateClaudeCredentials", () => {
       CLAUDE_CODE_OAUTH_TOKEN: undefined,
       ANTHROPIC_API_KEY: undefined,
     };
-    expect(() => validateClaudeCredentials(env)).toThrow(
-      "No Claude credentials found",
-    );
+    expect(() => validateClaudeCredentials(env)).toThrow("No Claude credentials found");
   });
 });
 

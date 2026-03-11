@@ -64,7 +64,7 @@ describe("upsertEventPromptTemplate", () => {
   });
 
   test("upserts on conflict (same provider+eventType+agentId)", () => {
-    const first = upsertEventPromptTemplate({
+    upsertEventPromptTemplate({
       provider: "gitlab",
       eventType: "pipeline.failed",
       template: "Version 1",

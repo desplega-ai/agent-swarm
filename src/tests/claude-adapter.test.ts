@@ -37,7 +37,7 @@ describe("ClaudeSession CLI argument construction", () => {
   // Since buildCommand is private, we verify via the public interface behavior.
 
   test("default model falls back to 'opus' when empty", async () => {
-    const adapter = new ClaudeAdapter();
+    const _adapter = new ClaudeAdapter();
     const config = makeConfig({ model: "" });
 
     // We can't easily inspect the spawned process args without actually spawning,
