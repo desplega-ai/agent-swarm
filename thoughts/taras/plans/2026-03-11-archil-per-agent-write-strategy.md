@@ -136,10 +136,16 @@ if [ -n "$AGENT_ID" ]; then
 
     echo "Setting up per-agent directories for $AGENT_ID..."
 
-    # Create per-agent directories.
+    # IMPORTANT: The shared disk is already mounted via `archil mount --shared`
+    # earlier in the entrypoint. That single mount gives this agent READ access
+    # to the ENTIRE disk — including all other agents' directories.
+    #
+    # What we're doing here is claiming WRITE ownership of this agent's own
+    # subdirectories only. Other agents' dirs (e.g., thoughts/worker-2/) are
+    # visible and readable but not writable by this agent.
+    #
     # On Archil --shared mounts, mkdir auto-grants ownership to the creator.
     # On non-Archil (local dev), this is just a regular mkdir.
-    # NOTE: Read access to ALL dirs is automatic on --shared mounts.
     for category in "thoughts" "memory" "downloads" "misc"; do
         AGENT_DIR="$AGENT_SHARED/$category/$AGENT_ID"
         mkdir -p "$AGENT_DIR" 2>/dev/null || true
@@ -160,7 +166,7 @@ if [ -n "$AGENT_ID" ]; then
 fi
 ```
 
-**Note**: This unified block handles both Archil and non-Archil cases. The `archil checkout` fallback only runs when `ARCHIL_MOUNT_TOKEN` is set.
+**Key clarification**: This block only sets up WRITE ownership for this agent's dirs. **Read access to ALL directories (including other agents') is already provided by the `archil mount --shared` call earlier in the entrypoint.** The lead can `cat /workspace/shared/thoughts/worker-1/plans/foo.md` without any checkout — reads are universal on `--shared` mounts.
 
 ### Success Criteria:
 
