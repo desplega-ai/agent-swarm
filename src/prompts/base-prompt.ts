@@ -215,9 +215,26 @@ const BASE_PROMPT_FILESYSTEM = `
 - /workspace/personal - Your personal directory for storing files, code, and data related to your tasks.
 - /workspace/personal/todos.md - A markdown file to keep track of your personal to-do list, it will be persisted across sessions. Use the /todos command to interact with it.
 - /workspace/shared - A shared directory accessible by all agents in the swarm for collaboration, critical if you want to share files or data with other agents, specially the lead agent.
-- /workspace/shared/thoughts/{name}/{plans,research} directories - A shared thoughts directory, where you and all other agents will be storing your plans and research notes. Use it to document your reasoning, decisions, and findings for transparency and collaboration. The commands to interact with it are /desplega:research, /desplega:create-plan and /desplega:implement-plan.
-  - There will be a /workspace/shared/thoughts/shared/... directory for general swarm-wide notes.
-  - There will be a /workspace/shared/thoughts/{yourId}/... directory for each agent to store their individual notes, you can access other agents' notes here as well.
+
+#### Shared Workspace Directory Convention
+
+Each agent writes ONLY to its own subdirectory under each shared category, using \`{category}/{agentId}/\`. You have **read access to everything** under /workspace/shared/ but **write access only to your own directories**.
+
+**Your write directories** (create as needed):
+- \`/workspace/shared/thoughts/{agentId}/plans/\` — Your plans
+- \`/workspace/shared/thoughts/{agentId}/research/\` — Your research notes
+- \`/workspace/shared/memory/{agentId}/\` — Your shared memories (searchable by all agents)
+- \`/workspace/shared/downloads/{agentId}/\` — Your downloaded files
+- \`/workspace/shared/misc/{agentId}/\` — Other shared files
+
+The commands to interact with thoughts are /desplega:research, /desplega:create-plan and /desplega:implement-plan.
+
+**Discovering other agents' work:**
+- \`ls /workspace/shared/thoughts/*/plans/\` — See all agents' plans
+- \`ls /workspace/shared/thoughts/*/research/\` — See all agents' research
+- \`memory-search\` — Search across all agents' shared memories
+
+**WARNING: Do NOT write to another agent's directory.** Each agent owns its \`{agentId}/\` subdirectory. Writing to another agent's directory will cause conflicts and data loss.
 
 #### Environment Setup
 Your setup script at \`/workspace/start-up.sh\` runs at every container start.
@@ -242,11 +259,13 @@ Do this FIRST, before reading files, writing code, or making plans.
 
 **Saving memories:** Write important learnings, patterns, decisions, and solutions to files in your memory directories. They are automatically indexed and become searchable via \`memory-search\`:
 - \`/workspace/personal/memory/\` — Private to you, searchable only by you
-- \`/workspace/shared/memory/\` — Shared with all agents, searchable by everyone
+- \`/workspace/shared/memory/{agentId}/\` — Shared with all agents, searchable by everyone (write only to YOUR directory)
 
 When you solve a hard problem, fix a tricky bug, or learn something about the codebase — write it down immediately. Don't wait until the end of the session.
 
-Example: \`Write("/workspace/personal/memory/auth-header-fix.md", "The API requires Bearer prefix on all auth headers. Without it, you get a misleading 403 instead of 401.")\`
+Examples:
+- Private: \`Write("/workspace/personal/memory/auth-header-fix.md", "The API requires Bearer prefix...")\`
+- Shared: \`Write("/workspace/shared/memory/{agentId}/auth-header-fix.md", "The API requires Bearer prefix...")\`
 
 **Memory tools:**
 - \`memory-search\` — Search your memories with natural language queries. Returns summaries with IDs.
@@ -447,7 +466,7 @@ export const getBasePrompt = (args: BasePromptArgs): string => {
     staticSuffix += BASE_PROMPT_WORKER;
   }
 
-  staticSuffix += BASE_PROMPT_FILESYSTEM;
+  staticSuffix += BASE_PROMPT_FILESYSTEM.replaceAll("{agentId}", agentId);
   staticSuffix += BASE_PROMPT_SELF_AWARENESS;
   staticSuffix += BASE_PROMPT_CONTEXT_MODE;
   staticSuffix += BASE_PROMPT_GUIDELINES;
