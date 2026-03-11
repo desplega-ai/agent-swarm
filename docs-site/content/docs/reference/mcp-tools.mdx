@@ -71,6 +71,7 @@ Send a task to a specific agent, create an unassigned task, or offer a task for 
 | `dependsOn` | array | No | Task IDs this depends on |
 | `epicId` | uuid | No | Associated epic |
 | `parentTaskId` | uuid | No | Parent task for session continuity |
+| `dir` | string | No | Working directory (absolute path) for the agent to start in |
 | `model` | string | No | Model for this task: `haiku`, `sonnet`, or `opus`. Falls back to agent/global `MODEL_OVERRIDE` config, then `opus` |
 
 ### get-task-details
@@ -255,6 +256,7 @@ Manage tasks in the pool: create, claim, release, accept, reject, or move to/fro
 | `task` | string | Varies | Required for create |
 | `priority` | number | No | Priority 0-100 |
 | `tags` | array | No | Tags for filtering |
+| `dir` | string | No | Working directory (absolute path) for the agent to start in (only used with `create` action) |
 | `model` | string | No | Model for the created task: `haiku`, `sonnet`, or `opus` (only used with `create` action) |
 
 ## Messaging Tools

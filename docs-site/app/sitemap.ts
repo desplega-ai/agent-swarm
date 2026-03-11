@@ -18,12 +18,14 @@ export default function sitemap(): MetadataRoute.Sitemap {
     "/docs/guides/deployment",
     "/docs/guides/slack-integration",
     "/docs/guides/github-integration",
+    "/docs/guides/gitlab-integration",
     "/docs/guides/agentmail-integration",
     "/docs/guides/sentry-integration",
     "/docs/guides/x402-payments",
     "/docs/reference/mcp-tools",
     "/docs/reference/environment-variables",
     "/docs/reference/cli",
+    "/docs/contributing",
   ];
 
   return docPages.map((path) => ({
