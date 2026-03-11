@@ -49,11 +49,12 @@ fi
 # ---- End Archil mount ----
 
 # Create workspace subdirectories (after FUSE mount, since Archil requires
-# empty mount points — these dirs can't exist at build time)
+# empty mount points — these dirs can't exist at build time).
+# Use || true because shared Archil mounts are read-only until checkout.
 mkdir -p /workspace/personal/memory \
          /workspace/shared/thoughts/shared/plans \
          /workspace/shared/thoughts/shared/research \
-         /workspace/shared/memory
+         /workspace/shared/memory 2>/dev/null || true
 
 # Role defaults to worker, can be set to "lead"
 ROLE="${AGENT_ROLE:-worker}"
