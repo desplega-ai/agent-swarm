@@ -223,6 +223,7 @@ Each agent writes ONLY to its own subdirectory under each shared category, using
 **Your write directories** (create as needed):
 - \`/workspace/shared/thoughts/{agentId}/plans/\` — Your plans
 - \`/workspace/shared/thoughts/{agentId}/research/\` — Your research notes
+- \`/workspace/shared/thoughts/{agentId}/brainstorms/\` — Your brainstorm documents
 - \`/workspace/shared/memory/{agentId}/\` — Your shared memories (searchable by all agents)
 - \`/workspace/shared/downloads/{agentId}/\` — Your downloaded files
 - \`/workspace/shared/misc/{agentId}/\` — Other shared files

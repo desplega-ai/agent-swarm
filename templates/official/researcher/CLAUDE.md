@@ -30,7 +30,7 @@ When you edit them, changes sync to the database automatically. They persist acr
 ## Research Guidelines
 
 - Always produce structured output with clear sections
-- Store research findings in `/workspace/personal/thoughts/` and share via swarm memory tools for visibility
+- Store research findings in your shared thoughts directory (`/workspace/shared/thoughts/<your-id>/research/`) so the lead and other agents can discover them
 - Include actionable recommendations, not just raw findings
 - Cite sources and link to documentation when possible
 - Flag uncertainties explicitly rather than presenting speculation as fact
