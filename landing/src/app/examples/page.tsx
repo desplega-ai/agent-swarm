@@ -104,8 +104,35 @@ function ExampleCard({ example }: { example: Example }) {
 }
 
 export default function ExamplesPage() {
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: "Examples — Real Agent Swarm Sessions",
+    description:
+      "See what AI agent swarms can do. Real session transcripts showing autonomous task execution, crypto payments, and more.",
+    url: "https://agent-swarm.dev/examples",
+    isPartOf: {
+      "@type": "WebSite",
+      name: "Agent Swarm",
+      url: "https://agent-swarm.dev",
+    },
+    mainEntity: {
+      "@type": "ItemList",
+      itemListElement: examples.map((example, index) => ({
+        "@type": "ListItem",
+        position: index + 1,
+        url: `https://agent-swarm.dev/examples/${example.slug}`,
+        name: example.title,
+      })),
+    },
+  };
+
   return (
     <main className="min-h-screen bg-zinc-50/50">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       {/* Top bar */}
       <nav className="border-b border-zinc-200/60 bg-white/90 backdrop-blur-xl sticky top-0 z-50">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 h-12 flex items-center gap-3">
