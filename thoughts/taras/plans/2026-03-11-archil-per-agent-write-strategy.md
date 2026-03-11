@@ -22,11 +22,11 @@ The shared Archil disk at `/workspace/shared` is mounted with `--shared` on all 
 - `docker-entrypoint.sh:477-486` does `archil checkout` for `thoughts/$AGENT_ID` only — this works correctly
 - `base-prompt.ts:219` tells agents to write shared plans to `thoughts/shared/plans/` — broken for all agents except the first to boot
 - `base-prompt.ts:245` tells agents to write memory to `/workspace/shared/memory/` — same issue
-- `hook.ts:860-864` auto-indexes memory files using `startsWith("/workspace/shared/memory/")` — already matches `memory/$AGENT_ID/foo.md`, no change needed
+- `hook.ts:473-474` auto-indexes memory files using `startsWith("/workspace/shared/memory/")` — already matches `memory/$AGENT_ID/foo.md`, no change needed
 
 ### Key Discoveries:
-- `hook.ts:860-864`: Memory auto-indexing path detection uses `startsWith("/workspace/shared/memory/")` which naturally matches per-agent subdirs — **no hook change needed for indexing**
-- `hook.ts:870`: `isShared` scope detection uses same prefix — **also fine**
+- `hook.ts:473-474`: Memory auto-indexing path detection uses `startsWith("/workspace/shared/memory/")` which naturally matches per-agent subdirs — **no hook change needed for indexing**
+- `hook.ts:164`: `isShared` scope detection uses same prefix — **also fine**
 - `inject-learning.ts`, `store-progress.ts`: Write to database only, not filesystem — **not affected**
 - `memory-search` MCP tool: Queries indexed database — **not affected by path changes**
 - `slack-download-file.ts:14`: Hardcoded default `/workspace/shared/downloads/slack/` — needs update
@@ -126,23 +126,31 @@ mkdir -p /workspace/shared/thoughts/shared/plans \
          /workspace/shared/memory 2>/dev/null || true
 ```
 
-Replace the per-agent checkout block (currently around lines 477-486) with an expanded version:
+Replace the per-agent checkout block (currently around lines 477-486) with an expanded version.
+
+**Primary approach: `mkdir -p` first** — Archil auto-grants ownership to the client that creates a directory on a `--shared` mount. This is simpler and avoids the question of whether `checkout` works on non-existent paths. Explicit `checkout` is used only as a fallback for dirs that already exist (e.g., on container restart where dirs persist from a previous boot).
+
 ```bash
-if [ -n "$AGENT_ID" ] && [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
+if [ -n "$AGENT_ID" ]; then
     AGENT_SHARED="/workspace/shared"
 
-    echo "Checking out per-agent directories for $AGENT_ID..."
+    echo "Setting up per-agent directories for $AGENT_ID..."
 
-    # Checkout each top-level category for this agent
+    # Create per-agent directories.
+    # On Archil --shared mounts, mkdir auto-grants ownership to the creator.
+    # On non-Archil (local dev), this is just a regular mkdir.
     # NOTE: Read access to ALL dirs is automatic on --shared mounts.
-    # No checkout needed for reads — only for writes to own dirs.
     for category in "thoughts" "memory" "downloads" "misc"; do
         AGENT_DIR="$AGENT_SHARED/$category/$AGENT_ID"
-        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil checkout "$AGENT_DIR" 2>/dev/null || true
-        mkdir -p "$AGENT_DIR"
+        mkdir -p "$AGENT_DIR" 2>/dev/null || true
+
+        # Fallback: if dir already existed (previous boot), claim via checkout
+        if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
+            sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil checkout "$AGENT_DIR" 2>/dev/null || true
+        fi
     done
 
-    # Create standard subdirectories
+    # Create standard subdirectories (within owned dirs, so these always succeed)
     mkdir -p "$AGENT_SHARED/thoughts/$AGENT_ID/plans"
     mkdir -p "$AGENT_SHARED/thoughts/$AGENT_ID/research"
     mkdir -p "$AGENT_SHARED/thoughts/$AGENT_ID/brainstorms"
@@ -152,23 +160,7 @@ if [ -n "$AGENT_ID" ] && [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
 fi
 ```
 
-Also handle the non-Archil case (local dev without shared disk):
-```bash
-if [ -n "$AGENT_ID" ] && [ -z "$ARCHIL_MOUNT_TOKEN" ]; then
-    # No Archil — just create the directories directly
-    AGENT_SHARED="/workspace/shared"
-    for category in "thoughts" "memory" "downloads" "misc"; do
-        mkdir -p "$AGENT_SHARED/$category/$AGENT_ID"
-    done
-    mkdir -p "$AGENT_SHARED/thoughts/$AGENT_ID/plans"
-    mkdir -p "$AGENT_SHARED/thoughts/$AGENT_ID/research"
-    mkdir -p "$AGENT_SHARED/thoughts/$AGENT_ID/brainstorms"
-    mkdir -p "$AGENT_SHARED/downloads/$AGENT_ID/slack"
-fi
-```
-
-#### 2. Verify checkout-before-mkdir works
-**Note**: The current entrypoint does `archil checkout` then `mkdir`, which implies checkout works on non-existent paths (or auto-creates them). If checkout fails on non-existent paths, reverse the order: `mkdir -p` first (which auto-grants ownership via Archil's mkdir mechanism), then skip explicit checkout.
+**Note**: This unified block handles both Archil and non-Archil cases. The `archil checkout` fallback only runs when `ARCHIL_MOUNT_TOKEN` is set.
 
 ### Success Criteria:
 
@@ -236,15 +228,27 @@ Add PostToolUse error detection in `hook.ts` that catches write failures to non-
 
 ### Changes Required:
 
-#### 1. Write failure detection in PostToolUse hook
-**File**: `src/hooks/hook.ts`
-**Changes**: In the PostToolUse handler, after a Write or Edit tool call, check if:
-1. The tool result indicates an error (permission denied, read-only filesystem, etc. — pattern from Phase 1)
-2. The target path is under `/workspace/shared/` but NOT under `/workspace/shared/{category}/{agentId}/`
-
-If both conditions are true, return a hook hint:
+#### 1. Path ownership check helper
+**Files**: `src/hooks/hook.ts` and `src/providers/pi-mono-extension.ts`
+**Changes**: Add a shared helper function (or duplicate in both files):
+```ts
+function isOwnedSharedPath(path: string, agentId: string): boolean {
+  const sharedCategories = ["thoughts", "memory", "downloads", "misc"];
+  return sharedCategories.some(cat =>
+    path.startsWith(`/workspace/shared/${cat}/${agentId}/`)
+  );
+}
 ```
-⚠️ Write failed: You don't have write access to this directory.
+
+#### 2. PreToolUse prevention (primary — proactive)
+**Files**: `src/hooks/hook.ts` (PreToolUse handler) and `src/providers/pi-mono-extension.ts` (`tool_call` handler)
+**Changes**: Before a Write/Edit tool executes, check if:
+1. `ARCHIL_MOUNT_TOKEN` is set (skip in local dev — all paths are writable)
+2. The target path is under `/workspace/shared/` but NOT under the agent's own subdirectory
+
+If both conditions are true, return a **non-blocking warning** hint:
+```
+⚠️ This write will fail: You don't have write access to this directory.
 
 On shared workspaces, each agent can only write to their own directories:
 - /workspace/shared/thoughts/{yourId}/
@@ -255,23 +259,15 @@ On shared workspaces, each agent can only write to their own directories:
 You CAN read any file on the shared disk. For writes, use your own subdirectory.
 ```
 
-#### 2. Path ownership check helper
-**File**: `src/hooks/hook.ts`
-**Changes**: Add a helper function:
-```ts
-function isOwnedSharedPath(path: string, agentId: string): boolean {
-  const sharedCategories = ["thoughts", "memory", "downloads", "misc"];
-  return sharedCategories.some(cat =>
-    path.startsWith(`/workspace/shared/${cat}/${agentId}/`)
-  );
-}
-```
+This prevents wasted tool calls by warning the agent before the write fails.
 
-#### 3. PreToolUse prevention (optional optimization)
-**File**: `src/hooks/hook.ts`
-**Changes**: In the PreToolUse handler for Write/Edit, if the target path is under `/workspace/shared/` and NOT under the agent's own subdirectory, return a warning hint BEFORE the write attempt. This avoids the failed write entirely.
+#### 3. PostToolUse detection (secondary — safety net)
+**Files**: `src/hooks/hook.ts` (PostToolUse handler) and `src/providers/pi-mono-extension.ts` (`tool_result` handler)
+**Changes**: After a Write/Edit tool call, check if:
+1. The tool result indicates an error (exact pattern from Phase 1 error discovery)
+2. The target path is under `/workspace/shared/` but NOT owned by this agent
 
-Only enable this when Archil is active (check `ARCHIL_MOUNT_TOKEN` env var), since in local dev all paths are writable.
+If both conditions are true, return the same hint as above. This catches cases where the PreToolUse check didn't fire (e.g., Bash-based writes, MCP tools).
 
 ### Success Criteria:
 
@@ -280,13 +276,15 @@ Only enable this when Archil is active (check `ARCHIL_MOUNT_TOKEN` env var), sin
 - [ ] Lint passes: `bun run lint`
 - [ ] Hook correctly identifies owned paths: test `isOwnedSharedPath("/workspace/shared/memory/agent-1/foo.md", "agent-1")` → true
 - [ ] Hook correctly identifies non-owned paths: test `isOwnedSharedPath("/workspace/shared/memory/agent-2/foo.md", "agent-1")` → false
+- [ ] Both `hook.ts` and `pi-mono-extension.ts` contain the guardrail logic
 
 #### Manual Verification:
-- [ ] Deploy and have an agent attempt to write to another agent's directory — verify the hook hint appears in the agent's conversation
+- [ ] Deploy and have an agent attempt to write to another agent's directory — verify the PreToolUse hint appears before the write
 - [ ] Verify writes to own directory still work without any hook interference
 - [ ] Verify the hint message is clear and actionable
+- [ ] Test with pi-mono harness (if available) to confirm parity
 
-**Implementation Note**: Implement PostToolUse detection first (reactive). Add PreToolUse prevention (proactive) as a follow-up if time allows. Pause for confirmation before proceeding.
+**Implementation Note**: PreToolUse is the primary guardrail (proactive). PostToolUse is the safety net (reactive). Both must be implemented in both `hook.ts` and `pi-mono-extension.ts`.
 
 ---
 
@@ -349,8 +347,8 @@ const DEFAULT_DOWNLOAD_DIR = `/workspace/shared/downloads/${process.env.AGENT_ID
 #### Automated Verification:
 - [ ] TypeScript check passes: `bun run tsc:check`
 - [ ] Lint passes: `bun run lint`
-- [ ] No remaining hardcoded shared write paths: `grep -rn "/workspace/shared/downloads/slack" src/ plugin/` returns nothing
-- [ ] No remaining `thoughts/shared` write targets: `grep -rn "thoughts/shared" src/ plugin/ | grep -v "read\|Read\|cat \|ls "` returns nothing
+- [ ] No remaining hardcoded shared write paths: `grep -rn "/workspace/shared/downloads/slack" src/ plugin/ templates/ docs-site/ README.md MCP.md` returns nothing
+- [ ] No remaining `thoughts/shared` write targets: `grep -rn "thoughts/shared" src/ plugin/ templates/ docs-site/ README.md MCP.md | grep -v "read\|Read\|cat \|ls "` returns nothing
 
 #### Manual Verification:
 - [ ] Deploy and test Slack file download — verify file lands in `downloads/$AGENT_ID/slack/`
@@ -395,21 +393,20 @@ _Reviewed: 2026-03-11 by Claude_
 
 ### Critical
 
-- [ ] **Phase 3 missing `pi-mono-extension.ts`**: The hook analysis confirmed there's a parallel PostToolUse implementation in `src/providers/pi-mono-extension.ts` (lines 450-478) with identical memory detection logic. If guardrails are added to `hook.ts`, the same logic must be added to `pi-mono-extension.ts` or pi-mono agents won't get the write-failure hints. Add this as a change item in Phase 3.
+_(none remaining)_
 
 ### Important
 
-- [ ] **Phase 1 checkout-vs-mkdir ambiguity**: The plan hedges on whether to `archil checkout` then `mkdir`, or `mkdir` first (which auto-grants ownership). These are different Archil behaviors. The plan should pick one primary approach and use the other as fallback. Recommendation: try `mkdir -p` first (auto-grants ownership), then verify with `archil delegations`. Skip explicit `checkout` unless `mkdir` doesn't grant delegation on a `--shared` mount.
-
-- [ ] **Phase 4 grep sweep incomplete**: Success criteria grep `src/` and `plugin/` but Phase 4 also adds changes to `templates/`, `docs-site/`, `README.md`, and `src/be/db.ts`. The grep commands should include these paths: `grep -rn "thoughts/shared" src/ plugin/ templates/ docs-site/ README.md MCP.md`.
-
-- [ ] **Phase 3 scope: PostToolUse vs PreToolUse**: Plan says "implement PostToolUse first, PreToolUse as follow-up." These have very different UX — PostToolUse is reactive (write fails, then hint), PreToolUse is proactive (block before failure). Recommend: make PreToolUse the primary approach (prevents wasted tool calls), and use PostToolUse only as a safety net. The plan should be explicit about which is in-scope vs follow-up.
-
-- [ ] **No rollback notes**: None of the phases mention what to do if something goes wrong. For Phase 1 (entrypoint), rollback is straightforward (revert commit). But Phase 2 (prompts) + Phase 3 (hooks) combined could cause agents to misbehave if partially deployed. Add a brief rollback note per phase.
+_(none remaining)_
 
 ### Resolved
 
 - [x] Missing `brainstorms/` subdirectory — added to both Archil and non-Archil blocks, desired end state, and boot flow
 - [x] Read-only access to other agents' dirs — clarified in entrypoint comment that `--shared` mounts provide automatic read access
 - [x] `ARCHIL_MOUNT_TOKEN` availability in hooks — confirmed: hooks run as subprocesses in the same container, env vars are inherited
-- [x] Line references verified — `hook.ts` lines corrected (473→860-864, 164→870). `work-on-task.md:68` references `shared/memory/` not `thoughts/shared/` (removed from Phase 4 item 4)
+- [x] Line references verified — `hook.ts` lines corrected (473→860-864, 164→870)
+- [x] Phase 3 missing `pi-mono-extension.ts` — added to all Phase 3 change items
+- [x] Phase 1 checkout-vs-mkdir ambiguity — switched to `mkdir` first (auto-grants ownership), `checkout` as fallback
+- [x] Phase 4 grep sweep — expanded to include `templates/`, `docs-site/`, `README.md`, `MCP.md`
+- [x] Phase 3 PreToolUse vs PostToolUse — PreToolUse is now primary (proactive), PostToolUse is safety net
+- [x] Rollback notes — skipped per Taras: whole thing is a no-op in non-Archil case
