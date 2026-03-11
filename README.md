@@ -46,8 +46,9 @@ Agent Swarm lets you run a team of AI coding agents that coordinate autonomously
 - **Dashboard UI** — Real-time monitoring of agents, tasks, and inter-agent chat
 - **Service discovery** — Workers can expose HTTP services and discover each other
 - **Scheduled tasks** — Cron-based recurring task automation
-- **Templates registry** — Pre-built agent templates with a gallery UI and docker-compose builder
+- **Templates registry** — Pre-built agent templates (9 official: lead, coder, researcher, reviewer, tester, FDE, content-writer, content-reviewer, content-strategist) with a gallery UI and docker-compose builder
 - **GitLab integration** — Full GitLab webhook support alongside GitHub via provider adapter pattern
+- **Working directory support** — Tasks can specify a custom starting directory for agents via the `dir` parameter
 - **Multi-provider** — Run agents with Claude Code or pi-mono (`HARNESS_PROVIDER=claude|pi`)
 
 ## Quick Start
