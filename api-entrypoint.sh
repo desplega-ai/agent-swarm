@@ -12,15 +12,8 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
     chmod 666 /dev/fuse
   fi
 
-  if [ -n "$ARCHIL_API_DISK_NAME" ]; then
-    echo "Mounting API disk ($ARCHIL_API_DISK_NAME) at /mnt/data..."
-    mkdir -p /mnt/data
-    # Exclusive mount (not --shared) — only the API uses this disk, and it
-    # needs reliable read/write for SQLite. Shared mode is slower and can
-    # cause FUSE hangs under load.
-    # --force reclaims stale delegations from previous machine incarnations.
-    archil mount --force "$ARCHIL_API_DISK_NAME" /mnt/data --region "$ARCHIL_REGION"
-  fi
+  # NOTE: API data disk (/mnt/data) is now a Fly volume, auto-mounted by Fly.
+  # No Archil mount needed for it.
 
   if [ -n "$ARCHIL_SHARED_DISK_NAME" ]; then
     echo "Mounting shared disk ($ARCHIL_SHARED_DISK_NAME) at /workspace/shared..."
@@ -49,7 +42,6 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
   # Graceful unmount on shutdown (flushes pending data to backing store)
   cleanup_archil() {
     echo "Unmounting Archil disks..."
-    archil unmount /mnt/data 2>/dev/null || true
     archil unmount /workspace/shared 2>/dev/null || true
   }
   trap cleanup_archil EXIT INT TERM
