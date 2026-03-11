@@ -49,6 +49,8 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
         # --force reclaims stale delegations from previous machine incarnations.
         # Personal disks are always single-client, so force is safe.
         sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --force "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
+        # FUSE mount comes up as root; fix ownership so worker user can write
+        sudo chown worker:worker /workspace/personal
     fi
     echo "===================="
 fi
