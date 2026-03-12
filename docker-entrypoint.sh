@@ -52,8 +52,6 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
         sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --force "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
         # Brief pause for FUSE daemon to finish --force re-negotiation
         sleep 1
-        # FUSE mount comes up as root; fix ownership so worker user can write
-        chown worker:worker /workspace/personal
     fi
     echo "===================="
 fi
