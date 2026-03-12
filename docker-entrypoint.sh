@@ -522,8 +522,9 @@ if [ -n "$AGENT_ID" ]; then
         # Checkout for persistent ownership (survives reboots where dir already exists)
         # Use -f (force) to reclaim stale delegations from destroyed/redeployed machines.
         # Each agent is the sole writer for its own subdirectory, so force is safe.
+        # Pipe "y" to confirm the force-checkout prompt (no --yes flag available).
         if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
-            sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil checkout -f "$AGENT_DIR" 2>/dev/null || true
+            echo y | sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil checkout -f "$AGENT_DIR" 2>/dev/null || true
         fi
 
         # chown AFTER checkout — need Archil delegation before FUSE allows chown
