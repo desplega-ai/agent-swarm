@@ -640,7 +640,6 @@ async function registerActiveSession(
   session: {
     taskId: string;
     triggerType: string;
-    inboxMessageId?: string;
     taskDescription?: string;
   },
 ): Promise<void> {
@@ -657,7 +656,6 @@ async function registerActiveSession(
         agentId: config.agentId,
         taskId: session.taskId,
         triggerType: session.triggerType,
-        inboxMessageId: session.inboxMessageId,
         taskDescription: session.taskDescription,
       }),
     });
@@ -705,7 +703,6 @@ interface Trigger {
     | "task_offered"
     | "unread_mentions"
     | "pool_tasks_available"
-    | "slack_inbox_message"
     | "epic_progress_changed";
   taskId?: string;
   task?: unknown;
@@ -963,37 +960,6 @@ This is an iterative process - you'll be notified again when more tasks finish.
 The epic should keep progressing until 100% complete and the goal is achieved.`;
 
       return prompt;
-    }
-
-    case "slack_inbox_message": {
-      // Lead: Slack inbox messages from users
-      const inboxDetails = (trigger.messages || [])
-        .map((m: { id: string; content: string }, index: number) => {
-          // Parse structured content if present
-          const newMessageMatch = m.content.match(/<new_message>\n([\s\S]*?)\n<\/new_message>/);
-          const threadHistoryMatch = m.content.match(
-            /<thread_history>\n([\s\S]*?)\n<\/thread_history>/,
-          );
-
-          const newMessage = newMessageMatch ? newMessageMatch[1] : m.content;
-          const threadHistory = threadHistoryMatch ? threadHistoryMatch[1] : null;
-
-          let formatted = `### Message ${index + 1} (inboxMessageId: ${m.id})\n`;
-          formatted += `**New Message:**\n${newMessage}\n`;
-
-          if (threadHistory) {
-            formatted += `\n**Thread History:**\n${threadHistory}\n`;
-          }
-
-          return formatted;
-        })
-        .join("\n---\n\n");
-
-      return `${trigger.count} Slack inbox message(s):\n\n${inboxDetails}\n\nFor each message, choose one:
-- **Reply directly**: Use \`slack-reply\` with inboxMessageId if you can answer immediately
-- **Delegate to worker**: Use \`inbox-delegate\` with inboxMessageId and agentId if it requires work
-
-Do not leave messages unanswered.`;
     }
 
     default:
@@ -2187,14 +2153,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             trigger.task && typeof trigger.task === "object" && "task" in trigger.task
               ? String((trigger.task as { task: string }).task).slice(0, 200)
               : undefined;
-          const inboxMsgId =
-            trigger.type === "slack_inbox_message" && trigger.messages?.[0]?.id
-              ? trigger.messages[0].id
-              : undefined;
           registerActiveSession(apiConfig, {
             taskId: runningTask.taskId,
             triggerType: trigger.type,
-            inboxMessageId: inboxMsgId,
             taskDescription: taskDesc,
           });
 

@@ -33,16 +33,14 @@ As the lead agent, you are responsible for coordinating the activities of all wo
 - Communication and coordination between agents
 - When the user EXPLICITLY says "do this yourself" or "don't delegate"
 
-#### Slack Inbox
-When Slack messages are routed to you, they appear as "inbox messages" - NOT tasks.
-Each inbox message shows the new message to respond to, with any thread history for context.
+#### Slack Messages
+When Slack messages are routed to you, they arrive as tasks with Slack metadata (channel, thread, user).
+Use the task's Slack context to reply or read thread history.
 
 Available Slack tools:
-- \`get-inbox-message\`: Read full details of an inbox message (content, Slack context, status)
-- \`slack-reply\`: Reply directly to the user in the Slack thread
-- \`slack-read\`: Read thread/channel history (use inboxMessageId, taskId, or channelId)
+- \`slack-reply\`: Reply directly to the user in the Slack thread (use taskId for context)
+- \`slack-read\`: Read thread/channel history (use taskId or channelId)
 - \`slack-list-channels\`: Discover available Slack channels the bot can access
-- \`inbox-delegate\`: Create a task for a worker agent (preserves Slack context for replies)
 
 #### General monitor and control tools
 
@@ -52,8 +50,7 @@ Available Slack tools:
 
 #### Task delegation tools
 
-- \`send-task\`: Assign a new task to a specific worker or to the general pool
-- \`inbox-delegate\`: Delegate an inbox message to a worker (creates task with Slack context)
+- \`send-task\`: Assign a new task to a specific worker or to the general pool (Slack/AgentMail metadata auto-inherits from parent task)
 - \`store-progress\`: Track coordination notes or update task status
 
 #### Session Continuity (parentTaskId)

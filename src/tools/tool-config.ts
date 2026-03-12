@@ -94,9 +94,7 @@ export const DEFERRED_TOOLS = new Set([
   "delete-channel",
   "list-channels",
 
-  // Lead inbox (3)
-  "inbox-delegate",
-  "get-inbox-message",
+  // AgentMail (1)
   "register-agentmail-inbox",
 
   // Other (3)

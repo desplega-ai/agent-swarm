@@ -1747,6 +1747,28 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         ? "backlog"
         : "unassigned";
 
+  // Inherit Slack/AgentMail metadata from parent task (unless explicitly overridden)
+  if (options?.parentTaskId) {
+    const parent = getTaskById(options.parentTaskId);
+    if (parent) {
+      if (parent.slackChannelId && !options.slackChannelId) {
+        options.slackChannelId = parent.slackChannelId;
+      }
+      if (parent.slackThreadTs && !options.slackThreadTs) {
+        options.slackThreadTs = parent.slackThreadTs;
+      }
+      if (parent.slackUserId && !options.slackUserId) {
+        options.slackUserId = parent.slackUserId;
+      }
+      if (parent.agentmailInboxId && !options.agentmailInboxId) {
+        options.agentmailInboxId = parent.agentmailInboxId;
+      }
+      if (parent.agentmailThreadId && !options.agentmailThreadId) {
+        options.agentmailThreadId = parent.agentmailThreadId;
+      }
+    }
+  }
+
   const row = getDb()
     .prepare<AgentTaskRow, (string | number | null)[]>(
       `INSERT INTO agent_tasks (

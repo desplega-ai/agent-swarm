@@ -1,6 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
-  claimInboxMessages,
   claimMentions,
   claimOfferedTask,
   getAgentById,
@@ -98,19 +97,6 @@ export async function handlePoll(
           // is created and assigned to the lead, which is picked up via the normal
           // task_assigned trigger above. This is more reliable and visible than the
           // old poll-based notification approach.
-
-          // Check for unread Slack inbox messages
-          // Atomically claim messages to prevent duplicate processing
-          const claimedInbox = claimInboxMessages(myAgentId, 5);
-          if (claimedInbox.length > 0) {
-            return {
-              trigger: {
-                type: "slack_inbox_message",
-                count: claimedInbox.length,
-                messages: claimedInbox,
-              },
-            };
-          }
 
           // Check for epic progress updates (tasks completed/failed for active epics)
           // This trigger helps lead plan next steps for epics - similar to ralph loop

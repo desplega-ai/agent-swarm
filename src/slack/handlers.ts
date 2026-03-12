@@ -1,7 +1,6 @@
 import type { App } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import {
-  createInboxMessage,
   createTask,
   createTaskExtended,
   getAgentById,
@@ -361,14 +360,9 @@ export function registerMessageHandler(app: App): void {
     // Check if bot was mentioned (in original text only)
     const botMentioned = !!msg.text?.includes(`<@${botUserId}>`);
 
-    // Build thread context for routing (if we're in a thread)
-    const routingThreadContext = msg.thread_ts
-      ? { channelId: msg.channel, threadTs: msg.thread_ts }
-      : undefined;
-
     // Route message to agents (use original text for routing to preserve mention/name matching)
     const routingText = msg.text || effectiveText;
-    const matches = routeMessage(routingText, botUserId, botMentioned, routingThreadContext);
+    const matches = routeMessage(routingText, botUserId, botMentioned);
 
     if (matches.length === 0) {
       if (!botMentioned) return;
@@ -399,30 +393,18 @@ export function registerMessageHandler(app: App): void {
         msg.ts,
         botUserId,
       );
-      const structuredContent = threadContext
-        ? `<new_message>\n${taskDescription}\n</new_message>\n\n<thread_history>\n${threadContext}\n</thread_history>`
-        : taskDescription;
       const fullTaskDescription = threadContext
         ? `<thread_context>\n${threadContext}\n</thread_context>\n\n${taskDescription}`
         : taskDescription;
 
       const lead = getLeadAgent();
-      if (lead) {
-        createInboxMessage(lead.id, structuredContent, {
-          source: "slack",
-          slackChannelId: msg.channel,
-          slackThreadTs: threadTs,
-          slackUserId: msg.user,
-          matchedText: "@bot (queued — agents offline)",
-        });
-      } else {
-        createTaskExtended(fullTaskDescription, {
-          source: "slack",
-          slackChannelId: msg.channel,
-          slackThreadTs: threadTs,
-          slackUserId: msg.user,
-        });
-      }
+      createTaskExtended(fullTaskDescription, {
+        agentId: lead?.id,
+        source: "slack",
+        slackChannelId: msg.channel,
+        slackThreadTs: threadTs,
+        slackUserId: msg.user,
+      });
 
       await say({
         text: ":satellite: _No agents are online right now. Your request has been queued and will be processed when agents come back up._",
@@ -461,11 +443,6 @@ export function registerMessageHandler(app: App): void {
       msg.ts,
       botUserId,
     );
-    // Structure content with clear separation for inbox messages
-    const structuredContent = threadContext
-      ? `<new_message>\n${taskDescription}\n</new_message>\n\n<thread_history>\n${threadContext}\n</thread_history>`
-      : taskDescription;
-    // For workers (tasks), keep using the old format for backwards compatibility
     const fullTaskDescription = threadContext
       ? `<thread_context>\n${threadContext}\n</thread_context>\n\n${taskDescription}`
       : taskDescription;
@@ -484,16 +461,15 @@ export function registerMessageHandler(app: App): void {
       }
 
       try {
-        // Lead agents receive inbox messages, not tasks
         if (agent.isLead) {
-          createInboxMessage(agent.id, structuredContent, {
+          const task = createTaskExtended(fullTaskDescription, {
+            agentId: agent.id,
             source: "slack",
             slackChannelId: msg.channel,
             slackThreadTs: threadTs,
             slackUserId: msg.user,
-            matchedText: match.matchedText,
           });
-          results.assigned.push(`*${agent.name}* (inbox)`);
+          results.assigned.push(`*${agent.name}* (${getTaskLink(task.id)})`);
           continue;
         }
 

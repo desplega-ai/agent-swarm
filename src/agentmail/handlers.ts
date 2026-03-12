@@ -1,5 +1,4 @@
 import {
-  createInboxMessage,
   createTaskExtended,
   findTaskByAgentMailThread,
   getAgentById,
@@ -74,7 +73,7 @@ function findLeadAgent() {
  */
 export async function handleMessageReceived(
   payload: AgentMailWebhookPayload,
-): Promise<{ created: boolean; taskId?: string; inboxMessageId?: string }> {
+): Promise<{ created: boolean; taskId?: string }> {
   const message = payload.message;
   if (!message) {
     console.log("[AgentMail] message.received event missing message payload");
@@ -133,18 +132,22 @@ export async function handleMessageReceived(
     const agent = getAgentById(mapping.agentId);
     if (agent) {
       if (agent.isLead) {
-        // Route to lead as inbox message
-        const content = `[AgentMail] New email received\n\nFrom: ${from}\nSubject: ${subject}\nInbox: ${inbox_id}\nThread: ${thread_id}\nMessage: ${message_id}\n\n${preview}`;
+        // Route to lead as task
+        const taskDescription = `[AgentMail] New email received\n\nFrom: ${from}\nSubject: ${subject}\nInbox: ${inbox_id}\nThread: ${thread_id}\nMessage: ${message_id}\n\n${preview}`;
 
-        const inboxMsg = createInboxMessage(agent.id, content, {
+        const task = createTaskExtended(taskDescription, {
+          agentId: agent.id,
           source: "agentmail",
-          matchedText: `AgentMail inbox ${inbox_id}`,
+          taskType: "agentmail-message",
+          agentmailInboxId: inbox_id,
+          agentmailMessageId: message_id,
+          agentmailThreadId: thread_id,
         });
 
         console.log(
-          `[AgentMail] Created inbox message ${inboxMsg.id} for lead ${agent.name} (inbox: ${inbox_id})`,
+          `[AgentMail] Created task ${task.id} for lead ${agent.name} (inbox: ${inbox_id})`,
         );
-        return { created: true, inboxMessageId: inboxMsg.id };
+        return { created: true, taskId: task.id };
       }
 
       // Route to worker as task
@@ -166,20 +169,24 @@ export async function handleMessageReceived(
     }
   }
 
-  // No mapping found - route to lead as inbox message
+  // No mapping found - route to lead as task
   const lead = findLeadAgent();
   if (lead) {
-    const content = `[AgentMail] New email received (unmapped inbox)\n\nFrom: ${from}\nSubject: ${subject}\nInbox: ${inbox_id}\nThread: ${thread_id}\nMessage: ${message_id}\n\n${preview}`;
+    const taskDescription = `[AgentMail] New email received (unmapped inbox)\n\nFrom: ${from}\nSubject: ${subject}\nInbox: ${inbox_id}\nThread: ${thread_id}\nMessage: ${message_id}\n\n${preview}`;
 
-    const inboxMsg = createInboxMessage(lead.id, content, {
+    const task = createTaskExtended(taskDescription, {
+      agentId: lead.id,
       source: "agentmail",
-      matchedText: `AgentMail inbox ${inbox_id} (no mapping)`,
+      taskType: "agentmail-message",
+      agentmailInboxId: inbox_id,
+      agentmailMessageId: message_id,
+      agentmailThreadId: thread_id,
     });
 
     console.log(
-      `[AgentMail] Created inbox message ${inboxMsg.id} for lead ${lead.name} (unmapped inbox: ${inbox_id})`,
+      `[AgentMail] Created task ${task.id} for lead ${lead.name} (unmapped inbox: ${inbox_id})`,
     );
-    return { created: true, inboxMessageId: inboxMsg.id };
+    return { created: true, taskId: task.id };
   }
 
   // No lead available - create unassigned task
