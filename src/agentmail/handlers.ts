@@ -31,7 +31,9 @@ export function isSenderAllowed(
   const allowedDomains = filter.split(",").map((d) => d.trim().toLowerCase());
   const fromAddresses = Array.isArray(from) ? from : [from || ""];
   return fromAddresses.some((addr) => {
-    const domain = addr.split("@")[1]?.toLowerCase();
+    const emailMatch = addr.match(/<([^>]+)>/);
+    const email = emailMatch?.[1] ?? addr;
+    const domain = email.split("@")[1]?.toLowerCase();
     return !!domain && allowedDomains.includes(domain);
   });
 }
