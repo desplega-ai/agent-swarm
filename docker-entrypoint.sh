@@ -62,7 +62,9 @@ fi
 # NOTE: Shared disk subdirectories are created per-agent below (see
 # "Setting up per-agent directories" block), NOT here.
 mkdir -p /workspace/personal/memory 2>/dev/null || true
-chown -R worker:worker /workspace/personal
+# chown individual dirs (not -R) to avoid EPERM on .archil system files
+chown worker:worker /workspace/personal 2>/dev/null || true
+chown worker:worker /workspace/personal/memory 2>/dev/null || true
 
 # Role defaults to worker, can be set to "lead"
 ROLE="${AGENT_ROLE:-worker}"
