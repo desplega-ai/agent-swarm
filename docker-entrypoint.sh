@@ -515,20 +515,20 @@ if [ -n "$AGENT_ID" ]; then
         AGENT_DIR="$AGENT_SHARED/$category/$AGENT_ID"
 
         # Create our subdir (auto-grants delegation on $AGENT_ID level)
-        # Use sudo because FUSE mount root is owned by root; UNIX perms
-        # are per-mount (not persisted to R2), so API's chmod doesn't help.
-        sudo mkdir -p "$AGENT_DIR" 2>/dev/null || true
+        # Entrypoint runs as root, so no sudo needed for mkdir.
+        mkdir -p "$AGENT_DIR" 2>/dev/null || true
 
         # Checkout for persistent ownership (survives reboots where dir already exists)
         # Use -f (force) to reclaim stale delegations from destroyed/redeployed machines.
         # Each agent is the sole writer for its own subdirectory, so force is safe.
-        # Pipe "y" to confirm the force-checkout prompt (no --yes flag available).
+        # Use `yes` piped in to auto-confirm the force-checkout prompt (no --yes flag).
+        # No sudo — entrypoint runs as root; sudo can swallow stdin pipes.
         if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
-            echo y | sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil checkout -f "$AGENT_DIR" 2>/dev/null || true
+            yes | archil checkout -f "$AGENT_DIR" 2>/dev/null || true
         fi
 
         # chown AFTER checkout — need Archil delegation before FUSE allows chown
-        sudo chown worker:worker "$AGENT_DIR" 2>/dev/null || true
+        chown worker:worker "$AGENT_DIR" 2>/dev/null || true
     done
 
     # Create standard subdirectories (within owned dirs, always succeeds)
