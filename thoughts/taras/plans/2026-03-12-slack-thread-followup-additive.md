@@ -1,7 +1,7 @@
 ---
 date: 2026-03-12T00:00:00Z
 topic: "Slack Thread Follow-up Routing + Additive Slack Buffer"
-status: draft-v2
+status: completed
 autonomy: critical
 ---
 

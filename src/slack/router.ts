@@ -1,5 +1,10 @@
-import { getAgentById, getAllAgents } from "../be/db";
+import { getAgentById, getAgentWorkingOnThread, getAllAgents } from "../be/db";
 import type { AgentMatch } from "./types";
+
+export interface ThreadContext {
+  channelId: string;
+  threadTs: string;
+}
 
 /**
  * Routes a Slack message to the appropriate agent(s) based on mentions.
@@ -13,6 +18,7 @@ export function routeMessage(
   text: string,
   _botUserId: string,
   botMentioned: boolean,
+  threadContext?: ThreadContext,
 ): AgentMatch[] {
   const matches: AgentMatch[] = [];
   const agents = getAllAgents().filter((a) => a.status !== "offline");
@@ -35,6 +41,21 @@ export function routeMessage(
       if (!matches.some((m) => m.agent.id === agent.id)) {
         matches.push({ agent, matchedText: "swarm#all" });
       }
+    }
+  }
+
+  // Thread follow-up — route to agent already working in this thread
+  if (matches.length === 0 && threadContext) {
+    const workingAgent = getAgentWorkingOnThread(threadContext.channelId, threadContext.threadTs);
+    if (workingAgent && workingAgent.status !== "offline") {
+      console.log(
+        `[Slack] Thread follow-up: routing to agent ${workingAgent.name} (${workingAgent.id}) in thread ${threadContext.threadTs}`,
+      );
+      matches.push({ agent: workingAgent, matchedText: "thread follow-up" });
+    } else if (workingAgent) {
+      console.log(
+        `[Slack] Thread follow-up: agent ${workingAgent.name} is offline, falling through to lead`,
+      );
     }
   }
 
