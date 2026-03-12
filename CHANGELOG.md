@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Per-agent write isolation on shared disk (#172)
+  - Each agent can only write to its own subdirectory under `/workspace/shared/{category}/{agentId}/`
+  - PreToolUse hook warns agents before writing to another agent's directory
+  - PostToolUse hook detects "Read-only file system" errors and guides agents to use their own directory
+  - Base prompt updated with per-agent directory convention and discovery commands
+  - Slack download tool saves to per-agent download directory by default
+- Claude credential validation — fail fast if no auth is set
+- Pre-push hooks to match CI merge gate checks
 - Working directory (`dir`) support for agent tasks (#159)
   - `send-task` and `task-action` accept `dir` parameter (absolute path) to set agent starting directory
   - Runner resolves `dir` for both new and resumed tasks with fallback chain: `task.dir` > `vcsRepo` clone path > default cwd
@@ -48,6 +56,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Docker multi-provider support in Dockerfile.worker and entrypoint
 
 ### Changed
+- API data disk switched from Archil FUSE to Fly volume for reliability
+- Shared disk uses exclusive Archil mounts with `--force` for stale delegation recovery
 - Template fetching refactored to run before agent registration (cached and reused for identity files)
 - Docker workspace volumes replaced with FUSE mount points for Archil compatibility
 
