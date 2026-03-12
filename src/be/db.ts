@@ -20,6 +20,8 @@ import type {
   Epic,
   EpicStatus,
   EpicWithProgress,
+  EventPromptProvider,
+  EventPromptTemplate,
   InboxMessage,
   InboxMessageStatus,
   ScheduledTask,
@@ -6041,4 +6043,144 @@ export function getStuckWorkflowRuns(): StuckWorkflowRun[] {
         AND at.status IN ('completed', 'failed', 'cancelled')`,
     )
     .all();
+}
+
+// ── Event Prompt Templates ──────────────────────────────────────────────────
+
+type EventPromptTemplateRow = {
+  id: string;
+  provider: string;
+  eventType: string;
+  template: string;
+  enabled: number;
+  agentId: string | null;
+  description: string | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+};
+
+function rowToEventPromptTemplate(row: EventPromptTemplateRow): EventPromptTemplate {
+  return {
+    id: row.id,
+    provider: row.provider as EventPromptProvider,
+    eventType: row.eventType,
+    template: row.template,
+    enabled: row.enabled === 1,
+    agentId: row.agentId,
+    description: row.description,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+/**
+ * Resolve an event prompt template with fallback:
+ * 1. Agent-specific template (if agentId provided)
+ * 2. Global template (agentId IS NULL)
+ * 3. null (no custom template — use hardcoded default)
+ */
+export function getEventPromptTemplate(
+  provider: EventPromptProvider,
+  eventType: string,
+  agentId?: string,
+): EventPromptTemplate | null {
+  if (agentId) {
+    const agentRow = getDb()
+      .prepare<EventPromptTemplateRow, [string, string, string]>(
+        `SELECT * FROM event_prompt_templates
+         WHERE provider = ? AND eventType = ? AND agentId = ? AND enabled = 1`,
+      )
+      .get(provider, eventType, agentId);
+    if (agentRow) return rowToEventPromptTemplate(agentRow);
+  }
+
+  const globalRow = getDb()
+    .prepare<EventPromptTemplateRow, [string, string]>(
+      `SELECT * FROM event_prompt_templates
+       WHERE provider = ? AND eventType = ? AND agentId IS NULL AND enabled = 1`,
+    )
+    .get(provider, eventType);
+
+  return globalRow ? rowToEventPromptTemplate(globalRow) : null;
+}
+
+export function upsertEventPromptTemplate(data: {
+  provider: EventPromptProvider;
+  eventType: string;
+  template: string;
+  agentId?: string | null;
+  description?: string | null;
+  enabled?: boolean;
+}): EventPromptTemplate {
+  const now = new Date().toISOString();
+  const agentId = data.agentId ?? null;
+  const enabled = data.enabled !== false ? 1 : 0;
+
+  // SQLite UNIQUE treats NULL != NULL, so ON CONFLICT won't match rows with NULL agentId.
+  // Handle upsert manually: check for existing row, then UPDATE or INSERT.
+  const existing = agentId
+    ? getDb()
+        .prepare<EventPromptTemplateRow, [string, string, string]>(
+          `SELECT * FROM event_prompt_templates WHERE provider = ? AND eventType = ? AND agentId = ?`,
+        )
+        .get(data.provider, data.eventType, agentId)
+    : getDb()
+        .prepare<EventPromptTemplateRow, [string, string]>(
+          `SELECT * FROM event_prompt_templates WHERE provider = ? AND eventType = ? AND agentId IS NULL`,
+        )
+        .get(data.provider, data.eventType);
+
+  if (existing) {
+    const row = getDb()
+      .prepare<EventPromptTemplateRow, [string, number, string | null, string, string]>(
+        `UPDATE event_prompt_templates
+         SET template = ?, enabled = ?, description = ?, lastUpdatedAt = ?
+         WHERE id = ? RETURNING *`,
+      )
+      .get(data.template, enabled, data.description ?? null, now, existing.id);
+    if (!row) throw new Error("Failed to update event prompt template");
+    return rowToEventPromptTemplate(row);
+  }
+
+  const id = crypto.randomUUID();
+  const row = getDb()
+    .prepare<EventPromptTemplateRow, (string | number | null)[]>(
+      `INSERT INTO event_prompt_templates (id, provider, eventType, template, enabled, agentId, description, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      data.provider,
+      data.eventType,
+      data.template,
+      enabled,
+      agentId,
+      data.description ?? null,
+      now,
+      now,
+    );
+
+  if (!row) throw new Error("Failed to insert event prompt template");
+  return rowToEventPromptTemplate(row);
+}
+
+export function listEventPromptTemplates(filters?: {
+  provider?: EventPromptProvider;
+}): EventPromptTemplate[] {
+  let query = "SELECT * FROM event_prompt_templates WHERE 1=1";
+  const params: string[] = [];
+  if (filters?.provider) {
+    query += " AND provider = ?";
+    params.push(filters.provider);
+  }
+  query += " ORDER BY provider, eventType, agentId ASC";
+  return getDb()
+    .prepare<EventPromptTemplateRow, string[]>(query)
+    .all(...params)
+    .map(rowToEventPromptTemplate);
+}
+
+export function deleteEventPromptTemplate(id: string): boolean {
+  const result = getDb().prepare("DELETE FROM event_prompt_templates WHERE id = ?").run(id);
+  return result.changes > 0;
 }

@@ -640,3 +640,21 @@ export const WorkflowRunStepSchema = z.object({
   finishedAt: z.string().optional(),
 });
 export type WorkflowRunStep = z.infer<typeof WorkflowRunStepSchema>;
+
+// ── Event Prompt Templates ──────────────────────────────────────────────────
+
+export const EventPromptProviderSchema = z.enum(["github", "gitlab", "agentmail"]);
+export type EventPromptProvider = z.infer<typeof EventPromptProviderSchema>;
+
+export const EventPromptTemplateSchema = z.object({
+  id: z.string().uuid(),
+  provider: EventPromptProviderSchema,
+  eventType: z.string(),
+  template: z.string(),
+  enabled: z.boolean(),
+  agentId: z.string().uuid().nullable(),
+  description: z.string().nullable(),
+  createdAt: z.string(),
+  lastUpdatedAt: z.string(),
+});
+export type EventPromptTemplate = z.infer<typeof EventPromptTemplateSchema>;

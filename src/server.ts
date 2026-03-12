@@ -16,6 +16,13 @@ import {
   registerUnassignTaskFromEpicTool,
   registerUpdateEpicTool,
 } from "./tools/epics";
+// Event prompt templates
+import {
+  registerDeleteEventPromptTemplateTool,
+  registerGetEventPromptTemplateTool,
+  registerListEventPromptTemplatesTool,
+  registerSetEventPromptTemplateTool,
+} from "./tools/event-prompt-templates";
 // Lead inbox tools
 import { registerGetInboxMessageTool } from "./tools/get-inbox-message";
 import { registerGetSwarmTool } from "./tools/get-swarm";
@@ -211,6 +218,12 @@ export function createServer() {
     registerGetWorkflowRunTool(server);
     registerRetryWorkflowRunTool(server);
   }
+
+  // Event prompt templates (always registered — lightweight config tools)
+  registerSetEventPromptTemplateTool(server);
+  registerGetEventPromptTemplateTool(server);
+  registerListEventPromptTemplatesTool(server);
+  registerDeleteEventPromptTemplateTool(server);
 
   return server;
 }
