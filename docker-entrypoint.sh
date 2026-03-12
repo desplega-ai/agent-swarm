@@ -62,6 +62,7 @@ fi
 # NOTE: Shared disk subdirectories are created per-agent below (see
 # "Setting up per-agent directories" block), NOT here.
 mkdir -p /workspace/personal/memory 2>/dev/null || true
+chown -R worker:worker /workspace/personal
 
 # Role defaults to worker, can be set to "lead"
 ROLE="${AGENT_ROLE:-worker}"
@@ -515,12 +516,16 @@ if [ -n "$AGENT_ID" ]; then
         # Use sudo because FUSE mount root is owned by root; UNIX perms
         # are per-mount (not persisted to R2), so API's chmod doesn't help.
         sudo mkdir -p "$AGENT_DIR" 2>/dev/null || true
-        sudo chown worker:worker "$AGENT_DIR" 2>/dev/null || true
 
         # Checkout for persistent ownership (survives reboots where dir already exists)
+        # Use -f (force) to reclaim stale delegations from destroyed/redeployed machines.
+        # Each agent is the sole writer for its own subdirectory, so force is safe.
         if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
-            sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil checkout "$AGENT_DIR" 2>/dev/null || true
+            sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil checkout -f "$AGENT_DIR" 2>/dev/null || true
         fi
+
+        # chown AFTER checkout — need Archil delegation before FUSE allows chown
+        sudo chown worker:worker "$AGENT_DIR" 2>/dev/null || true
     done
 
     # Create standard subdirectories (within owned dirs, always succeeds)
