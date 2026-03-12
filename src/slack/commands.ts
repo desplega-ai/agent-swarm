@@ -59,30 +59,44 @@ export function registerCommandHandler(app: App): void {
 
   app.command("/agent-swarm-help", async ({ ack, respond }) => {
     await ack();
+    console.log("[Slack] /agent-swarm-help command invoked");
 
-    await respond({
-      response_type: "ephemeral",
-      blocks: [
-        {
-          type: "header",
-          text: { type: "plain_text", text: "Agent Swarm Help" },
-        },
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `*How to assign tasks:*
+    const additiveSlack = process.env.ADDITIVE_SLACK === "true";
+
+    const sections = [
+      `*How to assign tasks:*
 • Mention an agent by name: \`Hey Alpha, can you review this code?\`
 • Use explicit ID: \`swarm#<uuid> please analyze the logs\`
 • Broadcast to all: \`swarm#all status report please\`
 • Mention the bot: \`@agent-swarm help me\` (routes to lead agent)
+• Thread @mentions auto-route to the worker already active in that thread`,
+    ];
 
-*Commands:*
+    if (additiveSlack) {
+      sections.push(`*Additive Slack (enabled):*
+• Thread replies (no @mention needed) are automatically buffered and batched into follow-up tasks
+• \`!now <message>\` in a thread — Flush buffer immediately, skip dependency queue
+• Follow-up tasks auto-depend on the active task in the thread for natural sequencing`);
+    }
+
+    sections.push(`*Commands:*
 • \`/agent-swarm-status\` - Show all agents and their current status
-• \`/agent-swarm-help\` - Show this help message`,
-          },
-        },
-      ],
+• \`/agent-swarm-help\` - Show this help message`);
+
+    const blocks = [
+      {
+        type: "header" as const,
+        text: { type: "plain_text" as const, text: "Agent Swarm Help" },
+      },
+      ...sections.map((text) => ({
+        type: "section" as const,
+        text: { type: "mrkdwn" as const, text },
+      })),
+    ];
+
+    await respond({
+      response_type: "ephemeral",
+      blocks,
     });
   });
 }

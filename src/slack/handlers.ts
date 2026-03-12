@@ -4,12 +4,14 @@ import {
   createTask,
   createTaskExtended,
   getAgentById,
+  getAgentWorkingOnThread,
   getLeadAgent,
   getTasksByAgentId,
 } from "../be/db";
 import { workflowEventBus } from "../workflows/event-bus";
 import type { SlackFile } from "./files";
 import { extractTaskFromMessage, routeMessage } from "./router";
+import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
 
 // User filtering configuration from environment variables
 const allowedEmailDomains = (process.env.SLACK_ALLOWED_EMAIL_DOMAINS || "")
@@ -360,9 +362,69 @@ export function registerMessageHandler(app: App): void {
     // Check if bot was mentioned (in original text only)
     const botMentioned = !!msg.text?.includes(`<@${botUserId}>`);
 
+    // ADDITIVE_SLACK: Check for !now command in threads
+    const additiveSlack = process.env.ADDITIVE_SLACK === "true";
+    if (additiveSlack && msg.thread_ts) {
+      const stripped = effectiveText.replace(/<@[A-Z0-9]+>/g, "").trim();
+      if (stripped.startsWith("!now")) {
+        const nowMessage = stripped.replace(/^!now\s*/, "").trim();
+        const threadKey = `${msg.channel}:${msg.thread_ts}`;
+
+        console.log(
+          `[Slack] !now command detected in thread ${threadKey}${nowMessage ? ` with message: "${nowMessage}"` : ""}`,
+        );
+
+        if (nowMessage) {
+          bufferThreadMessage(msg.channel, msg.thread_ts, nowMessage, msg.user, msg.ts);
+        }
+
+        // Instant flush — no dependency
+        await instantFlush(threadKey);
+
+        try {
+          await client.reactions.add({ channel: msg.channel, name: "zap", timestamp: msg.ts });
+        } catch (e) {
+          console.log(`[Slack] Reaction failed: ${e instanceof Error ? e.message : e}`);
+        }
+
+        return;
+      }
+    }
+
+    // ADDITIVE_SLACK: Buffer non-mention thread messages
+    if (additiveSlack && !botMentioned && msg.thread_ts) {
+      // Check if this thread has any swarm activity (existing tasks)
+      const hasSwarmActivity = getAgentWorkingOnThread(msg.channel, msg.thread_ts) !== null;
+
+      if (hasSwarmActivity) {
+        const threadKey = `${msg.channel}:${msg.thread_ts}`;
+        bufferThreadMessage(msg.channel, msg.thread_ts, effectiveText, msg.user, msg.ts);
+
+        // Slack feedback: react with :eyes: on first buffer, :heavy_plus_sign: on appends
+        const count = getBufferMessageCount(threadKey);
+        console.log(
+          `[Slack] Additive buffer: ${threadKey} (message #${count}, reaction: ${count === 1 ? "eyes" : "heavy_plus_sign"})`,
+        );
+        try {
+          await client.reactions.add({
+            channel: msg.channel,
+            name: count === 1 ? "eyes" : "heavy_plus_sign",
+            timestamp: msg.ts,
+          });
+        } catch (e) {
+          console.log(`[Slack] Reaction failed: ${e instanceof Error ? e.message : e}`);
+        }
+
+        return; // Don't process further — buffer will flush
+      }
+    }
+
     // Route message to agents (use original text for routing to preserve mention/name matching)
     const routingText = msg.text || effectiveText;
-    const matches = routeMessage(routingText, botUserId, botMentioned);
+    const routingThreadContext = msg.thread_ts
+      ? { channelId: msg.channel, threadTs: msg.thread_ts }
+      : undefined;
+    const matches = routeMessage(routingText, botUserId, botMentioned, routingThreadContext);
 
     if (matches.length === 0) {
       if (!botMentioned) return;
