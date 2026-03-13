@@ -1,8 +1,6 @@
 import { Assistant } from "@slack/bolt";
 import { createTaskExtended, getAgentWorkingOnThread, getLeadAgent } from "../be/db";
-import { getTaskLink } from "./blocks";
 import { bufferThreadMessage } from "./thread-buffer";
-import { registerTaskMessage } from "./watcher";
 
 const additiveSlack = process.env.ADDITIVE_SLACK === "true";
 
@@ -47,7 +45,7 @@ export function createAssistant(): Assistant {
         }
 
         // Otherwise, create a follow-up task for the working agent
-        const task = createTaskExtended(messageText, {
+        createTaskExtended(messageText, {
           agentId: workingAgent.id,
           source: "slack",
           slackChannelId: channelId,
@@ -55,12 +53,7 @@ export function createAssistant(): Assistant {
           slackUserId: userId,
         });
 
-        const followResp = await say(
-          `Follow-up sent to *${workingAgent.name}* (${getTaskLink(task.id)})`,
-        );
-        if (followResp?.ts) {
-          registerTaskMessage(task.id, channelId, threadTs, followResp.ts);
-        }
+        await setStatus("Processing follow-up...");
         return;
       }
 
@@ -82,35 +75,26 @@ export function createAssistant(): Assistant {
       const lead = getLeadAgent();
       if (!lead) {
         // No lead — still queue the task
-        const task = createTaskExtended(messageText + channelContext, {
+        createTaskExtended(messageText + channelContext, {
           source: "slack",
           slackChannelId: channelId,
           slackThreadTs: threadTs,
           slackUserId: userId,
         });
-        const queuedResp = await say(
-          `No lead agent is available right now. Your request has been queued (${getTaskLink(task.id)}).`,
+        await say(
+          "No agents are available right now. Your request has been queued and will be processed when agents come back online.",
         );
-        if (queuedResp?.ts) {
-          registerTaskMessage(task.id, channelId, threadTs, queuedResp.ts);
-        }
         return;
       }
 
-      const task = createTaskExtended(messageText + channelContext, {
+      createTaskExtended(messageText + channelContext, {
         agentId: lead.id,
         source: "slack",
         slackChannelId: channelId,
         slackThreadTs: threadTs,
         slackUserId: userId,
       });
-
-      const resp = await say(
-        `Task created and assigned to *${lead.name}* (${getTaskLink(task.id)}). I'll update you here when it's done.`,
-      );
-      if (resp?.ts) {
-        registerTaskMessage(task.id, channelId, threadTs, resp.ts);
-      }
+      // setStatus shows typing indicator — watcher will post final result when done
     },
   });
 }
