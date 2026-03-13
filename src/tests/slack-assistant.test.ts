@@ -12,11 +12,11 @@ import {
 
 const TEST_DB_PATH = "./test-slack-assistant.sqlite";
 
-let leadAgent: ReturnType<typeof createAgent>;
+let _leadAgent: ReturnType<typeof createAgent>;
 
 beforeAll(() => {
   initDb(TEST_DB_PATH);
-  leadAgent = createAgent({ name: "AssistantLead", isLead: true, status: "idle" });
+  _leadAgent = createAgent({ name: "AssistantLead", isLead: true, status: "idle" });
 });
 
 afterAll(() => {

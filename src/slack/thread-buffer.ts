@@ -1,11 +1,6 @@
-import {
-  createTaskExtended,
-  getAgentWorkingOnThread,
-  getLatestActiveTaskInThread,
-  getLeadAgent,
-} from "../be/db";
+import { createTaskExtended, getLatestActiveTaskInThread, getLeadAgent } from "../be/db";
 import { getSlackApp } from "./app";
-import { buildBufferFlushBlocks, getTaskLink } from "./blocks";
+import { buildBufferFlushBlocks } from "./blocks";
 
 interface BufferedMessage {
   text: string;

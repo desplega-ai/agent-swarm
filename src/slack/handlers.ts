@@ -9,7 +9,7 @@ import {
   getTasksByAgentId,
 } from "../be/db";
 import { workflowEventBus } from "../workflows/event-bus";
-import { buildAssignmentSummaryBlocks, getTaskLink } from "./blocks";
+import { buildAssignmentSummaryBlocks } from "./blocks";
 import type { SlackFile } from "./files";
 import { extractTaskFromMessage, routeMessage } from "./router";
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
