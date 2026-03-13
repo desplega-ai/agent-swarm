@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Image from "next/image";
 import { Github, BookOpen, LayoutDashboard, Menu, X, Newspaper, Play, Blocks } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -27,7 +28,7 @@ export function Navbar() {
     >
       <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
         <a href="/" className="flex items-center gap-3 group">
-          <img src="/logo.png" alt="Agent Swarm" className="w-8 h-8 rounded-lg shadow-lg shadow-amber-500/20 group-hover:shadow-amber-500/40 transition-shadow" />
+          <Image src="/logo.png" alt="Agent Swarm" width={32} height={32} className="rounded-lg shadow-lg shadow-amber-500/20 group-hover:shadow-amber-500/40 transition-shadow" priority />
           <span className="text-lg font-bold tracking-tight text-zinc-900">
             Agent Swarm
           </span>
