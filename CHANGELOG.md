@@ -4,25 +4,6 @@ All notable changes to Agent Swarm are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [1.43.0] - 2026-03-12
-
-### Added
-- Slack thread follow-up routing — @mentions in threads route directly to the worker already active in that thread, bypassing lead delegation
-- Additive Slack buffer (`ADDITIVE_SLACK=true`) — non-mention thread replies are debounced and batched into a single follow-up task with dependency chaining
-- `!now` command for instant buffer flush without dependency chaining
-- `HEURISTICS.md` documenting all Slack routing rules and buffering behavior
-- `reactions:write` Slack scope for visual buffer feedback (:eyes:, :heavy_plus_sign:, :zap:)
-
-### Changed
-- Eliminated inbox message system — all Slack and AgentMail messages now route directly as tasks
-- Leads poll for tasks like workers (removed poll-task lead block)
-- Child tasks auto-inherit Slack/AgentMail metadata from parent tasks
-- Removed `inbox-delegate` and `get-inbox-message` MCP tools
-- Removed fuzzy name matching from Slack router (replaced by task-based routing)
-
-### Fixed
-- AgentMail sender domain filter now correctly handles "Name \<email\>" format
-
 ## [Unreleased]
 
 ### Added
@@ -133,6 +114,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - `property-match` workflow node crash when config uses flat format (`property`/`operator`/`value`) instead of `conditions` array (#146)
 - API migration Dockerfile fix for workflow schema
+
+## [1.43.0] - 2026-03-12
+
+### Added
+- Slack thread follow-up routing — @mentions in threads route directly to the worker already active in that thread, bypassing lead delegation
+- Additive Slack buffer (`ADDITIVE_SLACK=true`) — non-mention thread replies are debounced and batched into a single follow-up task with dependency chaining
+- `!now` command for instant buffer flush without dependency chaining
+- `HEURISTICS.md` documenting all Slack routing rules and buffering behavior
+- `reactions:write` Slack scope for visual buffer feedback (:eyes:, :heavy_plus_sign:, :zap:)
+
+### Changed
+- Eliminated inbox message system — all Slack and AgentMail messages now route directly as tasks
+- Leads poll for tasks like workers (removed poll-task lead block)
+- Child tasks auto-inherit Slack/AgentMail metadata from parent tasks
+- Removed `inbox-delegate` and `get-inbox-message` MCP tools
+- Removed fuzzy name matching from Slack router (replaced by task-based routing)
+
+### Fixed
+- AgentMail sender domain filter now correctly handles "Name \<email\>" format
 
 ## [1.36.0] - 2026-03-06
 
