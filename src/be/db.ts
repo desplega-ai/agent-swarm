@@ -1264,7 +1264,6 @@ export function getAgentWorkingOnThread(channelId: string, threadTs: string): Ag
        WHERE source = 'slack'
        AND slackChannelId = ?
        AND slackThreadTs = ?
-       AND status IN ('in_progress', 'pending')
        ORDER BY createdAt DESC
        LIMIT 1`,
     )

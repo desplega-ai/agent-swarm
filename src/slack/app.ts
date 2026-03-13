@@ -41,9 +41,15 @@ export async function initSlackApp(): Promise<App | null> {
   // Register handlers
   const { registerMessageHandler } = await import("./handlers");
   const { registerCommandHandler } = await import("./commands");
+  const { registerActionHandlers } = await import("./actions");
 
   registerMessageHandler(app);
   registerCommandHandler(app);
+  registerActionHandlers(app);
+
+  // Register assistant thread handler (safe even if "Agents & AI Apps" isn't enabled)
+  const { createAssistant } = await import("./assistant");
+  app.assistant(createAssistant());
 
   return app;
 }

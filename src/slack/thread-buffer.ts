@@ -5,6 +5,7 @@ import {
   getLeadAgent,
 } from "../be/db";
 import { getSlackApp } from "./app";
+import { buildBufferFlushBlocks, getTaskLink } from "./blocks";
 
 interface BufferedMessage {
   text: string;
@@ -23,16 +24,6 @@ interface BufferedThread {
 const threadBuffers = new Map<string, BufferedThread>();
 
 const BUFFER_TIMEOUT_MS = Number(process.env.ADDITIVE_SLACK_BUFFER_MS) || 10_000;
-
-const appUrl = process.env.APP_URL || "";
-
-function getTaskLink(taskId: string): string {
-  const shortId = taskId.slice(0, 8);
-  if (appUrl) {
-    return `<${appUrl}?tab=tasks&task=${taskId}&expand=true|\`${shortId}\`>`;
-  }
-  return `\`${shortId}\``;
-}
 
 function makeKey(channelId: string, threadTs: string): string {
   return `${channelId}:${threadTs}`;
@@ -190,19 +181,26 @@ async function flushBuffer(key: string, immediate = false): Promise<void> {
     `[Slack] Buffer flushed → task ${task.id} (dependsOn: ${dependsOn ? dependsOn.join(", ") : "none"})`,
   );
 
-  // Slack feedback
+  // Slack feedback with Block Kit
   const app = getSlackApp();
   if (app) {
-    const hasDep = !immediate && latestActiveTask;
-    const statusText = hasDep
-      ? `:satellite: _${buffer.messages.length} follow-up message(s) queued pending completion of current task_ (${getTaskLink(task.id)})`
-      : `:satellite: _${buffer.messages.length} follow-up message(s) batched into task_ (${getTaskLink(task.id)})`;
+    const hasDependency = !immediate && !!latestActiveTask;
+    const blocks = buildBufferFlushBlocks({
+      messageCount: buffer.messages.length,
+      taskId: task.id,
+      hasDependency,
+    });
+    const fallbackText = hasDependency
+      ? `${buffer.messages.length} follow-up message(s) queued pending completion of current task`
+      : `${buffer.messages.length} follow-up message(s) batched into task`;
 
     try {
       await app.client.chat.postMessage({
         channel: buffer.channelId,
         thread_ts: buffer.threadTs,
-        text: statusText,
+        text: fallbackText,
+        // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
+        blocks: blocks as any,
       });
     } catch (error) {
       console.error("[Slack] Failed to post buffer flush feedback:", error);

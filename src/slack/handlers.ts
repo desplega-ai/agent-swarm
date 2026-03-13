@@ -9,9 +9,11 @@ import {
   getTasksByAgentId,
 } from "../be/db";
 import { workflowEventBus } from "../workflows/event-bus";
+import { buildAssignmentSummaryBlocks, getTaskLink } from "./blocks";
 import type { SlackFile } from "./files";
 import { extractTaskFromMessage, routeMessage } from "./router";
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
+import { registerTaskMessage } from "./watcher";
 
 // User filtering configuration from environment variables
 const allowedEmailDomains = (process.env.SLACK_ALLOWED_EMAIL_DOMAINS || "")
@@ -219,19 +221,6 @@ async function getThreadContext(
     console.error("[Slack] Failed to fetch thread context:", error);
     return "";
   }
-}
-
-const appUrl = process.env.APP_URL || "";
-
-/**
- * Get a link to the task in the dashboard, or just the task ID if no APP_URL.
- */
-function getTaskLink(taskId: string): string {
-  const shortId = taskId.slice(0, 8);
-  if (appUrl) {
-    return `<${appUrl}?tab=tasks&task=${taskId}&expand=true|\`${shortId}\`>`;
-  }
-  return `\`${shortId}\``;
 }
 
 /**
@@ -508,17 +497,17 @@ export function registerMessageHandler(app: App): void {
     const fullTaskDescription = threadContext
       ? `<thread_context>\n${threadContext}\n</thread_context>\n\n${taskDescription}`
       : taskDescription;
-    const results: { assigned: string[]; queued: string[]; failed: string[] } = {
-      assigned: [],
-      queued: [],
-      failed: [],
-    };
+    const results: {
+      assigned: Array<{ agentName: string; taskId: string }>;
+      queued: Array<{ agentName: string; taskId: string }>;
+      failed: Array<{ agentName: string; reason: string }>;
+    } = { assigned: [], queued: [], failed: [] };
 
     for (const match of matches) {
       const agent = getAgentById(match.agent.id);
 
       if (!agent) {
-        results.failed.push(`\`${match.agent.name}\` (not found)`);
+        results.failed.push({ agentName: match.agent.name, reason: "not found" });
         continue;
       }
 
@@ -531,7 +520,7 @@ export function registerMessageHandler(app: App): void {
             slackThreadTs: threadTs,
             slackUserId: msg.user,
           });
-          results.assigned.push(`*${agent.name}* (${getTaskLink(task.id)})`);
+          results.assigned.push({ agentName: agent.name, taskId: task.id });
           continue;
         }
 
@@ -550,32 +539,46 @@ export function registerMessageHandler(app: App): void {
         );
 
         if (inProgressInThread) {
-          results.queued.push(`*${agent.name}* (${getTaskLink(task.id)})`);
+          results.queued.push({ agentName: agent.name, taskId: task.id });
         } else {
-          results.assigned.push(`*${agent.name}* (${getTaskLink(task.id)})`);
+          results.assigned.push({ agentName: agent.name, taskId: task.id });
         }
       } catch {
-        results.failed.push(`\`${agent.name}\` (error)`);
+        results.failed.push({ agentName: agent.name, reason: "error" });
       }
     }
 
-    // Send consolidated summary
-    const parts: string[] = [];
-    if (results.assigned.length > 0) {
-      parts.push(`:satellite: _Task assigned to: ${results.assigned.join(", ")}_`);
-    }
-    if (results.queued.length > 0) {
-      parts.push(`:satellite: _Task queued for: ${results.queued.join(", ")}_`);
-    }
-    if (results.failed.length > 0) {
-      parts.push(`:satellite: _Could not assign to: ${results.failed.join(", ")}_`);
-    }
+    // Send consolidated summary with Block Kit
+    const totalResults = results.assigned.length + results.queued.length + results.failed.length;
+    if (totalResults > 0) {
+      // Build plain-text fallback
+      const parts: string[] = [];
+      if (results.assigned.length > 0) {
+        const names = results.assigned.map((a) => `${a.agentName}`).join(", ");
+        parts.push(`Task assigned to: ${names}`);
+      }
+      if (results.queued.length > 0) {
+        const names = results.queued.map((q) => `${q.agentName}`).join(", ");
+        parts.push(`Task queued for: ${names}`);
+      }
+      if (results.failed.length > 0) {
+        const names = results.failed.map((f) => `${f.agentName}`).join(", ");
+        parts.push(`Could not assign to: ${names}`);
+      }
 
-    if (parts.length > 0) {
-      await say({
-        text: parts.join("\n"),
+      const resp = await say({
+        text: parts.join(". "),
+        blocks: buildAssignmentSummaryBlocks(results),
         thread_ts: msg.thread_ts || msg.ts,
       });
+
+      // Register the assignment message so the watcher can update it in-place
+      // (assignment → progress → completion all in one evolving message)
+      if (resp?.ts) {
+        for (const { taskId } of results.assigned) {
+          registerTaskMessage(taskId, msg.channel, threadTs, resp.ts);
+        }
+      }
     }
   });
 
