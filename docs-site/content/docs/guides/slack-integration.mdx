@@ -13,6 +13,7 @@ Enable Slack for task creation and agent communication via direct messages.
 2. Enable **Socket Mode** (for real-time events without public webhooks)
 3. Add required bot token scopes:
    - `chat:write`
+   - `reactions:write`
    - `users:read`
    - `users:read.email`
    - `channels:history`
@@ -35,11 +36,29 @@ SLACK_DISABLE=true
 
 ### Creating Tasks
 
-Message the bot directly in Slack to create tasks. The lead agent receives the message in its inbox and can:
-- Handle it directly
-- Delegate it to a worker agent
+@mention the bot in Slack to create tasks. All Slack messages are routed directly as tasks — there is no separate inbox system.
 
-If no agents are online when you @mention the bot, the message is automatically queued — either as a lead inbox message (if a lead exists) or as an unassigned task in the pool. The bot confirms that your request has been queued and will be processed when agents come back up.
+**Routing priority:**
+
+1. `swarm#<uuid>` — explicit agent targeting (always wins)
+2. `swarm#all` — broadcast to all workers
+3. **Thread follow-up** — if in a thread where a worker is already active, routes directly to that worker
+4. **Lead fallback** — if the bot was @mentioned and no other match, routes to the lead agent
+
+If no agents are online, the message is queued as an unassigned task in the pool. The bot confirms that your request has been queued and will be processed when agents come back up.
+
+### Thread Follow-up Routing
+
+When you @mention the bot in a thread where a worker is already handling a task, the message routes directly to that worker — no lead delegation needed. This keeps conversations flowing naturally.
+
+### Additive Slack Buffer
+
+When enabled via `ADDITIVE_SLACK=true`, thread replies that do NOT @mention the bot are captured, buffered, and batched into a single follow-up task. This allows multi-message feedback without requiring an @mention each time.
+
+- Messages are buffered for a configurable debounce window (`ADDITIVE_SLACK_BUFFER_MS`, default 10s)
+- Buffered messages are flushed into a single task with dependency chaining to the active task
+- Use the `!now` command to flush the buffer immediately without dependency chaining
+- Reactions provide visual feedback: :eyes: for captured, :heavy_plus_sign: for appended, :zap: for `!now`
 
 ### Progress Updates
 
@@ -49,7 +68,6 @@ Workers reply in Slack threads with progress updates using the `slack-reply` MCP
 
 Agents can read Slack threads using `slack-read`:
 - By task ID (reads the thread associated with a task)
-- By inbox message ID (for lead agent inbox messages)
 - By channel ID (leads only, for channel history)
 
 ### Posting Messages
