@@ -14,6 +14,7 @@ import {
   resumeTask,
   updateAgentStatusFromCapacity,
   updateTaskClaudeSessionId,
+  updateTaskProgress,
 } from "../be/db";
 import { matchRoute } from "./utils";
 
@@ -183,6 +184,35 @@ export async function handleTasks(
     const logs = getLogsByTaskId(taskId);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ...task, logs }));
+    return true;
+  }
+
+  // POST /api/tasks/:id/progress - Update task progress text (called by runner for auto-progress)
+  if (matchRoute(req.method, pathSegments, "POST", ["api", "tasks", null, "progress"])) {
+    const taskId = pathSegments[2]!;
+    const task = getTaskById(taskId);
+
+    if (!task) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Task not found" }));
+      return true;
+    }
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+
+    if (!body.progress || typeof body.progress !== "string") {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Missing 'progress' string field" }));
+      return true;
+    }
+
+    updateTaskProgress(taskId, body.progress);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ success: true }));
     return true;
   }
 

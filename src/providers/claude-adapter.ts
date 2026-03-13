@@ -245,6 +245,25 @@ class ClaudeSession implements ProviderSession {
         });
       }
 
+      // Tool use from assistant messages — emit tool_start for auto-progress
+      if (json.type === "assistant" && json.message) {
+        const message = json.message as {
+          content?: Array<{ type: string; name?: string; id?: string; input?: unknown }>;
+        };
+        if (message.content) {
+          for (const block of message.content) {
+            if (block.type === "tool_use" && block.name) {
+              this.emit({
+                type: "tool_start",
+                toolCallId: block.id || "",
+                toolName: block.name,
+                args: block.input || {},
+              });
+            }
+          }
+        }
+      }
+
       trackErrorFromJson(json, this.errorTracker);
     } catch {
       // Not JSON — ignore
