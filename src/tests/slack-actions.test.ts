@@ -126,7 +126,7 @@ describe("cancel_task action logic", () => {
       taskId: slackTask.id,
     });
 
-    expect(blocks.length).toBe(3);
+    expect(blocks.length).toBe(1);
     expect(blocks[0].type).toBe("section");
     expect(blocks[0].text.text).toContain("Cancelled");
   });

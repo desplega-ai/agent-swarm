@@ -46,12 +46,14 @@ export function getTaskUrl(taskId: string): string {
 export function markdownToSlack(text: string): string {
   return (
     text
-      // Headers to bold (# Header -> *Header*)
-      .replace(/^#{1,6}\s+(.+)$/gm, "*$1*")
-      // Bold **text** -> *text* (must be before italic)
-      .replace(/\*\*(.+?)\*\*/g, "*$1*")
-      // Italic *text* -> _text_ (single asterisks, after bold is converted)
+      // Headers to bold placeholder (# Header -> bold, protected from italic)
+      .replace(/^#{1,6}\s+(.+)$/gm, "\uE000$1\uE001")
+      // Bold **text** -> placeholder (to avoid italic chain converting *bold* to _italic_)
+      .replace(/\*\*(.+?)\*\*/g, "\uE000$1\uE001")
+      // Italic *text* -> _text_ (single asterisks, now safe from bold placeholders)
       .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "_$1_")
+      // Restore bold from placeholder -> *text*
+      .replace(/\uE000(.+?)\uE001/g, "*$1*")
       // Strikethrough ~~text~~ -> ~text~
       .replace(/~~(.+?)~~/g, "~$1~")
       // Links [text](url) -> <url|text>
@@ -94,10 +96,6 @@ function splitText(text: string): string[] {
 
 // --- Block primitives ---
 
-function headerBlock(text: string): SlackBlock {
-  return { type: "section", text: { type: "mrkdwn", text: `*${text}*` } };
-}
-
 function contextBlock(...elements: string[]): SlackBlock {
   return {
     type: "context",
@@ -134,6 +132,7 @@ function cancelActionBlock(taskId: string): SlackBlock {
 
 /**
  * Build blocks for a completed task response.
+ * Single-line header with agent/task metadata, then body content.
  */
 export function buildCompletedBlocks(opts: {
   agentName: string;
@@ -141,23 +140,20 @@ export function buildCompletedBlocks(opts: {
   body: string;
   duration?: string;
 }): SlackBlock[] {
-  const shortId = opts.taskId.slice(0, 8);
   const taskLink = getTaskLink(opts.taskId);
-  let meta = `🤖 *${opts.agentName}* · \`${shortId}\``;
-  if (opts.duration) meta += ` · ${opts.duration}`;
+  let line = `✅ *${opts.agentName}* (${taskLink})`;
+  if (opts.duration) line += ` · ${opts.duration}`;
 
-  const blocks: SlackBlock[] = [headerBlock("✅ Task Completed"), contextBlock(meta)];
-
+  const blocks: SlackBlock[] = [sectionBlock(line)];
   for (const chunk of splitText(opts.body)) {
     blocks.push(sectionBlock(chunk));
   }
-
-  blocks.push(contextBlock(`View full logs at ${taskLink}`));
   return blocks;
 }
 
 /**
  * Build blocks for a failed task response.
+ * Single-line header, then error in code block.
  */
 export function buildFailedBlocks(opts: {
   agentName: string;
@@ -165,21 +161,16 @@ export function buildFailedBlocks(opts: {
   reason: string;
   duration?: string;
 }): SlackBlock[] {
-  const shortId = opts.taskId.slice(0, 8);
   const taskLink = getTaskLink(opts.taskId);
-  let meta = `🤖 *${opts.agentName}* · \`${shortId}\``;
-  if (opts.duration) meta += ` · ${opts.duration}`;
+  let line = `❌ *${opts.agentName}* (${taskLink})`;
+  if (opts.duration) line += ` · ${opts.duration}`;
 
-  return [
-    headerBlock("❌ Task Failed"),
-    contextBlock(meta),
-    sectionBlock(`\`\`\`${opts.reason}\`\`\``),
-    contextBlock(`View full logs at ${taskLink}`),
-  ];
+  return [sectionBlock(line), sectionBlock(`\`\`\`${opts.reason}\`\`\``)];
 }
 
 /**
  * Build blocks for a progress update.
+ * Single line with cancel button.
  */
 export function buildProgressBlocks(opts: {
   agentName: string;
@@ -188,9 +179,7 @@ export function buildProgressBlocks(opts: {
 }): SlackBlock[] {
   const shortId = opts.taskId.slice(0, 8);
   return [
-    headerBlock("⏳ Task In Progress"),
-    contextBlock(`🤖 *${opts.agentName}* · \`${shortId}\``),
-    sectionBlock(opts.progress),
+    sectionBlock(`⏳ *${opts.agentName}* (\`${shortId}\`): ${opts.progress}`),
     cancelActionBlock(opts.taskId),
   ];
 }
@@ -199,38 +188,32 @@ export function buildProgressBlocks(opts: {
  * Build blocks for a cancelled task card (used when cancel button is clicked).
  */
 export function buildCancelledBlocks(opts: { agentName: string; taskId: string }): SlackBlock[] {
-  const shortId = opts.taskId.slice(0, 8);
   const taskLink = getTaskLink(opts.taskId);
-  return [
-    headerBlock("🚫 Task Cancelled"),
-    contextBlock(`🤖 *${opts.agentName}* · \`${shortId}\``),
-    contextBlock(`View full logs at ${taskLink}`),
-  ];
+  return [sectionBlock(`🚫 *${opts.agentName}* (${taskLink}) — Cancelled`)];
 }
 
 /**
  * Build blocks for a consolidated task assignment summary.
+ * Each assignment/queue/failure is a single line.
  */
 export function buildAssignmentSummaryBlocks(results: {
   assigned: Array<{ agentName: string; taskId: string }>;
   queued: Array<{ agentName: string; taskId: string }>;
   failed: Array<{ agentName: string; reason: string }>;
 }): SlackBlock[] {
-  const totalOk = results.assigned.length + results.queued.length;
-  const headerText = totalOk === 0 ? "⚠️ Task Assignment Failed" : "📡 Task Assigned";
-  const blocks: SlackBlock[] = [headerBlock(headerText)];
+  const lines: string[] = [];
 
   for (const a of results.assigned) {
-    blocks.push(contextBlock(`*${a.agentName}* · ${getTaskLink(a.taskId)} · Assigned`));
+    lines.push(`📡 Task assigned to: *${a.agentName}* (${getTaskLink(a.taskId)})`);
   }
   for (const q of results.queued) {
-    blocks.push(contextBlock(`*${q.agentName}* · ${getTaskLink(q.taskId)} · Queued`));
+    lines.push(`📡 Task queued for: *${q.agentName}* (${getTaskLink(q.taskId)})`);
   }
   for (const f of results.failed) {
-    blocks.push(contextBlock(`⚠️ \`${f.agentName}\` · ${f.reason}`));
+    lines.push(`⚠️ Could not assign to: *${f.agentName}* — ${f.reason}`);
   }
 
-  return blocks;
+  return [sectionBlock(lines.join("\n"))];
 }
 
 /**

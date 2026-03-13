@@ -3,6 +3,7 @@ import { getAgentById } from "../be/db";
 import type { Agent, AgentTask } from "../types";
 import { getSlackApp } from "./app";
 import {
+  buildCancelledBlocks,
   buildCompletedBlocks,
   buildFailedBlocks,
   buildProgressBlocks,
@@ -162,6 +163,9 @@ export async function updateToFinal(task: AgentTask, messageTs: string): Promise
     const slackOutput = markdownToSlack(output);
     blocks = buildCompletedBlocks({ agentName, taskId: task.id, body: slackOutput });
     text = slackOutput;
+  } else if (task.status === "cancelled") {
+    blocks = buildCancelledBlocks({ agentName, taskId: task.id });
+    text = "Task cancelled";
   } else {
     const reason = task.failureReason || "Unknown error";
     blocks = buildFailedBlocks({ agentName, taskId: task.id, reason });

@@ -12,11 +12,10 @@ import {
 } from "../slack/blocks";
 
 describe("markdownToSlack", () => {
-  test("converts bold (then italic chain applies to single words)", () => {
-    // **hello** → *hello* (bold) → _hello_ (italic catches single-star result)
-    expect(markdownToSlack("**hello**")).toBe("_hello_");
-    // Multi-word bold stays as bold since italic regex requires non-star chars
-    expect(markdownToSlack("**hello world**")).toBe("_hello world_");
+  test("converts bold correctly without italic interference", () => {
+    // **hello** → *hello* (Slack bold)
+    expect(markdownToSlack("**hello**")).toBe("*hello*");
+    expect(markdownToSlack("**hello world**")).toBe("*hello world*");
   });
 
   test("converts italic", () => {
@@ -31,9 +30,9 @@ describe("markdownToSlack", () => {
     expect(markdownToSlack("[click](https://example.com)")).toBe("<https://example.com|click>");
   });
 
-  test("converts headers (bold then italic chain)", () => {
-    // ## Header → *Header* → _Header_ (same chain as bold)
-    expect(markdownToSlack("## Header")).toBe("_Header_");
+  test("converts headers to bold", () => {
+    // ## Header → *Header* (Slack bold)
+    expect(markdownToSlack("## Header")).toBe("*Header*");
   });
 
   test("collapses excessive blank lines", () => {
@@ -62,23 +61,22 @@ describe("getTaskUrl", () => {
 });
 
 describe("buildCompletedBlocks", () => {
-  test("returns header, context, section, footer", () => {
+  test("returns single-line header + body section", () => {
     const blocks = buildCompletedBlocks({
       agentName: "Alpha",
       taskId: "abcdef12-3456-7890-abcd-ef1234567890",
       body: "Task output here",
     });
 
-    expect(blocks.length).toBe(4);
+    expect(blocks.length).toBe(2);
+    // First block: single-line with emoji, agent name, task link
     expect(blocks[0].type).toBe("section");
-    expect(blocks[0].text.text).toContain("Task Completed");
-    expect(blocks[1].type).toBe("context");
-    expect(blocks[1].elements[0].text).toContain("Alpha");
-    expect(blocks[1].elements[0].text).toContain("abcdef12");
-    expect(blocks[2].type).toBe("section");
-    expect(blocks[2].text.text).toBe("Task output here");
-    expect(blocks[3].type).toBe("context");
-    expect(blocks[3].elements[0].text).toContain("full logs");
+    expect(blocks[0].text.text).toContain("✅");
+    expect(blocks[0].text.text).toContain("Alpha");
+    expect(blocks[0].text.text).toContain("abcdef12");
+    // Second block: body content
+    expect(blocks[1].type).toBe("section");
+    expect(blocks[1].text.text).toBe("Task output here");
   });
 
   test("includes duration when provided", () => {
@@ -89,7 +87,7 @@ describe("buildCompletedBlocks", () => {
       duration: "45s",
     });
 
-    expect(blocks[1].elements[0].text).toContain("45s");
+    expect(blocks[0].text.text).toContain("45s");
   });
 
   test("splits long body into multiple sections", () => {
@@ -100,33 +98,30 @@ describe("buildCompletedBlocks", () => {
       body: longBody,
     });
 
-    // header + context + N sections + footer = at least 5 blocks
-    expect(blocks.length).toBeGreaterThanOrEqual(5);
-    // Body sections are between the header section (index 0), context (index 1), and footer at the end
-    const bodySections = blocks.filter((b) => b.type === "section" && !b.text.text.startsWith("*"));
+    // 1 header line + N body sections
+    expect(blocks.length).toBeGreaterThanOrEqual(3);
+    const bodySections = blocks.slice(1);
     expect(bodySections.length).toBeGreaterThanOrEqual(2);
-    // Total body section text should equal original
     const totalText = bodySections.map((s) => s.text.text).join("");
     expect(totalText).toBe(longBody);
   });
 });
 
 describe("buildFailedBlocks", () => {
-  test("returns header, context, error section, footer", () => {
+  test("returns single-line header + error section", () => {
     const blocks = buildFailedBlocks({
       agentName: "Beta",
       taskId: "12345678-abcd-ef12-3456-7890abcdef12",
       reason: "Something broke",
     });
 
-    expect(blocks.length).toBe(4);
+    expect(blocks.length).toBe(2);
     expect(blocks[0].type).toBe("section");
-    expect(blocks[0].text.text).toContain("Task Failed");
-    expect(blocks[1].type).toBe("context");
-    expect(blocks[1].elements[0].text).toContain("Beta");
-    expect(blocks[2].type).toBe("section");
-    expect(blocks[2].text.text).toContain("Something broke");
-    expect(blocks[3].type).toBe("context");
+    expect(blocks[0].text.text).toContain("❌");
+    expect(blocks[0].text.text).toContain("Beta");
+    expect(blocks[0].text.text).toContain("12345678");
+    expect(blocks[1].type).toBe("section");
+    expect(blocks[1].text.text).toContain("Something broke");
   });
 
   test("includes duration when provided", () => {
@@ -137,47 +132,46 @@ describe("buildFailedBlocks", () => {
       duration: "2m 30s",
     });
 
-    expect(blocks[1].elements[0].text).toContain("2m 30s");
+    expect(blocks[0].text.text).toContain("2m 30s");
   });
 });
 
 describe("buildProgressBlocks", () => {
-  test("returns header, context, section, cancel action", () => {
+  test("returns single-line section + cancel action", () => {
     const blocks = buildProgressBlocks({
       agentName: "Gamma",
       taskId: "aabbccdd-1234-5678-9012-abcdefabcdef",
       progress: "Analyzing codebase...",
     });
 
-    expect(blocks.length).toBe(4);
+    expect(blocks.length).toBe(2);
+    // Single line: ⏳ *Gamma* (`aabbccdd`): Analyzing codebase...
     expect(blocks[0].type).toBe("section");
-    expect(blocks[0].text.text).toContain("In Progress");
-    expect(blocks[1].type).toBe("context");
-    expect(blocks[1].elements[0].text).toContain("Gamma");
-    expect(blocks[2].type).toBe("section");
-    expect(blocks[2].text.text).toBe("Analyzing codebase...");
+    expect(blocks[0].text.text).toContain("⏳");
+    expect(blocks[0].text.text).toContain("Gamma");
+    expect(blocks[0].text.text).toContain("aabbccdd");
+    expect(blocks[0].text.text).toContain("Analyzing codebase...");
     // Cancel button
-    expect(blocks[3].type).toBe("actions");
-    expect(blocks[3].elements[0].action_id).toBe("cancel_task");
-    expect(blocks[3].elements[0].style).toBe("danger");
-    expect(blocks[3].elements[0].confirm).toBeDefined();
+    expect(blocks[1].type).toBe("actions");
+    expect(blocks[1].elements[0].action_id).toBe("cancel_task");
+    expect(blocks[1].elements[0].style).toBe("danger");
+    expect(blocks[1].elements[0].confirm).toBeDefined();
   });
 });
 
 describe("buildAssignmentSummaryBlocks", () => {
-  test("single assigned task", () => {
+  test("single assigned task — one-line format", () => {
     const blocks = buildAssignmentSummaryBlocks({
       assigned: [{ agentName: "Alpha", taskId: "aabb1122-0000-0000-0000-000000000000" }],
       queued: [],
       failed: [],
     });
 
-    expect(blocks.length).toBe(2); // header + 1 context
+    expect(blocks.length).toBe(1);
     expect(blocks[0].type).toBe("section");
-    expect(blocks[0].text.text).toContain("Task Assigned");
-    expect(blocks[1].type).toBe("context");
-    expect(blocks[1].elements[0].text).toContain("Alpha");
-    expect(blocks[1].elements[0].text).toContain("Assigned");
+    expect(blocks[0].text.text).toContain("📡 Task assigned to:");
+    expect(blocks[0].text.text).toContain("Alpha");
+    expect(blocks[0].text.text).toContain("aabb1122");
   });
 
   test("mixed assigned, queued, and failed", () => {
@@ -187,40 +181,42 @@ describe("buildAssignmentSummaryBlocks", () => {
       failed: [{ agentName: "Gamma", reason: "offline" }],
     });
 
-    expect(blocks.length).toBe(4); // header + 3 context
-    expect(blocks[1].elements[0].text).toContain("Alpha");
-    expect(blocks[1].elements[0].text).toContain("Assigned");
-    expect(blocks[2].elements[0].text).toContain("Beta");
-    expect(blocks[2].elements[0].text).toContain("Queued");
-    expect(blocks[3].elements[0].text).toContain("Gamma");
-    expect(blocks[3].elements[0].text).toContain("offline");
+    expect(blocks.length).toBe(1);
+    const text = blocks[0].text.text;
+    expect(text).toContain("Task assigned to:");
+    expect(text).toContain("Alpha");
+    expect(text).toContain("Task queued for:");
+    expect(text).toContain("Beta");
+    expect(text).toContain("Could not assign to:");
+    expect(text).toContain("Gamma");
+    expect(text).toContain("offline");
   });
 
-  test("all failed shows different header", () => {
+  test("all failed shows warning", () => {
     const blocks = buildAssignmentSummaryBlocks({
       assigned: [],
       queued: [],
       failed: [{ agentName: "Delta", reason: "error" }],
     });
 
-    expect(blocks[0].text.text).toContain("Assignment Failed");
+    expect(blocks[0].text.text).toContain("⚠️");
+    expect(blocks[0].text.text).toContain("Could not assign");
   });
 });
 
 describe("buildCancelledBlocks", () => {
-  test("returns header, context meta, context footer", () => {
+  test("returns single section block", () => {
     const blocks = buildCancelledBlocks({
       agentName: "Alpha",
       taskId: "cccc0000-0000-0000-0000-000000000000",
     });
 
-    expect(blocks.length).toBe(3);
+    expect(blocks.length).toBe(1);
     expect(blocks[0].type).toBe("section");
+    expect(blocks[0].text.text).toContain("🚫");
+    expect(blocks[0].text.text).toContain("Alpha");
     expect(blocks[0].text.text).toContain("Cancelled");
-    expect(blocks[1].type).toBe("context");
-    expect(blocks[1].elements[0].text).toContain("Alpha");
-    expect(blocks[2].type).toBe("context");
-    expect(blocks[2].elements[0].text).toContain("full logs");
+    expect(blocks[0].text.text).toContain("cccc0000");
   });
 });
 
