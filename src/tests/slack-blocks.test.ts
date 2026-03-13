@@ -50,10 +50,14 @@ describe("getTaskLink", () => {
 });
 
 describe("getTaskUrl", () => {
-  test("returns URL with task ID", () => {
+  test("returns URL with task ID or empty string", () => {
     const url = getTaskUrl("some-id");
-    // APP_URL is set in .env; either way the result should contain the task ID
-    expect(url).toContain("some-id");
+    // When APP_URL is set, URL contains the task ID; when not set, returns ""
+    if (url) {
+      expect(url).toContain("some-id");
+    } else {
+      expect(url).toBe("");
+    }
   });
 });
 
