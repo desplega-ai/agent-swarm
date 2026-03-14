@@ -1,7 +1,9 @@
 ---
 date: 2026-03-13
 author: claude
-status: draft
+status: in-progress
+last_updated: 2026-03-13
+last_updated_by: claude
 autonomy: critical
 research: thoughts/taras/research/2026-03-13-slack-ai-features.md
 tags: [slack, ai, block-kit, assistant-threads, interactivity]
@@ -134,17 +136,17 @@ Replace plain-text buffer flush feedback with a context block showing message co
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Existing tests pass: `bun test`
-- [ ] New block builder unit tests pass: `bun test src/tests/slack-blocks.test.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Existing tests pass: `bun test`
+- [x] New block builder unit tests pass: `bun test src/tests/slack-blocks.test.ts`
 
 #### Manual Verification:
-- [ ] @mention an agent in Slack → task assigned message shows rich block layout
-- [ ] Wait for task completion → completion message shows header, context, structured body
-- [ ] Failed task → failure message shows error in code block with context metadata
-- [ ] Progress updates still appear (format will improve in Phase 2)
-- [ ] Messages look correct in both desktop and mobile Slack clients
+- [x] @mention an agent in Slack → task assigned message shows rich block layout
+- [x] Wait for task completion → completion message shows header, context, structured body
+- [ ] Failed task → failure message shows error in code block with context metadata _(not triggered during E2E — needs a task that fails)_
+- [x] Progress updates still appear (format will improve in Phase 2)
+- [ ] Messages look correct in both desktop and mobile Slack clients _(desktop confirmed, mobile not tested)_
 
 **Implementation Note**: Pause after this phase for Slack visual QA before continuing.
 
@@ -195,10 +197,10 @@ When a task completes or fails:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Existing tests pass: `bun test`
-- [ ] Watcher tests pass (if added): `bun test src/tests/slack-watcher.test.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Existing tests pass: `bun test`
+- [x] Watcher tests pass: `bun test src/tests/slack-watcher.test.ts`
 
 #### Manual Verification:
 - [ ] Assign a task via Slack → see "Task In Progress" card appear
@@ -269,7 +271,8 @@ export function registerActionHandlers(app: App): void {
     await ack();
     // Extract taskId from action.value
     // Get original task from DB
-    // Create new task with same description, source, slack context
+    // Create follow-up task via createTaskExtended() with parentTaskId
+    //   → inherits slackChannelId, slackThreadTs, slackUserId from parent
     // Post confirmation in thread
   });
 
@@ -297,10 +300,10 @@ Check if interactivity is already enabled in the manifest. Currently `"interacti
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Existing tests pass: `bun test`
-- [ ] Action handler tests pass: `bun test src/tests/slack-actions.test.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Existing tests pass: `bun test`
+- [x] Action handler tests pass: `bun test src/tests/slack-actions.test.ts`
 
 #### Manual Verification:
 - [ ] Completed task message shows "View Full Logs", "Retry Task" buttons
@@ -449,37 +452,94 @@ Update `slack-manifest.json` to add:
 }
 ```
 
-### 4.5 Handle context awareness
+### 4.5 Reuse existing routing for follow-up messages
 
-When `threadContextChanged` fires, save the new channel context. When creating tasks, optionally include the channel context as metadata so the agent knows which channel the user was viewing:
+The `userMessage` handler fires for **every** message in the assistant thread — not just the first one. Creating a new task per message would be wrong. Instead, the handler should reuse the same routing logic as channel threads:
 
 ```typescript
-userMessage: async ({ message, say, setStatus, getThreadContext }) => {
+userMessage: async ({ message, say, setStatus, setTitle, getThreadContext }) => {
+  const threadTs = message.thread_ts || message.ts;
+  const channelId = message.channel;
+
+  // 1. Check if an agent is already working in this thread
+  const workingAgent = getAgentWorkingOnThread(channelId, threadTs);
+
+  if (workingAgent && workingAgent.status !== "offline") {
+    // Follow-up message → route to the same agent
+    // If ADDITIVE_SLACK is enabled, buffer it (same as channel threads)
+    if (additiveSlack) {
+      bufferThreadMessage(channelId, threadTs, message.text, message.user, message.ts);
+      await setStatus("Queuing follow-up...");
+      return;
+    }
+    // Otherwise, create a follow-up task for the working agent
+    const task = createTaskExtended(message.text, {
+      agentId: workingAgent.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      slackUserId: message.user,
+    });
+    await say(`Follow-up sent to *${workingAgent.name}* (${getTaskLink(task.id)})`);
+    return;
+  }
+
+  // 2. First message in thread — create new task for lead
+  await setStatus("Processing your request...");
+
+  if (message.text) {
+    const title = message.text.length > 50 ? message.text.slice(0, 47) + "..." : message.text;
+    await setTitle(title);
+  }
+
+  // Optionally enrich with channel context
   const ctx = await getThreadContext();
   const channelContext = ctx.channel_id
     ? `\n\n[User is viewing channel <#${ctx.channel_id}>]`
     : "";
 
-  const task = createTaskExtended(message.text + channelContext, { ... });
+  const lead = getLeadAgent();
+  if (!lead) {
+    await say("No lead agent is available right now. Your request has been queued.");
+    createTaskExtended(message.text + channelContext, {
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      slackUserId: message.user,
+    });
+    return;
+  }
+
+  const task = createTaskExtended(message.text + channelContext, {
+    agentId: lead.id,
+    source: "slack",
+    slackChannelId: channelId,
+    slackThreadTs: threadTs,
+    slackUserId: message.user,
+  });
+
+  await say(`Task created and assigned to *${lead.name}* (${getTaskLink(task.id)}). I'll update you here when it's done.`);
 };
 ```
+
+This ensures assistant threads behave identically to channel threads: first message creates a task, follow-ups route to the working agent or buffer via additive slack.
 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Existing tests pass: `bun test`
-- [ ] Assistant handler unit tests pass: `bun test src/tests/slack-assistant.test.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Existing tests pass: `bun test`
+- [x] Assistant handler unit tests pass: `bun test src/tests/slack-assistant.test.ts`
 
 #### Manual Verification:
-- [ ] Open the agent-swarm app in Slack sidebar → assistant container appears
-- [ ] Suggested prompts are shown on thread start
-- [ ] Send a message → loading status shows → task is created → response posted in thread
-- [ ] Thread title is set from the first message
-- [ ] Switch channels while assistant is open → no errors
-- [ ] Channel @mentions still work exactly as before (backward compat)
-- [ ] If "Agents & AI Apps" is disabled → app works normally without assistant, no errors
+- [x] Open the agent-swarm app in Slack sidebar → assistant container appears
+- [x] Suggested prompts are shown on thread start
+- [x] Send a message → loading status shows → task is created → response posted in thread
+- [ ] Thread title is set from the first message _(not verified)_
+- [ ] Switch channels while assistant is open → no errors _(not verified)_
+- [x] Channel @mentions still work exactly as before (backward compat)
+- [ ] If "Agents & AI Apps" is disabled → app works normally without assistant, no errors _(not tested)_
 
 **Implementation Note**: Pause after this phase. Verify backward compatibility thoroughly — existing channel @mention flow must be unaffected.
 
@@ -533,16 +593,16 @@ bun run start:http
 | 1 | `src/slack/thread-buffer.ts` | Modify — Rich flush messages |
 | 1 | `src/tests/slack-blocks.test.ts` | **Create** — Block builder tests |
 | 2 | `src/slack/watcher.ts` | Modify — chat.update logic |
-| 2 | `src/tests/slack-watcher.test.ts` | **Create** — Watcher tests |
+| 2 | `src/tests/slack-watcher.test.ts` | **Created** — Watcher lifecycle + DB query tests |
 | 3 | `src/slack/actions.ts` | **Create** — Interactivity handlers |
 | 3 | `src/slack/app.ts` | Modify — Register action handlers |
 | 3 | `src/slack/blocks.ts` | Modify — Add action blocks |
-| 3 | `src/tests/slack-actions.test.ts` | **Create** — Action handler tests |
+| 3 | `src/tests/slack-actions.test.ts` | **Created** — Action handler DB + block tests |
 | 4 | `src/slack/assistant.ts` | **Create** — Assistant thread handler |
 | 4 | `src/slack/app.ts` | Modify — Register assistant |
 | 4 | `src/slack/responses.ts` | Modify — Persona skip for DMs |
 | 4 | `slack-manifest.json` | Modify — Add assistant config + events + scope |
-| 4 | `src/tests/slack-assistant.test.ts` | **Create** — Assistant tests |
+| 4 | `src/tests/slack-assistant.test.ts` | **Created** — Assistant routing + DB tests |
 
 ## Risk Assessment
 
@@ -553,3 +613,32 @@ bun run start:http
 | `progressMessages` lost on restart | Graceful fallback to posting new messages |
 | Users without "Agents & AI Apps" enabled | Assistant registration is safe; events simply won't fire |
 | Block size limits (50 blocks, 3000 chars/section) | Split long output across multiple section blocks |
+
+---
+
+## Review Errata
+
+_Reviewed: 2026-03-13 by claude (automated verification against codebase)_
+_Updated: 2026-03-13 by claude (post-implementation verification + E2E testing)_
+
+### Post-E2E Changes
+
+- [x] **Header blocks changed to section blocks.** Slack `header` type rendered too large. Changed `headerBlock()` to use `section` with bold mrkdwn (`*text*`) for a more subtle look. All builders affected. Tests updated.
+- [x] **"Retry Task" button replaced with "Follow-up" button.** Opens a modal for the user to type a follow-up message, which creates a new task with `parentTaskId` linked to the original. More useful than blindly retrying the same task.
+
+### Critical
+
+- [x] **Phase 4: Contradictory `userMessage` handlers.** Section 4.1 shows a naive `userMessage` that creates a new task for every message, then section 4.5 replaces it with proper routing logic. **Resolved in code:** Implementation uses the correct 4.5 routing logic with `getAgentWorkingOnThread` check. Plan text still shows both versions — left as-is since implementation is authoritative.
+
+### Important
+
+- [x] **Phase 2: `sendWithPersona()` returns `void` — cannot track message `ts`.** **Resolved in code:** `sendWithPersona()` now returns `result.ts` (the message timestamp). `sendProgressUpdate()` returns `Promise<string | undefined>` passing through the `ts`.
+- [x] **Phase 4.3: DM detection method is wrong.** **Resolved in code:** Uses channel ID prefix `"D"` check (Slack DM convention) instead of `conversations.info` API call. No extra API call needed.
+- [x] **Phase 3: Retry handler underspecified.** **Resolved in code:** `retry_task` handler fetches original task via `getTaskById(action.value)`, re-uses `originalTask.task` as the description, and sets `parentTaskId` to the original task ID.
+- [ ] **Missing "What We're NOT Doing" section.** Plan template requires this section to scope-bound the work and prevent scope creep. Suggested items: no streaming API (`chat.startStream`), no Workflow Builder integration, no message metadata events, no Canvas/Lists integration.
+
+### Minor
+
+- [x] **`getTaskLink()` duplicated in 3 files.** The function exists identically in `handlers.ts:229`, `responses.ts:46`, and `thread-buffer.ts:29`. Phase 1 should consolidate this into `blocks.ts` and re-export — auto-noted for implementation.
+- [x] **Phase 1.3 scope incomplete.** The plan mentions updating "task assigned" messages in `handlers.ts` but doesn't mention the error/rate-limit messages (`say()` calls at lines 434, 443, 471, 490). These could stay as plain text or be upgraded — should be explicitly decided.
+- [x] **Missing "Quick Verification Reference" section.** Plan template recommends a summary table of all verification commands across phases for quick reference.

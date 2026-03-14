@@ -81,28 +81,28 @@ describe("Model name mapping", () => {
   };
 
   test("opus maps to anthropic/claude-opus-4-20250514", () => {
-    const mapping = shortnames["opus"];
+    const mapping = shortnames.opus;
     expect(mapping).toBeDefined();
     expect(mapping![0]).toBe("anthropic");
     expect(mapping![1]).toBe("claude-opus-4-20250514");
   });
 
   test("sonnet maps to anthropic/claude-sonnet-4-20250514", () => {
-    const mapping = shortnames["sonnet"];
+    const mapping = shortnames.sonnet;
     expect(mapping).toBeDefined();
     expect(mapping![0]).toBe("anthropic");
     expect(mapping![1]).toBe("claude-sonnet-4-20250514");
   });
 
   test("haiku maps to anthropic/claude-haiku-4-5-20251001", () => {
-    const mapping = shortnames["haiku"];
+    const mapping = shortnames.haiku;
     expect(mapping).toBeDefined();
     expect(mapping![0]).toBe("anthropic");
     expect(mapping![1]).toBe("claude-haiku-4-5-20251001");
   });
 
   test("unknown shortname returns undefined", () => {
-    const mapping = shortnames["gpt4"];
+    const mapping = shortnames.gpt4;
     expect(mapping).toBeUndefined();
   });
 

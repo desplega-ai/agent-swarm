@@ -207,6 +207,71 @@ async function fetchResolvedEnv(
 }
 
 /**
+ * Convert a tool call into a human-readable progress description.
+ */
+function toolCallToProgress(toolName: string, args: unknown): string {
+  const a = args as Record<string, unknown>;
+  const shortPath = (p: unknown) => {
+    if (typeof p !== "string") return "";
+    // Show last 2 path segments for readability
+    const parts = p.split("/");
+    return parts.length > 2 ? parts.slice(-2).join("/") : p;
+  };
+
+  switch (toolName) {
+    case "Read":
+      return `Reading ${shortPath(a.file_path)}`;
+    case "Edit":
+    case "MultiEdit":
+      return `Editing ${shortPath(a.file_path)}`;
+    case "Write":
+      return `Writing ${shortPath(a.file_path)}`;
+    case "Bash":
+      return a.description ? `${a.description}` : "Running shell command";
+    case "Grep":
+      return `Searching for "${a.pattern}"`;
+    case "Glob":
+      return `Finding files matching ${a.pattern}`;
+    case "Agent":
+    case "Task":
+      return a.description ? `${a.description}` : "Delegating sub-task";
+    case "Skill":
+      return `Running /${a.skill}`;
+    default: {
+      // MCP tools: mcp__server__tool → "server:tool"
+      if (toolName.startsWith("mcp__")) {
+        const parts = toolName.split("__");
+        return parts.length >= 3 ? `Using ${parts[1]}:${parts[2]}` : `Using ${toolName}`;
+      }
+      return `Using ${toolName}`;
+    }
+  }
+}
+
+/**
+ * Report task progress via the API (fire-and-forget).
+ */
+async function updateProgressViaAPI(
+  apiUrl: string,
+  apiKey: string,
+  taskId: string,
+  progress: string,
+): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+  try {
+    await fetch(`${apiUrl}/api/tasks/${taskId}/progress`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ progress }),
+    });
+  } catch {
+    // Non-blocking — progress update failure is not critical
+  }
+}
+
+/**
  * Ensure task is marked as completed or failed via the API.
  * This is called when a Claude process exits to ensure task status is updated,
  * regardless of whether the agent explicitly called store-progress.
@@ -1112,6 +1177,10 @@ async function spawnProviderProcess(
   const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now(), partialLine: "" };
   const shouldStream = opts.apiUrl && opts.runnerSessionId && opts.iteration;
 
+  // Auto-progress throttle: don't update more than once per 3 seconds
+  let lastProgressTime = 0;
+  const PROGRESS_THROTTLE_MS = 3000;
+
   session.onEvent((event) => {
     switch (event.type) {
       case "session_init":
@@ -1121,6 +1190,16 @@ async function spawnProviderProcess(
           );
         }
         break;
+      case "tool_start": {
+        // Auto-progress: report tool activity as task progress (throttled)
+        const now = Date.now();
+        if (effectiveTaskId && opts.apiUrl && now - lastProgressTime >= PROGRESS_THROTTLE_MS) {
+          lastProgressTime = now;
+          const progress = toolCallToProgress(event.toolName, event.args);
+          updateProgressViaAPI(opts.apiUrl, opts.apiKey, effectiveTaskId, progress).catch(() => {});
+        }
+        break;
+      }
       case "result":
         // Cost save is handled in waitForCompletion().then() to ensure
         // it completes before the process exits (fire-and-forget here

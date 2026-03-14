@@ -1254,8 +1254,10 @@ export function getInProgressSlackTasks(): AgentTask[] {
 }
 
 /**
- * Find an agent that has an active task in a specific Slack thread.
- * Used for routing thread follow-up messages to the same agent.
+ * Find the most recent agent associated with a specific Slack thread.
+ * No status filter — returns the last agent that touched this thread regardless of task state.
+ * This is intentional: follow-up messages should route to the same agent even after task completion.
+ * Callers (e.g. assistant.ts) apply their own status checks (e.g. agent.status !== "offline").
  */
 export function getAgentWorkingOnThread(channelId: string, threadTs: string): Agent | null {
   const taskRow = getDb()
@@ -1264,7 +1266,6 @@ export function getAgentWorkingOnThread(channelId: string, threadTs: string): Ag
        WHERE source = 'slack'
        AND slackChannelId = ?
        AND slackThreadTs = ?
-       AND status IN ('in_progress', 'pending')
        ORDER BY createdAt DESC
        LIMIT 1`,
     )
