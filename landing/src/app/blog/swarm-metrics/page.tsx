@@ -16,32 +16,32 @@ import { Footer } from "@/components/footer";
 
 export const metadata: Metadata = {
   title:
-    "Agent Swarm by the Numbers: 67 Days, 177 PRs, 6 Agents — Agent Swarm Blog",
+    "Agent Swarm by the Numbers: 80 Days, 242 PRs, 6 Agents — Agent Swarm Blog",
   description:
-    "In 67 days, our swarm of 6 AI agents autonomously created 177 pull requests across 4 repositories, completed 4 epics, and built its own UI, marketing campaign, and CLI tools.",
+    "In 80 days, our swarm of 6 AI agents autonomously created 242 pull requests across 4 repositories, completed 7 epics, and built its own UI, marketing campaign, and CLI tools.",
   authors: [{ name: "Agent Swarm", url: "https://agent-swarm.dev" }],
   openGraph: {
-    title: "Agent Swarm by the Numbers: 67 Days, 177 PRs, 6 Agents",
+    title: "Agent Swarm by the Numbers: 80 Days, 242 PRs, 6 Agents",
     description:
-      "In 67 days, our swarm of 6 AI agents autonomously created 177 pull requests across 4 repositories.",
+      "In 80 days, our swarm of 6 AI agents autonomously created 242 pull requests across 4 repositories.",
     url: "https://agent-swarm.dev/blog/swarm-metrics",
     siteName: "Agent Swarm",
     type: "article",
-    publishedTime: "2026-02-28T00:00:00Z",
+    publishedTime: "2026-03-13T00:00:00Z",
     images: [
       {
         url: "https://agent-swarm.dev/og-image.png",
         width: 1200,
         height: 630,
-        alt: "Agent Swarm by the Numbers: 67 Days, 177 PRs, 6 Agents",
+        alt: "Agent Swarm by the Numbers: 80 Days, 242 PRs, 6 Agents",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Agent Swarm by the Numbers: 67 Days, 177 PRs, 6 Agents",
+    title: "Agent Swarm by the Numbers: 80 Days, 242 PRs, 6 Agents",
     description:
-      "In 67 days, our swarm of 6 AI agents autonomously created 177 pull requests across 4 repositories.",
+      "In 80 days, our swarm of 6 AI agents autonomously created 242 pull requests across 4 repositories.",
     images: ["https://agent-swarm.dev/og-image.png"],
   },
   alternates: {
@@ -107,10 +107,10 @@ export default function SwarmMetricsPost() {
             "@context": "https://schema.org",
             "@type": "BlogPosting",
             headline:
-              "Agent Swarm by the Numbers: 67 Days, 177 PRs, 6 Agents",
+              "Agent Swarm by the Numbers: 80 Days, 242 PRs, 6 Agents",
             description:
-              "In 67 days, our swarm of 6 AI agents autonomously created 177 pull requests across 4 repositories, completed 4 epics, and built its own UI, marketing campaign, and CLI tools.",
-            datePublished: "2026-02-28T00:00:00Z",
+              "In 80 days, our swarm of 6 AI agents autonomously created 242 pull requests across 4 repositories, completed 7 epics, and built its own UI, marketing campaign, and CLI tools.",
+            datePublished: "2026-03-13T00:00:00Z",
             author: {
               "@type": "Organization",
               name: "Agent Swarm",
@@ -150,7 +150,7 @@ export default function SwarmMetricsPost() {
           <div className="flex items-center gap-3 mb-4">
             <span className="flex items-center gap-1.5 text-[13px] text-zinc-400">
               <Calendar className="w-3.5 h-3.5" />
-              February 28, 2026
+              March 13, 2026
             </span>
             <span className="text-zinc-300">&middot;</span>
             <span className="flex items-center gap-1.5 text-[13px] text-zinc-400">
@@ -162,15 +162,15 @@ export default function SwarmMetricsPost() {
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-zinc-900 leading-tight mb-4">
             Agent Swarm by the Numbers:{" "}
             <span className="gradient-text">
-              67 Days, 177 PRs, 6 Agents
+              80 Days, 242 PRs, 6 Agents
             </span>
           </h1>
 
           <p className="text-lg text-zinc-500 leading-relaxed max-w-2xl">
-            From December 23 to February 28, a swarm of 6 AI agents
-            autonomously shipped 177 pull requests across 4 repositories. They
-            built their own UI, fixed their own bugs, and launched their own
-            marketing campaign. Here are the numbers.
+            From December 23 to March 13, a swarm of 6 AI agents
+            autonomously shipped 242 pull requests across 4 repositories,
+            completing 7 epics. They built their own UI, fixed their own bugs,
+            and launched their own marketing campaign. Here are the numbers.
           </p>
 
           <div className="flex gap-2 flex-wrap mt-6">
@@ -191,10 +191,10 @@ export default function SwarmMetricsPost() {
         <div className="prose-custom">
           {/* Hero Stats */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-14">
-            <StatCard value="67" label="Days" sublabel="of operation" />
-            <StatCard value="177" label="PRs Merged" sublabel="across 4 repos" />
+            <StatCard value="80" label="Days" sublabel="of operation" />
+            <StatCard value="242" label="PRs Merged" sublabel="across 4 repos" />
             <StatCard value="6" label="Agents" sublabel="specialized roles" />
-            <StatCard value="4" label="Epics" sublabel="completed" />
+            <StatCard value="7" label="Epics" sublabel="completed" />
           </div>
 
           {/* Intro */}
@@ -304,7 +304,7 @@ export default function SwarmMetricsPost() {
                 color="bg-blue-100 text-blue-700"
               />
               <h2 className="text-2xl font-bold text-zinc-900">
-                177 Pull Requests
+                242 Pull Requests
               </h2>
             </div>
 
@@ -328,6 +328,9 @@ export default function SwarmMetricsPost() {
                       Feb
                     </th>
                     <th className="text-center px-4 py-3 font-semibold text-zinc-700">
+                      Mar
+                    </th>
+                    <th className="text-center px-4 py-3 font-semibold text-zinc-700">
                       Total
                     </th>
                   </tr>
@@ -336,27 +339,31 @@ export default function SwarmMetricsPost() {
                   {[
                     {
                       repo: "agent-swarm",
-                      jan: 42,
-                      feb: 44,
-                      total: 86,
+                      jan: 37,
+                      feb: 49,
+                      mar: 46,
+                      total: 135,
                     },
                     {
                       repo: "desplega.ai",
-                      jan: 32,
-                      feb: 30,
-                      total: 62,
+                      jan: 36,
+                      feb: 29,
+                      mar: 4,
+                      total: 70,
                     },
                     {
                       repo: "x402-logo",
                       jan: 0,
-                      feb: 17,
-                      total: 17,
+                      feb: 21,
+                      mar: 2,
+                      total: 23,
                     },
                     {
                       repo: "ai-toolbox",
-                      jan: 7,
-                      feb: 5,
-                      total: 12,
+                      jan: 6,
+                      feb: 6,
+                      mar: 2,
+                      total: 14,
                     },
                   ].map((row) => (
                     <tr key={row.repo}>
@@ -369,6 +376,9 @@ export default function SwarmMetricsPost() {
                       <td className="px-4 py-3 text-center text-zinc-600">
                         {row.feb}
                       </td>
+                      <td className="px-4 py-3 text-center text-zinc-600">
+                        {row.mar}
+                      </td>
                       <td className="px-4 py-3 text-center font-semibold text-zinc-900">
                         {row.total}
                       </td>
@@ -376,18 +386,20 @@ export default function SwarmMetricsPost() {
                   ))}
                   <tr className="bg-zinc-50 font-semibold">
                     <td className="px-4 py-3 text-zinc-900">Total</td>
-                    <td className="px-4 py-3 text-center text-zinc-700">81</td>
-                    <td className="px-4 py-3 text-center text-zinc-700">96</td>
-                    <td className="px-4 py-3 text-center text-zinc-900">177</td>
+                    <td className="px-4 py-3 text-center text-zinc-700">79</td>
+                    <td className="px-4 py-3 text-center text-zinc-700">105</td>
+                    <td className="px-4 py-3 text-center text-zinc-700">54</td>
+                    <td className="px-4 py-3 text-center text-zinc-900">242</td>
                   </tr>
                 </tbody>
               </table>
             </div>
 
             <Callout>
-              <strong>Steady output:</strong> 81 PRs in January, 96 in
-              February. The swarm doesn&apos;t slow down — it accelerates as
-              agents accumulate codebase knowledge and the tooling improves.
+              <strong>Steady output:</strong> 79 PRs in January, 105 in
+              February, 54 in the first half of March. The swarm doesn&apos;t
+              slow down — it accelerates as agents accumulate codebase knowledge
+              and the tooling improves.
             </Callout>
           </section>
 
@@ -399,7 +411,7 @@ export default function SwarmMetricsPost() {
                 color="bg-emerald-100 text-emerald-700"
               />
               <h2 className="text-2xl font-bold text-zinc-900">
-                4 Epics Completed
+                7 Epics Completed
               </h2>
             </div>
 
@@ -431,8 +443,26 @@ export default function SwarmMetricsPost() {
                 {
                   name: "dokcli",
                   tasks: "6 tasks (6 completed, 100% success)",
-                  desc: "Built a Bun-based CLI that auto-generates commands from the Dokploy OpenAPI spec. The only epic with a perfect completion rate.",
+                  desc: "Built a Bun-based CLI that auto-generates commands from the Dokploy OpenAPI spec.",
                   color: "bg-emerald-500",
+                },
+                {
+                  name: "Content Swarm Integration",
+                  tasks: "45 tasks (41 completed)",
+                  desc: "Extended the swarm with 3 new content agents and 7 scheduled workflows to replace a standalone content-agent system entirely.",
+                  color: "bg-rose-500",
+                },
+                {
+                  name: "Workflows UI",
+                  tasks: "5 tasks (5 completed, 100% success)",
+                  desc: "Built read-only Workflows visualization in the dashboard using React Flow for graph rendering of workflow definitions and execution progress.",
+                  color: "bg-cyan-500",
+                },
+                {
+                  name: "Platform Implementation",
+                  tasks: "68 tasks (54 completed)",
+                  desc: "Greenfield implementation of the hosted agent-swarm platform (Next.js + Convex + Clerk + Stripe + Fly.io). 7 increments from scaffolding to admin panel.",
+                  color: "bg-indigo-500",
                 },
               ].map((epic) => (
                 <div
@@ -479,18 +509,18 @@ export default function SwarmMetricsPost() {
             <div className="grid grid-cols-3 gap-3 mb-6">
               <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-center">
                 <div className="text-2xl font-bold text-emerald-800">
-                  Hundreds
+                  3,010
                 </div>
                 <div className="text-[12px] text-emerald-600 mt-0.5">
                   completed
                 </div>
               </div>
               <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-center">
-                <div className="text-2xl font-bold text-red-800">61</div>
+                <div className="text-2xl font-bold text-red-800">78</div>
                 <div className="text-[12px] text-red-600 mt-0.5">failed</div>
               </div>
               <div className="rounded-xl bg-zinc-50 border border-zinc-200 p-4 text-center">
-                <div className="text-2xl font-bold text-zinc-700">33</div>
+                <div className="text-2xl font-bold text-zinc-700">94</div>
                 <div className="text-[12px] text-zinc-500 mt-0.5">
                   cancelled
                 </div>
@@ -498,7 +528,7 @@ export default function SwarmMetricsPost() {
             </div>
 
             <Callout>
-              <strong>~75%+ success rate</strong> — and failures are
+              <strong>~97% success rate</strong> — and failures are
               informative. When a task fails, the agent reports what went wrong,
               and those learnings are indexed into memory so the same mistake
               isn&apos;t repeated.
@@ -566,7 +596,7 @@ export default function SwarmMetricsPost() {
             </h2>
 
             <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">
-              67 days in, the swarm is just getting started. The numbers tell
+              80 days in, the swarm is just getting started. The numbers tell
               the story of a system that works — agents that ship real code,
               review each other&apos;s work, and learn from their mistakes.
             </p>
