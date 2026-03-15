@@ -546,4 +546,4 @@ echo ""
 
 # Run the agent using compiled binary
 echo "Starting $ROLE..."
-exec /usr/local/bin/agent-swarm "$ROLE" "$@"
+exec gosu worker /usr/local/bin/agent-swarm "$ROLE" "$@"

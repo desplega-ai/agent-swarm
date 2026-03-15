@@ -39,7 +39,7 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     vim nano \
     build-essential make cmake gcc g++ \
     python3 python3-pip python3-venv \
-    jq tree htop unzip zip tar gzip sqlite3 fuse3 libfuse2 \
+    jq tree htop unzip zip tar gzip sqlite3 fuse3 libfuse2 gosu \
     openssh-client \
     sudo \
     nodejs \
@@ -60,8 +60,8 @@ ENV PATH="$BUN_INSTALL/bin:$PATH"
 
 # Create non-root user with sudo access (passwordless)
 # NOTE: Container entrypoint runs as root for FUSE mount compatibility.
-# Claude processes exec as root on Fly (Fly overrides Docker USER anyway).
-# Worker user retained for file ownership (chown) and optional su usage.
+# Final exec drops to worker via gosu (Claude rejects --dangerously-skip-permissions as root).
+# Worker user retained for file ownership and Claude process execution.
 RUN useradd -m -s /bin/bash -G sudo worker \
     && echo "worker ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
