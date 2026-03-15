@@ -37,7 +37,7 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
 
     if [ -n "$ARCHIL_SHARED_DISK_NAME" ]; then
         echo "Mounting shared disk ($ARCHIL_SHARED_DISK_NAME) at /workspace/shared..."
-        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --shared "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
+        archil mount --shared "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
     fi
 
     # NOTE: Top-level shared directory pre-creation (thoughts/, memory/, etc.)
@@ -48,8 +48,8 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
         echo "Mounting personal disk ($ARCHIL_PERSONAL_DISK_NAME) at /workspace/personal..."
         # --force reclaims stale delegations from previous machine incarnations.
         # Personal disks are always single-client, so force is safe.
-        # archil mount requires root privileges explicitly — use sudo.
-        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --force "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
+        # Entrypoint runs as root — no sudo needed.
+        archil mount --force "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
         # Brief pause for FUSE daemon to finish --force re-negotiation
         sleep 1
     fi
@@ -472,7 +472,7 @@ echo "=== Workspace Initialization ==="
 PERSONAL_DIR="/workspace/personal"
 if [ ! -f "$PERSONAL_DIR/todos.md" ]; then
     echo "Creating personal todos.md..."
-    cat > "$PERSONAL_DIR/todos.md" << EOF
+    cat > "$PERSONAL_DIR/todos.md" << EOF || echo "Warning: Could not create todos.md (disk may not be mounted)"
 # My TODOs
 
 ## Current
