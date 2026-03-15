@@ -59,8 +59,9 @@ ENV BUN_INSTALL="/root/.bun"
 ENV PATH="$BUN_INSTALL/bin:$PATH"
 
 # Create non-root user with sudo access (passwordless)
-# NOTE: Claude requires non-root for --dangerously-skip-permissions
-# Worker runs as non-root but CAN use sudo for installing packages
+# NOTE: Container entrypoint runs as root for FUSE mount compatibility.
+# Claude processes exec as root on Fly (Fly overrides Docker USER anyway).
+# Worker user retained for file ownership (chown) and optional su usage.
 RUN useradd -m -s /bin/bash -G sudo worker \
     && echo "worker ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
@@ -146,7 +147,7 @@ RUN mkdir -p /workspace /logs && chown worker:worker /workspace /logs
 COPY --chown=worker:worker docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-USER worker
+USER root
 WORKDIR /workspace
 
 # Create mount-point directories (must be empty for Archil FUSE mounts)

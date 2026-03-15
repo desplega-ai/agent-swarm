@@ -31,13 +31,13 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
 
     # Ensure /dev/fuse exists (needed in some VM environments like Fly.io Firecracker)
     if [ ! -e /dev/fuse ]; then
-        sudo mknod /dev/fuse c 10 229
-        sudo chmod 666 /dev/fuse
+        mknod /dev/fuse c 10 229
+        chmod 666 /dev/fuse
     fi
 
     if [ -n "$ARCHIL_SHARED_DISK_NAME" ]; then
         echo "Mounting shared disk ($ARCHIL_SHARED_DISK_NAME) at /workspace/shared..."
-        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --shared "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
+        archil mount --shared "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
     fi
 
     # NOTE: Top-level shared directory pre-creation (thoughts/, memory/, etc.)
@@ -48,8 +48,8 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
         echo "Mounting personal disk ($ARCHIL_PERSONAL_DISK_NAME) at /workspace/personal..."
         # --force reclaims stale delegations from previous machine incarnations.
         # Personal disks are always single-client, so force is safe.
-        # archil mount requires root privileges explicitly — use sudo.
-        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --force "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
+        # archil mount requires root — entrypoint runs as root (USER root in Dockerfile).
+        archil mount --force "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
         # Brief pause for FUSE daemon to finish --force re-negotiation
         sleep 1
     fi
