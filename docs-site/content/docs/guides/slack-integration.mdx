@@ -5,20 +5,30 @@ description: Set up Slack to create tasks and communicate with agents
 
 # Slack Integration
 
-Enable Slack for task creation and agent communication via direct messages.
+Enable Slack for task creation, agent communication, and interactive workflows via direct messages and the Slack Assistant sidebar.
 
 ## Setup
 
 1. Create a [Slack App](https://api.slack.com/apps)
 2. Enable **Socket Mode** (for real-time events without public webhooks)
-3. Add required bot token scopes:
-   - `chat:write`
+3. Enable **Interactivity** (for action buttons and modals)
+4. Enable **Assistant View** (for sidebar conversations)
+5. Add required bot token scopes:
+   - `app_mentions:read`
+   - `assistant:write`
+   - `channels:history`, `channels:read`
+   - `chat:write`, `chat:write.customize`, `chat:write.public`
+   - `commands`
+   - `files:read`, `files:write`
+   - `groups:history`, `groups:read`
+   - `im:history`, `im:read`, `im:write`
+   - `mpim:history`, `mpim:read`, `mpim:write`
    - `reactions:write`
    - `users:read`
-   - `users:read.email`
-   - `channels:history`
-   - `im:history`
-4. Install to your workspace and copy tokens
+6. Subscribe to bot events: `app_mention`, `assistant_thread_started`, `assistant_thread_context_changed`, `message.channels`, `message.groups`, `message.im`, `message.mpim`
+7. Install to your workspace and copy tokens
+
+A ready-to-use `slack-manifest.json` is included in the repository root — import it directly in the Slack App configuration page to set up all scopes, events, and features automatically.
 
 ## Configuration
 
@@ -59,6 +69,43 @@ When enabled via `ADDITIVE_SLACK=true`, thread replies that do NOT @mention the 
 - Buffered messages are flushed into a single task with dependency chaining to the active task
 - Use the `!now` command to flush the buffer immediately without dependency chaining
 - Reactions provide visual feedback: :eyes: for captured, :heavy_plus_sign: for appended, :zap: for `!now`
+
+### Single Evolving Message
+
+Each task gets a single Slack message that evolves through its lifecycle — from assignment to progress to completion. Instead of posting multiple messages, the bot uses `chat.update` to update one message in place:
+
+1. **Assignment** — When a task is created from Slack, the bot posts a structured Block Kit message with the task link, assigned agent, and status
+2. **Progress** — As the agent works, progress updates replace the message content (keeping the same message)
+3. **Completion** — The final message shows the task output, status, and action buttons
+
+This keeps threads clean and avoids message spam during long-running tasks.
+
+### Rich Block Kit Messages
+
+All Slack responses use structured [Block Kit](https://api.slack.com/block-kit) layouts instead of plain text:
+
+- **Headers** with task status indicators
+- **Context blocks** showing agent name, task ID, and timestamps
+- **Section blocks** for progress and output text
+- **Action buttons** for follow-up and viewing task logs
+- Markdown is automatically converted to Slack's `mrkdwn` format
+
+### Interactive Actions
+
+Task completion messages include interactive buttons:
+
+- **Follow-up** — Opens a modal to send a follow-up message to the same agent, creating a new task with dependency on the completed one
+- **View Full Logs** — Links to the task detail page in the dashboard
+- **Cancel** — Shows a confirmation dialog before cancelling an in-progress task
+
+### Assistant Sidebar
+
+The bot supports Slack's [Assistant](https://api.slack.com/docs/apps/ai) sidebar for direct conversations:
+
+- Open the sidebar in any channel or DM to start a conversation
+- Suggested prompts help you get started ("Check agent status", "Assign a task", "List recent tasks")
+- Follow-up messages in assistant threads route to the same agent that handled the original task
+- The assistant sets a typing status while the agent is working
 
 ### Progress Updates
 

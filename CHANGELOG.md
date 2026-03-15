@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Rich Block Kit messages for all Slack responses — structured headers, context, sections, and action buttons (#177)
+- Single evolving message per task — assignment, progress, and completion all update one message via `chat.update` (#177)
+- Slack Assistant sidebar support with thread routing, suggested prompts, and typing status (#177)
+- Interactive actions: follow-up modal for sending follow-up tasks, cancel with confirmation dialog (#177)
+- Markdown-to-Slack format converter (`markdownToSlack`) for consistent formatting (#177)
 - Per-agent write isolation on shared disk (#172)
   - Each agent can only write to its own subdirectory under `/workspace/shared/{category}/{agentId}/`
   - PreToolUse hook warns agents before writing to another agent's directory
@@ -62,6 +67,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Docker workspace volumes replaced with FUSE mount points for Archil compatibility
 
 ### Fixed
+- Thread follow-ups now route correctly after task completion — `getAgentWorkingOnThread` checks all statuses (#177)
+- Docker entrypoint runs as root for FUSE mounts, then drops to worker user via `gosu` before exec
 - Archil FUSE mount fixes: read-write mounts, per-agent subdirectory checkout, POSIX signal names in entrypoint, shared flag for mount calls
 - `dir` validation added to MCP tool schemas with inner type cast fix
 - Workspace `mkdir` made non-fatal for read-only Archil mounts
