@@ -63,6 +63,7 @@ export const AgentTaskSourceSchema = z.enum([
   "system",
   "schedule",
   "workflow",
+  "linear",
 ]);
 export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 
