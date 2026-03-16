@@ -111,6 +111,7 @@ export default function SwarmMetricsPost() {
             description:
               "In 80 days, our swarm of 6 AI agents autonomously created 242 pull requests across 4 repositories, completed 7 epics, and built its own UI, marketing campaign, and CLI tools.",
             datePublished: "2026-03-13T00:00:00Z",
+            dateModified: "2026-03-13T00:00:00Z",
             author: {
               "@type": "Organization",
               name: "Agent Swarm",

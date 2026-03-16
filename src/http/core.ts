@@ -13,6 +13,7 @@ import {
 import { initGitHub, resetGitHub } from "../github";
 import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
+import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
 import { agentWithCapacity, parseQueryParams } from "./utils";
 
 /**
@@ -58,6 +59,20 @@ export async function handleCore(
       }),
     );
 
+    return true;
+  }
+
+  if (req.url === "/openapi.json") {
+    const version = (await Bun.file("package.json").json()).version;
+    const spec = generateOpenApiSpec({ version });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(spec);
+    return true;
+  }
+
+  if (req.url === "/docs" || req.url === "/docs/") {
+    res.writeHead(200, { "Content-Type": "text/html" });
+    res.end(SCALAR_HTML);
     return true;
   }
 

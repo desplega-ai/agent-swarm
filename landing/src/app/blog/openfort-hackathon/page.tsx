@@ -140,6 +140,7 @@ export default function OpenfortHackathonPost() {
             description:
               "We shipped x402 payment capability into Agent Swarm — AI agents can now autonomously pay for API services using crypto. Built with Openfort managed wallets on Base mainnet.",
             datePublished: "2026-02-28T00:00:00Z",
+            dateModified: "2026-02-28T00:00:00Z",
             author: {
               "@type": "Organization",
               name: "Agent Swarm",

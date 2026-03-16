@@ -90,7 +90,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleAgentRegister(req, res, pathSegments, myAgentId),
     () => handlePoll(req, res, pathSegments, myAgentId),
     () => handleSessionData(req, res, pathSegments, queryParams, myAgentId),
-    () => handleEcosystem(req, res, myAgentId),
+    () => handleEcosystem(req, res, pathSegments, myAgentId),
     () => handleWebhooks(req, res, pathSegments),
     () => handleAgentsRest(req, res, pathSegments, queryParams, myAgentId),
     () => handleTasks(req, res, pathSegments, queryParams, myAgentId),
