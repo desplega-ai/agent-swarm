@@ -47,10 +47,10 @@ interface BlogPost {
 const posts: BlogPost[] = [
   {
     slug: "swarm-metrics",
-    title: "Agent Swarm by the Numbers: 67 Days, 177 PRs, 6 Agents",
+    title: "Agent Swarm by the Numbers: 80 Days, 242 PRs, 6 Agents",
     description:
-      "In 67 days, our swarm of 6 AI agents autonomously created 177 pull requests across 4 repositories, completed 4 epics, and built its own UI, marketing campaign, and CLI tools.",
-    date: "February 28, 2026",
+      "In 80 days, our swarm of 6 AI agents autonomously created 242 pull requests across 4 repositories, completed 7 epics, and built its own UI, marketing campaign, and CLI tools.",
+    date: "March 13, 2026",
     readTime: "6 min read",
     tags: ["metrics", "AI agents", "automation", "open source"],
   },
