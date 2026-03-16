@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- ARM compatibility for Docker Compose — added `platform: linux/amd64` to all services to fix `no matching manifest for linux/arm64/v8` on Apple Silicon Macs (#180)
+
 ### Added
 - Rich Block Kit messages for all Slack responses — structured headers, context, sections, and action buttons (#177)
 - Single evolving message per task — assignment, progress, and completion all update one message via `chat.update` (#177)
