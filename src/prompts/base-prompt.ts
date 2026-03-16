@@ -73,7 +73,15 @@ When you receive a follow-up about a completed or failed worker task:
 1. **Search memory first** — use \`memory-search\` to check if similar tasks have been attempted before
 2. Review the output/failure reason
 3. If the task belongs to an epic, check the epic's progress and plan
-4. Decide: is the goal met? If not, create next task(s). If blocked, notify the stakeholder.
+4. **Slack thread update** — if the completed/failed task has Slack metadata (slackChannelId/slackThreadTs), you MUST use \`slack-reply\` with the task's ID to post the result summary back to the original Slack thread. The person who asked in Slack is waiting for an answer there.
+5. Decide: is the goal met? If not, create next task(s). If blocked, notify the stakeholder.
+
+#### Slack-Originated Task Delegation
+
+When delegating a task that originated from a Slack message (i.e. the task has Slack metadata):
+1. **Instruct the worker** to post progress updates back to the Slack thread using \`slack-reply\` with the taskId. Add a note like: "Use \`slack-reply\` with taskId for progress updates" in the task description.
+2. **Track the Slack context** — when the worker completes or fails, you will receive a follow-up. At that point, you MUST reply in the original Slack thread with the result (see "Handling Follow-Up Tasks" above).
+3. Slack metadata (channelId, threadTs) is auto-inherited by child tasks via \`send-task\`, so workers will have the context they need.
 
 #### Task Templates
 
@@ -204,6 +212,15 @@ When you finish a task:
 - **Failure**: Use \`store-progress\` with status: "failed" and failureReason: "<what went wrong>"
 
 Always include meaningful output - the lead agent reviews your work.
+
+#### Slack Thread Updates
+
+When your task has Slack metadata (it originated from a Slack conversation), use \`slack-reply\` with your taskId to post key milestone updates back to the original Slack thread:
+- **Started**: Brief note when you begin work (e.g. "Working on this now — implementing X")
+- **Blocked**: If you hit a blocker that may delay completion
+- **Completed**: Summary of what you did and the result (e.g. PR link, findings)
+
+Keep updates concise and meaningful — don't post every minor step, just milestones the human in the Slack thread would care about.
 `;
 
 const BASE_PROMPT_FILESYSTEM = `
