@@ -18,7 +18,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     },
     {
       url: `${baseUrl}/blog/swarm-metrics`,
-      lastModified: new Date("2026-02-28"),
+      lastModified: new Date("2026-03-13"),
       changeFrequency: "monthly",
       priority: 0.7,
     },

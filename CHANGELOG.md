@@ -6,7 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- ARM compatibility for Docker Compose — added `platform: linux/amd64` to all services to fix `no matching manifest for linux/arm64/v8` on Apple Silicon Macs (#180)
+
 ### Added
+- Rich Block Kit messages for all Slack responses — structured headers, context, sections, and action buttons (#177)
+- Single evolving message per task — assignment, progress, and completion all update one message via `chat.update` (#177)
+- Slack Assistant sidebar support with thread routing, suggested prompts, and typing status (#177)
+- Interactive actions: follow-up modal for sending follow-up tasks, cancel with confirmation dialog (#177)
+- Markdown-to-Slack format converter (`markdownToSlack`) for consistent formatting (#177)
+- Per-agent write isolation on shared disk (#172)
+  - Each agent can only write to its own subdirectory under `/workspace/shared/{category}/{agentId}/`
+  - PreToolUse hook warns agents before writing to another agent's directory
+  - PostToolUse hook detects "Read-only file system" errors and guides agents to use their own directory
+  - Base prompt updated with per-agent directory convention and discovery commands
+  - Slack download tool saves to per-agent download directory by default
+- Claude credential validation — fail fast if no auth is set
+- Pre-push hooks to match CI merge gate checks
 - Working directory (`dir`) support for agent tasks (#159)
   - `send-task` and `task-action` accept `dir` parameter (absolute path) to set agent starting directory
   - Runner resolves `dir` for both new and resumed tasks with fallback chain: `task.dir` > `vcsRepo` clone path > default cwd
@@ -48,10 +64,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Docker multi-provider support in Dockerfile.worker and entrypoint
 
 ### Changed
+- API data disk switched from Archil FUSE to Fly volume for reliability
+- Shared disk uses exclusive Archil mounts with `--force` for stale delegation recovery
 - Template fetching refactored to run before agent registration (cached and reused for identity files)
 - Docker workspace volumes replaced with FUSE mount points for Archil compatibility
 
 ### Fixed
+- Thread follow-ups now route correctly after task completion — `getAgentWorkingOnThread` checks all statuses (#177)
+- Docker entrypoint runs as root for FUSE mounts, then drops to worker user via `gosu` before exec
 - Archil FUSE mount fixes: read-write mounts, per-agent subdirectory checkout, POSIX signal names in entrypoint, shared flag for mount calls
 - `dir` validation added to MCP tool schemas with inner type cast fix
 - Workspace `mkdir` made non-fatal for read-only Archil mounts
@@ -104,6 +124,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - `property-match` workflow node crash when config uses flat format (`property`/`operator`/`value`) instead of `conditions` array (#146)
 - API migration Dockerfile fix for workflow schema
+
+## [1.43.0] - 2026-03-12
+
+### Added
+- Slack thread follow-up routing — @mentions in threads route directly to the worker already active in that thread, bypassing lead delegation
+- Additive Slack buffer (`ADDITIVE_SLACK=true`) — non-mention thread replies are debounced and batched into a single follow-up task with dependency chaining
+- `!now` command for instant buffer flush without dependency chaining
+- `HEURISTICS.md` documenting all Slack routing rules and buffering behavior
+- `reactions:write` Slack scope for visual buffer feedback (:eyes:, :heavy_plus_sign:, :zap:)
+
+### Changed
+- Eliminated inbox message system — all Slack and AgentMail messages now route directly as tasks
+- Leads poll for tasks like workers (removed poll-task lead block)
+- Child tasks auto-inherit Slack/AgentMail metadata from parent tasks
+- Removed `inbox-delegate` and `get-inbox-message` MCP tools
+- Removed fuzzy name matching from Slack router (replaced by task-based routing)
+
+### Fixed
+- AgentMail sender domain filter now correctly handles "Name \<email\>" format
 
 ## [1.36.0] - 2026-03-06
 

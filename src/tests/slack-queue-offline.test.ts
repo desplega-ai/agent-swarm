@@ -3,11 +3,10 @@ import { unlinkSync } from "node:fs";
 import {
   closeDb,
   createAgent,
-  createInboxMessage,
   createTaskExtended,
   getLeadAgent,
+  getTasksByAgentId,
   getTasksByStatus,
-  getUnreadInboxMessages,
   initDb,
 } from "../be/db";
 import { extractTaskFromMessage, routeMessage } from "../slack/router";
@@ -56,65 +55,60 @@ describe("Slack queue-when-offline", () => {
     });
   });
 
-  describe("queue as inbox message when offline lead exists", () => {
-    test("creates inbox message for offline lead with correct metadata", () => {
+  describe("queue as task when offline lead exists", () => {
+    test("creates task for offline lead with correct metadata", () => {
       const lead = getLeadAgent()!;
       const taskDescription = "deploy the new feature";
 
-      const msg = createInboxMessage(lead.id, taskDescription, {
+      const task = createTaskExtended(taskDescription, {
+        agentId: lead.id,
         source: "slack",
         slackChannelId: "C999",
         slackThreadTs: "1111.2222",
         slackUserId: "U_HUMAN",
-        matchedText: "@bot (queued — agents offline)",
       });
 
-      expect(msg.agentId).toBe(lead.id);
-      expect(msg.content).toBe(taskDescription);
-      expect(msg.source).toBe("slack");
-      expect(msg.slackChannelId).toBe("C999");
-      expect(msg.slackThreadTs).toBe("1111.2222");
-      expect(msg.slackUserId).toBe("U_HUMAN");
-      expect(msg.matchedText).toBe("@bot (queued — agents offline)");
-      expect(msg.status).toBe("unread");
+      expect(task.agentId).toBe(lead.id);
+      expect(task.task).toBe(taskDescription);
+      expect(task.source).toBe("slack");
+      expect(task.slackChannelId).toBe("C999");
+      expect(task.slackThreadTs).toBe("1111.2222");
+      expect(task.slackUserId).toBe("U_HUMAN");
+      expect(task.status).toBe("pending");
     });
 
-    test("queued inbox message appears in unread messages for lead", () => {
+    test("queued task appears in lead's task list", () => {
       const lead = getLeadAgent()!;
-      const unread = getUnreadInboxMessages(lead.id);
-      expect(unread.length).toBeGreaterThanOrEqual(1);
+      const tasks = getTasksByAgentId(lead.id);
+      expect(tasks.length).toBeGreaterThanOrEqual(1);
 
-      const queued = unread.find((m) => m.matchedText === "@bot (queued — agents offline)");
+      const queued = tasks.find((t) => t.task === "deploy the new feature");
       expect(queued).toBeDefined();
-      expect(queued!.content).toBe("deploy the new feature");
+      expect(queued!.source).toBe("slack");
     });
 
-    test("creates inbox message with structured content when thread context exists", () => {
+    test("creates task with thread context", () => {
       const lead = getLeadAgent()!;
-      const taskDescription = "check the logs";
       const threadContext = "Alice: something is broken\n[Agent]: I'll look into it";
+      const taskDescription = "check the logs";
+      const fullTaskDescription = `<thread_context>\n${threadContext}\n</thread_context>\n\n${taskDescription}`;
 
-      const structuredContent = `<new_message>\n${taskDescription}\n</new_message>\n\n<thread_history>\n${threadContext}\n</thread_history>`;
-
-      const msg = createInboxMessage(lead.id, structuredContent, {
+      const task = createTaskExtended(fullTaskDescription, {
+        agentId: lead.id,
         source: "slack",
         slackChannelId: "C888",
         slackThreadTs: "3333.4444",
         slackUserId: "U_HUMAN2",
-        matchedText: "@bot (queued — agents offline)",
       });
 
-      expect(msg.content).toContain("<new_message>");
-      expect(msg.content).toContain("check the logs");
-      expect(msg.content).toContain("<thread_history>");
-      expect(msg.content).toContain("Alice: something is broken");
+      expect(task.task).toContain("<thread_context>");
+      expect(task.task).toContain("check the logs");
+      expect(task.task).toContain("Alice: something is broken");
     });
   });
 
   describe("queue as unassigned task when no lead exists at all", () => {
     test("creates unassigned task with Slack metadata", () => {
-      // Even though there's an offline lead in the DB, createTaskExtended can still
-      // be used to create unassigned tasks — this tests that fallback path
       const taskText = "fix the CI pipeline";
 
       const task = createTaskExtended(taskText, {

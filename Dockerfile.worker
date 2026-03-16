@@ -39,7 +39,7 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     vim nano \
     build-essential make cmake gcc g++ \
     python3 python3-pip python3-venv \
-    jq tree htop unzip zip tar gzip sqlite3 fuse3 libfuse2 \
+    jq tree htop unzip zip tar gzip sqlite3 fuse3 libfuse2 gosu \
     openssh-client \
     sudo \
     nodejs \
@@ -59,8 +59,9 @@ ENV BUN_INSTALL="/root/.bun"
 ENV PATH="$BUN_INSTALL/bin:$PATH"
 
 # Create non-root user with sudo access (passwordless)
-# NOTE: Claude requires non-root for --dangerously-skip-permissions
-# Worker runs as non-root but CAN use sudo for installing packages
+# NOTE: Container entrypoint runs as root for FUSE mount compatibility.
+# Final exec drops to worker via gosu (Claude rejects --dangerously-skip-permissions as root).
+# Worker user retained for file ownership and Claude process execution.
 RUN useradd -m -s /bin/bash -G sudo worker \
     && echo "worker ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
@@ -146,7 +147,7 @@ RUN mkdir -p /workspace /logs && chown worker:worker /workspace /logs
 COPY --chown=worker:worker docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-USER worker
+USER root
 WORKDIR /workspace
 
 # Create mount-point directories (must be empty for Archil FUSE mounts)

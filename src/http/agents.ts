@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { z } from "zod";
 import {
   createAgent,
   getAgentById,
@@ -14,7 +15,130 @@ import {
   updateAgentProfile,
   updateAgentStatus,
 } from "../be/db";
-import { agentWithCapacity, matchRoute } from "./utils";
+import { route } from "./route-def";
+import { agentWithCapacity, json, jsonError } from "./utils";
+
+// ─── Route Definitions ───────────────────────────────────────────────────────
+
+const registerAgent = route({
+  method: "post",
+  path: "/api/agents",
+  pattern: ["api", "agents"],
+  summary: "Register or re-register an agent",
+  tags: ["Agents"],
+  body: z.object({
+    name: z.string().min(1),
+    isLead: z.boolean().optional(),
+    description: z.string().optional(),
+    role: z.string().optional(),
+    capabilities: z.array(z.string()).optional(),
+    maxTasks: z.number().int().optional(),
+  }),
+  responses: {
+    200: { description: "Agent re-registered (already existed)" },
+    201: { description: "Agent created" },
+    400: { description: "Validation error" },
+  },
+});
+
+const listAgents = route({
+  method: "get",
+  path: "/api/agents",
+  pattern: ["api", "agents"],
+  summary: "List all agents",
+  tags: ["Agents"],
+  query: z.object({
+    include: z.enum(["tasks"]).optional(),
+  }),
+  responses: {
+    200: { description: "Agent list with capacity info" },
+  },
+});
+
+const updateAgentNameRoute = route({
+  method: "put",
+  path: "/api/agents/{id}/name",
+  pattern: ["api", "agents", null, "name"],
+  summary: "Update agent name",
+  tags: ["Agents"],
+  params: z.object({ id: z.string() }),
+  body: z.object({ name: z.string().min(1) }),
+  responses: {
+    200: { description: "Agent updated" },
+    404: { description: "Agent not found" },
+    409: { description: "Name conflict" },
+  },
+});
+
+const getAgentSetupScript = route({
+  method: "get",
+  path: "/api/agents/{id}/setup-script",
+  pattern: ["api", "agents", null, "setup-script"],
+  summary: "Fetch agent + global setup scripts for Docker entrypoint",
+  tags: ["Agents"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Setup scripts" },
+    404: { description: "Agent not found" },
+  },
+});
+
+const updateAgentProfileRoute = route({
+  method: "put",
+  path: "/api/agents/{id}/profile",
+  pattern: ["api", "agents", null, "profile"],
+  summary: "Update agent profile (role, description, capabilities, etc.)",
+  tags: ["Agents"],
+  params: z.object({ id: z.string() }),
+  body: z.object({
+    role: z.string().max(100).optional(),
+    description: z.string().optional(),
+    capabilities: z.array(z.string()).optional(),
+    claudeMd: z.string().max(65536).optional(),
+    soulMd: z.string().max(65536).optional(),
+    identityMd: z.string().max(65536).optional(),
+    setupScript: z.string().max(65536).optional(),
+    toolsMd: z.string().max(65536).optional(),
+    changeSource: z.string().optional(),
+    changedByAgentId: z.string().optional(),
+    changeReason: z.string().optional(),
+  }),
+  responses: {
+    200: { description: "Profile updated" },
+    400: { description: "Validation error" },
+    404: { description: "Agent not found" },
+  },
+});
+
+const updateAgentActivityRoute = route({
+  method: "put",
+  path: "/api/agents/{id}/activity",
+  pattern: ["api", "agents", null, "activity"],
+  summary: "Update agent last activity timestamp",
+  tags: ["Agents"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    204: { description: "Activity updated" },
+  },
+});
+
+const getAgent = route({
+  method: "get",
+  path: "/api/agents/{id}",
+  pattern: ["api", "agents", null],
+  summary: "Get a single agent",
+  tags: ["Agents"],
+  params: z.object({ id: z.string() }),
+  query: z.object({
+    include: z.enum(["tasks"]).optional(),
+  }),
+  responses: {
+    200: { description: "Agent with capacity info" },
+    404: { description: "Agent not found" },
+  },
+});
+
+// ─── Handlers ────────────────────────────────────────────────────────────────
 
 export async function handleAgentRegister(
   req: IncomingMessage,
@@ -22,59 +146,40 @@ export async function handleAgentRegister(
   pathSegments: string[],
   myAgentId: string | undefined,
 ): Promise<boolean> {
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "agents"], true)) {
-    // Parse request body
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = JSON.parse(Buffer.concat(chunks).toString());
+  if (registerAgent.match(req.method, pathSegments)) {
+    const parsed = await registerAgent.parse(req, res, pathSegments, new URLSearchParams());
+    if (!parsed) return true;
 
-    // Validate required fields
-    if (!body.name || typeof body.name !== "string") {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing or invalid 'name' field" }));
-      return true;
-    }
-
-    // Use X-Agent-ID header if provided, otherwise generate new UUID
     const agentId = myAgentId || crypto.randomUUID();
 
-    // Use transaction to ensure atomicity of check-and-create/update
     const result = getDb().transaction(() => {
-      // Check if agent already exists
       const existingAgent = getAgentById(agentId);
       if (existingAgent) {
-        // Update status to idle if offline
         if (existingAgent.status === "offline") {
           updateAgentStatus(existingAgent.id, "idle");
         }
-        // Update maxTasks if provided (allows runner to sync its MAX_CONCURRENT_TASKS)
-        if (body.maxTasks !== undefined && body.maxTasks !== existingAgent.maxTasks) {
-          updateAgentMaxTasks(existingAgent.id, body.maxTasks);
+        if (parsed.body.maxTasks !== undefined && parsed.body.maxTasks !== existingAgent.maxTasks) {
+          updateAgentMaxTasks(existingAgent.id, parsed.body.maxTasks);
         }
-        // Reset empty poll count on re-registration (agent is starting fresh)
         resetEmptyPollCount(existingAgent.id);
         return { agent: getAgentById(agentId), created: false };
       }
 
-      // Create new agent
       const agent = createAgent({
         id: agentId,
-        name: body.name,
-        isLead: body.isLead ?? false,
+        name: parsed.body.name,
+        isLead: parsed.body.isLead ?? false,
         status: "idle",
-        description: body.description,
-        role: body.role,
-        capabilities: body.capabilities,
-        maxTasks: body.maxTasks ?? 1,
+        description: parsed.body.description,
+        role: parsed.body.role,
+        capabilities: parsed.body.capabilities ?? [],
+        maxTasks: parsed.body.maxTasks ?? 1,
       });
 
       return { agent, created: true };
     })();
 
-    res.writeHead(result.created ? 201 : 200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(result.agent));
+    json(res, result.agent, result.created ? 201 : 200);
     return true;
   }
 
@@ -88,115 +193,56 @@ export async function handleAgentsRest(
   queryParams: URLSearchParams,
   _myAgentId: string | undefined,
 ): Promise<boolean> {
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "agents"], true)) {
-    const includeTasks = queryParams.get("include") === "tasks";
+  if (listAgents.match(req.method, pathSegments)) {
+    const parsed = await listAgents.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const includeTasks = parsed.query.include === "tasks";
     const agents = includeTasks ? getAllAgentsWithTasks() : getAllAgents();
     const agentsWithCapacity = agents.map(agentWithCapacity);
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ agents: agentsWithCapacity }));
+    json(res, { agents: agentsWithCapacity });
     return true;
   }
 
-  // PUT /api/agents/:id/name - Update agent name (check before GET to avoid conflict)
-  if (matchRoute(req.method, pathSegments, "PUT", ["api", "agents", null, "name"])) {
-    const agentId = pathSegments[2]!;
-
-    // Parse request body
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk as Buffer);
-    }
-    const bodyText = Buffer.concat(chunks).toString();
-
-    let body: { name?: string };
-    try {
-      body = JSON.parse(bodyText);
-    } catch {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Invalid JSON" }));
-      return true;
-    }
-
-    if (!body.name || typeof body.name !== "string" || !body.name.trim()) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Invalid name" }));
-      return true;
-    }
+  if (updateAgentNameRoute.match(req.method, pathSegments)) {
+    const parsed = await updateAgentNameRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
 
     try {
-      const agent = updateAgentName(agentId, body.name.trim());
+      const agent = updateAgentName(parsed.params.id, parsed.body.name.trim());
       if (!agent) {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Agent not found" }));
+        jsonError(res, "Agent not found", 404);
         return true;
       }
-
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(agentWithCapacity(agent)));
+      json(res, agentWithCapacity(agent));
     } catch (error) {
-      res.writeHead(409, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: (error as Error).message }));
+      jsonError(res, (error as Error).message, 409);
     }
     return true;
   }
 
-  // GET /api/agents/:id/setup-script - Fetch agent + global setup scripts for Docker entrypoint
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "agents", null, "setup-script"])) {
-    const agentId = pathSegments[2]!;
-    const agent = getAgentById(agentId);
+  if (getAgentSetupScript.match(req.method, pathSegments)) {
+    const parsed = await getAgentSetupScript.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const agent = getAgentById(parsed.params.id);
     if (!agent) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Agent not found" }));
+      jsonError(res, "Agent not found", 404);
       return true;
     }
-
-    // Fetch global setup script from swarm_config
     const globalConfigs = getSwarmConfigs({ scope: "global", key: "SETUP_SCRIPT" });
     const globalSetupScript = globalConfigs[0]?.value ?? null;
-
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        setupScript: agent.setupScript ?? null,
-        globalSetupScript,
-      }),
-    );
+    json(res, {
+      setupScript: agent.setupScript ?? null,
+      globalSetupScript,
+    });
     return true;
   }
 
-  // PUT /api/agents/:id/profile - Update agent profile (role, description, capabilities)
-  if (matchRoute(req.method, pathSegments, "PUT", ["api", "agents", null, "profile"])) {
-    const agentId = pathSegments[2]!;
+  if (updateAgentProfileRoute.match(req.method, pathSegments)) {
+    const parsed = await updateAgentProfileRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const body = parsed.body;
 
-    // Parse request body
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk as Buffer);
-    }
-    const bodyText = Buffer.concat(chunks).toString();
-
-    let body: {
-      role?: string;
-      description?: string;
-      capabilities?: string[];
-      claudeMd?: string;
-      soulMd?: string;
-      identityMd?: string;
-      setupScript?: string;
-      toolsMd?: string;
-      changeSource?: string;
-      changedByAgentId?: string;
-      changeReason?: string;
-    };
-    try {
-      body = JSON.parse(bodyText);
-    } catch {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Invalid JSON" }));
-      return true;
-    }
-
-    // At least one field must be provided
+    // At least one profile field must be provided
     if (
       body.role === undefined &&
       body.description === undefined &&
@@ -207,38 +253,12 @@ export async function handleAgentsRest(
       body.setupScript === undefined &&
       body.toolsMd === undefined
     ) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          error:
-            "At least one field (role, description, capabilities, claudeMd, soulMd, identityMd, setupScript, or toolsMd) must be provided",
-        }),
+      jsonError(
+        res,
+        "At least one field (role, description, capabilities, claudeMd, soulMd, identityMd, setupScript, or toolsMd) must be provided",
+        400,
       );
       return true;
-    }
-
-    // Validate role length if provided
-    if (body.role !== undefined && body.role.length > 100) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Role must be 100 characters or less" }));
-      return true;
-    }
-
-    // Validate capabilities if provided
-    if (body.capabilities !== undefined && !Array.isArray(body.capabilities)) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Capabilities must be an array of strings" }));
-      return true;
-    }
-
-    // Validate text field sizes (max 64KB each)
-    for (const field of ["claudeMd", "soulMd", "identityMd", "setupScript", "toolsMd"] as const) {
-      const value = body[field];
-      if (value !== undefined && value.length > 65536) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: `${field} must be 64KB or less` }));
-        return true;
-      }
     }
 
     // Build version metadata if provided
@@ -255,7 +275,7 @@ export async function handleAgentsRest(
         : undefined;
 
     const agent = updateAgentProfile(
-      agentId,
+      parsed.params.id,
       {
         role: body.role,
         description: body.description,
@@ -270,43 +290,39 @@ export async function handleAgentsRest(
     );
 
     if (!agent) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Agent not found" }));
+      jsonError(res, "Agent not found", 404);
       return true;
     }
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(agentWithCapacity(agent)));
+    json(res, agentWithCapacity(agent));
     return true;
   }
 
-  // PUT /api/agents/:id/activity - Update agent last activity timestamp
-  if (matchRoute(req.method, pathSegments, "PUT", ["api", "agents", null, "activity"])) {
-    const agentId = pathSegments[2]!;
-    updateAgentActivity(agentId);
+  if (updateAgentActivityRoute.match(req.method, pathSegments)) {
+    const parsed = await updateAgentActivityRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    updateAgentActivity(parsed.params.id);
     res.writeHead(204);
     res.end();
     return true;
   }
 
-  // GET /api/agents/:id - Get single agent (optionally with tasks)
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "agents", null], true)) {
-    const agentId = pathSegments[2]!;
-    const includeTasks = queryParams.get("include") === "tasks";
-    const agent = includeTasks ? getAgentWithTasks(agentId) : getAgentById(agentId);
+  if (getAgent.match(req.method, pathSegments)) {
+    const parsed = await getAgent.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const includeTasks = parsed.query.include === "tasks";
+    const agent = includeTasks
+      ? getAgentWithTasks(parsed.params.id)
+      : getAgentById(parsed.params.id);
 
     if (!agent) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Agent not found" }));
+      jsonError(res, "Agent not found", 404);
       return true;
     }
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(agentWithCapacity(agent)));
+    json(res, agentWithCapacity(agent));
     return true;
   }
-
-  // GET /api/tasks - List all tasks (with optional filters: status, agentId, search)
 
   return false;
 }

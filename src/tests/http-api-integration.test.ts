@@ -873,7 +873,7 @@ describe("Epics", () => {
       body: { name: "No Goal" },
     });
     expect(status).toBe(400);
-    expect(body.error).toContain("name, goal");
+    expect(body.error).toContain("goal");
   });
 
   test("POST /api/epics — create epic", async () => {

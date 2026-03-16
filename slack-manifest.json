@@ -14,6 +14,19 @@
             "display_name": "agent-swarm",
             "always_online": true
         },
+        "assistant_view": {
+            "assistant_description": "Your Agent Swarm — assign tasks, check status, and interact with your AI agents.",
+            "suggested_commands": [
+                {
+                    "title": "Check agent status",
+                    "description": "See which agents are online and what they're working on"
+                },
+                {
+                    "title": "Assign a task",
+                    "description": "Give a task to one of your agents"
+                }
+            ]
+        },
         "slash_commands": [
             {
                 "command": "/agent-swarm-status",
@@ -31,6 +44,7 @@
         "scopes": {
             "bot": [
                 "app_mentions:read",
+                "assistant:write",
                 "channels:history",
                 "channels:read",
                 "chat:write",
@@ -47,6 +61,7 @@
                 "mpim:history",
                 "mpim:read",
                 "mpim:write",
+                "reactions:write",
                 "users:read"
             ]
         }
@@ -55,6 +70,8 @@
         "event_subscriptions": {
             "bot_events": [
                 "app_mention",
+                "assistant_thread_started",
+                "assistant_thread_context_changed",
                 "message.channels",
                 "message.groups",
                 "message.im",

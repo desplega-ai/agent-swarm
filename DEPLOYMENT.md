@@ -41,6 +41,10 @@ docker-compose up -d
 
 > **Note:** `.env.example` contains API server settings, `.env.docker.example` contains Docker worker settings. For docker-compose, you need both sets of variables in a single `.env` file.
 
+### ARM Compatibility (Apple Silicon)
+
+All services in the docker-compose files include `platform: linux/amd64` to avoid `no matching manifest for linux/arm64/v8` errors on Apple Silicon Macs. The Docker images are built for `linux/amd64` and run via Rosetta emulation.
+
 ### What's Included
 
 The example `docker-compose.yml` sets up:
@@ -392,10 +396,12 @@ Enable Slack for task creation and agent communication via direct messages.
 
 ### Setup
 
-1. Create a Slack App at https://api.slack.com/apps
+1. Create a Slack App at https://api.slack.com/apps (or import `slack-manifest.json` from the repo root)
 2. Enable Socket Mode (for real-time events without public webhooks)
-3. Add required scopes: `chat:write`, `users:read`, `users:read.email`, `channels:history`, `im:history`
-4. Install to workspace and copy tokens
+3. Enable Interactivity and Assistant View
+4. Add required scopes: `app_mentions:read`, `assistant:write`, `channels:history`, `channels:read`, `chat:write`, `chat:write.customize`, `chat:write.public`, `commands`, `files:read`, `files:write`, `groups:history`, `groups:read`, `im:history`, `im:read`, `im:write`, `mpim:history`, `mpim:read`, `mpim:write`, `reactions:write`, `users:read`
+5. Subscribe to bot events: `app_mention`, `assistant_thread_started`, `assistant_thread_context_changed`, `message.channels`, `message.groups`, `message.im`, `message.mpim`
+6. Install to workspace and copy tokens
 
 ### Configuration
 

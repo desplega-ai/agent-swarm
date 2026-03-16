@@ -16,12 +16,9 @@ import {
   registerUnassignTaskFromEpicTool,
   registerUpdateEpicTool,
 } from "./tools/epics";
-// Lead inbox tools
-import { registerGetInboxMessageTool } from "./tools/get-inbox-message";
 import { registerGetSwarmTool } from "./tools/get-swarm";
 import { registerGetTaskDetailsTool } from "./tools/get-task-details";
 import { registerGetTasksTool } from "./tools/get-tasks";
-import { registerInboxDelegateTool } from "./tools/inbox-delegate";
 import { registerInjectLearningTool } from "./tools/inject-learning";
 import { registerJoinSwarmTool } from "./tools/join-swarm";
 // Messaging capability
@@ -137,8 +134,6 @@ export function createServer() {
   registerSlackListChannelsTool(server);
   registerSlackUploadFileTool(server);
   registerSlackDownloadFileTool(server);
-  registerInboxDelegateTool(server);
-  registerGetInboxMessageTool(server);
 
   // AgentMail integration tool (always registered, self-service inbox mapping)
   registerRegisterAgentMailInboxTool(server);

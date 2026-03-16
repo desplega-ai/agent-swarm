@@ -2,53 +2,24 @@ import type { WebClient } from "@slack/web-api";
 import { getAgentById } from "../be/db";
 import type { Agent, AgentTask } from "../types";
 import { getSlackApp } from "./app";
+import {
+  buildCancelledBlocks,
+  buildCompletedBlocks,
+  buildFailedBlocks,
+  buildProgressBlocks,
+  markdownToSlack,
+} from "./blocks";
+
+// Re-export for backward compatibility
+export { markdownToSlack } from "./blocks";
 
 const isDev = process.env.ENV === "development";
-const appUrl = process.env.APP_URL || "";
-
-/**
- * Convert GitHub-flavored markdown to Slack mrkdwn format.
- *
- * Key differences:
- * - GitHub: **bold**, *italic*, ~~strike~~, [text](url)
- * - Slack:  *bold*,  _italic_, ~strike~,   <url|text>
- */
-export function markdownToSlack(text: string): string {
-  return (
-    text
-      // Headers to bold (# Header -> *Header*)
-      .replace(/^#{1,6}\s+(.+)$/gm, "*$1*")
-      // Bold **text** -> *text* (must be before italic)
-      .replace(/\*\*(.+?)\*\*/g, "*$1*")
-      // Italic *text* -> _text_ (single asterisks, after bold is converted)
-      .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "_$1_")
-      // Strikethrough ~~text~~ -> ~text~
-      .replace(/~~(.+?)~~/g, "~$1~")
-      // Links [text](url) -> <url|text>
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<$2|$1>")
-      // Inline code already works the same
-      // Bullet points already work the same
-      // Remove excessive blank lines
-      .replace(/\n{3,}/g, "\n\n")
-  );
-}
 
 /**
  * Get the display name for an agent, with (dev) prefix if in development mode.
  */
 function getAgentDisplayName(agent: Agent): string {
   return isDev ? `(dev) ${agent.name}` : agent.name;
-}
-
-/**
- * Get a link to the task in the dashboard, or just the task ID if no APP_URL.
- */
-function getTaskLink(taskId: string): string {
-  const shortId = taskId.slice(0, 8);
-  if (appUrl) {
-    return `<${appUrl}?tab=tasks&task=${taskId}&expand=true|\`${shortId}\`>`;
-  }
-  return `\`${shortId}\``;
 }
 
 /**
@@ -72,28 +43,31 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
   }
 
   const client = app.client;
-  const taskLink = getTaskLink(task.id);
-  const footer = `_Check the full logs at ${taskLink}_`;
+  const agentName = agent.name;
 
   try {
     if (task.status === "completed") {
-      const output = task.output || "_Task completed._";
+      const output = task.output || "Task completed.";
       const slackOutput = markdownToSlack(output);
+      const blocks = buildCompletedBlocks({ agentName, taskId: task.id, body: slackOutput });
       await sendWithPersona(client, {
         channel: task.slackChannelId,
         thread_ts: task.slackThreadTs,
-        text: `${slackOutput}\n\n${footer}`,
+        text: slackOutput,
         username: getAgentDisplayName(agent),
         icon_emoji: getAgentEmoji(agent),
+        blocks,
       });
     } else if (task.status === "failed") {
       const reason = task.failureReason || "Unknown error";
+      const blocks = buildFailedBlocks({ agentName, taskId: task.id, reason });
       await sendWithPersona(client, {
         channel: task.slackChannelId,
         thread_ts: task.slackThreadTs,
-        text: `:x: *Task failed*\n\`\`\`${reason}\`\`\`\n${footer}`,
+        text: `Task failed: ${reason}`,
         username: getAgentDisplayName(agent),
         icon_emoji: getAgentEmoji(agent),
+        blocks,
       });
     }
 
@@ -105,33 +79,110 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
 }
 
 /**
- * Send a progress update to Slack.
+ * Send a progress update to Slack. Returns the message ts for chat.update tracking.
  */
-export async function sendProgressUpdate(task: AgentTask, progress: string): Promise<boolean> {
+export async function sendProgressUpdate(
+  task: AgentTask,
+  progress: string,
+): Promise<string | undefined> {
   const app = getSlackApp();
   if (!app || !task.slackChannelId || !task.slackThreadTs) {
-    return false;
+    return undefined;
   }
 
-  if (!task.agentId) return false;
+  if (!task.agentId) return undefined;
+
+  const agent = getAgentById(task.agentId);
+  if (!agent) return undefined;
+
+  const blocks = buildProgressBlocks({ agentName: agent.name, taskId: task.id, progress });
+
+  try {
+    return await sendWithPersona(app.client, {
+      channel: task.slackChannelId,
+      thread_ts: task.slackThreadTs,
+      text: progress,
+      username: getAgentDisplayName(agent),
+      icon_emoji: getAgentEmoji(agent),
+      blocks,
+    });
+  } catch (error) {
+    console.error(`[Slack] Failed to send progress update:`, error);
+    return undefined;
+  }
+}
+
+/**
+ * Update an existing progress message in-place via chat.update.
+ */
+export async function updateProgressInPlace(
+  task: AgentTask,
+  progress: string,
+  messageTs: string,
+): Promise<boolean> {
+  const app = getSlackApp();
+  if (!app || !task.slackChannelId || !task.agentId) return false;
 
   const agent = getAgentById(task.agentId);
   if (!agent) return false;
 
-  const taskLink = getTaskLink(task.id);
-  const footer = `_Check progress at ${taskLink}_`;
+  const blocks = buildProgressBlocks({ agentName: agent.name, taskId: task.id, progress });
 
   try {
-    await sendWithPersona(app.client, {
+    await app.client.chat.update({
       channel: task.slackChannelId,
-      thread_ts: task.slackThreadTs,
-      text: `:hourglass_flowing_sand: _${progress}_\n\n${footer}`,
-      username: getAgentDisplayName(agent),
-      icon_emoji: getAgentEmoji(agent),
+      ts: messageTs,
+      text: progress,
+      // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
+      blocks: blocks as any,
     });
     return true;
   } catch (error) {
-    console.error(`[Slack] Failed to send progress update:`, error);
+    console.error(`[Slack] Failed to update progress in-place:`, error);
+    return false;
+  }
+}
+
+/**
+ * Update the task message to its final state (completed/failed) via chat.update.
+ * Uses full blocks (not compact) since this is the only message for the task.
+ */
+export async function updateToFinal(task: AgentTask, messageTs: string): Promise<boolean> {
+  const app = getSlackApp();
+  if (!app || !task.slackChannelId || !task.agentId) return false;
+
+  const agent = getAgentById(task.agentId);
+  if (!agent) return false;
+
+  const agentName = agent.name;
+  let blocks: unknown[];
+  let text: string;
+
+  if (task.status === "completed") {
+    const output = task.output || "Task completed.";
+    const slackOutput = markdownToSlack(output);
+    blocks = buildCompletedBlocks({ agentName, taskId: task.id, body: slackOutput });
+    text = slackOutput;
+  } else if (task.status === "cancelled") {
+    blocks = buildCancelledBlocks({ agentName, taskId: task.id });
+    text = "Task cancelled";
+  } else {
+    const reason = task.failureReason || "Unknown error";
+    blocks = buildFailedBlocks({ agentName, taskId: task.id, reason });
+    text = `Task failed: ${reason}`;
+  }
+
+  try {
+    await app.client.chat.update({
+      channel: task.slackChannelId,
+      ts: messageTs,
+      text,
+      // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
+      blocks: blocks as any,
+    });
+    return true;
+  } catch (error) {
+    console.error(`[Slack] Failed to update task message to final state:`, error);
     return false;
   }
 }
@@ -144,24 +195,26 @@ async function sendWithPersona(
     text: string;
     username: string;
     icon_emoji: string;
+    blocks?: unknown[];
   },
-): Promise<void> {
-  await client.chat.postMessage({
+): Promise<string | undefined> {
+  const blocks = options.blocks ?? [
+    { type: "section", text: { type: "mrkdwn", text: options.text } },
+  ];
+
+  // Skip persona overrides in DM channels (assistant threads use the app's own identity)
+  const isDM = options.channel.startsWith("D");
+
+  const result = await client.chat.postMessage({
     channel: options.channel,
     thread_ts: options.thread_ts,
     text: options.text, // Fallback for notifications
-    username: options.username,
-    icon_emoji: options.icon_emoji,
-    blocks: [
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: options.text,
-        },
-      },
-    ],
+    ...(isDM ? {} : { username: options.username, icon_emoji: options.icon_emoji }),
+    // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects are typed as plain JSON
+    blocks: blocks as any,
   });
+
+  return result.ts;
 }
 
 function getAgentEmoji(agent: Agent): string {

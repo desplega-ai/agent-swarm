@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { z } from "zod";
 import { chunkContent } from "../be/chunking";
 import {
   createMemory,
@@ -8,7 +9,52 @@ import {
   updateMemoryEmbedding,
 } from "../be/db";
 import { getEmbedding, serializeEmbedding } from "../be/embedding";
-import { matchRoute } from "./utils";
+import { AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
+import { route } from "./route-def";
+import { json, jsonError } from "./utils";
+
+// ─── Route Definitions ───────────────────────────────────────────────────────
+
+const indexMemory = route({
+  method: "post",
+  path: "/api/memory/index",
+  pattern: ["api", "memory", "index"],
+  summary: "Ingest content into memory system (async embedding)",
+  tags: ["Memory"],
+  body: z.object({
+    agentId: z.string().uuid().optional(),
+    content: z.string().min(1),
+    name: z.string().min(1),
+    scope: AgentMemoryScopeSchema,
+    source: AgentMemorySourceSchema,
+    sourceTaskId: z.string().uuid().optional(),
+    sourcePath: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+  }),
+  responses: {
+    202: { description: "Content queued for embedding" },
+    400: { description: "Validation error" },
+  },
+});
+
+const searchMemory = route({
+  method: "post",
+  path: "/api/memory/search",
+  pattern: ["api", "memory", "search"],
+  summary: "Search memories by natural language query",
+  tags: ["Memory"],
+  auth: { apiKey: true, agentId: true },
+  body: z.object({
+    query: z.string().min(1),
+    limit: z.number().int().min(1).max(20).default(5),
+  }),
+  responses: {
+    200: { description: "Search results" },
+    400: { description: "Missing query or agent ID" },
+  },
+});
+
+// ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleMemory(
   req: IncomingMessage,
@@ -16,32 +62,11 @@ export async function handleMemory(
   pathSegments: string[],
   myAgentId: string | undefined,
 ): Promise<boolean> {
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "memory", "index"], true)) {
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = JSON.parse(Buffer.concat(chunks).toString());
+  if (indexMemory.match(req.method, pathSegments)) {
+    const parsed = await indexMemory.parse(req, res, pathSegments, new URLSearchParams());
+    if (!parsed) return true;
 
-    const { agentId, content, name, scope, source, sourceTaskId, sourcePath, tags } = body;
-
-    if (!content || !name || !scope || !source) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing required fields: content, name, scope, source" }));
-      return true;
-    }
-
-    if (!["agent", "swarm"].includes(scope)) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "scope must be 'agent' or 'swarm'" }));
-      return true;
-    }
-
-    if (!["manual", "file_index", "session_summary", "task_completion"].includes(source)) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Invalid source type" }));
-      return true;
-    }
+    const { agentId, content, name, scope, source, sourceTaskId, sourcePath, tags } = parsed.body;
 
     // Chunk content and create memories in a transaction (with dedup)
     const contentChunks = chunkContent(content);
@@ -94,58 +119,47 @@ export async function handleMemory(
       }
     })();
 
-    res.writeHead(202, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ queued: true, memoryIds }));
+    json(res, { queued: true, memoryIds }, 202);
     return true;
   }
 
-  // POST /api/memory/search - Search memories by natural language query
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "memory", "search"], true)) {
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = JSON.parse(Buffer.concat(chunks).toString());
-    const { query, limit = 5 } = body;
-    const searchAgentId = myAgentId;
-
-    if (!query || !searchAgentId) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing required fields: query, X-Agent-ID header" }));
+  if (searchMemory.match(req.method, pathSegments)) {
+    if (!myAgentId) {
+      jsonError(res, "Missing required fields: query, X-Agent-ID header", 400);
       return true;
     }
+
+    const parsed = await searchMemory.parse(req, res, pathSegments, new URLSearchParams());
+    if (!parsed) return true;
+
+    const { query, limit } = parsed.body;
 
     try {
       const queryEmbedding = await getEmbedding(query);
       if (!queryEmbedding) {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ results: [] }));
+        json(res, { results: [] });
         return true;
       }
 
-      const results = searchMemoriesByVector(queryEmbedding, searchAgentId, {
+      const results = searchMemoriesByVector(queryEmbedding, myAgentId, {
         scope: "all",
         limit: Math.min(limit, 20),
         isLead: false,
       });
 
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          results: results.map((r) => ({
-            id: r.id,
-            name: r.name,
-            content: r.content,
-            similarity: r.similarity,
-            source: r.source,
-            scope: r.scope,
-          })),
-        }),
-      );
+      json(res, {
+        results: results.map((r) => ({
+          id: r.id,
+          name: r.name,
+          content: r.content,
+          similarity: r.similarity,
+          source: r.source,
+          scope: r.scope,
+        })),
+      });
     } catch (err) {
       console.error("[memory-search] Error:", (err as Error).message);
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ results: [] }));
+      json(res, { results: [] });
     }
     return true;
   }

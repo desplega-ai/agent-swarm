@@ -31,13 +31,13 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
 
     # Ensure /dev/fuse exists (needed in some VM environments like Fly.io Firecracker)
     if [ ! -e /dev/fuse ]; then
-        sudo mknod /dev/fuse c 10 229
-        sudo chmod 666 /dev/fuse
+        mknod /dev/fuse c 10 229
+        chmod 666 /dev/fuse
     fi
 
     if [ -n "$ARCHIL_SHARED_DISK_NAME" ]; then
         echo "Mounting shared disk ($ARCHIL_SHARED_DISK_NAME) at /workspace/shared..."
-        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --shared "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
+        archil mount --shared "$ARCHIL_SHARED_DISK_NAME" /workspace/shared --region "$ARCHIL_REGION"
     fi
 
     # NOTE: Top-level shared directory pre-creation (thoughts/, memory/, etc.)
@@ -48,9 +48,10 @@ if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
         echo "Mounting personal disk ($ARCHIL_PERSONAL_DISK_NAME) at /workspace/personal..."
         # --force reclaims stale delegations from previous machine incarnations.
         # Personal disks are always single-client, so force is safe.
-        sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil mount --force "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
-        # FUSE mount comes up as root; fix ownership so worker user can write
-        sudo chown worker:worker /workspace/personal
+        # archil mount requires root — entrypoint runs as root (USER root in Dockerfile).
+        archil mount --force "$ARCHIL_PERSONAL_DISK_NAME" /workspace/personal --region "$ARCHIL_REGION"
+        # Brief pause for FUSE daemon to finish --force re-negotiation
+        sleep 1
     fi
     echo "===================="
 fi
@@ -62,6 +63,9 @@ fi
 # NOTE: Shared disk subdirectories are created per-agent below (see
 # "Setting up per-agent directories" block), NOT here.
 mkdir -p /workspace/personal/memory 2>/dev/null || true
+# chown individual dirs (not -R) to avoid EPERM on .archil system files
+chown worker:worker /workspace/personal 2>/dev/null || true
+chown worker:worker /workspace/personal/memory 2>/dev/null || true
 
 # Role defaults to worker, can be set to "lead"
 ROLE="${AGENT_ROLE:-worker}"
@@ -468,7 +472,7 @@ echo "=== Workspace Initialization ==="
 PERSONAL_DIR="/workspace/personal"
 if [ ! -f "$PERSONAL_DIR/todos.md" ]; then
     echo "Creating personal todos.md..."
-    cat > "$PERSONAL_DIR/todos.md" << EOF
+    cat > "$PERSONAL_DIR/todos.md" << EOF || echo "Warning: Could not create todos.md (disk may not be mounted)"
 # My TODOs
 
 ## Current
@@ -512,15 +516,20 @@ if [ -n "$AGENT_ID" ]; then
         AGENT_DIR="$AGENT_SHARED/$category/$AGENT_ID"
 
         # Create our subdir (auto-grants delegation on $AGENT_ID level)
-        # Use sudo because FUSE mount root is owned by root; UNIX perms
-        # are per-mount (not persisted to R2), so API's chmod doesn't help.
-        sudo mkdir -p "$AGENT_DIR" 2>/dev/null || true
-        sudo chown worker:worker "$AGENT_DIR" 2>/dev/null || true
+        # Entrypoint runs as root, so no sudo needed for mkdir.
+        mkdir -p "$AGENT_DIR" 2>/dev/null || true
 
         # Checkout for persistent ownership (survives reboots where dir already exists)
+        # Use -f (force) to reclaim stale delegations from destroyed/redeployed machines.
+        # Each agent is the sole writer for its own subdirectory, so force is safe.
+        # Use `yes` piped in to auto-confirm the force-checkout prompt (no --yes flag).
+        # No sudo — entrypoint runs as root; sudo can swallow stdin pipes.
         if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
-            sudo --preserve-env=ARCHIL_MOUNT_TOKEN archil checkout "$AGENT_DIR" 2>/dev/null || true
+            yes | archil checkout -f "$AGENT_DIR" 2>/dev/null || true
         fi
+
+        # chown AFTER checkout — need Archil delegation before FUSE allows chown
+        chown worker:worker "$AGENT_DIR" 2>/dev/null || true
     done
 
     # Create standard subdirectories (within owned dirs, always succeeds)
@@ -537,4 +546,4 @@ echo ""
 
 # Run the agent using compiled binary
 echo "Starting $ROLE..."
-exec /usr/local/bin/agent-swarm "$ROLE" "$@"
+exec gosu worker /usr/local/bin/agent-swarm "$ROLE" "$@"

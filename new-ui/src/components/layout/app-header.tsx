@@ -27,6 +27,7 @@ export function AppHeader() {
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <div className={cn("size-2 rounded-full", isHealthy ? "bg-emerald-500" : "bg-red-500")} />
           <span className="hidden sm:inline">{isHealthy ? "Connected" : "Disconnected"}</span>
+          {health?.version && <span>v{health.version}</span>}
         </div>
 
         {/* Theme toggle */}

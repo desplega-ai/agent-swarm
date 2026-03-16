@@ -537,7 +537,7 @@ describe("Workflow HTTP API", () => {
       });
       expect(res.status).toBe(400);
       const body = (await res.json()) as { error: string };
-      expect(body.error).toBe("Invalid definition");
+      expect(body.error).toContain("Invalid definition");
     });
   });
 });

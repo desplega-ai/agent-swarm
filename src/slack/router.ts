@@ -1,66 +1,9 @@
 import { getAgentById, getAgentWorkingOnThread, getAllAgents } from "../be/db";
 import type { AgentMatch } from "./types";
 
-interface ThreadContext {
+export interface ThreadContext {
   channelId: string;
   threadTs: string;
-}
-
-// Common 3-letter words to exclude from matching
-const COMMON_WORDS = new Set([
-  "the",
-  "and",
-  "for",
-  "are",
-  "but",
-  "not",
-  "you",
-  "all",
-  "can",
-  "had",
-  "her",
-  "was",
-  "one",
-  "our",
-  "out",
-  "has",
-  "his",
-  "how",
-  "its",
-  "let",
-  "may",
-  "new",
-  "now",
-  "old",
-  "see",
-  "way",
-  "who",
-  "boy",
-  "did",
-  "get",
-  "say",
-  "she",
-  "too",
-  "use",
-  "hey",
-  "hi",
-  "hello",
-  "please",
-  "help",
-]);
-
-/**
- * Check if a word is suitable for agent name matching.
- * Allows 3+ char words if they're not common words.
- * Always allows uppercase words (CEO, CTO, etc).
- */
-function isMatchableWord(word: string): boolean {
-  if (word.length < 3) return false;
-  // Always allow fully uppercase words (acronyms like CEO, CTO)
-  if (word === word.toUpperCase() && word.length >= 3) return true;
-  // Allow 3+ char words that aren't common
-  if (word.length >= 3 && !COMMON_WORDS.has(word.toLowerCase())) return true;
-  return false;
 }
 
 /**
@@ -69,10 +12,7 @@ function isMatchableWord(word: string): boolean {
  * Routing rules:
  * - `swarm#<uuid>` → exact agent by ID
  * - `swarm#all` → all non-lead agents
- * - Partial name match (3+ chars, not common words) → agent by name
- * - Multiple partial matches → route to lead (let lead decide)
- * - Thread follow-up (no match but agent working on thread) → route to that agent
- * - Bot @mention only → lead agent
+ * - Everything else → lead agent
  */
 export function routeMessage(
   text: string,
@@ -104,46 +44,28 @@ export function routeMessage(
     }
   }
 
-  // Check for partial name matches (3+ chars, not common words)
-  if (matches.length === 0) {
-    for (const agent of agents) {
-      const nameWords = agent.name.split(/\s+/).filter(isMatchableWord);
-      for (const word of nameWords) {
-        const regex = new RegExp(`\\b${escapeRegex(word)}\\b`, "i");
-        if (regex.test(text)) {
-          if (!matches.some((m) => m.agent.id === agent.id)) {
-            matches.push({ agent, matchedText: word });
-          }
-          break;
-        }
-      }
-    }
-
-    // If multiple agents matched a partial name, route to lead instead (let lead decide)
-    if (matches.length > 1) {
-      const lead = agents.find((a) => a.isLead);
-      if (lead) {
-        const matchedWords = matches.map((m) => m.matchedText).join(", ");
-        const matchedAgents = matches.map((m) => m.agent.name).join(", ");
-        return [
-          {
-            agent: lead,
-            matchedText: `ambiguous match "${matchedWords}" (could be: ${matchedAgents})`,
-          },
-        ];
-      }
-    }
-  }
-
-  // Thread follow-up: If no matches and we're in a thread, check if an agent is working on it
+  // Thread follow-up — route to agent already working in this thread
   if (matches.length === 0 && threadContext) {
     const workingAgent = getAgentWorkingOnThread(threadContext.channelId, threadContext.threadTs);
     if (workingAgent && workingAgent.status !== "offline") {
+      console.log(
+        `[Slack] Thread follow-up: routing to agent ${workingAgent.name} (${workingAgent.id}) in thread ${threadContext.threadTs}`,
+      );
       matches.push({ agent: workingAgent, matchedText: "thread follow-up" });
+    } else if (workingAgent) {
+      // Agent is offline but thread has history — route to lead without requiring @mention
+      console.log(
+        `[Slack] Thread follow-up: agent ${workingAgent.name} is offline, routing to lead`,
+      );
+      const allAgents = getAllAgents();
+      const lead = allAgents.find((a) => a.isLead && a.status !== "offline");
+      if (lead) {
+        matches.push({ agent: lead, matchedText: "thread follow-up (lead fallback)" });
+      }
     }
   }
 
-  // If only bot was mentioned and no agents matched, route to lead
+  // Default to lead for everything else
   if (matches.length === 0 && botMentioned) {
     const lead = agents.find((a) => a.isLead);
     if (lead) {
@@ -152,10 +74,6 @@ export function routeMessage(
   }
 
   return matches;
-}
-
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**

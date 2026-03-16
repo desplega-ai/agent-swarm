@@ -1173,10 +1173,10 @@ export function getCompletedSlackTasks(): AgentTask[] {
   return getDb()
     .prepare<AgentTaskRow, []>(
       `SELECT * FROM agent_tasks
-       WHERE source = 'slack'
-       AND slackChannelId IS NOT NULL
+       WHERE slackChannelId IS NOT NULL
        AND status IN ('completed', 'failed')
-       ORDER BY lastUpdatedAt DESC`,
+       ORDER BY lastUpdatedAt DESC
+       LIMIT 200`,
     )
     .all()
     .map(rowToAgentTask);
@@ -1244,29 +1244,28 @@ export function getInProgressSlackTasks(): AgentTask[] {
   return getDb()
     .prepare<AgentTaskRow, []>(
       `SELECT * FROM agent_tasks
-       WHERE source = 'slack'
-       AND slackChannelId IS NOT NULL
+       WHERE slackChannelId IS NOT NULL
        AND status = 'in_progress'
-       ORDER BY lastUpdatedAt DESC`,
+       ORDER BY lastUpdatedAt DESC
+       LIMIT 200`,
     )
     .all()
     .map(rowToAgentTask);
 }
 
 /**
- * Find an agent that has an active task or inbox message in a specific Slack thread.
- * Used for routing thread follow-up messages to the same agent.
- * Checks both tasks (for workers) and inbox_messages (for leads).
+ * Find the most recent agent associated with a specific Slack thread.
+ * No status filter — returns the last agent that touched this thread regardless of task state.
+ * This is intentional: follow-up messages should route to the same agent even after task completion.
+ * Callers (e.g. assistant.ts) apply their own status checks (e.g. agent.status !== "offline").
  */
 export function getAgentWorkingOnThread(channelId: string, threadTs: string): Agent | null {
-  // First check tasks (for workers)
   const taskRow = getDb()
     .prepare<AgentTaskRow, [string, string]>(
       `SELECT * FROM agent_tasks
        WHERE source = 'slack'
        AND slackChannelId = ?
        AND slackThreadTs = ?
-       AND status IN ('in_progress', 'pending')
        ORDER BY createdAt DESC
        LIMIT 1`,
     )
@@ -1274,21 +1273,45 @@ export function getAgentWorkingOnThread(channelId: string, threadTs: string): Ag
 
   if (taskRow?.agentId) return getAgentById(taskRow.agentId);
 
-  // Then check inbox_messages (for leads)
-  const inboxRow = getDb()
-    .prepare<{ agentId: string }, [string, string]>(
-      `SELECT agentId FROM inbox_messages
+  return null;
+}
+
+/**
+ * Find the latest active (in_progress or pending) task in a specific Slack thread.
+ * Used for dependency chaining in additive Slack buffer.
+ */
+export function getLatestActiveTaskInThread(channelId: string, threadTs: string): AgentTask | null {
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      `SELECT * FROM agent_tasks
        WHERE source = 'slack'
        AND slackChannelId = ?
+       AND slackThreadTs = ?
+       AND status IN ('in_progress', 'pending')
+       ORDER BY createdAt DESC, rowid DESC
+       LIMIT 1`,
+    )
+    .get(channelId, threadTs);
+
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Find the most recent task in a Slack thread, regardless of source or status.
+ * Unlike getAgentWorkingOnThread (which filters source='slack'), this finds ALL tasks
+ * including worker tasks that inherited Slack metadata via parentTaskId.
+ */
+export function getMostRecentTaskInThread(channelId: string, threadTs: string): AgentTask | null {
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      `SELECT * FROM agent_tasks
+       WHERE slackChannelId = ?
        AND slackThreadTs = ?
        ORDER BY createdAt DESC
        LIMIT 1`,
     )
     .get(channelId, threadTs);
-
-  if (inboxRow?.agentId) return getAgentById(inboxRow.agentId);
-
-  return null;
+  return row ? rowToAgentTask(row) : null;
 }
 
 export function completeTask(id: string, output?: string): AgentTask | null {
@@ -1746,6 +1769,28 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       : options?.status === "backlog"
         ? "backlog"
         : "unassigned";
+
+  // Inherit Slack/AgentMail metadata from parent task (unless explicitly overridden)
+  if (options?.parentTaskId) {
+    const parent = getTaskById(options.parentTaskId);
+    if (parent) {
+      if (parent.slackChannelId && !options.slackChannelId) {
+        options.slackChannelId = parent.slackChannelId;
+      }
+      if (parent.slackThreadTs && !options.slackThreadTs) {
+        options.slackThreadTs = parent.slackThreadTs;
+      }
+      if (parent.slackUserId && !options.slackUserId) {
+        options.slackUserId = parent.slackUserId;
+      }
+      if (parent.agentmailInboxId && !options.agentmailInboxId) {
+        options.agentmailInboxId = parent.agentmailInboxId;
+      }
+      if (parent.agentmailThreadId && !options.agentmailThreadId) {
+        options.agentmailThreadId = parent.agentmailThreadId;
+      }
+    }
+  }
 
   const row = getDb()
     .prepare<AgentTaskRow, (string | number | null)[]>(

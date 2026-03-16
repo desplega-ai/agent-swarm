@@ -1,15 +1,34 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getServicesByAgentId } from "../be/db";
+import { route } from "./route-def";
+import { json, jsonError } from "./utils";
+
+// ─── Route Definitions ───────────────────────────────────────────────────────
+
+const getEcosystem = route({
+  method: "get",
+  path: "/ecosystem",
+  pattern: ["ecosystem"],
+  summary: "Get PM2 ecosystem config for agent services",
+  tags: ["Ecosystem"],
+  auth: { apiKey: true, agentId: true },
+  responses: {
+    200: { description: "PM2 ecosystem config" },
+    400: { description: "Missing X-Agent-ID" },
+  },
+});
+
+// ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleEcosystem(
   req: IncomingMessage,
   res: ServerResponse,
+  pathSegments: string[],
   myAgentId: string | undefined,
 ): Promise<boolean> {
-  if (req.method === "GET" && req.url === "/ecosystem") {
+  if (getEcosystem.match(req.method, pathSegments)) {
     if (!myAgentId) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
+      jsonError(res, "Missing X-Agent-ID header", 400);
       return true;
     }
 
@@ -36,8 +55,7 @@ export async function handleEcosystem(
         }),
     };
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(ecosystem));
+    json(res, ecosystem);
     return true;
   }
 
