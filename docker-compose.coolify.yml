@@ -503,7 +503,7 @@ services:
 
   dashboard:
     build:
-      context: ./ui
+      context: ./new-ui
       dockerfile: Dockerfile
       args:
         - VITE_API_URL=${APP_URL:-https://swarm.cool.jamalavedra.com}
