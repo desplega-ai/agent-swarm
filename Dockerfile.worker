@@ -39,7 +39,7 @@ RUN apt-get update && apt-get install -y curl ca-certificates gnupg \
     vim nano \
     build-essential make cmake gcc g++ \
     python3 python3-pip python3-venv \
-    jq tree htop unzip zip tar gzip sqlite3 \
+    jq tree htop unzip zip tar gzip sqlite3 fuse3 libfuse2 gosu \
     openssh-client \
     sudo \
     nodejs \
@@ -59,8 +59,9 @@ ENV BUN_INSTALL="/root/.bun"
 ENV PATH="$BUN_INSTALL/bin:$PATH"
 
 # Create non-root user with sudo access (passwordless)
-# NOTE: Claude requires non-root for --dangerously-skip-permissions
-# Worker runs as non-root but CAN use sudo for installing packages
+# NOTE: Container entrypoint runs as root for FUSE mount compatibility.
+# Final exec drops to worker via gosu (Claude rejects --dangerously-skip-permissions as root).
+# Worker user retained for file ownership and Claude process execution.
 RUN useradd -m -s /bin/bash -G sudo worker \
     && echo "worker ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
@@ -126,6 +127,9 @@ RUN npm install -g \
     @desplega.ai/qa-use@2.8.7 \
     && qa-use install-deps
 
+# Install archil CLI for FUSE/R2-backed disk mounts
+RUN curl https://s3.amazonaws.com/archil-client/install | sh
+
 # Copy binary from builder (changes on every code change — keep late)
 COPY --from=builder /build/agent-swarm /usr/local/bin/agent-swarm
 RUN chmod +x /usr/local/bin/agent-swarm
@@ -143,16 +147,16 @@ RUN mkdir -p /workspace /logs && chown worker:worker /workspace /logs
 COPY --chown=worker:worker docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-USER worker
+USER root
 WORKDIR /workspace
 
-# Create static workspace directories (build-time)
-RUN mkdir -p /workspace/personal /workspace/shared/thoughts/shared/plans \
-    /workspace/shared/thoughts/shared/research \
-    /workspace/personal/memory /workspace/shared/memory
+# Create mount-point directories (must be empty for Archil FUSE mounts)
+RUN mkdir -p /workspace/personal /workspace/shared
 
+# NOTE: Do NOT use VOLUME for /workspace/shared or /workspace/personal.
+# Fly.io's init sets up volume mount points that prevent FUSE from mounting
+# on top of them (EINVAL). Archil FUSE mounts replace Docker volumes here.
 VOLUME ["/logs"]
-VOLUME ["/workspace/personal", "/workspace/shared"]
 
 # Expose service port for PM2 processes
 EXPOSE 3000

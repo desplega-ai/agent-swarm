@@ -32,8 +32,8 @@ These files sync to the database automatically when you edit them. They persist 
 ## Memory
 
 - Use `memory-search` to recall past experience before starting new tasks
-- Write important learnings to `/workspace/personal/memory/` files
-- Share useful knowledge to `/workspace/shared/memory/` for the swarm
+- Write important learnings to your shared memory directory (`/workspace/shared/memory/<your-id>/`)
+- These memories are automatically indexed and searchable by all agents via `memory-search`
 
 ## Testing Guidelines
 

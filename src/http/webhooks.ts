@@ -42,33 +42,76 @@ import {
   verifyGitLabWebhook,
 } from "../gitlab";
 import { workflowEventBus } from "../workflows/event-bus";
-import { matchRoute } from "./utils";
+import { route } from "./route-def";
+
+// ─── Route Definitions (documentation only — webhooks handle their own body parsing) ─
+
+const githubWebhook = route({
+  method: "post",
+  path: "/api/github/webhook",
+  pattern: ["api", "github", "webhook"],
+  summary: "Handle GitHub webhook events",
+  tags: ["Webhooks"],
+  auth: { apiKey: false },
+  responses: {
+    200: { description: "Event processed" },
+    401: { description: "Invalid signature" },
+    503: { description: "GitHub integration not configured" },
+  },
+});
+
+const gitlabWebhook = route({
+  method: "post",
+  path: "/api/gitlab/webhook",
+  pattern: ["api", "gitlab", "webhook"],
+  summary: "Handle GitLab webhook events",
+  tags: ["Webhooks"],
+  auth: { apiKey: false },
+  responses: {
+    200: { description: "Event processed" },
+    401: { description: "Invalid token" },
+    503: { description: "GitLab integration not configured" },
+  },
+});
+
+const agentmailWebhook = route({
+  method: "post",
+  path: "/api/agentmail/webhook",
+  pattern: ["api", "agentmail", "webhook"],
+  summary: "Handle AgentMail webhook events",
+  tags: ["Webhooks"],
+  auth: { apiKey: false },
+  responses: {
+    200: { description: "Event received" },
+    401: { description: "Invalid signature" },
+    503: { description: "AgentMail integration not configured" },
+  },
+});
+
+// ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleWebhooks(
   req: IncomingMessage,
   res: ServerResponse,
   pathSegments: string[],
 ): Promise<boolean> {
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "github", "webhook"])) {
-    // Check if GitHub integration is enabled
+  // GitHub webhook — needs raw body for signature verification
+  if (githubWebhook.match(req.method, pathSegments)) {
     if (!isGitHubEnabled()) {
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "GitHub integration not configured" }));
       return true;
     }
 
-    // Get event type and signature
     const eventType = req.headers["x-github-event"] as string | undefined;
     const signature = req.headers["x-hub-signature-256"] as string | undefined;
 
-    // Parse request body
     const chunks: Buffer[] = [];
     for await (const chunk of req) {
       chunks.push(chunk);
     }
     const rawBody = Buffer.concat(chunks).toString();
 
-    // Verify webhook signature
     const isValid = await verifyWebhookSignature(rawBody, signature ?? null);
     if (!isValid) {
       console.log("[GitHub] Invalid webhook signature");
@@ -77,7 +120,6 @@ export async function handleWebhooks(
       return true;
     }
 
-    // Handle ping event (webhook setup verification)
     if (eventType === "ping") {
       console.log("[GitHub] Received ping event - webhook configured successfully");
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -85,7 +127,6 @@ export async function handleWebhooks(
       return true;
     }
 
-    // Parse JSON body
     let body: unknown;
     try {
       body = JSON.parse(rawBody);
@@ -97,7 +138,6 @@ export async function handleWebhooks(
 
     console.log(`[GitHub] Received ${eventType} event`);
 
-    // Route to appropriate handler
     let result: { created: boolean; taskId?: string } = { created: false };
 
     try {
@@ -182,7 +222,7 @@ export async function handleWebhooks(
       res.end(JSON.stringify(result));
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
-      console.error(`[GitHub] ❌ Error handling ${eventType} event: ${errorMessage}`);
+      console.error(`[GitHub] Error handling ${eventType} event: ${errorMessage}`);
       if (err instanceof Error && err.stack) {
         console.error(err.stack);
       }
@@ -192,19 +232,14 @@ export async function handleWebhooks(
     return true;
   }
 
-  // ============================================================================
-  // GitLab Webhook Endpoint
-  // ============================================================================
-
-  // POST /api/gitlab/webhook - Handle GitLab webhook events
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "gitlab", "webhook"])) {
+  // GitLab webhook — needs raw body + custom token verification
+  if (gitlabWebhook.match(req.method, pathSegments)) {
     if (!isGitLabEnabled()) {
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "GitLab integration not configured" }));
       return true;
     }
 
-    // Verify X-Gitlab-Token header
     const token = req.headers["x-gitlab-token"] as string | undefined;
     if (!verifyGitLabWebhook(token)) {
       console.log("[GitLab] Invalid webhook token");
@@ -213,7 +248,6 @@ export async function handleWebhooks(
       return true;
     }
 
-    // Read and parse body
     const chunks: Buffer[] = [];
     for await (const chunk of req) {
       chunks.push(chunk);
@@ -314,27 +348,20 @@ export async function handleWebhooks(
     return true;
   }
 
-  // ============================================================================
-  // AgentMail Webhook Endpoint
-  // ============================================================================
-
-  // POST /api/agentmail/webhook - Handle AgentMail webhook events
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "agentmail", "webhook"])) {
-    // Check if AgentMail integration is enabled
+  // AgentMail webhook — needs raw body for Svix signature verification
+  if (agentmailWebhook.match(req.method, pathSegments)) {
     if (!isAgentMailEnabled()) {
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "AgentMail integration not configured" }));
       return true;
     }
 
-    // Read raw body (required for Svix signature verification)
     const chunks: Buffer[] = [];
     for await (const chunk of req) {
       chunks.push(chunk);
     }
     const rawBody = Buffer.concat(chunks).toString();
 
-    // Extract Svix headers for verification
     const svixHeaders: Record<string, string> = {};
     for (const key of ["svix-id", "svix-timestamp", "svix-signature"]) {
       const value = req.headers[key];
@@ -343,7 +370,6 @@ export async function handleWebhooks(
       }
     }
 
-    // Verify webhook signature
     const verified = verifyAgentMailWebhook(rawBody, svixHeaders);
     if (!verified) {
       console.log("[AgentMail] Invalid webhook signature");
@@ -357,10 +383,8 @@ export async function handleWebhooks(
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ received: true }));
 
-    // Process webhook asynchronously
     const payload = verified as AgentMailWebhookPayload;
 
-    // Filter by inbox domain (only process messages for inboxes we care about)
     if (
       payload.message &&
       !isInboxAllowed(payload.message.inbox_id, process.env.AGENTMAIL_INBOX_DOMAIN_FILTER)
@@ -372,7 +396,6 @@ export async function handleWebhooks(
       return true;
     }
 
-    // Filter by sender domain (security — reject messages from untrusted senders)
     if (
       payload.message &&
       !isSenderAllowed(payload.message.from_, process.env.AGENTMAIL_SENDER_DOMAIN_FILTER)

@@ -82,4 +82,16 @@ describe("isSenderAllowed", () => {
     expect(isSenderAllowed("", "a.com")).toBe(false);
     expect(isSenderAllowed([], "a.com")).toBe(false);
   });
+
+  test("extracts domain from 'Name <email>' format (string)", () => {
+    expect(isSenderAllowed("Taras Yarema <t@desplega.ai>", "desplega.ai,desplega.sh")).toBe(true);
+  });
+
+  test("extracts domain from 'Name <email>' format (array)", () => {
+    expect(isSenderAllowed(["Taras <t@desplega.ai>"], "desplega.ai")).toBe(true);
+  });
+
+  test("rejects non-matching domain in 'Name <email>' format", () => {
+    expect(isSenderAllowed("Taras <t@evil.com>", "desplega.ai")).toBe(false);
+  });
 });

@@ -22,6 +22,19 @@ export function selectRandomCredential(value: string): {
 }
 
 /**
+ * Validate that at least one Claude credential is available.
+ * Priority: CLAUDE_CODE_OAUTH_TOKEN > ANTHROPIC_API_KEY.
+ * Returns the credential type found, or throws if neither is set.
+ */
+export function validateClaudeCredentials(
+  env: Record<string, string | undefined>,
+): "oauth" | "api_key" {
+  if (env.CLAUDE_CODE_OAUTH_TOKEN) return "oauth";
+  if (env.ANTHROPIC_API_KEY) return "api_key";
+  throw new Error("No Claude credentials found. Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY.");
+}
+
+/**
  * For credential env vars that contain comma-separated values,
  * randomly select one to distribute load across subscriptions.
  */
