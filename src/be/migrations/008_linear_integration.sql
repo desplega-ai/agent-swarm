@@ -88,6 +88,7 @@ CREATE TABLE agent_tasks_new (
     scheduleId TEXT,
     workflowRunId TEXT REFERENCES workflow_runs(id),
     workflowRunStepId TEXT REFERENCES workflow_run_steps(id),
+    dir TEXT,
     createdAt TEXT NOT NULL,
     lastUpdatedAt TEXT NOT NULL,
     finishedAt TEXT,
