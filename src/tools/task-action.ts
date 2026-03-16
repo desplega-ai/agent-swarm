@@ -60,6 +60,14 @@ export const registerTaskActionTool = (server: McpServer) => {
         // For 'reject' action:
         reason: z.string().optional().describe("Reason for rejection (optional for 'reject')."),
         // For 'create' action:
+        dir: z
+          .string()
+          .min(1)
+          .startsWith("/")
+          .optional()
+          .describe(
+            "Working directory (absolute path) for the agent to start in. Only used with 'create' action.",
+          ),
         model: z
           .enum(["haiku", "sonnet", "opus"])
           .optional()
@@ -75,7 +83,8 @@ export const registerTaskActionTool = (server: McpServer) => {
       }),
     },
     async (input, requestInfo, _meta) => {
-      const { action, task, taskType, tags, priority, dependsOn, taskId, reason, model } = input;
+      const { action, task, taskType, tags, priority, dependsOn, taskId, reason, dir, model } =
+        input;
 
       if (!requestInfo.agentId) {
         return {
@@ -104,6 +113,7 @@ export const registerTaskActionTool = (server: McpServer) => {
               tags,
               priority,
               dependsOn,
+              dir,
               model,
             });
             return {

@@ -12,7 +12,7 @@ Agent Swarm exposes its functionality through MCP (Model Context Protocol) tools
 All MCP tools have structured annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) to improve Claude Code's Tool Search discoverability. Tools are split into two tiers:
 
 - **Core tools** (15) — Always available in context: task lifecycle, basic communication, memory recall, and swarm awareness
-- **Deferred tools** (35) — Discovered on demand via Claude Code's Tool Search when the agent needs them (scheduling, epics, config, file operations, etc.)
+- **Deferred tools** (33) — Discovered on demand via Claude Code's Tool Search when the agent needs them (scheduling, epics, config, file operations, etc.)
 
 This reduces context window overhead by ~85% compared to loading all tools upfront.
 
@@ -71,6 +71,7 @@ Send a task to a specific agent, create an unassigned task, or offer a task for 
 | `dependsOn` | array | No | Task IDs this depends on |
 | `epicId` | uuid | No | Associated epic |
 | `parentTaskId` | uuid | No | Parent task for session continuity |
+| `dir` | string | No | Working directory (absolute path) for the agent to start in |
 | `model` | string | No | Model for this task: `haiku`, `sonnet`, or `opus`. Falls back to agent/global `MODEL_OVERRIDE` config, then `opus` |
 
 ### get-task-details
@@ -156,13 +157,12 @@ Delete a configuration entry by its ID.
 
 ### slack-reply
 
-Reply to a Slack thread associated with a task or inbox message.
+Reply to a Slack thread associated with a task.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `message` | string | Yes | Message to send |
 | `taskId` | uuid | No | Task context |
-| `inboxMessageId` | uuid | No | Inbox message context |
 
 ### slack-read
 
@@ -171,7 +171,6 @@ Read messages from a Slack thread or channel.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `taskId` | uuid | No | Task thread |
-| `inboxMessageId` | uuid | No | Inbox message thread |
 | `channelId` | string | No | Channel ID (leads only) |
 | `limit` | number | No | Max messages (default: 20) |
 
@@ -198,7 +197,6 @@ Upload a file to a Slack channel or thread (max 1 GB).
 | `content` | string | No | Base64-encoded file content |
 | `filename` | string | No | Name for the file in Slack |
 | `taskId` | uuid | No | Task context for thread |
-| `inboxMessageId` | uuid | No | Inbox message context |
 | `channelId` | string | No | Direct channel (leads only) |
 | `initialComment` | string | No | Message to post with the file |
 
@@ -210,27 +208,7 @@ Download a file from Slack by file ID or URL.
 |-----------|------|----------|-------------|
 | `fileId` | string | No | Slack file ID |
 | `url` | string | No | Direct download URL |
-| `savePath` | string | No | Where to save (default: `/workspace/shared/downloads/slack/`) |
-
-### inbox-delegate
-
-Delegate an inbox message to a worker agent by creating a task. The task inherits Slack context for replies.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `inboxMessageId` | uuid | Yes | Inbox message to delegate |
-| `agentId` | uuid | Yes | Worker to delegate to |
-| `taskDescription` | string | No | Custom task description |
-| `offerMode` | boolean | No | Offer instead of direct assign |
-| `parentTaskId` | uuid | No | Parent task for session continuity |
-
-### get-inbox-message
-
-Returns detailed information about a specific inbox message. Lead only.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `inboxMessageId` | uuid | Yes | Inbox message ID |
+| `savePath` | string | No | Where to save (default: `/workspace/shared/downloads/{agentId}/slack/`) |
 
 ### register-agentmail-inbox
 
@@ -255,6 +233,7 @@ Manage tasks in the pool: create, claim, release, accept, reject, or move to/fro
 | `task` | string | Varies | Required for create |
 | `priority` | number | No | Priority 0-100 |
 | `tags` | array | No | Tags for filtering |
+| `dir` | string | No | Working directory (absolute path) for the agent to start in (only used with `create` action) |
 | `model` | string | No | Model for the created task: `haiku`, `sonnet`, or `opus` (only used with `create` action) |
 
 ## Messaging Tools

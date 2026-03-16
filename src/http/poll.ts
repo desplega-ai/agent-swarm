@@ -1,6 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
-  claimInboxMessages,
   claimMentions,
   claimOfferedTask,
   getAgentById,
@@ -14,7 +13,26 @@ import {
   markEpicsProgressNotified,
   startTask,
 } from "../be/db";
-import { matchRoute } from "./utils";
+import { route } from "./route-def";
+import { json, jsonError } from "./utils";
+
+// ─── Route Definitions ───────────────────────────────────────────────────────
+
+const pollTriggers = route({
+  method: "get",
+  path: "/api/poll",
+  pattern: ["api", "poll"],
+  summary: "Poll for triggers (tasks, mentions, epic updates)",
+  tags: ["Poll"],
+  auth: { apiKey: true, agentId: true },
+  responses: {
+    200: { description: "Trigger data or null" },
+    400: { description: "Missing X-Agent-ID" },
+    404: { description: "Agent not found" },
+  },
+});
+
+// ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handlePoll(
   req: IncomingMessage,
@@ -22,10 +40,9 @@ export async function handlePoll(
   pathSegments: string[],
   myAgentId: string | undefined,
 ): Promise<boolean> {
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "poll"])) {
+  if (pollTriggers.match(req.method, pathSegments)) {
     if (!myAgentId) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
+      jsonError(res, "Missing X-Agent-ID header", 400);
       return true;
     }
 
@@ -99,19 +116,6 @@ export async function handlePoll(
           // task_assigned trigger above. This is more reliable and visible than the
           // old poll-based notification approach.
 
-          // Check for unread Slack inbox messages
-          // Atomically claim messages to prevent duplicate processing
-          const claimedInbox = claimInboxMessages(myAgentId, 5);
-          if (claimedInbox.length > 0) {
-            return {
-              trigger: {
-                type: "slack_inbox_message",
-                count: claimedInbox.length,
-                messages: claimedInbox,
-              },
-            };
-          }
-
           // Check for epic progress updates (tasks completed/failed for active epics)
           // This trigger helps lead plan next steps for epics - similar to ralph loop
           const epicsWithUpdates = getEpicsWithProgressUpdates();
@@ -152,25 +156,21 @@ export async function handlePoll(
       })();
     } catch (error) {
       console.error("[/api/poll] Database error:", error);
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          error: "Database error occurred while polling for triggers",
-          details: error instanceof Error ? error.message : String(error),
-        }),
+      jsonError(
+        res,
+        `Database error occurred while polling for triggers: ${error instanceof Error ? error.message : String(error)}`,
+        500,
       );
       return true;
     }
 
     // Handle error case
     if ("error" in result) {
-      res.writeHead(result.status ?? 500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: result.error }));
+      jsonError(res, result.error, result.status ?? 500);
       return true;
     }
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(result));
+    json(res, result);
     return true;
   }
 

@@ -1,3 +1,4 @@
+import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import type { TemplateResponse } from "../../templates/schema.ts";
 import {
@@ -206,6 +207,71 @@ async function fetchResolvedEnv(
 }
 
 /**
+ * Convert a tool call into a human-readable progress description.
+ */
+function toolCallToProgress(toolName: string, args: unknown): string {
+  const a = args as Record<string, unknown>;
+  const shortPath = (p: unknown) => {
+    if (typeof p !== "string") return "";
+    // Show last 2 path segments for readability
+    const parts = p.split("/");
+    return parts.length > 2 ? parts.slice(-2).join("/") : p;
+  };
+
+  switch (toolName) {
+    case "Read":
+      return `Reading ${shortPath(a.file_path)}`;
+    case "Edit":
+    case "MultiEdit":
+      return `Editing ${shortPath(a.file_path)}`;
+    case "Write":
+      return `Writing ${shortPath(a.file_path)}`;
+    case "Bash":
+      return a.description ? `${a.description}` : "Running shell command";
+    case "Grep":
+      return `Searching for "${a.pattern}"`;
+    case "Glob":
+      return `Finding files matching ${a.pattern}`;
+    case "Agent":
+    case "Task":
+      return a.description ? `${a.description}` : "Delegating sub-task";
+    case "Skill":
+      return `Running /${a.skill}`;
+    default: {
+      // MCP tools: mcp__server__tool → "server:tool"
+      if (toolName.startsWith("mcp__")) {
+        const parts = toolName.split("__");
+        return parts.length >= 3 ? `Using ${parts[1]}:${parts[2]}` : `Using ${toolName}`;
+      }
+      return `Using ${toolName}`;
+    }
+  }
+}
+
+/**
+ * Report task progress via the API (fire-and-forget).
+ */
+async function updateProgressViaAPI(
+  apiUrl: string,
+  apiKey: string,
+  taskId: string,
+  progress: string,
+): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+  try {
+    await fetch(`${apiUrl}/api/tasks/${taskId}/progress`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ progress }),
+    });
+  } catch {
+    // Non-blocking — progress update failure is not critical
+  }
+}
+
+/**
  * Ensure task is marked as completed or failed via the API.
  * This is called when a Claude process exits to ensure task status is updated,
  * regardless of whether the agent explicitly called store-progress.
@@ -317,6 +383,8 @@ async function getPausedTasksFromAPI(config: ApiConfig): Promise<
     progress?: string;
     claudeSessionId?: string;
     parentTaskId?: string;
+    dir?: string;
+    vcsRepo?: string;
     finishedAt?: string;
     output?: string;
     status?: string;
@@ -347,6 +415,8 @@ async function getPausedTasksFromAPI(config: ApiConfig): Promise<
         progress?: string;
         claudeSessionId?: string;
         parentTaskId?: string;
+        dir?: string;
+        vcsRepo?: string;
         finishedAt?: string;
         output?: string;
         status?: string;
@@ -635,7 +705,6 @@ async function registerActiveSession(
   session: {
     taskId: string;
     triggerType: string;
-    inboxMessageId?: string;
     taskDescription?: string;
   },
 ): Promise<void> {
@@ -652,7 +721,6 @@ async function registerActiveSession(
         agentId: config.agentId,
         taskId: session.taskId,
         triggerType: session.triggerType,
-        inboxMessageId: session.inboxMessageId,
         taskDescription: session.taskDescription,
       }),
     });
@@ -700,7 +768,6 @@ interface Trigger {
     | "task_offered"
     | "unread_mentions"
     | "pool_tasks_available"
-    | "slack_inbox_message"
     | "epic_progress_changed";
   taskId?: string;
   task?: unknown;
@@ -739,6 +806,7 @@ async function registerAgent(opts: {
   agentId: string;
   name: string;
   isLead: boolean;
+  role?: string;
   capabilities?: string[];
   maxTasks?: number;
 }): Promise<void> {
@@ -756,6 +824,7 @@ async function registerAgent(opts: {
     body: JSON.stringify({
       name: opts.name,
       isLead: opts.isLead,
+      role: opts.role,
       capabilities: opts.capabilities,
       maxTasks: opts.maxTasks,
     }),
@@ -958,37 +1027,6 @@ The epic should keep progressing until 100% complete and the goal is achieved.`;
       return prompt;
     }
 
-    case "slack_inbox_message": {
-      // Lead: Slack inbox messages from users
-      const inboxDetails = (trigger.messages || [])
-        .map((m: { id: string; content: string }, index: number) => {
-          // Parse structured content if present
-          const newMessageMatch = m.content.match(/<new_message>\n([\s\S]*?)\n<\/new_message>/);
-          const threadHistoryMatch = m.content.match(
-            /<thread_history>\n([\s\S]*?)\n<\/thread_history>/,
-          );
-
-          const newMessage = newMessageMatch ? newMessageMatch[1] : m.content;
-          const threadHistory = threadHistoryMatch ? threadHistoryMatch[1] : null;
-
-          let formatted = `### Message ${index + 1} (inboxMessageId: ${m.id})\n`;
-          formatted += `**New Message:**\n${newMessage}\n`;
-
-          if (threadHistory) {
-            formatted += `\n**Thread History:**\n${threadHistory}\n`;
-          }
-
-          return formatted;
-        })
-        .join("\n---\n\n");
-
-      return `${trigger.count} Slack inbox message(s):\n\n${inboxDetails}\n\nFor each message, choose one:
-- **Reply directly**: Use \`slack-reply\` with inboxMessageId if you can answer immediately
-- **Delegate to worker**: Use \`inbox-delegate\` with inboxMessageId and agentId if it requires work
-
-Do not leave messages unanswered.`;
-    }
-
     default:
       return defaultPrompt;
   }
@@ -1103,6 +1141,7 @@ async function spawnProviderProcess(
     iteration: number;
     taskId?: string;
     model?: string;
+    cwd?: string;
   },
   logDir: string,
   isYolo: boolean,
@@ -1125,7 +1164,7 @@ async function spawnProviderProcess(
     taskId: effectiveTaskId,
     apiUrl: opts.apiUrl,
     apiKey: opts.apiKey,
-    cwd: process.cwd(),
+    cwd: opts.cwd || process.cwd(),
     logFile: opts.logFile,
     additionalArgs: opts.additionalArgs,
     iteration: opts.iteration,
@@ -1138,6 +1177,10 @@ async function spawnProviderProcess(
   const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now(), partialLine: "" };
   const shouldStream = opts.apiUrl && opts.runnerSessionId && opts.iteration;
 
+  // Auto-progress throttle: don't update more than once per 3 seconds
+  let lastProgressTime = 0;
+  const PROGRESS_THROTTLE_MS = 3000;
+
   session.onEvent((event) => {
     switch (event.type) {
       case "session_init":
@@ -1147,6 +1190,16 @@ async function spawnProviderProcess(
           );
         }
         break;
+      case "tool_start": {
+        // Auto-progress: report tool activity as task progress (throttled)
+        const now = Date.now();
+        if (effectiveTaskId && opts.apiUrl && now - lastProgressTime >= PROGRESS_THROTTLE_MS) {
+          lastProgressTime = now;
+          const progress = toolCallToProgress(event.toolName, event.args);
+          updateProgressViaAPI(opts.apiUrl, opts.apiKey, effectiveTaskId, progress).catch(() => {});
+        }
+        break;
+      }
       case "result":
         // Cost save is handled in waitForCompletion().then() to ensure
         // it completes before the process exits (fire-and-forget here
@@ -1269,6 +1322,7 @@ async function runProviderIteration(
     apiKey: string;
     agentId: string;
     taskId?: string;
+    cwd?: string;
   },
 ): Promise<ProviderResult> {
   const freshEnv = await fetchResolvedEnv(opts.apiUrl, opts.apiKey, opts.agentId);
@@ -1283,7 +1337,7 @@ async function runProviderIteration(
     taskId: opts.taskId || crypto.randomUUID(),
     apiUrl: opts.apiUrl,
     apiKey: opts.apiKey,
-    cwd: process.cwd(),
+    cwd: opts.cwd || process.cwd(),
     logFile: opts.logFile,
     additionalArgs: opts.additionalArgs,
     env: freshEnv as Record<string, string>,
@@ -1412,7 +1466,8 @@ async function fetchTemplate(
 }
 
 export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
-  const { role, defaultPrompt, metadataType } = config;
+  const { defaultPrompt, metadataType } = config;
+  let role = config.role;
 
   // Create provider adapter based on HARNESS_PROVIDER env var (default: claude)
   const adapter = createProviderAdapter(process.env.HARNESS_PROVIDER || "claude");
@@ -1432,7 +1487,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   const apiUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
   const swarmUrl = process.env.SWARM_URL || "localhost";
 
-  const capabilities = config.capabilities;
+  let capabilities = config.capabilities;
 
   // Agent identity fields — populated after registration by fetching full profile
   let agentSoulMd: string | undefined;
@@ -1524,9 +1579,38 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let iteration = 0;
 
   if (!isAiLoop) {
+    // Fetch template early (before registration) so defaults can be applied
+    const templateId = process.env.TEMPLATE_ID;
+    const registryUrl = process.env.TEMPLATE_REGISTRY_URL || "https://templates.agent-swarm.dev";
+    let cachedTemplate: TemplateResponse | null = null;
+
+    if (templateId) {
+      try {
+        cachedTemplate = await fetchTemplate(templateId, registryUrl, "/workspace/.template-cache");
+        if (cachedTemplate) {
+          console.log(`[${role}] Fetched template: ${templateId}`);
+
+          // Apply agentDefaults as fallbacks (env/config takes precedence)
+          const defaults = cachedTemplate.config.agentDefaults;
+          if (config.role === "worker" && defaults.role) {
+            role = defaults.role;
+          }
+          if (!capabilities?.length && defaults.capabilities?.length) {
+            capabilities = defaults.capabilities;
+          }
+        }
+      } catch (err) {
+        console.warn(`[${role}] Failed to fetch template ${templateId}: ${err}`);
+      }
+    }
+
     // Runner-level polling mode with parallel execution support
-    const defaultConcurrent = role === "lead" ? "2" : "1";
-    const maxConcurrent = parseInt(process.env.MAX_CONCURRENT_TASKS || defaultConcurrent, 10);
+    const isLeadFromConfig = config.role === "lead";
+    const isLead = isLeadFromConfig || (cachedTemplate?.config.agentDefaults?.isLead ?? false);
+    const defaultMaxTasks = isLead ? 2 : 1;
+    const maxConcurrent = process.env.MAX_CONCURRENT_TASKS
+      ? parseInt(process.env.MAX_CONCURRENT_TASKS, 10)
+      : (cachedTemplate?.config.agentDefaults?.maxTasks ?? defaultMaxTasks);
     console.log(`[${role}] Mode: runner-level polling (use --ai-loop for AI-based polling)`);
     console.log(`[${role}] Max concurrent tasks: ${maxConcurrent}`);
 
@@ -1546,15 +1630,19 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     setupShutdownHandlers(role, apiConfig, () => state);
 
     // Register agent before starting
-    const agentName = process.env.AGENT_NAME || `${role}-${agentId.slice(0, 8)}`;
+    const agentName =
+      process.env.AGENT_NAME ||
+      cachedTemplate?.config.displayName ||
+      `${role}-${agentId.slice(0, 8)}`;
     try {
       await registerAgent({
         apiUrl,
         apiKey,
         agentId,
         name: agentName,
-        isLead: role === "lead",
-        capabilities: config.capabilities,
+        role,
+        isLead,
+        capabilities,
         maxTasks: maxConcurrent,
       });
       console.log(`[${role}] Registered as "${agentName}" (ID: ${agentId})`);
@@ -1596,34 +1684,24 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // Generate default templates if missing (runner registers via POST /api/agents
         // which doesn't generate templates like join-swarm does)
         if (!agentSoulMd || !agentIdentityMd || !agentToolsMd || !agentClaudeMd) {
-          // Try TEMPLATE_ID-based template first
-          const templateId = process.env.TEMPLATE_ID;
-          const registryUrl =
-            process.env.TEMPLATE_REGISTRY_URL || "https://templates.agent-swarm.dev";
-
-          if (templateId) {
-            const template = await fetchTemplate(
-              templateId,
-              registryUrl,
-              "/workspace/.template-cache",
-            );
-            if (template) {
-              const ctx = {
-                agent: {
-                  name: agentProfileName || agentName,
-                  role: role,
-                  description: agentDescription || "",
-                  capabilities: (config.capabilities || []).join(", "),
-                },
-              };
-              if (!agentSoulMd) agentSoulMd = interpolate(template.files.soulMd, ctx);
-              if (!agentIdentityMd) agentIdentityMd = interpolate(template.files.identityMd, ctx);
-              if (!agentToolsMd) agentToolsMd = interpolate(template.files.toolsMd, ctx);
-              if (!agentClaudeMd) agentClaudeMd = interpolate(template.files.claudeMd, ctx);
-              if (!agentSetupScript)
-                agentSetupScript = interpolate(template.files.setupScript, ctx);
-              console.log(`[${role}] Applied template: ${templateId}`);
-            }
+          // Use already-fetched template (from pre-registration step)
+          if (cachedTemplate) {
+            const ctx = {
+              agent: {
+                name: agentProfileName || agentName,
+                role: role,
+                description: agentDescription || "",
+                capabilities: (capabilities || []).join(", "),
+              },
+            };
+            if (!agentSoulMd) agentSoulMd = interpolate(cachedTemplate.files.soulMd, ctx);
+            if (!agentIdentityMd)
+              agentIdentityMd = interpolate(cachedTemplate.files.identityMd, ctx);
+            if (!agentToolsMd) agentToolsMd = interpolate(cachedTemplate.files.toolsMd, ctx);
+            if (!agentClaudeMd) agentClaudeMd = interpolate(cachedTemplate.files.claudeMd, ctx);
+            if (!agentSetupScript)
+              agentSetupScript = interpolate(cachedTemplate.files.setupScript, ctx);
+            console.log(`[${role}] Applied template: ${templateId}`);
           }
 
           // Fallback to generic defaults for any still-missing fields
@@ -1819,6 +1897,38 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           };
           await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
 
+          // Resolve cwd for resumed task (mirrors normal task path: task.dir > vcsRepo clonePath)
+          let resumeCwd: string | undefined;
+          if (task.dir) {
+            try {
+              if (existsSync(task.dir) && statSync(task.dir).isDirectory()) {
+                resumeCwd = task.dir;
+              } else {
+                console.warn(
+                  `[${role}] Resume task dir "${task.dir}" does not exist or is not a directory, falling back to default cwd`,
+                );
+              }
+            } catch {
+              console.warn(
+                `[${role}] Failed to check resume task dir "${task.dir}", falling back to default cwd`,
+              );
+            }
+          }
+
+          if (!resumeCwd && task.vcsRepo && apiUrl) {
+            const repoConfig = await fetchRepoConfig(apiUrl, apiKey, task.vcsRepo);
+            const effectiveConfig = repoConfig ?? {
+              url: task.vcsRepo,
+              name: task.vcsRepo.split("/").pop() || task.vcsRepo,
+              clonePath: `/workspace/repos/${task.vcsRepo.split("/").pop() || task.vcsRepo}`,
+              defaultBranch: "main",
+            };
+            const repoContext = await ensureRepoForTask(effectiveConfig, role);
+            if (repoContext?.clonePath) {
+              resumeCwd = repoContext.clonePath;
+            }
+          }
+
           const runningTask = await spawnProviderProcess(
             adapter,
             {
@@ -1834,6 +1944,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               iteration,
               taskId: task.id,
               model: (task as { model?: string }).model,
+              cwd: resumeCwd,
             },
             logDir,
             isYolo,
@@ -2017,11 +2128,54 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             currentRepoContext = undefined;
           }
 
+          // Resolve effective working directory (priority: task.dir > repoContext.clonePath > process.cwd())
+          const taskDir = (trigger.task as { dir?: string } | undefined)?.dir;
+          let effectiveCwd: string | undefined;
+
+          if (taskDir) {
+            try {
+              if (existsSync(taskDir) && statSync(taskDir).isDirectory()) {
+                effectiveCwd = taskDir;
+              } else {
+                console.warn(
+                  `[${role}] Task dir "${taskDir}" does not exist or is not a directory, falling back to default cwd`,
+                );
+              }
+            } catch {
+              console.warn(
+                `[${role}] Failed to check task dir "${taskDir}", falling back to default cwd`,
+              );
+            }
+          }
+
+          if (!effectiveCwd && currentRepoContext?.clonePath) {
+            effectiveCwd = currentRepoContext.clonePath;
+          }
+
+          // Annotate prompt with working directory context
+          if (effectiveCwd && effectiveCwd !== process.cwd()) {
+            triggerPrompt += `\n\n---\n**Working Directory**: You are starting in \`${effectiveCwd}\`. `;
+            if (taskDir) {
+              triggerPrompt += "This was explicitly set on the task.";
+            } else if (currentRepoContext?.clonePath) {
+              triggerPrompt += "This is the repository clone path for this task's VCS repo.";
+            }
+            triggerPrompt +=
+              " You can still access any path on the filesystem — this is just your starting directory.";
+          }
+
+          // Warn in system prompt when task dir was specified but doesn't exist
+          let cwdWarning = "";
+          if (taskDir && !effectiveCwd) {
+            cwdWarning = `\n\nNote: The task requested working directory "${taskDir}" but it does not exist. Falling back to default directory.`;
+          }
+
           // Rebuild system prompt with per-task repo context
           const taskBasePrompt = buildSystemPrompt();
-          const taskSystemPrompt = additionalSystemPrompt
-            ? `${taskBasePrompt}\n\n${additionalSystemPrompt}`
-            : taskBasePrompt;
+          const taskSystemPrompt =
+            (additionalSystemPrompt
+              ? `${taskBasePrompt}\n\n${additionalSystemPrompt}`
+              : taskBasePrompt) + cwdWarning;
 
           iteration++;
           const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -2031,6 +2185,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           console.log(`\n[${role}] === Iteration ${iteration} ===`);
           console.log(`[${role}] Logging to: ${logFile}`);
           console.log(`[${role}] Prompt: ${triggerPrompt.slice(0, 100)}...`);
+          if (effectiveCwd) {
+            console.log(`[${role}] Working directory: ${effectiveCwd}`);
+          }
 
           const metadata = {
             type: metadataType,
@@ -2059,6 +2216,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               iteration,
               taskId: trigger.taskId,
               model: taskModel,
+              cwd: effectiveCwd,
             },
             logDir,
             isYolo,
@@ -2074,14 +2232,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             trigger.task && typeof trigger.task === "object" && "task" in trigger.task
               ? String((trigger.task as { task: string }).task).slice(0, 200)
               : undefined;
-          const inboxMsgId =
-            trigger.type === "slack_inbox_message" && trigger.messages?.[0]?.id
-              ? trigger.messages[0].id
-              : undefined;
           registerActiveSession(apiConfig, {
             taskId: runningTask.taskId,
             triggerType: trigger.type,
-            inboxMessageId: inboxMsgId,
             taskDescription: taskDesc,
           });
 

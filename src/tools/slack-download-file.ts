@@ -11,7 +11,7 @@ export const registerSlackDownloadFileTool = (server: McpServer) => {
     {
       title: "Download file from Slack",
       description:
-        "Download a file from Slack by file ID or URL. Files are saved to /workspace/shared/downloads/slack/ by default.",
+        "Download a file from Slack by file ID or URL. Files are saved to the agent's download directory on the shared disk by default.",
       annotations: { readOnlyHint: true, openWorldHint: true },
 
       inputSchema: z.object({
@@ -28,7 +28,7 @@ export const registerSlackDownloadFileTool = (server: McpServer) => {
           .string()
           .optional()
           .describe(
-            "Where to save the file. Can be a directory or full path. Defaults to /workspace/shared/downloads/slack/",
+            "Where to save the file. Can be a directory or full path. Defaults to /workspace/shared/downloads/{agentId}/slack/",
           ),
         filename: z
           .string()

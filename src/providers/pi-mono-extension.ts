@@ -157,6 +157,31 @@ async function syncSetupScriptToServer(
   }
 }
 
+/**
+ * Check if a path is under the agent's own subdirectory on the shared disk.
+ * Shared disk categories: thoughts, memory, downloads, misc.
+ * Each agent can only write to /workspace/shared/{category}/{agentId}/
+ */
+function isOwnedSharedPath(path: string, agentId: string): boolean {
+  const sharedCategories = ["thoughts", "memory", "downloads", "misc"];
+  return sharedCategories.some((cat) => path.startsWith(`/workspace/shared/${cat}/${agentId}/`));
+}
+
+/**
+ * Build the shared disk write warning message for a given agent ID.
+ */
+function sharedDiskWriteWarning(agentId: string): string {
+  return (
+    `⚠️ This write will fail: You don't have write access to this directory.\n\n` +
+    `On shared workspaces, each agent can only write to their own directories:\n` +
+    `- /workspace/shared/thoughts/${agentId}/\n` +
+    `- /workspace/shared/memory/${agentId}/\n` +
+    `- /workspace/shared/downloads/${agentId}/\n` +
+    `- /workspace/shared/misc/${agentId}/\n\n` +
+    `You CAN read any file on the shared disk. For writes, use your own subdirectory.`
+  );
+}
+
 /** Auto-index a file written to memory directory */
 async function autoIndexMemoryFile(config: SwarmHooksConfig, editedPath: string): Promise<void> {
   try {
@@ -428,6 +453,24 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
         }
       }
 
+      // Shared disk write prevention (Archil only — skip in local dev)
+      if (process.env.ARCHIL_MOUNT_TOKEN) {
+        // Pi-mono uses lowercase tool names: "write", "edit"
+        if (event.toolName === "write" || event.toolName === "edit") {
+          const toolInput =
+            "input" in event
+              ? (event.input as { file_path?: string; path?: string } | undefined)
+              : undefined;
+          const targetPath = toolInput?.file_path || toolInput?.path || "";
+          if (
+            targetPath.startsWith("/workspace/shared/") &&
+            !isOwnedSharedPath(targetPath, config.agentId)
+          ) {
+            console.log(sharedDiskWriteWarning(config.agentId));
+          }
+        }
+      }
+
       return undefined;
     });
 
@@ -446,6 +489,27 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
         method: "PUT",
         headers: apiHeaders(config),
       });
+
+      // Shared disk write failure detection (Archil only — safety net)
+      if (process.env.ARCHIL_MOUNT_TOKEN) {
+        // Pi-mono uses lowercase tool names
+        if (event.toolName === "write" || event.toolName === "edit" || event.toolName === "bash") {
+          const resultStr = JSON.stringify(event.content ?? []);
+          if (resultStr.includes("Read-only file system")) {
+            const resultInput = event.input as { file_path?: string; path?: string } | undefined;
+            const resultPath = resultInput?.file_path || resultInput?.path || "";
+            if (
+              resultPath.startsWith("/workspace/shared/") &&
+              !isOwnedSharedPath(resultPath, config.agentId)
+            ) {
+              console.log(sharedDiskWriteWarning(config.agentId));
+            } else if (!resultPath) {
+              // Bash tool — no file_path, just warn generically
+              console.log(sharedDiskWriteWarning(config.agentId));
+            }
+          }
+        }
+      }
 
       // File sync: check if tool wrote to identity files or memory dirs
       // Pi-mono uses tool names: "write", "edit" (lowercase, unlike Claude's "Write", "Edit")

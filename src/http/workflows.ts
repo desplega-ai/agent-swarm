@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { z } from "zod";
 import {
   createWorkflow,
   deleteWorkflow,
@@ -12,7 +13,134 @@ import {
 import { WorkflowDefinitionSchema } from "../types";
 import { startWorkflowExecution } from "../workflows";
 import { retryFailedRun } from "../workflows/resume";
-import { matchRoute, parseBody } from "./utils";
+import { route } from "./route-def";
+import { json, jsonError, parseBody } from "./utils";
+
+// ─── Route Definitions ───────────────────────────────────────────────────────
+
+const listWorkflowsRoute = route({
+  method: "get",
+  path: "/api/workflows",
+  pattern: ["api", "workflows"],
+  summary: "List all workflows",
+  tags: ["Workflows"],
+  responses: {
+    200: { description: "Workflow list" },
+  },
+});
+
+const createWorkflowRoute = route({
+  method: "post",
+  path: "/api/workflows",
+  pattern: ["api", "workflows"],
+  summary: "Create a new workflow",
+  tags: ["Workflows"],
+  body: z.object({
+    name: z.string().min(1),
+    description: z.string().optional(),
+    definition: z.record(z.string(), z.unknown()),
+  }),
+  responses: {
+    201: { description: "Workflow created" },
+    400: { description: "Invalid definition" },
+  },
+});
+
+const getWorkflowRoute = route({
+  method: "get",
+  path: "/api/workflows/{id}",
+  pattern: ["api", "workflows", null],
+  summary: "Get a workflow by ID",
+  tags: ["Workflows"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Workflow details" },
+    404: { description: "Workflow not found" },
+  },
+});
+
+const updateWorkflowRoute = route({
+  method: "put",
+  path: "/api/workflows/{id}",
+  pattern: ["api", "workflows", null],
+  summary: "Update a workflow",
+  tags: ["Workflows"],
+  params: z.object({ id: z.string() }),
+  body: z.record(z.string(), z.unknown()),
+  responses: {
+    200: { description: "Workflow updated" },
+    400: { description: "Invalid definition" },
+    404: { description: "Workflow not found" },
+  },
+});
+
+const deleteWorkflowRoute = route({
+  method: "delete",
+  path: "/api/workflows/{id}",
+  pattern: ["api", "workflows", null],
+  summary: "Delete a workflow",
+  tags: ["Workflows"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    204: { description: "Workflow deleted" },
+    404: { description: "Workflow not found" },
+  },
+});
+
+const triggerWorkflow = route({
+  method: "post",
+  path: "/api/workflows/{id}/trigger",
+  pattern: ["api", "workflows", null, "trigger"],
+  summary: "Trigger a workflow execution",
+  tags: ["Workflows"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    201: { description: "Workflow run started" },
+    400: { description: "Workflow is disabled" },
+    401: { description: "Unauthorized" },
+    404: { description: "Workflow not found" },
+  },
+});
+
+const listWorkflowRunsRoute = route({
+  method: "get",
+  path: "/api/workflows/{id}/runs",
+  pattern: ["api", "workflows", null, "runs"],
+  summary: "List runs for a workflow",
+  tags: ["Workflows"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Workflow run list" },
+  },
+});
+
+const getWorkflowRunRoute = route({
+  method: "get",
+  path: "/api/workflow-runs/{id}",
+  pattern: ["api", "workflow-runs", null],
+  summary: "Get a workflow run with steps",
+  tags: ["Workflows"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Workflow run details with steps" },
+    404: { description: "Run not found" },
+  },
+});
+
+const retryWorkflowRun = route({
+  method: "post",
+  path: "/api/workflow-runs/{id}/retry",
+  pattern: ["api", "workflow-runs", null, "retry"],
+  summary: "Retry a failed workflow run",
+  tags: ["Workflows"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Retry started" },
+    400: { description: "Cannot retry" },
+  },
+});
+
+// ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleWorkflows(
   req: IncomingMessage,
@@ -21,102 +149,92 @@ export async function handleWorkflows(
   queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
-  // GET /api/workflows
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "workflows"], true)) {
+  if (listWorkflowsRoute.match(req.method, pathSegments)) {
     const workflows = listWorkflows();
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(workflows));
+    json(res, workflows);
     return true;
   }
 
-  // POST /api/workflows
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "workflows"], true)) {
-    const body = await parseBody<Record<string, unknown>>(req);
-    const parsed = WorkflowDefinitionSchema.safeParse(body.definition);
-    if (!parsed.success) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Invalid definition", details: parsed.error.issues }));
+  if (createWorkflowRoute.match(req.method, pathSegments)) {
+    const parsed = await createWorkflowRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const defParsed = WorkflowDefinitionSchema.safeParse(parsed.body.definition);
+    if (!defParsed.success) {
+      jsonError(res, `Invalid definition: ${JSON.stringify(defParsed.error.issues)}`, 400);
       return true;
     }
     const workflow = createWorkflow({
-      name: body.name as string,
-      description: body.description as string | undefined,
-      definition: parsed.data,
+      name: parsed.body.name,
+      description: parsed.body.description,
+      definition: defParsed.data,
       createdByAgentId: myAgentId ?? undefined,
     });
-    res.writeHead(201, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(workflow));
+    json(res, workflow, 201);
     return true;
   }
 
-  // GET /api/workflows/:id
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "workflows", null], true)) {
-    const id = pathSegments[2]!;
-    const workflow = getWorkflow(id);
+  if (getWorkflowRoute.match(req.method, pathSegments)) {
+    const parsed = await getWorkflowRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const workflow = getWorkflow(parsed.params.id);
     if (!workflow) {
       res.writeHead(404);
       res.end();
       return true;
     }
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(workflow));
+    json(res, workflow);
     return true;
   }
 
-  // PUT /api/workflows/:id
-  if (matchRoute(req.method, pathSegments, "PUT", ["api", "workflows", null], true)) {
-    const id = pathSegments[2]!;
-    const body = await parseBody<Record<string, unknown>>(req);
+  if (updateWorkflowRoute.match(req.method, pathSegments)) {
+    const parsed = await updateWorkflowRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const body = parsed.body as Record<string, unknown>;
     if (body.definition) {
-      const parsed = WorkflowDefinitionSchema.safeParse(body.definition);
-      if (!parsed.success) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Invalid definition", details: parsed.error.issues }));
+      const defParsed = WorkflowDefinitionSchema.safeParse(body.definition);
+      if (!defParsed.success) {
+        jsonError(res, `Invalid definition: ${JSON.stringify(defParsed.error.issues)}`, 400);
         return true;
       }
-      body.definition = parsed.data;
+      body.definition = defParsed.data;
     }
-    const workflow = updateWorkflow(id, body);
+    const workflow = updateWorkflow(parsed.params.id, body);
     if (!workflow) {
       res.writeHead(404);
       res.end();
       return true;
     }
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(workflow));
+    json(res, workflow);
     return true;
   }
 
-  // DELETE /api/workflows/:id
-  if (matchRoute(req.method, pathSegments, "DELETE", ["api", "workflows", null], true)) {
-    const id = pathSegments[2]!;
+  if (deleteWorkflowRoute.match(req.method, pathSegments)) {
+    const parsed = await deleteWorkflowRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
     try {
-      const deleted = deleteWorkflow(id);
+      const deleted = deleteWorkflow(parsed.params.id);
       res.writeHead(deleted ? 204 : 404);
     } catch (err) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: String(err) }));
+      jsonError(res, String(err), 500);
       return true;
     }
     res.end();
     return true;
   }
 
-  // POST /api/workflows/:id/trigger
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "workflows", null, "trigger"])) {
-    const id = pathSegments[2]!;
-    const workflow = getWorkflow(id);
+  if (triggerWorkflow.match(req.method, pathSegments)) {
+    const parsed = await triggerWorkflow.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const workflow = getWorkflow(parsed.params.id);
     if (!workflow) {
       res.writeHead(404);
       res.end();
       return true;
     }
     if (!workflow.enabled) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Workflow is disabled" }));
+      jsonError(res, "Workflow is disabled", 400);
       return true;
     }
-    // Auth: global API key already checked upstream, OR check webhook secret
     const secret = queryParams.get("secret");
     if (!myAgentId && secret !== workflow.webhookSecret) {
       res.writeHead(401);
@@ -125,45 +243,40 @@ export async function handleWorkflows(
     }
     const body = await parseBody<Record<string, unknown>>(req);
     const runId = await startWorkflowExecution(workflow, body);
-    res.writeHead(201, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ runId }));
+    json(res, { runId }, 201);
     return true;
   }
 
-  // GET /api/workflows/:id/runs
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "workflows", null, "runs"])) {
-    const id = pathSegments[2]!;
-    const runs = listWorkflowRuns(id);
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(runs));
+  if (listWorkflowRunsRoute.match(req.method, pathSegments)) {
+    const parsed = await listWorkflowRunsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const runs = listWorkflowRuns(parsed.params.id);
+    json(res, runs);
     return true;
   }
 
-  // GET /api/workflow-runs/:id
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "workflow-runs", null], true)) {
-    const id = pathSegments[2]!;
-    const run = getWorkflowRun(id);
+  if (getWorkflowRunRoute.match(req.method, pathSegments)) {
+    const parsed = await getWorkflowRunRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const run = getWorkflowRun(parsed.params.id);
     if (!run) {
       res.writeHead(404);
       res.end();
       return true;
     }
-    const steps = getWorkflowRunStepsByRunId(id);
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ...run, steps }));
+    const steps = getWorkflowRunStepsByRunId(parsed.params.id);
+    json(res, { ...run, steps });
     return true;
   }
 
-  // POST /api/workflow-runs/:id/retry
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "workflow-runs", null, "retry"])) {
-    const id = pathSegments[2]!;
+  if (retryWorkflowRun.match(req.method, pathSegments)) {
+    const parsed = await retryWorkflowRun.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
     try {
-      await retryFailedRun(id);
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ success: true }));
+      await retryFailedRun(parsed.params.id);
+      json(res, { success: true });
     } catch (err) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: String(err) }));
+      jsonError(res, String(err), 400);
     }
     return true;
   }

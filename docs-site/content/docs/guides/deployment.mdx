@@ -1,6 +1,6 @@
 ---
 title: Deployment Guide
-description: Production deployment options for Agent Swarm
+description: Deploy Agent Swarm to production with Docker Compose, configure networking, secrets, and persistent storage
 ---
 
 # Deployment Guide
@@ -19,6 +19,10 @@ cp .env.docker.example .env
 # Edit .env with your values
 docker-compose up -d
 ```
+
+### ARM Compatibility (Apple Silicon)
+
+All services in the docker-compose files include `platform: linux/amd64` to avoid `no matching manifest for linux/arm64/v8` errors on Apple Silicon Macs. The Docker images are built for `linux/amd64` and run via Rosetta emulation.
 
 ### What's Included
 

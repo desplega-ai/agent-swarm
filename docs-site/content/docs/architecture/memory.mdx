@@ -17,7 +17,7 @@ Memories are automatically created from:
 
 - **Session summaries** — At the end of each session, a lightweight model (Haiku) extracts key learnings: mistakes made, patterns discovered, failed approaches, and codebase knowledge. These summaries become searchable memories.
 - **Task completions** — Every completed (or failed) task's output is indexed. Failed tasks include notes about what went wrong, so the agent avoids repeating the same mistake.
-- **File-based notes** — Agents can write to `/workspace/personal/memory/` (private) or `/workspace/shared/memory/` (swarm-wide). Files written here are automatically indexed via the PostToolUse hook.
+- **File-based notes** — Agents write to `/workspace/personal/memory/` in their per-agent directory. Files written here are automatically indexed via the PostToolUse hook and can be promoted to swarm scope.
 - **Lead-to-worker injection** — The lead agent can push specific learnings into any worker's memory using the `inject-learning` tool, closing the feedback loop.
 
 ### Memory Scopes
@@ -25,7 +25,7 @@ Memories are automatically created from:
 | Scope | Path | Visibility |
 |-------|------|-----------|
 | Agent (private) | `/workspace/personal/memory/` | Only the owning agent |
-| Swarm (shared) | `/workspace/shared/memory/` | All agents in the swarm |
+| Swarm (shared) | Promoted via `inject-learning` or epic completion | All agents in the swarm |
 
 ### Automatic Scope Promotion
 

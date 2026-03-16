@@ -105,6 +105,7 @@ A task with dependencies won't be offered or claimable until all dependencies ar
 | `dependsOn` | Array of task IDs that must complete first |
 | `epicId` | Optional association with an epic |
 | `parentTaskId` | For session continuity — child task resumes parent's Claude session |
+| `dir` | Working directory (absolute path) for the agent to start in. Falls back to repo clone path or default cwd |
 | `model` | Model override: `haiku`, `sonnet`, or `opus`. Priority: task > `MODEL_OVERRIDE` config > `opus` |
 | `scheduleId` | Back-reference to the originating schedule (set automatically for schedule-created tasks) |
 

@@ -25,8 +25,6 @@
   - [slack-list-channels](#slack-list-channels)
   - [slack-upload-file](#slack-upload-file)
   - [slack-download-file](#slack-download-file)
-  - [inbox-delegate](#inbox-delegate)
-  - [get-inbox-message](#get-inbox-message)
   - [register-agent-mail-inbox](#register-agent-mail-inbox)
 - [Task Pool Tools](#task-pool-tools)
   - [task-action](#task-action)
@@ -269,30 +267,9 @@ Upload a file (image, document, etc.) to a Slack channel or thread. Use inboxMes
 
 **Download file from Slack**
 
-Download a file from Slack by file ID or URL. Files are saved to /workspace/shared/downloads/slack/ by default.
+Download a file from Slack by file ID or URL. Files are saved to the agent's download directory on the shared disk by default.
 
 *No parameters*
-
-### inbox-delegate
-
-**Delegate inbox message to worker**
-
-Delegate an inbox message to a worker agent by creating a task. The task inherits Slack context for replies.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `inboxMessageId` | `uuid` | Yes | - | The inbox message ID to delegate. |
-| `agentId` | `uuid` | Yes | - | The worker agent to delegate to. |
-
-### get-inbox-message
-
-**Get inbox message details**
-
-Returns detailed information about a specific inbox message, including full content and Slack context. Only accessible to the lead agent who owns the message.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `inboxMessageId` | `uuid` | Yes | - | The ID of the inbox message to retrieve. |
 
 ### register-agent-mail-inbox
 

@@ -122,7 +122,6 @@ describe("Tool Annotations & Classification", () => {
       "get-swarm",
       "get-task-details",
       "get-tasks",
-      "get-inbox-message",
       "get-epic-details",
       "get-config",
       "list-epics",

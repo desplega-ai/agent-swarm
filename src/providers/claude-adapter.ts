@@ -1,4 +1,5 @@
 import { unlink, writeFile } from "node:fs/promises";
+import { validateClaudeCredentials } from "../utils/credentials";
 import {
   parseStderrForErrors,
   SessionErrorTracker,
@@ -61,6 +62,7 @@ class ClaudeSession implements ProviderSession {
     );
 
     this.proc = Bun.spawn(cmd, {
+      cwd: this.config.cwd,
       env: {
         ...(config.env || process.env),
         TASK_FILE: taskFilePath,
@@ -243,6 +245,25 @@ class ClaudeSession implements ProviderSession {
         });
       }
 
+      // Tool use from assistant messages — emit tool_start for auto-progress
+      if (json.type === "assistant" && json.message) {
+        const message = json.message as {
+          content?: Array<{ type: string; name?: string; id?: string; input?: unknown }>;
+        };
+        if (message.content) {
+          for (const block of message.content) {
+            if (block.type === "tool_use" && block.name) {
+              this.emit({
+                type: "tool_start",
+                toolCallId: block.id || "",
+                toolName: block.name,
+                args: block.input || {},
+              });
+            }
+          }
+        }
+      }
+
       trackErrorFromJson(json, this.errorTracker);
     } catch {
       // Not JSON — ignore
@@ -327,6 +348,9 @@ export class ClaudeAdapter implements ProviderAdapter {
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
     const model = config.model || "opus";
+
+    const credType = validateClaudeCredentials(config.env || process.env);
+    console.log(`\x1b[2m[claude]\x1b[0m Using credential: ${credType}`);
 
     const taskFilePid = process.pid;
     const taskFilePath = await writeTaskFile(taskFilePid, {
