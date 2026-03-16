@@ -19,6 +19,7 @@
 services:
   api:
     image: "ghcr.io/desplega-ai/agent-swarm:latest"
+    platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
 
@@ -50,6 +51,7 @@ services:
 
   lead:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
 
@@ -90,6 +92,7 @@ services:
 
   worker-1:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
 
@@ -128,6 +131,7 @@ services:
 
   worker-2:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
 
@@ -166,6 +170,7 @@ services:
 
   worker-content-writer:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
 
@@ -203,6 +208,7 @@ services:
 
   worker-content-reviewer:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
 
@@ -243,6 +249,7 @@ services:
 
   worker-content-strategist:
     image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
 
@@ -284,6 +291,7 @@ services:
   #
   # pi-worker:
   #   image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+  #   platform: linux/amd64
   #   pull_policy: always
   #   stop_grace_period: 60s
   #
