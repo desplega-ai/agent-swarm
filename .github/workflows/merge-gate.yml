@@ -116,6 +116,39 @@ jobs:
           fi
           echo "pi-skills are up to date."
 
+  openapi-freshness:
+    name: OpenAPI Spec Freshness Check
+    needs: detect-changes
+    if: needs.detect-changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Rebuild OpenAPI spec and check for drift
+        run: |
+          bun run docs:openapi
+          if [ -n "$(git diff --name-only openapi.json)" ]; then
+            echo "::error::openapi.json is out of date! Run 'bun run docs:openapi' and commit the changes."
+            git diff --stat openapi.json
+            exit 1
+          fi
+          echo "OpenAPI spec is up to date."
+      - name: Check for raw matchRoute usage
+        run: |
+          UNREGISTERED=$(grep -rn "matchRoute(" src/http/ --include="*.ts" | grep -v "route-def.ts" | grep -v "utils.ts" || true)
+          if [ -n "$UNREGISTERED" ]; then
+            echo "::error::Found raw matchRoute() calls. Convert to route() definitions:"
+            echo "$UNREGISTERED"
+            exit 1
+          fi
+          echo "No raw matchRoute() calls found."
+
   docker-build:
     name: Docker Build Test
     needs: detect-changes
@@ -173,7 +206,7 @@ jobs:
 
   gate:
     name: Merge Gate
-    needs: [detect-changes, lint-and-typecheck, test, pi-skills-freshness, docker-build, new-ui-lint]
+    needs: [detect-changes, lint-and-typecheck, test, pi-skills-freshness, openapi-freshness, docker-build, new-ui-lint]
     if: always()
     runs-on: ubuntu-latest
 

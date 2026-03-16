@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { z } from "zod";
 import {
   assignTaskToEpic,
   createChannel,
@@ -10,7 +11,7 @@ import {
   getAllChannels,
   getChannelById,
   getChannelByName,
-  getChannelMessages,
+  getChannelMessages as getChannelMessagesDb,
   getEpicById,
   getEpics,
   getEpicWithProgress,
@@ -19,7 +20,207 @@ import {
   updateEpic,
 } from "../be/db";
 import type { EpicStatus } from "../types";
-import { matchRoute } from "./utils";
+import { route } from "./route-def";
+import { json, jsonError, parseBody } from "./utils";
+
+// ─── Route Definitions ───────────────────────────────────────────────────────
+
+const listEpics = route({
+  method: "get",
+  path: "/api/epics",
+  pattern: ["api", "epics"],
+  summary: "List epics with optional filters",
+  tags: ["Epics"],
+  query: z.object({
+    status: z.string().optional(),
+    search: z.string().optional(),
+    leadAgentId: z.string().optional(),
+  }),
+  responses: {
+    200: { description: "Epic list with progress" },
+  },
+});
+
+const createEpicRoute = route({
+  method: "post",
+  path: "/api/epics",
+  pattern: ["api", "epics"],
+  summary: "Create a new epic",
+  tags: ["Epics"],
+  body: z.object({
+    name: z.string().min(1),
+    goal: z.string().min(1),
+    description: z.string().optional(),
+    leadAgentId: z.string().optional(),
+    repoId: z.string().optional(),
+    branch: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+  }),
+  responses: {
+    201: { description: "Epic created" },
+    400: { description: "Validation error" },
+  },
+});
+
+const getEpic = route({
+  method: "get",
+  path: "/api/epics/{id}",
+  pattern: ["api", "epics", null],
+  summary: "Get epic with progress and tasks",
+  tags: ["Epics"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Epic with tasks" },
+    404: { description: "Epic not found" },
+  },
+});
+
+const updateEpicRoute = route({
+  method: "put",
+  path: "/api/epics/{id}",
+  pattern: ["api", "epics", null],
+  summary: "Update an epic",
+  tags: ["Epics"],
+  params: z.object({ id: z.string() }),
+  body: z.record(z.string(), z.unknown()),
+  responses: {
+    200: { description: "Epic updated" },
+    404: { description: "Epic not found" },
+  },
+});
+
+const deleteEpicRoute = route({
+  method: "delete",
+  path: "/api/epics/{id}",
+  pattern: ["api", "epics", null],
+  summary: "Delete an epic",
+  tags: ["Epics"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Epic deleted" },
+    404: { description: "Epic not found" },
+  },
+});
+
+const addTaskToEpic = route({
+  method: "post",
+  path: "/api/epics/{id}/tasks",
+  pattern: ["api", "epics", null, "tasks"],
+  summary: "Add task to epic (create new or assign existing)",
+  tags: ["Epics"],
+  params: z.object({ id: z.string() }),
+  body: z.object({
+    taskId: z.string().optional(),
+    task: z.string().optional(),
+    agentId: z.string().optional(),
+    taskType: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    priority: z.number().int().optional(),
+    offeredTo: z.string().optional(),
+  }),
+  responses: {
+    200: { description: "Existing task assigned" },
+    201: { description: "New task created in epic" },
+    400: { description: "Missing task or taskId" },
+    404: { description: "Epic or task not found" },
+  },
+});
+
+const listChannels = route({
+  method: "get",
+  path: "/api/channels",
+  pattern: ["api", "channels"],
+  summary: "List all channels",
+  tags: ["Channels"],
+  responses: {
+    200: { description: "Channel list" },
+  },
+});
+
+const createChannelRoute = route({
+  method: "post",
+  path: "/api/channels",
+  pattern: ["api", "channels"],
+  summary: "Create a new channel",
+  tags: ["Channels"],
+  body: z.object({
+    name: z.string().min(1),
+    description: z.string().optional(),
+    type: z.enum(["public", "dm"]).optional(),
+  }),
+  responses: {
+    201: { description: "Channel created" },
+    400: { description: "Validation error" },
+    409: { description: "Duplicate name" },
+  },
+});
+
+const deleteChannelRoute = route({
+  method: "delete",
+  path: "/api/channels/{id}",
+  pattern: ["api", "channels", null],
+  summary: "Delete a channel",
+  tags: ["Channels"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Channel deleted" },
+    400: { description: "Cannot delete general channel" },
+    404: { description: "Channel not found" },
+  },
+});
+
+const listChannelMessages = route({
+  method: "get",
+  path: "/api/channels/{id}/messages",
+  pattern: ["api", "channels", null, "messages"],
+  summary: "Get messages in a channel",
+  tags: ["Channels"],
+  params: z.object({ id: z.string() }),
+  query: z.object({
+    limit: z.coerce.number().int().min(1).optional(),
+    since: z.string().optional(),
+    before: z.string().optional(),
+  }),
+  responses: {
+    200: { description: "Channel messages" },
+    404: { description: "Channel not found" },
+  },
+});
+
+const getThreadMessages = route({
+  method: "get",
+  path: "/api/channels/{channelId}/messages/{messageId}/thread",
+  pattern: ["api", "channels", null, "messages", null, "thread"],
+  summary: "Get thread messages for a message",
+  tags: ["Channels"],
+  params: z.object({ channelId: z.string(), messageId: z.string() }),
+  responses: {
+    200: { description: "Thread messages" },
+    404: { description: "Channel not found" },
+  },
+});
+
+const postMessageRoute = route({
+  method: "post",
+  path: "/api/channels/{id}/messages",
+  pattern: ["api", "channels", null, "messages"],
+  summary: "Post a message to a channel",
+  tags: ["Channels"],
+  params: z.object({ id: z.string() }),
+  body: z.object({
+    content: z.string().min(1),
+    agentId: z.string().optional(),
+    replyToId: z.string().optional(),
+    mentions: z.array(z.string()).optional(),
+  }),
+  responses: {
+    201: { description: "Message posted" },
+    400: { description: "Invalid content or agentId" },
+    404: { description: "Channel not found" },
+  },
+});
+
+// ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleEpics(
   req: IncomingMessage,
@@ -28,329 +229,230 @@ export async function handleEpics(
   queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "epics"], true)) {
-    const status = queryParams.get("status") as EpicStatus | null;
-    const search = queryParams.get("search");
-    const leadAgentId = queryParams.get("leadAgentId");
+  if (listEpics.match(req.method, pathSegments)) {
+    const parsed = await listEpics.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
     const rawEpics = getEpics({
-      status: status || undefined,
-      search: search || undefined,
-      leadAgentId: leadAgentId || undefined,
+      status: (parsed.query.status as EpicStatus) || undefined,
+      search: parsed.query.search || undefined,
+      leadAgentId: parsed.query.leadAgentId || undefined,
     });
-    // Enrich each epic with progress data for the UI
     const epics = rawEpics.map((e) => getEpicWithProgress(e.id) ?? e);
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ epics, total: epics.length }));
+    json(res, { epics, total: epics.length });
     return true;
   }
 
-  // POST /api/epics - Create a new epic
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "epics"], true)) {
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = JSON.parse(Buffer.concat(chunks).toString());
-
-    if (!body.name || !body.goal) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing required fields: name, goal" }));
-      return true;
-    }
+  if (createEpicRoute.match(req.method, pathSegments)) {
+    const parsed = await createEpicRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
 
     try {
       const epic = createEpic({
-        ...body,
+        ...parsed.body,
         createdByAgentId: myAgentId || undefined,
       });
-      res.writeHead(201, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(epic));
+      json(res, epic, 201);
     } catch (_error) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Failed to create epic" }));
+      jsonError(res, "Failed to create epic", 500);
     }
     return true;
   }
 
-  // GET /api/epics/:id - Get single epic with progress and tasks
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "epics", null], true)) {
-    const epicId = pathSegments[2]!;
-    const epic = getEpicWithProgress(epicId);
+  if (getEpic.match(req.method, pathSegments)) {
+    const parsed = await getEpic.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const epic = getEpicWithProgress(parsed.params.id);
 
     if (!epic) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Epic not found" }));
+      jsonError(res, "Epic not found", 404);
       return true;
     }
 
-    const tasks = getTasksByEpicId(epicId);
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ...epic, tasks }));
+    const tasks = getTasksByEpicId(parsed.params.id);
+    json(res, { ...epic, tasks });
     return true;
   }
 
-  // PUT /api/epics/:id - Update an epic
-  if (matchRoute(req.method, pathSegments, "PUT", ["api", "epics", null], true)) {
-    const epicId = pathSegments[2]!;
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = JSON.parse(Buffer.concat(chunks).toString());
-
-    const epic = updateEpic(epicId, body);
+  if (updateEpicRoute.match(req.method, pathSegments)) {
+    const parsed = await updateEpicRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const epic = updateEpic(parsed.params.id, parsed.body as Record<string, unknown>);
     if (!epic) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Epic not found" }));
+      jsonError(res, "Epic not found", 404);
       return true;
     }
-
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(epic));
+    json(res, epic);
     return true;
   }
 
-  // DELETE /api/epics/:id - Delete an epic
-  if (matchRoute(req.method, pathSegments, "DELETE", ["api", "epics", null], true)) {
-    const epicId = pathSegments[2]!;
-    const deleted = deleteEpic(epicId);
-
+  if (deleteEpicRoute.match(req.method, pathSegments)) {
+    const parsed = await deleteEpicRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const deleted = deleteEpic(parsed.params.id);
     if (!deleted) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Epic not found" }));
+      jsonError(res, "Epic not found", 404);
       return true;
     }
-
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ success: true }));
+    json(res, { success: true });
     return true;
   }
 
-  // POST /api/epics/:id/tasks - Add task to epic (create new or assign existing)
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "epics", null, "tasks"])) {
-    const epicId = pathSegments[2]!;
-    const epic = getEpicById(epicId);
+  if (addTaskToEpic.match(req.method, pathSegments)) {
+    const parsed = await addTaskToEpic.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const epic = getEpicById(parsed.params.id);
 
     if (!epic) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Epic not found" }));
+      jsonError(res, "Epic not found", 404);
       return true;
     }
-
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = JSON.parse(Buffer.concat(chunks).toString());
 
     // If taskId provided, assign existing task
-    if (body.taskId) {
-      const task = assignTaskToEpic(body.taskId, epicId);
+    if (parsed.body.taskId) {
+      const task = assignTaskToEpic(parsed.body.taskId, parsed.params.id);
       if (!task) {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Task not found" }));
+        jsonError(res, "Task not found", 404);
         return true;
       }
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(task));
+      json(res, task);
       return true;
     }
 
     // Otherwise create new task in this epic
-    if (!body.task) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing task description or taskId" }));
+    if (!parsed.body.task) {
+      jsonError(res, "Missing task description or taskId", 400);
       return true;
     }
 
     try {
-      const task = createTaskExtended(body.task, {
-        ...body,
-        epicId,
+      const task = createTaskExtended(parsed.body.task, {
+        ...parsed.body,
+        epicId: parsed.params.id,
         creatorAgentId: myAgentId || undefined,
-        tags: [...(body.tags || []), `epic:${epic.name}`],
+        tags: [...(parsed.body.tags || []), `epic:${epic.name}`],
         source: "api",
       });
-      res.writeHead(201, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(task));
+      json(res, task, 201);
     } catch (_error) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Failed to create task" }));
+      jsonError(res, "Failed to create task", 500);
     }
     return true;
   }
 
-  // GET /api/channels - List all channels
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "channels"], true)) {
+  if (listChannels.match(req.method, pathSegments)) {
     const channels = getAllChannels();
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ channels }));
+    json(res, { channels });
     return true;
   }
 
-  // POST /api/channels - Create a new channel
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "channels"], true)) {
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = JSON.parse(Buffer.concat(chunks).toString());
+  if (createChannelRoute.match(req.method, pathSegments)) {
+    const parsed = await createChannelRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
 
-    if (!body.name) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing required field: name" }));
-      return true;
-    }
-
-    // Check for duplicate name
-    const existing = getChannelByName(body.name);
+    const existing = getChannelByName(parsed.body.name);
     if (existing) {
-      res.writeHead(409, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Channel with this name already exists" }));
+      jsonError(res, "Channel with this name already exists", 409);
       return true;
     }
 
     try {
-      const channel = createChannel(body.name, {
-        description: body.description,
-        type: body.type,
+      const channel = createChannel(parsed.body.name, {
+        description: parsed.body.description,
+        type: parsed.body.type,
       });
-      res.writeHead(201, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(channel));
+      json(res, channel, 201);
     } catch (_error) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Failed to create channel" }));
+      jsonError(res, "Failed to create channel", 500);
     }
     return true;
   }
 
-  // DELETE /api/channels/:id - Delete a channel
-  if (matchRoute(req.method, pathSegments, "DELETE", ["api", "channels", null], true)) {
-    const channelId = pathSegments[2]!;
+  if (deleteChannelRoute.match(req.method, pathSegments)) {
+    const parsed = await deleteChannelRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
 
-    // Protect the general channel
     const GENERAL_CHANNEL_ID = "00000000-0000-4000-8000-000000000001";
-    if (channelId === GENERAL_CHANNEL_ID) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Cannot delete the general channel" }));
+    if (parsed.params.id === GENERAL_CHANNEL_ID) {
+      jsonError(res, "Cannot delete the general channel", 400);
       return true;
     }
 
-    const channel = getChannelById(channelId);
+    const channel = getChannelById(parsed.params.id);
     if (!channel) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Channel not found" }));
+      jsonError(res, "Channel not found", 404);
       return true;
     }
 
-    const deleted = deleteChannel(channelId);
+    const deleted = deleteChannel(parsed.params.id);
     if (!deleted) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Failed to delete channel" }));
+      jsonError(res, "Failed to delete channel", 500);
       return true;
     }
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ success: true }));
+    json(res, { success: true });
     return true;
   }
 
-  // GET /api/channels/:id/messages - Get messages in a channel
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "channels", null, "messages"], true)) {
-    const channelId = pathSegments[2]!;
-    const channel = getChannelById(channelId);
+  if (listChannelMessages.match(req.method, pathSegments)) {
+    const parsed = await listChannelMessages.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
 
+    const channel = getChannelById(parsed.params.id);
     if (!channel) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Channel not found" }));
+      jsonError(res, "Channel not found", 404);
       return true;
     }
 
-    const limitParam = queryParams.get("limit");
-    const limit = limitParam ? parseInt(limitParam, 10) : 50;
-    const since = queryParams.get("since") || undefined;
-    const before = queryParams.get("before") || undefined;
-
-    const messages = getChannelMessages(channelId, { limit, since, before });
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ messages }));
+    const limit = parsed.query.limit ?? 50;
+    const messages = getChannelMessagesDb(parsed.params.id, {
+      limit,
+      since: parsed.query.since || undefined,
+      before: parsed.query.before || undefined,
+    });
+    json(res, { messages });
     return true;
   }
 
-  // GET /api/channels/:id/messages/:messageId/thread - Get thread messages
-  if (
-    matchRoute(req.method, pathSegments, "GET", [
-      "api",
-      "channels",
-      null,
-      "messages",
-      null,
-      "thread",
-    ])
-  ) {
-    const channelId = pathSegments[2]!;
-    const parentMessageId = pathSegments[4]!;
+  if (getThreadMessages.match(req.method, pathSegments)) {
+    const parsed = await getThreadMessages.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
 
-    const channel = getChannelById(channelId);
+    const channel = getChannelById(parsed.params.channelId);
     if (!channel) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Channel not found" }));
+      jsonError(res, "Channel not found", 404);
       return true;
     }
 
-    // Get all messages that reply to this message
-    const allMessages = getChannelMessages(channelId, { limit: 1000 });
-    const threadMessages = allMessages.filter((m) => m.replyToId === parentMessageId);
-
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ messages: threadMessages }));
+    const allMessages = getChannelMessagesDb(parsed.params.channelId, { limit: 1000 });
+    const threadMessages = allMessages.filter((m) => m.replyToId === parsed.params.messageId);
+    json(res, { messages: threadMessages });
     return true;
   }
 
-  // POST /api/channels/:id/messages - Post a message
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "channels", null, "messages"])) {
-    const channelId = pathSegments[2]!;
-    const channel = getChannelById(channelId);
+  if (postMessageRoute.match(req.method, pathSegments)) {
+    const parsed = await postMessageRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
 
+    const channel = getChannelById(parsed.params.id);
     if (!channel) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Channel not found" }));
+      jsonError(res, "Channel not found", 404);
       return true;
     }
 
-    // Parse request body
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = JSON.parse(Buffer.concat(chunks).toString());
-
-    if (!body.content || typeof body.content !== "string") {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing or invalid content" }));
-      return true;
-    }
-
-    // agentId is optional (null for human users)
-    const agentId = body.agentId || null;
-
-    // If agentId provided, verify agent exists
+    const agentId = parsed.body.agentId || null;
     if (agentId) {
       const agent = getAgentById(agentId);
       if (!agent) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Invalid agentId" }));
+        jsonError(res, "Invalid agentId", 400);
         return true;
       }
     }
 
-    const message = postMessage(channelId, agentId, body.content, {
-      replyToId: body.replyToId,
-      mentions: body.mentions,
+    const message = postMessage(parsed.params.id, agentId, parsed.body.content, {
+      replyToId: parsed.body.replyToId,
+      mentions: parsed.body.mentions,
     });
-
-    res.writeHead(201, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(message));
+    json(res, message, 201);
     return true;
   }
 

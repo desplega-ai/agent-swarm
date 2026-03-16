@@ -62,6 +62,7 @@
     "e2e:workflows": "bun scripts/e2e-workflow-test.ts",
     "e2e:workflows:docker": "bun scripts/e2e-workflow-test.ts --with-docker",
     "docs:mcp": "bun scripts/generate-mcp-docs.ts",
+    "docs:openapi": "bun scripts/generate-openapi.ts",
     "pm2-start": "pm2 start ecosystem.config.cjs",
     "pm2-stop": "pm2 stop ecosystem.config.cjs",
     "pm2-restart": "pm2 restart ecosystem.config.cjs",
@@ -80,6 +81,7 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.41",
+    "@asteasolutions/zod-to-openapi": "^8.0.0",
     "@desplega.ai/localtunnel": "^2.2.0",
     "@inkjs/ui": "^2.0.0",
     "@mariozechner/pi-agent-core": "^0.57.1",

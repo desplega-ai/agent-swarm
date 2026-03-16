@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { z } from "zod";
 import {
   cancelTask,
   completeTask,
@@ -16,7 +17,175 @@ import {
   updateTaskClaudeSessionId,
   updateTaskProgress,
 } from "../be/db";
-import { matchRoute } from "./utils";
+import { route } from "./route-def";
+import { json, jsonError, parseBody } from "./utils";
+
+// ─── Route Definitions ───────────────────────────────────────────────────────
+
+const listTasks = route({
+  method: "get",
+  path: "/api/tasks",
+  pattern: ["api", "tasks"],
+  summary: "List tasks with filters",
+  tags: ["Tasks"],
+  query: z.object({
+    status: z.string().optional(),
+    agentId: z.string().optional(),
+    epicId: z.string().optional(),
+    scheduleId: z.string().optional(),
+    search: z.string().optional(),
+    includeHeartbeat: z.enum(["true", "false"]).optional(),
+    limit: z.coerce.number().int().optional(),
+    offset: z.coerce.number().int().optional(),
+  }),
+  responses: {
+    200: { description: "Paginated task list" },
+  },
+});
+
+const createTask = route({
+  method: "post",
+  path: "/api/tasks",
+  pattern: ["api", "tasks"],
+  summary: "Create a new task",
+  tags: ["Tasks"],
+  body: z.object({
+    task: z.string().min(1),
+    agentId: z.string().optional(),
+    taskType: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    priority: z.number().int().optional(),
+    dependsOn: z.array(z.string()).optional(),
+    offeredTo: z.string().optional(),
+    dir: z.string().optional(),
+    parentTaskId: z.string().optional(),
+    source: z.string().optional(),
+  }),
+  responses: {
+    201: { description: "Task created" },
+    400: { description: "Validation error" },
+  },
+});
+
+const updateClaudeSession = route({
+  method: "put",
+  path: "/api/tasks/{id}/claude-session",
+  pattern: ["api", "tasks", null, "claude-session"],
+  summary: "Update Claude session ID for a task",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  body: z.object({ claudeSessionId: z.string().min(1) }),
+  responses: {
+    200: { description: "Session ID updated" },
+    404: { description: "Task not found" },
+  },
+});
+
+const cancelTaskRoute = route({
+  method: "post",
+  path: "/api/tasks/{id}/cancel",
+  pattern: ["api", "tasks", null, "cancel"],
+  summary: "Cancel a pending or in-progress task",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Task cancelled" },
+    400: { description: "Cannot cancel terminal task" },
+    404: { description: "Task not found" },
+  },
+});
+
+const getTask = route({
+  method: "get",
+  path: "/api/tasks/{id}",
+  pattern: ["api", "tasks", null],
+  summary: "Get task details with logs",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Task with logs" },
+    404: { description: "Task not found" },
+  },
+});
+
+const updateTaskProgressRoute = route({
+  method: "post",
+  path: "/api/tasks/{id}/progress",
+  pattern: ["api", "tasks", null, "progress"],
+  summary: "Update task progress text",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  body: z.object({ progress: z.string().min(1) }),
+  responses: {
+    200: { description: "Progress updated" },
+    404: { description: "Task not found" },
+  },
+});
+
+const finishTask = route({
+  method: "post",
+  path: "/api/tasks/{id}/finish",
+  pattern: ["api", "tasks", null, "finish"],
+  summary: "Mark task as completed or failed (runner endpoint)",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  body: z.object({
+    status: z.enum(["completed", "failed"]),
+    output: z.string().optional(),
+    failureReason: z.string().optional(),
+  }),
+  auth: { apiKey: true, agentId: true },
+  responses: {
+    200: { description: "Task finished" },
+    400: { description: "Invalid status" },
+    403: { description: "Not assigned to this agent" },
+    404: { description: "Task not found" },
+  },
+});
+
+const listPausedTasks = route({
+  method: "get",
+  path: "/api/paused-tasks",
+  pattern: ["api", "paused-tasks"],
+  summary: "Get paused tasks for this agent",
+  tags: ["Tasks"],
+  auth: { apiKey: true, agentId: true },
+  responses: {
+    200: { description: "Paused task list" },
+  },
+});
+
+const pauseTaskRoute = route({
+  method: "post",
+  path: "/api/tasks/{id}/pause",
+  pattern: ["api", "tasks", null, "pause"],
+  summary: "Pause an in-progress task",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Task paused" },
+    400: { description: "Task not in_progress" },
+    403: { description: "Task belongs to another agent" },
+    404: { description: "Task not found" },
+  },
+});
+
+const resumeTaskRoute = route({
+  method: "post",
+  path: "/api/tasks/{id}/resume",
+  pattern: ["api", "tasks", null, "resume"],
+  summary: "Resume a paused task",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Task resumed" },
+    400: { description: "Task not paused" },
+    403: { description: "Task belongs to another agent" },
+    404: { description: "Task not found" },
+  },
+});
+
+// ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleTasks(
   req: IncomingMessage,
@@ -25,119 +194,80 @@ export async function handleTasks(
   queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "tasks"], true)) {
-    const status = queryParams.get("status") as import("../types").AgentTaskStatus | null;
-    const agentId = queryParams.get("agentId");
-    const epicId = queryParams.get("epicId");
-    const scheduleId = queryParams.get("scheduleId");
-    const search = queryParams.get("search");
-    const includeHeartbeat = queryParams.get("includeHeartbeat") === "true";
-    const limit = queryParams.get("limit") ? Number(queryParams.get("limit")) : undefined;
-    const offset = queryParams.get("offset") ? Number(queryParams.get("offset")) : undefined;
+  if (listTasks.match(req.method, pathSegments)) {
+    const parsed = await listTasks.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
     const filters = {
-      status: status || undefined,
-      agentId: agentId || undefined,
-      epicId: epicId || undefined,
-      scheduleId: scheduleId || undefined,
-      search: search || undefined,
-      includeHeartbeat: includeHeartbeat || undefined,
-      limit,
-      offset,
+      status: (parsed.query.status as import("../types").AgentTaskStatus) || undefined,
+      agentId: parsed.query.agentId || undefined,
+      epicId: parsed.query.epicId || undefined,
+      scheduleId: parsed.query.scheduleId || undefined,
+      search: parsed.query.search || undefined,
+      includeHeartbeat: parsed.query.includeHeartbeat === "true" || undefined,
+      limit: parsed.query.limit,
+      offset: parsed.query.offset,
     };
     const tasks = getAllTasks(filters);
     const total = getTasksCount(filters);
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ tasks, total }));
+    json(res, { tasks, total });
     return true;
   }
 
-  // POST /api/tasks - Create a new task
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "tasks"], true)) {
-    // Parse request body
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = JSON.parse(Buffer.concat(chunks).toString());
-
-    // Validate required fields
-    if (!body.task || typeof body.task !== "string") {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing or invalid 'task' field" }));
-      return true;
-    }
+  if (createTask.match(req.method, pathSegments)) {
+    const parsed = await createTask.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
 
     try {
-      // Create task with provided options
-      const task = createTaskExtended(body.task, {
-        agentId: body.agentId || undefined,
+      const task = createTaskExtended(parsed.body.task, {
+        agentId: parsed.body.agentId || undefined,
         creatorAgentId: myAgentId || undefined,
-        taskType: body.taskType || undefined,
-        tags: body.tags || undefined,
-        priority: body.priority || 50,
-        dependsOn: body.dependsOn || undefined,
-        offeredTo: body.offeredTo || undefined,
-        dir: body.dir || undefined,
-        parentTaskId: body.parentTaskId || undefined,
-        source: body.source || "api",
+        taskType: parsed.body.taskType || undefined,
+        tags: parsed.body.tags || undefined,
+        priority: parsed.body.priority || 50,
+        dependsOn: parsed.body.dependsOn || undefined,
+        offeredTo: parsed.body.offeredTo || undefined,
+        dir: parsed.body.dir || undefined,
+        parentTaskId: parsed.body.parentTaskId || undefined,
+        source: (parsed.body.source as import("../types").AgentTaskSource) || "api",
       });
-
-      res.writeHead(201, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(task));
+      json(res, task, 201);
     } catch (error) {
       console.error("[HTTP] Failed to create task:", error);
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Failed to create task" }));
+      jsonError(res, "Failed to create task", 500);
     }
     return true;
   }
 
-  // PUT /api/tasks/:id/claude-session - Update Claude session ID (called by runner)
-  if (matchRoute(req.method, pathSegments, "PUT", ["api", "tasks", null, "claude-session"])) {
-    const taskId = pathSegments[2]!;
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = JSON.parse(Buffer.concat(chunks).toString());
-
-    if (!body.claudeSessionId || typeof body.claudeSessionId !== "string") {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing or invalid 'claudeSessionId' field" }));
-      return true;
-    }
-
-    const task = updateTaskClaudeSessionId(taskId, body.claudeSessionId);
+  if (updateClaudeSession.match(req.method, pathSegments)) {
+    const parsed = await updateClaudeSession.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = updateTaskClaudeSessionId(parsed.params.id, parsed.body.claudeSessionId);
     if (!task) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Task not found" }));
+      jsonError(res, "Task not found", 404);
       return true;
     }
-
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(task));
+    json(res, task);
     return true;
   }
 
-  // POST /api/tasks/:id/cancel - Cancel a pending or in-progress task
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "tasks", null, "cancel"])) {
-    const taskId = pathSegments[2]!;
-    const task = getTaskById(taskId);
+  if (cancelTaskRoute.match(req.method, pathSegments)) {
+    const parsed = await cancelTaskRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = getTaskById(parsed.params.id);
 
     if (!task) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Task not found" }));
+      jsonError(res, "Task not found", 404);
       return true;
     }
 
     const terminalStatuses = ["completed", "failed", "cancelled"];
     if (terminalStatuses.includes(task.status)) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: `Cannot cancel task with status '${task.status}'` }));
+      jsonError(res, `Cannot cancel task with status '${task.status}'`, 400);
       return true;
     }
 
-    // Parse optional reason from body
+    // Parse optional reason from body (already consumed by parse if body schema exists,
+    // but cancel has no body schema — read raw)
     let reason: string | undefined;
     const chunks: Buffer[] = [];
     for await (const chunk of req) {
@@ -153,121 +283,79 @@ export async function handleTasks(
       }
     }
 
-    const cancelledTask = cancelTask(taskId, reason);
+    const cancelledTask = cancelTask(parsed.params.id, reason);
     if (!cancelledTask) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Failed to cancel task" }));
+      jsonError(res, "Failed to cancel task", 500);
       return true;
     }
 
-    // Update agent status if task had an assigned agent
     if (task.agentId) {
       updateAgentStatusFromCapacity(task.agentId);
     }
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ success: true, task: cancelledTask }));
+    json(res, { success: true, task: cancelledTask });
     return true;
   }
 
-  // GET /api/tasks/:id - Get single task with logs
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "tasks", null])) {
-    const taskId = pathSegments[2]!;
-    const task = getTaskById(taskId);
+  if (getTask.match(req.method, pathSegments)) {
+    const parsed = await getTask.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = getTaskById(parsed.params.id);
 
     if (!task) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Task not found" }));
+      jsonError(res, "Task not found", 404);
       return true;
     }
 
-    const logs = getLogsByTaskId(taskId);
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ...task, logs }));
+    const logs = getLogsByTaskId(parsed.params.id);
+    json(res, { ...task, logs });
     return true;
   }
 
-  // POST /api/tasks/:id/progress - Update task progress text (called by runner for auto-progress)
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "tasks", null, "progress"])) {
-    const taskId = pathSegments[2]!;
-    const task = getTaskById(taskId);
+  if (updateTaskProgressRoute.match(req.method, pathSegments)) {
+    const parsed = await updateTaskProgressRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = getTaskById(parsed.params.id);
 
     if (!task) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Task not found" }));
+      jsonError(res, "Task not found", 404);
       return true;
     }
 
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = JSON.parse(Buffer.concat(chunks).toString());
-
-    if (!body.progress || typeof body.progress !== "string") {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing 'progress' string field" }));
-      return true;
-    }
-
-    updateTaskProgress(taskId, body.progress);
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ success: true }));
+    updateTaskProgress(parsed.params.id, parsed.body.progress);
+    json(res, { success: true });
     return true;
   }
 
-  // POST /api/tasks/:id/finish - Mark task as completed or failed (runner wrapper endpoint)
-  // This endpoint is called by the runner when a Claude process exits to ensure task status is updated
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "tasks", null, "finish"])) {
+  if (finishTask.match(req.method, pathSegments)) {
     if (!myAgentId) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
+      jsonError(res, "Missing X-Agent-ID header", 400);
       return true;
     }
 
-    const taskId = pathSegments[2]!;
-
-    // Parse request body
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = JSON.parse(Buffer.concat(chunks).toString());
-
-    // Validate status field
-    if (!body.status || !["completed", "failed"].includes(body.status)) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          error: "Missing or invalid 'status' field (must be 'completed' or 'failed')",
-        }),
-      );
-      return true;
-    }
+    const parsed = await finishTask.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
 
     const result = getDb().transaction(() => {
-      const task = getTaskById(taskId);
+      const task = getTaskById(parsed.params.id);
 
       if (!task) {
         return { error: "Task not found", status: 404 };
       }
 
-      // Only allow the assigned agent (or task creator if unassigned) to finish the task
       if (task.agentId && task.agentId !== myAgentId) {
         return { error: "Task is assigned to another agent", status: 403 };
       }
 
-      // Only finish tasks that are in_progress (prevent double-finishing)
       if (task.status !== "in_progress") {
-        // Task already finished or not started - return success with current state
         return { task, alreadyFinished: true };
       }
 
       let updatedTask: typeof task;
-      if (body.status === "completed") {
+      if (parsed.body.status === "completed") {
         const result = completeTask(
-          taskId,
-          body.output || "Completed by runner wrapper (no explicit output)",
+          parsed.params.id,
+          parsed.body.output || "Completed by runner wrapper (no explicit output)",
         );
         if (!result) {
           return { error: "Failed to complete task", status: 500 };
@@ -275,8 +363,8 @@ export async function handleTasks(
         updatedTask = result;
       } else {
         const result = failTask(
-          taskId,
-          body.failureReason || "Process exited without explicit completion",
+          parsed.params.id,
+          parsed.body.failureReason || "Process exited without explicit completion",
         );
         if (!result) {
           return { error: "Failed to mark task as failed", status: 500 };
@@ -284,7 +372,6 @@ export async function handleTasks(
         updatedTask = result;
       }
 
-      // Update agent status based on remaining capacity
       if (task.agentId) {
         updateAgentStatusFromCapacity(task.agentId);
       }
@@ -292,106 +379,86 @@ export async function handleTasks(
       return { task: updatedTask };
     })();
 
-    if ("error" in result) {
-      res.writeHead(result.status ?? 500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: result.error }));
+    if ("error" in result && result.error) {
+      jsonError(res, result.error, (result as { status?: number }).status ?? 500);
       return true;
     }
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        success: true,
-        alreadyFinished: result.alreadyFinished ?? false,
-        task: result.task,
-      }),
-    );
+    json(res, {
+      success: true,
+      alreadyFinished: "alreadyFinished" in result ? result.alreadyFinished : false,
+      task: result.task,
+    });
     return true;
   }
 
-  // GET /api/paused-tasks - Get paused tasks for this agent
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "paused-tasks"])) {
+  if (listPausedTasks.match(req.method, pathSegments)) {
     if (!myAgentId) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
+      jsonError(res, "Missing X-Agent-ID header", 400);
       return true;
     }
-
     const pausedTasks = getPausedTasksForAgent(myAgentId);
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ tasks: pausedTasks }));
+    json(res, { tasks: pausedTasks });
     return true;
   }
 
-  // POST /api/tasks/:id/pause - Pause an in-progress task
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "tasks", null, "pause"])) {
-    const taskId = pathSegments[2]!;
-    const task = getTaskById(taskId);
+  if (pauseTaskRoute.match(req.method, pathSegments)) {
+    const parsed = await pauseTaskRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = getTaskById(parsed.params.id);
 
     if (!task) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Task not found" }));
+      jsonError(res, "Task not found", 404);
       return true;
     }
 
-    // If called by an agent, only allow pausing own tasks
     if (myAgentId && task.agentId !== myAgentId) {
-      res.writeHead(403, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Task belongs to another agent" }));
+      jsonError(res, "Task belongs to another agent", 403);
       return true;
     }
 
     if (task.status !== "in_progress") {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: `Task status is '${task.status}', not 'in_progress'` }));
+      jsonError(res, `Task status is '${task.status}', not 'in_progress'`, 400);
       return true;
     }
 
-    const pausedTask = pauseTask(taskId);
+    const pausedTask = pauseTask(parsed.params.id);
     if (!pausedTask) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Failed to pause task" }));
+      jsonError(res, "Failed to pause task", 500);
       return true;
     }
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ success: true, task: pausedTask }));
+    json(res, { success: true, task: pausedTask });
     return true;
   }
 
-  // POST /api/tasks/:id/resume - Resume a paused task
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "tasks", null, "resume"])) {
-    const taskId = pathSegments[2]!;
-    const task = getTaskById(taskId);
+  if (resumeTaskRoute.match(req.method, pathSegments)) {
+    const parsed = await resumeTaskRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = getTaskById(parsed.params.id);
 
     if (!task) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Task not found" }));
+      jsonError(res, "Task not found", 404);
       return true;
     }
 
-    // If called by an agent, only allow resuming own tasks
     if (myAgentId && task.agentId !== myAgentId) {
-      res.writeHead(403, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Task belongs to another agent" }));
+      jsonError(res, "Task belongs to another agent", 403);
       return true;
     }
 
     if (task.status !== "paused") {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: `Task status is '${task.status}', not 'paused'` }));
+      jsonError(res, `Task status is '${task.status}', not 'paused'`, 400);
       return true;
     }
 
-    const resumedTask = resumeTask(taskId);
+    const resumedTask = resumeTask(parsed.params.id);
     if (!resumedTask) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Failed to resume task" }));
+      jsonError(res, "Failed to resume task", 500);
       return true;
     }
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ success: true, task: resumedTask }));
+    json(res, { success: true, task: resumedTask });
     return true;
   }
 

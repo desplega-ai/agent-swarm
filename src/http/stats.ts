@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { z } from "zod";
 import {
   getAllAgents,
   getAllLogs,
@@ -9,7 +10,82 @@ import {
   getTaskStats,
 } from "../be/db";
 import type { AgentLog } from "../types";
-import { matchRoute } from "./utils";
+import { route } from "./route-def";
+import { json } from "./utils";
+
+// ─── Route Definitions ───────────────────────────────────────────────────────
+
+const listLogs = route({
+  method: "get",
+  path: "/api/logs",
+  pattern: ["api", "logs"],
+  summary: "List agent logs",
+  tags: ["Stats"],
+  query: z.object({
+    limit: z.coerce.number().int().min(1).optional(),
+    agentId: z.string().uuid().optional(),
+  }),
+  responses: {
+    200: { description: "Agent logs" },
+  },
+});
+
+const getStats = route({
+  method: "get",
+  path: "/api/stats",
+  pattern: ["api", "stats"],
+  summary: "Dashboard summary stats",
+  tags: ["Stats"],
+  responses: {
+    200: { description: "Agent and task statistics" },
+  },
+});
+
+const listServices = route({
+  method: "get",
+  path: "/api/services",
+  pattern: ["api", "services"],
+  summary: "List all registered services",
+  tags: ["Stats"],
+  query: z.object({
+    status: z.string().optional(),
+    agentId: z.string().optional(),
+    name: z.string().optional(),
+  }),
+  responses: {
+    200: { description: "Service list" },
+  },
+});
+
+const listScheduledTasks = route({
+  method: "get",
+  path: "/api/scheduled-tasks",
+  pattern: ["api", "scheduled-tasks"],
+  summary: "List scheduled tasks",
+  tags: ["Stats"],
+  query: z.object({
+    enabled: z.enum(["true", "false"]).optional(),
+    name: z.string().optional(),
+    scheduleType: z.enum(["recurring", "one_time"]).optional(),
+    hideCompleted: z.enum(["true", "false"]).optional(),
+  }),
+  responses: {
+    200: { description: "Scheduled tasks list" },
+  },
+});
+
+const getConcurrentContextRoute = route({
+  method: "get",
+  path: "/api/concurrent-context",
+  pattern: ["api", "concurrent-context"],
+  summary: "Get concurrent session context for lead awareness",
+  tags: ["Stats"],
+  responses: {
+    200: { description: "Concurrent context data" },
+  },
+});
+
+// ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleStats(
   req: IncomingMessage,
@@ -17,23 +93,22 @@ export async function handleStats(
   pathSegments: string[],
   queryParams: URLSearchParams,
 ): Promise<boolean> {
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "logs"])) {
-    const limitParam = queryParams.get("limit");
-    const limit = limitParam ? parseInt(limitParam, 10) : 100;
-    const agentId = queryParams.get("agentId");
+  if (listLogs.match(req.method, pathSegments)) {
+    const parsed = await listLogs.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const limit = parsed.query.limit ?? 100;
+    const agentId = parsed.query.agentId;
     let logs: AgentLog[] = [];
     if (agentId) {
       logs = getLogsByAgentId(agentId).slice(0, limit);
     } else {
       logs = getAllLogs(limit);
     }
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ logs }));
+    json(res, { logs });
     return true;
   }
 
-  // GET /api/stats - Dashboard summary stats
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "stats"])) {
+  if (getStats.match(req.method, pathSegments)) {
     const agents = getAllAgents();
     const taskStats = getTaskStats();
 
@@ -57,48 +132,41 @@ export async function handleStats(
       },
     };
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(stats));
+    json(res, stats);
     return true;
   }
 
-  // GET /api/services - List all services (with optional filters: status, agentId, name)
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "services"], true)) {
-    const status = queryParams.get("status") as import("../types").ServiceStatus | null;
-    const agentId = queryParams.get("agentId");
-    const name = queryParams.get("name");
+  if (listServices.match(req.method, pathSegments)) {
+    const parsed = await listServices.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
     const services = getAllServices({
-      status: status || undefined,
-      agentId: agentId || undefined,
-      name: name || undefined,
+      status: (parsed.query.status as import("../types").ServiceStatus) || undefined,
+      agentId: parsed.query.agentId || undefined,
+      name: parsed.query.name || undefined,
     });
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ services }));
+    json(res, { services });
     return true;
   }
 
-  // GET /api/scheduled-tasks - List all scheduled tasks (with optional filters: enabled, name)
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "scheduled-tasks"], true)) {
-    const enabledParam = queryParams.get("enabled");
-    const name = queryParams.get("name");
-    const scheduleType = queryParams.get("scheduleType") as "recurring" | "one_time" | null;
-    const hideCompletedParam = queryParams.get("hideCompleted");
+  if (listScheduledTasks.match(req.method, pathSegments)) {
+    const parsed = await listScheduledTasks.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
     const scheduledTasks = getScheduledTasks({
-      enabled: enabledParam !== null ? enabledParam === "true" : undefined,
-      name: name || undefined,
-      scheduleType: scheduleType || undefined,
-      hideCompleted: hideCompletedParam !== null ? hideCompletedParam !== "false" : undefined,
+      enabled: parsed.query.enabled !== undefined ? parsed.query.enabled === "true" : undefined,
+      name: parsed.query.name || undefined,
+      scheduleType: (parsed.query.scheduleType as "recurring" | "one_time") || undefined,
+      hideCompleted:
+        parsed.query.hideCompleted !== undefined
+          ? parsed.query.hideCompleted !== "false"
+          : undefined,
     });
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ scheduledTasks }));
+    json(res, { scheduledTasks });
     return true;
   }
 
-  // GET /api/concurrent-context - Get concurrent session context for lead awareness
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "concurrent-context"], true)) {
+  if (getConcurrentContextRoute.match(req.method, pathSegments)) {
     const context = getConcurrentContext();
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(context));
+    json(res, context);
     return true;
   }
 

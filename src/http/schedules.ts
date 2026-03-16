@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { CronExpressionParser } from "cron-parser";
+import { z } from "zod";
 import {
   createScheduledTask,
   createTaskExtended,
@@ -11,108 +12,184 @@ import {
   updateScheduledTask,
 } from "../be/db";
 import { calculateNextRun } from "../scheduler/scheduler";
-import { matchRoute } from "./utils";
+import { route } from "./route-def";
+import { json, jsonError } from "./utils";
+
+// ─── Route Definitions ───────────────────────────────────────────────────────
+
+const createSchedule = route({
+  method: "post",
+  path: "/api/schedules",
+  pattern: ["api", "schedules"],
+  summary: "Create a new schedule",
+  tags: ["Schedules"],
+  body: z.object({
+    name: z.string().min(1),
+    description: z.string().optional(),
+    cronExpression: z.string().optional(),
+    intervalMs: z.number().int().optional(),
+    taskTemplate: z.string().min(1),
+    taskType: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    priority: z.number().int().optional(),
+    targetAgentId: z.string().uuid().optional(),
+    enabled: z.boolean().optional(),
+    timezone: z.string().optional(),
+    model: z.string().optional(),
+    scheduleType: z.enum(["recurring", "one_time"]).optional(),
+    delayMs: z.number().int().optional(),
+    runAt: z.string().optional(),
+  }),
+  responses: {
+    201: { description: "Schedule created" },
+    400: { description: "Validation error" },
+    409: { description: "Duplicate name" },
+  },
+});
+
+const runScheduleNow = route({
+  method: "post",
+  path: "/api/schedules/{id}/run",
+  pattern: ["api", "schedules", null, "run"],
+  summary: "Run a schedule immediately",
+  tags: ["Schedules"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Schedule run triggered" },
+    400: { description: "Schedule is disabled" },
+    404: { description: "Schedule not found" },
+  },
+});
+
+const getSchedule = route({
+  method: "get",
+  path: "/api/schedules/{id}",
+  pattern: ["api", "schedules", null],
+  summary: "Get a schedule by ID",
+  tags: ["Schedules"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Schedule details" },
+    404: { description: "Schedule not found" },
+  },
+});
+
+const updateSchedule = route({
+  method: "put",
+  path: "/api/schedules/{id}",
+  pattern: ["api", "schedules", null],
+  summary: "Update a schedule",
+  tags: ["Schedules"],
+  params: z.object({ id: z.string() }),
+  body: z.object({
+    name: z.string().optional(),
+    description: z.string().optional(),
+    cronExpression: z.string().optional(),
+    intervalMs: z.number().int().optional(),
+    taskTemplate: z.string().optional(),
+    taskType: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    priority: z.number().int().optional(),
+    targetAgentId: z.string().uuid().optional(),
+    enabled: z.boolean().optional(),
+    timezone: z.string().optional(),
+    model: z.string().optional(),
+    nextRunAt: z.string().nullable().optional(),
+  }),
+  responses: {
+    200: { description: "Schedule updated" },
+    400: { description: "Validation error" },
+    404: { description: "Schedule not found" },
+    409: { description: "Duplicate name" },
+  },
+});
+
+const deleteSchedule = route({
+  method: "delete",
+  path: "/api/schedules/{id}",
+  pattern: ["api", "schedules", null],
+  summary: "Delete a schedule",
+  tags: ["Schedules"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Schedule deleted" },
+    404: { description: "Schedule not found" },
+  },
+});
+
+// ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleSchedules(
   req: IncomingMessage,
   res: ServerResponse,
   pathSegments: string[],
-  _queryParams: URLSearchParams,
+  queryParams: URLSearchParams,
   _myAgentId: string | undefined,
 ): Promise<boolean> {
-  // POST /api/schedules — Create a new schedule
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "schedules"], true)) {
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = JSON.parse(Buffer.concat(chunks).toString());
-
-    if (!body.name) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing required field: name" }));
-      return true;
-    }
-
-    if (!body.taskTemplate) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing required field: taskTemplate" }));
-      return true;
-    }
+  if (createSchedule.match(req.method, pathSegments)) {
+    const parsed = await createSchedule.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const body = parsed.body;
 
     const isOneTime = body.scheduleType === "one_time";
 
-    // Validate params based on schedule type
+    // Cross-field validation
     if (isOneTime) {
       if (body.cronExpression || body.intervalMs) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            error:
-              "One-time schedules cannot use cronExpression or intervalMs. Use delayMs or runAt.",
-          }),
+        jsonError(
+          res,
+          "One-time schedules cannot use cronExpression or intervalMs. Use delayMs or runAt.",
+          400,
         );
         return true;
       }
       if (!body.delayMs && !body.runAt) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "One-time schedules require either delayMs or runAt." }));
+        jsonError(res, "One-time schedules require either delayMs or runAt.", 400);
         return true;
       }
       if (body.delayMs && body.runAt) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Provide either delayMs or runAt, not both." }));
+        jsonError(res, "Provide either delayMs or runAt, not both.", 400);
         return true;
       }
       if (body.runAt && new Date(body.runAt).getTime() <= Date.now()) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "runAt must be in the future." }));
+        jsonError(res, "runAt must be in the future.", 400);
         return true;
       }
     } else {
       if (body.delayMs || body.runAt) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            error:
-              "delayMs and runAt are only for one-time schedules. Set scheduleType to 'one_time'.",
-          }),
+        jsonError(
+          res,
+          "delayMs and runAt are only for one-time schedules. Set scheduleType to 'one_time'.",
+          400,
         );
         return true;
       }
     }
 
-    // Validate cron expression
     if (body.cronExpression) {
       try {
         CronExpressionParser.parse(body.cronExpression);
       } catch {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Invalid cron expression" }));
+        jsonError(res, "Invalid cron expression", 400);
         return true;
       }
     }
 
-    // Check for duplicate name
     const existing = getScheduledTaskByName(body.name);
     if (existing) {
-      res.writeHead(409, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Schedule with this name already exists" }));
+      jsonError(res, "Schedule with this name already exists", 409);
       return true;
     }
 
-    // Validate target agent if provided
     if (body.targetAgentId) {
       const agent = getAgentById(body.targetAgentId);
       if (!agent) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Target agent not found" }));
+        jsonError(res, "Target agent not found", 400);
         return true;
       }
     }
 
     try {
-      // Calculate nextRunAt before creation
       let nextRunAt: string | undefined;
       if (body.enabled === false) {
         nextRunAt = undefined;
@@ -147,29 +224,25 @@ export async function handleSchedules(
         scheduleType: body.scheduleType,
       });
 
-      res.writeHead(201, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(schedule));
+      json(res, schedule, 201);
     } catch (_error) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Failed to create schedule" }));
+      jsonError(res, "Failed to create schedule", 500);
     }
     return true;
   }
 
-  // POST /api/schedules/:id/run — Run a schedule immediately
-  if (matchRoute(req.method, pathSegments, "POST", ["api", "schedules", null, "run"])) {
-    const scheduleId = pathSegments[2]!;
-    const schedule = getScheduledTaskById(scheduleId);
+  if (runScheduleNow.match(req.method, pathSegments)) {
+    const parsed = await runScheduleNow.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const schedule = getScheduledTaskById(parsed.params.id);
 
     if (!schedule) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Schedule not found" }));
+      jsonError(res, "Schedule not found", 404);
       return true;
     }
 
     if (!schedule.enabled) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Schedule is disabled" }));
+      jsonError(res, "Schedule is disabled", 400);
       return true;
     }
 
@@ -205,95 +278,73 @@ export async function handleSchedules(
         return createdTask;
       })();
 
-      const updatedSchedule = getScheduledTaskById(scheduleId);
-
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ schedule: updatedSchedule, task }));
+      const updatedSchedule = getScheduledTaskById(parsed.params.id);
+      json(res, { schedule: updatedSchedule, task });
     } catch (_error) {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Failed to run schedule" }));
+      jsonError(res, "Failed to run schedule", 500);
     }
     return true;
   }
 
-  // GET /api/schedules/:id — Get single schedule
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "schedules", null])) {
-    const scheduleId = pathSegments[2]!;
-    const schedule = getScheduledTaskById(scheduleId);
+  if (getSchedule.match(req.method, pathSegments)) {
+    const parsed = await getSchedule.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const schedule = getScheduledTaskById(parsed.params.id);
 
     if (!schedule) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Schedule not found" }));
+      jsonError(res, "Schedule not found", 404);
       return true;
     }
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(schedule));
+    json(res, schedule);
     return true;
   }
 
-  // PUT /api/schedules/:id — Update a schedule
-  if (matchRoute(req.method, pathSegments, "PUT", ["api", "schedules", null])) {
-    const scheduleId = pathSegments[2]!;
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = JSON.parse(Buffer.concat(chunks).toString());
+  if (updateSchedule.match(req.method, pathSegments)) {
+    const parsed = await updateSchedule.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const body = parsed.body as Record<string, unknown>;
 
-    const existing = getScheduledTaskById(scheduleId);
+    const existing = getScheduledTaskById(parsed.params.id);
     if (!existing) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Schedule not found" }));
+      jsonError(res, "Schedule not found", 404);
       return true;
     }
 
     // Reject updates on completed one-time schedules
     if (existing.scheduleType === "one_time" && !existing.enabled && existing.lastRunAt) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          error: "One-time schedule has already executed. Create a new one instead.",
-        }),
-      );
+      jsonError(res, "One-time schedule has already executed. Create a new one instead.", 400);
       return true;
     }
 
-    // Validate new cron expression if provided
-    if (body.cronExpression) {
+    if (parsed.body.cronExpression) {
       try {
-        CronExpressionParser.parse(body.cronExpression);
+        CronExpressionParser.parse(parsed.body.cronExpression);
       } catch {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Invalid cron expression" }));
+        jsonError(res, "Invalid cron expression", 400);
         return true;
       }
     }
 
-    // Validate new target agent if provided
-    if (body.targetAgentId) {
-      const agent = getAgentById(body.targetAgentId);
+    if (parsed.body.targetAgentId) {
+      const agent = getAgentById(parsed.body.targetAgentId);
       if (!agent) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Target agent not found" }));
+        jsonError(res, "Target agent not found", 400);
         return true;
       }
     }
 
-    // Validate name uniqueness if changing name
-    if (body.name && body.name !== existing.name) {
-      const nameConflict = getScheduledTaskByName(body.name);
+    if (parsed.body.name && parsed.body.name !== existing.name) {
+      const nameConflict = getScheduledTaskByName(parsed.body.name);
       if (nameConflict) {
-        res.writeHead(409, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Schedule with this name already exists" }));
+        jsonError(res, "Schedule with this name already exists", 409);
         return true;
       }
     }
 
     // Recalculate nextRunAt when timing fields or enabled status changes
-    const newEnabled = body.enabled !== undefined ? body.enabled : existing.enabled;
+    const newEnabled = parsed.body.enabled !== undefined ? parsed.body.enabled : existing.enabled;
     if (existing.scheduleType === "one_time") {
-      // One-time schedules: no recalculation via cron/interval
       if (!newEnabled) {
         body.nextRunAt = null;
       }
@@ -301,14 +352,14 @@ export async function handleSchedules(
       if (!newEnabled) {
         body.nextRunAt = null;
       } else if (
-        body.cronExpression !== undefined ||
-        body.intervalMs !== undefined ||
-        (body.enabled === true && !existing.enabled)
+        parsed.body.cronExpression !== undefined ||
+        parsed.body.intervalMs !== undefined ||
+        (parsed.body.enabled === true && !existing.enabled)
       ) {
         const merged = {
-          cronExpression: body.cronExpression ?? existing.cronExpression,
-          intervalMs: body.intervalMs ?? existing.intervalMs,
-          timezone: body.timezone ?? existing.timezone,
+          cronExpression: parsed.body.cronExpression ?? existing.cronExpression,
+          intervalMs: parsed.body.intervalMs ?? existing.intervalMs,
+          timezone: parsed.body.timezone ?? existing.timezone,
         };
         if (merged.cronExpression || merged.intervalMs) {
           // biome-ignore lint/suspicious/noExplicitAny: need partial ScheduledTask for calculateNextRun
@@ -317,25 +368,22 @@ export async function handleSchedules(
       }
     }
 
-    const schedule = updateScheduledTask(scheduleId, body);
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(schedule));
+    const schedule = updateScheduledTask(parsed.params.id, body);
+    json(res, schedule);
     return true;
   }
 
-  // DELETE /api/schedules/:id — Delete a schedule
-  if (matchRoute(req.method, pathSegments, "DELETE", ["api", "schedules", null])) {
-    const scheduleId = pathSegments[2]!;
-    const deleted = deleteScheduledTask(scheduleId);
+  if (deleteSchedule.match(req.method, pathSegments)) {
+    const parsed = await deleteSchedule.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const deleted = deleteScheduledTask(parsed.params.id);
 
     if (!deleted) {
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Schedule not found" }));
+      jsonError(res, "Schedule not found", 404);
       return true;
     }
 
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ success: true }));
+    json(res, { success: true });
     return true;
   }
 
