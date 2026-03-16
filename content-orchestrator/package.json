@@ -1,0 +1,19 @@
+{
+  "name": "content-orchestrator",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch src/index.ts",
+    "dry-run": "DRY_RUN=true bun run src/index.ts",
+    "lint:fix": "biome check --write src/",
+    "format": "biome format --write src/",
+    "tsc:check": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.0",
+    "@types/bun": "latest",
+    "typescript": "^5.7.0"
+  }
+}
