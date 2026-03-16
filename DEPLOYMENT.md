@@ -41,6 +41,10 @@ docker-compose up -d
 
 > **Note:** `.env.example` contains API server settings, `.env.docker.example` contains Docker worker settings. For docker-compose, you need both sets of variables in a single `.env` file.
 
+### ARM Compatibility (Apple Silicon)
+
+All services in the docker-compose files include `platform: linux/amd64` to avoid `no matching manifest for linux/arm64/v8` errors on Apple Silicon Macs. The Docker images are built for `linux/amd64` and run via Rosetta emulation.
+
 ### What's Included
 
 The example `docker-compose.yml` sets up:
