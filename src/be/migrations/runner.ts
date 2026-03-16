@@ -145,9 +145,25 @@ export function runMigrations(db: Database): void {
           checksum: initialMigration.checksum,
         });
       } else {
+        // Database has some tables but not all baseline tables — the schema is
+        // partial or from a very old version. We can't safely run 001_initial
+        // on top because CREATE TABLE IF NOT EXISTS would skip existing tables
+        // (keeping their old schema) while indexes/seeds reference new columns.
+        // Drop all user tables so 001_initial creates everything from scratch.
         console.log(
-          "[migrations] Existing database appears incomplete — applying 001_initial migration",
+          "[migrations] Existing database appears incomplete — dropping old tables and applying fresh",
         );
+        const existingTables = db
+          .prepare<{ name: string }, []>(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '\\_%' ESCAPE '\\'",
+          )
+          .all()
+          .map((r) => r.name);
+        db.run("PRAGMA foreign_keys = OFF");
+        for (const table of existingTables) {
+          db.run(`DROP TABLE IF EXISTS "${table}"`);
+        }
+        db.run("PRAGMA foreign_keys = ON");
       }
     }
   }
