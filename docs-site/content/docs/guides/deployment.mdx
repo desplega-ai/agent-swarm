@@ -20,6 +20,10 @@ cp .env.docker.example .env
 docker-compose up -d
 ```
 
+### ARM Compatibility (Apple Silicon)
+
+All services in the docker-compose files include `platform: linux/amd64` to avoid `no matching manifest for linux/arm64/v8` errors on Apple Silicon Macs. The Docker images are built for `linux/amd64` and run via Rosetta emulation.
+
 ### What's Included
 
 The example `docker-compose.yml` sets up:
