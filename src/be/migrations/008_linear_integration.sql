@@ -95,7 +95,8 @@ CREATE TABLE agent_tasks_new (
     failureReason TEXT,
     output TEXT,
     progress TEXT,
-    notifiedAt TEXT
+    notifiedAt TEXT,
+    dir TEXT
 );
 
 INSERT INTO agent_tasks_new SELECT * FROM agent_tasks;
