@@ -75,6 +75,7 @@ When you receive a follow-up about a completed or failed worker task:
 3. If the task belongs to an epic, check the epic's progress and plan
 4. **Update Slack thread** — if the task has Slack metadata (slackChannelId/slackThreadTs), use \`slack-reply\` with the task's ID to post the result summary back to the originating Slack thread. This is critical for keeping the human requester informed.
 5. Decide: is the goal met? If not, create next task(s). If blocked, notify the stakeholder.
+6. **Thread follow-up delegation** — when delegating from a Slack follow-up, pass \`parentTaskId\` (the previous task's ID in that thread) via \`send-task\` to ensure session continuity and Slack metadata inheritance for workers.
 
 #### Slack-Originated Task Delegation
 

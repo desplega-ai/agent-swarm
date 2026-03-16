@@ -1173,10 +1173,10 @@ export function getCompletedSlackTasks(): AgentTask[] {
   return getDb()
     .prepare<AgentTaskRow, []>(
       `SELECT * FROM agent_tasks
-       WHERE source = 'slack'
-       AND slackChannelId IS NOT NULL
+       WHERE slackChannelId IS NOT NULL
        AND status IN ('completed', 'failed')
-       ORDER BY lastUpdatedAt DESC`,
+       ORDER BY lastUpdatedAt DESC
+       LIMIT 200`,
     )
     .all()
     .map(rowToAgentTask);
@@ -1244,10 +1244,10 @@ export function getInProgressSlackTasks(): AgentTask[] {
   return getDb()
     .prepare<AgentTaskRow, []>(
       `SELECT * FROM agent_tasks
-       WHERE source = 'slack'
-       AND slackChannelId IS NOT NULL
+       WHERE slackChannelId IS NOT NULL
        AND status = 'in_progress'
-       ORDER BY lastUpdatedAt DESC`,
+       ORDER BY lastUpdatedAt DESC
+       LIMIT 200`,
     )
     .all()
     .map(rowToAgentTask);
@@ -1293,6 +1293,24 @@ export function getLatestActiveTaskInThread(channelId: string, threadTs: string)
     )
     .get(channelId, threadTs);
 
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Find the most recent task in a Slack thread, regardless of source or status.
+ * Unlike getAgentWorkingOnThread (which filters source='slack'), this finds ALL tasks
+ * including worker tasks that inherited Slack metadata via parentTaskId.
+ */
+export function getMostRecentTaskInThread(channelId: string, threadTs: string): AgentTask | null {
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      `SELECT * FROM agent_tasks
+       WHERE slackChannelId = ?
+       AND slackThreadTs = ?
+       ORDER BY createdAt DESC
+       LIMIT 1`,
+    )
+    .get(channelId, threadTs);
   return row ? rowToAgentTask(row) : null;
 }
 
