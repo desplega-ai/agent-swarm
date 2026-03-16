@@ -94,10 +94,10 @@ describe("Slack router — thread follow-up routing", () => {
 
       const matches = routeMessage("<@BOT123> follow up", "BOT123", true, { channelId, threadTs });
 
-      // Should fall through to lead since worker is offline
+      // Should route to lead via thread follow-up fallback (not generic @bot)
       expect(matches).toHaveLength(1);
       expect(matches[0].agent.id).toBe(leadAgent.id);
-      expect(matches[0].matchedText).toBe("@bot");
+      expect(matches[0].matchedText).toBe("thread follow-up (lead fallback)");
     });
   });
 

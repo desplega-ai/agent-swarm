@@ -53,9 +53,15 @@ export function routeMessage(
       );
       matches.push({ agent: workingAgent, matchedText: "thread follow-up" });
     } else if (workingAgent) {
+      // Agent is offline but thread has history — route to lead without requiring @mention
       console.log(
-        `[Slack] Thread follow-up: agent ${workingAgent.name} is offline, falling through to lead`,
+        `[Slack] Thread follow-up: agent ${workingAgent.name} is offline, routing to lead`,
       );
+      const allAgents = getAllAgents();
+      const lead = allAgents.find((a) => a.isLead && a.status !== "offline");
+      if (lead) {
+        matches.push({ agent: lead, matchedText: "thread follow-up (lead fallback)" });
+      }
     }
   }
 

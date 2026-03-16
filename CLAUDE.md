@@ -198,6 +198,48 @@ docker run --rm -d \
 
 **Keep test tasks trivial**: Use simple tasks like "Say hi" for E2E tests. Complex tasks (web searches, research) waste time and API credits during testing.
 
+**Quick E2E setup (clean DB + API + Docker lead/worker):**
+
+```bash
+# 1. Clean DB for fresh state
+rm -f agent-swarm-db.sqlite agent-swarm-db.sqlite-wal agent-swarm-db.sqlite-shm
+
+# 2. Start API server (NOT pm2 — it starts extra services)
+bun run start:http &
+
+# 3. Build Docker image with current code
+bun run docker:build:worker
+
+# 4a. Start a LEAD container (uses .env.docker-lead)
+docker run --rm -d \
+  --name e2e-test-lead \
+  --env-file .env.docker-lead \
+  -e AGENT_ROLE=lead \
+  -e MAX_CONCURRENT_TASKS=1 \
+  -p 3201:3000 \
+  agent-swarm-worker:latest
+
+# 4b. Start a WORKER container (uses .env.docker)
+docker run --rm -d \
+  --name e2e-test-worker \
+  --env-file .env.docker \
+  -e MAX_CONCURRENT_TASKS=1 \
+  -p 3203:3000 \
+  agent-swarm-worker:latest
+
+# 5. Verify registration
+curl -s -H "Authorization: Bearer 123123" http://localhost:3013/api/agents | jq '.agents[] | {name, isLead, status}'
+
+# 6. Cleanup
+docker stop e2e-test-lead e2e-test-worker
+kill $(lsof -ti :3013)
+```
+
+Key differences between lead and worker env files:
+- `.env.docker-lead` — lead-specific `AGENT_ID`, no `OPENROUTER_API_KEY`
+- `.env.docker` — worker-specific `AGENT_ID`, includes `OPENROUTER_API_KEY`
+- `AGENT_ROLE=lead` must be passed explicitly (not in the env file)
+
 ### MCP Tool Testing (Streamable HTTP)
 
 To test MCP tools via curl, you need a proper session handshake:
