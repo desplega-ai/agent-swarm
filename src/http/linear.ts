@@ -6,7 +6,40 @@
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { getAuthorizationUrl, handleOAuthCallback, isLinearEnabled } from "../linear";
-import { matchRoute } from "./utils";
+import { route } from "./route-def";
+
+// ─── Route Definitions ──────────────────────────────────────────────────────
+
+const linearAuthorize = route({
+  method: "get",
+  path: "/api/linear/authorize",
+  pattern: ["api", "linear", "authorize"],
+  summary: "Redirect to Linear OAuth consent screen",
+  tags: ["Linear"],
+  auth: { apiKey: false },
+  responses: {
+    302: { description: "Redirect to Linear OAuth" },
+    500: { description: "Failed to generate authorization URL" },
+    503: { description: "Linear integration not configured" },
+  },
+});
+
+const linearCallback = route({
+  method: "get",
+  path: "/api/linear/callback",
+  pattern: ["api", "linear", "callback"],
+  summary: "Handle Linear OAuth callback",
+  tags: ["Linear"],
+  auth: { apiKey: false },
+  responses: {
+    200: { description: "OAuth authorization complete" },
+    400: { description: "Missing or invalid parameters" },
+    500: { description: "OAuth callback failed" },
+    503: { description: "Linear integration not configured" },
+  },
+});
+
+// ─── Handler ────────────────────────────────────────────────────────────────
 
 export async function handleLinear(
   req: IncomingMessage,
@@ -14,7 +47,7 @@ export async function handleLinear(
   pathSegments: string[],
 ): Promise<boolean> {
   // ── GET /api/linear/authorize ──
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "linear", "authorize"])) {
+  if (linearAuthorize.match(req.method, pathSegments)) {
     if (!isLinearEnabled()) {
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Linear integration not configured" }));
@@ -35,7 +68,7 @@ export async function handleLinear(
   }
 
   // ── GET /api/linear/callback ──
-  if (matchRoute(req.method, pathSegments, "GET", ["api", "linear", "callback"])) {
+  if (linearCallback.match(req.method, pathSegments)) {
     if (!isLinearEnabled()) {
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Linear integration not configured" }));
