@@ -1,11 +1,13 @@
 ---
 date: 2026-03-16
 author: Claude
-status: draft
+status: completed
 autonomy: autopilot
 research: thoughts/taras/research/2026-03-16-route-wrapper-openapi.md
 tags: [plan, openapi, route-wrapper, zod-to-openapi, api-docs]
-commit_per_phase: TBD
+commit_per_phase: single (all phases shipped in b8e0d9d)
+last_updated: 2026-03-16
+last_updated_by: Claude (verification)
 ---
 
 # Route Wrapper + OpenAPI Spec Generation
@@ -578,3 +580,57 @@ _(none)_
 - [x] **Phase 1 grep count wrong** — `grep -c "/api/repos" openapi.json` expected "≥ 5" but OpenAPI has 2 path keys (`/api/repos` and `/api/repos/{id}`), not 5 (endpoints ≠ paths). Fixed to "≥ 2"
 - [x] **Import side effects verified safe** — `db.ts` uses lazy init (`getDb()` only opens DB on first query call). All handler files can be safely imported in the dump script without triggering DB connections, Slack, or timers. Only `src/http/index.ts` has dangerous top-level side effects (boots entire server).
 - [x] **`Object.fromEntries(queryParams)` verified safe** — no handler uses `getAll()`, comma-splitting, or repeated query params. All query params are single-valued scalars.
+
+---
+
+## Post-Implementation Verification
+
+_Verified: 2026-03-16 by Claude_
+
+### Automated Checks (all pass)
+
+| Check | Result |
+|-------|--------|
+| `bun run tsc:check` | **PASS** — clean |
+| `bun run lint:fix` | **PASS** — 0 warnings (after fixing 3 unused imports in active-sessions.ts, epics.ts, tasks.ts) |
+| `bun test` | **PASS** — 1400/1400 tests, 0 fail |
+| `bun test src/tests/http-api-integration.test.ts` | **PASS** — 166/166 tests, 0 fail |
+| `bun run docs:openapi` | **PASS** — generated 83.2KB |
+| `git diff --exit-code openapi.json` | **PASS** — no drift |
+| `grep -rn "matchRoute(" src/http/ ...` | **PASS** — no raw matchRoute() in handlers |
+| Dependency installed | **PASS** — `@asteasolutions/zod-to-openapi ^8.0.0` |
+| CI job added | **PASS** — `openapi-freshness` job + gate dependency |
+
+### Manual E2E Tests (all pass)
+
+Server started on port 3013, tested the following:
+
+| Test | Expected | Actual | Status |
+|------|----------|--------|--------|
+| `GET /health` | 200 | 200 | **PASS** |
+| `GET /openapi.json` | Valid OpenAPI 3.1.0 JSON | OpenAPI 3.1.0, 58 paths, title: "Agent Swarm API" | **PASS** |
+| `GET /docs` | Scalar HTML page | HTML with `<script>` loading Scalar CDN | **PASS** |
+| `GET /api/repos` (authed) | 200 + JSON list | 200, dict response | **PASS** |
+| `GET /api/tasks?limit=2` (authed) | 200 + JSON with tasks/total | 200, `{tasks, total}` | **PASS** |
+| `GET /api/agents` (authed) | 200 + JSON list | 200, list | **PASS** |
+| `GET /api/epics` (authed) | 200 + JSON | 200, dict | **PASS** |
+| `GET /api/active-sessions` (authed) | 200 + JSON | 200, dict | **PASS** |
+| `GET /api/config` (authed) | 200 + JSON | 200, dict | **PASS** |
+| `GET /api/workflows` (authed) | 200 + JSON list | 200, list (count: 0) | **PASS** |
+| `POST /api/repos` empty body | 400 + Zod error | 400: "url: expected string, name: expected string" | **PASS** |
+| `POST /api/epics` missing goal | 400 + Zod error | 400: "goal: expected string, received undefined" | **PASS** |
+| `GET /api/tasks?limit=abc` | 400 + coercion error | 400: "limit: expected number, received NaN" | **PASS** |
+| `GET /api/tasks` no auth | 401 | 401: "Unauthorized" | **PASS** |
+| `GET /ecosystem` no X-Agent-ID | 400 | 400: "Missing X-Agent-ID header" | **PASS** |
+
+### Notes
+
+- **Invalid UUID path params** (`GET /api/tasks/not-a-uuid`): Returns 404 "Task not found" instead of 400. The route param schemas use `z.string()` without `.uuid()`, so non-UUID strings are accepted and the handler returns 404 when no DB record matches. This is acceptable — strict UUID validation can be added later if desired.
+- **`GET /api/schedules` returns 404**: This is pre-existing behavior — no list endpoint was ever implemented (only CRUD on individual schedules). Not a regression.
+- **58 OpenAPI paths**: Plan estimated ~62-70. The difference is because OpenAPI groups multiple HTTP methods under one path key, and some matchRoute() calls were sub-route checks (e.g., `/tasks/{id}/cancel`), not distinct paths.
+- **Test assertion changes**: Two test files were updated — `http-api-integration.test.ts` loosened an epic validation assertion (`"name, goal"` → `"goal"`), and `workflow-http.test.ts` changed `toBe` → `toContain` for an error message. Both reflect Zod validation producing slightly different error messages than the old manual validation. All 1400 tests pass.
+
+### Cleanup Applied During Verification
+
+- Removed unused `parseBody` import from `epics.ts` and `tasks.ts`
+- Removed unused `jsonError` import from `active-sessions.ts`

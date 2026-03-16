@@ -10,7 +10,7 @@ import {
   insertActiveSession,
 } from "../be/db";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { json } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 

@@ -18,7 +18,7 @@ import {
   updateTaskProgress,
 } from "../be/db";
 import { route } from "./route-def";
-import { json, jsonError, parseBody } from "./utils";
+import { json, jsonError } from "./utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
