@@ -1,4 +1,9 @@
-import { createTaskExtended, getLatestActiveTaskInThread, getLeadAgent } from "../be/db";
+import {
+  createTaskExtended,
+  getLatestActiveTaskInThread,
+  getLeadAgent,
+  getMostRecentTaskInThread,
+} from "../be/db";
 import { getSlackApp } from "./app";
 import { buildBufferFlushBlocks } from "./blocks";
 
@@ -163,6 +168,7 @@ async function flushBuffer(key: string, immediate = false): Promise<void> {
   // Otherwise, depend on the latest active task so it queues naturally.
   const dependsOn = !immediate && latestActiveTask ? [latestActiveTask.id] : undefined;
 
+  const mostRecentTask = getMostRecentTaskInThread(buffer.channelId, buffer.threadTs);
   const task = createTaskExtended(fullDescription, {
     agentId: lead?.id,
     source: "slack",
@@ -170,6 +176,7 @@ async function flushBuffer(key: string, immediate = false): Promise<void> {
     slackThreadTs: buffer.threadTs,
     slackUserId: buffer.slackUserId,
     dependsOn,
+    parentTaskId: mostRecentTask?.id,
   });
 
   console.log(

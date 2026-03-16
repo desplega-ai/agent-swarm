@@ -1,5 +1,10 @@
 import { Assistant } from "@slack/bolt";
-import { createTaskExtended, getAgentWorkingOnThread, getLeadAgent } from "../be/db";
+import {
+  createTaskExtended,
+  getAgentWorkingOnThread,
+  getLeadAgent,
+  getMostRecentTaskInThread,
+} from "../be/db";
 import { bufferThreadMessage } from "./thread-buffer";
 
 const additiveSlack = process.env.ADDITIVE_SLACK === "true";
@@ -50,12 +55,14 @@ export function createAssistant(): Assistant {
           }
 
           // Otherwise, create a follow-up task for the working agent
+          const latestTask = getMostRecentTaskInThread(channelId, threadTs);
           createTaskExtended(messageText, {
             agentId: workingAgent.id,
             source: "slack",
             slackChannelId: channelId,
             slackThreadTs: threadTs,
             slackUserId: userId,
+            parentTaskId: latestTask?.id,
           });
 
           await setStatus("Processing follow-up...");

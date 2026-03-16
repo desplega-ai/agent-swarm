@@ -6,6 +6,7 @@ import {
   getAgentById,
   getAgentWorkingOnThread,
   getLeadAgent,
+  getMostRecentTaskInThread,
   getTasksByAgentId,
 } from "../be/db";
 import { workflowEventBus } from "../workflows/event-bus";
@@ -512,6 +513,7 @@ export function registerMessageHandler(app: App): void {
       }
 
       try {
+        const latestTask = getMostRecentTaskInThread(msg.channel, threadTs);
         if (agent.isLead) {
           const task = createTaskExtended(fullTaskDescription, {
             agentId: agent.id,
@@ -519,6 +521,7 @@ export function registerMessageHandler(app: App): void {
             slackChannelId: msg.channel,
             slackThreadTs: threadTs,
             slackUserId: msg.user,
+            parentTaskId: latestTask?.id,
           });
           results.assigned.push({ agentName: agent.name, taskId: task.id });
           continue;
