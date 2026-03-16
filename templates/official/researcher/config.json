@@ -2,12 +2,12 @@
   "name": "researcher",
   "displayName": "Researcher",
   "description": "Research-focused worker that analyzes codebases, reviews documentation, and produces structured findings for the swarm",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "category": "official",
   "icon": "search",
   "author": "Agent Swarm <contact@agent-swarm.dev>",
   "createdAt": "2026-03-09",
-  "lastUpdatedAt": "2026-03-10",
+  "lastUpdatedAt": "2026-03-16",
   "agentDefaults": {
     "role": "worker",
     "capabilities": ["research", "analysis", "documentation", "web-search"],
@@ -16,8 +16,6 @@
   "files": {
     "claudeMd": "CLAUDE.md",
     "soulMd": "SOUL.md",
-    "identityMd": "IDENTITY.md",
-    "toolsMd": "TOOLS.md",
-    "setupScript": "start-up.sh"
+    "identityMd": "IDENTITY.md"
   }
 }

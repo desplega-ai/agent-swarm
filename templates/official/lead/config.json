@@ -2,12 +2,12 @@
   "name": "lead",
   "displayName": "Lead",
   "description": "Orchestrator agent that coordinates workers, decomposes tasks, manages epics, and builds institutional knowledge across sessions",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "category": "official",
   "icon": "crown",
   "author": "Agent Swarm <contact@agent-swarm.dev>",
   "createdAt": "2026-03-09",
-  "lastUpdatedAt": "2026-03-10",
+  "lastUpdatedAt": "2026-03-16",
   "agentDefaults": {
     "role": "lead",
     "capabilities": ["coordination", "planning", "communication"],
@@ -17,8 +17,6 @@
   "files": {
     "claudeMd": "CLAUDE.md",
     "soulMd": "SOUL.md",
-    "identityMd": "IDENTITY.md",
-    "toolsMd": "TOOLS.md",
-    "setupScript": "start-up.sh"
+    "identityMd": "IDENTITY.md"
   }
 }
