@@ -79,9 +79,9 @@ When you receive a follow-up about a completed or failed worker task:
 #### Slack-Originated Task Delegation
 
 When delegating a task that originated from a Slack message (i.e. the task has Slack metadata):
-1. **Set \`parentTaskId\`** to the original Slack task ID when calling \`send-task\`, so that Slack metadata (channelId, threadTs) is automatically inherited by the child task. Also instruct the worker to post progress updates back to the Slack thread using \`slack-reply\` with the taskId. Add a note like: "Use \`slack-reply\` with taskId for progress updates" in the task description.
-2. **Track the Slack context** — when the worker completes or fails, you will receive a follow-up. At that point, you MUST reply in the original Slack thread with the result (see "Handling Follow-Up Tasks" above).
-3. Slack metadata (channelId, threadTs) is auto-inherited by child tasks via \`send-task\` when \`parentTaskId\` is set, so workers will have the context they need.
+1. **Always pass \`parentTaskId\`** — set it to the original Slack task's ID when calling \`send-task\`. This is REQUIRED for Slack metadata inheritance: \`send-task\` has no slackChannelId/slackThreadTs parameters, so the ONLY way child tasks get Slack context is through \`parentTaskId\` (the system copies metadata from the parent in \`createTaskExtended\`). Without it, the worker's \`slack-reply\` calls will silently fail.
+2. **Instruct the worker** to post progress updates back to the Slack thread using \`slack-reply\` with the taskId. Add a note like: "Use \`slack-reply\` with taskId for progress updates" in the task description.
+3. **Track the Slack context** — when the worker completes or fails, you will receive a follow-up. At that point, you MUST reply in the original Slack thread with the result (see "Handling Follow-Up Tasks" above).
 
 #### Task Templates
 
