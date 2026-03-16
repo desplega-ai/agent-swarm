@@ -1,6 +1,24 @@
 import { CONFIG } from "./config.js";
 import type { TaskResponse } from "./types.js";
 
+const FETCH_TIMEOUT_MS = 30_000;
+const MAX_POLL_ERRORS = 5;
+
+/** Fetch with AbortController timeout */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs: number = FETCH_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export class SwarmClient {
   private baseUrl: string;
   private apiKey: string;
@@ -28,7 +46,7 @@ export class SwarmClient {
     tags?: string[];
     priority?: number;
   }): Promise<string> {
-    const resp = await fetch(`${this.baseUrl}/api/tasks`, {
+    const resp = await fetchWithTimeout(`${this.baseUrl}/api/tasks`, {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify({
@@ -52,7 +70,7 @@ export class SwarmClient {
 
   /** Get task details by ID */
   async getTaskDetails(taskId: string): Promise<TaskResponse> {
-    const resp = await fetch(`${this.baseUrl}/api/tasks/${taskId}`, {
+    const resp = await fetchWithTimeout(`${this.baseUrl}/api/tasks/${taskId}`, {
       headers: this.headers(),
     });
 
@@ -103,11 +121,35 @@ export class SwarmClient {
 
     const deadline = Date.now() + timeoutMs;
     let pollInterval: number = CONFIG.POLL_INITIAL_MS;
+    let consecutiveErrors = 0;
 
     while (Date.now() < deadline) {
       await sleep(pollInterval);
 
-      const task = await this.getTaskDetails(taskId);
+      let task: TaskResponse;
+      try {
+        task = await this.getTaskDetails(taskId);
+        consecutiveErrors = 0;
+      } catch (e) {
+        consecutiveErrors++;
+        console.warn(
+          `[swarm] Poll error for ${taskId} (${consecutiveErrors}/${MAX_POLL_ERRORS}): ${e}`,
+        );
+        if (consecutiveErrors >= MAX_POLL_ERRORS) {
+          return {
+            id: taskId,
+            agentId,
+            task: taskDescription,
+            status: "failed",
+            failureReason: `Polling failed after ${MAX_POLL_ERRORS} consecutive errors`,
+          };
+        }
+        pollInterval = Math.min(
+          pollInterval * CONFIG.POLL_BACKOFF_FACTOR,
+          CONFIG.POLL_MAX_MS,
+        );
+        continue;
+      }
 
       if (task.status === "completed") {
         console.log(`[swarm] Task ${taskId} completed`);
@@ -131,7 +173,7 @@ export class SwarmClient {
     // Timeout: try to cancel and return failure
     console.log(`[swarm] Task ${taskId} timed out after ${timeoutMs}ms`);
     try {
-      await fetch(`${this.baseUrl}/api/tasks/${taskId}/cancel`, {
+      await fetchWithTimeout(`${this.baseUrl}/api/tasks/${taskId}/cancel`, {
         method: "POST",
         headers: this.headers(),
       });

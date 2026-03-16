@@ -104,9 +104,15 @@ function normalizeLitmusResult(raw: Record<string, unknown>): LitmusResult {
     scores,
     totalScore,
     maxScore: maxScore || 50,
-    rejectionReasons: toStringArray(raw.rejection_reasons ?? raw.rejectionReasons),
+    rejectionReasons: toStringArray(
+      raw.rejection_reasons ?? raw.rejectionReasons ?? raw.weaknesses ?? raw.reasons,
+    ),
     improvementSuggestions: toStringArray(
-      raw.improvement_suggestions ?? raw.improvementSuggestions ?? raw.suggestions,
+      raw.improvement_suggestions ??
+        raw.improvementSuggestions ??
+        raw.suggestions ??
+        raw.revision_suggestions ??
+        raw.revisionSuggestions,
     ),
   };
 }

@@ -11,20 +11,27 @@ export async function safePull(
     return true;
   }
 
+  let didStash = false;
   try {
-    // Stash, pull, pop
-    await Bun.$`cd ${repoPath} && git stash`.quiet();
+    // Check if there are changes to stash
+    const stashResult = await Bun.$`cd ${repoPath} && git stash`.quiet().text();
+    didStash = !stashResult.includes("No local changes");
+
     await Bun.$`cd ${repoPath} && git pull origin main`.quiet();
-    try {
-      await Bun.$`cd ${repoPath} && git stash pop`.quiet();
-    } catch {
-      // No stash to pop is fine
-    }
     console.log(`[git] Pulled latest in ${repoPath}`);
     return true;
   } catch (e) {
     console.error(`[git] Pull failed: ${e}`);
     return false;
+  } finally {
+    // Always pop stash if we stashed, even if pull failed
+    if (didStash) {
+      try {
+        await Bun.$`cd ${repoPath} && git stash pop`.quiet();
+      } catch {
+        console.warn("[git] Failed to pop stash after pull");
+      }
+    }
   }
 }
 

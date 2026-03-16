@@ -108,6 +108,7 @@ export async function runDailyBlogFlow(): Promise<FlowResult> {
     // Step 4: Git operations — branch, commit, push, PR
     let prUrl: string | undefined;
     const branchName = `daily-content/${dateStr}`;
+    let gitFailed = false;
 
     try {
       await createBranch(branchName);
@@ -124,24 +125,29 @@ export async function runDailyBlogFlow(): Promise<FlowResult> {
         autoMerge: false,
       });
     } catch (e) {
-      console.error(`[orchestrator] Git/PR operations failed: ${e}`);
+      const gitError = e instanceof Error ? e.message : String(e);
+      console.error(`[orchestrator] Git/PR operations failed: ${gitError}`);
+      gitFailed = true;
     }
 
     // Step 5: Record workflow execution
+    // If git failed, record as failed so cooldown doesn't skip the next run
     const completedAt = new Date().toISOString();
+    const workflowStatus = gitFailed ? "failed" : "success";
     const result: FlowResult = {
-      status: "success",
+      status: gitFailed ? "failed" : "success",
       seriesResults,
       prUrl,
       startedAt,
       completedAt,
+      error: gitFailed ? "Git/PR operations failed" : undefined,
     };
 
     stateManager.recordWorkflowExecution({
       workflowName: "daily_blog",
       startedAt,
       completedAt,
-      status: "success",
+      status: workflowStatus,
       metadata: JSON.stringify({
         seriesResults: seriesResults.map((r) => ({
           series: r.series,
@@ -150,6 +156,7 @@ export async function runDailyBlogFlow(): Promise<FlowResult> {
         })),
         prUrl,
         postsGenerated: successCount,
+        gitFailed,
       }),
     });
 
