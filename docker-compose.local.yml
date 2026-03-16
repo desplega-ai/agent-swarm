@@ -15,6 +15,7 @@
 services:
   api:
     container_name: swarm-api
+    platform: linux/amd64
     build:
       context: .
       dockerfile: Dockerfile
@@ -39,6 +40,7 @@ services:
 
   lead:
     container_name: swarm-lead
+    platform: linux/amd64
     image: swarm-worker:local
     build:
       context: .
@@ -72,6 +74,7 @@ services:
 
   pi-worker:
     container_name: swarm-pi-worker
+    platform: linux/amd64
     image: swarm-worker:local
     build:
       context: .
