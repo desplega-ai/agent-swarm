@@ -367,8 +367,8 @@ Handle edge cases, ensure dev proxy works correctly with multi-config, and add f
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Lint passes: `cd new-ui && pnpm lint`
+- [x] TypeScript compiles: `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Lint passes: `cd new-ui && pnpm lint`
 
 #### Manual Verification:
 - [ ] Dev proxy works correctly when active connection is localhost:3013
