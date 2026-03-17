@@ -76,6 +76,8 @@ docker compose -f docker-compose.example.yml --env-file .env up -d
 
 The API runs on port `3013`. The dashboard is available separately (see [Dashboard](#dashboard)).
 
+The API includes interactive documentation at `http://localhost:3013/docs` (Scalar UI) and a machine-readable OpenAPI 3.1 spec at `http://localhost:3013/openapi.json`.
+
 ### Option B: Local API + Docker Workers
 
 Run the API locally and connect Docker workers to it.

@@ -6,7 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.44.5] - 2026-03-17
+
+### Added
+- OpenAPI 3.1 spec at `/openapi.json` (~83KB, ~60 REST endpoints) generated from route registry (#184)
+- Scalar interactive API docs at `/docs` — pre-authentication API explorer (#184)
+- `MODEL_OVERRIDE` and `CAPABILITIES` env vars for content agents in `docker-compose.example.yml` (#165)
+  - `content-writer`: `MODEL_OVERRIDE=opus`, capability: `content-writing`
+  - `content-reviewer`: `MODEL_OVERRIDE=sonnet`, capability: `content-review` (uses Gemini via OpenRouter)
+  - `content-strategist`: `MODEL_OVERRIDE=sonnet`, capability: `content-strategy`
+
+### Changed
+- `route()` factory replaces all raw `matchRoute()` calls — typed route definitions with Zod schemas for params, query, and body validation (#184)
+- Lead agent now posts task results back to originating Slack threads (#183)
+- Worker agents now post start/completion/failure updates to originating Slack threads (#183)
+
 ### Fixed
+- Slack thread follow-ups route to lead when assigned agent is offline (#183)
+- `parentTaskId` continuity preserved for follow-up tasks (#183)
 - ARM compatibility for Docker Compose — added `platform: linux/amd64` to all services to fix `no matching manifest for linux/arm64/v8` on Apple Silicon Macs (#180)
 
 ### Added

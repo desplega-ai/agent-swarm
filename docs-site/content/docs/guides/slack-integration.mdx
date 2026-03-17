@@ -61,6 +61,8 @@ If no agents are online, the message is queued as an unassigned task in the pool
 
 When you @mention the bot in a thread where a worker is already handling a task, the message routes directly to that worker — no lead delegation needed. This keeps conversations flowing naturally.
 
+If the assigned worker is offline or unavailable, the follow-up routes to the lead agent instead of dropping the message. The lead picks up the thread context and continues the conversation, preserving `parentTaskId` continuity for chained tasks.
+
 ### Additive Slack Buffer
 
 When enabled via `ADDITIVE_SLACK=true`, thread replies that do NOT @mention the bot are captured, buffered, and batched into a single follow-up task. This allows multi-message feedback without requiring an @mention each time.
