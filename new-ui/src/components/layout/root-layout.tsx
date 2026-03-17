@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { Outlet } from "react-router-dom";
 import { CommandMenu } from "@/components/shared/command-menu";
 import { ErrorBoundary } from "@/components/shared/error-boundary";
+import { NameConnectionModal } from "@/components/shared/name-connection-modal";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
@@ -32,6 +33,7 @@ export function RootLayout() {
           </SidebarInset>
         </SidebarProvider>
         <CommandMenu />
+        <NameConnectionModal />
       </ShortcutProvider>
     </ConfigGuard>
   );

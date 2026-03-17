@@ -303,8 +303,8 @@ Replace the single-connection card on the config page with a multi-connection ma
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Lint passes: `cd new-ui && pnpm lint`
+- [x] TypeScript compiles: `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Lint passes: `cd new-ui && pnpm lint`
 
 #### Manual Verification:
 - [ ] Can add a new connection with a custom name
