@@ -14,6 +14,11 @@ import {
   updateConnection as updateStoredConnection,
 } from "@/lib/config";
 
+export interface PendingConnection {
+  apiUrl: string;
+  apiKey: string;
+}
+
 interface ConfigContextValue {
   /** All saved connections */
   connections: Connection[];
@@ -35,19 +40,49 @@ interface ConfigContextValue {
   resetConfig: () => void;
   /** True if active connection has an apiKey */
   isConfigured: boolean;
+  /** Pending connection from URL params (not yet saved) */
+  pendingConnection: PendingConnection | null;
+  /** Clear the pending connection state */
+  clearPendingConnection: () => void;
 }
 
 export const ConfigContext = createContext<ConfigContextValue | null>(null);
 
-/** Strip ?apiUrl= and ?apiKey= from the URL without acting on them (deferred to Phase 4). */
-function stripUrlParams(): void {
+/**
+ * Extract ?apiUrl= and ?apiKey= from the URL, strip them, and return values if both present.
+ * If a matching connection already exists, activate it and return null.
+ */
+function extractUrlParams(
+  connections: Connection[],
+  activateFn: (id: string) => void,
+): PendingConnection | null {
   const params = new URLSearchParams(window.location.search);
+  const apiUrl = params.get("apiUrl");
+  const apiKey = params.get("apiKey");
+
+  // Always strip the params from the URL
   if (params.has("apiUrl") || params.has("apiKey")) {
     const url = new URL(window.location.href);
     url.searchParams.delete("apiUrl");
     url.searchParams.delete("apiKey");
     window.history.replaceState({}, "", url.toString());
   }
+
+  // Only act if we have both values
+  if (!apiUrl || !apiKey) return null;
+
+  const normalizedUrl = apiUrl.replace(/\/+$/, "");
+
+  // Check if a connection with matching URL+key already exists
+  const existing = connections.find(
+    (c) => c.apiUrl.replace(/\/+$/, "") === normalizedUrl && c.apiKey === apiKey,
+  );
+  if (existing) {
+    activateFn(existing.id);
+    return null;
+  }
+
+  return { apiUrl: normalizedUrl, apiKey };
 }
 
 function loadState(): { connections: Connection[]; activeConnection: Connection | null } {
@@ -57,11 +92,6 @@ function loadState(): { connections: Connection[]; activeConnection: Connection 
 }
 
 export function useConfigProvider() {
-  // Strip URL params on init (Phase 4 will create connections from them)
-  useState(() => {
-    stripUrlParams();
-  });
-
   const [state, setState] = useState(loadState);
   const queryClient = useQueryClient();
 
@@ -69,9 +99,32 @@ export function useConfigProvider() {
     setState(loadState());
   }, []);
 
-  const config: Config = state.activeConnection
-    ? { apiUrl: state.activeConnection.apiUrl, apiKey: state.activeConnection.apiKey }
-    : getDefaultConfig();
+  // Extract URL params on init — may set pendingConnection or activate an existing one
+  const [pendingConnection, setPendingConnection] = useState<PendingConnection | null>(() => {
+    const initial = loadState();
+    return extractUrlParams(initial.connections, (id) => {
+      setActiveConnection(id);
+      // State will be loaded fresh on next render
+    });
+  });
+
+  // Re-load state if URL params activated an existing connection
+  useState(() => {
+    if (!pendingConnection) {
+      setState(loadState());
+    }
+  });
+
+  const clearPendingConnection = useCallback(() => {
+    setPendingConnection(null);
+  }, []);
+
+  // If there's a pending connection, use its credentials for the config
+  const config: Config = pendingConnection
+    ? { apiUrl: pendingConnection.apiUrl, apiKey: pendingConnection.apiKey }
+    : state.activeConnection
+      ? { apiUrl: state.activeConnection.apiUrl, apiKey: state.activeConnection.apiKey }
+      : getDefaultConfig();
 
   const switchConnection = useCallback(
     (id: string) => {
@@ -120,6 +173,7 @@ export function useConfigProvider() {
   const resetConfig = useCallback(() => {
     resetStoredConfig();
     refreshState();
+    setPendingConnection(null);
   }, [refreshState]);
 
   const isConfigured = !!config.apiKey;
@@ -135,6 +189,8 @@ export function useConfigProvider() {
     setConfig,
     resetConfig,
     isConfigured,
+    pendingConnection,
+    clearPendingConnection,
   };
 }
 
