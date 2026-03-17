@@ -114,9 +114,9 @@ Replace the single-config localStorage schema with a multi-connection schema. In
 - [x] Lint passes: `cd new-ui && pnpm lint`
 
 #### Manual Verification:
-- [ ] Open browser console, call `localStorage.getItem("agent-swarm-connections")` — verify structure
-- [ ] If old `agent-swarm-config` existed, verify it was migrated into a "default" connection
-- [ ] `getConfig()` still returns correct `{ apiUrl, apiKey }` for the active connection
+- [x] Open browser console, call `localStorage.getItem("agent-swarm-connections")` — verify structure
+- [x] If old `agent-swarm-config` existed, verify it was migrated into a "default" connection
+- [x] `getConfig()` still returns correct `{ apiUrl, apiKey }` for the active connection
 
 **Implementation Note**: After completing this phase, pause for manual confirmation.
 
@@ -190,9 +190,9 @@ Update the React context to expose multi-connection state and operations. The ex
 - [x] Lint passes: `cd new-ui && pnpm lint`
 
 #### Manual Verification:
-- [ ] Temporarily add a `console.log` in the config provider — verify connections load on page refresh
-- [ ] Verify `isConfigured` is true when active connection has an apiKey
-- [ ] Verify React DevTools shows correct context value structure
+- [x] Temporarily add a `console.log` in the config provider — verify connections load on page refresh
+- [x] Verify `isConfigured` is true when active connection has an apiKey
+- [x] Verify React DevTools shows correct context value structure
 
 **Implementation Note**: After completing this phase, pause for manual confirmation.
 
@@ -238,11 +238,11 @@ Add a compact swarm switcher to the sidebar header, below the logo. Shows the ac
 - [x] Lint passes: `cd new-ui && pnpm lint`
 
 #### Manual Verification:
-- [ ] Switcher shows active connection name in sidebar
-- [ ] Dropdown lists all saved connections
-- [ ] Clicking a different connection switches and reloads data
-- [ ] "Manage connections" navigates to `/config`
-- [ ] Sidebar collapsed mode shows reasonable compact view
+- [x] Switcher shows active connection name in sidebar
+- [x] Dropdown lists all saved connections
+- [x] Clicking a different connection switches and reloads data
+- [x] "Manage connections" navigates to `/config`
+- [x] Sidebar collapsed mode shows reasonable compact view
 
 **Implementation Note**: After completing this phase, pause for manual confirmation.
 
@@ -250,10 +250,10 @@ Add a compact swarm switcher to the sidebar header, below the logo. Shows the ac
 
 **Approach:** manual
 **Test Scenarios:**
-- [ ] TC-1: Switch between connections
+- [x] TC-1: Switch between connections
   - Steps: 1. Have 2+ connections saved, 2. Click switcher, 3. Select different connection
   - Expected: Dashboard reloads with data from new API, health indicator updates
-- [ ] TC-2: Collapsed sidebar
+- [x] TC-2: Collapsed sidebar
   - Steps: 1. Collapse sidebar, 2. Observe switcher
   - Expected: Switcher degrades gracefully (icon only or hidden)
 
@@ -307,13 +307,13 @@ Replace the single-connection card on the config page with a multi-connection ma
 - [x] Lint passes: `cd new-ui && pnpm lint`
 
 #### Manual Verification:
-- [ ] Can add a new connection with a custom name
-- [ ] Can add a connection without a name -> random slug generated
-- [ ] Can edit an existing connection's name, URL, and key
-- [ ] Can delete a non-active connection
-- [ ] Deleting the last connection shows unconfigured state
-- [ ] URL params (`?apiUrl=x&apiKey=y`) still work — create a new connection or match existing
-- [ ] SwarmConfigSection still works against the active connection
+- [x] Can add a new connection with a custom name
+- [x] Can add a connection without a name -> random slug generated
+- [x] Can edit an existing connection's name, URL, and key
+- [x] Can delete a non-active connection
+- [x] Deleting the last connection shows unconfigured state
+- [x] URL params (`?apiUrl=x&apiKey=y`) still work — create a new connection or match existing
+- [x] SwarmConfigSection still works against the active connection
 
 **Implementation Note**: After completing this phase, pause for manual confirmation.
 
@@ -321,16 +321,16 @@ Replace the single-connection card on the config page with a multi-connection ma
 
 **Approach:** manual
 **Test Scenarios:**
-- [ ] TC-1: First-time setup
+- [x] TC-1: First-time setup
   - Steps: 1. Clear localStorage, 2. Open dashboard, 3. Fill in connection details, 4. Click Connect
   - Expected: Connection saved, redirected to dashboard, data loads
-- [ ] TC-2: Add second connection
+- [x] TC-2: Add second connection
   - Steps: 1. Go to /config, 2. Click "Add Connection", 3. Fill in different API, 4. Save
   - Expected: New connection appears in list and in sidebar switcher
-- [ ] TC-3: Delete connection
+- [x] TC-3: Delete connection
   - Steps: 1. Have 2+ connections, 2. Delete the non-active one
   - Expected: Connection removed from list and switcher
-- [ ] TC-4: URL param deep-link
+- [x] TC-4: URL param deep-link
   - Steps: 1. Visit `/?apiUrl=http://localhost:3013&apiKey=123123`
   - Expected: Connection created/matched and set active, URL cleaned up
 
@@ -371,11 +371,11 @@ Handle edge cases, ensure dev proxy works correctly with multi-config, and add f
 - [x] Lint passes: `cd new-ui && pnpm lint`
 
 #### Manual Verification:
-- [ ] Dev proxy works correctly when active connection is localhost:3013
-- [ ] Switching to a non-localhost connection bypasses the proxy correctly
-- [ ] Clearing all connections shows the unconfigured state
-- [ ] Page refresh preserves active connection selection
-- [ ] Multiple tabs sharing localStorage stay reasonably in sync (no crashes)
+- [x] Dev proxy works correctly when active connection is localhost:3013
+- [x] Switching to a non-localhost connection bypasses the proxy correctly
+- [x] Clearing all connections shows the unconfigured state
+- [x] Page refresh preserves active connection selection
+- [x] Multiple tabs sharing localStorage stay reasonably in sync (no crashes)
 
 **Implementation Note**: After completing this phase, pause for manual confirmation.
 
