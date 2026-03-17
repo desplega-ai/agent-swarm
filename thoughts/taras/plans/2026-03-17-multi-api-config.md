@@ -186,8 +186,8 @@ Update the React context to expose multi-connection state and operations. The ex
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Lint passes: `cd new-ui && pnpm lint`
+- [x] TypeScript compiles: `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Lint passes: `cd new-ui && pnpm lint`
 
 #### Manual Verification:
 - [ ] Temporarily add a `console.log` in the config provider — verify connections load on page refresh
