@@ -26,6 +26,7 @@ import {
   SidebarRail,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { SwarmSwitcher } from "./swarm-switcher";
 
 const navGroups = [
   {
@@ -64,10 +65,10 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="h-14 justify-center border-b border-sidebar-border">
+      <SidebarHeader className="border-b border-sidebar-border">
         <NavLink
           to="/"
-          className="flex items-center gap-2 group-data-[collapsible=icon]:justify-center"
+          className="flex h-10 items-center gap-2 group-data-[collapsible=icon]:justify-center"
         >
           <img
             src="/logo.png"
@@ -78,6 +79,9 @@ export function AppSidebar() {
             Agent Swarm
           </span>
         </NavLink>
+        <div className="group-data-[collapsible=icon]:hidden">
+          <SwarmSwitcher />
+        </div>
       </SidebarHeader>
 
       <SidebarContent>
