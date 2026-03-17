@@ -3,6 +3,7 @@ import { useHealth } from "@/api/hooks/use-stats";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { useConfig } from "@/hooks/use-config";
 import { useTheme } from "@/hooks/use-theme";
 import { cn } from "@/lib/utils";
 import { Breadcrumbs } from "./breadcrumbs";
@@ -10,6 +11,7 @@ import { Breadcrumbs } from "./breadcrumbs";
 export function AppHeader() {
   const { theme, toggleTheme } = useTheme();
   const { data: health, isError } = useHealth();
+  const { activeConnection } = useConfig();
 
   const isHealthy = health && !isError;
 
@@ -26,6 +28,10 @@ export function AppHeader() {
         {/* Health indicator */}
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <div className={cn("size-2 rounded-full", isHealthy ? "bg-emerald-500" : "bg-red-500")} />
+          {activeConnection && (
+            <span className="hidden sm:inline font-medium">{activeConnection.name}</span>
+          )}
+          {activeConnection && <span className="hidden sm:inline">&mdash;</span>}
           <span className="hidden sm:inline">{isHealthy ? "Connected" : "Disconnected"}</span>
           {health?.version && <span>v{health.version}</span>}
         </div>
