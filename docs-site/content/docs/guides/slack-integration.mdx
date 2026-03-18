@@ -63,6 +63,16 @@ When you @mention the bot in a thread where a worker is already handling a task,
 
 If the assigned worker is offline or unavailable, the follow-up routes to the lead agent instead of dropping the message. The lead picks up the thread context and continues the conversation, preserving `parentTaskId` continuity for chained tasks.
 
+### Explicit Slack Context Propagation
+
+When programmatically delegating tasks from a Slack thread (e.g., lead breaking down work for workers), you can pass Slack metadata directly on `send-task`:
+
+- `slackChannelId` — Channel ID for progress updates
+- `slackThreadTs` — Thread timestamp for thread-level updates
+- `slackUserId` — Original requester's Slack user ID
+
+This allows explicit Slack context propagation without requiring `parentTaskId` (which implies session continuity). Workers receiving these tasks will automatically post progress updates back to the originating Slack thread.
+
 ### Additive Slack Buffer
 
 When enabled via `ADDITIVE_SLACK=true`, thread replies that do NOT @mention the bot are captured, buffered, and batched into a single follow-up task. This allows multi-message feedback without requiring an @mention each time.

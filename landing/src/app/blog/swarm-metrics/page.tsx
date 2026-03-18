@@ -9,8 +9,10 @@ import {
   BarChart3,
   Bot,
   ExternalLink,
+  ArrowRight,
   Zap,
 } from "lucide-react";
+import Link from "next/link";
 import { Navbar } from "@/components/navbar";
 import { Footer } from "@/components/footer";
 
@@ -138,13 +140,13 @@ export default function SwarmMetricsPost() {
 
       <article className="mx-auto max-w-3xl px-6 pt-32 pb-20">
         {/* Back link */}
-        <a
+        <Link
           href="/blog"
           className="inline-flex items-center gap-1.5 text-[13px] text-zinc-400 hover:text-zinc-700 transition-colors mb-8"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           Back to Blog
-        </a>
+        </Link>
 
         {/* Header */}
         <header className="mb-12">
@@ -652,6 +654,26 @@ export default function SwarmMetricsPost() {
                   {label}
                 </a>
               ))}
+            </div>
+
+            <div className="mt-8 pt-6 border-t border-zinc-100">
+              <h3 className="text-[13px] font-semibold text-zinc-500 uppercase tracking-wider mb-3">
+                Related Posts
+              </h3>
+              <Link
+                href="/blog/openfort-hackathon"
+                className="group flex items-center gap-3 p-3 -mx-3 rounded-lg hover:bg-zinc-50 transition-colors"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-[14px] font-medium text-zinc-800 group-hover:text-amber-800 transition-colors">
+                    Openfort Hackathon: Teaching Agents to Pay
+                  </p>
+                  <p className="text-[12px] text-zinc-500 mt-0.5">
+                    We shipped x402 payment capability into Agent Swarm — agents can now pay for API services using crypto.
+                  </p>
+                </div>
+                <ArrowRight className="w-4 h-4 text-zinc-400 group-hover:text-amber-600 shrink-0" />
+              </Link>
             </div>
           </footer>
         </div>
