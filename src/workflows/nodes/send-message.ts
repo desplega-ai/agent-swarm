@@ -4,14 +4,15 @@ import { interpolate } from "../template";
 
 export interface SendMessageConfig {
   channelId?: string;
-  template: string;
+  template?: string;
+  message?: string;
 }
 
 export function executeSendMessage(
   config: SendMessageConfig,
   ctx: Record<string, unknown>,
 ): NodeResult {
-  const message = interpolate(config.template, ctx);
+  const message = interpolate(config.template ?? config.message ?? "", ctx);
   if (config.channelId) {
     postMessage(config.channelId, null, message);
   }

@@ -4,7 +4,8 @@ import { interpolate } from "../template";
 
 export interface DelegateToAgentConfig {
   agentId: string;
-  taskTemplate: string;
+  taskTemplate?: string;
+  message?: string;
   tags?: string[];
   offerMode?: boolean;
 }
@@ -15,7 +16,7 @@ export function executeDelegateToAgent(
   runId: string,
   stepId: string,
 ): NodeResult {
-  const taskDescription = interpolate(config.taskTemplate, ctx);
+  const taskDescription = interpolate(config.taskTemplate ?? config.message ?? "", ctx);
   const tags = (config.tags ?? []).map((t) => interpolate(t, ctx));
   const task = createTaskExtended(taskDescription, {
     agentId: config.offerMode ? null : config.agentId,
