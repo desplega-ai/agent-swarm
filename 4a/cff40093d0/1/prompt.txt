@@ -1,0 +1,1680 @@
+# Research Codebase
+
+A thin wrapper that invokes the `desplega:researching` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse autonomy mode from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - If document frontmatter has `autonomy:` field, use that as default
+   - Otherwise, ask the user via AskUserQuestion:
+
+   ```
+   How much should I check in with you during this research?
+   - Autopilot: Work independently, only present final results
+   - Critical questions (Recommended): Ask only when blocked or for major decisions
+   - Verbose: Check in frequently, validate approach at each step
+   ```
+
+2. **ALWAYS invoke the `desplega:researching` skill:**
+   - Pass the research query (everything after the flag)
+   - Pass the autonomy mode determined above
+   - Let the skill handle all research logic
+
+3. **If no query provided:**
+   - Respond with: "I'm ready to research the codebase. Please provide your research question or area of interest."
+
+## Example Usage
+
+```
+/research how does the authentication system work
+/research --autonomy=autopilot document all API endpoints
+/research --autonomy=verbose analyze the database schema
+```
+
+
+ARGUMENTS: I want to refactor the workflows to work similar to 
+
+thoughts/shared/research/2026-03-18-workflow-engine-mechanics.md from ../content-agent
+
+let's do a progressive (a lot of questions and bg researches in this repo) on how we could do that more similar to how content agent does it, not afraid of FULL refactor
+
+---
+
+<task-notification>
+<task-id>a50a503f4468c384c</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/063cc034-aa84-4605-a6b1-d3c0376e5c74/tasks/a50a503f4468c384c.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore current workflow system" completed</summary>
+<result>Perfect! Now I have a comprehensive understanding of the workflow system. Let me compile my findings into a detailed report.
+
+## Thorough Exploration Report: Agent-Swarm Workflow System
+
+I've conducted an extensive exploration of the workflow system in this codebase. Here's what I found:
+
+---
+
+### 1. **Workflow System Architecture Overview**
+
+The workflow engine is a **lightweight, event-driven DAG (Directed Acyclic Graph) executor** built into the agent-swarm TypeScript/Bun/SQLite application. It enables automation by connecting triggers, conditions, and actions in a visual workflow format.
+
+**Key Design Philosophy** (from research doc):
+- Synchronous BFS/DAG walk on trigger fire
+- No durable execution layer (unlike Temporal/Inngest) — runs are short-lived
+- SQLite-native with JSON blob definitions + normalized run tracking
+- Event-driven: subscriptions fire workflows based on system events
+
+---
+
+### 2. **Database Schema** (`src/be/migrations/003_workflows.sql` & `004_workflow_source.sql`)
+
+**Three main tables:**
+
+1. **`workflows`** — DAG definitions
+   - `id` (TEXT PRIMARY KEY, UUID)
+   - `name` (TEXT UNIQUE)
+   - `description` (TEXT)
+   - `enabled` (INTEGER, default 1)
+   - `definition` (TEXT, stores JSON DAG: `{ nodes: [...], edges: [...] }`)
+   - `webhookSecret` (TEXT, optional — for webhook-triggered workflows)
+   - `createdByAgentId` (TEXT)
+   - Timestamps: `createdAt`, `lastUpdatedAt`
+
+2. **`workflow_runs`** — Execution instances
+   - `id` (TEXT PRIMARY KEY, UUID)
+   - `workflowId` (TEXT REFERENCES workflows(id))
+   - `status` (TEXT): `running | waiting | completed | failed`
+   - `triggerData` (TEXT JSON, raw event payload)
+   - `context` (TEXT JSON, accumulated outputs from executed nodes)
+   - `error` (TEXT)
+   - Timestamps: `startedAt`, `lastUpdatedAt`, `finishedAt`
+
+3. **`workflow_run_steps`** — Per-node execution history
+   - `id` (TEXT PRIMARY KEY, UUID)
+   - `runId` (TEXT REFERENCES workflow_runs(id))
+   - `nodeId`, `nodeType` (TEXT)
+   - `status` (TEXT): `pending | running | waiting | completed | failed | skipped`
+   - `input`, `output`, `error` (TEXT JSON)
+   - Timestamps: `startedAt`, `finishedAt`
+
+4. **`agent_tasks` extension**
+   - Added columns: `workflowRunId`, `workflowRunStepId` (foreign keys)
+   - Tasks created by workflows are linked back for async resumption
+   - Schema constraint updated: `source` enum now includes `'workflow'`
+
+---
+
+### 3. **TypeScript Type System** (`src/types.ts`)
+
+**Core types:**
+
+```typescript
+// Node types (11 total)
+WorkflowNodeType: "trigger-new-task" | "trigger-task-completed" | "trigger-webhook" |
+                  "trigger-email" | "trigger-slack-message" | "trigger-github-event" | 
+                  "trigger-gitlab-event" | "llm-classify" | "property-match" | 
+                  "code-match" | "create-task" | "send-message" | "delegate-to-agent"
+
+// Node structure
+interface WorkflowNode {
+  id: string;
+  type: WorkflowNodeType;
+  label?: string;
+  config: Record<string, unknown>;  // Node-type-specific config
+}
+
+// Edge structure (named ports)
+interface WorkflowEdge {
+  id: string;
+  source: string;           // source node id
+  sourcePort: string;       // "default" | "true" | "false" | custom label
+  target: string;           // target node id
+}
+
+// DAG definition
+interface WorkflowDefinition {
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+}
+
+// Run status
+WorkflowRunStatus: "running" | "waiting" | "completed" | "failed"
+WorkflowRunStepStatus: "pending" | "running" | "waiting" | "completed" | "failed" | "skipped"
+```
+
+**Tasks link to workflows via:**
+```typescript
+workflowRunId?: string | null;      // Which workflow run created this task
+workflowRunStepId?: string | null;  // Which step in that run
+```
+
+---
+
+### 4. **Execution Engine** (`src/workflows/engine.ts`)
+
+**Core algorithm: Breadth-First DAG walk**
+
+```typescript
+export async function startWorkflowExecution(
+  workflow: Workflow,
+  triggerData: unknown
+): Promise<string>
+
+export async function walkDag(
+  def: WorkflowDefinition,
+  runId: string,
+  ctx: Record<string, unknown>,
+  startNodes: WorkflowNode[]
+): Promise<void>
+```
+
+**Execution flow:**
+
+1. Create `workflow_run` record with `status: 'running'`
+2. Initialize context: `{ trigger: triggerData }`
+3. Find entry nodes (nodes with no incoming edges)
+4. BFS queue-based traversal:
+   - For each node, create a `workflow_run_step` record
+   - Execute the node via `executeNode()`
+   - If result is **instant**: mark step completed, add output to context, enqueue successors
+   - If result is **async** (e.g., task creation): mark run as `'waiting'`, return and let event bus resume
+   - If error: mark run as `'failed'`, stop traversal
+5. Mark run `'completed'` when queue is empty
+
+**Node execution interface:**
+
+```typescript
+interface NodeResult {
+  mode: "instant" | "async";
+  nextPort: string;  // Which outgoing edge to follow
+  output: unknown;   // Stored in ctx[node.id]
+}
+
+async executeNode(
+  node: WorkflowNode,
+  ctx: Record<string, unknown>,
+  runId: string,
+  stepId: string
+): Promise<NodeResult>
+```
+
+**Key design:**
+- Cycle guard: `visited` set prevents infinite loops
+- Context accumulation: `ctx[node.id] = output` allows downstream nodes to reference upstream results
+- Port-based routing: edges are followed based on `sourcePort` matching `nextPort`
+
+---
+
+### 5. **Node Types & Implementations** (`src/workflows/nodes/`)
+
+**Trigger nodes** (pass through, matched during subscription):
+- `trigger-new-task`, `trigger-task-completed`, `trigger-webhook`, `trigger-email`, `trigger-slack-message`, `trigger-github-event`, `trigger-gitlab-event`
+- Output: pass trigger data to context, return `nextPort: "default"`
+
+**Conditional nodes** (deterministic routing):
+
+**`property-match.ts`** — JSONPath-based conditions
+- Config: `{ conditions?: PropertyMatchCondition[], mode?: "all" | "any", property?, operator?, value? }`
+- Condition operators: `eq | neq | contains | not_contains | gt | lt | exists`
+- Returns: `nextPort: "true" | "false"`, output with `{ passed, results }`
+- **Instant** execution
+
+**`llm-classify.ts`** — LLM-powered classification
+- Config: `{ prompt, categories, model?, fallbackPort? }`
+- Uses Zod schemas + structured output (Claude or OpenRouter)
+- Output ports named after categories (e.g., `"bug" | "feature" | "question"`)
+- Fallback port for unexpected LLM outputs
+- **Async** LLM call (awaited)
+
+**`code-match.ts`** — Sandboxed JavaScript evaluation
+- Config: `{ code: string, outputPorts: string[] }`
+- Executes user-provided function: `(input) => boolean | string`
+- Blocks dangerous globals: `require`, `process`, `Bun`, `fetch`, etc.
+- Returns port matching result
+- **Instant** execution
+
+**Action nodes** (create work or send data):
+
+**`create-task.ts`** — Async task creation
+- Config: `{ template, agentId?, tags?, source?, priority? }`
+- Interpolates template with context: `{{trigger.title}}` → actual value
+- Creates task with `source: 'workflow'`, linked via `workflowRunId` + `workflowRunStepId`
+- Returns: **async** result with `{ taskId, taskStatus }`
+- **Workflow execution pauses here** — resumes when task completes
+
+**`delegate-to-agent.ts`** — Task assignment (with offer mode)
+- Config: `{ agentId, taskTemplate, tags?, offerMode? }`
+- If `offerMode: true`: creates task as unassigned, sets `offeredTo: agentId`
+- Otherwise: assigns directly to agent
+- Returns: **async** result
+
+**`send-message.ts`** — Channel message posting
+- Config: `{ channelId?, template }`
+- Posts message to internal swarm channel
+- Returns: **instant** result
+- **Instant** execution
+
+---
+
+### 6. **Async Resume & Event-Driven Continuation** (`src/workflows/resume.ts`)
+
+**Problem:** When a workflow creates a task, execution pauses. The task runs asynchronously (possibly on a different agent). How does the workflow resume?
+
+**Solution: Event Bus Listener**
+
+```typescript
+export function setupWorkflowResumeListener(eventBus: WorkflowEventBus): void
+```
+
+Subscribes to three events:
+- `task.completed` → Resume DAG from task's successors
+- `task.failed` → Mark run as `'failed'`
+- `task.cancelled` → Mark run as `'failed'`
+
+**Resume logic:**
+1. Check task has `workflowRunId` + `workflowRunStepId` set
+2. Get run (must be `status: 'waiting'`)
+3. Get step (must be `status: 'waiting'`)
+4. Mark step completed, store task output in context
+5. Find node's successors for the default port
+6. Call `walkDag()` again with successors to continue
+
+**Failure handling:**
+- If task fails/cancelled: mark step and run as `'failed'`, halt execution
+
+---
+
+### 7. **Recovery & Retry** (`src/workflows/recovery.ts`)
+
+**Stuck workflow detection:**
+
+```typescript
+export function getStuckWorkflowRuns(): StuckWorkflowRun[]
+```
+
+Query finds runs where:
+- `workflow_runs.status = 'waiting'` (paused)
+- `workflow_run_steps.status = 'waiting'` (waiting for task)
+- Linked `agent_tasks.status IN ('completed', 'failed', 'cancelled')` (task finished)
+
+**Recovery:** Re-run the resume logic (same as event bus handler) for each stuck run.
+
+**Retry logic:**
+
+```typescript
+export async function retryFailedRun(runId: string): Promise<void>
+```
+
+- Find failed step
+- Reset step/run to `'pending'` / `'running'`
+- Re-execute the failed node
+- Continue DAG walk
+
+---
+
+### 8. **Trigger Subscription** (`src/workflows/triggers.ts`)
+
+**Trigger matching:**
+
+```typescript
+export function evaluateWorkflowTriggers(eventType: string, eventData: unknown): void
+```
+
+For each enabled workflow:
+1. Find entry nodes (trigger nodes)
+2. Match trigger node config against event:
+   - `trigger-new-task`: Match task tags, exclude workflow-originated tasks (prevent loops)
+   - `trigger-task-completed`: Match task filters
+   - `trigger-github-event`: Check event type prefix (`"github.*"`)
+   - `trigger-gitlab-event`: Check event type prefix (`"gitlab.*"`)
+   - `trigger-slack-message`: Match Slack message filters
+   - `trigger-email`: Match email filters
+   - `trigger-webhook`: Handled via HTTP (not event bus)
+
+3. If matched: call `startWorkflowExecution(workflow, eventData)`
+
+**Event subscription** (`src/workflows/index.ts`):
+
+`initWorkflows()` wires up listeners for:
+- Task events: `task.created`, `task.completed`
+- GitHub events: `github.pull_request.*`, `github.issue.*`, `github.pull_request_review.*`
+- GitLab events: `gitlab.merge_request.*`, `gitlab.issue.*`, `gitlab.note.*`, `gitlab.pipeline.*`
+- Slack: `slack.message`
+- Email: `agentmail.message.received`
+
+---
+
+### 9. **Template Interpolation** (`src/workflows/template.ts`)
+
+```typescript
+export function interpolate(template: string, ctx: Record<string, unknown>): string
+```
+
+Replaces `{{path.to.value}}` tokens with context values:
+- Dot-notation path resolution: `{{trigger.repo.name}}` → `triggerData.repo.name`
+- Objects serialized to JSON
+- Missing paths return empty string
+- No escape mechanism (intentional — simple/safe)
+
+---
+
+### 10. **LLM Provider** (`src/workflows/llm-provider.ts`)
+
+**Two implementations:**
+
+1. **OpenRouterProvider** — Remote (requires API key)
+   - Uses `@ai-sdk/openai` with OpenRouter baseURL
+   - Model: `google/gemini-2.0-flash-001`
+
+2. **ClaudeCliProvider** — Local fallback
+   - Spawns `claude` CLI with `--output-format json --json-schema`
+   - Model: `haiku` (fast/cheap)
+
+**Selection logic:**
+- If `OPENROUTER_API_KEY` env var set → use OpenRouter
+- Otherwise → use Claude CLI
+
+---
+
+### 11. **HTTP API Endpoints** (`src/http/workflows.ts`)
+
+| Method | Path | Summary |
+|--------|------|---------|
+| GET | `/api/workflows` | List all workflows |
+| POST | `/api/workflows` | Create workflow |
+| GET | `/api/workflows/{id}` | Get workflow by ID |
+| PUT | `/api/workflows/{id}` | Update workflow |
+| DELETE | `/api/workflows/{id}` | Delete workflow (cascades) |
+| POST | `/api/workflows/{id}/trigger` | Manually trigger execution |
+| GET | `/api/workflows/{id}/runs` | List runs for workflow |
+| GET | `/api/workflow-runs/{id}` | Get run with all steps |
+| POST | `/api/workflow-runs/{id}/retry` | Retry failed run |
+
+**Webhook auth:** Workflows can be triggered via POST with `?secret=<webhookSecret>` (anonymous access).
+
+---
+
+### 12. **Event Bus** (`src/workflows/event-bus.ts`)
+
+**Simple in-process EventEmitter wrapper:**
+
+```typescript
+interface WorkflowEventBus {
+  emit(event: string, data: unknown): void;
+  on(event: string, handler: (data: unknown) => void): void;
+  off(event: string, handler: (data: unknown) => void): void;
+}
+
+export const workflowEventBus: WorkflowEventBus = new InProcessEventBus();
+```
+
+Emitted from:
+- Task creation: `task.created` event with `{ taskId, workflowRunId, workflowRunStepId, ... }`
+- Task completion: `task.completed` event
+- Task failure: `task.failed` event
+- Task cancellation: `task.cancelled` event
+
+---
+
+### 13. **MCP Tools** (`src/tools/workflows/`)
+
+Nine tools for agents to interact with workflows:
+
+1. **`create-workflow.ts`** — Create new workflow (requires `WorkflowDefinitionSchema`)
+2. **`update-workflow.ts`** — Modify workflow (name, description, definition, enabled)
+3. **`delete-workflow.ts`** — Delete workflow (cascades to runs/steps)
+4. **`get-workflow.ts`** — Fetch workflow by ID
+5. **`list-workflows.ts`** — List all workflows (with optional filters)
+6. **`trigger-workflow.ts`** — Manually execute workflow
+7. **`get-workflow-run.ts`** — Get run with step details
+8. **`list-workflow-runs.ts`** — List runs for a workflow
+9. **`retry-workflow-run.ts`** — Retry failed run
+
+---
+
+### 14. **UI Components** (`new-ui/src/`)
+
+- **`api/hooks/use-workflows.ts`** — React Query hooks for CRUD + mutations
+- **`components/workflows/workflow-graph.tsx`** — Visual DAG renderer
+
+---
+
+### 15. **Testing** (`src/tests/`)
+
+Comprehensive test suite (2,582 lines total):
+
+- **`workflow-engine.test.ts`** (255 lines) — Core DAG walk, graph helpers, interpolation
+- **`workflow-triggers.test.ts`** (459 lines) — Trigger matching logic
+- **`workflow-property-match.test.ts`** (395 lines) — Conditional evaluation
+- **`workflow-resume-retry.test.ts`** (259 lines) — Async resume and retry
+- **`workflow-recovery.test.ts`** (184 lines) — Stuck workflow detection
+- **`workflow-http.test.ts`** (543 lines) — REST API endpoints
+- **`workflow-engine-errors.test.ts`** (195 lines) — Error handling
+- **`workflow-nodes-phase6.test.ts`** (292 lines) — All node types
+
+---
+
+### 16. **E2E Testing** (`scripts/e2e-workflow-test.ts`)
+
+Full integration test script that:
+- Spins up API server on custom port
+- Optionally builds & runs Docker containers
+- Tests CRUD lifecycle
+- Tests trigger routing (pass/reject)
+- Tests all node types
+- Tests disabled workflows, webhook auth, retries
+- Tests delete (cascade)
+
+**Key paths:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/` — Engine
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/be/migrations/003_workflows.sql` — DB schema
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/` — MCP tools
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/http/workflows.ts` — HTTP API
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/types.ts` — Type definitions (lines 549-643)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/thoughts/taras/research/2026-03-06-workflow-engine-design.md` — Design research</result>
+<usage><total_tokens>99523</total_tokens><tool_uses>42</tool_uses><duration_ms>134903</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/063cc034-aa84-4605-a6b1-d3c0376e5c74/tasks/a50a503f4468c384c.output
+
+---
+
+<task-notification>
+<task-id>a7f24f1f741ea34c5</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/063cc034-aa84-4605-a6b1-d3c0376e5c74/tasks/a7f24f1f741ea34c5.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore executor/step patterns" completed</summary>
+<result>Perfect. I now have a comprehensive understanding of the system. Let me create a detailed summary of my findings.
+
+## Exploration Report: Agent-Swarm Task Execution & Workflow System
+
+### Overview
+
+Agent-swarm implements a sophisticated multi-layered task and workflow orchestration system. Here's the complete picture:
+
+---
+
+## 1. TASK EXECUTION LIFECYCLE
+
+### Task States (from `src/types.ts`)
+```
+backlog → unassigned → offered → reviewing → pending → in_progress → completed/failed/cancelled
+                                ↓
+                           (acceptedAt)
+                              ↓
+                            pending
+```
+
+Key states:
+- **backlog**: Not ready for pool yet
+- **unassigned**: In task pool, waiting for assignment
+- **offered**: Offered to specific agent, awaiting accept/reject
+- **reviewing**: Agent is reviewing an offered task
+- **pending**: Assigned/accepted, waiting to start
+- **in_progress**: Agent is executing
+- **paused**: Gracefully paused, can resume (NEW - supports interrupted work)
+- **completed/failed/cancelled**: Terminal states
+
+### Task Lifecycle (Database: `agent_tasks` table)
+
+**Location**: `/src/be/migrations/001_initial.sql` + `/src/be/db.ts`
+
+Task record includes:
+- `agentId`: Agent executing it (nullable for unassigned)
+- `creatorAgentId`: Who created it
+- `source`: mcp/slack/api/github/agentmail/system/schedule/**workflow**
+- `status`: Current state
+- `parentTaskId`: Session continuity (child task resumes parent session)
+- `claudeSessionId`: Runner session ID
+- `progress`, `output`, `failureReason`: Execution data
+- `workflowRunId`, `workflowRunStepId`: **Workflow linkage** (NEW)
+- `scheduleId`: For scheduled tasks
+- `model`: haiku/sonnet/opus
+
+**Key Functions** (`src/be/db.ts`):
+- `createTaskExtended()`: Create task with options
+- `completeTask(id, output)`: Mark completed
+- `failTask(id, reason)`: Mark failed
+- `pauseTask(id)`: Pause in-progress task
+- `resumeTask(id)`: Resume paused task
+- `cancelTask(id, reason)`: Cancel pending/in-progress
+- `startTask(id)`: Mark as in_progress
+- `claimTask()`, `releaseTask()`: Task pool operations
+- `acceptTask()`, `rejectTask()`: Offered task operations
+
+---
+
+## 2. RUNNER & WORKER ARCHITECTURE
+
+### The Runner (`src/commands/runner.ts`)
+
+**What it is**: The main execution loop that polls for tasks and spawns Claude processes.
+
+**Key responsibilities**:
+1. Register agent with API
+2. Poll for triggers (tasks/inbox messages)
+3. Spawn Claude process per task via provider adapter
+4. Monitor execution, handle progress updates
+5. Handle graceful shutdown (pause/resume)
+6. Track sessions, costs, logs
+
+**Execution flow**:
+```
+runAgent(config, opts)
+  ├─ registerAgent() [send agent info to API]
+  ├─ pollForTrigger() [blocking poll, 30s timeout]
+  │  └─ Returns Trigger = {task, inboxMessage, etc}
+  ├─ For each trigger:
+  │  ├─ Fetch relevant memories, epic context
+  │  ├─ Fetch resolved config from API
+  │  ├─ spawnProviderProcess() [start Claude session]
+  │  │  └─ Receives ProviderResult = {status, logs, cost, sessionId}
+  │  ├─ Collect logs into buffer
+  │  ├─ Save cost data via API
+  │  └─ ensureTaskFinished() [mark completed/failed]
+  └─ Repeat
+```
+
+**Key functions**:
+- `pollForTrigger()`: Fetch next task from API
+- `spawnProviderProcess()`: Start Claude (yields async)
+- `checkCompletedProcesses()`: Check if Claude finished
+- `updateProgressViaAPI()`: Push progress updates
+- `pauseTaskViaAPI()`, `resumeTaskViaAPI()`: Pause/resume
+- `ensureTaskFinished()`: Final status update
+
+**Provider Abstraction** (`src/providers/`):
+- Supports Claude, Pi-mono via adapters
+- Each session has `waitForCompletion()` promise
+- Handles credential pools, env resolution
+
+### Worker vs Lead
+
+**Worker** (`src/commands/worker.ts`):
+- Thin wrapper around `runAgent()`
+- Uses `defaultPrompt: "/start-worker"`
+- Executes tasks from task pool
+
+**Lead** (implies parallel in Docker):
+- Different defaultPrompt
+- Handles inbox messages, lead-specific tasks
+- Can delegate tasks
+
+---
+
+## 3. WORKFLOW ENGINE & EXECUTION
+
+### Workflow System Architecture
+
+**Files**:
+- `/src/workflows/engine.ts`: Core DAG executor
+- `/src/workflows/resume.ts`: Resume after async steps
+- `/src/workflows/recovery.ts`: Recover stuck runs
+- `/src/workflows/triggers.ts`: Event-based triggers
+- `/src/workflows/nodes/`: Individual node executors
+
+### Workflow Definitions (Database: `workflows` table)
+
+```sql
+CREATE TABLE workflows (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  definition TEXT NOT NULL,  -- JSON: {nodes, edges}
+  enabled INTEGER,
+  createdByAgentId TEXT,
+  ...
+);
+```
+
+### Workflow Execution Model
+
+**DAG-based**: Nodes connected by edges with ports
+
+**Node Types**:
+- **Triggers**: trigger-new-task, trigger-task-completed, trigger-webhook, trigger-slack-message, trigger-github-event, trigger-gitlab-event, trigger-email
+- **Conditions**: property-match, code-match, llm-classify
+- **Actions**: create-task, send-message, delegate-to-agent
+
+**Execution Modes**:
+- **Instant**: Completes synchronously (conditions, code evaluation)
+- **Async**: Spawns task, pauses run until task completes (create-task, delegate-to-agent)
+
+### Workflow Run State (Database)
+
+```sql
+CREATE TABLE workflow_runs (
+  id TEXT PRIMARY KEY,
+  workflowId TEXT NOT NULL,
+  status TEXT CHECK(status IN ('running', 'waiting', 'completed', 'failed')),
+  triggerData TEXT,      -- Initial event data
+  context TEXT,          -- Accumulated state as JSON
+  error TEXT,
+  startedAt, finishedAt
+);
+
+CREATE TABLE workflow_run_steps (
+  id TEXT PRIMARY KEY,
+  runId TEXT,
+  nodeId TEXT,
+  nodeType TEXT,
+  status TEXT CHECK(status IN ('pending', 'running', 'waiting', 'completed', 'failed', 'skipped')),
+  input TEXT,
+  output TEXT,
+  error TEXT,
+  startedAt, finishedAt
+);
+```
+
+### Execution Flow (`src/workflows/engine.ts`)
+
+```typescript
+startWorkflowExecution(workflow, triggerData)
+  ├─ createWorkflowRun()
+  ├─ ctx = { trigger: triggerData }
+  ├─ walkDag(def, runId, ctx, entryNodes)
+  │  ├─ for each node in queue:
+  │  │  ├─ createWorkflowRunStep()
+  │  │  ├─ executeNode()
+  │  │  │  └─ Returns NodeResult = { mode, nextPort, output }
+  │  │  ├─ if mode === "async":
+  │  │  │  └─ updateWorkflowRunStep(status: "waiting")
+  │  │  │  └─ updateWorkflowRun(status: "waiting")
+  │  │  │  └─ PAUSE execution
+  │  │  ├─ else:
+  │  │  │  ├─ updateWorkflowRunStep(status: "completed")
+  │  │  │  ├─ ctx[nodeId] = output
+  │  │  │  ├─ getSuccessors(def, nodeId, nextPort)
+  │  │  │  └─ queue.push(...successors)
+  │  │  └─ on error: mark step & run as failed
+  └─ If no more nodes: mark run completed
+```
+
+**Key insight**: Workflows are PAUSED when waiting for async operations (task completion). Execution resumes via event listeners.
+
+### Node Executors
+
+**create-task** (`src/workflows/nodes/create-task.ts`):
+- Mode: async
+- Creates task, returns immediately
+- Marks run as "waiting"
+
+**delegate-to-agent** (`src/workflows/nodes/delegate-to-agent.ts`):
+- Mode: async
+- Assigns task to agent (or offers it)
+- Marks run as "waiting"
+
+**property-match** (`src/workflows/nodes/property-match.ts`):
+- Mode: instant
+- Evaluates conditions against context
+- Routes to "true" or "false" port based on match
+
+**llm-classify** (`src/workflows/nodes/llm-classify.ts`):
+- Mode: instant
+- Calls LLM to classify data
+- Routes based on result
+
+### Resume & Recovery
+
+**Resume** (`src/workflows/resume.ts`):
+- Event listeners on task.completed, task.failed, task.cancelled
+- When task linked to workflow completes:
+  - Mark step as completed
+  - Add task output to context
+  - Resume DAG walk from successors
+- If run fails: mark step & run as failed
+
+**Recovery** (`src/workflows/recovery.ts`):
+- `recoverStuckWorkflowRuns()`: Find runs in "waiting" state whose tasks are already completed
+- Recovers on startup (in `/src/http/index.ts`)
+- Handles network/crash scenarios
+
+### Triggers (`src/workflows/triggers.ts`)
+
+**Event-based trigger matching**:
+- Workflows subscribe to events: task.created, task.completed, github.pull_request.opened, slack.message, etc.
+- Trigger nodes evaluated against event
+- Matching triggers fire `startWorkflowExecution()`
+
+**Prevent infinite loops**: Don't trigger on tasks with `workflowRunId` set.
+
+---
+
+## 4. SCHEDULED TASKS
+
+### Scheduler System (`src/scheduler/scheduler.ts`)
+
+**Database**: `scheduled_tasks` table
+
+**Types**:
+- **Recurring**: cron expression OR intervalMs
+- **One-time**: delayMs or runAt timestamp
+
+**Execution**:
+1. `startScheduler(intervalMs)`: Start polling loop
+2. `getDueScheduledTasks()`: Find overdue schedules
+3. `executeSchedule()`: Create task from template
+4. Calculate next run, update `nextRunAt`
+
+**Error handling**:
+- Consecutive error tracking
+- Exponential backoff (1m → 5m → 15m → 30m → 1h)
+- Auto-disable after 5 consecutive errors
+- One-time schedules auto-disabled after execution
+
+**Recovery**:
+- `recoverMissedSchedules()`: On startup, fire ONE catch-up run per schedule (not N missed)
+- Tag with "recovered" for tracking
+
+---
+
+## 5. TASK-TO-WORKFLOW LINKAGE
+
+### How Workflows Create & Track Tasks
+
+**Linkage columns** (in `agent_tasks` table):
+- `workflowRunId`: UUID of the workflow run
+- `workflowRunStepId`: UUID of the step that created this task
+
+**When task created in workflow**:
+1. Node executor calls `createTaskExtended()` with `source: "workflow"`
+2. Sets `workflowRunId` and `workflowRunStepId`
+3. Runner processes task normally
+4. When task completes/fails: emits event with `workflowRunId`, `workflowRunStepId`
+5. Event listeners resume workflow run
+
+---
+
+## 6. PAUSE/RESUME CAPABILITY
+
+### New in this branch: Graceful Task Pausing
+
+**Functions** (`src/be/db.ts`):
+- `pauseTask(id)`: Mark as "paused", retain agent/progress
+- `resumeTask(id)`: Mark as "pending", trigger new execution
+
+**HTTP Endpoints** (`src/http/tasks.ts`):
+- `POST /api/tasks/{id}/pause`
+- `POST /api/tasks/{id}/resume`
+- `GET /api/paused-tasks` (for this agent)
+
+**Runner support** (`src/commands/runner.ts`):
+- `pauseTaskViaAPI()`: Pause during execution (e.g., on graceful shutdown)
+- `resumeTaskViaAPI()`: Resume from paused state
+- `buildResumePrompt()`: Inject task + progress into Claude prompt
+
+**Use case**: Graceful shutdown — pause running task, restart container, resume from where it left off.
+
+---
+
+## 7. HTTP API LAYER
+
+### Task Endpoints (`src/http/tasks.ts`)
+
+**Create & List**:
+- `POST /api/tasks` — Create task
+- `GET /api/tasks` — List with filters (status, agent, epic, schedule, search)
+
+**Lifecycle**:
+- `POST /api/tasks/{id}/finish` — Mark completed/failed (runner endpoint)
+- `POST /api/tasks/{id}/cancel` — Cancel pending/in-progress
+- `POST /api/tasks/{id}/pause` — Pause in-progress task
+- `POST /api/tasks/{id}/resume` — Resume paused task
+
+**Progress & Status**:
+- `GET /api/tasks/{id}` — Get task + logs
+- `POST /api/tasks/{id}/progress` — Update progress text
+- `PUT /api/tasks/{id}/claude-session` — Store session ID
+
+### Workflow Endpoints (`src/http/workflows.ts`)
+
+- `GET /api/workflows` — List all
+- `POST /api/workflows` — Create
+- `GET /api/workflows/{id}` — Get definition
+- `PUT /api/workflows/{id}` — Update
+- `DELETE /api/workflows/{id}` — Delete
+- `POST /api/workflows/{id}/trigger` — Manually trigger execution
+- `GET /api/workflows/{id}/runs` — List runs
+- `GET /api/workflows/{id}/runs/{runId}` — Get run + steps
+- `POST /api/workflows/{id}/runs/{runId}/retry` — Retry failed run
+
+---
+
+## 8. KEY PATTERNS & DESIGN INSIGHTS
+
+### Executor Pattern (Not explicit, but implicit)
+
+There's **no explicit "executor" class**, but the pattern exists across:
+1. **Runner**: Polls tasks, spawns processes
+2. **Workflow engine**: Walks DAG, executes nodes
+3. **Scheduler**: Polls schedules, creates tasks
+4. **Node executors**: Execute individual workflow nodes
+
+### Step-by-Step Workflows
+
+Workflows are inherently step-by-step:
+- Nodes execute in topological order
+- Each step produces output that feeds into context
+- Async steps PAUSE the run (not spawn threads)
+- Event listeners RESUME from where paused
+- State is persisted in `workflow_runs.context` (JSON)
+
+### No Explicit "Executor" Concept Yet
+
+The redesign branch is NEW (feat/workflow-redesign). The system treats:
+- **Tasks** as atomic work units
+- **Workflows** as DAGs of steps
+- **Steps** as nodes that either complete instantly or create async tasks
+
+There's no unified "workflow step executor" that handles both instant and async internally. Instead:
+- Instant steps complete inline
+- Async steps pause and resume via events
+
+### Session Continuity
+
+**Feature**: Parent-child task continuity
+- `parentTaskId`: Links child task to parent
+- Runner resumes parent's Claude session for child task
+- Allows sub-task delegation without losing session state
+
+---
+
+## File Structure Summary
+
+```
+src/
+  be/
+    db.ts                      # All DB queries + schema init
+    migrations/
+      001_initial.sql          # Complete schema
+      003_workflows.sql        # Workflow tables
+      runner.ts                # Migration execution
+  
+  workflows/
+    engine.ts                  # DAG executor
+    nodes/
+      create-task.ts           # Async task creation
+      delegate-to-agent.ts     # Async delegation
+      property-match.ts        # Instant condition
+      llm-classify.ts          # Instant LLM eval
+    resume.ts                  # Async resume listeners
+    recovery.ts                # Stuck run recovery
+    triggers.ts                # Event trigger matching
+    event-bus.ts               # Event emitter
+  
+  scheduler/
+    scheduler.ts               # Cron + interval scheduling
+  
+  commands/
+    runner.ts                  # Main execution loop (2323 lines!)
+    worker.ts                  # Thin wrapper for worker role
+  
+  http/
+    tasks.ts                   # Task endpoints
+    workflows.ts               # Workflow endpoints
+    polls.ts                   # Agent polling endpoint
+```
+
+---
+
+## Key Takeaways
+
+1. **Task execution** is pull-based: runner polls API, processes tasks, reports completion
+2. **Workflows** are DAG-based with instant + async nodes; execution pauses on async steps
+3. **No explicit "executor" class** — logic distributed across runner, engine, nodes, scheduler
+4. **Pause/resume** is NEW — allows graceful interruption of in-progress tasks
+5. **Event-driven resume** — async workflow steps resume via event listeners on task completion
+6. **Scheduled tasks** create regular tasks via scheduler, which runner executes like any other
+7. **Workflow runs** track state as JSON context; steps are stored as DB records for auditability
+
+This is a sophisticated system with clear separation of concerns: runners poll and execute, workflows orchestrate multi-step processes, schedulers create recurring work, and the event bus coordinates async resumption.</result>
+<usage><total_tokens>96344</total_tokens><tool_uses>40</tool_uses><duration_ms>150391</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/063cc034-aa84-4605-a6b1-d3c0376e5c74/tasks/a7f24f1f741ea34c5.output
+
+---
+
+<task-notification>
+<task-id>adabaf64a6ff9e07e</task-id>
+<tool-use-id>toolu_01XJjuQZTyEfpzo5gWJvkz3g</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/063cc034-aa84-4605-a6b1-d3c0376e5c74/tasks/adabaf64a6ff9e07e.output</output-file>
+<status>completed</status>
+<summary>Agent "Analyze current node executor code" completed</summary>
+<result>
+
+I now have a complete picture. Here is the detailed breakdown, Taras.
+
+---
+
+## Analysis: Workflow Node Executor Architecture
+
+### Overview
+
+The workflow engine implements a DAG-based execution model where nodes are dispatched through a manual `switch` statement in `engine.ts`. Each node type has a dedicated executor function in `src/workflows/nodes/`, returning a `NodeResult` that tells the engine whether execution is instant or async, which output port to follow, and what data to store. The engine walks the DAG breadth-first, pausing on async nodes and resuming via an event bus when tasks complete.
+
+### Type Definitions (`src/types.ts:548-642`)
+
+**WorkflowNodeType** (line 552-566) -- a Zod enum of 13 node types split into two categories:
+- 7 trigger types: `trigger-new-task`, `trigger-task-completed`, `trigger-webhook`, `trigger-email`, `trigger-slack-message`, `trigger-github-event`, `trigger-gitlab-event`
+- 6 action types: `llm-classify`, `property-match`, `code-match`, `create-task`, `send-message`, `delegate-to-agent`
+
+**WorkflowNode** (line 569-575) -- `{ id: string, type: WorkflowNodeType, label?: string, config: Record<string, unknown> }`. The `config` field is an untyped record -- each executor casts it to its own config interface.
+
+**WorkflowEdge** (line 577-583) -- `{ id: string, source: string, sourcePort: string, target: string }`. Edges are port-based: the `sourcePort` field determines which output port an edge connects from.
+
+**WorkflowDefinition** (line 585-589) -- `{ nodes: WorkflowNode[], edges: WorkflowEdge[] }`.
+
+**WorkflowRun** (line 607-618) -- Tracks an execution instance. Status is one of `running | waiting | completed | failed`. Stores `triggerData`, accumulated `context`, and optional `error`.
+
+**WorkflowRunStep** (line 630-642) -- One step per node execution. Status is one of `pending | running | waiting | completed | failed | skipped`. Stores `input`, `output`, and optional `error`.
+
+---
+
+### Engine Core (`src/workflows/engine.ts`)
+
+#### NodeResult Interface (line 16-20)
+
+```typescript
+export interface NodeResult {
+  mode: "instant" | "async";
+  nextPort: string;
+  output: unknown;
+}
+```
+
+This is the universal return type for every node executor. `mode` determines whether the DAG walk continues or pauses. `nextPort` names the output port for edge matching. `output` is stored in both the step record and the context accumulator.
+
+#### Entry Node Discovery -- `findEntryNodes()` (line 22-25)
+
+Identifies nodes that have no incoming edges (i.e., their `id` does not appear as a `target` in any edge). These are the DAG roots.
+
+#### Successor Lookup -- `getSuccessors()` (line 27-36)
+
+Given a `nodeId` and a `port`, filters edges where `source === nodeId && sourcePort === port`, then maps each matching edge's `target` back to a `WorkflowNode`. This is how port-based branching works -- different output ports route to different successors.
+
+#### Workflow Start -- `startWorkflowExecution()` (line 38-48)
+
+1. Generates a UUID `runId`
+2. Creates a `workflow_run` DB record via `createWorkflowRun()`
+3. Seeds the context as `{ trigger: triggerData }`
+4. Finds entry nodes and starts `walkDag()`
+5. Returns the `runId`
+
+#### DAG Walk -- `walkDag()` (line 50-122)
+
+Breadth-first traversal using a queue:
+
+1. **Cycle guard** (line 63): A `visited` set prevents re-executing the same node within a single walk.
+2. **Step creation** (line 66-73): For each node, creates a `workflow_run_step` with status `pending` and the current context snapshot as `input`.
+3. **Execution** (line 76): Calls `executeNode(node, ctx, runId, stepId)`.
+4. **Async handling** (line 78-86): If `result.mode === "async"`, the step status is set to `waiting`, the run status is set to `waiting` with the current context persisted, and the function **returns immediately** -- the DAG walk stops. Resumption happens via the event bus (see resume section).
+5. **Instant handling** (line 88-97): Step marked `completed`, output stored at `ctx[node.id]`, then successors for `result.nextPort` are pushed onto the queue.
+6. **Error handling** (line 98-110): Any thrown error marks the step as `failed`, marks the entire run as `failed`, and the function returns.
+7. **Completion** (line 113-121): When the queue empties, if the run is still `running`, it is marked `completed` with the final context.
+
+#### Node Dispatch -- `executeNode()` (line 124-167)
+
+A `switch` on `node.type`:
+
+- **Trigger nodes** (lines 132-139): All 7 trigger types are pass-throughs. They return `{ mode: "instant", nextPort: "default", output: ctx.trigger }`. Trigger matching happens in `triggers.ts`, not here.
+- **Action nodes** (lines 141-163): Each casts `node.config` via `as unknown as XConfig` and delegates to the corresponding executor function.
+
+The parameters passed vary by executor:
+| Node type | Receives `ctx` | Receives `runId` | Receives `stepId` |
+|---|---|---|---|
+| `property-match` | yes | no | no |
+| `code-match` | yes | no | no |
+| `llm-classify` | yes | no | no |
+| `send-message` | yes | no | no |
+| `create-task` | yes | yes | yes |
+| `delegate-to-agent` | yes | yes | yes |
+
+---
+
+### Node Executor Implementations
+
+#### 1. `property-match` (`src/workflows/nodes/property-match.ts`)
+
+**Signature:** `executePropertyMatch(config: PropertyMatchConfig, ctx: Record<string, unknown>): NodeResult`
+
+**Mode:** Always `instant`
+
+**Dependencies:** None (pure logic)
+
+**Config:**
+- `PropertyMatchConfig` supports two shapes: a `conditions` array (each with `field`, `op`, `value`) or a flat `{ property, operator, value }` form. `normalizeConditions()` (line 38-51) unifies them.
+- `mode`: `"all"` (AND) or `"any"` (OR), defaults to `"all"`.
+
+**Logic:**
+- `evaluateCondition()` (line 53-77) resolves a dot-path via `resolvePath()` (line 79-87) then applies one of 7 operators: `eq`, `neq`, `contains`, `not_contains`, `gt`, `lt`, `exists`.
+- **Output port:** `"true"` or `"false"` based on whether conditions pass.
+- **Output data:** `{ passed: boolean, results: boolean[] }` (per-condition results).
+
+#### 2. `code-match` (`src/workflows/nodes/code-match.ts`)
+
+**Signature:** `executeCodeMatch(config: CodeMatchConfig, ctx: Record<string, unknown>): NodeResult`
+
+**Mode:** Always `instant`
+
+**Dependencies:** None (user-provided code evaluated in-process)
+
+**Config:** `{ code: string, outputPorts: string[] }`
+
+**Logic:**
+- Builds a sandboxed function via `new Function()` (line 28). Shadows `require`, `process`, `Bun`, `globalThis`, `global`, `fetch`, `setTimeout`, `setInterval` by passing `undefined` for each.
+- Calls the compiled function with `ctx` as the `input` parameter (line 30).
+- Maps the return value to a port string: booleans become `"true"`/`"false"`, everything else is `String(result)` (lines 34-40).
+- Validates the returned port is in `config.outputPorts` (line 43-47), throws if not.
+- **Output port:** The computed port string.
+- **Output data:** `{ result: port }`.
+
+#### 3. `llm-classify` (`src/workflows/nodes/llm-classify.ts`)
+
+**Signature:** `executeLlmClassify(config: LlmClassifyConfig, ctx: Record<string, unknown>, providerOverride?: LlmProvider): Promise<NodeResult>`
+
+**Mode:** Always `instant` (the LLM call is awaited, but the result is returned synchronously to the engine -- it does not pause the DAG)
+
+**Dependencies:** 
+- `../template` -- `interpolate()` for prompt template expansion
+- `../llm-provider` -- `createProvider()` returns either `OpenRouterProvider` (uses `@ai-sdk/openai` with `OPENROUTER_API_KEY`) or `ClaudeCliProvider` (spawns `claude` CLI with `--model haiku`)
+
+**Config:** `{ prompt: string, categories: string[], model?: string, fallbackPort?: string }`
+
+**Logic:**
+- Interpolates the prompt template against ctx (line 18).
+- Builds a Zod schema requiring `{ category: enum(categories), confidence: number(0-1) }` (lines 20-23).
+- Calls `provider.query()` with the classification prompt (lines 27-30).
+- On success: output port is the returned `category`, output data is `{ category, confidence }`.
+- On error (line 36-43): falls back to `config.fallbackPort ?? last category ?? "unknown"`, returns `{ category: fallback, confidence: 0, error }`.
+- The `providerOverride` parameter (line 16) exists for testability.
+
+#### 4. `create-task` (`src/workflows/nodes/create-task.ts`)
+
+**Signature:** `executeCreateTask(config: CreateTaskConfig, ctx: Record<string, unknown>, runId: string, stepId: string): NodeResult`
+
+**Mode:** Always `async`
+
+**Dependencies:**
+- `../../be/db` -- `createTaskExtended()` to insert a task row
+- `../template` -- `interpolate()` for task description and tags
+
+**Config:** `{ template: string, agentId?: string, tags?: string[], source?: string, priority?: number }`
+
+**Logic:**
+- Interpolates `config.template` and each tag string against ctx (lines 19-20).
+- Calls `createTaskExtended()` with `source: "workflow"`, passing `workflowRunId` and `workflowRunStepId` to link the task back to the workflow (lines 21-28).
+- **Output port:** `"default"`.
+- **Output data:** `{ taskId, taskStatus }`.
+
+Because the mode is `async`, the DAG walk pauses here. The workflow resumes when the task completes via the event bus.
+
+#### 5. `delegate-to-agent` (`src/workflows/nodes/delegate-to-agent.ts`)
+
+**Signature:** `executeDelegateToAgent(config: DelegateToAgentConfig, ctx: Record<string, unknown>, runId: string, stepId: string): NodeResult`
+
+**Mode:** Always `async`
+
+**Dependencies:**
+- `../../be/db` -- `createTaskExtended()`
+- `../template` -- `interpolate()`
+
+**Config:** `{ agentId: string, taskTemplate: string, tags?: string[], offerMode?: boolean }`
+
+**Logic:**
+- Interpolates `config.taskTemplate` and tags (lines 18-19).
+- `offerMode` flag (line 21-22): When `true`, sets `agentId: null` and `offeredTo: config.agentId` (agent can accept or decline). When `false`, sets `agentId: config.agentId` directly (hard assignment).
+- Creates the task with `source: "workflow"`, `workflowRunId`, `workflowRunStepId`.
+- **Output port:** `"default"`.
+- **Output data:** `{ taskId, taskStatus, agentId }`.
+
+#### 6. `send-message` (`src/workflows/nodes/send-message.ts`)
+
+**Signature:** `executeSendMessage(config: SendMessageConfig, ctx: Record<string, unknown>): NodeResult`
+
+**Mode:** Always `instant`
+
+**Dependencies:**
+- `../../be/db` -- `postMessage()` for channel messaging
+- `../template` -- `interpolate()`
+
+**Config:** `{ channelId?: string, template: string }`
+
+**Logic:**
+- Interpolates the template (line 14).
+- If `channelId` is provided, calls `postMessage(channelId, null, message)` (lines 15-17). The `null` is the `agentId` parameter -- messages posted by workflows have no agent identity.
+- **Output port:** `"default"`.
+- **Output data:** `{ message }`.
+
+---
+
+### Supporting Infrastructure
+
+#### Template Interpolation (`src/workflows/template.ts`)
+
+`interpolate(template, ctx)` replaces `{{path.to.value}}` tokens by walking the dot-separated path into the context object. Returns empty string for null/undefined values, `JSON.stringify()` for objects.
+
+#### LLM Provider (`src/workflows/llm-provider.ts`)
+
+Two implementations behind the `LlmProvider` interface:
+- `OpenRouterProvider` (line 8-25): Dynamic imports of `ai` and `@ai-sdk/openai`. Uses `google/gemini-2.0-flash-001` model via OpenRouter. Uses the `generateObject()` API with Zod schema.
+- `ClaudeCliProvider` (line 27-44): Spawns a `claude` CLI subprocess with `--model haiku --output-format json --json-schema`. Parses stdout JSON and validates with Zod.
+
+Provider selection (line 48-55): Singleton pattern. If `OPENROUTER_API_KEY` env var is set, uses OpenRouter; otherwise falls back to Claude CLI.
+
+#### Event Bus (`src/workflows/event-bus.ts`)
+
+`InProcessEventBus` wraps Node's `EventEmitter` with max 100 listeners. A module-level singleton `workflowEventBus` is exported at line 29.
+
+#### Resume Logic (`src/workflows/resume.ts`)
+
+`setupWorkflowResumeListener()` (line 21-38) subscribes to three events on the bus:
+- `task.completed`: Calls `resumeFromTaskCompletion()` which marks the waiting step as completed, adds task output to context at `ctx[step.nodeId]`, sets the run back to `running`, and calls `walkDag()` from the successors of the completed node (lines 41-66).
+- `task.failed` / `task.cancelled`: Both call `markRunFailed()` which marks both step and run as `failed` (lines 68-79).
+- `retryFailedRun()` (line 81-102): Finds the first failed step, resets it to `pending`, resets the run to `running`, and re-enters `walkDag()` starting from that node.
+
+#### Recovery (`src/workflows/recovery.ts`)
+
+`recoverStuckWorkflowRuns()` queries `getStuckWorkflowRuns()` from the DB -- runs that are `waiting` but whose linked task has already completed/failed/cancelled (the event bus notification was missed). For completed tasks, it replays the resume logic. For failed/cancelled tasks, it marks the run failed.
+
+#### Trigger Evaluation (`src/workflows/triggers.ts`)
+
+`evaluateWorkflowTriggers(eventType, eventData)` loads all enabled workflows, finds their entry nodes, and for each checks if the trigger node matches the incoming event. Matching is done by `matchTriggerNode()` which dispatches on the node type and applies filter functions: `matchTaskFilters()` (tags, source, taskType, agentId), `matchEventFilters()` (event type, repo, actions), `matchSlackFilters()` (channel, pattern regex), `matchEmailFilters()` (inbox, sender domain). Webhook triggers return `false` here (they are triggered via HTTP, not the event bus).
+
+Notably, `trigger-new-task` has a loop prevention check at line 26: tasks with `workflowRunId` set are skipped, preventing workflow-created tasks from re-triggering the same workflow.
+
+#### Initialization (`src/workflows/index.ts`)
+
+`initWorkflows()` wires everything: calls `setupWorkflowResumeListener(workflowEventBus)`, then subscribes to 14 event types on the bus, routing each to `evaluateWorkflowTriggers()`.
+
+---
+
+### What Is Common Across All Node Executors
+
+1. **Import `NodeResult` from `../engine`** -- every executor returns this type.
+2. **Receive `ctx: Record<string, unknown>`** -- the accumulated workflow context.
+3. **Receive a config interface** -- each defines its own typed config, but the engine casts `node.config` (an untyped `Record<string, unknown>`) to it.
+4. **Return a `NodeResult`** with `mode`, `nextPort`, and `output`.
+5. **No access to the event bus** -- none of the executors emit events. The engine handles all state persistence.
+6. **No access to the `node` object itself** -- they only receive the extracted `config`, not `node.id`, `node.type`, or `node.label`.
+
+### What Varies Across Node Executors
+
+| Dimension | Varies How |
+|---|---|
+| **Sync vs Async** | `property-match`, `code-match`, `send-message` are synchronous functions. `llm-classify` is `async` (returns Promise). `create-task` and `delegate-to-agent` are synchronous but return `mode: "async"`. |
+| **Parameters beyond config+ctx** | `create-task` and `delegate-to-agent` also receive `runId` and `stepId` (to link created tasks back to the workflow). The other four do not. |
+| **Dependencies** | `property-match` and `code-match` are pure (no imports beyond the `NodeResult` type). `send-message` and `create-task`/`delegate-to-agent` import from `../../be/db`. `llm-classify` imports from `../llm-provider` and `../template`. `send-message`, `create-task`, and `delegate-to-agent` import from `../template`. |
+| **Port routing** | `property-match` uses `"true"`/`"false"`. `code-match` uses dynamic ports from user code. `llm-classify` uses the classification category name. The other three always use `"default"`. |
+| **Error handling** | `llm-classify` has internal try/catch with fallback port logic. All others let errors propagate to the engine's catch block. |
+| **Testability hooks** | `llm-classify` accepts an optional `providerOverride` parameter. No other executor has a similar injection point. |
+
+### Key Files
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/types.ts` (lines 548-642) -- Workflow type definitions
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/engine.ts` -- DAG walker, dispatch switch, NodeResult interface
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/nodes/property-match.ts` -- Pure condition evaluator
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/nodes/code-match.ts` -- Sandboxed user code executor
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/nodes/llm-classify.ts` -- LLM-based classification
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/nodes/create-task.ts` -- Async task creation
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/nodes/delegate-to-agent.ts` -- Async agent delegation
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/nodes/send-message.ts` -- Channel message posting
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/template.ts` -- `{{path}}` interpolation
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/llm-provider.ts` -- LLM abstraction (OpenRouter / Claude CLI)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/event-bus.ts` -- In-process EventEmitter wrapper
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/resume.ts` -- Event-driven DAG resumption
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/recovery.ts` -- Stuck run recovery
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/triggers.ts` -- Trigger matching logic
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/index.ts` -- Initialization and wiring</result>
+<usage><total_tokens>28233</total_tokens><tool_uses>19</tool_uses><duration_ms>130834</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/063cc034-aa84-4605-a6b1-d3c0376e5c74/tasks/adabaf64a6ff9e07e.output
+
+---
+
+<task-notification>
+<task-id>a6f6f3c046737222b</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/063cc034-aa84-4605-a6b1-d3c0376e5c74/tasks/a6f6f3c046737222b.output</output-file>
+<status>completed</status>
+<summary>Agent "Research Temporal-like patterns in TS" completed</summary>
+<result>
+
+Taras, here is my comprehensive research synthesis. I'll save it to the thoughts directory.
+
+---
+
+## Summary
+
+I researched durable workflow execution patterns across Temporal, Inngest, Restate, DBOS, Hatchet, @hazeljs/flow, and Gunnar Morling's SQLite-based durable execution engine. Below is the full synthesis, organized around your four questions, grounded in your existing `src/workflows/engine.ts` implementation.
+
+## 1. Core Temporal Concepts That Matter
+
+### Deterministic Replay
+
+Temporal's core mechanism: every workflow action (called a "Command") is recorded as an Event in an append-only Event History. When a worker crashes and a new worker picks up the workflow, it replays the Event History from the start, re-executing the workflow code but **skipping** any step whose result already exists in the history. The replay produces Commands that are compared against the recorded history -- a mismatch means non-determinism (a bug).
+
+**What matters for us**: We do NOT need full deterministic replay. Our workflows are DAG definitions, not arbitrary code. The DAG structure itself is deterministic. What we need is the **step result memoization** pattern -- if a step already completed, skip it and use its stored output.
+
+### Activity Retries with Backoff
+
+Temporal retries Activities (the side-effectful operations) automatically with configurable policies:
+- `initialInterval` (e.g., 1s)
+- `backoffCoefficient` (e.g., 2.0)
+- `maximumInterval` (cap, e.g., 60s)
+- `maximumAttempts` (e.g., 5)
+
+The delay formula: `min(initialInterval * backoffCoefficient^attempt, maximumInterval)` with optional jitter.
+
+Each Activity has its own independent retry counter. The Workflow itself is NOT retried -- only the failing Activity within it.
+
+### Workflow State Persistence
+
+Temporal persists the full event history to a database (Postgres, MySQL, Cassandra, or SQLite). Every step's input, output, and status is recorded. On crash, the workflow reconstructs its state by replaying this history.
+
+### Signals (Pause/Resume)
+
+A Signal is an external message sent to a running workflow. The workflow can `await condition(() => someFlag)` which blocks until a signal sets the flag. This is how Temporal implements pause/resume, human-in-the-loop approvals, and external event waiting.
+
+Your existing `status: 'waiting'` + event bus resume pattern is already the equivalent of Temporal signals. The task completion event is functionally a signal.
+
+### Timers
+
+`workflow.sleep(duration)` is durable -- persisted to the database. If the worker crashes during a sleep, when the workflow resumes, it checks if the timer has already elapsed. Temporal's timers survive process restarts.
+
+### Child Workflows
+
+A workflow can spawn child workflows that execute independently but report their completion back to the parent. The parent can await the child's result. Each child has its own event history, retry policy, and lifecycle. Used for breaking large workflows into manageable pieces and for distributing work across workers.
+
+## 2. Lightweight TypeScript Libraries for Durable Workflows
+
+### Inngest -- Best-in-class step function model
+
+**How it works**: Inngest re-invokes your function via HTTP for each step. Previously completed steps are memoized -- the SDK checks the step ID hash against stored state and injects the cached result instead of re-executing. Each `step.run()` is an independent HTTP request with its own retry counter.
+
+**Key insight for us**: Inngest's memoization is the simplest durable execution pattern. On each function invocation, check the step log -- if a step already completed, return its stored result. If not, execute it.
+
+**Architecture**: Event API receives events, Runner schedules function runs, State store (managed) persists step results, SDK handles memoization client-side.
+
+**Relevance**: High. The Inngest step model maps directly to our DAG nodes. Each node execution can check the step log before executing.
+
+### Restate -- Journaled async/await
+
+**How it works**: Every `ctx.run()` call journals its result. On crash recovery, the runtime "fast-forwards" through already-journaled steps. The key primitive is `ctx.run(() => sideEffect())` which wraps non-deterministic operations.
+
+**Key insight**: The "journal + fast-forward" pattern. On resume, iterate through the DAG, and for each step check if there's a journal entry. If yes, use the stored result. If no, execute from that point onward.
+
+**Relevance**: Medium-high. The journal pattern is what we'd implement in SQLite.
+
+### DBOS Transact -- Lightweight durable TypeScript workflows on Postgres
+
+**How it works**: `@DBOS.workflow()` and `@DBOS.step()` decorators. Steps are checkpointed to Postgres. On crash, workflows automatically resume from last completed step. Uses a `transaction_completion` table for exactly-once step execution tracking.
+
+**Key insight**: Decorator-based step marking with database checkpointing. Simple model, no event sourcing complexity.
+
+**Relevance**: Medium. We use SQLite not Postgres, but the pattern is the same.
+
+### Hatchet -- DAG-based orchestration on Postgres
+
+**How it works**: Supports DAG workflows, rate limiting, conditional triggers, and durable execution. Steps are defined as DAG nodes with dependencies. Built on Postgres.
+
+**Key insight**: Hatchet is the closest to what we're building -- DAG-based workflows with per-step durability. But it requires a separate server process.
+
+**Relevance**: Architectural inspiration, but we don't want external infrastructure.
+
+### @hazeljs/flow -- In-process graph engine for Node.js
+
+**How it works**: `@Flow`, `@Node`, `@Edge` decorators. Runs in-memory by default, optional Prisma storage for crash recovery. Supports retry policies per node (`maxAttempts`, `backoff: 'fixed' | 'exponential'`, `baseDelayMs`, `maxDelayMs`). First-class wait/resume for human approval. Audit trail.
+
+**Key insight**: The closest library to what we need. In-process, decorator-based, with optional persistence. But it's alpha-stage and brings Prisma as a dependency.
+
+**Relevance**: API design inspiration, but we'd roll our own with bun:sqlite.
+
+### Gunnar Morling's "Persistasaurus" -- Proof-of-concept SQLite durable execution
+
+**How it works**: An `execution_log` SQLite table stores one entry per step with status and result. On workflow start, each step's intent is recorded. On completion, the result is stored. On crash recovery, the engine reads the log and skips completed steps.
+
+**Key insight**: The minimal viable schema for durable execution is just an execution log table. This is exactly what our `workflow_run_steps` table already is, but without retry tracking.
+
+**Relevance**: Highest. This is essentially what we need to evolve our existing schema into.
+
+## 3. Durable Step Execution with SQLite + BFS DAG Walk
+
+### The Pattern: Journal + Fast-Forward + Retry
+
+Here's the concrete approach, building on the existing `walkDag` in `src/workflows/engine.ts`:
+
+#### Schema Changes (new migration)
+
+```sql
+-- Add retry tracking to workflow_run_steps
+ALTER TABLE workflow_run_steps ADD COLUMN retryCount INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE workflow_run_steps ADD COLUMN maxRetries INTEGER NOT NULL DEFAULT 3;
+ALTER TABLE workflow_run_steps ADD COLUMN nextRetryAt TEXT;  -- ISO timestamp, NULL = not scheduled
+ALTER TABLE workflow_run_steps ADD COLUMN idempotencyKey TEXT;  -- runId:nodeId for dedup
+
+CREATE INDEX IF NOT EXISTS idx_wrs_retry
+  ON workflow_run_steps(status, nextRetryAt)
+  WHERE status = 'failed' AND nextRetryAt IS NOT NULL;
+```
+
+#### State Checkpointing After Each Step
+
+The existing engine already does this -- `createWorkflowRunStep` before execution, `updateWorkflowRunStep` after. The gap is that on crash, the step stays `pending` forever. The fix:
+
+```typescript
+// Before executing a step, mark it 'running'
+updateWorkflowRunStep(stepId, { status: "running" });
+
+try {
+  const result = await executeNode(node, ctx, runId, stepId);
+  updateWorkflowRunStep(stepId, {
+    status: "completed",
+    output: result.output,
+    finishedAt: new Date().toISOString(),
+  });
+} catch (err) {
+  const step = getWorkflowRunStep(stepId);
+  const retryCount = (step?.retryCount ?? 0) + 1;
+  const maxRetries = node.config.maxRetries ?? 3;
+
+  if (retryCount < maxRetries) {
+    const delay = calculateBackoff(retryCount);
+    updateWorkflowRunStep(stepId, {
+      status: "failed",
+      error: String(err),
+      retryCount,
+      nextRetryAt: new Date(Date.now() + delay).toISOString(),
+    });
+    // Don't mark run as failed -- retry will pick it up
+  } else {
+    updateWorkflowRunStep(stepId, {
+      status: "failed",
+      error: String(err),
+      retryCount,
+      nextRetryAt: null,  // exhausted
+      finishedAt: new Date().toISOString(),
+    });
+    updateWorkflowRun(runId, {
+      status: "failed",
+      error: `Step ${node.id} failed after ${retryCount} attempts: ${err}`,
+      finishedAt: new Date().toISOString(),
+    });
+  }
+}
+```
+
+#### Retry with Exponential Backoff
+
+```typescript
+function calculateBackoff(
+  attempt: number,
+  baseDelayMs = 1000,
+  maxDelayMs = 60000,
+  jitter = true,
+): number {
+  const exponentialDelay = Math.min(
+    baseDelayMs * Math.pow(2, attempt - 1),
+    maxDelayMs,
+  );
+  if (!jitter) return exponentialDelay;
+  // Full jitter: uniform random between 0 and exponentialDelay
+  return Math.floor(Math.random() * exponentialDelay);
+}
+```
+
+A retry poller (runs on interval, e.g., every 5s):
+
+```typescript
+function pollRetryableSteps(): void {
+  const now = new Date().toISOString();
+  // Query: steps that failed but have nextRetryAt <= now
+  const retryable = db.query(`
+    SELECT wrs.*, wr.workflowId, wr.context
+    FROM workflow_run_steps wrs
+    JOIN workflow_runs wr ON wr.id = wrs.runId
+    WHERE wrs.status = 'failed'
+      AND wrs.nextRetryAt IS NOT NULL
+      AND wrs.nextRetryAt <= ?
+    ORDER BY wrs.nextRetryAt ASC
+    LIMIT 10
+  `).all(now);
+
+  for (const step of retryable) {
+    retryStep(step);  // re-execute the node with stored context
+  }
+}
+```
+
+#### Idempotent Step Execution
+
+The idempotency key is `runId:nodeId`. Before creating a new step row, check if one already exists:
+
+```typescript
+function getOrCreateStep(runId: string, nodeId: string, nodeType: string, input: unknown) {
+  const existing = db.query(
+    `SELECT * FROM workflow_run_steps WHERE runId = ? AND nodeId = ? ORDER BY retryCount DESC LIMIT 1`
+  ).get(runId, nodeId);
+
+  if (existing && existing.status === 'completed') {
+    return { step: existing, alreadyDone: true };
+  }
+
+  if (existing && (existing.status === 'failed' || existing.status === 'running')) {
+    // Reuse the existing row for retry
+    return { step: existing, alreadyDone: false };
+  }
+
+  // Create new
+  const stepId = crypto.randomUUID();
+  createWorkflowRunStep({ id: stepId, runId, nodeId, nodeType, input });
+  return { step: { id: stepId, retryCount: 0 }, alreadyDone: false };
+}
+```
+
+#### Recovery from Crashes Mid-Workflow
+
+On startup (or on a timer), scan for runs that are stuck:
+
+```typescript
+async function recoverInterruptedRuns(): Promise<void> {
+  // Runs that are 'running' but have no step in 'running' or 'pending' state
+  // and have been stuck for > 60s
+  const stuckRuns = db.query(`
+    SELECT wr.id as runId, wr.workflowId, wr.context
+    FROM workflow_runs wr
+    WHERE wr.status = 'running'
+      AND wr.lastUpdatedAt < datetime('now', '-60 seconds')
+      AND NOT EXISTS (
+        SELECT 1 FROM workflow_run_steps wrs
+        WHERE wrs.runId = wr.id AND wrs.status IN ('running', 'pending')
+      )
+  `).all();
+
+  for (const run of stuckRuns) {
+    // Find the last completed step and resume from its successors
+    const completedSteps = db.query(`
+      SELECT nodeId FROM workflow_run_steps
+      WHERE runId = ? AND status = 'completed'
+      ORDER BY finishedAt DESC
+    `).all(run.runId);
+
+    const workflow = getWorkflow(run.workflowId);
+    if (!workflow) continue;
+
+    const completedNodeIds = new Set(completedSteps.map(s => s.nodeId));
+    const ctx = JSON.parse(run.context ?? '{}');
+
+    // Find nodes whose predecessors are all completed but they haven't run
+    const nextNodes = workflow.definition.nodes.filter(node => {
+      if (completedNodeIds.has(node.id)) return false;
+      const incomingEdges = workflow.definition.edges.filter(e => e.target === node.id);
+      if (incomingEdges.length === 0) return !completedNodeIds.has(node.id); // entry node
+      return incomingEdges.some(e => completedNodeIds.has(e.source));
+    });
+
+    if (nextNodes.length > 0) {
+      await walkDag(workflow.definition, run.runId, ctx, nextNodes);
+    }
+  }
+}
+```
+
+### The Revised walkDag with Durability
+
+```typescript
+export async function walkDag(
+  def: WorkflowDefinition,
+  runId: string,
+  ctx: Record<string, unknown>,
+  startNodes: WorkflowNode[],
+): Promise<void> {
+  const queue = [...startNodes];
+  const visited = new Set<string>();
+
+  while (queue.length > 0) {
+    const node = queue.shift()!;
+    if (visited.has(node.id)) continue;
+    visited.add(node.id);
+
+    // === DURABLE: Check if step already completed (memoization) ===
+    const { step, alreadyDone } = getOrCreateStep(runId, node.id, node.type, ctx);
+
+    if (alreadyDone) {
+      // Fast-forward: inject stored output into context
+      ctx[node.id] = step.output;
+      const successors = getSuccessors(def, node.id, step.nextPort ?? "default");
+      queue.push(...successors);
+      continue;
+    }
+
+    updateWorkflowRunStep(step.id, { status: "running" });
+
+    try {
+      const result = await executeNode(node, ctx, runId, step.id);
+
+      if (result.mode === "async") {
+        updateWorkflowRunStep(step.id, { status: "waiting", output: result.output });
+        updateWorkflowRun(runId, { status: "waiting", context: ctx });
+        return;
+      }
+
+      updateWorkflowRunStep(step.id, {
+        status: "completed",
+        output: result.output,
+        finishedAt: new Date().toISOString(),
+      });
+      ctx[node.id] = result.output;
+      // Checkpoint context to run row
+      updateWorkflowRun(runId, { context: ctx });
+
+      const successors = getSuccessors(def, node.id, result.nextPort);
+      queue.push(...successors);
+    } catch (err) {
+      await handleStepFailure(step, node, runId, err);
+      if (shouldRetry(step, node)) return; // Poller will resume
+      return; // Exhausted retries, run marked failed
+    }
+  }
+
+  // All nodes done
+  const run = getWorkflowRun(runId);
+  if (run && run.status === "running") {
+    updateWorkflowRun(runId, {
+      status: "completed",
+      context: ctx,
+      finishedAt: new Date().toISOString(),
+    });
+  }
+}
+```
+
+## 4. Minimum Viable "Durable Execution" for a DAG Workflow Engine
+
+The absolute minimum is four things:
+
+### A. Step Result Journal (you already have this)
+
+`workflow_run_steps` table with `status`, `input`, `output`. On resume, skip completed steps.
+
+### B. Context Checkpointing (one line change)
+
+After each step completes, write the accumulated `ctx` back to `workflow_runs.context`. Currently you only do this on `waiting` -- also do it on each `completed` step. This is the crash recovery checkpoint.
+
+### C. Retry with Backoff (new)
+
+Add `retryCount`, `maxRetries`, `nextRetryAt` columns to `workflow_run_steps`. On step failure, if retries remain, compute the next retry time and write it. A poller picks up retryable steps.
+
+### D. Startup Recovery (partially exists)
+
+Your `recoverStuckWorkflowRuns()` already handles the "task completed but run stuck" case. Extend it to also handle "process crashed mid-walk" by finding runs in `running` status with no active steps.
+
+### What You Do NOT Need
+
+- **Full deterministic replay** -- your DAGs are declarative, not arbitrary code. The graph structure is the replay mechanism.
+- **Event sourcing** -- the step log is sufficient. You don't need an append-only event stream.
+- **Separate worker processes** -- your engine runs in-process with bun:sqlite. No need for Temporal-style worker polling.
+- **Distributed locking** -- single-process SQLite with WAL mode. No contention.
+
+### Signals / Timers / Child Workflows
+
+- **Signals**: Already implemented via `status: 'waiting'` + event bus resume. No changes needed.
+- **Timers**: Add a `timer` node type that writes `nextRetryAt` and returns `mode: "async"`. The retry poller doubles as the timer executor.
+- **Child workflows**: A node type that calls `startWorkflowExecution()` for another workflow and returns `mode: "async"`. The parent run waits, the child run's completion fires an event that resumes the parent. Store `parentRunId`/`parentStepId` on the child run for the callback.
+
+## Gaps and Limitations
+
+- **No idempotency for external side effects**: If a `create-task` step succeeds but the process crashes before recording the step as `completed`, retrying will create a duplicate task. For critical steps, the step executor should check for existing results (e.g., check if a task with the same idempotency key exists).
+- **No distributed execution**: This design is single-process. If you need multi-node, you'd need distributed locking or a queue-based approach (which is what Temporal/Inngest provide).
+- **No workflow versioning**: If you change a workflow definition mid-run, existing runs use the old definition. Consider snapshotting the definition into the run row at start time.
+
+## Sources
+
+- [Temporal Workflow Execution Overview](https://docs.temporal.io/workflow-execution)
+- [Temporal Retry Policies](https://docs.temporal.io/encyclopedia/retry-policies)
+- [Temporal Workflow Definition (Determinism)](https://docs.temporal.io/workflow-definition)
+- [Temporal Child Workflows](https://docs.temporal.io/child-workflows)
+- [Temporal Durable Timers - TypeScript SDK](https://docs.temporal.io/develop/typescript/timers)
+- [Temporal Event History - TypeScript SDK](https://docs.temporal.io/encyclopedia/event-history/event-history-typescript)
+- [Inngest - How Functions Are Executed](https://www.inngest.com/docs/learn/how-functions-are-executed)
+- [Inngest Steps](https://www.inngest.com/docs/learn/inngest-steps)
+- [Inngest Checkpointing](https://www.inngest.com/docs/setup/checkpointing)
+- [Restate - What is Durable Execution](https://www.restate.dev/what-is-durable-execution)
+- [Restate - Durable Steps](https://docs.restate.dev/develop/ts/durable-steps)
+- [DBOS - Reliable Workflow Engine in TypeScript](https://www.dbos.dev/blog/reliable-workflow-engine-typescript-sfnode)
+- [DBOS Workflows & Steps Reference](https://docs.dbos.dev/typescript/reference/workflows-steps)
+- [Building a Durable Execution Engine With SQLite - Gunnar Morling](https://www.morling.dev/blog/building-durable-execution-engine-with-sqlite/)
+- [Durable Background Execution with Go and SQLite - Three Dots Labs](https://threedots.tech/post/sqlite-durable-execution/)
+- [Hatchet Documentation](https://docs.hatchet.run/home)
+- [@hazeljs/flow - Durable Execution Graph Engine for Node.js](https://dev.to/arslan_mecom/hazeljsflow-a-durable-execution-graph-engine-for-nodejs-1l14)
+- [Workflow DevKit - Make any TypeScript Function Durable](https://useworkflow.dev/)
+- [Temporal - Idempotency and Durable Execution](https://temporal.io/blog/idempotency-and-durable-execution)
+- [Cloudflare - Better Testing for Workflows](https://blog.cloudflare.com/better-testing-for-workflows/)
+- [TypeScript Orchestration Comparison (Medium)](https://medium.com/@matthieumordrel/the-ultimate-guide-to-typescript-orchestration-temporal-vs-trigger-dev-vs-inngest-and-beyond-29e1147c8f2d)
+- [Lightweight Alternative to Temporal for Node.js (DEV Community)](https://dev.to/louis_dussarps_e656bc7b01/a-lightweight-alternative-to-temporal-for-nodejs-applications-9e4)
+
+---
+
+The research file has been saved to `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/thoughts/taras/research/2026-03-18-durable-workflow-execution.md`.
+
+The bottom line, Taras: you don't need Temporal or any external library. Your existing `walkDag` + `workflow_run_steps` is 80% of the way there. The four concrete additions are:
+
+1. **Context checkpoint after every step** (one `updateWorkflowRun` call after each completed step)
+2. **Retry columns** (`retryCount`, `maxRetries`, `nextRetryAt`) on `workflow_run_steps` + a poller that picks up failed steps past their retry time
+3. **Step memoization** in `walkDag` -- check if a step already completed before executing it
+4. **Startup recovery** -- extend `recoverStuckWorkflowRuns()` to handle process crashes mid-walk, not just stuck async tasks
+
+The exponential backoff formula is `min(baseDelay * 2^(attempt-1), maxDelay)` with full jitter. The retry poller runs on a `setInterval` (e.g., every 5 seconds) and is also the mechanism for durable timers.</result>
+<usage><total_tokens>56089</total_tokens><tool_uses>46</tool_uses><duration_ms>374231</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/063cc034-aa84-4605-a6b1-d3c0376e5c74/tasks/a6f6f3c046737222b.output
+
+---
+
+<task-notification>
+<task-id>b3x9505w2</task-id>
+<tool-use-id>toolu_017Ey9PQJo3peD88kN8GkpwF</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/063cc034-aa84-4605-a6b1-d3c0376e5c74/tasks/b3x9505w2.output</output-file>
+<status>completed</status>
+<summary>Background command "Open research doc for Taras to review" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/063cc034-aa84-4605-a6b1-d3c0376e5c74/tasks/b3x9505w2.output
