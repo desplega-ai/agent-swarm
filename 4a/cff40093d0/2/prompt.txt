@@ -1,0 +1,1190 @@
+# Create Plan
+
+A thin wrapper that invokes the `desplega:planning` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse autonomy mode from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - If provided file has `autonomy:` in frontmatter, use that as default
+   - Otherwise, ask the user via AskUserQuestion:
+
+   ```
+   How much should I check in with you during planning?
+   - Autopilot: Research and create plan independently, present for final review
+   - Critical questions (Recommended): Ask only for major design decisions
+   - Verbose: Check in at each step, validate approach throughout
+   ```
+
+2. **ALWAYS invoke the `desplega:planning` skill:**
+   - Pass any file paths or task descriptions
+   - Pass the autonomy mode determined above
+   - Let the skill handle all planning logic
+
+3. **If no input provided:**
+   - Respond with:
+   ```
+   I'll help you create a detailed implementation plan. Please provide:
+   1. The task description
+   2. Any relevant context, constraints, or specific requirements
+   3. Links to related research or previous implementations
+   ```
+
+## Example Usage
+
+```
+/create-plan @thoughts/<username|shared>/research/my-feature.md
+/create-plan --autonomy=autopilot implement user authentication
+/create-plan --autonomy=verbose add caching layer
+```
+
+
+ARGUMENTS: thoughts/taras/research/2026-03-18-workflow-redesign.md
+
+---
+
+Base directory for this skill: /Users/taras/.claude/plugins/cache/desplega-ai-toolbox/desplega/1.7.0/skills/planning
+
+# Planning
+
+You are creating detailed implementation plans through an interactive, iterative process. Be skeptical, thorough, and collaborative.
+
+## Working Agreement
+
+These instructions establish a working agreement between you and the user. The key principles are:
+
+1. **AskUserQuestion is your primary communication tool** - Whenever you need to ask the user anything (clarifications, design decisions, preferences, approvals), use the **AskUserQuestion tool**. Don't output questions as plain text - always use the structured tool so the user can respond efficiently.
+
+2. **Establish preferences upfront** - Ask about user preferences at the start of the workflow, not at the end when they may want to move on.
+
+3. **Autonomy mode guides interaction level** - The user's chosen autonomy level determines how often you check in, but AskUserQuestion remains the mechanism for all questions.
+
+### User Preferences
+
+Before starting planning (unless autonomy is Autopilot), establish these preferences:
+
+**Commit After Each Phase** - Use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like me to create a commit after each phase once manual verification passes?" | 1. Yes, commit after each phase passes (Recommended), 2. No, I'll handle commits myself |
+
+Store this preference and act on it during implementation (see "Commit Integration" section).
+
+**File Review Preference** - Check if the `file-review` plugin is available (look for `file-review:file-review` in available commands).
+
+If file-review plugin is installed, use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like to use file-review for inline feedback on the plan when it's ready?" | 1. Yes, open file-review when plan is ready (Recommended), 2. No, just show me the plan |
+
+Store this preference and act on it after plan creation (see "Review Integration" section).
+
+## When to Use
+
+This skill activates when:
+- User invokes `/create-plan` command
+- Another skill references `**REQUIRED SUB-SKILL:** Use desplega:planning`
+- User asks to plan an implementation or create a technical spec
+
+## Autonomy Mode
+
+At the start of planning, adapt your interaction level based on the autonomy mode:
+
+| Mode | Behavior |
+|------|----------|
+| **Autopilot** | Research independently, create complete plan, present for final review only |
+| **Critical** (Default) | Get buy-in at major decision points, present design options for approval |
+| **Verbose** | Check in at each step, validate understanding, confirm before each phase |
+
+The autonomy mode is passed by the invoking command. If not specified, default to **Critical**.
+
+## Process Steps
+
+### Step 1: Context Gathering & Initial Analysis
+
+1. **Read all mentioned files immediately and FULLY:**
+   - Research documents, related plans, JSON/data files
+   - **IMPORTANT**: Use Read tool WITHOUT limit/offset parameters
+   - **CRITICAL**: Read files yourself before spawning sub-tasks
+
+2. **Spawn initial research tasks:**
+   - Use **codebase-locator** agent to find all files related to the task
+   - Use **codebase-analyzer** agent to understand current implementation
+   - Use **thoughts-locator** agent to find existing thoughts documents
+   - Use context7 MCP for library/framework insights
+
+3. **Read all files identified by research tasks**
+
+4. **Analyze and verify understanding:**
+   - Identify discrepancies or misunderstandings
+   - Note assumptions needing verification
+
+5. **Present understanding and questions (if not Autopilot):**
+
+   First, present your findings as text:
+   ```
+   Based on the research of the codebase, I understand we need to [summary].
+
+   I've found that:
+   - [Current implementation detail with file:line reference]
+   - [Relevant pattern or constraint discovered]
+   ```
+
+   Then, if there are questions that research couldn't answer, use **AskUserQuestion** with:
+
+   | Question | Options |
+   |----------|---------|
+   | "[Specific technical question]" | Provide relevant options based on the choices available |
+   | "[Design preference question]" | Provide relevant options based on the choices available |
+
+### Step 2: Research & Discovery
+
+1. **If the user corrects any misunderstanding:**
+   - Spawn new research tasks to verify
+   - Read specific files/directories mentioned
+
+2. **Create a research todo list** using TodoWrite
+
+3. **Spawn parallel sub-tasks:**
+   - **codebase-locator** - Find specific files
+   - **codebase-analyzer** - Understand implementation details
+   - **codebase-pattern-finder** - Find similar features to model after
+
+4. **Present findings and design options (if not Autopilot):**
+
+   First, present findings as text:
+   ```
+   **Current State:**
+   - [Key discovery about existing code]
+   ```
+
+   Then, use **AskUserQuestion** to present design options:
+
+   | Question | Options |
+   |----------|---------|
+   | "Which approach aligns best with your vision?" | 1. [Option A] - [brief description], 2. [Option B] - [brief description] |
+
+   Include pros/cons in the option descriptions to help the user decide.
+
+### Step 3: Plan Structure Development
+
+1. **Create initial plan outline (if not Autopilot):**
+
+   Present the outline as text:
+   ```
+   Here's my proposed plan structure:
+
+   ## Overview
+   [1-2 sentence summary]
+
+   ## Implementation Phases:
+   1. [Phase name] - [what it accomplishes]
+   2. [Phase name] - [what it accomplishes]
+   ```
+
+   Then, use **AskUserQuestion** to get approval:
+
+   | Question | Options |
+   |----------|---------|
+   | "Does this phasing make sense?" | 1. Yes, proceed with this structure, 2. No, let's discuss changes |
+
+2. **Get feedback on structure** before writing details
+
+### Step 4: Detailed Plan Writing
+
+Before proceeding, exit plan mode to write the plan file.
+
+Write the plan to `thoughts/<username|shared>/plans/YYYY-MM-DD-description.md`.
+
+**Path selection:** Use the user's name (e.g., `thoughts/taras/plans/`) if known from context. Fall back to `thoughts/shared/plans/` when unclear.
+
+**CRITICAL**: Every phase MUST include a `### Success Criteria:` section with both `#### Automated Verification:` and `#### Manual Verification:` subsections. See "Success Criteria Requirements" section at the end of this document for the exact format.
+
+**QA Specs (optional)**: Phases that change user-facing behavior, add UI, modify API responses, or alter auth/permissions SHOULD include an optional `### QA Spec (optional):` section after the Success Criteria. See the template for the exact format. Phases that are internal refactors, type changes, config updates, or dependency bumps should omit QA specs. QA specs can live either inline in plan phases (for per-phase validation) or as a separate standalone document (for cross-cutting or feature-level QA). The inline approach is the default for plans; the QA skill handles both sources transparently.
+
+**Template:** Read and follow the template at `cc-plugin/base/skills/planning/template.md`
+
+The template includes:
+- Standard plan sections (Overview, Current State, Desired End State, etc.)
+- Multiple phase examples with proper Success Criteria structure
+- Correct heading hierarchy throughout
+
+### Step 5: Review and Iterate
+
+1. **Present draft plan location:**
+   ```
+   I've created the implementation plan at:
+   `thoughts/<username|shared>/plans/YYYY-MM-DD-description.md`
+
+   Please review it.
+   ```
+
+2. **Iterate based on feedback** (if not Autopilot)
+
+3. **Offer structured review:**
+   - After iteration, offer: "Would you like me to run `/review` on this plan for completeness and gap analysis?"
+   - If yes, invoke the `desplega:reviewing` skill on the plan document
+
+4. **Finalize the plan** - DO NOT START implementation
+
+5. **Workflow handoff:**
+   After the plan is finalized (and optionally reviewed), use **AskUserQuestion** with:
+
+   | Question | Options |
+   |----------|---------|
+   | "The plan is ready. What's the next step?" | 1. Implement this plan (→ `/implement-plan`), 2. Run a review first (→ `/review`), 3. Done for now (park the plan) |
+
+   Based on the answer:
+   - **Implement**: Suggest the `/implement-plan` command with the plan file path
+   - **Review**: Invoke the `desplega:reviewing` skill on the plan document
+   - **Done**: Set the plan's `status` to `ready` or `parked` as appropriate
+
+## Review Integration
+
+If the `file-review` plugin is available and the user selected "Yes" during User Preferences setup:
+- After creating plans, invoke `/file-review:file-review <path>`
+- If user selected "No" or autonomy mode is Autopilot, skip this step
+
+## Commit Integration
+
+If the user selected "Yes" to commits during User Preferences setup:
+- After each phase's manual verification passes, create a commit with a descriptive message
+- Commit message format: `[phase N] <brief description of what the phase accomplished>`
+- Only commit after explicit confirmation that manual verification passed
+- If user selected "No", skip commits entirely - the user will handle them
+
+## Important Guidelines
+
+1. **Be Skeptical**: Question vague requirements, verify with code
+2. **Be Interactive**: Don't write full plan in one shot (unless Autopilot)
+3. **Be Thorough**: Read context files COMPLETELY, include file:line references
+4. **Be Practical**: Focus on incremental, testable changes
+5. **No Open Questions**: Research or clarify immediately, don't leave questions in plan
+
+## Success Criteria Requirements (MANDATORY)
+
+**Every phase MUST have a Success Criteria section.** Plans without proper success criteria are incomplete.
+
+### Required Structure
+
+Each phase must end with this exact structure:
+
+```markdown
+### Success Criteria:
+
+#### Automated Verification:
+- [ ] [Command that can be run]: `command here`
+- [ ] [Another automated check]: `command here`
+
+#### Manual Verification:
+- [ ] [Human testing step]
+- [ ] [Another manual check]
+
+**Implementation Note**: [When to pause for confirmation]
+```
+
+### Heading Hierarchy
+
+Use these exact heading levels (this is critical for consistency):
+- `### Success Criteria:` (h3) - section header
+- `#### Automated Verification:` (h4) - subsection
+- `#### Manual Verification:` (h4) - subsection
+
+### What Goes Where
+
+| Type | Examples |
+|------|----------|
+| **Automated** | `make test`, `npm run lint`, `tsc --noEmit`, `ls path/to/file`, `grep pattern file` |
+| **Manual** | UI interactions, visual checks, performance testing, edge case validation |
+
+### Validation Checklist
+
+Before finalizing any plan, verify:
+- [ ] Every phase has `### Success Criteria:` section
+- [ ] Each has `#### Automated Verification:` with runnable commands
+- [ ] Each has `#### Manual Verification:` with human testing steps
+- [ ] All items use checkbox format `- [ ]`
+- [ ] Automated checks are actual commands (not descriptions)
+- [ ] Phases with user-facing changes have optional `### QA Spec` sections (if applicable)
+
+
+ARGUMENTS: thoughts/taras/research/2026-03-18-workflow-redesign.md --autonomy=critical
+
+---
+
+<task-notification>
+<task-id>abfca29b20b554426</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/7a934dc4-42d5-4afb-bec7-e9ac49c7ee0e/tasks/abfca29b20b554426.output</output-file>
+<status>completed</status>
+<summary>Agent "Find workflow engine files" completed</summary>
+<result>Here is the complete file listing, Taras, organized by the categories you requested.
+
+---
+
+## File Locations for Workflow Engine
+
+### 1. Workflow Engine Core (`src/workflows/`)
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/index.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/engine.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/triggers.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/resume.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/recovery.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/event-bus.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/template.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/llm-provider.ts`
+
+### 2. Workflow Node Executors (`src/workflows/nodes/`)
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/nodes/code-match.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/nodes/create-task.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/nodes/delegate-to-agent.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/nodes/llm-classify.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/nodes/property-match.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/nodes/send-message.ts`
+
+### 3. MCP Tool Definitions (`src/tools/workflows/`)
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/index.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/create-workflow.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/update-workflow.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/delete-workflow.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/get-workflow.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/list-workflows.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/trigger-workflow.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/get-workflow-run.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/list-workflow-runs.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/retry-workflow-run.ts`
+
+### 4. HTTP API
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/http/workflows.ts`
+
+### 5. Database Migrations (Workflow-Related)
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/be/migrations/003_workflows.sql`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/be/migrations/004_workflow_source.sql`
+
+### 6. Core Shared Files
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/be/db.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/types.ts`
+
+### 7. Workflow Test Files
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-engine.test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-engine-errors.test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-http.test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-triggers.test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-nodes-phase6.test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-property-match.test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-recovery.test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-resume-retry.test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/gitlab-workflow-triggers.test.ts`
+
+### 8. Schedule-Related Files
+
+**Scheduler runtime:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/scheduler/index.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/scheduler/scheduler.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/scheduler/scheduler.test.ts`
+
+**Schedule MCP tools:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/schedules/index.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/schedules/create-schedule.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/schedules/update-schedule.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/schedules/delete-schedule.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/schedules/list-schedules.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/schedules/run-schedule-now.ts`
+
+**Schedule HTTP API:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/http/schedules.ts`
+
+**Schedule migration:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/be/migrations/002_one_time_schedules.sql`
+
+**Schedule test files:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/scheduled-tasks.test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/scheduled-tasks-api.test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/scheduler-backoff.test.ts`
+
+### 9. Dashboard UI Files (`new-ui/`) -- Workflow-Related
+
+**Pages:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/pages/workflows/page.tsx`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/pages/workflows/[id]/page.tsx`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/pages/workflow-runs/[id]/page.tsx`
+
+**API layer:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/api/hooks/use-workflows.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/api/hooks/index.ts` (re-exports workflow hooks)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/api/client.ts` (contains workflow API calls)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/api/types.ts` (contains workflow type definitions)
+
+**Navigation/routing:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/components/layout/app-sidebar.tsx` (sidebar with workflow nav links)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/app/router.tsx` (workflow route definitions)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/index.html`
+
+---
+
+### Summary Counts
+
+| Category | File Count |
+|---|---|
+| Workflow engine core (`src/workflows/`) | 8 files |
+| Workflow node executors (`src/workflows/nodes/`) | 6 files |
+| MCP workflow tools (`src/tools/workflows/`) | 10 files |
+| HTTP API | 1 file |
+| Workflow migrations | 2 files |
+| Shared core files (db, types) | 2 files |
+| Workflow test files | 9 files |
+| Schedule-related files (runtime + tools + HTTP + migration + tests) | 12 files |
+| Dashboard UI workflow files | 8 files |
+| **Total** | **58 files** |</result>
+<usage><total_tokens>14519</total_tokens><tool_uses>15</tool_uses><duration_ms>48337</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/7a934dc4-42d5-4afb-bec7-e9ac49c7ee0e/tasks/abfca29b20b554426.output
+
+---
+
+<task-notification>
+<task-id>a4b0abb6de81c921c</task-id>
+<tool-use-id>toolu_01Xaiph4pu8q7vFfCJbWvvuJ</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/7a934dc4-42d5-4afb-bec7-e9ac49c7ee0e/tasks/a4b0abb6de81c921c.output</output-file>
+<status>completed</status>
+<summary>Agent "Analyze workflow DB schema & tests" completed</summary>
+<result>
+
+Taras, here is the full analysis.
+
+---
+
+## Analysis: Workflow Database Schema, HTTP Endpoints, MCP Tools, Tests, and Schedule Integration
+
+### Overview
+
+The workflow system is a DAG-based automation engine stored across three database tables (`workflows`, `workflow_runs`, `workflow_run_steps`), exposed via nine HTTP endpoints and nine MCP tools. It links back to the existing `agent_tasks` table for async task execution. The `scheduled_tasks` table is a separate, independent system with no direct cross-references to workflow tables.
+
+---
+
+### 1. Migration `003_workflows.sql` -- Full Schema
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/be/migrations/003_workflows.sql`
+
+#### Table: `workflows` (lines 2-12)
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | TEXT | PRIMARY KEY |
+| `name` | TEXT | NOT NULL UNIQUE |
+| `description` | TEXT | nullable |
+| `enabled` | INTEGER | NOT NULL DEFAULT 1 |
+| `definition` | TEXT | NOT NULL (stores JSON) |
+| `webhookSecret` | TEXT | nullable |
+| `createdByAgentId` | TEXT | nullable |
+| `createdAt` | TEXT | NOT NULL DEFAULT datetime('now') |
+| `lastUpdatedAt` | TEXT | NOT NULL DEFAULT datetime('now') |
+
+No indexes on this table.
+
+#### Table: `workflow_runs` (lines 15-26)
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | TEXT | PRIMARY KEY |
+| `workflowId` | TEXT | NOT NULL, FK -> workflows(id) |
+| `status` | TEXT | NOT NULL DEFAULT 'running', CHECK IN ('running', 'waiting', 'completed', 'failed') |
+| `triggerData` | TEXT | nullable (stores JSON) |
+| `context` | TEXT | nullable (stores JSON) |
+| `error` | TEXT | nullable |
+| `startedAt` | TEXT | NOT NULL DEFAULT datetime('now') |
+| `lastUpdatedAt` | TEXT | NOT NULL DEFAULT datetime('now') |
+| `finishedAt` | TEXT | nullable |
+
+**Indexes** (lines 28-29):
+- `idx_workflow_runs_workflowId` on `workflowId`
+- `idx_workflow_runs_status` on `status`
+
+#### Table: `workflow_run_steps` (lines 32-44)
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| `id` | TEXT | PRIMARY KEY |
+| `runId` | TEXT | NOT NULL, FK -> workflow_runs(id) |
+| `nodeId` | TEXT | NOT NULL |
+| `nodeType` | TEXT | NOT NULL |
+| `status` | TEXT | NOT NULL DEFAULT 'pending', CHECK IN ('pending', 'running', 'waiting', 'completed', 'failed', 'skipped') |
+| `input` | TEXT | nullable (stores JSON) |
+| `output` | TEXT | nullable (stores JSON) |
+| `error` | TEXT | nullable |
+| `startedAt` | TEXT | NOT NULL DEFAULT datetime('now') |
+| `finishedAt` | TEXT | nullable |
+
+**Index** (line 46):
+- `idx_workflow_run_steps_runId` on `runId`
+
+#### `agent_tasks` extensions (lines 49-51)
+
+Two new columns are added via ALTER TABLE:
+- `workflowRunId TEXT REFERENCES workflow_runs(id)` (line 49)
+- `workflowRunStepId TEXT REFERENCES workflow_run_steps(id)` (line 50)
+- Index `idx_agent_tasks_workflow_run` on `agent_tasks(workflowRunId)` (line 51)
+
+---
+
+### 2. Migration `004_workflow_source.sql` -- `agent_tasks` Table Recreation
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/be/migrations/004_workflow_source.sql`
+
+This migration adds `'workflow'` to the `source` CHECK constraint on `agent_tasks`. Since SQLite cannot ALTER COLUMN, it uses the standard 12-step table recreation approach (cited in the comment at line 3):
+
+1. **Line 5:** `PRAGMA defer_foreign_keys = ON`
+2. **Lines 9-52:** Creates `agent_tasks_new` with the updated CHECK constraint at line 15: `CHECK(source IN ('mcp', 'slack', 'api', 'github', 'agentmail', 'system', 'schedule', 'workflow'))` -- the new value `'workflow'` is added to the allowed set.
+3. **Lines 55-65:** Copies all data from old table to new via `INSERT INTO ... SELECT`.
+4. **Line 68:** `DROP TABLE agent_tasks`
+5. **Line 71:** `ALTER TABLE agent_tasks_new RENAME TO agent_tasks`
+6. **Lines 74-81:** Recreates all eight pre-existing indexes, including `idx_agent_tasks_workflow_run` on `workflowRunId` (line 81).
+
+The new table retains both `workflowRunId` and `workflowRunStepId` columns with their FK references (lines 43-44), plus the `scheduleId` column (line 42).
+
+---
+
+### 3. Workflow Test Files
+
+There are **9 test files** under `src/tests/`. All follow the same infrastructure pattern:
+
+**Common test setup pattern:**
+- Each test defines its own `TEST_DB_PATH` (e.g., `./test-workflow-engine.sqlite`)
+- `beforeAll`: deletes the old test DB file, calls `initDb(TEST_DB_PATH)` to create an isolated SQLite database
+- `afterAll`: calls `closeDb()`, then deletes the DB file plus `-wal` and `-shm` companions
+- Workflows are created via the `createWorkflow()` DB function with inline `WorkflowDefinition` objects (nodes + edges)
+- Async results are awaited with `setTimeout` delays (typically 10-150ms)
+
+#### 3a. `workflow-engine.test.ts`
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-engine.test.ts` (255 lines)
+
+Tests the core engine primitives:
+- **`interpolate()` (lines 45-66):** Template string replacement with `{{token}}` syntax. Tests simple replacement, multiple tokens, missing paths (returns empty string), object serialization as JSON.
+- **`findEntryNodes()` / `getSuccessors()` (lines 71-98):** Graph traversal helpers. Validates that entry nodes (no incoming edges) are found correctly, and that successors are resolved per source port.
+- **`property-match` with failing condition (lines 103-146):** Verifies that when a `property-match` condition evaluates to false, downstream `create-task` nodes are never reached (no step recorded, no task created).
+- **3-node workflow trigger->property-match->create-task (lines 151-203):** Verifies that the workflow run reaches `'waiting'` status when it hits an async `create-task` node, that all three steps are recorded, and that an `agent_tasks` row is created with the interpolated task text.
+- **Resume on task.completed (lines 208-254):** Wires up `setupWorkflowResumeListener`, manually emits `task.completed` via the event bus, and verifies the run transitions to `'completed'`.
+
+#### 3b. `workflow-engine-errors.test.ts`
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-engine-errors.test.ts` (195 lines)
+
+Tests error/edge-case paths in the engine:
+- **Cycle guard (lines 39-77):** Creates a graph with a back-edge (sm1 -> pm1), verifies the engine completes without infinite loop and visits pm1 only once.
+- **Unknown node type (lines 82-106):** Casts a bad node type through TypeScript, verifies both run and step are marked `'failed'` with error containing "Unknown node type".
+- **Node executor throws (lines 111-163):** Tests `code-match` throwing at runtime (marks run failed with the error message) and returning an invalid port name (marks run failed with "not in outputPorts" error).
+- **Multi-branch DAG (lines 169-194):** Trigger with two outgoing edges to different `send-message` nodes. Verifies both branches execute and run completes.
+
+#### 3c. `workflow-http.test.ts`
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-http.test.ts` (543 lines)
+
+Tests the HTTP API endpoints. Uses a lightweight `node:http` server (lines 19-33) that delegates to `handleWorkflows()`, running on port 13026.
+
+- **CRUD (lines 74-137):** POST create, GET list, GET by ID, GET 404, PUT update.
+- **Trigger and run detail (lines 144-203):** POST trigger creates a run, GET lists runs, GET run detail includes steps with nodeIds.
+- **Trigger subscription with matchTags (lines 208-290):** Tests `evaluateWorkflowTriggers("task.created", ...)` fires a workflow when tags match, does not fire when tags differ, and does not fire when `workflowRunId` is set (loop guard).
+- **Delete (lines 295-322):** DELETE removes workflow, subsequent GET returns 404.
+- **Retry (lines 327-408):** POST retry succeeds for a manually-failed run, returns 400 for non-failed run.
+- **Trigger edge cases (lines 413-475):** Disabled workflow returns 400, missing secret without agentId returns 401, unknown workflow returns 404.
+- **PUT edge cases (lines 480-511):** 404 for unknown ID, 400 for invalid definition.
+- **GET edge cases (lines 516-523):** 404 for unknown run.
+- **Validation (lines 528-542):** Invalid definition returns 400.
+
+#### 3d. `workflow-nodes-phase6.test.ts`
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-nodes-phase6.test.ts` (292 lines)
+
+Tests individual node type executors:
+- **`executeCodeMatch()` (lines 43-155):** Tests truthy/falsy port routing, sandbox isolation (blocks `process`, `Bun`, `require`, `fetch`, `setTimeout`, `globalThis` access), number-to-string coercion, runtime throws, and invalid port rejection.
+- **`executeSendMessage()` (lines 160-206):** Tests message posting to a channel via DB, skipping when no channelId, and template interpolation.
+- **`delegate-to-agent` (lines 211-291):** Full workflow execution test. Verifies task creation with `offeredTo` set when `offerMode: true` (line 228), and direct `agentId` assignment when `offerMode: false` (line 272).
+
+#### 3e. `workflow-property-match.test.ts`
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-property-match.test.ts` (395 lines)
+
+Exhaustive unit tests for `executePropertyMatch()` -- no DB needed:
+- Operators: `eq`, `neq`, `contains` (array + string), `not_contains`, `gt`, `lt`, `exists` (lines 13-189)
+- Modes: `any` (OR logic) vs `all` (AND logic, default) (lines 194-242)
+- Deep dot-path resolution (lines 247-269)
+- Flat config format (`property`/`operator`/`value` keys) (lines 274-318)
+- Edge cases: empty conditions, missing operator warns, conditions array takes priority over flat config (lines 323-362)
+- Output structure: `{ mode, nextPort, output: { passed, results[] } }` (lines 367-394)
+
+#### 3f. `workflow-recovery.test.ts`
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-recovery.test.ts` (184 lines)
+
+Tests `recoverStuckWorkflowRuns()`:
+- **Completed task (lines 52-91):** Bypasses the event bus by directly updating DB task status to `'completed'`, then calls recovery. Verifies run transitions to `'completed'` and step is marked completed.
+- **Failed task (lines 96-132):** Same pattern with `'failed'` status. Run becomes failed with `"Task failed"` error.
+- **Cancelled task (lines 137-171):** Task set to `'cancelled'`. Run becomes failed with `"Task cancelled"` error.
+- **No stuck runs (lines 176-183):** Returns 0 when no qualifying runs exist.
+
+#### 3g. `workflow-resume-retry.test.ts`
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-resume-retry.test.ts` (259 lines)
+
+Tests the resume listener and retry logic, using a fresh `InProcessEventBus` instance (line 36):
+- **task.failed event (lines 54-88):** Emits `task.failed` through the event bus, verifies run and step marked failed with the failure reason.
+- **task.cancelled event (lines 93-118):** Verifies run marked failed with `"Task was cancelled"`.
+- **Events without workflow metadata (lines 123-162):** Events missing `workflowRunId` or `workflowRunStepId` are silently ignored.
+- **`retryFailedRun()` (lines 167-223):** Manually fails a run+step via DB, calls retry, verifies run returns to `'waiting'`. Also tests throws for non-failed run, non-existent run, and no failed step.
+- **Resume guards (lines 229-258):** `task.completed` event is ignored when run is already in `'completed'` state.
+
+#### 3h. `workflow-triggers.test.ts`
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-triggers.test.ts` (459 lines)
+
+Tests `evaluateWorkflowTriggers()` across all trigger node types, using a shared helper `expectTriggerFires()` (lines 12-44) that creates a workflow, fires an event, and checks whether a downstream task was created:
+- **trigger-task-completed (lines 70-114):** Fires on `task.completed`, not on `task.created`. Supports `matchTags` filtering.
+- **trigger-github-event (lines 119-185):** Fires on `github.*` events, filters by `matchEventType` and `matchRepo`. Fires on any github event when no filter specified.
+- **trigger-slack-message (lines 190-267):** Fires on `slack.message`, filters by `matchChannel` and `matchPattern` (regex, case-insensitive).
+- **trigger-email (lines 272-338):** Fires on `agentmail.message.received`, filters by `matchInbox` and `matchSenderDomain`.
+- **trigger-webhook (lines 343-365):** Never fires via event bus (webhooks are HTTP-only).
+- **matchTaskFilters extended (lines 370-458):** Tests `matchSource`, `matchTaskType`, `matchAgentId` on `trigger-new-task`, including AND-combined multi-filter logic.
+
+#### 3i. `gitlab-workflow-triggers.test.ts`
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/gitlab-workflow-triggers.test.ts` (271 lines)
+
+Tests `trigger-gitlab-event` trigger type and GitLab event bus emissions:
+- Uses `createAgent()` in `beforeAll` (line 15) to register a lead agent for the test DB.
+- **Trigger matching (lines 36-196):** Fires on `gitlab.merge_request.open`, does not fire on GitHub events for a GitLab trigger, filters by `matchRepo`, and filters by `actions` array.
+- **Event bus emissions (lines 203-271):** Verifies that `gitlab.merge_request.open`, `gitlab.issue.open`, and `gitlab.pipeline.failed` events carry expected data through the `workflowEventBus`.
+
+---
+
+### 4. HTTP Endpoints (`src/http/workflows.ts`)
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/http/workflows.ts` (285 lines)
+
+The handler function `handleWorkflows()` (line 145) receives path segments and dispatches to route matchers. Nine routes are defined:
+
+| Method | Route | Handler Lines | Description |
+|--------|-------|---------------|-------------|
+| GET | `/api/workflows` | 152-156 | Lists all workflows via `listWorkflows()` |
+| POST | `/api/workflows` | 158-174 | Creates a workflow. Validates `definition` against `WorkflowDefinitionSchema` (line 161). Returns 400 on invalid definition, 201 on success. |
+| GET | `/api/workflows/{id}` | 176-187 | Gets a single workflow. Returns 404 if not found. |
+| PUT | `/api/workflows/{id}` | 189-209 | Updates a workflow. Validates definition if provided (line 194). Returns 400/404. |
+| DELETE | `/api/workflows/{id}` | 211-223 | Deletes a workflow (cascading via `deleteWorkflow()`). Returns 204 or 404. |
+| POST | `/api/workflows/{id}/trigger` | 225-248 | Triggers execution. Checks `enabled` (line 234), validates auth via `myAgentId` or `secret` query param matching `workflow.webhookSecret` (line 239). Calls `startWorkflowExecution()` (line 245). Returns 201 with `{ runId }`. |
+| GET | `/api/workflows/{id}/runs` | 250-256 | Lists runs for a workflow via `listWorkflowRuns()`. |
+| GET | `/api/workflow-runs/{id}` | 258-270 | Gets a run with its steps (joins `getWorkflowRun()` + `getWorkflowRunStepsByRunId()`). Returns 404 if not found. |
+| POST | `/api/workflow-runs/{id}/retry` | 272-282 | Retries a failed run via `retryFailedRun()` from `../workflows/resume`. Returns 400 on error. |
+
+---
+
+### 5. MCP Tools (`src/tools/workflows/`)
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/index.ts` (9 exports)
+
+Nine MCP tools are registered, each following the same pattern: `createToolRegistrar(server)()` with a Zod input/output schema, returning `{ content, structuredContent }`.
+
+| Tool Name | File | Input | Description |
+|-----------|------|-------|-------------|
+| `create-workflow` | `create-workflow.ts` | `name`, `description?`, `definition` (WorkflowDefinitionSchema) | Creates a workflow. Requires `agentId` from request info (line 30). |
+| `delete-workflow` | `delete-workflow.ts` | `id` (uuid) | Deletes a workflow and all associated runs/steps. Marked `destructiveHint: true` (line 12). |
+| `get-workflow` | `get-workflow.ts` | `id` (uuid) | Gets a single workflow by ID. |
+| `get-workflow-run` | `get-workflow-run.ts` | `id` (uuid) | Gets a run plus its steps via `getWorkflowRunStepsByRunId()` (line 36). |
+| `list-workflows` | `list-workflows.ts` | `enabled?` (boolean) | Lists workflows with optional enabled filter (line 24). |
+| `list-workflow-runs` | `list-workflow-runs.ts` | `workflowId` (uuid) | Lists all runs for a given workflow. |
+| `trigger-workflow` | `trigger-workflow.ts` | `id` (uuid), `triggerData?` (Record) | Triggers execution. Checks `enabled` (line 37), calls `startWorkflowExecution()` (line 46). |
+| `update-workflow` | `update-workflow.ts` | `id` (uuid), `name?`, `description?`, `definition?`, `enabled?` | Updates workflow fields. |
+| `retry-workflow-run` | `retry-workflow-run.ts` | `runId` (uuid) | Retries a failed run via `retryFailedRun()` (line 24). |
+
+---
+
+### 6. Scheduled Tasks and Their Relationship to Workflows
+
+#### Schedule Schema
+
+The `scheduled_tasks` table is defined in `001_initial.sql` (lines 216-244) and modified by `002_one_time_schedules.sql`. It has its own columns (`cronExpression`, `intervalMs`, `taskTemplate`, `targetAgentId`, `scheduleType`, `nextRunAt`, etc.) and is a completely independent entity from workflows.
+
+Key columns of `scheduled_tasks`:
+- `scheduleType`: `'recurring'` or `'one_time'` (added in migration 002)
+- CHECK constraint (line 32-36 of 002): recurring schedules require `cronExpression` or `intervalMs`; one-time schedules have no such requirement
+- Indexes on `enabled`, `nextRunAt`, `scheduleType` (002, lines 57-59)
+
+#### Schedule DB Functions in `db.ts`
+
+The schedule-related functions at lines 4004-4304 of `db.ts`:
+- `getScheduledTasks(filters?)` (line 4066) -- with optional `scheduleType`, `enabled`, `excludeSpentOneTime` filters
+- `getScheduledTaskById(id)` (line 4097)
+- `getScheduledTaskByName(name)` (line 4104)
+- `createScheduledTask(data)` (line 4129)
+- `updateScheduledTask(id, data)` (line 4188)
+- `deleteScheduledTask(id)` (line 4286)
+- `getDueScheduledTasks()` (line 4295) -- queries for enabled tasks where `nextRunAt <= ?` (current time)
+
+#### Integration Between Schedules and Workflows
+
+There is **no direct integration**. The two systems are independent:
+
+- The `agent_tasks` table has a `scheduleId` column (line 42 of 004_workflow_source.sql) and separate `workflowRunId`/`workflowRunStepId` columns (lines 43-44). These are independent FK references.
+- The `source` CHECK constraint on `agent_tasks` lists both `'schedule'` and `'workflow'` as separate allowed values (line 15 of 004_workflow_source.sql).
+- No function in `db.ts` references both schedules and workflows together (confirmed by the grep returning no results for `schedule.*workflow|workflow.*schedule`).
+- The `scheduled_tasks` table has no FK to `workflows` and vice versa.
+
+In summary, schedules create tasks with `source='schedule'` and a `scheduleId` FK, while workflows create tasks with `source='workflow'` and `workflowRunId`/`workflowRunStepId` FKs. The two mechanisms are parallel, not integrated.
+
+---
+
+### Key Files Referenced
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/be/migrations/001_initial.sql` (scheduled_tasks definition, lines 216-244)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/be/migrations/002_one_time_schedules.sql` (scheduleType addition)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/be/migrations/003_workflows.sql` (workflow tables)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/be/migrations/004_workflow_source.sql` (agent_tasks source constraint update)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/be/db.ts` (workflow DB functions lines 5712-6089, schedule DB functions lines 4004-4304)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/http/workflows.ts` (HTTP endpoints)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/` (all 10 files including index)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-engine.test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-engine-errors.test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-http.test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-nodes-phase6.test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-property-match.test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-recovery.test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-resume-retry.test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-triggers.test.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/gitlab-workflow-triggers.test.ts`</result>
+<usage><total_tokens>75520</total_tokens><tool_uses>32</tool_uses><duration_ms>170783</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/7a934dc4-42d5-4afb-bec7-e9ac49c7ee0e/tasks/a4b0abb6de81c921c.output
+
+---
+
+<task-notification>
+<task-id>aa38cc7f84007f58b</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/7a934dc4-42d5-4afb-bec7-e9ac49c7ee0e/tasks/aa38cc7f84007f58b.output</output-file>
+<status>completed</status>
+<summary>Agent "Analyze current workflow engine" completed</summary>
+<result>
+
+Taras, here is the full analysis of the current workflow engine implementation.
+
+---
+
+## Analysis: Workflow Engine
+
+### Overview
+
+The workflow engine executes directed acyclic graphs (DAGs) of typed nodes. A workflow is triggered by an external event (task created, GitHub webhook, Slack message, etc.), which starts a DAG walk. Each node is executed in sequence; "instant" nodes continue immediately while "async" nodes (task creation) pause the run and resume later via an in-process event bus. The entire system is initialized at HTTP server startup and uses SQLite for persistence.
+
+### Entry Points
+
+- `/src/http/index.ts:187` -- `initWorkflows()` called during HTTP server startup
+- `/src/workflows/index.ts:11` -- `initWorkflows()` wires up resume listener and trigger subscriptions
+- `/src/workflows/engine.ts:38` -- `startWorkflowExecution()` begins a new run
+- `/src/workflows/triggers.ts:5` -- `evaluateWorkflowTriggers()` matches events to workflow triggers
+
+---
+
+### 1. Engine (`src/workflows/engine.ts`)
+
+#### Core Types and Functions
+
+**`NodeResult` interface (line 16-20)**
+```typescript
+export interface NodeResult {
+  mode: "instant" | "async";
+  nextPort: string;
+  output: unknown;
+}
+```
+Every node executor returns this. `mode` determines whether the engine continues walking (`instant`) or pauses the run (`async`). `nextPort` selects which outgoing edges to follow. `output` is stored in context and persisted.
+
+**`findEntryNodes(def: WorkflowDefinition): WorkflowNode[]` (line 22-25)**
+Identifies entry nodes by collecting all edge targets into a Set, then returning nodes that are never a target of any edge.
+
+**`getSuccessors(def: WorkflowDefinition, nodeId: string, port: string): WorkflowNode[]` (line 27-36)**
+Filters the definition's edges for those matching `source === nodeId && sourcePort === port`, then resolves each edge's `target` to its `WorkflowNode`.
+
+**`startWorkflowExecution(workflow: Workflow, triggerData: unknown): Promise<string>` (line 38-48)**
+1. Generates a `runId` via `crypto.randomUUID()`
+2. Creates a `workflow_runs` DB row via `createWorkflowRun()`
+3. Initializes context as `{ trigger: triggerData }`
+4. Finds entry nodes via `findEntryNodes()`
+5. Calls `walkDag()` with entry nodes
+6. Returns the `runId`
+
+**`walkDag(def: WorkflowDefinition, runId: string, ctx: Record<string, unknown>, startNodes: WorkflowNode[]): Promise<void>` (line 50-122)**
+
+This is the core execution loop. It uses a BFS queue with a `visited` Set as a cycle guard:
+
+1. Shifts a node from the queue (line 60)
+2. Skips if already visited (line 63-64)
+3. Creates a `workflow_run_steps` DB row with status `running` (line 67-73)
+4. Calls `executeNode()` (line 76)
+5. **If async** (line 78-86): sets step to `waiting`, sets run to `waiting`, persists context, and **returns** -- execution stops entirely
+6. **If instant** (line 89-97): sets step to `completed`, stores `result.output` in `ctx[node.id]`, resolves successors via `getSuccessors(def, node.id, result.nextPort)`, and pushes them into the queue
+7. **On error** (line 98-110): sets step and run to `failed` with the error string, then returns
+8. **When queue empties** (line 113-121): if run status is still `running`, marks it `completed`
+
+**`executeNode(node: WorkflowNode, ctx: Record<string, unknown>, runId: string, stepId: string): Promise<NodeResult>` (line 124-167)**
+
+A switch statement dispatching on `node.type`:
+- Trigger types (`trigger-new-task`, `trigger-task-completed`, `trigger-webhook`, `trigger-email`, `trigger-slack-message`, `trigger-github-event`, `trigger-gitlab-event`) -- pass through instantly, returning `ctx.trigger` as output on port `default` (line 132-139)
+- `property-match` -- delegates to `executePropertyMatch()` (line 142)
+- `create-task` -- delegates to `executeCreateTask()`, passes `runId` and `stepId` (line 145)
+- `llm-classify` -- delegates to `executeLlmClassify()` (line 148)
+- `send-message` -- delegates to `executeSendMessage()` (line 151)
+- `delegate-to-agent` -- delegates to `executeDelegateToAgent()`, passes `runId` and `stepId` (line 154)
+- `code-match` -- delegates to `executeCodeMatch()` (line 162)
+- Unknown types throw an error (line 165)
+
+---
+
+### 2. Node Executors (`src/workflows/nodes/`)
+
+Six executor files exist:
+
+#### 2a. `property-match.ts`
+
+**Config types (line 3-18):**
+- `PropertyMatchCondition`: `{ field: string, op: "eq"|"neq"|"contains"|"not_contains"|"gt"|"lt"|"exists", value?: unknown }`
+- `PropertyMatchConfig`: accepts either a `conditions[]` array or flat `{ property, operator, value }` fields, plus `mode?: "all"|"any"`
+
+**`executePropertyMatch(config: PropertyMatchConfig, ctx: Record<string, unknown>): NodeResult` (line 20-36)**
+1. Normalizes conditions via `normalizeConditions()` (line 38-51) which supports both array and flat formats
+2. Evaluates each condition via `evaluateCondition()` (line 53-77) which resolves dot-paths via `resolvePath()` (line 79-87)
+3. Combines results based on mode (`all` = AND, `any` = OR)
+4. Returns `mode: "instant"`, `nextPort: "true"|"false"`, `output: { passed, results }`
+
+#### 2b. `create-task.ts`
+
+**Config (line 5-11):** `{ template: string, agentId?: string, tags?: string[], source?: string, priority?: number }`
+
+**`executeCreateTask(config: CreateTaskConfig, ctx: Record<string, unknown>, runId: string, stepId: string): NodeResult` (line 13-34)**
+1. Interpolates `config.template` and tags via `interpolate()` (line 19-20)
+2. Calls `createTaskExtended()` from db.ts, passing `workflowRunId` and `workflowRunStepId` (line 21-28)
+3. Returns `mode: "async"` -- this pauses the DAG walk. The task's `workflowRunStepId` links it back so that when the task completes, the resume listener can find this step.
+
+#### 2c. `delegate-to-agent.ts`
+
+**Config (line 5-10):** `{ agentId: string, taskTemplate: string, tags?: string[], offerMode?: boolean }`
+
+**`executeDelegateToAgent(config: DelegateToAgentConfig, ctx: Record<string, unknown>, runId: string, stepId: string): NodeResult` (line 12-33)**
+1. Interpolates `config.taskTemplate` and tags
+2. If `offerMode` is true, sets `offeredTo` instead of `agentId` (line 21-22) -- this means the agent can accept or reject the task rather than having it directly assigned
+3. Calls `createTaskExtended()` with workflow linking
+4. Returns `mode: "async"` -- same pause behavior as `create-task`
+
+#### 2d. `llm-classify.ts`
+
+**Config (line 6-11):** `{ prompt: string, categories: string[], model?: string, fallbackPort?: string }`
+
+**`executeLlmClassify(config: LlmClassifyConfig, ctx: Record<string, unknown>, providerOverride?: LlmProvider): Promise<NodeResult>` (line 13-44)**
+1. Interpolates the prompt (line 18)
+2. Creates a Zod schema requiring `{ category: enum(categories), confidence: number 0-1 }` (line 20-23)
+3. Calls `provider.query()` which sends the classification request to an LLM (line 27-29)
+4. Returns `mode: "instant"`, `nextPort: result.category`
+5. On error, falls back to `fallbackPort` (or last category), returning confidence `0` (line 37-42)
+
+The LLM provider (`src/workflows/llm-provider.ts`) is a singleton that selects between `OpenRouterProvider` (uses Vercel AI SDK with `google/gemini-2.0-flash-001` via OpenRouter, line 13-24) and `ClaudeCliProvider` (shells out to `claude` CLI with `haiku` model, line 27-43) based on whether `OPENROUTER_API_KEY` is set (line 50-54).
+
+#### 2e. `send-message.ts`
+
+**Config (line 5-8):** `{ channelId?: string, template: string }`
+
+**`executeSendMessage(config: SendMessageConfig, ctx: Record<string, unknown>): NodeResult` (line 10-19)**
+1. Interpolates the template (line 14)
+2. If `channelId` is set, calls `postMessage(channelId, null, message)` from db.ts (line 15-17)
+3. Returns `mode: "instant"`, `nextPort: "default"`
+
+#### 2f. `code-match.ts`
+
+**Config (line 3-6):** `{ code: string, outputPorts: string[] }`
+
+**`executeCodeMatch(config: CodeMatchConfig, ctx: Record<string, unknown>): NodeResult` (line 8-50)**
+1. Creates a sandboxed function via `new Function()` with dangerous globals (`require`, `process`, `Bun`, `globalThis`, `global`, `fetch`, `setTimeout`, `setInterval`) shadowed as `undefined` (line 16-28)
+2. Executes the user-provided code string as `(code)(input)` where `input` is `ctx` (line 30)
+3. Converts the return value to a port name: booleans become `"true"`/`"false"`, everything else is `String(result)` (line 33-40)
+4. Validates the port is in `config.outputPorts`, throws if not (line 43-46)
+5. Returns `mode: "instant"`, `nextPort: port`
+
+---
+
+### 3. Resume Mechanism (`src/workflows/resume.ts`)
+
+**`setupWorkflowResumeListener(eventBus: WorkflowEventBus): void` (line 21-39)**
+
+Registers three event listeners on the event bus:
+- `task.completed` (line 22-26): calls `resumeFromTaskCompletion()` if event has both `workflowRunId` and `workflowRunStepId`
+- `task.failed` (line 28-32): calls `markRunFailed()` with the failure reason
+- `task.cancelled` (line 34-38): calls `markRunFailed()` with reason "Task was cancelled"
+
+**`resumeFromTaskCompletion(event: TaskEvent): Promise<void>` (line 41-66)**
+1. Loads the run and verifies `status === "waiting"` (line 42-43)
+2. Loads the step and verifies `status === "waiting"` (line 45-46)
+3. Loads the workflow definition (line 48-49)
+4. Marks step `completed` with `output: { taskOutput: event.output }` (line 52-56)
+5. Restores context from the persisted `run.context`, adds `ctx[step.nodeId] = { taskOutput: event.output }` (line 59-60)
+6. Sets run status back to `running` (line 61)
+7. Finds successors on port `"default"` (line 64)
+8. Calls `walkDag()` to continue the DAG from those successors (line 65)
+
+**`markRunFailed(event: TaskEvent, reason: string): void` (line 68-79)**
+Sets both the step and run to `failed` with the error reason and a `finishedAt` timestamp.
+
+**`retryFailedRun(runId: string): Promise<void>` (line 81-102)**
+1. Validates run is in `failed` state (line 83)
+2. Finds the first failed step (line 89-91)
+3. Resets step to `pending`, clears the error (line 94)
+4. Sets run back to `running`, clears the error (line 96)
+5. Finds the node in the workflow definition matching `failedStep.nodeId` (line 99)
+6. Calls `walkDag()` starting from that single node (line 101)
+
+---
+
+### 4. Stuck-Run Recovery (`src/workflows/recovery.ts`)
+
+**`recoverStuckWorkflowRuns(): Promise<number>` (line 10-52)**
+
+Called from the heartbeat system (`src/heartbeat/heartbeat.ts:217`).
+
+1. Calls `getStuckWorkflowRuns()` from db.ts (line 11) -- this runs a SQL query joining `workflow_runs` (status `waiting`) with `workflow_run_steps` (status `waiting`) with `agent_tasks` (status `completed`, `failed`, or `cancelled`) on `workflowRunStepId` (db.ts line 6072-6088)
+2. For each stuck run:
+   - If `taskStatus === "completed"` (line 20): mirrors the resume logic -- marks step completed, updates context, finds successors, calls `walkDag()` (line 22-31)
+   - Otherwise (line 32): marks both step and run as `failed` with appropriate reason (line 34-44)
+3. Returns the count of recovered runs (line 51)
+
+---
+
+### 5. Triggers (`src/workflows/triggers.ts`)
+
+**`evaluateWorkflowTriggers(eventType: string, eventData: unknown): void` (line 5-17)**
+1. Loads all enabled workflows via `listWorkflows({ enabled: true })` (line 6)
+2. For each workflow, finds entry nodes (line 8)
+3. For each entry node, tests `matchTriggerNode()` (line 10)
+4. On match, calls `startWorkflowExecution()` asynchronously with `.catch()` error logging (line 11-13)
+
+**`matchTriggerNode(node: WorkflowNode, eventType: string, eventData: unknown): boolean` (line 19-55)**
+
+Dispatches on `node.type`:
+- `trigger-new-task`: requires `eventType === "task.created"`, rejects if `data.workflowRunId` is set (infinite loop guard, line 26), then delegates to `matchTaskFilters()` (line 27)
+- `trigger-task-completed`: requires `eventType === "task.completed"`, delegates to `matchTaskFilters()` (line 31)
+- `trigger-github-event`: requires `eventType` starts with `"github."`, delegates to `matchEventFilters()` (line 35)
+- `trigger-gitlab-event`: requires `eventType` starts with `"gitlab."`, delegates to `matchEventFilters()` (line 39)
+- `trigger-slack-message`: requires `eventType === "slack.message"`, delegates to `matchSlackFilters()` (line 43)
+- `trigger-email`: requires `eventType === "agentmail.message.received"`, delegates to `matchEmailFilters()` (line 47)
+- `trigger-webhook`: always returns `false` (line 50) -- webhooks are triggered via HTTP, not the event bus
+
+**Filter functions:**
+- `matchTaskFilters()` (line 57-66): checks `matchTags`, `matchSource`, `matchTaskType`, `matchAgentId`
+- `matchEventFilters()` (line 68-84): checks `matchEventType` (prefixed with provider), `matchRepo`, `actions` array
+- `matchSlackFilters()` (line 86-96): checks `matchChannel`, `matchPattern` (regex)
+- `matchEmailFilters()` (line 98-108): checks `matchInbox`, `matchSenderDomain`
+
+---
+
+### 6. Event Bus (`src/workflows/event-bus.ts`)
+
+**`WorkflowEventBus` interface (line 3-7):**
+```typescript
+export interface WorkflowEventBus {
+  emit(event: string, data: unknown): void;
+  on(event: string, handler: (data: unknown) => void): void;
+  off(event: string, handler: (data: unknown) => void): void;
+}
+```
+
+**`InProcessEventBus` class (line 9-27):** Wraps Node.js `EventEmitter` with max listeners set to 100 (line 13).
+
+**`workflowEventBus` singleton (line 29):** A module-level `InProcessEventBus` instance exported for use throughout the codebase.
+
+**Event emitters across the codebase (all via dynamic `import()`):**
+| Event | Source file | Line |
+|---|---|---|
+| `task.completed` | `src/be/db.ts` (in `completeTask()`) | 1339 |
+| `task.failed` | `src/be/db.ts` (in `failTask()`) | 1370 |
+| `task.cancelled` | `src/be/db.ts` (in `cancelTask()`) | 1410 |
+| `task.created` | `src/be/db.ts` (in `createTaskExtended()`) | 1860 |
+| `slack.message` | `src/slack/handlers.ts` | 337 |
+| `github.*` (4 event types) | `src/http/webhooks.ts` | 177-211 |
+| `gitlab.*` (6 event types) | `src/http/webhooks.ts` | 294-327 |
+| `agentmail.message.received` | `src/agentmail/handlers.ts` | 99 |
+
+All DB-level emitters use dynamic `import("../workflows/event-bus")` wrapped in try/catch (avoiding circular dependency issues).
+
+---
+
+### 7. Template Interpolation (`src/workflows/template.ts`)
+
+**`interpolate(template: string, ctx: Record<string, unknown>): string` (line 5-16)**
+
+Replaces `{{path.to.value}}` tokens in a template string:
+1. Regex: `/\{\{([^}]+)\}\}/g` matches double-curly-braced expressions (line 6)
+2. Splits the captured path on `.` (line 7)
+3. Walks the context object key by key (line 9-11)
+4. If the resolved value is `null`/`undefined`, returns empty string (line 13)
+5. If it is an object, returns `JSON.stringify(value)` (line 14)
+6. Otherwise returns `String(value)` (line 14)
+
+Used by `create-task`, `delegate-to-agent`, `send-message`, and `llm-classify` nodes.
+
+---
+
+### 8. Initialization (`src/workflows/index.ts`)
+
+**Exports (line 1-5):** Re-exports `findEntryNodes`, `getSuccessors`, `startWorkflowExecution`, `workflowEventBus`, `recoverStuckWorkflowRuns`, `retryFailedRun`, `interpolate`.
+
+**`initWorkflows(): void` (line 11-41)**
+1. Calls `setupWorkflowResumeListener(workflowEventBus)` -- registers the `task.completed`, `task.failed`, `task.cancelled` handlers (line 12)
+2. Defines an array of 14 trigger event strings (line 15-35) covering task, GitHub, GitLab, Slack, and AgentMail events
+3. For each event, registers a listener on `workflowEventBus` that calls `evaluateWorkflowTriggers(event, data)` (line 36-40)
+
+Called from `src/http/index.ts:187` during server startup.
+
+---
+
+### 9. Workflow-Related DB Functions (`src/be/db.ts`)
+
+**Workflow CRUD (line 5712-5852):**
+| Function | Signature | Line |
+|---|---|---|
+| `rowToWorkflow` | `(row: WorkflowRow): Workflow` | 5728 |
+| `createWorkflow` | `(data: { name, description?, definition, createdByAgentId? }): Workflow` | 5742 |
+| `getWorkflow` | `(id: string): Workflow \| null` | 5767 |
+| `getWorkflowByWebhookSecret` | `(secret: string): Workflow \| null` | 5774 |
+| `listWorkflows` | `(filters?: { enabled?: boolean }): Workflow[]` | 5781 |
+| `updateWorkflow` | `(id, data: { name?, description?, enabled?, definition? }): Workflow \| null` | 5795 |
+| `deleteWorkflow` | `(id: string): boolean` | 5834 |
+
+`deleteWorkflow` performs a manual cascade: unlinks `agent_tasks`, deletes `workflow_run_steps`, deletes `workflow_runs`, then deletes the workflow (line 5836-5851).
+
+**Workflow Run CRUD (line 5854-5951):**
+| Function | Signature | Line |
+|---|---|---|
+| `rowToWorkflowRun` | `(row: WorkflowRunRow): WorkflowRun` | 5870 |
+| `createWorkflowRun` | `(data: { id, workflowId, triggerData? }): WorkflowRun` | 5884 |
+| `getWorkflowRun` | `(id: string): WorkflowRun \| null` | 5898 |
+| `updateWorkflowRun` | `(id, data: { status?, context?, error?, finishedAt? }): WorkflowRun \| null` | 5905 |
+| `listWorkflowRuns` | `(workflowId: string): WorkflowRun[]` | 5944 |
+
+**Workflow Run Step CRUD (line 5953-6059):**
+| Function | Signature | Line |
+|---|---|---|
+| `rowToWorkflowRunStep` | `(row: WorkflowRunStepRow): WorkflowRunStep` | 5970 |
+| `createWorkflowRunStep` | `(data: { id, runId, nodeId, nodeType, input? }): WorkflowRunStep` | 5985 |
+| `getWorkflowRunStep` | `(id: string): WorkflowRunStep \| null` | 6008 |
+| `updateWorkflowRunStep` | `(id, data: { status?, output?, error?, finishedAt? }): WorkflowRunStep \| null` | 6015 |
+| `getWorkflowRunStepsByRunId` | `(runId: string): WorkflowRunStep[]` | 6052 |
+
+**Stuck Run Detection (line 6061-6089):**
+| Function | Signature | Line |
+|---|---|---|
+| `getStuckWorkflowRuns` | `(): StuckWorkflowRun[]` | 6072 |
+
+The `StuckWorkflowRun` interface (line 6063-6070) has: `runId`, `stepId`, `nodeId`, `taskStatus`, `taskOutput`, `workflowId`. The SQL query joins `workflow_runs` (waiting) + `workflow_run_steps` (waiting) + `agent_tasks` (completed/failed/cancelled) to find runs whose tasks finished but the run was never resumed.
+
+---
+
+### 10. Workflow Zod Schemas and Types (`src/types.ts`, line 550-642)
+
+| Schema | Type | Line |
+|---|---|---|
+| `WorkflowNodeTypeSchema` | `z.enum([...13 values])` | 552-566 |
+| `WorkflowNodeType` | inferred | 567 |
+| `WorkflowNodeSchema` | `{ id: string, type: WorkflowNodeType, label?: string, config: Record<string, unknown> }` | 569-574 |
+| `WorkflowNode` | inferred | 575 |
+| `WorkflowEdgeSchema` | `{ id: string, source: string, sourcePort: string, target: string }` | 577-582 |
+| `WorkflowEdge` | inferred | 583 |
+| `WorkflowDefinitionSchema` | `{ nodes: WorkflowNode[], edges: WorkflowEdge[] }` | 585-588 |
+| `WorkflowDefinition` | inferred | 589 |
+| `WorkflowSchema` | `{ id, name, description?, enabled, definition, webhookSecret?, createdByAgentId?, createdAt, lastUpdatedAt }` | 591-601 |
+| `Workflow` | inferred | 602 |
+| `WorkflowRunStatusSchema` | `z.enum(["running","waiting","completed","failed"])` | 604 |
+| `WorkflowRunSchema` | `{ id, workflowId, status, triggerData?, context?, error?, startedAt, lastUpdatedAt, finishedAt? }` | 607-617 |
+| `WorkflowRun` | inferred | 618 |
+| `WorkflowRunStepStatusSchema` | `z.enum(["pending","running","waiting","completed","failed","skipped"])` | 620-627 |
+| `WorkflowRunStepSchema` | `{ id, runId, nodeId, nodeType, status, input?, output?, error?, startedAt, finishedAt? }` | 630-641 |
+| `WorkflowRunStep` | inferred | 642 |
+
+The task schema also has optional workflow linking fields at line 140-141: `workflowRunId` and `workflowRunStepId` (both `z.string().uuid().nullable().optional()`), and `"workflow"` is one of the allowed `source` values (line 65).
+
+---
+
+### Data Flow Summary
+
+**Trigger-to-execution flow:**
+1. External event occurs (task created, GitHub PR, Slack message, etc.)
+2. The relevant handler in db.ts / webhooks.ts / slack/handlers.ts / agentmail/handlers.ts calls `workflowEventBus.emit(eventType, data)`
+3. The listener registered in `initWorkflows()` calls `evaluateWorkflowTriggers(eventType, data)`
+4. `evaluateWorkflowTriggers` loads all enabled workflows, finds entry nodes, and tests each against the event via `matchTriggerNode()`
+5. On match, `startWorkflowExecution()` creates a run and calls `walkDag()`
+6. `walkDag()` processes nodes via BFS until it hits an async node or the queue empties
+
+**Async pause/resume flow:**
+1. A `create-task` or `delegate-to-agent` node creates a task linked to `(runId, stepId)`
+2. `walkDag()` sees `mode: "async"`, sets step and run to `waiting`, and returns
+3. When the task finishes, `completeTask()`/`failTask()`/`cancelTask()` in db.ts emits `task.completed`/`task.failed`/`task.cancelled` with the `workflowRunId` and `workflowRunStepId`
+4. The resume listener in `resume.ts` receives the event
+5. For `task.completed`: restores context from DB, adds task output, finds successors, and calls `walkDag()` again
+6. For `task.failed`/`task.cancelled`: marks the run as failed
+
+**Recovery flow:**
+1. The heartbeat calls `recoverStuckWorkflowRuns()` periodically
+2. The SQL query finds runs stuck in `waiting` whose linked tasks have already reached a terminal state
+3. Recovery mirrors the resume logic for completed tasks, or marks the run failed for failed/cancelled tasks
+
+### Key Patterns
+
+- **DAG Walker**: BFS traversal with visited-set cycle guard in `walkDag()` (`engine.ts:56-121`)
+- **Port-based branching**: Edges have `sourcePort`; node results specify `nextPort` to select the outgoing edge(s) -- this is how conditional branching works
+- **Async suspension**: The `mode: "async"` mechanism pauses runs by persisting context to DB and returning from `walkDag()`
+- **Event-driven resume**: In-process `EventEmitter` bridges task lifecycle events to workflow continuation
+- **Context accumulation**: Each node's output is stored as `ctx[node.id]` and flows to all downstream nodes
+- **Template interpolation**: `{{dot.path}}` syntax resolves against the accumulated context
+- **Singleton LLM provider**: Lazy-initialized, cached at module level (`llm-provider.ts:46-56`)
+
+### Relevant Files
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/engine.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/resume.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/recovery.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/triggers.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/event-bus.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/template.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/index.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/llm-provider.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/nodes/code-match.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/nodes/create-task.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/nodes/delegate-to-agent.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/nodes/llm-classify.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/nodes/property-match.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/nodes/send-message.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/types.ts` (lines 550-642)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/be/db.ts` (lines 5712-6089)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/http/index.ts` (line 187)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/heartbeat/heartbeat.ts` (line 217)</result>
+<usage><total_tokens>40456</total_tokens><tool_uses>25</tool_uses><duration_ms>179067</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/7a934dc4-42d5-4afb-bec7-e9ac49c7ee0e/tasks/aa38cc7f84007f58b.output
+
+---
+
+<task-notification>
+<task-id>bhbtekr3y</task-id>
+<tool-use-id>toolu_01MkvhssUS6XJ1EZ4VVk1FCj</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/7a934dc4-42d5-4afb-bec7-e9ac49c7ee0e/tasks/bhbtekr3y.output</output-file>
+<status>completed</status>
+<summary>Background command "Open plan in file-review GUI for inline comments" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/7a934dc4-42d5-4afb-bec7-e9ac49c7ee0e/tasks/bhbtekr3y.output
+
+---
+
+[Request interrupted by user]
