@@ -134,6 +134,9 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `task` | `string` | Yes | - | The task description to send. |
 | `dependsOn` | `array` | No | - | Task IDs this task depends on. |
 | `epicId` | `string` | No | - | Epic to associate this task with. |
+| `slackChannelId` | `string` | No | - | Slack channel ID to post progress updates to. Use this to propagate Slack context when delegating from a Slack thread. |
+| `slackThreadTs` | `string` | No | - | Slack thread timestamp. Required with slackChannelId for thread-level updates. |
+| `slackUserId` | `string` | No | - | Slack user ID of the original requester. |
 
 ### get-task-details
 
