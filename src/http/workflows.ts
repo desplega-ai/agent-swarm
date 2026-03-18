@@ -235,8 +235,8 @@ export async function handleWorkflows(
       jsonError(res, "Workflow is disabled", 400);
       return true;
     }
-    const secret = queryParams.get("secret");
-    if (!myAgentId && secret !== workflow.webhookSecret) {
+    // TODO(Phase 6): Replace with HMAC-based webhook verification via triggers[]
+    if (!myAgentId) {
       res.writeHead(401);
       res.end();
       return true;
