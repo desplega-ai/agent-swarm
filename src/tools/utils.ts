@@ -18,22 +18,31 @@ type Meta = RequestHandlerExtra<ServerRequest, ServerNotification>;
 export type RequestInfo = {
   sessionId: string | undefined;
   agentId: string | undefined;
+  sourceTaskId: string | undefined;
 };
 
 export const getRequestInfo = (req: Meta): RequestInfo => {
   const agentIdHeader = req.requestInfo?.headers?.["x-agent-id"];
+  const sourceTaskIdHeader = req.requestInfo?.headers?.["x-source-task-id"];
 
   let agentId: string | undefined;
-
   if (Array.isArray(agentIdHeader)) {
     agentId = agentIdHeader?.[0];
   } else if (typeof agentIdHeader === "string") {
     agentId = agentIdHeader;
   }
 
+  let sourceTaskId: string | undefined;
+  if (Array.isArray(sourceTaskIdHeader)) {
+    sourceTaskId = sourceTaskIdHeader?.[0];
+  } else if (typeof sourceTaskIdHeader === "string") {
+    sourceTaskId = sourceTaskIdHeader;
+  }
+
   return {
     sessionId: req.sessionId || undefined,
     agentId,
+    sourceTaskId,
   };
 };
 

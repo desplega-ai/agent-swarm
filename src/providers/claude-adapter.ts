@@ -1,4 +1,5 @@
-import { unlink, writeFile } from "node:fs/promises";
+import { rename, unlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { validateClaudeCredentials } from "../utils/credentials";
 import {
   parseStderrForErrors,
@@ -36,6 +37,45 @@ async function cleanupTaskFile(pid: number): Promise<void> {
     await unlink(getTaskFilePath(pid));
   } catch {
     // File might already be deleted or never created
+  }
+}
+
+/**
+ * Inject X-Source-Task-Id header into the .mcp.json at the given cwd.
+ * Claude CLI reads .mcp.json once at startup, so this must be written before spawn.
+ * Note: with concurrent sessions sharing the same cwd, there's a small race window.
+ * The worst case is inheriting Slack metadata from the wrong task — same limitation
+ * as the getAgentCurrentTask() heuristic, but with a much smaller window.
+ */
+async function injectSourceTaskHeader(cwd: string, taskId: string): Promise<void> {
+  const mcpJsonPath = join(cwd, ".mcp.json");
+  try {
+    const file = Bun.file(mcpJsonPath);
+    if (!(await file.exists())) return;
+
+    const config = await file.json();
+    const servers = config?.mcpServers;
+    if (!servers) return;
+
+    // Find the agent-swarm server entry (could be named "agent-swarm" or similar)
+    const serverKey = Object.keys(servers).find(
+      (k) => k === "agent-swarm" || servers[k]?.headers?.["X-Agent-ID"],
+    );
+    if (!serverKey) return;
+
+    const server = servers[serverKey];
+    if (!server.headers) server.headers = {};
+    server.headers["X-Source-Task-Id"] = taskId;
+
+    // Atomic write: write to temp file then rename
+    const tmpPath = `${mcpJsonPath}.tmp.${process.pid}.${Date.now()}`;
+    await writeFile(tmpPath, JSON.stringify(config, null, 2));
+    await rename(tmpPath, mcpJsonPath);
+  } catch (err) {
+    // Non-fatal — sourceTaskId is best-effort, falls back to getAgentCurrentTask()
+    console.warn(
+      `\x1b[33m[claude]\x1b[0m Failed to inject X-Source-Task-Id into .mcp.json: ${err}`,
+    );
   }
 }
 
@@ -360,6 +400,9 @@ export class ClaudeAdapter implements ProviderAdapter {
     });
 
     console.log(`\x1b[2m[${config.role}]\x1b[0m Task file written: ${taskFilePath}`);
+
+    // Inject X-Source-Task-Id header into .mcp.json so the MCP server knows which task this session is working on
+    await injectSourceTaskHeader(config.cwd, config.taskId);
 
     return new ClaudeSession(config, model, taskFilePath, taskFilePid);
   }
