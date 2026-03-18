@@ -1,0 +1,495 @@
+# Review Document
+
+A thin wrapper that invokes the `desplega:reviewing` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse flags from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - Check for `--output=append|separate` flag (sets output mode preference, skipping the preference question)
+   - Otherwise, default to **Critical** autonomy
+
+2. **ALWAYS invoke the `desplega:reviewing` skill:**
+   - Pass the document path
+   - Pass the autonomy mode determined above
+   - Pass the output mode if specified
+   - Let the skill handle all review logic
+
+3. **If no path provided:**
+   - Respond with: "I need a document to review. Please provide the path to the research, plan, or brainstorm document you'd like me to review."
+
+## Example Usage
+
+```
+/review thoughts/taras/research/2026-03-09-new-base-skills.md
+/review --autonomy=autopilot --output=append thoughts/taras/plans/2026-03-09-feature.md
+/review --output=separate thoughts/shared/brainstorms/2026-03-09-idea.md
+```
+
+
+ARGUMENTS: thoughts/taras/plans/2026-03-18-workflow-redesign.md
+
+---
+
+Base directory for this skill: /Users/taras/.claude/plugins/cache/desplega-ai-toolbox/desplega/1.7.0/skills/reviewing
+
+# Reviewing
+
+You are performing a structured critique of a document (research, plan, or brainstorm) to identify gaps, weaknesses, and quality issues.
+
+## Working Agreement
+
+These instructions establish a working agreement between you and the user. The key principles are:
+
+1. **AskUserQuestion is your primary communication tool** - Whenever you need to ask the user anything (clarifications, preferences, decisions), use the **AskUserQuestion tool**. Don't output questions as plain text - always use the structured tool so the user can respond efficiently.
+
+2. **Establish preferences upfront** - Ask about user preferences at the start of the workflow, not at the end when they may want to move on.
+
+3. **Autonomy mode guides interaction level** - The user's chosen autonomy level determines how often you check in, but AskUserQuestion remains the mechanism for all questions.
+
+### User Preferences
+
+Before starting review (unless autonomy is Autopilot), establish these preferences:
+
+**Output Mode** - Use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "How should I present the review findings?" | 1. Append errata section to the document (Recommended), 2. Write a separate review file to thoughts/*/reviews/ |
+
+**File Review Preference** - Check if the `file-review` plugin is available (look for `file-review:file-review` in available commands).
+
+If file-review plugin is installed, use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like to use file-review for inline feedback after the automated review?" | 1. Yes, open file-review after review (Recommended), 2. No, the automated review is sufficient |
+
+Store these preferences and act on them during the review process.
+
+## When to Use
+
+This skill activates when:
+- User invokes `/review` command
+- Another skill references the reviewing skill at completion
+- User asks to review, critique, or check a document
+
+## Autonomy Mode
+
+At the start of review, adapt your interaction level based on the autonomy mode:
+
+| Mode | Behavior |
+|------|----------|
+| **Autopilot** | Run full review, auto-fix minor issues, present summary at end |
+| **Critical** (Default) | Ask about Critical/Important findings, auto-fix Minor ones |
+| **Verbose** | Walk through each finding, confirm before any changes |
+
+The autonomy mode is passed by the invoking command. If not specified, default to **Critical**.
+
+## Process Steps
+
+### Step 1: Read & Classify
+
+Read the input document fully. Determine the document type from its path and content structure:
+
+| Path contains | Type |
+|---------------|------|
+| `/research/` | Research document |
+| `/plans/` | Plan |
+| `/brainstorms/` | Brainstorm |
+| `/qa/` | QA report |
+
+If the type is ambiguous, infer from content structure or use **AskUserQuestion** to clarify.
+
+### Step 2: Structural Check
+
+Verify required sections exist based on document type:
+
+**Research documents:**
+- YAML frontmatter with required fields (date, researcher, topic, status)
+- Research Question section
+- Summary section
+- Detailed Findings with file:line references
+- Code References table
+- Open Questions section
+
+**Plans:**
+- YAML frontmatter with required fields (date, planner, topic, status)
+- Overview section
+- Current State Analysis
+- Desired End State with Key Discoveries
+- What We're NOT Doing
+- Phases with Changes Required and Success Criteria (both Automated and Manual Verification)
+- Quick Verification Reference
+
+**Brainstorms:**
+- YAML frontmatter with required fields (date, author, topic, status)
+- Context section
+- Exploration section with Q&A pairs
+- Synthesis section
+- Next Steps section
+
+**QA reports:**
+- YAML frontmatter with required fields (date, author, topic, status)
+- Context section
+- Scope section (In Scope / Out of Scope)
+- Test Cases with Steps, Expected, Actual, Status per case
+- Evidence section (Screenshots, Videos, Logs, or External Links)
+- Verdict section with overall status and summary
+
+### Step 3: Content Analysis
+
+Apply type-specific quality criteria:
+
+**Research documents:**
+- Are findings supported by specific file:line references?
+- Are there claims without evidence from the codebase?
+- Are there obvious areas that weren't investigated?
+- Are open questions actually open (not answerable from the findings)?
+
+**Plans:**
+- Are there missing phases or gaps in the implementation sequence?
+- Are success criteria specific enough to be actionable?
+- Are there unstated assumptions about the codebase?
+- Is error handling or rollback addressed?
+- Is there scope creep risk (doing more than stated)?
+
+**Brainstorms:**
+- Were important angles left unexplored?
+- Were conclusions reached prematurely before sufficient exploration?
+- Are constraints and requirements clearly identified?
+- Is the document ready to feed into research or planning?
+
+**QA reports:**
+- Does every test case have an actual result and status?
+- Is evidence provided for failures (screenshots, logs)?
+- Is the verdict consistent with individual test case results?
+- Are edge cases and exploratory testing documented?
+- Are external references (Sentry, PRs, CI) linked where relevant?
+
+### Step 4: Gap Identification
+
+Look for what's missing or assumed:
+- Cross-reference claims against the codebase if needed (spawn **codebase-analyzer** agent for verification)
+- Identify unstated assumptions
+- Check for internal contradictions
+- Verify external references are still valid
+
+### Step 5: Present Findings
+
+Categorize all findings into three severity levels:
+
+| Severity | Meaning | Action |
+|----------|---------|--------|
+| **Critical** | Blocks correctness or completeness — must be addressed | Discuss with user |
+| **Important** | Significant gap or weakness — should be addressed | Discuss with user (or auto-fix in Autopilot) |
+| **Minor** | Formatting, typos, small inconsistencies | Auto-fix unless Verbose mode |
+
+Present a summary as text output with findings grouped by severity.
+
+### Step 6: Apply or Discuss
+
+Based on output mode preference:
+
+**If "Append errata":**
+- Auto-fix Minor issues directly in the document
+- For Critical/Important items, append a `## Review Errata` section at the end of the document with:
+  ```
+  ## Review Errata
+
+  _Reviewed: YYYY-MM-DD by [reviewer]_
+
+  ### Critical
+  - [ ] [Finding description and recommended action]
+
+  ### Important
+  - [ ] [Finding description and recommended action]
+
+  ### Resolved
+  - [x] [Minor issue] — auto-fixed
+  ```
+
+**If "Separate file":**
+- Write review to `thoughts/*/reviews/YYYY-MM-DD-review-of-<original-slug>.md`
+- Include all findings with references back to the original document
+
+### Step 7: Workflow Handoff
+
+After the review is complete, determine the document type (from frontmatter, file path, or content) and propose the appropriate next step.
+
+Use **AskUserQuestion** with context-dependent options:
+
+**If reviewing a brainstorm document:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this brainstorm?" | 1. Start research (→ `/research`), 2. Create a plan directly (→ `/create-plan`), 3. Done for now |
+
+**If reviewing a research document:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this research?" | 1. Create a plan (→ `/create-plan`), 2. Done for now |
+
+**If reviewing a plan document:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this plan?" | 1. Start implementation (→ `/implement-plan`), 2. Done for now |
+
+**If reviewing a post-implementation verification:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next?" | 1. Done — mark as complete, 2. Address remaining items |
+
+**If reviewing a QA report:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this QA report?" | 1. Run post-QA verification (→ `/verify-plan`), 2. Address issues found, 3. Done |
+
+**If document type is unclear**, ask a generic question:
+
+| Question | Options |
+|----------|---------|
+| "Review complete. Would you like to proceed to the next workflow step?" | 1. Yes, suggest next step, 2. Done for now |
+
+## No Rewriting Rule
+
+**CRITICAL**: The reviewer identifies issues — the reviewer does NOT rewrite the document. Present findings and let the original author address them. The only exception is Minor auto-fixes (typos, formatting).
+
+## Review Integration
+
+If the `file-review` plugin is available and the user selected "Yes" during User Preferences setup:
+- After the automated review, invoke `/file-review:file-review <path>` for inline human comments
+- Process feedback with `file-review:process-review` skill
+- If user selected "No" or autonomy mode is Autopilot, skip this step
+
+
+ARGUMENTS: thoughts/taras/plans/2026-03-18-workflow-redesign.md --autonomy=critical
+
+---
+
+<task-notification>
+<task-id>a3ac1744a88c2851b</task-id>
+<tool-use-id>toolu_0199cGjK5Cv5bTuweEj51z26</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/7a934dc4-42d5-4afb-bec7-e9ac49c7ee0e/tasks/a3ac1744a88c2851b.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify plan claims against codebase" completed</summary>
+<result>I now have everything I need. Here is the full verification report, Taras.
+
+---
+
+## Plan Claims Verification Report
+
+### Claim 1: `walkDag()` uses a visited-set cycle guard at `engine.ts:56-121`
+
+**PARTIALLY ACCURATE.** The `walkDag()` function spans lines **50-122** at `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/engine.ts`. The visited-set cycle guard is at lines 56-64 (the `visited` Set is created at line 56, checked/added at lines 63-64). The function body ends at line 122, not 121. The claimed range of 56-121 misses the function signature (lines 50-55) and is off-by-one on the closing brace. The behavioral description (visited-set cycle guard) is accurate.
+
+---
+
+### Claim 2: Context only persists on async pause at `resume.ts:59-60`
+
+**INACCURATE (wrong file, wrong characterization).** Lines 59-60 of `resume.ts` are inside `resumeFromTaskCompletion()`, which is the *resume* path, not the pause path. The actual context persistence on async pause happens in `engine.ts:81-84`, inside `walkDag()`:
+
+```
+updateWorkflowRun(runId, {
+  status: "waiting",
+  context: ctx as Record<string, unknown>,
+});
+```
+
+What `resume.ts:59-60` does is *restore* the context and merge task output into it during resume:
+```
+const ctx = (run.context ?? {}) as Record<string, unknown>;
+ctx[step.nodeId] = { taskOutput: event.output };
+```
+
+Context also persists on completion at `engine.ts:116-119`. So the claim that context "only persists on async pause" is not strictly correct either -- it persists on pause and on completion.
+
+---
+
+### Claim 3: `WorkflowDefinitionSchema` uses `{ nodes: [], edges: [] }` format at `types.ts:585-588`
+
+**ACCURATE.** At `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/types.ts`, lines 585-588:
+```
+export const WorkflowDefinitionSchema = z.object({
+  nodes: z.array(WorkflowNodeSchema),
+  edges: z.array(WorkflowEdgeSchema),
+});
+```
+
+Exact match on location and structure.
+
+---
+
+### Claim 4: 13 node types in `WorkflowNodeTypeSchema` at `types.ts:552-566`
+
+**ACCURATE.** At `types.ts:552-566`, the enum contains exactly 13 values: 7 triggers (`trigger-new-task`, `trigger-task-completed`, `trigger-webhook`, `trigger-email`, `trigger-slack-message`, `trigger-github-event`, `trigger-gitlab-event`) and 6 action/logic nodes (`llm-classify`, `property-match`, `code-match`, `create-task`, `send-message`, `delegate-to-agent`). Line range is exact.
+
+---
+
+### Claim 5: Recovery via stuck-run detection SQL join at `db.ts:6072-6088`
+
+**ACCURATE.** At `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/be/db.ts`, lines 6072-6089, the function `getStuckWorkflowRuns()` performs a three-way JOIN: `workflow_runs` JOIN `workflow_run_steps` (on `status = 'waiting'`) JOIN `agent_tasks` (on `workflowRunStepId`), filtering where the run is `'waiting'` but the task is `IN ('completed', 'failed', 'cancelled')`. The function ends at line 6089 (the closing brace), not 6088, so off-by-one on the end.
+
+---
+
+### Claim 6: DB has 3 tables in migration `003_workflows.sql`
+
+**ACCURATE.** The file `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/be/migrations/003_workflows.sql` creates exactly three tables: `workflows` (line 2), `workflow_runs` (line 15), and `workflow_run_steps` (line 32). It also adds two columns to `agent_tasks` and creates indexes.
+
+---
+
+### Claim 7: 9 MCP tools in `src/tools/workflows/`
+
+**ACCURATE.** The directory contains 10 files, but one is `index.ts` (barrel export). The 9 actual tool files are: `create-workflow.ts`, `delete-workflow.ts`, `get-workflow.ts`, `get-workflow-run.ts`, `list-workflow-runs.ts`, `list-workflows.ts`, `retry-workflow-run.ts`, `trigger-workflow.ts`, `update-workflow.ts`. The `index.ts` exports exactly 9 register functions.
+
+---
+
+### Claim 8: 9 HTTP endpoints in `src/http/workflows.ts`
+
+**ACCURATE.** The file defines exactly 9 route definitions (lines 21-141): `listWorkflowsRoute` (GET /api/workflows), `createWorkflowRoute` (POST /api/workflows), `getWorkflowRoute` (GET /api/workflows/{id}), `updateWorkflowRoute` (PUT /api/workflows/{id}), `deleteWorkflowRoute` (DELETE /api/workflows/{id}), `triggerWorkflow` (POST /api/workflows/{id}/trigger), `listWorkflowRunsRoute` (GET /api/workflows/{id}/runs), `getWorkflowRunRoute` (GET /api/workflow-runs/{id}), `retryWorkflowRun` (POST /api/workflow-runs/{id}/retry).
+
+---
+
+### Claim 9: 9 test files (~2,500 lines) in `src/tests/workflow-*.test.ts`
+
+**INACCURATE on file count.** There are **8** test files, not 9:
+
+| File | Lines |
+|------|-------|
+| `workflow-engine.test.ts` | 223 |
+| `workflow-engine-errors.test.ts` | 173 |
+| `workflow-http.test.ts` | 490 |
+| `workflow-nodes-phase6.test.ts` | 255 |
+| `workflow-property-match.test.ts` | 352 |
+| `workflow-recovery.test.ts` | 155 |
+| `workflow-resume-retry.test.ts` | 216 |
+| `workflow-triggers.test.ts` | 419 |
+| **Total** | **2,283** |
+
+File count is off by one (8 not 9). Line count of ~2,500 is in the right ballpark but the actual total is ~2,283.
+
+---
+
+### Claim 10: 6 node files in `src/workflows/nodes/`
+
+**ACCURATE.** The directory contains exactly 6 files:
+1. `code-match.ts`
+2. `create-task.ts`
+3. `delegate-to-agent.ts`
+4. `llm-classify.ts`
+5. `property-match.ts`
+6. `send-message.ts`
+
+---
+
+### Claim 11: `src/workflows/llm-provider.ts` exists
+
+**ACCURATE.** The file exists at `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/llm-provider.ts`.
+
+---
+
+### Claim 12: DB workflow functions are at `src/be/db.ts:5712-6089`
+
+**ACCURATE.** The workflow section begins at line 5712 with the comment `// Workflow CRUD` and the last function `getStuckWorkflowRuns()` ends at line 6089. The first exported function is `createWorkflow` at line 5742 (preceded by the `WorkflowRow` type and `rowToWorkflow` helper starting at 5716).
+
+---
+
+### Claim 13: `heartbeat.ts` has a `recoverStuckWorkflowRuns()` call around line 217
+
+**ACCURATE.** At `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/heartbeat/heartbeat.ts`, line 217 reads exactly:
+```
+findings.staleCleanup.workflowRuns = await recoverStuckWorkflowRuns();
+```
+
+---
+
+### Claim 14: Is 005 the correct next migration number?
+
+**INACCURATE.** Existing migrations go up to `007_task_dir.sql`:
+1. `001_initial.sql`
+2. `002_one_time_schedules.sql`
+3. `003_workflows.sql`
+4. `004_workflow_source.sql`
+5. `005_epic_next_steps.sql`
+6. `006_vcs_provider.sql`
+7. `007_task_dir.sql`
+
+The correct next migration number is **008**, not 005.
+
+---
+
+### Claim 15: `agent_tasks` table has `workflowRunId` and `workflowRunStepId` columns
+
+**ACCURATE.** These columns are added in `003_workflows.sql` at lines 49-50:
+```sql
+ALTER TABLE agent_tasks ADD COLUMN workflowRunId TEXT REFERENCES workflow_runs(id);
+ALTER TABLE agent_tasks ADD COLUMN workflowRunStepId TEXT REFERENCES workflow_run_steps(id);
+```
+
+---
+
+### Claim 16: `src/workflows/index.ts` has a 14-event trigger subscription loop
+
+**INACCURATE on count.** The `triggerEvents` array in `initWorkflows()` at `src/workflows/index.ts:15-35` contains **15** events, not 14:
+
+1. `task.created`
+2. `task.completed`
+3. `github.pull_request.opened`
+4. `github.pull_request.closed`
+5. `github.issue.opened`
+6. `github.issue_comment.created`
+7. `github.pull_request_review.submitted`
+8. `gitlab.merge_request.open`
+9. `gitlab.merge_request.close`
+10. `gitlab.merge_request.merge`
+11. `gitlab.issue.open`
+12. `gitlab.note.created`
+13. `gitlab.pipeline.failed`
+14. `gitlab.pipeline.success`
+15. `slack.message`
+16. `agentmail.message.received`
+
+Correction: that is actually **16** events. The claim of 14 is off by 2.
+
+---
+
+### Summary
+
+| # | Claim | Verdict |
+|---|-------|---------|
+| 1 | `walkDag()` cycle guard at engine.ts:56-121 | Mostly accurate (actual: 50-122, guard at 56-64) |
+| 2 | Context persists on async pause at resume.ts:59-60 | **Inaccurate** -- pause persistence is at engine.ts:81-84; resume.ts:59-60 is the restore path |
+| 3 | `WorkflowDefinitionSchema` at types.ts:585-588 | Accurate |
+| 4 | 13 node types at types.ts:552-566 | Accurate |
+| 5 | Stuck-run SQL join at db.ts:6072-6088 | Accurate (ends at 6089, off-by-one) |
+| 6 | 3 tables in 003_workflows.sql | Accurate |
+| 7 | 9 MCP tools | Accurate |
+| 8 | 9 HTTP endpoints | Accurate |
+| 9 | 9 test files (~2,500 lines) | **Inaccurate** -- 8 files, ~2,283 lines |
+| 10 | 6 node files | Accurate |
+| 11 | `llm-provider.ts` exists | Accurate |
+| 12 | DB functions at db.ts:5712-6089 | Accurate |
+| 13 | `recoverStuckWorkflowRuns()` at heartbeat.ts:217 | Accurate |
+| 14 | Next migration is 005 | **Inaccurate** -- next is 008 |
+| 15 | `agent_tasks` has workflow columns | Accurate |
+| 16 | 14-event trigger subscription | **Inaccurate** -- 16 events, not 14 |
+
+**4 claims are materially inaccurate** (claims 2, 9, 14, 16). The migration numbering error (claim 14) is the most operationally significant -- if the plan creates a migration numbered 005, it will collide with the existing `005_epic_next_steps.sql`.</result>
+<usage><total_tokens>33130</total_tokens><tool_uses>30</tool_uses><duration_ms>117565</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/7a934dc4-42d5-4afb-bec7-e9ac49c7ee0e/tasks/a3ac1744a88c2851b.output
+
+---
+
+<task-notification>
+<task-id>bmt83ietq</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/7a934dc4-42d5-4afb-bec7-e9ac49c7ee0e/tasks/bmt83ietq.output</output-file>
+<status>completed</status>
+<summary>Background command "Launch file-review GUI for inline plan comments" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/7a934dc4-42d5-4afb-bec7-e9ac49c7ee0e/tasks/bmt83ietq.output
