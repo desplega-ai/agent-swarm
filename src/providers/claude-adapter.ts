@@ -140,7 +140,7 @@ class ClaudeSession implements ProviderSession {
 
     // Use per-session MCP config to avoid race conditions with concurrent sessions
     if (this.sessionMcpConfig) {
-      cmd.push("--mcp-config", this.sessionMcpConfig);
+      cmd.push("--mcp-config", this.sessionMcpConfig, "--strict-mcp-config");
     }
 
     return cmd;
