@@ -141,11 +141,11 @@ export default function DebugPage() {
   function handleEditorMount(editor: { getValue: () => string }) {
     editorRef.current = editor;
     // Add Cmd/Ctrl+Enter keybinding
-    (
-      editor as Record<string, unknown> & {
-        addCommand: (keybinding: number, handler: () => void) => void;
-      }
-    ).addCommand(
+    // Monaco editor instance has addCommand at runtime but the onMount type is minimal
+    const monacoEditor = editor as unknown as {
+      addCommand: (keybinding: number, handler: () => void) => void;
+    };
+    monacoEditor.addCommand(
       // Monaco KeyMod.CtrlCmd | KeyCode.Enter = 2048 | 3
       2048 | 3,
       () => executeQuery(),
