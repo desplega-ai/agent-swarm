@@ -1760,17 +1760,6 @@ export function findRecentSimilarTasks(opts: {
     .map(rowToAgentTask);
 }
 
-function getAgentCurrentTask(agentId: string): AgentTask | null {
-  const row = getDb()
-    .prepare<AgentTaskRow, [string]>(
-      `SELECT * FROM agent_tasks
-       WHERE agentId = ? AND status = 'in_progress'
-       ORDER BY lastUpdatedAt DESC LIMIT 1`,
-    )
-    .get(agentId);
-  return row ? rowToAgentTask(row) : null;
-}
-
 export function createTaskExtended(task: string, options?: CreateTaskOptions): AgentTask {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -1804,21 +1793,11 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
     }
   }
 
-  // Auto-inherit Slack metadata from the creator's source task (concurrency-safe via sourceTaskId header)
-  // Priority: explicit params > parentTaskId inheritance > sourceTaskId lookup > getAgentCurrentTask fallback
-  if (options?.creatorAgentId && !options.slackChannelId) {
-    let sourceTask: AgentTask | null = null;
-
-    // Prefer sourceTaskId (set via X-Source-Task-Id header) — concurrency-safe
-    if (options.sourceTaskId) {
-      sourceTask = getTaskById(options.sourceTaskId);
-    }
-
-    // Fallback: heuristic based on most recent in-progress task (not concurrency-safe when agent has multiple sessions)
-    if (!sourceTask) {
-      sourceTask = getAgentCurrentTask(options.creatorAgentId);
-    }
-
+  // Auto-inherit Slack metadata from the creator's source task (deterministic via sourceTaskId)
+  // Priority: explicit params > parentTaskId inheritance > sourceTaskId lookup
+  // sourceTaskId is set by the adapter's X-Source-Task-Id header — each adapter carries its taskId natively
+  if (options?.creatorAgentId && !options.slackChannelId && options.sourceTaskId) {
+    const sourceTask = getTaskById(options.sourceTaskId);
     if (sourceTask?.slackChannelId) {
       options.slackChannelId = sourceTask.slackChannelId;
       options.slackThreadTs = sourceTask.slackThreadTs;

@@ -45,7 +45,7 @@ async function cleanupTaskFile(pid: number): Promise<void> {
  * Claude CLI reads .mcp.json once at startup, so this must be written before spawn.
  * Note: with concurrent sessions sharing the same cwd, there's a small race window.
  * The worst case is inheriting Slack metadata from the wrong task — same limitation
- * as the getAgentCurrentTask() heuristic, but with a much smaller window.
+ * as any heuristic approach, but with a much smaller window.
  */
 async function injectSourceTaskHeader(cwd: string, taskId: string): Promise<void> {
   const mcpJsonPath = join(cwd, ".mcp.json");
@@ -72,7 +72,7 @@ async function injectSourceTaskHeader(cwd: string, taskId: string): Promise<void
     await writeFile(tmpPath, JSON.stringify(config, null, 2));
     await rename(tmpPath, mcpJsonPath);
   } catch (err) {
-    // Non-fatal — sourceTaskId is best-effort, falls back to getAgentCurrentTask()
+    // Non-fatal — if injection fails, sourceTaskId won't be sent and Slack metadata won't auto-inherit
     console.warn(
       `\x1b[33m[claude]\x1b[0m Failed to inject X-Source-Task-Id into .mcp.json: ${err}`,
     );

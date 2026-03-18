@@ -96,7 +96,7 @@ describe("Slack metadata auto-inheritance via sourceTaskId", () => {
     expect(childFromA.slackUserId).toBe("U_USER_A");
   });
 
-  test("sourceTaskId not provided → falls back to getAgentCurrentTask()", () => {
+  test("sourceTaskId not provided → no inheritance (no heuristic fallback)", () => {
     // Create a fresh agent to avoid interference from other tests
     const freshLead = createAgent({
       name: "fallback-lead",
@@ -113,15 +113,15 @@ describe("Slack metadata auto-inheritance via sourceTaskId", () => {
     });
     setTaskInProgress(leadTask.id);
 
-    // No sourceTaskId → should fall back to getAgentCurrentTask
+    // No sourceTaskId → no inheritance (adapters must provide sourceTaskId deterministically)
     const childTask = createTaskExtended("child no sourceTaskId", {
       agentId: workerAgent.id,
       creatorAgentId: freshLead.id,
     });
 
-    expect(childTask.slackChannelId).toBe("C_FALLBACK");
-    expect(childTask.slackThreadTs).toBe("4000.0001");
-    expect(childTask.slackUserId).toBe("U_FALLBACK");
+    expect(childTask.slackChannelId).toBeFalsy();
+    expect(childTask.slackThreadTs).toBeFalsy();
+    expect(childTask.slackUserId).toBeFalsy();
   });
 
   test("explicit Slack params take priority over sourceTaskId inheritance", () => {
@@ -214,7 +214,7 @@ describe("Slack metadata auto-inheritance via sourceTaskId", () => {
     expect(childTask.slackUserId).toBeFalsy();
   });
 
-  test("sourceTaskId pointing to non-existent task → falls back to getAgentCurrentTask", () => {
+  test("sourceTaskId pointing to non-existent task → no inheritance (no heuristic fallback)", () => {
     const freshLead = createAgent({
       name: "nonexist-lead",
       isLead: true,
@@ -236,8 +236,8 @@ describe("Slack metadata auto-inheritance via sourceTaskId", () => {
       sourceTaskId: "00000000-0000-0000-0000-000000000000", // non-existent
     });
 
-    // Falls back to getAgentCurrentTask
-    expect(childTask.slackChannelId).toBe("C_NONEXIST_FALLBACK");
-    expect(childTask.slackThreadTs).toBe("9000.0001");
+    // No fallback — sourceTaskId is the only path, and it points to a non-existent task
+    expect(childTask.slackChannelId).toBeFalsy();
+    expect(childTask.slackThreadTs).toBeFalsy();
   });
 });
