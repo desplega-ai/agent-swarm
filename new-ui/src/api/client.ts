@@ -747,6 +747,17 @@ class ApiClient {
     if (!res.ok) throw new Error(`Failed to retry workflow run: ${res.status}`);
     return res.json();
   }
+
+  async dbQuery(sql: string, params?: unknown[]): Promise<import("./types").DbQueryResponse> {
+    const url = `${this.getBaseUrl()}/api/db-query`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ sql, params }),
+    });
+    if (!res.ok) throw new Error(`Failed to execute query: ${res.status}`);
+    return res.json();
+  }
 }
 
 export const api = new ApiClient();

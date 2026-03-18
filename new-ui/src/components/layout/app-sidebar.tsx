@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  Bug,
   Clock,
   GitBranch,
   LayoutDashboard,
@@ -56,6 +57,7 @@ const navGroups = [
     items: [
       { title: "Config", path: "/config", icon: Settings },
       { title: "Repos", path: "/repos", icon: GitBranch },
+      { title: "Debug", path: "/debug", icon: Bug },
     ],
   },
 ];

@@ -489,3 +489,16 @@ export interface WorkflowsResponse {
 export interface WorkflowRunsResponse {
   runs: WorkflowRun[];
 }
+
+// Debug / DB Explorer
+export interface DbQueryRequest {
+  sql: string;
+  params?: unknown[];
+}
+
+export interface DbQueryResponse {
+  columns: string[];
+  rows: unknown[][];
+  elapsed: number;
+  total: number;
+}

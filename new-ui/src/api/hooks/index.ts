@@ -18,6 +18,7 @@ export {
   useSessionCosts,
   useTaskUsage,
 } from "./use-costs";
+export { useDbQuery, useTableColumns, useTableList } from "./use-db-query";
 export type { EpicFilters } from "./use-epics";
 export {
   useAssignTaskToEpic,
