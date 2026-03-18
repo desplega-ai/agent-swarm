@@ -55,21 +55,51 @@ gh pr view <pr-number> --json title,body,author,headRefName,baseRefName,addition
 gh pr diff <pr-number>
 ```
 
-### 6. Analyze the Changes
+### 6. Check CI Status (MANDATORY)
+
+Before analyzing the code, check if CI checks are passing:
+
+```bash
+# GitHub
+gh pr checks <pr-number>
+
+# GitLab
+glab mr view <mr-number> --json pipelines
+```
+
+**If CI checks are failing, this is an automatic REQUEST_CHANGES.** Do not approve a PR with failing CI. Include the failing check names and any relevant error details in your review.
+
+### 7. Verify Tests Are Included (MANDATORY)
+
+Check that the PR includes test changes:
+
+```bash
+# Look for test files in the diff
+gh pr diff <pr-number> | grep -E '^\+\+\+ b/.*\.(test|spec)\.' || echo "NO TEST FILES CHANGED"
+```
+
+**If the PR modifies code but does not add or update tests, this is an automatic REQUEST_CHANGES.** Every code change must include corresponding tests. The only exceptions are:
+- Pure documentation changes (README, comments only)
+- Configuration-only changes (CI config, linter config, env files)
+- Dependency version bumps with no code changes
+
+When requesting changes for missing tests, be specific about what tests are needed.
+
+### 8. Analyze the Changes
 
 Review the diff for:
 - **Security issues**: SQL injection, XSS, command injection, secrets in code
 - **Logic errors**: Off-by-one errors, null handling, edge cases
 - **Performance concerns**: N+1 queries, unnecessary loops, memory leaks
 - **Code quality**: Naming, complexity, duplication, missing error handling
-- **Test coverage**: Are changes adequately tested?
+- **Test coverage**: Are the included tests sufficient? Do they cover edge cases?
 
 You can also:
 - Run the test suite locally to verify tests pass
 - Check for TypeScript errors with `bun tsc --noEmit` or equivalent
 - Review the actual files in context, not just the diff
 
-### 7. Provide Structured Feedback
+### 9. Provide Structured Feedback
 
 Format your review as:
 
@@ -96,7 +126,7 @@ Format your review as:
 <Overall recommendation>
 ```
 
-### 8. Optionally Post the Review
+### 10. Optionally Post the Review
 
 If the user wants to post the review to GitHub:
 
@@ -108,7 +138,7 @@ gh pr review <pr-number> --request-changes --body "Your review message"
 gh pr review <pr-number> --comment --body "Your review message"
 ```
 
-### 9. Post Inline Comments on Specific Lines
+### 11. Post Inline Comments on Specific Lines
 
 For more detailed feedback, you can post inline comments directly on specific lines of code using the GitHub API:
 
@@ -166,7 +196,7 @@ gh api repos/owner/repo/pulls/123/comments \
   -f body="⚠️ SQL injection risk: Use parameterized queries instead of string interpolation."
 ```
 
-### 10. Re-reviewing and Resolving Comments
+### 12. Re-reviewing and Resolving Comments
 
 When the PR author makes changes in response to your review:
 
