@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import Image from "next/image";
+import Link from "next/link";
 import { ArrowLeft, ExternalLink, CheckCircle, Wallet, Zap } from "lucide-react";
 
 export const metadata: Metadata = {
@@ -152,13 +154,13 @@ export default function X402ExamplePage() {
       {/* Top bar */}
       <nav className="border-b border-zinc-200/60 bg-white/90 backdrop-blur-xl sticky top-0 z-50">
         <div className="mx-auto max-w-2xl px-4 sm:px-6 h-12 flex items-center gap-3">
-          <a
+          <Link
             href="/examples"
             className="flex items-center gap-1.5 text-[13px] text-zinc-500 hover:text-zinc-900 transition-colors"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Examples</span>
-          </a>
+          </Link>
           <div className="w-px h-4 bg-zinc-200" />
           <div className="flex items-center gap-1.5">
             <Zap className="w-3.5 h-3.5 text-amber-600" />
@@ -194,11 +196,14 @@ export default function X402ExamplePage() {
         {/* Result image */}
         <section className="mb-8 md:mb-10">
           <div className="rounded-2xl overflow-hidden border border-zinc-200 shadow-lg shadow-zinc-200/50 relative group">
-            <img
+            <Image
               src="https://blob.imference.com/large/37f7ee3b-616b-402f-8cb3-d69896165e3f.webp"
               alt="A cat on a skateboard, anime style — generated via x402 payment"
+              width={1024}
+              height={1024}
               className="w-full block"
-              loading="eager"
+              priority
+              sizes="(max-width: 768px) 100vw, 672px"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
             <div className="absolute bottom-0 left-0 right-0 p-4 md:p-5">
@@ -417,9 +422,9 @@ const result = await client.fetch(
         <footer className="border-t border-zinc-200 py-8">
           <p className="text-[13px] text-zinc-500 leading-relaxed mb-5">
             This is a real session from the{" "}
-            <a href="/" className="text-amber-700 hover:text-amber-900 font-medium transition-colors">
+            <Link href="/" className="text-amber-700 hover:text-amber-900 font-medium transition-colors">
               Agent Swarm
-            </a>
+            </Link>
             . The x402 protocol enables AI agents to autonomously pay for
             services using cryptocurrency — no human wallet interaction needed.
           </p>
