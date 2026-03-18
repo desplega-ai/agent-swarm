@@ -81,6 +81,19 @@ export const registerSendTaskTool = (server: McpServer) => {
           .describe(
             "If true, skip duplicate detection and create the task even if a similar one exists.",
           ),
+        slackChannelId: z
+          .string()
+          .optional()
+          .describe(
+            "Slack channel ID to post progress updates to. Use this to propagate Slack context when delegating from a Slack thread.",
+          ),
+        slackThreadTs: z
+          .string()
+          .optional()
+          .describe(
+            "Slack thread timestamp. Required with slackChannelId for thread-level updates.",
+          ),
+        slackUserId: z.string().optional().describe("Slack user ID of the original requester."),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
@@ -104,6 +117,9 @@ export const registerSendTaskTool = (server: McpServer) => {
         vcsRepo,
         model,
         allowDuplicate,
+        slackChannelId,
+        slackThreadTs,
+        slackUserId,
       },
       requestInfo,
       _meta,
@@ -205,6 +221,9 @@ export const registerSendTaskTool = (server: McpServer) => {
             parentTaskId,
             vcsRepo: effectiveVcsRepo,
             model,
+            slackChannelId,
+            slackThreadTs,
+            slackUserId,
           });
 
           return {
@@ -253,6 +272,9 @@ export const registerSendTaskTool = (server: McpServer) => {
             parentTaskId,
             vcsRepo: effectiveVcsRepo,
             model,
+            slackChannelId,
+            slackThreadTs,
+            slackUserId,
           });
 
           return {
@@ -275,6 +297,9 @@ export const registerSendTaskTool = (server: McpServer) => {
           parentTaskId,
           vcsRepo: effectiveVcsRepo,
           model,
+          slackChannelId,
+          slackThreadTs,
+          slackUserId,
         });
 
         return {
