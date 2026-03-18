@@ -1722,6 +1722,7 @@ export interface CreateTaskOptions {
   scheduleId?: string;
   workflowRunId?: string;
   workflowRunStepId?: string;
+  sourceTaskId?: string;
 }
 
 /**
@@ -1803,14 +1804,25 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
     }
   }
 
-  // Auto-inherit Slack metadata from creator's current in-progress task
-  // This ensures delegated tasks automatically appear in the originating Slack thread
+  // Auto-inherit Slack metadata from the creator's source task (concurrency-safe via sourceTaskId header)
+  // Priority: explicit params > parentTaskId inheritance > sourceTaskId lookup > getAgentCurrentTask fallback
   if (options?.creatorAgentId && !options.slackChannelId) {
-    const creatorTask = getAgentCurrentTask(options.creatorAgentId);
-    if (creatorTask?.slackChannelId) {
-      options.slackChannelId = creatorTask.slackChannelId;
-      options.slackThreadTs = creatorTask.slackThreadTs;
-      options.slackUserId = creatorTask.slackUserId;
+    let sourceTask: AgentTask | null = null;
+
+    // Prefer sourceTaskId (set via X-Source-Task-Id header) — concurrency-safe
+    if (options.sourceTaskId) {
+      sourceTask = getTaskById(options.sourceTaskId);
+    }
+
+    // Fallback: heuristic based on most recent in-progress task (not concurrency-safe when agent has multiple sessions)
+    if (!sourceTask) {
+      sourceTask = getAgentCurrentTask(options.creatorAgentId);
+    }
+
+    if (sourceTask?.slackChannelId) {
+      options.slackChannelId = sourceTask.slackChannelId;
+      options.slackThreadTs = sourceTask.slackThreadTs;
+      options.slackUserId = sourceTask.slackUserId;
     }
   }
 
