@@ -303,6 +303,65 @@ Examples:
 You also still have \`/workspace/personal/\` for general file persistence and \`sqlite3\` for local structured data.
 `;
 
+const BASE_PROMPT_AGENT_FS = `
+## Agent Filesystem (agent-fs)
+
+You have access to agent-fs — a persistent, searchable filesystem shared across the swarm.
+Use the \`agent-fs\` CLI for all thoughts, research, plans, and shared documents.
+
+The \`agent-fs\` skill (from the agent-fs Claude Code plugin) provides a full CLI reference —
+it auto-injects on relevant Bash tool calls. You can also run \`agent-fs docs\` for
+interactive CLI documentation.
+
+### Writing to your personal drive (default)
+\`\`\`bash
+agent-fs write thoughts/research/YYYY-MM-DD-topic.md --content "..." -m "description"
+echo "content" | agent-fs write thoughts/plans/YYYY-MM-DD-topic.md -m "description"
+\`\`\`
+
+### Writing to the shared drive
+Use the same directory structure as the personal drive, namespaced by your agent ID:
+\`\`\`bash
+# Structured files: thoughts/{agentId}/{type}/YYYY-MM-DD-name.md
+agent-fs --org {sharedOrgId} write thoughts/{agentId}/research/YYYY-MM-DD-topic.md --content "..." -m "research findings"
+agent-fs --org {sharedOrgId} write thoughts/{agentId}/plans/YYYY-MM-DD-topic.md --content "..." -m "implementation plan"
+
+# Random/misc files: misc/{agentId}/name.ext
+agent-fs --org {sharedOrgId} write misc/{agentId}/notes.md --content "..." -m "misc notes"
+
+# Shared documents (not agent-namespaced): docs/name.md
+agent-fs --org {sharedOrgId} write docs/shared-report.md --content "..." -m "for team review"
+\`\`\`
+
+### Reading and searching
+\`\`\`bash
+agent-fs cat thoughts/research/2026-03-18-topic.md
+agent-fs fts "authentication"          # keyword search across all files
+agent-fs search "how does auth work"   # semantic search
+agent-fs ls thoughts/research/         # list files
+agent-fs docs                          # interactive CLI documentation
+\`\`\`
+
+### Comments (for human-agent collaboration)
+\`\`\`bash
+agent-fs comment add docs/spec.md --body "Needs clarification on auth flow"
+agent-fs comment list docs/spec.md
+\`\`\`
+
+Key conventions:
+- **Personal drive**: thoughts/{type}/YYYY-MM-DD-topic.md (plans, research, brainstorms)
+- **Shared drive**: thoughts/{agentId}/{type}/YYYY-MM-DD-topic.md (same structure, namespaced by your ID)
+- **Misc files**: misc/{agentId}/name.ext (shared drive) or misc/name.ext (personal drive)
+- Add version messages (-m) to writes for auditability
+- All CLI output is JSON — parse it
+- Use the shared drive (--org) for documents humans or other agents should review
+- Run \`agent-fs docs\` if you need help with any command
+
+Do NOT use the local filesystem (/workspace/shared/thoughts/) for thoughts or shared docs
+when agent-fs is available. Local filesystem is still used for: repos, artifacts, scripts,
+and any non-thought data.
+`;
+
 const BASE_PROMPT_SELF_AWARENESS = `
 ### How You Are Built
 
@@ -484,6 +543,16 @@ export const getBasePrompt = (args: BasePromptArgs): string => {
   }
 
   staticSuffix += BASE_PROMPT_FILESYSTEM.replaceAll("{agentId}", agentId);
+
+  // Conditionally include agent-fs instructions when available
+  if (process.env.AGENT_FS_API_URL) {
+    const sharedOrgId = process.env.AGENT_FS_SHARED_ORG_ID || "YOUR_SHARED_ORG_ID";
+    staticSuffix += BASE_PROMPT_AGENT_FS.replaceAll("{agentId}", agentId).replaceAll(
+      "{sharedOrgId}",
+      sharedOrgId,
+    );
+  }
+
   staticSuffix += BASE_PROMPT_SELF_AWARENESS;
   staticSuffix += BASE_PROMPT_CONTEXT_MODE;
   staticSuffix += BASE_PROMPT_GUIDELINES;
