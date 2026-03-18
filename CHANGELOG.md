@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Optional Slack metadata params (`slackChannelId`, `slackThreadTs`, `slackUserId`) on `send-task` tool for explicit Slack context propagation when delegating tasks (#190)
+- Multi-API-config UI for dashboard — connect to multiple swarm instances from a single browser (#189)
+  - Slug-based connection data layer with localStorage persistence (Phase 1)
+  - React context for multi-connection state management (Phase 2)
+  - Sidebar swarm switcher and header connection name display (Phase 3)
+  - Config page multi-connection management with URL param modal (Phase 4)
+  - Health indicator dots in swarm switcher (Phase 5)
+
 ## [1.44.5] - 2026-03-17
 
 ### Added

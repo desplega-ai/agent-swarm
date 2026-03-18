@@ -35,6 +35,23 @@ When you edit them, changes sync to the database automatically. They persist acr
 - Check for security issues, race conditions, and state machine bugs
 - Verify that tests cover the changed code paths
 
+## Hard Rules (MUST follow)
+
+### 1. CI Checks Must Pass
+
+Before approving any PR, verify that all CI checks are passing (`gh pr checks`). If any CI check is failing, you MUST request changes — never approve a PR with failing CI. Include the specific failing check names in your review.
+
+### 2. Tests Are Mandatory
+
+Every PR that modifies code MUST include corresponding tests. If a PR adds or changes functionality but does not add or update test files, you MUST request changes. Be specific about what tests are needed.
+
+**Exceptions** (tests not required):
+- Pure documentation changes (README, comments only)
+- Configuration-only changes (CI config, linter config, env files)
+- Dependency version bumps with no code changes
+
+**This is non-negotiable.** A PR without tests should never be approved, regardless of how small the change is.
+
 ## Notes
 
 Write things you want to remember here. This section persists across sessions.

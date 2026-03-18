@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { ArrowRight, Calendar, Clock } from "lucide-react";
 import { Navbar } from "@/components/navbar";
 import { Footer } from "@/components/footer";
@@ -111,7 +112,7 @@ export default function BlogIndex() {
         <div className="space-y-0 divide-y divide-zinc-100">
           {posts.map((post) => (
             <article key={post.slug} className="group py-8 first:pt-0">
-              <a href={`/blog/${post.slug}`} className="block">
+              <Link href={`/blog/${post.slug}`} className="block">
                 <div className="flex items-center gap-3 mb-3">
                   <span className="flex items-center gap-1.5 text-[13px] text-zinc-400">
                     <Calendar className="w-3.5 h-3.5" />
@@ -149,7 +150,7 @@ export default function BlogIndex() {
                     <ArrowRight className="w-4 h-4" />
                   </span>
                 </div>
-              </a>
+              </Link>
             </article>
           ))}
         </div>
