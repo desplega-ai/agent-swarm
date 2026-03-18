@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { Github, BookOpen, LayoutDashboard, Menu, X, Newspaper, Play, Blocks } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -27,44 +28,44 @@ export function Navbar() {
       }`}
     >
       <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
-        <a href="/" className="flex items-center gap-3 group">
+        <Link href="/" className="flex items-center gap-3 group">
           <Image src="/logo.png" alt="Agent Swarm" width={32} height={32} className="rounded-lg shadow-lg shadow-amber-500/20 group-hover:shadow-amber-500/40 transition-shadow" priority />
           <span className="text-lg font-bold tracking-tight text-zinc-900">
             Agent Swarm
           </span>
-        </a>
+        </Link>
 
         <div className="hidden md:flex items-center gap-6">
-          <a
+          <Link
             href="/#features"
             className="text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
           >
             Features
-          </a>
-          <a
+          </Link>
+          <Link
             href="/#how-it-works"
             className="text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
           >
             How It Works
-          </a>
-          <a
+          </Link>
+          <Link
             href="/#architecture"
             className="text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
           >
             Architecture
-          </a>
-          <a
+          </Link>
+          <Link
             href="/blog"
             className="text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
           >
             Blog
-          </a>
-          <a
+          </Link>
+          <Link
             href="/examples"
             className="text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
           >
             Examples
-          </a>
+          </Link>
           <a
             href="https://templates.agent-swarm.dev"
             target="_blank"
@@ -119,11 +120,11 @@ export function Navbar() {
             className="md:hidden overflow-hidden bg-white/95 backdrop-blur-xl border-b border-zinc-200"
           >
             <div className="px-6 py-4 flex flex-col gap-3">
-              <a href="/#features" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Features</a>
-              <a href="/#how-it-works" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">How It Works</a>
-              <a href="/#architecture" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Architecture</a>
-              <a href="/blog" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Blog</a>
-              <a href="/examples" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Examples</a>
+              <Link href="/#features" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Features</Link>
+              <Link href="/#how-it-works" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">How It Works</Link>
+              <Link href="/#architecture" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Architecture</Link>
+              <Link href="/blog" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Blog</Link>
+              <Link href="/examples" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Examples</Link>
               <a href="https://templates.agent-swarm.dev" target="_blank" rel="noopener noreferrer" onClick={() => setMobileOpen(false)} className="flex items-center gap-2 text-sm font-medium text-zinc-600 py-2">
                 <Blocks className="w-4 h-4" /> Templates
               </a>
