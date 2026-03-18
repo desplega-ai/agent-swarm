@@ -3,7 +3,10 @@
  * with values from the context object.
  */
 export function interpolate(template: string, ctx: Record<string, unknown>): string {
-  if (typeof template !== "string") return "";
+  if (typeof template !== "string") {
+    console.warn(`[interpolate] expected string template, got ${typeof template}`);
+    return "";
+  }
   return template.replace(/\{\{([^}]+)\}\}/g, (_match, path: string) => {
     const keys = path.trim().split(".");
     let value: unknown = ctx;

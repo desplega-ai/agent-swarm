@@ -3,7 +3,8 @@ import type { NodeResult } from "../engine";
 import { interpolate } from "../template";
 
 export interface CreateTaskConfig {
-  template: string;
+  template?: string;
+  message?: string;
   agentId?: string;
   tags?: string[];
   source?: string;
@@ -16,7 +17,7 @@ export function executeCreateTask(
   runId: string,
   stepId: string,
 ): NodeResult {
-  const taskDescription = interpolate(config.template, ctx);
+  const taskDescription = interpolate(config.template ?? config.message ?? "", ctx);
   const tags = (config.tags ?? []).map((t) => interpolate(t, ctx));
   const task = createTaskExtended(taskDescription, {
     agentId: config.agentId ?? null,
