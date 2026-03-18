@@ -1,4 +1,5 @@
 import { unlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { validateClaudeCredentials } from "../utils/credentials";
 import {
   parseStderrForErrors,
@@ -39,6 +40,44 @@ async function cleanupTaskFile(pid: number): Promise<void> {
   }
 }
 
+/**
+ * Create a per-session MCP config file with X-Source-Task-Id header injected.
+ * Each session gets its own copy to avoid race conditions when multiple concurrent
+ * Claude sessions share the same cwd. The session-specific config is passed to
+ * Claude CLI via --mcp-config, so the shared .mcp.json is never modified.
+ * Returns the path to the per-session config, or null if no config exists.
+ */
+async function createSessionMcpConfig(cwd: string, taskId: string): Promise<string | null> {
+  const mcpJsonPath = join(cwd, ".mcp.json");
+  try {
+    const file = Bun.file(mcpJsonPath);
+    if (!(await file.exists())) return null;
+
+    const config = await file.json();
+    const servers = config?.mcpServers;
+    if (!servers) return null;
+
+    // Find the agent-swarm server entry (could be named "agent-swarm" or similar)
+    const serverKey = Object.keys(servers).find(
+      (k) => k === "agent-swarm" || servers[k]?.headers?.["X-Agent-ID"],
+    );
+    if (!serverKey) return null;
+
+    const server = servers[serverKey];
+    if (!server.headers) server.headers = {};
+    server.headers["X-Source-Task-Id"] = taskId;
+
+    // Write per-session config to /tmp — no race, each session has its own file
+    const sessionConfigPath = `/tmp/mcp-${taskId}.json`;
+    await writeFile(sessionConfigPath, JSON.stringify(config, null, 2));
+    return sessionConfigPath;
+  } catch (err) {
+    // Non-fatal — if creation fails, sourceTaskId won't be sent and Slack metadata won't auto-inherit
+    console.warn(`\x1b[33m[claude]\x1b[0m Failed to create session MCP config: ${err}`);
+    return null;
+  }
+}
+
 class ClaudeSession implements ProviderSession {
   private proc: ReturnType<typeof Bun.spawn>;
   private listeners: Array<(event: ProviderEvent) => void> = [];
@@ -53,6 +92,7 @@ class ClaudeSession implements ProviderSession {
     private model: string,
     taskFilePath: string,
     taskFilePid: number,
+    private sessionMcpConfig: string | null = null,
   ) {
     this.taskFilePid = taskFilePid;
     const cmd = this.buildCommand();
@@ -96,6 +136,11 @@ class ClaudeSession implements ProviderSession {
 
     if (this.config.systemPrompt) {
       cmd.push("--append-system-prompt", this.config.systemPrompt);
+    }
+
+    // Use per-session MCP config to avoid race conditions with concurrent sessions
+    if (this.sessionMcpConfig) {
+      cmd.push("--mcp-config", this.sessionMcpConfig, "--strict-mcp-config");
     }
 
     return cmd;
@@ -173,8 +218,15 @@ class ClaudeSession implements ProviderSession {
     await logFileHandle.end();
     const exitCode = await this.proc.exited;
 
-    // Cleanup task file
+    // Cleanup task file and per-session MCP config
     await cleanupTaskFile(this.taskFilePid);
+    if (this.sessionMcpConfig) {
+      try {
+        await unlink(this.sessionMcpConfig);
+      } catch {
+        // ignore — temp file may already be gone
+      }
+    }
 
     if (exitCode !== 0 && stderrOutput) {
       console.error(
@@ -361,7 +413,10 @@ export class ClaudeAdapter implements ProviderAdapter {
 
     console.log(`\x1b[2m[${config.role}]\x1b[0m Task file written: ${taskFilePath}`);
 
-    return new ClaudeSession(config, model, taskFilePath, taskFilePid);
+    // Create per-session MCP config with X-Source-Task-Id header (no shared-file race condition)
+    const sessionMcpConfig = await createSessionMcpConfig(config.cwd, config.taskId);
+
+    return new ClaudeSession(config, model, taskFilePath, taskFilePid, sessionMcpConfig);
   }
 
   async canResume(_sessionId: string): Promise<boolean> {

@@ -212,6 +212,7 @@ export const registerSendTaskTool = (server: McpServer) => {
         if (!effectiveAgentId) {
           const newTask = createTaskExtended(task, {
             creatorAgentId: requestInfo.agentId,
+            sourceTaskId: requestInfo.sourceTaskId,
             taskType,
             tags: finalTags,
             priority,
@@ -263,6 +264,7 @@ export const registerSendTaskTool = (server: McpServer) => {
           const newTask = createTaskExtended(task, {
             offeredTo: effectiveAgentId,
             creatorAgentId: requestInfo.agentId,
+            sourceTaskId: requestInfo.sourceTaskId,
             taskType,
             tags: finalTags,
             priority,
@@ -288,6 +290,7 @@ export const registerSendTaskTool = (server: McpServer) => {
         const newTask = createTaskExtended(task, {
           agentId: effectiveAgentId,
           creatorAgentId: requestInfo.agentId,
+          sourceTaskId: requestInfo.sourceTaskId,
           taskType,
           tags: finalTags,
           priority,

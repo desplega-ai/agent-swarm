@@ -25,6 +25,7 @@ export class McpHttpClient {
     private baseUrl: string,
     private apiKey: string,
     private agentId: string,
+    private taskId?: string,
   ) {}
 
   private async send(body: unknown): Promise<{ data: unknown; headers: Headers }> {
@@ -34,6 +35,9 @@ export class McpHttpClient {
       Authorization: `Bearer ${this.apiKey}`,
       "X-Agent-ID": this.agentId,
     };
+    if (this.taskId) {
+      headers["X-Source-Task-Id"] = this.taskId;
+    }
     if (this.sessionId) {
       headers["mcp-session-id"] = this.sessionId;
     }

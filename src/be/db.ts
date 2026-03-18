@@ -1722,6 +1722,7 @@ export interface CreateTaskOptions {
   scheduleId?: string;
   workflowRunId?: string;
   workflowRunStepId?: string;
+  sourceTaskId?: string;
 }
 
 /**
@@ -1789,6 +1790,18 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       if (parent.agentmailThreadId && !options.agentmailThreadId) {
         options.agentmailThreadId = parent.agentmailThreadId;
       }
+    }
+  }
+
+  // Auto-inherit Slack metadata from the creator's source task (deterministic via sourceTaskId)
+  // Priority: explicit params > parentTaskId inheritance > sourceTaskId lookup
+  // sourceTaskId is set by the adapter's X-Source-Task-Id header — each adapter carries its taskId natively
+  if (options?.creatorAgentId && !options.slackChannelId && options.sourceTaskId) {
+    const sourceTask = getTaskById(options.sourceTaskId);
+    if (sourceTask?.slackChannelId) {
+      options.slackChannelId = sourceTask.slackChannelId;
+      options.slackThreadTs = sourceTask.slackThreadTs;
+      options.slackUserId = sourceTask.slackUserId;
     }
   }
 

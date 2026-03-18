@@ -374,7 +374,12 @@ export class PiMonoAdapter implements ProviderAdapter {
     let customTools: ToolDefinition[] = [];
     if (config.apiUrl && config.apiKey) {
       try {
-        const mcpClient = new McpHttpClient(config.apiUrl, config.apiKey, config.agentId);
+        const mcpClient = new McpHttpClient(
+          config.apiUrl,
+          config.apiKey,
+          config.agentId,
+          config.taskId,
+        );
         await mcpClient.initialize();
         const tools = await mcpClient.listTools();
         customTools = mcpToolsToDefinitions(mcpClient, tools);
