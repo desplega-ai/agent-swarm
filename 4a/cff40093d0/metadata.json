@@ -3,7 +3,7 @@
   "checkpoint_id": "4acff40093d0",
   "strategy": "manual-commit",
   "branch": "feat/workflow-redesign",
-  "checkpoints_count": 8,
+  "checkpoints_count": 10,
   "files_touched": [
     "src/be/db.ts",
     "src/http/workflows.ts",
@@ -33,13 +33,20 @@
       "context": "/4a/cff40093d0/2/context.md",
       "content_hash": "/4a/cff40093d0/2/content_hash.txt",
       "prompt": "/4a/cff40093d0/2/prompt.txt"
+    },
+    {
+      "metadata": "/4a/cff40093d0/3/metadata.json",
+      "transcript": "/4a/cff40093d0/3/full.jsonl",
+      "context": "/4a/cff40093d0/3/context.md",
+      "content_hash": "/4a/cff40093d0/3/content_hash.txt",
+      "prompt": "/4a/cff40093d0/3/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 631,
-    "cache_creation_tokens": 735735,
-    "cache_read_tokens": 5260749,
-    "output_tokens": 80006,
-    "api_call_count": 64
+    "input_tokens": 769,
+    "cache_creation_tokens": 865663,
+    "cache_read_tokens": 10555435,
+    "output_tokens": 101790,
+    "api_call_count": 114
   }
 }

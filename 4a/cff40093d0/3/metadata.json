@@ -1,0 +1,30 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "4acff40093d0",
+  "session_id": "7c91ef5f-f705-420b-b451-93fea9ef9ace",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-18T23:51:16.078125Z",
+  "branch": "feat/workflow-redesign",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "thoughts/taras/research/2026-03-18-workflow-redesign.md"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "b9727188301c",
+  "token_usage": {
+    "input_tokens": 138,
+    "cache_creation_tokens": 129928,
+    "cache_read_tokens": 5294686,
+    "output_tokens": 21784,
+    "api_call_count": 50
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-18T23:51:14.851926Z",
+    "agent_lines": 763,
+    "human_added": 2366,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 3129,
+    "agent_percentage": 24.384787472035793
+  }
+}
