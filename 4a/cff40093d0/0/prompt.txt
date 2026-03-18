@@ -1,0 +1,311 @@
+# Implement Plan
+
+A thin wrapper that invokes the `desplega:implementing` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse autonomy mode from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - If plan file has `autonomy:` in frontmatter, use that as default
+   - Otherwise, default to **Critical** (don't prompt - implementation is more straightforward)
+
+2. **ALWAYS invoke the `desplega:implementing` skill:**
+   - Pass the plan file path
+   - Pass the autonomy mode determined above
+   - Let the skill handle all implementation logic
+
+3. **If no plan path provided:**
+   - Respond with: "I need a plan file to proceed. Please provide the path to the plan you would like me to implement."
+
+## Example Usage
+
+```
+/implement-plan thoughts/<username|shared>/plans/2026-01-14-my-feature.md
+/implement-plan --autonomy=autopilot @plans/feature.md
+/implement-plan --autonomy=verbose @current-plan.md
+```
+
+
+ARGUMENTS: thoughts/taras/plans/2026-03-18-workflow-redesign.md
+
+---
+
+Base directory for this skill: /Users/taras/.claude/plugins/cache/desplega-ai-toolbox/desplega/1.7.0/skills/implementing
+
+# Implementing
+
+You are implementing an approved technical plan, executing it phase by phase with verification at each step.
+
+## Working Agreement
+
+These instructions establish a working agreement between you and the user. The key principles are:
+
+1. **AskUserQuestion is your primary communication tool** - Whenever you need to ask the user anything (clarifications, preferences, decisions, confirmations), use the **AskUserQuestion tool**. Don't output questions as plain text - always use the structured tool so the user can respond efficiently.
+
+2. **Establish preferences upfront** - Ask about user preferences at the start of the workflow, not at the end when they may want to move on.
+
+3. **Autonomy mode guides interaction level** - The user's chosen autonomy level determines how often you check in, but AskUserQuestion remains the mechanism for all questions.
+
+### User Preferences
+
+Before starting implementation (unless autonomy is Autopilot), establish these preferences:
+
+**File Review Preference** - Check if the `file-review` plugin is available (look for `file-review:file-review` in available commands).
+
+If file-review plugin is installed, use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like to use file-review for inline feedback on code changes during implementation?" | 1. Yes, open file-review for significant changes (Recommended), 2. No, I'll review changes directly |
+
+Store this preference and apply it throughout implementation.
+
+## When to Use
+
+This skill activates when:
+- User invokes `/implement-plan` command
+- Another skill references `**REQUIRED SUB-SKILL:** Use desplega:implementing`
+- User asks to execute or implement an existing plan
+
+## Autonomy Mode
+
+Adapt your behavior based on the autonomy mode:
+
+| Mode | Behavior |
+|------|----------|
+| **Autopilot** | Execute all phases, pause only for manual verification or blockers |
+| **Critical** (Default) | Pause between phases for approval, ask when mismatches found |
+| **Verbose** | Check in frequently, confirm before each major change |
+
+The autonomy mode is passed by the invoking command. If not specified, default to **Critical**.
+
+## Initial Setup Questions
+
+After establishing user preferences, use **AskUserQuestion** to gather implementation-specific details:
+
+### 1. Branch/Worktree Setup
+
+First, check the current branch: `git branch --show-current`
+
+Then check if the `wts` plugin is available (look for `wts:wts` in available skills).
+
+**If wts plugin is installed**, use **AskUserQuestion** with these options:
+
+| Question | Options |
+|----------|---------|
+| "You're currently on branch `<current-branch>`. Where would you like to implement?" | 1. Continue on current branch, 2. Create a new branch, 3. Create a wts worktree |
+
+**If wts plugin is NOT installed**, use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "You're currently on branch `<current-branch>`. Where would you like to implement?" | 1. Continue on current branch, 2. Create a new branch |
+
+### 2. Phase Execution Mode
+
+Use **AskUserQuestion** with these options:
+
+| Question | Options |
+|----------|---------|
+| "How would you like to execute plan phases?" | 1. Background sub-agents (Recommended — saves context, uses phase-runner), 2. Inline in this session (classic — all work happens here) |
+
+If "Background sub-agents" is selected:
+- Each phase is spawned as a background Agent running `desplega:phase-running`
+- The main session becomes an orchestrator: spawn → wait → review report → manual verification → next phase
+- This preserves main session context for cross-phase coordination
+
+If "Inline" is selected:
+- Phases execute directly in the current session (original behavior)
+- Better for small plans or when you want to watch every step
+
+### 3. Commit Strategy
+
+Use **AskUserQuestion** with these options:
+
+| Question | Options |
+|----------|---------|
+| "How would you like to handle commits during implementation?" | 1. Commit after each phase (Recommended for complex plans), 2. Commit at the end (Single commit for all changes), 3. Let me decide as I go |
+
+If "Commit after each phase" is selected:
+- After completing each phase's verification, create a commit with message: `[Phase N] <phase name>`
+- Use the plan's phase descriptions for commit messages
+
+Store these preferences and apply them throughout the implementation.
+
+## Getting Started
+
+When given a plan path:
+1. Read the plan completely
+2. Check for existing checkmarks (`- [x]`)
+3. Set plan status to `status: in-progress` by editing the frontmatter `status` field. This signals to progress-tracking hooks which plan is active.
+4. **Read files fully** - never use limit/offset parameters
+5. Think deeply about how the pieces fit together
+6. Create a todo list to track progress
+7. Start implementing if you understand what needs to be done
+
+If no plan path provided, ask for one.
+
+## Implementation Philosophy
+
+Plans are carefully designed, but reality can be messy. Your job is to:
+- Follow the plan's intent while adapting to what you find
+- Implement each phase fully before moving to the next
+- Verify your work makes sense in the broader codebase context
+- Update checkboxes in the plan as you complete sections
+
+When things don't match the plan exactly, think about why and communicate clearly.
+
+## Handling Mismatches
+
+If you encounter a mismatch (and autonomy mode is not Autopilot):
+- STOP and think deeply about why the plan can't be followed
+- Use **AskUserQuestion** to present the issue and get direction:
+
+| Question | Options |
+|----------|---------|
+| "Issue in Phase [N]: Expected [what the plan says], Found [actual situation]. Why this matters: [explanation]. How should I proceed?" | 1. Adapt plan to match reality, 2. Proceed as originally planned, 3. Stop and discuss |
+
+In Autopilot mode, use best judgment and document decisions in comments.
+
+## Verification Approach
+
+### Background Sub-Agent Mode (Recommended)
+
+If the user selected "Background sub-agents" for phase execution:
+
+1. **Read the phase overview** in the main session (minimal context usage)
+2. **Spawn a `desplega:phase-running` agent** in background with plan path + phase number:
+   - Use the Agent tool with `run_in_background: true`
+   - Pass the plan path and phase number as context
+3. **Wait for agent completion** — you'll be notified when it finishes
+4. **Review the agent's report** — check status (completed/blocked/failed), changed files, verification results
+5. **Check QA spec status** — If the phase agent reports `QA: pending`, present the QA spec's test scenarios to the user and offer:
+   - Execute QA now (→ invoke `desplega:qa` with plan path + phase context)
+   - Skip QA for this phase
+   - If `QA: passed`, note it and proceed. If `QA: n/a`, proceed normally.
+6. **Handle manual verification** with the user — present the manual verification items from the phase
+7. **Proceed to next phase** after user confirms
+
+The implementing skill becomes an **orchestrator** — it coordinates phases, handles human checkpoints, and manages cross-phase decisions, but delegates actual implementation work to phase-runner sub-agents.
+
+### Inline Mode (Classic)
+
+If the user selected "Inline" for phase execution:
+
+After implementing a phase:
+1. Run the success criteria checks (usually `make format` or folder-specific `Makefile`s)
+2. Fix any issues before proceeding
+3. If the phase has a `### QA Spec` section, execute the test scenarios or offer to invoke `/qa`
+4. Update progress in both the plan and your todos
+4. Check off completed items in the plan file using Edit
+
+### Pause for Human Verification (if not Autopilot or executing multiple phases)
+
+```
+Phase [N] Complete - Ready for Manual Verification
+
+Automated verification passed:
+- [List automated checks that passed]
+
+Please perform the manual verification steps listed in the plan:
+- [List manual verification items from the plan]
+
+Let me know when manual testing is complete so I can proceed to Phase [N+1].
+```
+
+If instructed to execute multiple phases consecutively, skip the pause until the last phase.
+
+Do not check off manual testing items until confirmed by the user.
+
+## If You Get Stuck
+
+When something isn't working as expected:
+1. Make sure you've read and understood all relevant code
+2. Consider if the codebase has evolved since the plan was written
+3. Present the mismatch clearly and ask for guidance (unless Autopilot)
+4. Use sub-tasks sparingly for targeted debugging
+
+## Resuming Work
+
+If the plan has existing checkmarks:
+- Trust that completed work is done
+- Pick up from the first unchecked item
+- Verify previous work only if something seems off
+
+## Completing Implementation
+
+When all phases are complete and verified:
+1. Set the plan frontmatter `status` field to `completed`.
+2. Ensure automated verification checkboxes are updated.
+3. Leave manual verification checkboxes unchecked until the user confirms completion.
+4. Offer post-implementation auditing: "Would you like me to run `/verify-plan` for a post-implementation audit, then `/review` for a final quality check?"
+
+Remember: You're implementing a solution, not just checking boxes. Keep the end goal in mind.
+
+## Review Integration
+
+If the `file-review` plugin is available and the user selected "Yes" during User Preferences setup:
+- After significant code changes in each phase, invoke `/file-review:file-review <changed-file-path>` for inline human comments
+- Process feedback with `file-review:process-review` skill before moving to the next phase
+- If user selected "No" or autonomy mode is Autopilot, skip this step
+
+
+ARGUMENTS: thoughts/taras/plans/2026-03-18-workflow-redesign.md --autonomy=critical
+
+---
+
+<task-notification>
+<task-id>a1820d2fc0ef81992</task-id>
+<tool-use-id>toolu_01KLV1o2EFyzA1Ufydi2p4mj</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a1820d2fc0ef81992.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 1: Foundation types/DB/registry" completed</summary>
+<result>All three verifications pass. Let me summarize the complete implementation.
+
+---
+
+## Phase 1 Implementation Complete
+
+### Files Created
+
+1. **`src/be/migrations/008_workflow_redesign.sql`** — Database migration that drops and recreates workflow tables with new schema: `workflows` (adds `triggers`, `cooldown`, `input` columns; removes `webhookSecret`), `workflow_runs` (adds `skipped` status), `workflow_run_steps` (adds `retryCount`, `maxRetries`, `nextRetryAt`, `idempotencyKey`), and new `workflow_versions` table for version history. Includes retry and idempotency indexes.
+
+2. **`src/workflows/executors/base.ts`** — `BaseExecutor<TConfig, TOutput>` abstract class with `run()` (validates config via safeParse, calls `execute()`, validates output) and abstract `execute()` method. Also exports `ExecutorDependencies`, `ExecutorInput`, `ExecutorResult`, `AsyncExecutorResult` interfaces.
+
+3. **`src/workflows/executors/registry.ts`** — `ExecutorRegistry` class with `register()`, `get()`, `has()`, `types()` methods. Factory function `createExecutorRegistry()` placeholder for Phase 2 registration.
+
+4. **`src/workflows/executors/index.ts`** — Re-exports from base and registry.
+
+5. **`src/workflows/definition.ts`** — `generateEdges()` (derives edges from `next` refs for UI), `findEntryNodes()`, `getSuccessors()`, `validateDefinition()` (checks: missing next targets, entry node count, orphaned nodes, unregistered executor types).
+
+6. **`src/tests/workflow-registry.test.ts`** — 28 tests covering executor registration, type lookup, missing executor handling, BaseExecutor config/output validation, edge generation, entry node detection, successor resolution, definition validation (missing targets, multiple entries, orphans, unregistered types, cycles), and DB integration (workflow CRUD with new fields, version history, retry-related queries).
+
+### Files Modified
+
+7. **`src/types.ts`** (lines 548-773) — Replaced workflow schemas with: `RetryPolicySchema`, `ExecutorMetaSchema`, `ValidationResultSchema`, `StepValidationConfigSchema`, new `WorkflowNodeSchema` (with `next`, `validation`, `retry` fields), `WorkflowEdgeSchema` (kept as derived type), `WorkflowDefinitionSchema` (nodes-only, no edges), `TriggerConfigSchema` (discriminated union: webhook, schedule), `CooldownConfigSchema` (with refine), `InputValueSchema`, `WorkflowTemplateSchema`, `WorkflowSnapshotSchema`, `WorkflowSchema` (with `triggers`, `cooldown`, `input`), `WorkflowVersionSchema`, updated `WorkflowRunStatusSchema` (adds `skipped`), updated `WorkflowRunStepSchema` (adds retry columns).
+
+8. **`src/be/db.ts`** — Updated `WorkflowRow` type, `rowToWorkflow()`, `createWorkflow()`, `updateWorkflow()`, `WorkflowRunStepRow`, `rowToWorkflowRunStep()`, `updateWorkflowRunStep()` for new fields. Added: `getLastSuccessfulRun()`, `getRetryableSteps()`, `getCompletedStepNodeIds()`, `getStepByIdempotencyKey()`, `createWorkflowVersion()`, `getWorkflowVersions()`, `getWorkflowVersion()`. Removed `getWorkflowByWebhookSecret()`.
+
+9. **`src/workflows/engine.ts`** — Updated `findEntryNodes()` and `getSuccessors()` to derive from `next` references instead of `edges` array. Stubbed `executeNode()` (will be replaced by executor registry in Phase 3).
+
+10. **`src/http/workflows.ts`** — Replaced `webhookSecret` check with TODO comment for Phase 6 HMAC-based verification.
+
+### Verification Results
+
+- **TypeScript**: Compiles cleanly (`bun run tsc:check`)
+- **Lint**: Passes (`bun run lint:fix` — 1 pre-existing warning about nested biome.json in new-ui/)
+- **Tests**: 28/28 pass, 70 expect() calls (`bun test src/tests/workflow-registry.test.ts`)
+- **Migration**: Applies successfully on fresh DB (verified via test initialization)
+
+### Deviations from Plan
+
+- Removed `getWorkflowByWebhookSecret()` from db.ts since the `webhookSecret` column no longer exists. No other code referenced it.
+- Had to fix `src/http/workflows.ts` line 239 (`workflow.webhookSecret` reference) to make it compile — replaced with a TODO for Phase 6.
+- Had to stub `executeNode()` in engine.ts since the old node type imports (`./nodes/*`) reference old executor types that no longer align with the new schema. The full engine rewrite happens in Phase 3.</result>
+<usage><total_tokens>119030</total_tokens><tool_uses>80</tool_uses><duration_ms>679107</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a1820d2fc0ef81992.output
+
+---
+
+ok, keep going!
