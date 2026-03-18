@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { Github, BookOpen, ExternalLink, LayoutDashboard, Sparkles, PenLine, Blocks } from "lucide-react";
 
 export function Footer() {
@@ -44,20 +45,20 @@ export function Footer() {
               <BookOpen className="w-4 h-4" />
               Docs
             </a>
-            <a
+            <Link
               href="/blog"
               className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
             >
               <PenLine className="w-4 h-4" />
               Blog
-            </a>
-            <a
+            </Link>
+            <Link
               href="/examples"
               className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
             >
               <Sparkles className="w-4 h-4" />
               Examples
-            </a>
+            </Link>
             <a
               href="https://templates.agent-swarm.dev"
               target="_blank"

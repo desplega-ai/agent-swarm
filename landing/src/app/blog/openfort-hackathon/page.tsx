@@ -11,6 +11,8 @@ import {
   ExternalLink,
   Users,
 } from "lucide-react";
+import Image from "next/image";
+import Link from "next/link";
 import { Navbar } from "@/components/navbar";
 import { Footer } from "@/components/footer";
 
@@ -167,13 +169,13 @@ export default function OpenfortHackathonPost() {
 
       <article className="mx-auto max-w-3xl px-6 pt-32 pb-20">
         {/* Back link */}
-        <a
+        <Link
           href="/blog"
           className="inline-flex items-center gap-1.5 text-[13px] text-zinc-400 hover:text-zinc-700 transition-colors mb-8"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           Back to Blog
-        </a>
+        </Link>
 
         {/* Header */}
         <header className="mb-12">
@@ -530,11 +532,13 @@ const client = createX402Client({ signer });`}
                 </span>
               </div>
               <div className="bg-zinc-950 p-8 flex items-center justify-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
+                <Image
                   src="/omghost-openfort.svg"
                   alt="Openfort ghost logo in Pixel Icons style, purchased via x402"
+                  width={320}
+                  height={320}
                   className="max-w-full h-auto max-h-80"
+                  unoptimized
                 />
               </div>
               <div className="bg-zinc-50 px-4 py-2.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1.5 text-[11px] text-zinc-500 font-mono">
@@ -834,7 +838,7 @@ SVG saved (5910 characters)`}
               <h3 className="text-[13px] font-semibold text-zinc-500 uppercase tracking-wider mb-3">
                 Related Posts
               </h3>
-              <a
+              <Link
                 href="/blog/swarm-metrics"
                 className="group flex items-center gap-3 p-3 -mx-3 rounded-lg hover:bg-zinc-50 transition-colors"
               >
@@ -847,7 +851,7 @@ SVG saved (5910 characters)`}
                   </p>
                 </div>
                 <ArrowRight className="w-4 h-4 text-zinc-400 group-hover:text-amber-600 shrink-0" />
-              </a>
+              </Link>
             </div>
           </footer>
         </div>
