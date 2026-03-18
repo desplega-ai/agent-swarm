@@ -1759,6 +1759,17 @@ export function findRecentSimilarTasks(opts: {
     .map(rowToAgentTask);
 }
 
+function getAgentCurrentTask(agentId: string): AgentTask | null {
+  const row = getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks
+       WHERE agentId = ? AND status = 'in_progress'
+       ORDER BY lastUpdatedAt DESC LIMIT 1`,
+    )
+    .get(agentId);
+  return row ? rowToAgentTask(row) : null;
+}
+
 export function createTaskExtended(task: string, options?: CreateTaskOptions): AgentTask {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -1789,6 +1800,17 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       if (parent.agentmailThreadId && !options.agentmailThreadId) {
         options.agentmailThreadId = parent.agentmailThreadId;
       }
+    }
+  }
+
+  // Auto-inherit Slack metadata from creator's current in-progress task
+  // This ensures delegated tasks automatically appear in the originating Slack thread
+  if (options?.creatorAgentId && !options.slackChannelId) {
+    const creatorTask = getAgentCurrentTask(options.creatorAgentId);
+    if (creatorTask?.slackChannelId) {
+      options.slackChannelId = creatorTask.slackChannelId;
+      options.slackThreadTs = creatorTask.slackThreadTs;
+      options.slackUserId = creatorTask.slackUserId;
     }
   }
 
