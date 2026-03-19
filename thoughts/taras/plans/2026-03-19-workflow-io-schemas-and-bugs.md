@@ -518,10 +518,10 @@ if (validationResult.retryContext) {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] I/O schema tests pass: `bun test src/tests/workflow-io-schemas.test.ts`
-- [ ] All workflow tests pass: `bun test src/tests/workflow-`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
+- [x] I/O schema tests pass: `bun test src/tests/workflow-io-schemas.test.ts`
+- [x] All workflow tests pass: `bun test src/tests/workflow-`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
 - [ ] Create a workflow with explicit `inputs` mapping and verify nodes receive only declared inputs
