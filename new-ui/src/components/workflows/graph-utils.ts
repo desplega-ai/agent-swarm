@@ -32,6 +32,7 @@ export interface FlowNodeData {
   config: Record<string, unknown>;
   stepStatus?: WorkflowRunStepStatus;
   outputPorts: string[];
+  selected?: boolean;
   [key: string]: unknown;
 }
 
@@ -48,7 +49,7 @@ export function toReactFlowGraph(
 
   // Compute output ports per node from edges
   const outputPortsMap = new Map<string, Set<string>>();
-  for (const edge of definition.edges) {
+  for (const edge of definition.edges ?? []) {
     if (!outputPortsMap.has(edge.source)) {
       outputPortsMap.set(edge.source, new Set());
     }
@@ -73,7 +74,7 @@ export function toReactFlowGraph(
     };
   });
 
-  const edges: Edge[] = definition.edges.map((edge: WorkflowEdge) => {
+  const edges: Edge[] = (definition.edges ?? []).map((edge: WorkflowEdge) => {
     const sourceStep = stepMap.get(edge.source);
     const targetStep = stepMap.get(edge.target);
     const bothCompleted = sourceStep?.status === "completed" && targetStep?.status === "completed";

@@ -776,6 +776,28 @@ class ApiClient {
     if (!res.ok) throw new Error(`Failed to retry workflow run: ${res.status}`);
     return res.json();
   }
+
+  async fetchExecutorTypes(): Promise<ExecutorTypeInfo[]> {
+    const url = `${this.getBaseUrl()}/api/executor-types`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.executorTypes ?? [];
+  }
+
+  async fetchExecutorType(type: string): Promise<ExecutorTypeInfo | null> {
+    const url = `${this.getBaseUrl()}/api/executor-types/${encodeURIComponent(type)}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) return null;
+    return res.json();
+  }
+}
+
+export interface ExecutorTypeInfo {
+  type: string;
+  mode: "instant" | "async";
+  configSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
 }
 
 export const api = new ApiClient();

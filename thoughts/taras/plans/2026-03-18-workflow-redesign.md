@@ -652,9 +652,9 @@ Wire everything together in `index.ts`, delete old files, update the dashboard U
 #### Manual Verification:
 - [x] Fresh DB: `rm -f agent-swarm-db.sqlite* && bun run start:http` — starts without errors
 - [x] Create workflow via curl → trigger → watch run complete → query run detail with steps
-- [ ] UI dashboard: workflows page loads, shows workflow list with new fields
-- [ ] UI dashboard: workflow detail page shows definition (nodes-with-next rendered with auto-generated edges)
-- [ ] UI dashboard: run detail page shows steps with retry info
+- [x] UI dashboard: workflows page loads, shows workflow list with new fields
+- [x] UI dashboard: workflow detail page shows definition (nodes-with-next rendered with auto-generated edges)
+- [x] UI dashboard: run detail page shows steps with retry info
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. Commit after verification passes.
 

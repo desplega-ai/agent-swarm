@@ -14,6 +14,7 @@ export function ConditionNode({ data }: NodeProps) {
       className={cn(
         "bg-card border-2 rounded-lg shadow-sm px-3 py-2 min-w-[240px] max-w-[280px]",
         borderColor,
+        d.selected && "ring-2 ring-amber-500 ring-offset-1 ring-offset-background",
       )}
     >
       <Handle type="target" position={Position.Top} id="input" className="!bg-amber-500" />
