@@ -19,13 +19,28 @@ const AGENT_ACTIVITY_MUTATION = `
   }
 `;
 
+const AGENT_SESSION_UPDATE_MUTATION = `
+  mutation AgentSessionUpdate($id: String!, $input: AgentSessionUpdateInput!) {
+    agentSessionUpdate(id: $id, input: $input) { success }
+  }
+`;
+
 /**
  * Low-level helper to post an activity to a Linear AgentSession via GraphQL.
+ *
+ * Activity types and their effect on session state:
+ * - `thought` — internal note (dimmed), session becomes active
+ * - `action`  — tool invocation, session becomes active
+ * - `response` — final result, session auto-completes
+ * - `error`   — error message, session transitions to error state
+ *
+ * No `signal` parameter is needed — Linear derives session state from the activity type.
  */
 async function postAgentActivity(
   sessionId: string,
-  content: { type: "thought" | "response" | "error"; body: string },
-  signal?: "stop" | "continue",
+  content:
+    | { type: "thought" | "response" | "error"; body: string }
+    | { type: "action"; action: string; parameter?: string; result?: string },
 ): Promise<boolean> {
   const tokens = getOAuthTokens("linear");
   if (!tokens) {
@@ -33,13 +48,10 @@ async function postAgentActivity(
     return false;
   }
 
-  const input: Record<string, unknown> = {
+  const input = {
     agentSessionId: sessionId,
     content,
   };
-  if (signal) {
-    input.signal = signal;
-  }
 
   const res = await fetch("https://api.linear.app/graphql", {
     method: "POST",
@@ -66,6 +78,51 @@ async function postAgentActivity(
   };
   if (result.errors) {
     console.error("[Linear Sync] GraphQL errors posting AgentSession activity:", result.errors);
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Update an AgentSession via the agentSessionUpdate mutation.
+ * Used to set externalUrls, plan, etc.
+ */
+async function updateAgentSession(
+  sessionId: string,
+  input: Record<string, unknown>,
+): Promise<boolean> {
+  const tokens = getOAuthTokens("linear");
+  if (!tokens) {
+    console.log("[Linear Sync] No OAuth tokens, cannot update AgentSession");
+    return false;
+  }
+
+  const res = await fetch("https://api.linear.app/graphql", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${tokens.accessToken}`,
+    },
+    body: JSON.stringify({
+      query: AGENT_SESSION_UPDATE_MUTATION,
+      variables: { id: sessionId, input },
+    }),
+  });
+
+  if (!res.ok) {
+    console.error(
+      `[Linear Sync] Failed to update AgentSession ${sessionId}: ${res.status} ${res.statusText}`,
+    );
+    return false;
+  }
+
+  const result = (await res.json()) as {
+    data?: { agentSessionUpdate?: { success: boolean } };
+    errors?: unknown[];
+  };
+  if (result.errors) {
+    console.error("[Linear Sync] GraphQL errors updating AgentSession:", result.errors);
     return false;
   }
 
@@ -105,14 +162,47 @@ export async function postAgentSessionError(sessionId: string, body: string): Pr
 }
 
 /**
- * End a Linear AgentSession by posting a final response with a stop signal.
+ * End a Linear AgentSession by posting a response or error activity.
+ * A `response` activity auto-completes the session; an `error` activity marks it as errored.
+ * No explicit signal is needed — Linear derives state from the activity type.
  */
 export async function endAgentSession(
   sessionId: string,
   body: string,
   type: "response" | "error" = "response",
 ): Promise<void> {
-  await postAgentActivity(sessionId, { type, body }, "stop");
+  await postAgentActivity(sessionId, { type, body });
+}
+
+/**
+ * Post an action activity to a Linear AgentSession (tool invocation).
+ */
+export async function postAgentSessionAction(
+  sessionId: string,
+  action: string,
+  parameter?: string,
+  result?: string,
+): Promise<void> {
+  const content: { type: "action"; action: string; parameter?: string; result?: string } = {
+    type: "action",
+    action,
+  };
+  if (parameter) content.parameter = parameter;
+  if (result) content.result = result;
+  await postAgentActivity(sessionId, content);
+}
+
+/**
+ * Set externalUrls on an AgentSession so users can click through to the swarm dashboard.
+ */
+export async function updateAgentSessionExternalUrls(
+  sessionId: string,
+  urls: { label: string; url: string }[],
+): Promise<void> {
+  const ok = await updateAgentSession(sessionId, { externalUrls: urls });
+  if (ok) {
+    console.log(`[Linear Sync] Set externalUrls on AgentSession ${sessionId}`);
+  }
 }
 
 // Status mapping: Linear state names → swarm task statuses
@@ -215,6 +305,16 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
     ).catch((err) => {
       console.error("[Linear Sync] Failed to acknowledge AgentSession:", err);
     });
+
+    // Set externalUrls so users can click through to the swarm dashboard
+    const dashboardUrl = process.env.SWARM_DASHBOARD_URL || process.env.APP_URL;
+    if (dashboardUrl) {
+      updateAgentSessionExternalUrls(sessionId, [
+        { label: "View in Agent Swarm", url: `${dashboardUrl}/tasks/${task.id}` },
+      ]).catch((err) => {
+        console.error("[Linear Sync] Failed to set externalUrls on AgentSession:", err);
+      });
+    }
   }
 
   console.log(
@@ -406,6 +506,16 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
     ).catch((err) => {
       console.error("[Linear Sync] Failed to acknowledge prompted AgentSession:", err);
     });
+
+    // Set externalUrls for the follow-up task
+    const dashboardUrl = process.env.SWARM_DASHBOARD_URL || process.env.APP_URL;
+    if (dashboardUrl) {
+      updateAgentSessionExternalUrls(sessionId, [
+        { label: "View in Agent Swarm", url: `${dashboardUrl}/tasks/${task.id}` },
+      ]).catch((err) => {
+        console.error("[Linear Sync] Failed to set externalUrls on prompted AgentSession:", err);
+      });
+    }
   }
 
   console.log(
