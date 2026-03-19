@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.46.0",
+    "version": "1.47.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -3331,6 +3331,102 @@
           },
           "404": {
             "description": "Task not found"
+          }
+        }
+      }
+    },
+    "/api/trackers/linear/authorize": {
+      "get": {
+        "summary": "Redirect to Linear OAuth consent screen",
+        "tags": [
+          "Trackers"
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to Linear OAuth"
+          },
+          "500": {
+            "description": "Failed to generate authorization URL"
+          },
+          "503": {
+            "description": "Linear integration not configured"
+          }
+        }
+      }
+    },
+    "/api/trackers/linear/callback": {
+      "get": {
+        "summary": "Handle Linear OAuth callback",
+        "tags": [
+          "Trackers"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "code",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "state",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OAuth complete"
+          },
+          "400": {
+            "description": "Invalid state or code"
+          },
+          "500": {
+            "description": "Token exchange failed"
+          }
+        }
+      }
+    },
+    "/api/trackers/linear/status": {
+      "get": {
+        "summary": "Linear connection status, token expiry, workspace info, expected webhook URL",
+        "tags": [
+          "Trackers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Connection status"
+          },
+          "503": {
+            "description": "Linear integration not configured"
+          }
+        }
+      }
+    },
+    "/api/trackers/linear/webhook": {
+      "post": {
+        "summary": "Handle Linear webhook events (signature-verified)",
+        "tags": [
+          "Trackers"
+        ],
+        "responses": {
+          "200": {
+            "description": "Event accepted"
+          },
+          "401": {
+            "description": "Invalid signature"
+          },
+          "503": {
+            "description": "Linear integration not configured"
           }
         }
       }

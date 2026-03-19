@@ -62,6 +62,13 @@
   - [memory-search](#memory-search)
   - [memory-get](#memory-get)
   - [inject-learning](#inject-learning)
+- [Tracker Tools](#tracker-tools)
+  - [tracker-status](#tracker-status)
+  - [tracker-link-task](#tracker-link-task)
+  - [tracker-link-epic](#tracker-link-epic)
+  - [tracker-unlink](#tracker-unlink)
+  - [tracker-sync-status](#tracker-sync-status)
+  - [tracker-map-agent](#tracker-map-agent)
 - [Workflows Tools](#workflows-tools)
   - [create-workflow](#create-workflow)
   - [list-workflows](#list-workflows)
@@ -659,6 +666,80 @@ Allows the lead agent to push learnings into a worker's memory. The learning wil
 |-----------|------|----------|---------|-------------|
 | `agentId` | `uuid` | Yes | - | Target worker agent ID |
 | `learning` | `string` | Yes | - | The learning content to inject |
+
+## Tracker Tools
+
+*External issue tracker integration (Linear, etc.)*
+
+### tracker-status
+
+**Tracker Status**
+
+Show all connected trackers and their OAuth status (token expiry, workspace info).
+
+*No parameters*
+
+### tracker-link-task
+
+**Link Task to Tracker**
+
+Link a swarm task to an external tracker issue.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear') |
+| `swarmTaskId` | `string` | Yes | - | The swarm task ID to link |
+| `externalId` | `string` | Yes | - | The external issue ID in the tracker |
+| `externalIdentifier` | `string` | No | - | Human-readable identifier (e.g. 'ENG-42') |
+| `externalUrl` | `string` | No | - | URL to the external issue |
+
+### tracker-link-epic
+
+**Link Epic to Tracker**
+
+Link a swarm epic to an external tracker issue or project.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear') |
+| `swarmEpicId` | `string` | Yes | - | The swarm epic ID to link |
+| `externalId` | `string` | Yes | - | The external issue/project ID in the tracker |
+| `externalIdentifier` | `string` | No | - | Human-readable identifier (e.g. 'ENG-42') |
+| `externalUrl` | `string` | No | - | URL to the external issue/project |
+
+### tracker-unlink
+
+**Unlink Tracker Sync**
+
+Remove a tracker sync mapping by ID.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `syncId` | `string` | Yes | - | The tracker sync mapping ID to remove |
+
+### tracker-sync-status
+
+**Tracker Sync Status**
+
+Show all tracker sync mappings with their state.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `provider` | `string` | No | - | Filter by provider (e.g. 'linear') |
+| `entityType` | `string` | No | - | Filter by entity type ('task' or 'epic') |
+
+### tracker-map-agent
+
+**Map Agent to Tracker User**
+
+Map a swarm agent to an external tracker user (for assignment sync).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear') |
+| `agentId` | `string` | Yes | - | The swarm agent ID |
+| `externalUserId` | `string` | Yes | - | The external user ID in the tracker |
+| `agentName` | `string` | Yes | - | Display name for the agent mapping |
 
 ## Workflows Tools
 

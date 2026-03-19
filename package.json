@@ -1,6 +1,6 @@
 {
   "name": "@desplega.ai/agent-swarm",
-  "version": "1.46.0",
+  "version": "1.47.0",
   "description": "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants",
   "license": "MIT",
   "author": "desplega.sh <contact@desplega.sh>",
@@ -84,6 +84,7 @@
     "@asteasolutions/zod-to-openapi": "^8.0.0",
     "@desplega.ai/localtunnel": "^2.2.0",
     "@inkjs/ui": "^2.0.0",
+    "@linear/sdk": "^77.0.0",
     "@mariozechner/pi-agent-core": "^0.57.1",
     "@mariozechner/pi-ai": "^0.57.1",
     "@mariozechner/pi-coding-agent": "^0.57.1",
@@ -99,6 +100,7 @@
     "date-fns": "^4.1.0",
     "hono": "^4.12.3",
     "ink": "^6.5.1",
+    "oauth4webapi": "^3.8.5",
     "openai": "^6.22.0",
     "react": "^19.2.3",
     "react-devtools-core": "^7.0.1",

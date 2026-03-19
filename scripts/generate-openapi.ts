@@ -13,6 +13,7 @@ import "../src/http/schedules";
 import "../src/http/session-data";
 import "../src/http/stats";
 import "../src/http/tasks";
+import "../src/http/trackers/linear";
 import "../src/http/webhooks";
 import "../src/http/workflows";
 
