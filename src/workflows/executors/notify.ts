@@ -56,12 +56,29 @@ export class NotifyExecutor extends BaseExecutor<
         }
       }
       case "slack": {
-        // Stub — real Slack integration comes later
-        console.log(`[notify] Slack stub — target: ${config.target}, message: ${message}`);
-        return {
-          status: "success",
-          output: { sent: false, message },
-        };
+        const { getSlackApp } = await import("../../slack/app");
+        const app = getSlackApp();
+        if (!app) {
+          return {
+            status: "success",
+            output: { sent: false, message },
+          };
+        }
+        try {
+          const result = await app.client.chat.postMessage({
+            channel: config.target || "",
+            text: message,
+          });
+          return {
+            status: "success",
+            output: { sent: true, messageId: result.ts || "", message },
+          };
+        } catch (err) {
+          return {
+            status: "failed",
+            error: `Failed to post Slack message: ${err instanceof Error ? err.message : String(err)}`,
+          };
+        }
       }
       case "email": {
         // Stub — real email integration comes later
