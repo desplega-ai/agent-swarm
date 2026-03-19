@@ -9,7 +9,8 @@ export const registerListWorkflowsTool = (server: McpServer) => {
     {
       title: "List Workflows",
       annotations: { destructiveHint: false },
-      description: "List all automation workflows, optionally filtered by enabled status.",
+      description:
+        "List all automation workflows, optionally filtered by enabled status. Returns new fields: triggers, cooldown, input.",
       inputSchema: z.object({
         enabled: z.boolean().optional().describe("Filter by enabled status (omit to return all)"),
       }),
