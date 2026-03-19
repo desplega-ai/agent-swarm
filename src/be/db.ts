@@ -5910,11 +5910,12 @@ export function createWorkflowRun(data: {
   workflowId: string;
   triggerData?: unknown;
 }): WorkflowRun {
+  const now = new Date().toISOString();
   const row = getDb()
-    .prepare<WorkflowRunRow, [string, string, string | null]>(
-      `INSERT INTO workflow_runs (id, workflowId, triggerData) VALUES (?, ?, ?) RETURNING *`,
+    .prepare<WorkflowRunRow, [string, string, string, string | null]>(
+      `INSERT INTO workflow_runs (id, workflowId, startedAt, triggerData) VALUES (?, ?, ?, ?) RETURNING *`,
     )
-    .get(data.id, data.workflowId, data.triggerData ? JSON.stringify(data.triggerData) : null);
+    .get(data.id, data.workflowId, now, data.triggerData ? JSON.stringify(data.triggerData) : null);
   if (!row) throw new Error("Failed to create workflow run");
   return rowToWorkflowRun(row);
 }
@@ -6021,16 +6022,18 @@ export function createWorkflowRunStep(data: {
   nodeType: string;
   input?: unknown;
 }): WorkflowRunStep {
+  const now = new Date().toISOString();
   const row = getDb()
-    .prepare<WorkflowRunStepRow, [string, string, string, string, string | null]>(
-      `INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, input)
-       VALUES (?, ?, ?, ?, 'running', ?) RETURNING *`,
+    .prepare<WorkflowRunStepRow, [string, string, string, string, string, string | null]>(
+      `INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, startedAt, input)
+       VALUES (?, ?, ?, ?, 'running', ?, ?) RETURNING *`,
     )
     .get(
       data.id,
       data.runId,
       data.nodeId,
       data.nodeType,
+      now,
       data.input ? JSON.stringify(data.input) : null,
     );
   if (!row) throw new Error("Failed to create workflow run step");

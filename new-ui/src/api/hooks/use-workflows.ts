@@ -87,6 +87,15 @@ export function useWorkflowVersions(workflowId: string) {
   });
 }
 
+export function useExecutorType(type: string) {
+  return useQuery({
+    queryKey: ["executor-type", type],
+    queryFn: () => api.fetchExecutorType(type),
+    enabled: !!type,
+    staleTime: 60_000, // schemas don't change at runtime
+  });
+}
+
 export function useRetryWorkflowRun() {
   const queryClient = useQueryClient();
   return useMutation({

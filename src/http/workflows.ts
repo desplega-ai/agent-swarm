@@ -165,6 +165,30 @@ const retryWorkflowRunRoute = route({
   },
 });
 
+const listExecutorTypesRoute = route({
+  method: "get",
+  path: "/api/executor-types",
+  pattern: ["api", "executor-types"],
+  summary: "List all executor types with their config and output schemas",
+  tags: ["Workflows"],
+  responses: {
+    200: { description: "List of executor types with schemas" },
+  },
+});
+
+const getExecutorTypeRoute = route({
+  method: "get",
+  path: "/api/executor-types/{type}",
+  pattern: ["api", "executor-types", null],
+  summary: "Get a specific executor type with its schemas",
+  tags: ["Workflows"],
+  params: z.object({ type: z.string() }),
+  responses: {
+    200: { description: "Executor type details" },
+    404: { description: "Executor type not found" },
+  },
+});
+
 const webhookTriggerRoute = route({
   method: "post",
   path: "/api/webhooks/{workflowId}",
@@ -217,6 +241,26 @@ export async function handleWorkflows(
   queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
+  // Executor type schemas
+  if (listExecutorTypesRoute.match(req.method, pathSegments)) {
+    const registry = getExecutorRegistry();
+    json(res, { executorTypes: registry.describeAll() });
+    return true;
+  }
+
+  if (getExecutorTypeRoute.match(req.method, pathSegments)) {
+    const parsed = await getExecutorTypeRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const registry = getExecutorRegistry();
+    if (!registry.has(parsed.params.type)) {
+      res.writeHead(404);
+      res.end();
+      return true;
+    }
+    json(res, registry.describe(parsed.params.type));
+    return true;
+  }
+
   // Webhook trigger — needs raw body for HMAC verification, no API key auth
   if (webhookTriggerRoute.match(req.method, pathSegments)) {
     const workflowId = pathSegments[2]!;
@@ -406,11 +450,6 @@ export async function handleWorkflows(
     }
     if (!workflow.enabled) {
       jsonError(res, "Workflow is disabled", 400);
-      return true;
-    }
-    if (!myAgentId) {
-      res.writeHead(401);
-      res.end();
       return true;
     }
     const body = await parseBody<Record<string, unknown>>(req);

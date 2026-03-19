@@ -1,4 +1,4 @@
-import { Background, Controls, MiniMap, ReactFlow } from "@xyflow/react";
+import { Background, Controls, ReactFlow } from "@xyflow/react";
 import { useMemo } from "react";
 import "@xyflow/react/dist/style.css";
 import type { WorkflowDefinition, WorkflowRunStep } from "@/api/types";
@@ -18,15 +18,30 @@ interface WorkflowGraphProps {
   definition: WorkflowDefinition;
   steps?: WorkflowRunStep[];
   onNodeClick?: (nodeId: string) => void;
+  selectedNodeId?: string | null;
   className?: string;
 }
 
-export function WorkflowGraph({ definition, steps, onNodeClick, className }: WorkflowGraphProps) {
+export function WorkflowGraph({
+  definition,
+  steps,
+  onNodeClick,
+  selectedNodeId,
+  className,
+}: WorkflowGraphProps) {
   const { nodes, edges } = useMemo(() => {
     const graph = toReactFlowGraph(definition, steps);
+    // Mark selected node
+    if (selectedNodeId) {
+      for (const node of graph.nodes) {
+        if (node.id === selectedNodeId) {
+          node.data = { ...node.data, selected: true };
+        }
+      }
+    }
     const layoutNodes = applyDagreLayout(graph.nodes, graph.edges);
     return { nodes: layoutNodes, edges: graph.edges };
-  }, [definition, steps]);
+  }, [definition, steps, selectedNodeId]);
 
   return (
     <div className={cn("min-h-[400px] h-[500px] rounded-lg border bg-card", className)}>
@@ -44,10 +59,6 @@ export function WorkflowGraph({ definition, steps, onNodeClick, className }: Wor
       >
         <Background gap={16} size={1} />
         <Controls showInteractive={false} />
-        <MiniMap
-          nodeColor={() => "var(--color-muted-foreground)"}
-          className="!bg-muted !border-border"
-        />
       </ReactFlow>
     </div>
   );
