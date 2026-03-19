@@ -71,4 +71,5 @@ export interface ProviderAdapter {
   readonly name: string;
   createSession(config: ProviderSessionConfig): Promise<ProviderSession>;
   canResume(sessionId: string): Promise<boolean>;
+  formatCommand(commandName: string): string;
 }
