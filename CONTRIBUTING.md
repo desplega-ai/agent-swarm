@@ -89,6 +89,51 @@ bun run docker:run:worker
 bun run docker:run:lead
 ```
 
+### Local Development with Portless
+
+[Portless](https://port1355.dev/) replaces port numbers with friendly domain URLs:
+- API: `https://api.swarm.localhost:1355`
+- UI: `https://ui.swarm.localhost:1355`
+
+**One-time setup:**
+
+```bash
+bun add -g portless
+portless trust                    # Add CA to system trust store
+portless proxy start --https      # Start HTTPS proxy (runs as daemon)
+```
+
+**Usage:**
+
+```bash
+# Start API
+bun run dev:http
+# → https://api.swarm.localhost:1355
+
+# Start UI (separate terminal)
+cd new-ui && pnpm dev
+# → https://ui.swarm.localhost:1355
+
+# Or start everything with PM2
+bun run pm2-start
+```
+
+**Environment:** Set these in your `.env`:
+
+```bash
+MCP_BASE_URL=https://api.swarm.localhost:1355
+APP_URL=https://ui.swarm.localhost:1355
+```
+
+Update `.mcp.json`:
+```json
+{ "url": "https://api.swarm.localhost:1355/mcp" }
+```
+
+**Worktrees:** Each worktree gets a unique subdomain from the branch name. `.wts-setup.ts` handles this automatically.
+
+**Without portless:** Use `bun run start:http` (no portless required).
+
 ---
 
 ## Code Quality

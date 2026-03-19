@@ -2,15 +2,15 @@ module.exports = {
   apps: [
     {
       name: "swarm-api",
-      script: "bun",
-      args: "run start:http",
+      script: "portless",
+      args: ["api.swarm", "bun", "src/http.ts"],
       cwd: __dirname,
     },
     {
       name: "swarm-ui",
       script: "pnpm",
-      args: ["run", "dev", "--port", "5274"],
-      cwd: `${__dirname}/ui`,
+      args: ["run", "dev"],
+      cwd: `${__dirname}/new-ui`,
     },
     {
       name: "swarm-lead",

@@ -162,6 +162,9 @@ curl -H "Authorization: Bearer 123123" -H "X-Agent-ID: <uuid>" http://localhost:
 - `TEMPLATE_ID` - Template for initial worker profile (e.g., `official/coder`). Fetched from registry on first boot.
 - `TEMPLATE_REGISTRY_URL` - Templates registry URL (default: https://templates.agent-swarm.dev)
 
+**Portless (local dev):**
+`bun run dev:http` uses [portless](https://port1355.dev/) → `https://api.swarm.localhost:1355`. Set `MCP_BASE_URL=https://api.swarm.localhost:1355` and `APP_URL=https://ui.swarm.localhost:1355` in `.env`. Update `.mcp.json` URL to match. Non-portless fallback: `bun run start:http`. Worktrees auto-get `<branch>.api.swarm.localhost:1355` subdomains.
+
 **Local Docker Compose (builds from source):**
 ```bash
 # Runs: API + Claude lead + Pi-mono worker
