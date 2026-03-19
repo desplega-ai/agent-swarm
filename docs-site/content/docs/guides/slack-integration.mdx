@@ -63,15 +63,19 @@ When you @mention the bot in a thread where a worker is already handling a task,
 
 If the assigned worker is offline or unavailable, the follow-up routes to the lead agent instead of dropping the message. The lead picks up the thread context and continues the conversation, preserving `parentTaskId` continuity for chained tasks.
 
-### Explicit Slack Context Propagation
+### Slack Context Propagation
 
-When programmatically delegating tasks from a Slack thread (e.g., lead breaking down work for workers), you can pass Slack metadata directly on `send-task`:
+Slack metadata (`slackChannelId`, `slackThreadTs`, `slackUserId`) is **auto-inherited** from the creator's current task. When a lead delegates work from a Slack-originated task, workers automatically receive the Slack context and post progress updates to the originating thread — no manual metadata passing needed.
+
+The auto-inheritance works via the `X-Source-Task-Id` header, which links the new task back to the creator's active task to look up Slack metadata.
+
+For cases where auto-inheritance isn't available (e.g., programmatic task creation without an active parent task), you can pass Slack metadata explicitly on `send-task`:
 
 - `slackChannelId` — Channel ID for progress updates
 - `slackThreadTs` — Thread timestamp for thread-level updates
 - `slackUserId` — Original requester's Slack user ID
 
-This allows explicit Slack context propagation without requiring `parentTaskId` (which implies session continuity). Workers receiving these tasks will automatically post progress updates back to the originating Slack thread.
+Explicit params override auto-inherited values when both are present.
 
 ### Additive Slack Buffer
 

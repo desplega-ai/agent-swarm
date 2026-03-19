@@ -16,6 +16,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - System prompt conditionally includes agent-fs CLI usage instructions
   - `agent-fs` CLI and Claude plugin pre-installed in worker containers
 
+### Changed
+- Per-session MCP config — each Claude session gets its own `/tmp/mcp-{taskId}.json` config file instead of sharing `.mcp.json`, eliminating race conditions with concurrent sessions (#192)
+- `--strict-mcp-config` flag ensures only per-session MCP servers are loaded (#192)
+- Removed time-based `getAgentCurrentTask()` fallback — uses deterministic `sourceTaskId` only
+- Slack metadata is now auto-inherited from the creator's current task via `X-Source-Task-Id` header — explicit `slackChannelId`/`slackThreadTs`/`slackUserId` params on `send-task` remain available as optional overrides (#191)
+
 ### Fixed
 - Concurrency safety for Slack metadata auto-inheritance — pass `sourceTaskId` through MCP session context via `X-Source-Task-Id` header instead of guessing current task (#191)
 - `send-task` now propagates `sourceTaskId` for accurate Slack metadata lookup
@@ -23,7 +29,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- Optional Slack metadata params (`slackChannelId`, `slackThreadTs`, `slackUserId`) on `send-task` tool for explicit Slack context propagation when delegating tasks (#190)
 - Multi-API-config UI for dashboard — connect to multiple swarm instances from a single browser (#189)
   - Slug-based connection data layer with localStorage persistence (Phase 1)
   - React context for multi-connection state management (Phase 2)
