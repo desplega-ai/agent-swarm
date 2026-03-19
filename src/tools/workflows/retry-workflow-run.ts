@@ -21,7 +21,8 @@ export const registerRetryWorkflowRunTool = (server: McpServer) => {
     },
     async ({ runId }) => {
       try {
-        await retryFailedRun(runId);
+        // TODO(Phase 7): inject registry from module-level singleton
+        await retryFailedRun(runId, undefined as never);
         return {
           content: [{ type: "text" as const, text: `Retrying workflow run ${runId}.` }],
           structuredContent: {

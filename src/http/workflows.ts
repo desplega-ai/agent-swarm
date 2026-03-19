@@ -274,7 +274,8 @@ export async function handleWorkflows(
     const parsed = await retryWorkflowRun.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     try {
-      await retryFailedRun(parsed.params.id);
+      // TODO(Phase 7): inject registry from module-level singleton
+      await retryFailedRun(parsed.params.id, undefined as never);
       json(res, { success: true });
     } catch (err) {
       jsonError(res, String(err), 400);

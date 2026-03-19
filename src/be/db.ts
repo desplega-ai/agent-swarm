@@ -6161,7 +6161,6 @@ export function getRetryableSteps(): WorkflowRunStep[] {
        WHERE status = 'failed'
          AND nextRetryAt IS NOT NULL
          AND nextRetryAt <= ?
-         AND retryCount < maxRetries
        ORDER BY nextRetryAt ASC`,
     )
     .all(now)
@@ -6176,6 +6175,15 @@ export function getCompletedStepNodeIds(runId: string): string[] {
     )
     .all(runId);
   return rows.map((r) => r.nodeId);
+}
+
+export function getTaskByWorkflowRunStepId(stepId: string): AgentTask | null {
+  const row = getDb()
+    .prepare<AgentTaskRow, [string]>(
+      "SELECT * FROM agent_tasks WHERE workflowRunStepId = ? LIMIT 1",
+    )
+    .get(stepId);
+  return row ? rowToAgentTask(row) : null;
 }
 
 export function getStepByIdempotencyKey(key: string): WorkflowRunStep | null {

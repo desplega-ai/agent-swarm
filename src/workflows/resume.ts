@@ -6,9 +6,11 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
+import { checkpointStep } from "./checkpoint";
 import { getSuccessors } from "./definition";
 import { walkGraph } from "./engine";
 import type { WorkflowEventBus } from "./event-bus";
+import type { ExecutorRegistry } from "./executors/registry";
 
 interface TaskEvent {
   taskId: string;
@@ -19,11 +21,21 @@ interface TaskEvent {
   failureReason?: string;
 }
 
-export function setupWorkflowResumeListener(eventBus: WorkflowEventBus): void {
+/**
+ * Wire up event bus listeners for workflow resume on task lifecycle events.
+ */
+export function setupWorkflowResumeListener(
+  eventBus: WorkflowEventBus,
+  registry: ExecutorRegistry,
+): void {
   eventBus.on("task.completed", async (data: unknown) => {
     const event = data as TaskEvent;
     if (!event.workflowRunId || !event.workflowRunStepId) return;
-    await resumeFromTaskCompletion(event);
+    try {
+      await resumeFromTaskCompletion(event, registry);
+    } catch (err) {
+      console.error("[workflows] Resume from task completion failed:", err);
+    }
   });
 
   eventBus.on("task.failed", async (data: unknown) => {
@@ -39,7 +51,18 @@ export function setupWorkflowResumeListener(eventBus: WorkflowEventBus): void {
   });
 }
 
-async function resumeFromTaskCompletion(event: TaskEvent): Promise<void> {
+/**
+ * Resume a workflow after a linked task completes.
+ *
+ * 1. Verify run and step are in "waiting" state
+ * 2. Checkpoint step completion with task output
+ * 3. Set run status to "running"
+ * 4. Find successors and continue the graph walk
+ */
+async function resumeFromTaskCompletion(
+  event: TaskEvent,
+  registry: ExecutorRegistry,
+): Promise<void> {
   const run = getWorkflowRun(event.workflowRunId!);
   if (!run || run.status !== "waiting") return;
 
@@ -49,38 +72,41 @@ async function resumeFromTaskCompletion(event: TaskEvent): Promise<void> {
   const workflow = getWorkflow(run.workflowId);
   if (!workflow) return;
 
-  // Mark step completed
-  updateWorkflowRunStep(step.id, {
-    status: "completed",
-    output: { taskOutput: event.output },
-    finishedAt: new Date().toISOString(),
-  });
-
-  // Resume context
+  // Checkpoint: atomic step completion + context update
   const ctx = (run.context ?? {}) as Record<string, unknown>;
-  ctx[step.nodeId] = { taskOutput: event.output };
-  updateWorkflowRun(run.id, { status: "running", context: ctx });
+  const stepOutput = { taskId: event.taskId, taskOutput: event.output };
 
-  // Continue DAG walk from successors
+  checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput }, ctx);
+
+  // Set run back to running
+  updateWorkflowRun(run.id, { status: "running" });
+
+  // Find successors and continue DAG walk
   const successors = getSuccessors(workflow.definition, step.nodeId, "default");
-  // TODO(Phase 4): inject registry from module-level singleton
-  await walkGraph(workflow.definition, run.id, ctx, successors, undefined as never);
+  await walkGraph(workflow.definition, run.id, ctx, successors, registry, workflow.id);
 }
 
+/**
+ * Mark a workflow run as failed when its linked task fails or is cancelled.
+ */
 function markRunFailed(event: TaskEvent, reason: string): void {
+  const now = new Date().toISOString();
   updateWorkflowRunStep(event.workflowRunStepId!, {
     status: "failed",
     error: reason,
-    finishedAt: new Date().toISOString(),
+    finishedAt: now,
   });
   updateWorkflowRun(event.workflowRunId!, {
     status: "failed",
     error: reason,
-    finishedAt: new Date().toISOString(),
+    finishedAt: now,
   });
 }
 
-export async function retryFailedRun(runId: string): Promise<void> {
+/**
+ * Retry a failed workflow run from its failed step.
+ */
+export async function retryFailedRun(runId: string, registry: ExecutorRegistry): Promise<void> {
   const run = getWorkflowRun(runId);
   if (!run || run.status !== "failed") throw new Error("Run is not in failed state");
 
@@ -100,6 +126,5 @@ export async function retryFailedRun(runId: string): Promise<void> {
   // Resume from the failed node
   const node = workflow.definition.nodes.find((n) => n.id === failedStep.nodeId);
   if (!node) throw new Error(`Node ${failedStep.nodeId} not found in workflow definition`);
-  // Note: registry will be injected in Phase 4 — for now pass undefined cast
-  await walkGraph(workflow.definition, runId, ctx, [node], undefined as never);
+  await walkGraph(workflow.definition, runId, ctx, [node], registry, workflow.id);
 }

@@ -1,3 +1,4 @@
+export { AgentTaskExecutor } from "./agent-task";
 export {
   type AsyncExecutorResult,
   BaseExecutor,

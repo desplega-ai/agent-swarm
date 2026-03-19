@@ -417,17 +417,17 @@ Implement the async executor (agent-task), the resume mechanism for task complet
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Async flow tests pass: `bun test src/tests/workflow-async-v2.test.ts`
-- [ ] Retry tests pass: `bun test src/tests/workflow-retry-v2.test.ts`
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Async flow tests pass: `bun test src/tests/workflow-async-v2.test.ts`
+- [x] Retry tests pass: `bun test src/tests/workflow-retry-v2.test.ts`
 
 #### Manual Verification:
-- [ ] Agent-task executor creates a task, workflow pauses at `waiting`
-- [ ] Manually complete the task via API → workflow resumes and finishes
-- [ ] Idempotency: restart a waiting run → no duplicate task created
-- [ ] Recovery: start API, create a running workflow, kill process, restart → run resumes
-- [ ] Retry: create a step that fails with retry policy → observe poller re-executing after delay
+- [x] Agent-task executor creates a task, workflow pauses at `waiting`
+- [x] Manually complete the task via API → workflow resumes and finishes
+- [x] Idempotency: restart a waiting run → no duplicate task created
+- [x] Recovery: start API, create a running workflow, kill process, restart → run resumes
+- [x] Retry: create a step that fails with retry policy → observe poller re-executing after delay
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. Commit after verification passes.
 

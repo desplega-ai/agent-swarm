@@ -1,3 +1,4 @@
+import { AgentTaskExecutor } from "./agent-task";
 import type { BaseExecutor, ExecutorDependencies } from "./base";
 import { CodeMatchExecutor } from "./code-match";
 import { NotifyExecutor } from "./notify";
@@ -44,8 +45,8 @@ export function createExecutorRegistry(deps: ExecutorDependencies): ExecutorRegi
   registry.register(new VcsExecutor(deps));
   registry.register(new ValidateExecutor(deps));
 
-  // Phase 4 will add:
-  // registry.register(new AgentTaskExecutor(deps));
+  // Async executors (Phase 4)
+  registry.register(new AgentTaskExecutor(deps));
 
   return registry;
 }

@@ -4,6 +4,7 @@ import {
   getCompletedStepNodeIds,
   getStepByIdempotencyKey,
   getWorkflowRun,
+  getWorkflowRunStepsByRunId,
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
@@ -189,14 +190,21 @@ export async function walkGraph(
     pendingNodes = readyNext;
   }
 
-  // No more nodes to execute → complete the run
+  // No more nodes to execute — check if the run should be completed.
+  // If any step has a pending retry (failed with nextRetryAt), the run
+  // should stay in "running" state for the retry poller to pick up.
   const run = getWorkflowRun(runId);
   if (run && run.status === "running") {
-    updateWorkflowRun(runId, {
-      status: "completed",
-      context: ctx,
-      finishedAt: new Date().toISOString(),
-    });
+    const allSteps = getWorkflowRunStepsByRunId(runId);
+    const hasPendingRetries = allSteps.some((s) => s.status === "failed" && s.nextRetryAt != null);
+
+    if (!hasPendingRetries) {
+      updateWorkflowRun(runId, {
+        status: "completed",
+        context: ctx,
+        finishedAt: new Date().toISOString(),
+      });
+    }
   }
 }
 

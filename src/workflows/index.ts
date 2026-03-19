@@ -1,8 +1,9 @@
 export { findEntryNodes, getSuccessors } from "./definition";
 export { startWorkflowExecution } from "./engine";
 export { workflowEventBus } from "./event-bus";
-export { recoverStuckWorkflowRuns } from "./recovery";
-export { retryFailedRun } from "./resume";
+export { recoverIncompleteRuns, recoverStuckWorkflowRuns } from "./recovery";
+export { retryFailedRun, setupWorkflowResumeListener } from "./resume";
+export { startRetryPoller, stopRetryPoller } from "./retry-poller";
 export { interpolate } from "./template";
 
 import { workflowEventBus } from "./event-bus";
@@ -10,7 +11,11 @@ import { setupWorkflowResumeListener } from "./resume";
 import { evaluateWorkflowTriggers } from "./triggers";
 
 export function initWorkflows(): void {
-  setupWorkflowResumeListener(workflowEventBus);
+  // Note: Phase 4 adds registry parameter. For now, resume listener is set up
+  // with the event bus only. The registry will be injected in Phase 7's
+  // full initWorkflows() rewrite via createExecutorRegistry().
+  // Until then, the event trigger subscriptions remain for backward compat.
+  setupWorkflowResumeListener(workflowEventBus, undefined as never);
 
   // Subscribe to events for trigger matching
   const triggerEvents = [
