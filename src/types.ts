@@ -694,6 +694,7 @@ export const WorkflowSnapshotSchema = z.object({
   triggers: z.array(TriggerConfigSchema),
   cooldown: CooldownConfigSchema.optional(),
   input: z.record(z.string(), InputValueSchema).optional(),
+  triggerSchema: z.record(z.string(), z.unknown()).optional(),
   enabled: z.boolean(),
 });
 export type WorkflowSnapshot = z.infer<typeof WorkflowSnapshotSchema>;
@@ -709,6 +710,7 @@ export const WorkflowSchema = z.object({
   triggers: z.array(TriggerConfigSchema).default([]),
   cooldown: CooldownConfigSchema.optional(),
   input: z.record(z.string(), InputValueSchema).optional(),
+  triggerSchema: z.record(z.string(), z.unknown()).optional(),
   createdByAgentId: z.string().uuid().optional(),
   createdAt: z.string(),
   lastUpdatedAt: z.string(),

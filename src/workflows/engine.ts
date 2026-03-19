@@ -22,6 +22,16 @@ import { runStepValidation } from "./validation";
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_ITERATIONS = Number(process.env.WORKFLOW_MAX_ITERATIONS) || 100;
 
+/**
+ * Error thrown when trigger data fails validation against a workflow's triggerSchema.
+ */
+export class TriggerSchemaError extends Error {
+  constructor(public readonly validationErrors: string[]) {
+    super(`Trigger schema validation failed: ${validationErrors.join("; ")}`);
+    this.name = "TriggerSchemaError";
+  }
+}
+
 // ─── Public API ────────────────────────────────────────────
 
 /**
@@ -38,6 +48,14 @@ export async function startWorkflowExecution(
   triggerData: unknown,
   registry: ExecutorRegistry,
 ): Promise<string> {
+  // Validate trigger data against triggerSchema (before any DB writes)
+  if (workflow.triggerSchema) {
+    const validationErrors = validateJsonSchema(workflow.triggerSchema, triggerData);
+    if (validationErrors.length > 0) {
+      throw new TriggerSchemaError(validationErrors);
+    }
+  }
+
   // Cooldown check
   if (workflow.cooldown && shouldSkipCooldown(workflow.id, workflow.cooldown)) {
     const runId = crypto.randomUUID();
