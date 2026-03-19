@@ -427,8 +427,12 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
 
   const sessionId = String(agentSession.id ?? "");
   const issue = agentSession.issue as Record<string, unknown> | undefined;
-  const comment = agentSession.comment as Record<string, unknown> | undefined;
-  const userMessage = comment ? String(comment.body ?? "") : "";
+
+  // User message is in event.agentActivity.content.body (not agentSession.comment.body)
+  const agentActivity = event.agentActivity as Record<string, unknown> | undefined;
+  const activityContent = agentActivity?.content as Record<string, unknown> | undefined;
+  const userMessage = activityContent ? String(activityContent.body ?? "") : "";
+  const activitySignal = agentActivity ? String(agentActivity.signal ?? "") : "";
 
   if (!issue) {
     console.log("[Linear Sync] Prompted event has no issue data, skipping");
@@ -439,6 +443,24 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
   const issueIdentifier = String(issue.identifier ?? "");
   const issueTitle = String(issue.title ?? "");
   const issueUrl = String(issue.url ?? "");
+
+  // Handle stop signal — cancel the active task
+  if (activitySignal === "stop") {
+    const existing = getTrackerSyncByExternalId("linear", "task", issueId);
+    if (existing) {
+      const existingTask = getTaskById(existing.swarmId);
+      if (existingTask && !["completed", "failed", "cancelled"].includes(existingTask.status)) {
+        cancelTask(existing.swarmId, "Stopped by user from Linear");
+        console.log(`[Linear Sync] Cancelled task ${existing.swarmId} (stop signal from Linear)`);
+      }
+    }
+    if (sessionId) {
+      endAgentSession(sessionId, "Task cancelled by user.", "response").catch((err) => {
+        console.error("[Linear Sync] Failed to end session on stop:", err);
+      });
+    }
+    return;
+  }
 
   if (!issueId || !userMessage) {
     console.log("[Linear Sync] Prompted event missing issue ID or message, skipping");
