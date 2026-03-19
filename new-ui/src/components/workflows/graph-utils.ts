@@ -20,10 +20,7 @@ export function getNodeCategory(type: WorkflowNodeType): NodeCategory {
 
 export function getNodeLabel(node: WorkflowNode): string {
   if (node.label) return node.label;
-  return node.type
-    .split("-")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+  return node.id;
 }
 
 export interface FlowNodeData {

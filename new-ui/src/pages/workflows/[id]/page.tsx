@@ -302,19 +302,6 @@ function NodeInspector({ node }: { node: WorkflowNode }) {
           <JsonTree data={node.config} defaultExpandDepth={2} maxHeight="250px" />
         </InspectorSection>
 
-        {/* Input Schema (from executor) */}
-        {executorInfo?.configSchema && (
-          <InspectorSection label="Input Schema (Config)">
-            <JsonTree data={executorInfo.configSchema} defaultExpandDepth={2} maxHeight="200px" />
-          </InspectorSection>
-        )}
-
-        {/* Output Schema (from executor) */}
-        {executorInfo?.outputSchema && (
-          <InspectorSection label="Output Schema">
-            <JsonTree data={executorInfo.outputSchema} defaultExpandDepth={2} maxHeight="200px" />
-          </InspectorSection>
-        )}
 
         {/* Next */}
         {node.next != null && (
