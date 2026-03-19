@@ -4,6 +4,22 @@ All notable changes to Agent Swarm are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.45.1] - 2026-03-19
+
+### Added
+- Debug tab with database explorer — SQL query interface in the dashboard with Monaco editor, table browser sidebar, and AG Grid results display
+- `db-query` MCP tool — lead-only read-only SQL queries against the swarm database (capped at 100 rows)
+- `POST /api/db-query` REST endpoint for database inspection
+- Agent-fs native integration — persistent, searchable filesystem shared across the swarm
+  - Auto-registration on first container boot (idempotent)
+  - Lead creates shared org, workers receive invitations automatically
+  - System prompt conditionally includes agent-fs CLI usage instructions
+  - `agent-fs` CLI and Claude plugin pre-installed in worker containers
+
+### Fixed
+- Concurrency safety for Slack metadata auto-inheritance — pass `sourceTaskId` through MCP session context via `X-Source-Task-Id` header instead of guessing current task (#191)
+- `send-task` now propagates `sourceTaskId` for accurate Slack metadata lookup
+
 ## [Unreleased]
 
 ### Added
