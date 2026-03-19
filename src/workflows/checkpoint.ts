@@ -15,6 +15,7 @@ export function checkpointStep(
     updateWorkflowRunStep(stepId, {
       status: "completed",
       output: result.output,
+      nextPort: result.nextPort || undefined,
       finishedAt: new Date().toISOString(),
     });
 

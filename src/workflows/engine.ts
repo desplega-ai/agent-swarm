@@ -98,16 +98,30 @@ export async function walkGraph(
   registry: ExecutorRegistry,
   workflowId?: string,
 ): Promise<void> {
-  let iterationCount = 0;
+  let nodeExecutionCount = 0;
   const completedNodeIds = new Set(getCompletedStepNodeIds(runId));
 
-  // For memoized re-walks, inject stored outputs into context
+  // Track active edges: "sourceId→targetId" — only edges on actually-taken
+  // execution paths, not all structural edges in the definition.
+  const activeEdges = new Set<string>();
+
+  // For memoized re-walks, inject stored outputs into context and
+  // reconstruct active edges from completed steps' stored nextPort.
   if (completedNodeIds.size > 0) {
     for (const nodeId of completedNodeIds) {
       const key = `${runId}:${nodeId}`;
       const step = getStepByIdempotencyKey(key);
       if (step?.output !== undefined) {
         ctx[nodeId] = step.output;
+      }
+      // Reconstruct active edges from the stored nextPort.
+      // If nextPort is set, use it for port-specific routing.
+      // If not set, get all successors (fan-out).
+      const successors = step?.nextPort
+        ? getSuccessors(def, nodeId, step.nextPort)
+        : getSuccessors(def, nodeId);
+      for (const succ of successors) {
+        activeEdges.add(`${nodeId}→${succ.id}`);
       }
     }
   }
@@ -116,11 +130,11 @@ export async function walkGraph(
   let pendingNodes = startNodes.filter((n) => !completedNodeIds.has(n.id));
 
   while (pendingNodes.length > 0) {
-    iterationCount++;
-    if (iterationCount > MAX_ITERATIONS) {
+    nodeExecutionCount += pendingNodes.length;
+    if (nodeExecutionCount > MAX_ITERATIONS) {
       updateWorkflowRun(runId, {
         status: "failed",
-        error: `Max iterations (${MAX_ITERATIONS}) exceeded — possible infinite loop`,
+        error: `Max node executions (${MAX_ITERATIONS}) exceeded — possible infinite loop`,
         finishedAt: new Date().toISOString(),
       });
       return;
@@ -154,9 +168,11 @@ export async function walkGraph(
         continue;
       }
       // Mark this node as completed
-      completedNodeIds.add(pendingNodes[i]!.id);
-      // Queue successors, deduplicating by node ID
+      const sourceNodeId = pendingNodes[i]!.id;
+      completedNodeIds.add(sourceNodeId);
+      // Record active edges and queue successors
       for (const succ of result.successors) {
+        activeEdges.add(`${sourceNodeId}→${succ.id}`);
         nextBatch.set(succ.id, succ);
       }
     }
@@ -164,16 +180,18 @@ export async function walkGraph(
     if (hasFailed) return; // Run already marked failed in executeStep
     if (hasWaiting) return; // Run paused, will be resumed by event
 
-    // For convergence nodes (multiple predecessors pointing to same node),
-    // only execute if all predecessors that reference this node have completed.
-    // For non-convergence nodes, they're ready immediately.
+    // Convergence check — only wait for predecessors with active edges to
+    // this node, not all structural predecessors. This prevents deadlocks
+    // when conditional branches skip nodes.
     const readyNext: WorkflowNode[] = [];
     for (const [nodeId, node] of nextBatch) {
       if (completedNodeIds.has(nodeId)) continue; // Already done
 
       const allPreds = getAllPredecessors(def, nodeId);
-      const allPredsCompleted = allPreds.every((p) => completedNodeIds.has(p));
-      if (allPredsCompleted) {
+      const activePreds = allPreds.filter((predId) => activeEdges.has(`${predId}→${nodeId}`));
+      const allActivePredsCompleted = activePreds.every((p) => completedNodeIds.has(p));
+
+      if (allActivePredsCompleted) {
         readyNext.push(node);
       }
     }
@@ -374,8 +392,11 @@ async function executeStep(
   checkpointStep(runId, stepId, node.id, result, ctx);
 
   // 9. Determine successors based on nextPort
-  const port = result.nextPort || "default";
-  const successors = getSuccessors(def, node.id, port);
+  // If executor returned a specific port, use it. Otherwise, get all successors
+  // (fan-out behavior for non-branching nodes with record-based `next`).
+  const successors = result.nextPort
+    ? getSuccessors(def, node.id, result.nextPort)
+    : getSuccessors(def, node.id);
   return { outcome: "completed", successors };
 }
 
@@ -385,10 +406,15 @@ async function executeStep(
  * Find nodes that are ready to execute (used for recovery/resume).
  * A node is ready when all its predecessors (nodes that reference it via `next`)
  * have been completed.
+ *
+ * When `activeEdges` is provided, only predecessors with an active edge to the
+ * node are considered (prevents deadlocks on conditional branches where some
+ * predecessors were never executed).
  */
 export function findReadyNodes(
   def: WorkflowDefinition,
   completedNodeIds: Set<string>,
+  activeEdges?: Set<string>,
 ): WorkflowNode[] {
   // Build predecessor map: nodeId -> set of nodes that must complete before it
   const predecessors = new Map<string, Set<string>>();
@@ -411,11 +437,21 @@ export function findReadyNodes(
 
   // A node is ready if:
   // 1. It hasn't been completed yet
-  // 2. All its predecessors are completed
+  // 2. All its relevant predecessors are completed
   return def.nodes.filter((node) => {
     if (completedNodeIds.has(node.id)) return false;
     const preds = predecessors.get(node.id);
     if (!preds || preds.size === 0) return true; // Entry node
+
+    if (activeEdges) {
+      // Only consider predecessors with active edges to this node
+      const activePreds = [...preds].filter((predId) => activeEdges.has(`${predId}→${node.id}`));
+      // If no active edges point here, the node is not reachable yet
+      if (activePreds.length === 0) return false;
+      return activePreds.every((pred) => completedNodeIds.has(pred));
+    }
+
+    // Fallback: structural predecessors (backward compat)
     for (const pred of preds) {
       if (!completedNodeIds.has(pred)) return false;
     }

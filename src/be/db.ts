@@ -6017,6 +6017,7 @@ type WorkflowRunStepRow = {
   nextRetryAt: string | null;
   idempotencyKey: string | null;
   diagnostics: string | null;
+  nextPort: string | null;
 };
 
 function rowToWorkflowRunStep(row: WorkflowRunStepRow): WorkflowRunStep {
@@ -6036,6 +6037,7 @@ function rowToWorkflowRunStep(row: WorkflowRunStepRow): WorkflowRunStep {
     nextRetryAt: row.nextRetryAt ?? undefined,
     idempotencyKey: row.idempotencyKey ?? undefined,
     diagnostics: row.diagnostics ?? undefined,
+    nextPort: row.nextPort ?? undefined,
   };
 }
 
@@ -6083,6 +6085,7 @@ export function updateWorkflowRunStep(
     nextRetryAt?: string | null;
     idempotencyKey?: string;
     diagnostics?: string;
+    nextPort?: string;
   },
 ): WorkflowRunStep | null {
   const updates: string[] = [];
@@ -6122,6 +6125,10 @@ export function updateWorkflowRunStep(
   if (data.diagnostics !== undefined) {
     updates.push("diagnostics = ?");
     params.push(data.diagnostics);
+  }
+  if (data.nextPort !== undefined) {
+    updates.push("nextPort = ?");
+    params.push(data.nextPort);
   }
   if (updates.length === 0) return getWorkflowRunStep(id);
   params.push(id);

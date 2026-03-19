@@ -231,15 +231,15 @@ interpolate: (template, ctx) => interpolate(template, ctx).result,
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Interpolation tests pass: `bun test src/tests/workflow-template.test.ts`
-- [ ] Engine tests still pass: `bun test src/tests/workflow-engine-v2.test.ts`
-- [ ] All workflow tests pass: `bun test src/tests/workflow-`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
+- [x] Interpolation tests pass: `bun test src/tests/workflow-template.test.ts`
+- [x] Engine tests still pass: `bun test src/tests/workflow-engine-v2.test.ts`
+- [x] All workflow tests pass: `bun test src/tests/workflow-`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
-- [ ] Verify unresolved token warnings appear in console when running a workflow with a typo in a `{{path}}`
-- [ ] Verify agent-task executor still works without manual tag interpolation (create a workflow with `tags: ["{{trigger.source}}", "fixed"]` and confirm both tags resolve)
+- [x] Verify unresolved token warnings appear in console when running a workflow with a typo in a `{{path}}`
+- [x] Verify agent-task executor still works without manual tag interpolation (create a workflow with `tags: ["{{trigger.source}}", "fixed"]` and confirm both tags resolve)
 
 **Implementation Note**: After completing this phase, pause for manual confirmation before committing.
 
