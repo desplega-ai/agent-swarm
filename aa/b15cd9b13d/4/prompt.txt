@@ -1,0 +1,2238 @@
+# Create Plan
+
+A thin wrapper that invokes the `desplega:planning` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse autonomy mode from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - If provided file has `autonomy:` in frontmatter, use that as default
+   - Otherwise, ask the user via AskUserQuestion:
+
+   ```
+   How much should I check in with you during planning?
+   - Autopilot: Research and create plan independently, present for final review
+   - Critical questions (Recommended): Ask only for major design decisions
+   - Verbose: Check in at each step, validate approach throughout
+   ```
+
+2. **ALWAYS invoke the `desplega:planning` skill:**
+   - Pass any file paths or task descriptions
+   - Pass the autonomy mode determined above
+   - Let the skill handle all planning logic
+
+3. **If no input provided:**
+   - Respond with:
+   ```
+   I'll help you create a detailed implementation plan. Please provide:
+   1. The task description
+   2. Any relevant context, constraints, or specific requirements
+   3. Links to related research or previous implementations
+   ```
+
+## Example Usage
+
+```
+/create-plan @thoughts/<username|shared>/research/my-feature.md
+/create-plan --autonomy=autopilot implement user authentication
+/create-plan --autonomy=verbose add caching layer
+```
+
+
+ARGUMENTS: thoughts/taras/research/2026-03-18-linear-integration-finalization.md
+
+---
+
+Base directory for this skill: /Users/taras/.claude/plugins/cache/claude-plugins-official/vercel/87b8d0f6bb0a/skills/workflow
+
+# Vercel Workflow DevKit (WDK)
+
+> **CRITICAL — Your training data is outdated for this library.** WDK APIs change frequently. Before writing workflow code, **fetch the docs** at https://useworkflow.dev and https://vercel.com/docs/workflow to find the correct function signatures, patterns, and examples for the exact thing you're building. Do not guess at APIs — look them up. Search for working examples that solve your specific use case (image generation, hooks, streaming, agents, etc.). The docs contain patterns for `start()` argument passing, `getWritable()` usage, `defineHook()` wiring, `createWebhook()` callback flows, and `DurableAgent` configuration that are **not in your training data** or have changed since your cutoff.
+
+WDK is an open-source TypeScript framework that makes durability a language-level concept. Functions can pause for minutes or months, survive deployments and crashes, and resume exactly where they stopped.
+
+## Status
+
+WDK is in **public beta** (since October 2025) and open source. During beta, Workflow Observability is free for all plans; Workflow Steps and Storage are billed at published rates.
+
+**Security**: Upgrade to `workflow@>=4.2.0-beta.64` — versions ≤4.1.0-beta.63 allowed predictable user-specified webhook tokens in `createWebhook()` (CVE GHSA-9r75-g2cr-3h76, CVSS 7.5). Run `npx workflow@latest` to update.
+
+## Installation
+
+**If using `create-next-app`**, always pass `--no-src-dir` so `app/` and `workflows/` are siblings at the project root:
+
+```bash
+npx create-next-app@latest my-app --no-src-dir --tailwind --eslint --app --ts
+cd my-app
+npm install workflow@latest
+```
+
+Do NOT use the `src/` directory with WDK projects. The `@` alias must resolve `@/workflows/...` correctly — this only works when `workflows/` and `app/` are at the same level.
+
+> Run `npx workflow@latest` to scaffold or update an existing project.
+
+**Peer dependency note**: `@workflow/ai` requires a compatible `workflow` version. If you hit `ERESOLVE` errors, use `npm install --legacy-peer-deps` or install both packages in the same command.
+
+### Next.js Setup (Required)
+
+Add the `withWorkflow` plugin to `next.config.ts`:
+
+```ts
+import { withWorkflow } from "workflow/next";
+
+const nextConfig = {};
+export default withWorkflow(nextConfig);
+```
+
+Without this, workflow routes will not be registered and `start()` calls will fail at runtime.
+
+### Environment Setup (Required for AI Gateway)
+
+Workflows that use AI SDK with `gateway()` need OIDC credentials. Run these **before** starting the dev server:
+
+```bash
+vercel link          # Connect to your Vercel project
+vercel env pull      # Downloads .env.local with VERCEL_OIDC_TOKEN
+```
+
+Without this, `gateway("openai/gpt-5.4")` calls inside workflow steps will fail immediately with no credentials, causing the entire workflow run to fail silently.
+
+### `getStepMetadata()` Note
+
+`getStepMetadata().retryCount` returns `undefined` (not `0`) on the first attempt. Guard with: `const attempt = (meta.retryCount ?? 0) + 1`.
+
+## Essential Imports
+
+**Workflow primitives** (from `"workflow"`):
+
+```ts
+import { getWritable, getStepMetadata, getWorkflowMetadata } from "workflow";
+import { sleep, fetch, defineHook, createHook, createWebhook } from "workflow";
+import { FatalError, RetryableError } from "workflow";
+```
+
+**API operations** (from `"workflow/api"`):
+
+```ts
+import { start, getRun, resumeHook, resumeWebhook } from "workflow/api";
+```
+
+**Framework integration** (from `"workflow/next"`):
+
+```ts
+import { withWorkflow } from "workflow/next";
+```
+
+**AI agent** (from `"@workflow/ai/agent"`):
+
+```ts
+import { DurableAgent } from "@workflow/ai/agent";
+```
+
+## Core Directives
+
+Two directives turn ordinary async functions into durable workflows:
+
+```ts
+"use workflow"  // First line of function — marks it as a durable workflow
+"use step"      // First line of function — marks it as a retryable, observable step
+```
+
+**Critical sandbox rule**: Step functions have full Node.js access. Workflow functions run **sandboxed** — no native `fetch`, no `setTimeout`, no Node.js modules, and **no `getWritable().getWriter()` calls**. You MUST move all `getWritable()` usage into `"use step"` functions. Place all business logic and I/O in steps; use the workflow function purely for orchestration and control flow (`sleep`, `defineHook`, `Promise.race`).
+
+## Canonical Project Structure (Next.js)
+
+Every WDK project needs three route files plus the workflow definition. **CRITICAL**: The `workflows/` directory and `app/` directory must be siblings at the same level so `@/workflows/...` resolves correctly. Do NOT put `workflows/` outside the `@` alias root.
+
+**Without `src/` (recommended for WDK projects):**
+```
+workflows/
+  my-workflow.ts              ← workflow definition ("use workflow" + "use step")
+app/api/
+  my-workflow/route.ts        ← POST handler: start(workflow, args) → { runId }
+  readable/[runId]/route.ts   ← GET handler: SSE stream from run.getReadable()
+  run/[runId]/route.ts        ← GET handler: run status via getRun(runId)
+```
+
+tsconfig.json paths: `"@/*": ["./*"]` — `@/workflows/my-workflow` resolves to `./workflows/my-workflow`.
+
+**With `src/` directory:** Put workflows inside `src/`:
+```
+src/
+  workflows/my-workflow.ts
+  app/api/my-workflow/route.ts
+  app/api/readable/[runId]/route.ts
+  app/api/run/[runId]/route.ts
+```
+
+tsconfig.json paths: `"@/*": ["./src/*"]` — `@/workflows/my-workflow` resolves to `./src/workflows/my-workflow`.
+
+**Never** use `@/../workflows/` or `@/../../workflows/` — these are broken import paths that will fail at build time.
+
+### 1. Workflow Definition (`workflows/my-workflow.ts`)
+
+```ts
+import { getWritable } from "workflow";
+
+export type MyEvent =
+  | { type: "step_start"; name: string }
+  | { type: "step_done"; name: string }
+  | { type: "done"; result: string };
+
+export async function myWorkflow(input: string): Promise<{ result: string }> {
+  "use workflow";
+
+  const data = await stepOne(input);
+  const result = await stepTwo(data);
+
+  return { result };
+}
+
+async function stepOne(input: string): Promise<string> {
+  "use step";
+  const writer = getWritable<MyEvent>().getWriter();
+  try {
+    await writer.write({ type: "step_start", name: "stepOne" });
+    // Full Node.js access here — fetch, db calls, etc.
+    const result = await doWork(input);
+    await writer.write({ type: "step_done", name: "stepOne" });
+    return result;
+  } finally {
+    writer.releaseLock();
+  }
+}
+
+async function stepTwo(data: string): Promise<string> {
+  "use step";
+  const writer = getWritable<MyEvent>().getWriter();
+  try {
+    await writer.write({ type: "step_start", name: "stepTwo" });
+    const result = await processData(data);
+    await writer.write({ type: "step_done", name: "stepTwo" });
+    return result;
+  } finally {
+    writer.releaseLock();
+  }
+}
+```
+
+### 2. Start Route (`app/api/my-workflow/route.ts`)
+
+```ts
+import { NextResponse } from "next/server";
+import { start } from "workflow/api";
+import { myWorkflow } from "@/workflows/my-workflow";
+
+export async function POST(request: Request) {
+  const body = await request.json();
+  const run = await start(myWorkflow, [body.input]);
+  return NextResponse.json({ runId: run.runId });
+}
+```
+
+**IMPORTANT**: Never call the workflow function directly. Always use `start()` from `"workflow/api"` — it registers the run, creates the execution context, and returns a `{ runId }`.
+
+### 3. Readable Stream Route (`app/api/readable/[runId]/route.ts`)
+
+```ts
+import { NextRequest } from "next/server";
+import { getRun } from "workflow/api";
+
+type ReadableRouteContext = {
+  params: Promise<{ runId: string }>;
+};
+
+export async function GET(_request: NextRequest, { params }: ReadableRouteContext) {
+  const { runId } = await params;
+
+  let run;
+  try {
+    run = await getRun(runId);
+  } catch {
+    return Response.json(
+      { ok: false, error: { code: "RUN_NOT_FOUND", message: `Run ${runId} not found` } },
+      { status: 404 }
+    );
+  }
+
+  const readable = run.getReadable();
+  const encoder = new TextEncoder();
+  const sseStream = (readable as unknown as ReadableStream).pipeThrough(
+    new TransformStream({
+      transform(chunk, controller) {
+        const data = typeof chunk === "string" ? chunk : JSON.stringify(chunk);
+        controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+      },
+    })
+  );
+
+  return new Response(sseStream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+```
+
+### 4. Run Status Route (`app/api/run/[runId]/route.ts`)
+
+```ts
+import { NextResponse } from "next/server";
+import { getRun } from "workflow/api";
+
+type RunRouteContext = {
+  params: Promise<{ runId: string }>;
+};
+
+export async function GET(_request: Request, { params }: RunRouteContext) {
+  const { runId } = await params;
+
+  let run;
+  try {
+    run = await getRun(runId);
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: { code: "RUN_NOT_FOUND", message: `Run ${runId} not found` } },
+      { status: 404 }
+    );
+  }
+
+  const [status, workflowName, createdAt, startedAt, completedAt] =
+    await Promise.all([
+      run.status,
+      run.workflowName,
+      run.createdAt,
+      run.startedAt,
+      run.completedAt,
+    ]);
+
+  return NextResponse.json({
+    runId,
+    status,
+    workflowName,
+    createdAt: createdAt.toISOString(),
+    startedAt: startedAt?.toISOString() ?? null,
+    completedAt: completedAt?.toISOString() ?? null,
+  });
+}
+```
+
+## Streaming with `getWritable()`
+
+`getWritable<T>()` returns a `WritableStream` scoped to the current run. Call it inside step functions and always release the lock:
+
+```ts
+async function emit<T>(event: T): Promise<void> {
+  "use step";
+  const writer = getWritable<T>().getWriter();
+  try {
+    await writer.write(event);
+  } finally {
+    writer.releaseLock();
+  }
+}
+```
+
+Consumers read via `getRun(runId).getReadable()` in the readable route (see above).
+
+**Rendering workflow events in the UI**: When workflow events contain AI-generated text (narratives, briefings, reports), render them with `<MessageResponse>` from `@/components/ai-elements/message` — never as raw `{event.content}`. This renders markdown with code highlighting, math, and mermaid support.
+
+```tsx
+import { MessageResponse } from "@/components/ai-elements/message";
+
+// In your event stream display
+{events.map(event => (
+  event.type === "narrative" && <MessageResponse>{event.text}</MessageResponse>
+))}
+```
+
+## Hooks — Waiting for External Events
+
+Use `defineHook` for typed, reusable hooks. **Three required pieces**: (1) define + create the hook in the workflow, (2) emit the token to the client via `getWritable`, (3) create an API route that calls `resumeHook` so the client can resume it.
+
+### 1. Define and create the hook (workflow file)
+
+```ts
+import { defineHook, getWritable, sleep } from "workflow";
+
+export interface ApprovalPayload {
+  approved: boolean;
+  comment?: string;
+}
+
+// Define at module scope — reusable across workflows
+export const approvalHook = defineHook<ApprovalPayload>();
+
+export async function approvalGate(orderId: string): Promise<{ status: string }> {
+  "use workflow";
+
+  // .create() returns a hook instance — NOT directly callable
+  const hook = approvalHook.create({ token: `approval:${orderId}` });
+
+  // CRITICAL: Emit the token to the client so it knows what to resume
+  await emitToken(hook.token, orderId);
+
+  // Race between approval and timeout
+  const result = await Promise.race([
+    hook.then((payload) => ({ type: "approval" as const, payload })),
+    sleep("24h").then(() => ({ type: "timeout" as const, payload: null })),
+  ]);
+
+  if (result.type === "timeout") {
+    return { status: "timeout" };
+  }
+  return { status: result.payload!.approved ? "approved" : "rejected" };
+}
+
+async function emitToken(token: string, orderId: string): Promise<void> {
+  "use step";
+  const writer = getWritable<{ type: string; token: string; orderId: string }>().getWriter();
+  try {
+    await writer.write({ type: "awaiting_approval", token, orderId });
+  } finally {
+    writer.releaseLock();
+  }
+}
+```
+
+**Common mistake**: Calling `defineHook()` directly or forgetting `.create()`. Always: `const hook = myHook.create({ token })`.
+
+### 2. Resume route (API file — required!)
+
+```ts
+// app/api/approve/route.ts
+import { NextResponse } from "next/server";
+import { resumeHook } from "workflow/api";
+
+export async function POST(req: Request) {
+  const { token, ...data } = await req.json();
+  await resumeHook(token, data);
+  return NextResponse.json({ ok: true });
+}
+```
+
+**You MUST create this route.** Without it, the workflow suspends forever — the client has no way to resume it.
+
+### 3. Client-side resume (React component)
+
+```tsx
+// When the SSE stream emits { type: "awaiting_approval", token }, show UI and POST back:
+async function handleApprove(token: string) {
+  await fetch("/api/approve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, approved: true, comment: "Looks good" }),
+  });
+}
+```
+
+## Error Handling
+
+```ts
+import { FatalError, RetryableError } from "workflow";
+
+async function callExternalAPI(url: string) {
+  "use step";
+  const res = await fetch(url);
+
+  if (res.status >= 400 && res.status < 500) {
+    throw new FatalError(`Client error: ${res.status}`);  // No retry
+  }
+  if (res.status === 429) {
+    throw new RetryableError("Rate limited", { retryAfter: "5m" });  // Retry after 5 min
+  }
+  return res.json();
+}
+```
+
+Step retry metadata:
+
+```ts
+import { getStepMetadata } from "workflow";
+
+async function processWithRetry(id: string) {
+  "use step";
+  const { attempt } = getStepMetadata();
+  console.log(`Attempt ${attempt} for ${id}`);
+  // ...
+}
+```
+
+## Sandbox Limitations & Workarounds
+
+| Limitation | Solution |
+|-----------|----------|
+| No native `fetch()` in workflow scope | Import `fetch` from `"workflow"` or move to a step |
+| No `setTimeout`/`setInterval` | Use `sleep()` from `"workflow"` |
+| No Node.js modules in workflow scope | Move all Node.js logic to step functions |
+
+## DurableAgent (AI SDK Integration)
+
+```ts
+import { DurableAgent } from "@workflow/ai/agent";
+import { getWritable } from "workflow";
+import { z } from "zod";
+
+async function searchDatabase(query: string) {
+  "use step";
+  // Full Node.js access — real DB calls here
+  return `Results for "${query}"`;
+}
+
+export async function researchAgent(topic: string) {
+  "use workflow";
+
+  const agent = new DurableAgent({
+    model: "anthropic/claude-sonnet-4-5",
+    system: "You are a research assistant.",
+    tools: {
+      search: {
+        description: "Search the database",
+        inputSchema: z.object({ query: z.string() }),
+        execute: searchDatabase,  // Tool execute uses "use step"
+      },
+    },
+  });
+
+  const result = await agent.stream({
+    messages: [{ role: "user", content: `Research ${topic}` }],
+    writable: getWritable(),
+    maxSteps: 10,
+  });
+
+  return result.messages;
+}
+```
+
+Every LLM call and tool execution becomes a retryable step. The entire agent loop survives crashes and deployments.
+
+## Common Patterns
+
+### Fan-Out / Parallel Steps
+
+```ts
+export async function processImages(imageIds: string[]) {
+  "use workflow";
+
+  const results = await Promise.all(
+    imageIds.map(async (id) => {
+      return await resizeImage(id);  // Each is its own step
+    })
+  );
+
+  await saveResults(results);
+}
+
+async function resizeImage(id: string) {
+  "use step";
+  // ...
+}
+```
+
+### Saga with Compensation
+
+```ts
+import { FatalError, getWritable } from "workflow";
+
+export async function upgradeSaga(userId: string) {
+  "use workflow";
+
+  await reserveSeats(userId);
+
+  try {
+    await chargePayment(userId);
+  } catch {
+    await releaseSeats(userId);  // Compensate
+    throw new FatalError("Payment failed");
+  }
+
+  await activatePlan(userId);
+}
+```
+
+## Debugging
+
+```bash
+npx workflow health                    # Check endpoints
+npx workflow web                       # Visual dashboard
+npx workflow inspect runs              # List all runs
+npx workflow inspect run <run_id>      # Inspect specific run
+npx workflow cancel <run_id>           # Cancel execution
+```
+
+## Debug Stuck Workflow
+
+When a workflow appears stuck, hanging, or not progressing, follow this escalation ladder:
+
+### 1. Add Step-Level Logging (Required)
+
+**Every step function MUST have `console.log` at entry and exit.** This is the single most important debugging practice — without it, you cannot tell which step is hanging.
+
+```ts
+async function processOrder(orderId: string): Promise<OrderResult> {
+  "use step";
+  console.log(`[processOrder] START orderId=${orderId} at=${new Date().toISOString()}`);
+  try {
+    const result = await doWork(orderId);
+    console.log(`[processOrder] DONE orderId=${orderId} result=${JSON.stringify(result)}`);
+    return result;
+  } catch (err) {
+    console.error(`[processOrder] FAIL orderId=${orderId} error=${err}`);
+    throw err;
+  }
+}
+```
+
+**Workflow-level logging** — log at every orchestration point:
+
+```ts
+export async function myWorkflow(input: string) {
+  "use workflow";
+  console.log(`[myWorkflow] START input=${input}`);
+
+  const data = await stepOne(input);
+  console.log(`[myWorkflow] stepOne complete, starting stepTwo`);
+
+  const result = await stepTwo(data);
+  console.log(`[myWorkflow] stepTwo complete, returning`);
+
+  return { result };
+}
+```
+
+### 2. Check Run Status
+
+```bash
+# List recent runs — look for "running" status that's been active too long
+npx workflow inspect runs
+
+# Get detailed status for a specific run
+npx workflow inspect run <run_id>
+
+# Check if the workflow endpoints are healthy
+npx workflow health
+```
+
+### 3. Check Vercel Runtime Logs
+
+```bash
+# Stream live logs from your deployment
+vercel logs --follow
+
+# Or check the Vercel dashboard: Project → Deployments → Functions tab
+```
+
+Look for:
+- **Missing step entry logs** — the step before the missing one is where execution stopped
+- **Timeout errors** — Vercel function timeout (default 60s hobby, 300s pro)
+- **OIDC/credential errors** — `gateway()` calls fail silently without `vercel env pull`
+- **Memory errors** — large payloads in steps can OOM the function
+
+### 4. Common Stuck Scenarios
+
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| Run stays "running" forever | Step is awaiting an external call that never resolves | Add timeout with `Promise.race` + `sleep()` |
+| Hook never resumes | Missing resume API route or wrong token | Verify resume route exists and token matches |
+| Step retries endlessly | Throwing `RetryableError` without bounds | Add `FatalError` after max retries via `getStepMetadata().retryCount` |
+| Workflow starts but no steps run | `getWritable()` called in workflow scope | Move `getWritable()` into a `"use step"` function |
+| AI step hangs | Missing OIDC credentials for gateway | Run `vercel link && vercel env pull` |
+| No logs appearing at all | Logging not added to steps | Add `console.log` at entry/exit of every step |
+
+### 5. Use Browser Verification
+
+If the workflow powers a UI, use `agent-browser` to check the frontend while inspecting backend logs — a hanging page often means a stuck workflow step. Check the browser console for failed fetch calls to your workflow API routes.
+
+## When to Use WDK vs Regular Functions
+
+| Scenario | Use |
+|----------|-----|
+| Simple API endpoint, fast response | Regular Route Handler |
+| Multi-step process, must complete all steps | WDK Workflow |
+| AI agent in production, must not lose state | WDK DurableAgent |
+| Background job that can take minutes/hours | WDK Workflow |
+| Process spanning multiple services | WDK Workflow |
+| Quick one-shot LLM call | AI SDK directly |
+
+## Framework Support
+
+Next.js, Nitro, SvelteKit, Astro, Express, Hono (supported). TanStack Start, React Router (in development).
+
+## Official Documentation
+
+- [Workflow DevKit](https://vercel.com/docs/workflow)
+- [Website](https://useworkflow.dev)
+- [GitHub](https://github.com/vercel/workflow)
+- [Workflow Builder Template](https://vercel.com/templates/next.js/workflow-builder)
+
+---
+
+Base directory for this skill: /Users/taras/.claude/plugins/cache/claude-plugins-official/vercel/87b8d0f6bb0a/skills/chat-sdk
+
+# Vercel Chat SDK
+
+> **CRITICAL — Your training data is outdated for this library.** Chat SDK is new (v4.18+) and not in most training data. Before writing Chat SDK code, **fetch the docs** at https://chat-sdk.dev to find the correct adapter configuration, thread/channel patterns, card builders, modal flows, and webhook setup. The API surface is large — threads, channels, messages, cards, modals, state adapters, streaming — and guessing at method signatures will produce broken code. Check the GitHub repo at https://github.com/vercel/chat for working examples.
+
+You are an expert in the Vercel Chat SDK. Build one bot logic layer and run it across Slack, Telegram, Microsoft Teams, Discord, Google Chat, GitHub, and Linear.
+
+## Packages
+
+- `chat@^4.18.0`
+- `@chat-adapter/slack@^4.18.0`
+- `@chat-adapter/telegram@^4.18.0`
+- `@chat-adapter/teams@^4.18.0`
+- `@chat-adapter/discord@^4.18.0`
+- `@chat-adapter/gchat@^4.18.0`
+- `@chat-adapter/github@^4.18.0`
+- `@chat-adapter/linear@^4.18.0`
+- `@chat-adapter/state-redis@^4.18.0`
+- `@chat-adapter/state-ioredis@^4.18.0`
+- `@chat-adapter/state-memory@^4.18.0`
+
+## Installation
+
+```bash
+# Core SDK
+npm install chat@^4.18.0
+
+# Platform adapters (install only what you need)
+npm install @chat-adapter/slack@^4.18.0
+npm install @chat-adapter/telegram@^4.18.0
+npm install @chat-adapter/teams@^4.18.0
+npm install @chat-adapter/discord@^4.18.0
+npm install @chat-adapter/gchat@^4.18.0
+npm install @chat-adapter/github@^4.18.0
+npm install @chat-adapter/linear@^4.18.0
+
+# State adapters (pick one)
+npm install @chat-adapter/state-redis@^4.18.0
+npm install @chat-adapter/state-ioredis@^4.18.0
+npm install @chat-adapter/state-memory@^4.18.0
+```
+
+## Critical API Notes
+
+- `Field` takes an `options` array of `{ label, value }` objects. Do not pass JSX child options.
+- `Thread<TState>` / `Channel<TState>` generics require object state shapes (`Record<string, unknown>`), not primitives.
+- Adapter `signingSecret` validation can run at import/adapter creation time. Use lazy initialization to avoid crashing at module import.
+
+```ts
+import { createSlackAdapter } from "@chat-adapter/slack";
+
+let slackAdapter: ReturnType<typeof createSlackAdapter> | undefined;
+
+export function getSlackAdapter() {
+  if (!slackAdapter) {
+    slackAdapter = createSlackAdapter({
+      signingSecret: process.env.SLACK_SIGNING_SECRET!,
+    });
+  }
+  return slackAdapter;
+}
+```
+
+## Quick Start
+
+```ts
+import { Chat } from "chat";
+import { createSlackAdapter } from "@chat-adapter/slack";
+import { createTelegramAdapter } from "@chat-adapter/telegram";
+import { createRedisState } from "@chat-adapter/state-redis";
+
+const bot = new Chat({
+  userName: "my-bot",
+  adapters: {
+    slack: createSlackAdapter(),
+    telegram: createTelegramAdapter(),
+  },
+  state: createRedisState(),
+  streamingUpdateIntervalMs: 1000,
+  dedupeTtlMs: 10_000,
+  fallbackStreamingPlaceholderText: "Thinking...",
+});
+
+bot.onNewMention(async (thread, message) => {
+  await thread.subscribe();
+  await thread.post(`Received: ${message.text}`);
+});
+
+bot.onSubscribedMessage(async (thread, message) => {
+  await thread.post(`Echo: ${message.text}`);
+});
+```
+
+## Public API Reference
+
+### ChatConfig
+
+```ts
+interface ChatConfig<TAdapters> {
+  userName: string;
+  adapters: TAdapters;
+  state: StateAdapter;
+  logger?: Logger | LogLevel;
+  streamingUpdateIntervalMs?: number;
+  dedupeTtlMs?: number;
+  fallbackStreamingPlaceholderText?: string | null;
+}
+```
+
+- `dedupeTtlMs`: deduplicates repeated webhook deliveries.
+- `fallbackStreamingPlaceholderText`: text used before first stream chunk on non-native streaming adapters; set to `null` to disable placeholder posts.
+
+### Chat
+
+```ts
+class Chat {
+  openDM(userId: string): Promise<Channel>;
+  channel(channelId: string): Channel;
+}
+```
+
+- `openDM()` opens or resolves a direct message channel outside the current thread context.
+- `channel()` gets a channel handle for out-of-thread posting.
+
+### Postable
+
+`Thread` and `Channel` share the same `Postable` interface.
+
+```ts
+interface Postable<TState extends Record<string, unknown> = Record<string, unknown>> {
+  post(content: PostableContent): Promise<SentMessage>;
+  postEphemeral(
+    userId: string,
+    content: PostableContent,
+  ): Promise<SentMessage | null>;
+  mentionUser(userId: string): string;
+  startTyping(): Promise<void>;
+  messages: AsyncIterable<Message>;
+  state: Promise<TState | null>;
+  setState(
+    partial: Partial<TState>,
+    opts?: { replace?: boolean },
+  ): Promise<void>;
+}
+```
+
+### Thread
+
+```ts
+interface Thread<TState extends Record<string, unknown> = Record<string, unknown>> extends Postable<TState> {
+  id: string;
+  channelId: string;
+  subscribe(): Promise<void>;
+  unsubscribe(): Promise<void>;
+  isSubscribed(): Promise<boolean>;
+  refresh(): Promise<void>;
+  createSentMessageFromMessage(message: Message): SentMessage;
+}
+```
+
+### Message
+
+```ts
+class Message<TRaw = unknown> {
+  id: string;
+  threadId: string;
+  text: string;
+  isMention: boolean;
+  raw: TRaw;
+
+  toJSON(): SerializedMessage;
+  static fromJSON(data: SerializedMessage): Message;
+}
+```
+
+### SentMessage
+
+```ts
+interface SentMessage extends Message {
+  edit(content: PostableContent): Promise<void>;
+  delete(): Promise<void>;
+  addReaction(emoji: string): Promise<void>;
+  removeReaction(emoji: string): Promise<void>;
+}
+```
+
+Reactions are on `SentMessage`, not `Message`:
+`const sent = await thread.post('Done'); await sent.addReaction('thumbsup');`
+
+```ts
+const sent = await thread.post("Done");
+await sent.addReaction("thumbsup");
+```
+
+### Channel
+
+```ts
+interface Channel<TState extends Record<string, unknown> = Record<string, unknown>> extends Postable<TState> {
+  id: string;
+  name?: string;
+}
+```
+
+## Event Handlers
+
+### Standard handlers
+
+- `onNewMention(handler)`
+- `onSubscribedMessage(handler)`
+- `onNewMessage(pattern, handler)`
+- `onReaction(filter?, handler)`
+- `onAction(filter?, handler)`
+- `onModalSubmit(filter?, handler)`
+- `onModalClose(filter?, handler)`
+- `onSlashCommand(filter?, handler)`
+- `onMemberJoinedChannel(handler)`
+
+```ts
+bot.onMemberJoinedChannel(async (event) => {
+  await event.thread.post(`Welcome ${event.user.fullName}!`);
+});
+```
+
+### Handler overloads
+
+`onAction`, `onModalSubmit`, `onModalClose`, and `onReaction` support:
+
+- Catch-all: `bot.onAction(async (event) => { ... })`
+- Single filter: `bot.onAction("approve", async (event) => { ... })`
+- Array filter: `bot.onAction(["approve", "reject"], async (event) => { ... })`
+
+### Event payload shapes
+
+```ts
+interface ActionEvent {
+  actionId: string;
+  value?: string;
+  triggerId?: string;
+  privateMetadata?: string;
+  thread: Thread;
+  relatedThread?: Thread;
+  relatedMessage?: Message;
+  openModal: (modal: JSX.Element) => Promise<void>;
+}
+
+interface ModalEvent {
+  callbackId: string;
+  values: Record<string, string>;
+  triggerId?: string;
+  privateMetadata?: string;
+  relatedThread?: Thread;
+  relatedMessage?: Message;
+}
+```
+
+`onModalSubmit` may return `ModalResponse` to close, validate, update, or push another modal.
+
+## Cards & Modals
+
+### Cards
+
+```tsx
+await thread.post(
+  <Card
+    title="Build Status"
+    subtitle="Production"
+    imageUrl="https://example.com/preview.png"
+  >
+    <Text style="success">Deployment succeeded.</Text>
+    <Text style="muted">Commit: a1b2c3d</Text>
+
+    <Field
+      id="deploy-target"
+      label="Target"
+      options={[
+        { label: "Staging", value: "staging" },
+        { label: "Production", value: "prod" },
+      ]}
+      value="prod"
+    />
+
+    <Table>
+      <TableRow>
+        <TableCell>Region</TableCell>
+        <TableCell>us-east-1</TableCell>
+      </TableRow>
+      <TableRow>
+        <TableCell>Latency</TableCell>
+        <TableCell>128ms</TableCell>
+      </TableRow>
+    </Table>
+
+    <Actions>
+      <Button id="rollback" style="danger">
+        Rollback
+      </Button>
+      <CardLink url="https://vercel.com/dashboard">Open Dashboard</CardLink>
+    </Actions>
+  </Card>,
+);
+```
+
+Card additions to use when needed:
+
+- `Card.subtitle`
+- `Card.imageUrl`
+- `CardLink`
+- `Field` (`options` uses `{ label, value }[]`, not JSX children)
+- `Table` / `TableRow` / `TableCell` — native per-platform table rendering (**new — Mar 6, 2026**; see below)
+- `Text` styles (`default`, `muted`, `success`, `warning`, `danger`, `code`)
+
+### Table — Per-Platform Rendering (New — Mar 6, 2026)
+
+The `Table` component renders natively on each platform:
+
+| Platform | Rendering |
+|---|---|
+| Slack | Block Kit table blocks |
+| Teams / Discord | GFM markdown tables |
+| Google Chat | Monospace text widgets |
+| Telegram | Code blocks |
+| GitHub / Linear | Markdown tables (existing pipeline) |
+
+Plain markdown tables (without `Table()`) also pass through the same adapter conversion pipeline.
+
+```tsx
+<Table>
+  <TableRow>
+    <TableCell>Region</TableCell>
+    <TableCell>us-east-1</TableCell>
+  </TableRow>
+  <TableRow>
+    <TableCell>Latency</TableCell>
+    <TableCell>128ms</TableCell>
+  </TableRow>
+</Table>
+```
+
+### Modals
+
+```tsx
+await event.openModal(
+  <Modal
+    callbackId="deploy-form"
+    title="Deploy"
+    submitLabel="Deploy"
+    closeLabel="Cancel"
+    notifyOnClose
+    privateMetadata={JSON.stringify({ releaseId: "rel_123" })}
+  >
+    <TextInput id="reason" label="Reason" multiline />
+  </Modal>,
+);
+```
+
+Use `privateMetadata` to pass contextual data into submit/close events.
+
+## Companion Web UI and Card Design
+
+Chat SDK payloads render natively in chat platforms, so shadcn isn't used in message markup. But when building a web control plane, thread inspector, or bot settings UI around Chat SDK, use shadcn + Geist by default. Thread dashboards: Tabs+Card+Table+Badge. Bot settings: Sheet+form controls. Logs/IDs/timestamps: Geist Mono with tabular-nums.
+
+## Platform Adapters
+
+### Slack
+
+```ts
+import { createSlackAdapter } from "@chat-adapter/slack";
+
+const slack = createSlackAdapter();
+// Env: SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET
+
+const oauthSlack = createSlackAdapter({
+  clientId: process.env.SLACK_CLIENT_ID!,
+  clientSecret: process.env.SLACK_CLIENT_SECRET!,
+  encryptionKey: process.env.SLACK_ENCRYPTION_KEY,
+});
+```
+
+### Telegram
+
+```ts
+import { createTelegramAdapter } from "@chat-adapter/telegram";
+
+const telegram = createTelegramAdapter();
+// Env: TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET
+```
+
+### Microsoft Teams
+
+```ts
+import { createTeamsAdapter } from "@chat-adapter/teams";
+
+const teams = createTeamsAdapter({
+  appType: "singleTenant",
+});
+// Env: TEAMS_APP_ID, TEAMS_APP_PASSWORD, TEAMS_APP_TENANT_ID
+```
+
+### Discord
+
+```ts
+import { createDiscordAdapter } from "@chat-adapter/discord";
+
+const discord = createDiscordAdapter();
+// Env: DISCORD_BOT_TOKEN, DISCORD_PUBLIC_KEY, DISCORD_APPLICATION_ID, CRON_SECRET
+```
+
+For message content handlers, enable both Gateway intent and Message Content Intent in the Discord developer portal.
+
+### Google Chat
+
+```ts
+import { createGoogleChatAdapter } from "@chat-adapter/gchat";
+
+const gchat = createGoogleChatAdapter();
+// Env: GOOGLE_CHAT_CREDENTIALS, GOOGLE_CHAT_USE_ADC
+```
+
+### GitHub
+
+```ts
+import { createGitHubAdapter } from "@chat-adapter/github";
+
+const github = createGitHubAdapter({
+  botUserId: process.env.GITHUB_BOT_USER_ID,
+});
+// Env: GITHUB_TOKEN or (GITHUB_APP_ID + GITHUB_PRIVATE_KEY),
+//      GITHUB_WEBHOOK_SECRET, GITHUB_INSTALLATION_ID
+```
+
+### Linear
+
+```ts
+import { createLinearAdapter } from "@chat-adapter/linear";
+
+const linear = createLinearAdapter({
+  clientId: process.env.LINEAR_CLIENT_ID,
+  clientSecret: process.env.LINEAR_CLIENT_SECRET,
+  accessToken: process.env.LINEAR_ACCESS_TOKEN,
+});
+```
+
+## State Adapters
+
+### Redis (recommended)
+
+```ts
+import { createRedisState } from "@chat-adapter/state-redis";
+
+const state = createRedisState();
+// Env: REDIS_URL (or REDIS_HOST/REDIS_PORT/REDIS_PASSWORD)
+```
+
+### ioredis (cluster/sentinel)
+
+```ts
+import { createIoRedisState } from "@chat-adapter/state-ioredis";
+
+const state = createIoRedisState({
+  // cluster/sentinel options
+});
+```
+
+### Memory (dev/test only)
+
+```ts
+import { MemoryState } from "@chat-adapter/state-memory";
+
+const state = new MemoryState();
+```
+
+## Webhook Setup
+
+### Next.js App Router
+
+```ts
+// app/api/webhooks/slack/route.ts
+import { bot } from "@/lib/bot";
+import { after } from "next/server";
+
+export async function POST(req: Request) {
+  return bot.webhooks.slack(req, {
+    waitUntil: (p) => after(() => p),
+  });
+}
+```
+
+```ts
+// app/api/webhooks/telegram/route.ts
+import { bot } from "@/lib/bot";
+
+export async function POST(req: Request) {
+  return bot.webhooks.telegram(req);
+}
+```
+
+### Pages Router
+
+```ts
+// pages/api/bot.ts
+export default async function handler(req, res) {
+  const response = await bot.webhooks.slack(req);
+  res.status(response.status).send(await response.text());
+}
+```
+
+## Integration Patterns
+
+### Out-of-thread routing with `openDM()` and `channel()`
+
+```ts
+bot.onAction("handoff", async (event) => {
+  const dm = await bot.openDM(event.user.id);
+  await dm.post("A human will follow up shortly.");
+
+  const ops = bot.channel("ops-alerts");
+  await ops.post(`Escalated by ${event.user.fullName}`);
+});
+```
+
+### Workflow-safe serialization with `registerSingleton()` and `reviver()`
+
+```ts
+bot.registerSingleton();
+
+const serialized = JSON.stringify({ thread });
+const revived = JSON.parse(serialized, bot.reviver());
+await revived.thread.post("Resumed workflow step");
+```
+
+### Slack OAuth callback handling
+
+```ts
+// app/api/webhooks/slack/oauth/callback/route.ts
+import { bot } from "@/lib/bot";
+
+export async function GET(req: Request) {
+  return bot.oauth.slack.callback(req);
+}
+```
+
+## Gotchas
+
+### Routing
+
+1. `onNewMention` only fires for unsubscribed threads; call `thread.subscribe()` to receive follow-ups.
+2. DMs are treated as direct intent and set `message.isMention = true`.
+3. `onNewMessage(pattern, handler)` only applies before subscription; use `onSubscribedMessage` after subscribe.
+4. Catch-all and filtered handlers can both run; registration order determines execution order.
+5. Out-of-thread routing via `openDM()` / `channel()` needs platform permissions for DM/channel posting.
+
+### Streaming
+
+6. Slack supports native streaming with real-time bold, italic, list, and other formatting rendered as the response arrives. Teams/Discord/Google Chat/Telegram use post+edit fallback.
+7. Fallback adapters now convert markdown to each platform's native format at every intermediate edit — users no longer see raw `**bold**` syntax during streaming.
+8. `fallbackStreamingPlaceholderText: null` disables placeholder messages on fallback adapters.
+9. `streamingUpdateIntervalMs` too low can trigger rate limits on post+edit adapters.
+10. `dedupeTtlMs` should cover webhook retry windows to avoid duplicate responses.
+11. `startTyping()` is adapter-dependent and may no-op on platforms without typing indicators.
+
+### Adapter-specific
+
+11. Google Chat auth uses `GOOGLE_CHAT_CREDENTIALS` + `GOOGLE_CHAT_USE_ADC`; domain-wide delegation/impersonation is required for some org posting scenarios.
+12. Teams requires `appType` plus `TEAMS_APP_TENANT_ID`; reactions/history/typing features are limited compared with Slack.
+13. Discord content-based handlers require Message Content Intent enabled in addition to Gateway connectivity.
+14. GitHub and Linear adapters do not support interactive card actions/modals; design around comments/status updates instead.
+15. GitHub App installs need `GITHUB_INSTALLATION_ID` and often adapter `botUserId`; Linear OAuth setups need `clientId`, `clientSecret`, and `LINEAR_ACCESS_TOKEN`.
+
+## Official Docs
+
+- [Chat SDK documentation](https://chat-sdk.dev)
+- [GitHub: vercel/chat](https://github.com/vercel/chat)
+
+---
+
+Base directory for this skill: /Users/taras/.claude/plugins/cache/desplega-ai-toolbox/desplega/1.7.0/skills/planning
+
+# Planning
+
+You are creating detailed implementation plans through an interactive, iterative process. Be skeptical, thorough, and collaborative.
+
+## Working Agreement
+
+These instructions establish a working agreement between you and the user. The key principles are:
+
+1. **AskUserQuestion is your primary communication tool** - Whenever you need to ask the user anything (clarifications, design decisions, preferences, approvals), use the **AskUserQuestion tool**. Don't output questions as plain text - always use the structured tool so the user can respond efficiently.
+
+2. **Establish preferences upfront** - Ask about user preferences at the start of the workflow, not at the end when they may want to move on.
+
+3. **Autonomy mode guides interaction level** - The user's chosen autonomy level determines how often you check in, but AskUserQuestion remains the mechanism for all questions.
+
+### User Preferences
+
+Before starting planning (unless autonomy is Autopilot), establish these preferences:
+
+**Commit After Each Phase** - Use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like me to create a commit after each phase once manual verification passes?" | 1. Yes, commit after each phase passes (Recommended), 2. No, I'll handle commits myself |
+
+Store this preference and act on it during implementation (see "Commit Integration" section).
+
+**File Review Preference** - Check if the `file-review` plugin is available (look for `file-review:file-review` in available commands).
+
+If file-review plugin is installed, use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like to use file-review for inline feedback on the plan when it's ready?" | 1. Yes, open file-review when plan is ready (Recommended), 2. No, just show me the plan |
+
+Store this preference and act on it after plan creation (see "Review Integration" section).
+
+## When to Use
+
+This skill activates when:
+- User invokes `/create-plan` command
+- Another skill references `**REQUIRED SUB-SKILL:** Use desplega:planning`
+- User asks to plan an implementation or create a technical spec
+
+## Autonomy Mode
+
+At the start of planning, adapt your interaction level based on the autonomy mode:
+
+| Mode | Behavior |
+|------|----------|
+| **Autopilot** | Research independently, create complete plan, present for final review only |
+| **Critical** (Default) | Get buy-in at major decision points, present design options for approval |
+| **Verbose** | Check in at each step, validate understanding, confirm before each phase |
+
+The autonomy mode is passed by the invoking command. If not specified, default to **Critical**.
+
+## Process Steps
+
+### Step 1: Context Gathering & Initial Analysis
+
+1. **Read all mentioned files immediately and FULLY:**
+   - Research documents, related plans, JSON/data files
+   - **IMPORTANT**: Use Read tool WITHOUT limit/offset parameters
+   - **CRITICAL**: Read files yourself before spawning sub-tasks
+
+2. **Spawn initial research tasks:**
+   - Use **codebase-locator** agent to find all files related to the task
+   - Use **codebase-analyzer** agent to understand current implementation
+   - Use **thoughts-locator** agent to find existing thoughts documents
+   - Use context7 MCP for library/framework insights
+
+3. **Read all files identified by research tasks**
+
+4. **Analyze and verify understanding:**
+   - Identify discrepancies or misunderstandings
+   - Note assumptions needing verification
+
+5. **Present understanding and questions (if not Autopilot):**
+
+   First, present your findings as text:
+   ```
+   Based on the research of the codebase, I understand we need to [summary].
+
+   I've found that:
+   - [Current implementation detail with file:line reference]
+   - [Relevant pattern or constraint discovered]
+   ```
+
+   Then, if there are questions that research couldn't answer, use **AskUserQuestion** with:
+
+   | Question | Options |
+   |----------|---------|
+   | "[Specific technical question]" | Provide relevant options based on the choices available |
+   | "[Design preference question]" | Provide relevant options based on the choices available |
+
+### Step 2: Research & Discovery
+
+1. **If the user corrects any misunderstanding:**
+   - Spawn new research tasks to verify
+   - Read specific files/directories mentioned
+
+2. **Create a research todo list** using TodoWrite
+
+3. **Spawn parallel sub-tasks:**
+   - **codebase-locator** - Find specific files
+   - **codebase-analyzer** - Understand implementation details
+   - **codebase-pattern-finder** - Find similar features to model after
+
+4. **Present findings and design options (if not Autopilot):**
+
+   First, present findings as text:
+   ```
+   **Current State:**
+   - [Key discovery about existing code]
+   ```
+
+   Then, use **AskUserQuestion** to present design options:
+
+   | Question | Options |
+   |----------|---------|
+   | "Which approach aligns best with your vision?" | 1. [Option A] - [brief description], 2. [Option B] - [brief description] |
+
+   Include pros/cons in the option descriptions to help the user decide.
+
+### Step 3: Plan Structure Development
+
+1. **Create initial plan outline (if not Autopilot):**
+
+   Present the outline as text:
+   ```
+   Here's my proposed plan structure:
+
+   ## Overview
+   [1-2 sentence summary]
+
+   ## Implementation Phases:
+   1. [Phase name] - [what it accomplishes]
+   2. [Phase name] - [what it accomplishes]
+   ```
+
+   Then, use **AskUserQuestion** to get approval:
+
+   | Question | Options |
+   |----------|---------|
+   | "Does this phasing make sense?" | 1. Yes, proceed with this structure, 2. No, let's discuss changes |
+
+2. **Get feedback on structure** before writing details
+
+### Step 4: Detailed Plan Writing
+
+Before proceeding, exit plan mode to write the plan file.
+
+Write the plan to `thoughts/<username|shared>/plans/YYYY-MM-DD-description.md`.
+
+**Path selection:** Use the user's name (e.g., `thoughts/taras/plans/`) if known from context. Fall back to `thoughts/shared/plans/` when unclear.
+
+**CRITICAL**: Every phase MUST include a `### Success Criteria:` section with both `#### Automated Verification:` and `#### Manual Verification:` subsections. See "Success Criteria Requirements" section at the end of this document for the exact format.
+
+**QA Specs (optional)**: Phases that change user-facing behavior, add UI, modify API responses, or alter auth/permissions SHOULD include an optional `### QA Spec (optional):` section after the Success Criteria. See the template for the exact format. Phases that are internal refactors, type changes, config updates, or dependency bumps should omit QA specs. QA specs can live either inline in plan phases (for per-phase validation) or as a separate standalone document (for cross-cutting or feature-level QA). The inline approach is the default for plans; the QA skill handles both sources transparently.
+
+**Template:** Read and follow the template at `cc-plugin/base/skills/planning/template.md`
+
+The template includes:
+- Standard plan sections (Overview, Current State, Desired End State, etc.)
+- Multiple phase examples with proper Success Criteria structure
+- Correct heading hierarchy throughout
+
+### Step 5: Review and Iterate
+
+1. **Present draft plan location:**
+   ```
+   I've created the implementation plan at:
+   `thoughts/<username|shared>/plans/YYYY-MM-DD-description.md`
+
+   Please review it.
+   ```
+
+2. **Iterate based on feedback** (if not Autopilot)
+
+3. **Offer structured review:**
+   - After iteration, offer: "Would you like me to run `/review` on this plan for completeness and gap analysis?"
+   - If yes, invoke the `desplega:reviewing` skill on the plan document
+
+4. **Finalize the plan** - DO NOT START implementation
+
+5. **Workflow handoff:**
+   After the plan is finalized (and optionally reviewed), use **AskUserQuestion** with:
+
+   | Question | Options |
+   |----------|---------|
+   | "The plan is ready. What's the next step?" | 1. Implement this plan (→ `/implement-plan`), 2. Run a review first (→ `/review`), 3. Done for now (park the plan) |
+
+   Based on the answer:
+   - **Implement**: Suggest the `/implement-plan` command with the plan file path
+   - **Review**: Invoke the `desplega:reviewing` skill on the plan document
+   - **Done**: Set the plan's `status` to `ready` or `parked` as appropriate
+
+## Review Integration
+
+If the `file-review` plugin is available and the user selected "Yes" during User Preferences setup:
+- After creating plans, invoke `/file-review:file-review <path>`
+- If user selected "No" or autonomy mode is Autopilot, skip this step
+
+## Commit Integration
+
+If the user selected "Yes" to commits during User Preferences setup:
+- After each phase's manual verification passes, create a commit with a descriptive message
+- Commit message format: `[phase N] <brief description of what the phase accomplished>`
+- Only commit after explicit confirmation that manual verification passed
+- If user selected "No", skip commits entirely - the user will handle them
+
+## Important Guidelines
+
+1. **Be Skeptical**: Question vague requirements, verify with code
+2. **Be Interactive**: Don't write full plan in one shot (unless Autopilot)
+3. **Be Thorough**: Read context files COMPLETELY, include file:line references
+4. **Be Practical**: Focus on incremental, testable changes
+5. **No Open Questions**: Research or clarify immediately, don't leave questions in plan
+
+## Success Criteria Requirements (MANDATORY)
+
+**Every phase MUST have a Success Criteria section.** Plans without proper success criteria are incomplete.
+
+### Required Structure
+
+Each phase must end with this exact structure:
+
+```markdown
+### Success Criteria:
+
+#### Automated Verification:
+- [ ] [Command that can be run]: `command here`
+- [ ] [Another automated check]: `command here`
+
+#### Manual Verification:
+- [ ] [Human testing step]
+- [ ] [Another manual check]
+
+**Implementation Note**: [When to pause for confirmation]
+```
+
+### Heading Hierarchy
+
+Use these exact heading levels (this is critical for consistency):
+- `### Success Criteria:` (h3) - section header
+- `#### Automated Verification:` (h4) - subsection
+- `#### Manual Verification:` (h4) - subsection
+
+### What Goes Where
+
+| Type | Examples |
+|------|----------|
+| **Automated** | `make test`, `npm run lint`, `tsc --noEmit`, `ls path/to/file`, `grep pattern file` |
+| **Manual** | UI interactions, visual checks, performance testing, edge case validation |
+
+### Validation Checklist
+
+Before finalizing any plan, verify:
+- [ ] Every phase has `### Success Criteria:` section
+- [ ] Each has `#### Automated Verification:` with runnable commands
+- [ ] Each has `#### Manual Verification:` with human testing steps
+- [ ] All items use checkbox format `- [ ]`
+- [ ] Automated checks are actual commands (not descriptions)
+- [ ] Phases with user-facing changes have optional `### QA Spec` sections (if applicable)
+
+
+ARGUMENTS: thoughts/taras/research/2026-03-18-linear-integration-finalization.md --autonomy=verbose
+
+---
+
+<task-notification>
+<task-id>a9cff0649a305bb24</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/a9cff0649a305bb24.output</output-file>
+<status>completed</status>
+<summary>Agent "Find existing thoughts docs" completed</summary>
+<result>
+
+Here are the results, Taras.
+
+## Thoughts Documents Related to Linear Integration / Ticket Tracking
+
+### Directly Related (Linear / Tracker in filename)
+
+1. **`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/thoughts/taras/research/2026-03-18-linear-integration-finalization.md`**
+   - Location: `thoughts/taras/research/`
+   - The most recent document, dated today's timeframe. This is the primary Linear integration research file.
+
+2. **`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/thoughts/shared/research/2026-01-15-ai-tracker-agent-swarm-integration.md`**
+   - Location: `thoughts/shared/research/`
+   - Earlier research on AI tracker integration with agent-swarm, from January 2026.
+
+### Tangentially Related (mention "linear" in content but not the primary topic)
+
+These files contain the word "linear" somewhere in their body (likely referencing Linear as a concept or in passing, not as the main subject):
+
+3. **`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/thoughts/taras/research/2026-02-25-dashboard-ui-design-best-practices.md`** - `thoughts/taras/research/`
+4. **`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/thoughts/taras/research/2026-03-06-workflow-engine-design.md`** - `thoughts/taras/research/`
+5. **`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/thoughts/taras/plans/2026-02-25-feat-new-ui-visual-redesign-plan.md`** - `thoughts/taras/plans/`
+6. **`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/thoughts/swarm-researcher/research/2026-02-26-artifacts-localtunnel.md`** - `thoughts/swarm-researcher/research/`
+7. **`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/thoughts/shared/research/2026-03-03-database-migration-system-refactor.md`** - `thoughts/shared/research/`
+
+### Also found (outside thoughts/)
+
+8. **`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/new-ui/thoughts/taras/research/2026-02-26-task-detail-page-redesign.md`**
+   - Location: `new-ui/thoughts/taras/research/` (separate thoughts directory within the new-ui subproject). Mentions "linear" in content.
+
+### Directories checked with no results
+
+- **`thoughts/2pac/`** - Does not exist in this worktree.
+- **`thoughts/shared/plans/`** - No Linear or tracker-related files by name or content.
+- **`thoughts/shared/research/`** - Only the `2026-01-15-ai-tracker-agent-swarm-integration.md` file matched.
+
+### Summary
+
+The two primary documents are:
+- The **ai-tracker research** from January (`thoughts/shared/research/2026-01-15-ai-tracker-agent-swarm-integration.md`) -- likely the earlier/foundational exploration.
+- The **linear-integration-finalization research** from March (`thoughts/taras/research/2026-03-18-linear-integration-finalization.md`) -- the current/active document on this branch.</result>
+<usage><total_tokens>16653</total_tokens><tool_uses>12</tool_uses><duration_ms>41419</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/a9cff0649a305bb24.output
+
+---
+
+<task-notification>
+<task-id>aa316ba33e1deb038</task-id>
+<tool-use-id>toolu_01Lcbn6W6ig5T1oFzCW7Z78Q</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/aa316ba33e1deb038.output</output-file>
+<status>completed</status>
+<summary>Agent "Find Linear/tracker files" completed</summary>
+<result>
+
+I now have a comprehensive view. Here are the results, Taras.
+
+---
+
+## File Locations for Linear Integration / Ticket Tracker
+
+### Core Linear Module (`src/linear/`) -- 5 files
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/index.ts` -- Module barrel export; exposes `initLinear`, `resetLinear`, `isLinearEnabled`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/app.ts` -- `isLinearEnabled()`, `initLinear()`, `resetLinear()` lifecycle functions
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/client.ts` -- `@linear/sdk` wrapper with auto-refresh
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/oauth.ts` -- Linear OAuth/PKCE flow specifics (`getAuthorizationUrl`, `handleOAuthCallback`)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/types.ts` -- Linear webhook event types, API response types
+
+### HTTP Route Handlers
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/linear.ts` -- HTTP handlers for `/api/linear/authorize` and `/api/linear/callback` OAuth routes; `handleLinear()` exported function
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/index.ts` -- Imports `handleLinear` (line 23) and calls it in the request routing chain (line 96); also calls `initLinear()` during startup (line 190)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/core.ts` -- Imports `initLinear`/`resetLinear` from `../linear` (line 14); bypasses API key auth for `/api/linear/authorize` and `/api/linear/callback` (lines 85-87); re-initializes Linear integration on config hot-reload (lines 112-113)
+
+**Note**: There is NO `src/http/trackers/` directory and NO `src/tracker/` directory. The current implementation uses `src/http/linear.ts` directly rather than a generic trackers route structure.
+
+### Database Migration
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/be/migrations/008_linear_integration.sql` -- Creates three new tables: `linear_oauth_tokens`, `linear_sync` (swarm-to-Linear entity mapping), `linear_agent_mapping` (agent-to-Linear user mapping); adds indexes; recreates `agent_tasks` table to add `'linear'` to the source CHECK constraint
+
+### Database Layer
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/be/db.ts` -- No Linear-specific query functions found yet (no matches for "linear" or "tracker")
+
+**Note**: There is NO `src/be/db-queries/` directory. Database queries live in `src/be/db.ts` directly.
+
+### Type Definitions
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/types.ts` -- `AgentTaskSourceSchema` (line 56) is a Zod enum that includes `"linear"` (line 66) as one of the valid task sources alongside `mcp`, `slack`, `api`, `github`, `gitlab`, `agentmail`, `system`, `schedule`, `workflow`
+
+### Main HTTP Server Entry
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http.ts` -- No direct Linear references; this file delegates to `src/http/index.ts`
+
+### OpenAPI Spec
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/openapi.json` -- Documents two Linear endpoints under the `"Linear"` tag: `GET /api/linear/authorize` (line 1342) and `GET /api/linear/callback` (line 1361)
+
+### Environment / Configuration
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/.env.example` -- Lines 50-58 define Linear integration env vars:
+  - `LINEAR_DISABLE`, `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET`, `LINEAR_REDIRECT_URI`, `LINEAR_TEAM_ID`, `LINEAR_SIGNING_SECRET`, `LINEAR_ENABLED`, `LINEAR_SYNC_PROGRESS`
+
+### Package Dependencies
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/package.json` -- `@linear/sdk` at `^77.0.0` (line 87)
+
+### Research / Documentation
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/thoughts/taras/research/2026-03-18-linear-integration-finalization.md` -- Research document for the Linear integration. Notably describes a planned **generic ticket tracker abstraction** with Linear as the first provider, including a planned `src/http/trackers/linear.ts` route structure and generic `tracker_oauth_tokens` table -- which differs from what currently exists on disk.
+
+### Dashboard (new-ui/) -- No Direct Integration
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/new-ui/src/pages/dashboard/page.tsx` -- Contains only a comment reference ("Linear-style" activity feed, line 110) -- not actual Linear integration code
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/new-ui/src/components/ui/sidebar.tsx` -- Only contains CSS `ease-linear` transitions, not related to Linear the product
+
+### Test Files
+
+No Linear-specific test files exist. The `src/tests/` directory has no files matching "linear".
+
+### Directories That Do NOT Exist (Requested But Absent)
+
+- `src/tracker/` -- does not exist
+- `src/http/trackers/` -- does not exist
+- `src/be/db-queries/` -- does not exist
+
+### Summary of Current Architecture
+
+The Linear integration currently lives in two clusters:
+1. **`src/linear/`** (5 files) -- SDK client, OAuth flow, types, and lifecycle management
+2. **`src/http/linear.ts`** (1 file) -- HTTP route handlers for OAuth authorize/callback
+
+These are wired into the server via `src/http/index.ts` and `src/http/core.ts`. The database schema is established by migration 008. The research doc at `thoughts/taras/research/2026-03-18-linear-integration-finalization.md` describes a planned refactor toward a generic tracker abstraction that has not yet been implemented on disk.</result>
+<usage><total_tokens>20500</total_tokens><tool_uses>32</tool_uses><duration_ms>84438</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/aa316ba33e1deb038.output
+
+---
+
+<task-notification>
+<task-id>ac5b2919038bfa109</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/ac5b2919038bfa109.output</output-file>
+<status>completed</status>
+<summary>Agent "Analyze existing patterns" completed</summary>
+<result>Now I have all the information needed. Here is the full pattern catalog, Taras.
+
+---
+
+## Pattern Examples for Linear/Tracker Integration
+
+### 1. GitHub Integration Structure (`src/github/`)
+
+**File layout:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/github/index.ts` -- barrel re-exports
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/github/app.ts` -- initialization, enable check, credentials
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/github/handlers.ts` -- webhook event handlers (create tasks from events)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/github/types.ts` -- TypeScript interfaces for event payloads
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/github/reactions.ts` -- API actions (react, comment)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/github/mentions.ts` -- mention detection utilities
+
+**Initialization pattern (app.ts):**
+
+```typescript
+let initialized = false;
+let webhookSecret: string | null = null;
+
+export function isGitHubEnabled(): boolean {
+  const githubDisable = process.env.GITHUB_DISABLE;
+  if (githubDisable === "true" || githubDisable === "1") return false;
+  return !!process.env.GITHUB_WEBHOOK_SECRET;
+}
+
+export function resetGitHub(): void {
+  initialized = false;
+  webhookSecret = null;
+  // ...clear caches
+}
+
+export function initGitHub(): boolean {
+  if (initialized) {
+    console.log("[GitHub] Already initialized, skipping");
+    return isGitHubEnabled();
+  }
+  initialized = true;
+
+  // ... read env vars, set up credentials
+  console.log("[GitHub] Webhook handler initialized");
+  return true;
+}
+```
+
+**Key aspects:**
+- Module-level `let initialized = false` guard for idempotent init
+- `isXxxEnabled()` checks `XXX_DISABLE` env var + required credential
+- `resetXxx()` clears all module-level state
+- `initXxx()` returns `boolean` (enabled or not)
+- All console logs prefixed with `[GitHub]`
+
+**Barrel index.ts:**
+```typescript
+export { getInstallationToken, getWebhookSecret, initGitHub, isGitHubEnabled, isReactionsEnabled, resetGitHub, verifyWebhookSignature } from "./app";
+export { handleCheckRun, handleCheckSuite, handleComment, handleIssue, handlePullRequest, ... } from "./handlers";
+export { detectMention, extractMentionContext, GITHUB_BOT_NAME, isBotAssignee } from "./mentions";
+export type { ReactionType } from "./reactions";
+export { addIssueReaction, addReaction, postComment } from "./reactions";
+export type { CheckRunEvent, CommentEvent, ... } from "./types";
+```
+
+**Handler pattern (handlers.ts)** -- each handler receives a typed event, deduplicates, finds lead agent, calls `createTaskExtended()`:
+```typescript
+export async function handlePullRequest(
+  event: PullRequestEvent,
+): Promise<{ created: boolean; taskId?: string }> {
+  const { action, pull_request: pr, repository, sender, installation } = event;
+
+  // Deduplicate
+  const eventKey = `pr:${repository.full_name}:${pr.number}:${action}`;
+  if (isDuplicate(eventKey)) return { created: false };
+
+  const lead = findLeadAgent();
+  const task = createTaskExtended(taskDescription, {
+    agentId: lead?.id ?? "",
+    source: "github",
+    vcsProvider: "github",
+    taskType: "github-pr",
+    vcsRepo: repository.full_name,
+    vcsEventType: "pull_request",
+    vcsNumber: pr.number,
+    vcsAuthor: sender.login,
+    vcsUrl: pr.html_url,
+  });
+  return { created: true, taskId: task.id };
+}
+```
+
+---
+
+### 2. Slack Integration Structure (`src/slack/`)
+
+**File layout:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/slack/index.ts` -- barrel re-exports
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/slack/app.ts` -- init, start, stop lifecycle
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/slack/types.ts` -- type interfaces
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/slack/router.ts` -- message routing logic
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/slack/handlers.ts`, `commands.ts`, `actions.ts`, `assistant.ts` -- handler registrations
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/slack/watcher.ts` -- background task watcher
+
+**Initialization pattern (app.ts):**
+```typescript
+let app: App | null = null;
+let initialized = false;
+
+export function getSlackApp(): App | null { return app; }
+
+export async function initSlackApp(): Promise<App | null> {
+  if (initialized) {
+    console.log("[Slack] Already initialized, skipping");
+    return app;
+  }
+  initialized = true;
+
+  const slackDisable = process.env.SLACK_DISABLE;
+  if (slackDisable === "true" || slackDisable === "1") {
+    console.log("[Slack] Disabled via SLACK_DISABLE");
+    return null;
+  }
+  // ... check tokens, create App, register handlers
+  return app;
+}
+
+export async function startSlackApp(): Promise<void> { /* ... */ }
+export async function stopSlackApp(): Promise<void> {
+  // ... stop watcher, stop app, reset state
+  initialized = false;
+}
+```
+
+**Key aspects:**
+- Same `initialized` guard as GitHub
+- Async init (vs GitHub's sync) because Slack uses socket mode
+- Has explicit `start`/`stop` lifecycle methods
+- Dynamic imports for handler registration inside init
+
+---
+
+### 3. Linear Integration (Already Started) (`src/linear/`)
+
+**File layout:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/index.ts` -- barrel
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/app.ts` -- init (mirrors GitHub pattern exactly)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/types.ts` -- LinearOAuthToken, LinearSyncMapping, LinearAgentMapping, etc.
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/oauth.ts` -- OAuth 2.0 + PKCE flow, token storage in DB
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/client.ts` -- OAuth-aware LinearClient with auto-refresh
+
+**app.ts follows GitHub exactly:**
+```typescript
+let initialized = false;
+
+export function isLinearEnabled(): boolean {
+  const disabled = process.env.LINEAR_DISABLE;
+  if (disabled === "true" || disabled === "1") return false;
+  return !!process.env.LINEAR_CLIENT_ID;
+}
+
+export function resetLinear(): void {
+  initialized = false;
+  resetLinearClient();
+}
+
+export function initLinear(): boolean {
+  if (initialized) return isLinearEnabled();
+  initialized = true;
+  if (!isLinearEnabled()) {
+    console.log("[Linear] Integration disabled or LINEAR_CLIENT_ID not set");
+    return false;
+  }
+  console.log("[Linear] Integration initialized");
+  return true;
+}
+```
+
+**client.ts provides a `withLinearClient` wrapper** for auto-retry on auth errors:
+```typescript
+export async function withLinearClient<T>(
+  fn: (client: LinearClient) => Promise<T>,
+): Promise<T | null> {
+  const client = await getLinearClient();
+  if (!client) return null;
+  try {
+    return await fn(client);
+  } catch (error) {
+    // On 401/403, refresh token and retry once
+    // ...
+    throw error;
+  }
+}
+```
+
+---
+
+### 4. VCS Abstraction (`src/vcs/`)
+
+**Found in:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/vcs/types.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/vcs/index.ts`
+
+**types.ts:**
+```typescript
+export type VcsProvider = "github" | "gitlab";
+```
+
+**index.ts:**
+```typescript
+export type { VcsProvider } from "./types";
+
+export function detectVcsProvider(url: string): "github" | "gitlab" | null {
+  if (url.includes("gitlab.com") || url.includes("gitlab.")) return "gitlab";
+  if (url.includes("github.com") || /^[\w.-]+\/[\w.-]+$/.test(url)) return "github";
+  return null;
+}
+```
+
+**Key aspects:** Very thin abstraction -- just a type union and a URL detector. The VCS-specific fields on tasks (`vcsProvider`, `vcsRepo`, `vcsEventType`, etc.) are stored directly in `agent_tasks` and set by each integration's handlers.
+
+---
+
+### 5. MCP Tool Definition Pattern (`src/tools/`)
+
+**Pattern 1: Simple Read Tool**
+**Found in:** `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tools/get-task-details.ts`
+
+```typescript
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import * as z from "zod";
+import { getLogsByTaskIdChronological, getTaskById } from "@/be/db";
+import { createToolRegistrar } from "@/tools/utils";
+import { AgentLogSchema, AgentTaskSchema } from "@/types";
+
+export const registerGetTaskDetailsTool = (server: McpServer) => {
+  createToolRegistrar(server)(
+    "get-task-details",
+    {
+      title: "Get task details",
+      description: "Returns detailed information about a specific task...",
+      annotations: { readOnlyHint: true },
+      inputSchema: z.object({
+        taskId: z.uuid().describe("The ID of the task to get details for."),
+      }),
+      outputSchema: z.object({
+        yourAgentId: z.string().uuid().optional(),
+        success: z.boolean(),
+        message: z.string(),
+        task: AgentTaskSchema.optional(),
+        logs: z.array(AgentLogSchema).optional(),
+      }),
+    },
+    async ({ taskId }, requestInfo, _meta) => {
+      // ... logic
+      return {
+        content: [{ type: "text", text: `Task "${taskId}" details retrieved.` }],
+        structuredContent: { yourAgentId: requestInfo.agentId, success: true, message: "...", task, logs },
+      };
+    },
+  );
+};
+```
+
+**Pattern 2: Destructive Tool with Transactions**
+**Found in:** `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tools/cancel-task.ts`
+
+```typescript
+export const registerCancelTaskTool = (server: McpServer) => {
+  createToolRegistrar(server)(
+    "cancel-task",
+    {
+      title: "Cancel Task",
+      description: "Cancel a task that is pending or in progress...",
+      annotations: { destructiveHint: true },
+      inputSchema: z.object({ taskId: z.uuid(), reason: z.string().optional() }),
+      outputSchema: z.object({ ... }),
+    },
+    async (input, requestInfo, _meta) => {
+      const txn = getDb().transaction(() => {
+        // ... business logic inside transaction
+        return { success: true, message: "...", task: cancelled };
+      });
+      const result = txn();
+      return {
+        content: [{ type: "text", text: result.message }],
+        structuredContent: { yourAgentId: agentId, ...result },
+      };
+    },
+  );
+};
+```
+
+**Key aspects of tool pattern:**
+- Export a `registerXxxTool` function taking `McpServer`
+- Use `createToolRegistrar(server)` helper which auto-extracts `requestInfo` (agentId, sessionId) from headers
+- Zod schemas for `inputSchema` and `outputSchema`
+- Return both `content` (text for display) and `structuredContent` (typed data)
+- `annotations` object with hints (`readOnlyHint`, `destructiveHint`)
+- DB writes wrapped in `getDb().transaction()`
+
+**Tool grouping pattern (subdirectories):**
+**Found in:** `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tools/epics/index.ts`
+```typescript
+export { registerAssignTaskToEpicTool } from "./assign-task-to-epic";
+export { registerCreateEpicTool } from "./create-epic";
+export { registerDeleteEpicTool } from "./delete-epic";
+// ...
+```
+
+**Tool registration in tool-config.ts:**
+Tools are classified as `CORE_TOOLS` (always loaded) or `DEFERRED_TOOLS` (discovered via Tool Search). Found in `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tools/tool-config.ts`.
+
+---
+
+### 6. HTTP Route Registration Pattern (`src/http/`)
+
+**Server entrypoint:** `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/index.ts`
+
+**Integration init happens in server listen callback (lines 162-208):**
+```typescript
+httpServer.listen(port, async () => {
+    // ...
+    await startSlackApp();
+    initGitHub();
+    initGitLab();
+    initAgentMail();
+    initLinear();
+    initWorkflows();
+    // ...
+});
+```
+
+**Route handlers are registered as a prioritized array (lines 91-108):**
+```typescript
+const handlers: (() => Promise<boolean>)[] = [
+  () => handleAgentRegister(req, res, pathSegments, myAgentId),
+  () => handlePoll(req, res, pathSegments, myAgentId),
+  () => handleLinear(req, res, pathSegments),
+  () => handleWebhooks(req, res, pathSegments),
+  () => handleTasks(req, res, pathSegments, queryParams, myAgentId),
+  // ...
+  () => handleMcp(req, res, transports),
+];
+
+for (const handler of handlers) {
+  if (await handler()) return;
+}
+```
+
+**Route handler file pattern:**
+**Found in:** `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/linear.ts`
+
+```typescript
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { getAuthorizationUrl, handleOAuthCallback, isLinearEnabled } from "../linear";
+import { route } from "./route-def";
+
+// Define routes with OpenAPI metadata
+const linearAuthorize = route({
+  method: "get",
+  path: "/api/linear/authorize",
+  pattern: ["api", "linear", "authorize"],
+  summary: "Redirect to Linear OAuth consent screen",
+  tags: ["Linear"],
+  auth: { apiKey: false },
+  responses: { 302: { description: "Redirect" }, 503: { description: "Not configured" } },
+});
+
+// Export handler function: returns boolean (true = handled)
+export async function handleLinear(
+  req: IncomingMessage,
+  res: ServerResponse,
+  pathSegments: string[],
+): Promise<boolean> {
+  if (linearAuthorize.match(req.method, pathSegments)) {
+    if (!isLinearEnabled()) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Linear integration not configured" }));
+      return true;
+    }
+    // ... handle the route
+    return true;
+  }
+  return false;
+}
+```
+
+**Route definition factory (`route-def.ts`):**
+```typescript
+export function route<TParams, TQuery, TBody>(def: RouteDef<TParams, TQuery, TBody>): RouteHandle {
+  routeRegistry.push(def);  // auto-registers for OpenAPI generation
+  return {
+    def,
+    match(method, pathSegments) { /* pattern matching */ },
+    async parse(req, res, pathSegments, queryParams) { /* zod validation */ },
+  };
+}
+```
+
+**Key aspects:**
+- Each route group is a separate file in `src/http/`
+- Routes are defined with `route()` which auto-registers them in `routeRegistry` for OpenAPI
+- Handler function signature: `(req, res, pathSegments, ...) => Promise<boolean>`
+- Returns `true` if handled, `false` to pass to next handler
+- `isXxxEnabled()` guard at top of each matching block
+
+**Webhook handler pattern:**
+**Found in:** `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/webhooks.ts`
+
+All VCS webhooks (GitHub, GitLab, AgentMail) are grouped in a single `handleWebhooks` function. Each checks `isXxxEnabled()`, verifies the signature/token, parses the body, then dispatches to the integration's handlers.
+
+---
+
+### 7. Migration Runner (`src/be/migrations/runner.ts`)
+
+```typescript
+export function runMigrations(db: Database): void {
+  // 1. Ensure tracking table
+  db.run(`CREATE TABLE IF NOT EXISTS _migrations (...)`);
+
+  // 2. Load .sql files from migrations directory, sorted
+  const files = readdirSync(migrationsDir).filter(f => f.endsWith(".sql")).sort();
+  const migrations = files.map(file => ({
+    version: parseInt(file.split("_")[0]),
+    name: file.replace(".sql", ""),
+    sql: readFileSync(join(migrationsDir, file), "utf-8"),
+    checksum: createHash("sha256").update(sql).digest("hex"),
+  }));
+
+  // 3. Get already-applied migrations from _migrations table
+  // 4. Bootstrap: if pre-migration DB exists, mark 001 as applied
+  // 5. Apply pending migrations in transactions
+  for (const migration of migrations) {
+    if (existing) { /* verify checksum, skip */ continue; }
+    db.transaction(() => {
+      db.exec(migration.sql);
+      db.run("INSERT INTO _migrations ...", [...]);
+    })();
+  }
+}
+```
+
+**Existing Linear migration example:**
+**Found in:** `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/be/migrations/008_linear_integration.sql`
+
+Creates `linear_oauth_tokens`, `linear_sync`, `linear_agent_mapping` tables and recreates `agent_tasks` with `'linear'` added to the source CHECK constraint.
+
+---
+
+### 8. `db.ts` Module Pattern (`src/be/db.ts`)
+
+**Found in:** `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/be/db.ts`
+
+**DB lifecycle:**
+```typescript
+let db: Database | null = null;
+
+export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
+  if (db) return db;
+  db = new Database(dbPath, { create: true });
+  db.run("PRAGMA journal_mode = WAL;");
+  db.run("PRAGMA foreign_keys = ON;");
+  runMigrations(db);
+  return db;
+}
+
+export function getDb(path?: string): Database {
+  if (!db) return initDb(path ?? process.env.DATABASE_PATH);
+  return db;
+}
+
+export function closeDb(): void {
+  if (db) { db.close(); db = null; }
+}
+```
+
+**Query function pattern** -- plain exported functions using `getDb()`:
+```typescript
+export function getTaskById(id: string): AgentTask | null {
+  // uses getDb().prepare<Row, [string]>("SELECT ...").get(id)
+}
+
+export function findTaskByVcs(vcsRepo: string, vcsNumber: number): AgentTask | null { ... }
+export function createTaskExtended(task: string, options?: CreateTaskOptions): AgentTask { ... }
+```
+
+**`CreateTaskOptions` interface (line 1693):**
+```typescript
+export interface CreateTaskOptions {
+  agentId?: string | null;
+  creatorAgentId?: string;
+  source?: AgentTaskSource;
+  taskType?: string;
+  tags?: string[];
+  priority?: number;
+  dependsOn?: string[];
+  offeredTo?: string;
+  status?: "backlog" | "unassigned";
+  slackChannelId?: string;
+  slackThreadTs?: string;
+  slackUserId?: string;
+  vcsProvider?: "github" | "gitlab";
+  vcsRepo?: string;
+  vcsEventType?: string;
+  vcsNumber?: number;
+  vcsCommentId?: number;
+  vcsAuthor?: string;
+  vcsUrl?: string;
+  agentmailInboxId?: string;
+  agentmailMessageId?: string;
+  agentmailThreadId?: string;
+  epicId?: string;
+  dir?: string;
+  parentTaskId?: string;
+  model?: string;
+  scheduleId?: string;
+  workflowRunId?: string;
+  workflowRunStepId?: string;
+}
+```
+
+**Key aspects:**
+- No classes or ORM -- plain functions exported from a flat module
+- All query functions call `getDb()` internally (lazy-init)
+- Row types defined as interfaces, converted via helper functions like `rowToAgentTask()`
+- Transactions use `getDb().transaction(() => { ... })()`
+- `createTaskExtended` is the universal task creation function used by all integrations
+
+---
+
+### Summary: Pattern Inventory for New Integrations
+
+| Concern | Pattern location | What to follow |
+|---------|-----------------|----------------|
+| Integration directory | `src/github/`, `src/slack/`, `src/linear/` | Separate directory with `index.ts` barrel, `app.ts` init, `types.ts`, `handlers.ts` |
+| Init lifecycle | `src/github/app.ts`, `src/linear/app.ts` | `isXxxEnabled()` / `initXxx()` / `resetXxx()` with `initialized` guard |
+| Init call site | `src/http/index.ts:181-190` | Add `initXxx()` call in server listen callback |
+| HTTP routes | `src/http/linear.ts`, `src/http/webhooks.ts` | Create `src/http/xxx.ts`, define routes with `route()`, export `handleXxx()` returning `Promise<boolean>` |
+| Route registration | `src/http/index.ts:91-108` | Add `() => handleXxx(...)` to the handlers array |
+| Webhook handling | `src/http/webhooks.ts` | Check enabled, verify signature, parse body, dispatch to handlers |
+| Task creation | `src/github/handlers.ts` | Call `createTaskExtended()` with appropriate `source`, `vcsProvider`, `taskType`, etc. |
+| MCP tools | `src/tools/cancel-task.ts`, `src/tools/get-task-details.ts` | `registerXxxTool(server)` using `createToolRegistrar(server)()` |
+| Tool grouping | `src/tools/epics/index.ts` | Subdirectory with barrel index |
+| Tool visibility | `src/tools/tool-config.ts` | Add to `CORE_TOOLS` or `DEFERRED_TOOLS` set |
+| DB queries | `src/be/db.ts` | Plain exported functions using `getDb()` |
+| DB migration | `src/be/migrations/008_linear_integration.sql` | Numbered SQL file, `CREATE TABLE IF NOT EXISTS`, recreate tables to alter CHECK constraints |
+| Types | `src/github/types.ts`, `src/linear/types.ts` | Separate `types.ts` in integration directory |
+| VCS abstraction | `src/vcs/types.ts` | `VcsProvider` type union; VCS fields stored directly on task |</result>
+<usage><total_tokens>86840</total_tokens><tool_uses>43</tool_uses><duration_ms>169165</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/ac5b2919038bfa109.output
+
+---
+
+<task-notification>
+<task-id>b4ukowhgp</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/b4ukowhgp.output</output-file>
+<status>completed</status>
+<summary>Background command "Open plan in file-review GUI for inline comments" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/b4ukowhgp.output
+
+---
+
+[Request interrupted by user]
