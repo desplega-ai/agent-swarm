@@ -19,7 +19,7 @@ import {
   WorkflowDefinitionSchema,
   WorkflowRunStatusSchema,
 } from "../types";
-import { startWorkflowExecution } from "../workflows";
+import { getExecutorRegistry, startWorkflowExecution } from "../workflows";
 import { generateEdges, validateDefinition } from "../workflows/definition";
 import { retryFailedRun } from "../workflows/resume";
 import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
@@ -241,13 +241,12 @@ export async function handleWorkflows(
       (req.headers["x-signature"] as string | undefined);
 
     try {
-      // TODO(Phase 7): inject registry from module-level singleton
       const result = await handleWebhookTrigger(
         workflowId,
         rawBody, // Raw body string — used for HMAC verification + passed as triggerData
         signature,
         signature,
-        undefined as never,
+        getExecutorRegistry(),
       );
       json(res, result, 201);
     } catch (err) {
@@ -415,8 +414,7 @@ export async function handleWorkflows(
       return true;
     }
     const body = await parseBody<Record<string, unknown>>(req);
-    // TODO(Phase 7): inject registry from module-level singleton
-    const runId = await startWorkflowExecution(workflow, body, undefined as never);
+    const runId = await startWorkflowExecution(workflow, body, getExecutorRegistry());
 
     // Check if skipped due to cooldown
     const run = getWorkflowRun(runId);
@@ -456,8 +454,7 @@ export async function handleWorkflows(
     const parsed = await retryWorkflowRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     try {
-      // TODO(Phase 7): inject registry from module-level singleton
-      await retryFailedRun(parsed.params.id, undefined as never);
+      await retryFailedRun(parsed.params.id, getExecutorRegistry());
       json(res, { success: true });
     } catch (err) {
       jsonError(res, String(err), 400);

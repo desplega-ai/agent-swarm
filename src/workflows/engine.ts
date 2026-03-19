@@ -18,15 +18,6 @@ import { resolveInputs } from "./input";
 import { interpolate } from "./template";
 import { runStepValidation } from "./validation";
 
-/**
- * @deprecated Backward-compat export for old nodes/ files (removed in Phase 7).
- */
-export interface NodeResult {
-  mode: "instant" | "async";
-  nextPort: string;
-  output: unknown;
-}
-
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_ITERATIONS = Number(process.env.WORKFLOW_MAX_ITERATIONS) || 100;
 

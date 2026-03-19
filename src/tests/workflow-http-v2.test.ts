@@ -18,6 +18,7 @@ import type {
   WorkflowRunStep,
   WorkflowVersion,
 } from "../types";
+import { initWorkflows, stopRetryPoller } from "../workflows";
 
 const TEST_DB_PATH = "./test-workflow-http-v2.sqlite";
 const TEST_PORT = 13030;
@@ -99,6 +100,7 @@ describe("Workflow HTTP API v2", () => {
       // ignore
     }
     initDb(TEST_DB_PATH);
+    initWorkflows();
 
     server = createTestServer();
     await new Promise<void>((resolve) => {
@@ -107,6 +109,7 @@ describe("Workflow HTTP API v2", () => {
   });
 
   afterAll(async () => {
+    stopRetryPoller();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {

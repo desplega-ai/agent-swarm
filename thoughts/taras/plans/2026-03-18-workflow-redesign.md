@@ -640,14 +640,14 @@ Wire everything together in `index.ts`, delete old files, update the dashboard U
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles (root): `bun run tsc:check`
-- [ ] TypeScript compiles (UI): `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Lint passes (root): `bun run lint:fix`
-- [ ] Lint passes (UI): `cd new-ui && pnpm lint`
-- [ ] All new workflow tests pass: `bun test src/tests/workflow-*.test.ts`
-- [ ] No old workflow test files remain: `ls src/tests/workflow-{engine,http,triggers,nodes-phase6,property-match,recovery,resume-retry}.test.ts` should fail
-- [ ] No old node files remain: `ls src/workflows/nodes/` should fail
-- [ ] Full test suite passes: `bun test`
+- [x] TypeScript compiles (root): `bun run tsc:check`
+- [x] TypeScript compiles (UI): `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Lint passes (root): `bun run lint:fix`
+- [x] Lint passes (UI): `cd new-ui && pnpm lint`
+- [x] All new workflow tests pass: `bun test src/tests/workflow-*.test.ts`
+- [x] No old workflow test files remain: `ls src/tests/workflow-{engine,http,triggers,nodes-phase6,property-match,recovery,resume-retry}.test.ts` should fail
+- [x] No old node files remain: `ls src/workflows/nodes/` should fail
+- [x] Full test suite passes: `bun test`
 
 #### Manual Verification:
 - [ ] Fresh DB: `rm -f agent-swarm-db.sqlite* && bun run start:http` — starts without errors

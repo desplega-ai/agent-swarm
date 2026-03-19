@@ -16,7 +16,8 @@ import {
   updateAgentStatus,
 } from "../be/db";
 import type { AgentTask } from "../types";
-import { recoverStuckWorkflowRuns } from "../workflows/recovery";
+import { getExecutorRegistry } from "../workflows";
+import { recoverIncompleteRuns } from "../workflows/recovery";
 
 // ============================================================================
 // Configuration (env var overrides)
@@ -214,7 +215,12 @@ async function cleanupStaleResources(findings: HeartbeatFindings): Promise<void>
   findings.staleCleanup.inboxProcessing = releaseStaleProcessingInbox(
     STALE_CLEANUP_THRESHOLD_MINUTES,
   );
-  findings.staleCleanup.workflowRuns = await recoverStuckWorkflowRuns();
+  try {
+    findings.staleCleanup.workflowRuns = await recoverIncompleteRuns(getExecutorRegistry());
+  } catch {
+    // Workflow engine may not be initialized yet — skip recovery
+    findings.staleCleanup.workflowRuns = 0;
+  }
 }
 
 // ============================================================================

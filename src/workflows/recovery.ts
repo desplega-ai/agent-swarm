@@ -129,48 +129,6 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
 }
 
 /**
- * @deprecated Use `recoverIncompleteRuns()` instead. Kept for backward compat (heartbeat.ts).
- * This wrapper only recovers waiting runs (stuck tasks), not interrupted running runs.
- */
-export async function recoverStuckWorkflowRuns(): Promise<number> {
-  // Minimal backward-compat: only recover waiting runs that have finished tasks.
-  // Does not need a registry since it only marks runs as failed (no graph walk for failed tasks).
-  const stuckRuns = getStuckWorkflowRuns();
-  let recovered = 0;
-
-  for (const stuck of stuckRuns) {
-    try {
-      if (stuck.taskStatus === "completed") {
-        // For completed tasks we can't walk without a registry — just mark step done.
-        // The full recovery with graph walk is done via recoverIncompleteRuns() at startup.
-        const ctx: Record<string, unknown> = {};
-        const stepOutput = { taskId: stuck.stepId, taskOutput: stuck.taskOutput };
-        checkpointStep(stuck.runId, stuck.stepId, stuck.nodeId, { output: stepOutput }, ctx);
-        // Leave run in running state — it will be picked up by recoverIncompleteRuns
-        updateWorkflowRun(stuck.runId, { status: "running" });
-      } else {
-        const reason = stuck.taskStatus === "failed" ? "Task failed" : "Task cancelled";
-        const now = new Date().toISOString();
-        updateWorkflowRunStep(stuck.stepId, {
-          status: "failed",
-          error: reason,
-          finishedAt: now,
-        });
-        updateWorkflowRun(stuck.runId, {
-          status: "failed",
-          error: reason,
-          finishedAt: now,
-        });
-      }
-      recovered++;
-    } catch (err) {
-      console.error(`[workflows] Failed to recover stuck run ${stuck.runId}:`, err);
-    }
-  }
-  return recovered;
-}
-
-/**
  * Get run IDs by status. Simple query since there's no dedicated function for this.
  */
 function getRunIdsByStatus(status: string): string[] {

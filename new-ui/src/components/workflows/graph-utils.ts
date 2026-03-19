@@ -9,20 +9,12 @@ import type {
   WorkflowRunStepStatus,
 } from "@/api/types";
 
-const TRIGGER_TYPES: WorkflowNodeType[] = [
-  "trigger-new-task",
-  "trigger-task-completed",
-  "trigger-webhook",
-  "trigger-email",
-  "trigger-slack-message",
-  "trigger-github-event",
-];
-const CONDITION_TYPES: WorkflowNodeType[] = ["llm-classify", "property-match", "code-match"];
+const CONDITION_TYPES = new Set(["property-match", "code-match", "validate", "raw-llm"]);
 export type NodeCategory = "triggerNode" | "conditionNode" | "actionNode";
 
 export function getNodeCategory(type: WorkflowNodeType): NodeCategory {
-  if (TRIGGER_TYPES.includes(type)) return "triggerNode";
-  if (CONDITION_TYPES.includes(type)) return "conditionNode";
+  if (type.startsWith("trigger-")) return "triggerNode";
+  if (CONDITION_TYPES.has(type)) return "conditionNode";
   return "actionNode";
 }
 

@@ -1,7 +1,7 @@
 export { findEntryNodes, getSuccessors } from "./definition";
 export { startWorkflowExecution } from "./engine";
 export { workflowEventBus } from "./event-bus";
-export { recoverIncompleteRuns, recoverStuckWorkflowRuns } from "./recovery";
+export { recoverIncompleteRuns } from "./recovery";
 export { retryFailedRun, setupWorkflowResumeListener } from "./resume";
 export { startRetryPoller, stopRetryPoller } from "./retry-poller";
 export { interpolate } from "./template";
@@ -9,18 +9,53 @@ export { instantiateTemplate, validateTemplateVariables } from "./templates";
 export { handleWebhookTrigger } from "./triggers";
 export { snapshotWorkflow } from "./version";
 
+import * as db from "../be/db";
 import { workflowEventBus } from "./event-bus";
+import type { ExecutorRegistry } from "./executors/registry";
+import { createExecutorRegistry } from "./executors/registry";
+import { recoverIncompleteRuns } from "./recovery";
 import { setupWorkflowResumeListener } from "./resume";
+import { startRetryPoller } from "./retry-poller";
+import { interpolate } from "./template";
 
+// ─── Module-level singleton ────────────────────────────────
+
+let _registry: ExecutorRegistry | null = null;
+
+/**
+ * Get the executor registry singleton.
+ * Throws if called before `initWorkflows()`.
+ */
+export function getExecutorRegistry(): ExecutorRegistry {
+  if (!_registry) {
+    throw new Error("Workflow engine not initialized — call initWorkflows() first");
+  }
+  return _registry;
+}
+
+/**
+ * Initialize the workflow engine:
+ * 1. Create executor registry with all built-in executors
+ * 2. Wire up event bus listeners for task lifecycle resume
+ * 3. Recover incomplete runs from previous server lifecycle
+ * 4. Start the retry poller for failed steps with pending retries
+ */
 export function initWorkflows(): void {
-  // Note: Phase 4 adds registry parameter. For now, resume listener is set up
-  // with the event bus only. The registry will be injected in Phase 7's
-  // full initWorkflows() rewrite via createExecutorRegistry().
-  setupWorkflowResumeListener(workflowEventBus, undefined as never);
+  // 1. Create the executor registry singleton
+  _registry = createExecutorRegistry({
+    db,
+    eventBus: workflowEventBus,
+    interpolate,
+  });
 
-  // Event-based trigger subscriptions removed in Phase 5.
-  // Workflows are now triggered via:
-  // - Webhook: POST /api/webhooks/:workflowId (HMAC-verified)
-  // - Schedule: scheduler calls startWorkflowExecution() via scheduleId reference
-  // - Manual: POST /api/workflows/:id/trigger (API key auth)
+  // 2. Wire up resume listener (task.completed / task.failed / task.cancelled)
+  setupWorkflowResumeListener(workflowEventBus, _registry);
+
+  // 3. Recover incomplete runs (running + waiting) from previous lifecycle
+  recoverIncompleteRuns(_registry).catch((err) => {
+    console.error("[workflows] Failed to recover incomplete runs on startup:", err);
+  });
+
+  // 4. Start retry poller for failed steps with nextRetryAt
+  startRetryPoller(_registry);
 }

@@ -79,6 +79,14 @@ export function useTriggerWorkflow() {
   });
 }
 
+export function useWorkflowVersions(workflowId: string) {
+  return useQuery({
+    queryKey: ["workflow-versions", workflowId],
+    queryFn: () => api.fetchWorkflowVersions(workflowId),
+    enabled: !!workflowId,
+  });
+}
+
 export function useRetryWorkflowRun() {
   const queryClient = useQueryClient();
   return useMutation({

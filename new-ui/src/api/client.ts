@@ -26,8 +26,10 @@ import type {
   UsageSummaryResponse,
   Workflow,
   WorkflowRun,
+  WorkflowRunStep,
   WorkflowRunWithSteps,
   WorkflowsResponse,
+  WorkflowVersion,
 } from "./types";
 
 class ApiClient {
@@ -668,14 +670,31 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/workflows`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch workflows: ${res.status}`);
-    return { workflows: await res.json() };
+    const workflows = (await res.json()) as Workflow[];
+    // List endpoint doesn't include auto-generated edges — ensure the field exists
+    for (const w of workflows) {
+      if (!w.definition.edges) {
+        w.definition.edges = [];
+      }
+    }
+    return { workflows };
   }
 
   async fetchWorkflow(id: string): Promise<Workflow> {
     const url = `${this.getBaseUrl()}/api/workflows/${id}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch workflow: ${res.status}`);
-    return res.json();
+    const data = await res.json();
+    // API returns { ...workflow, edges } with edges at top level.
+    // Nest edges into definition for UI convenience.
+    if (data.edges && !data.definition.edges) {
+      data.definition.edges = data.edges;
+    }
+    // Ensure edges array exists even if not returned
+    if (!data.definition.edges) {
+      data.definition.edges = [];
+    }
+    return data as Workflow;
   }
 
   async updateWorkflow(
@@ -735,7 +754,17 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/workflow-runs/${id}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch workflow run: ${res.status}`);
-    return res.json();
+    const data = (await res.json()) as { run: WorkflowRun; steps: WorkflowRunStep[] };
+    // Reshape { run, steps } into WorkflowRunWithSteps
+    return { ...data.run, steps: data.steps };
+  }
+
+  async fetchWorkflowVersions(workflowId: string): Promise<WorkflowVersion[]> {
+    const url = `${this.getBaseUrl()}/api/workflows/${workflowId}/versions`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch workflow versions: ${res.status}`);
+    const data = (await res.json()) as { versions: WorkflowVersion[] };
+    return data.versions;
   }
 
   async retryWorkflowRun(id: string): Promise<{ success: boolean }> {

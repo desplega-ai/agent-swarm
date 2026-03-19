@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getWorkflow, getWorkflowRun } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
-import { startWorkflowExecution } from "@/workflows";
+import { getExecutorRegistry, startWorkflowExecution } from "@/workflows";
 
 export const registerTriggerWorkflowTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -44,8 +44,11 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
             },
           };
         }
-        // TODO(Phase 7): inject registry from module-level singleton
-        const runId = await startWorkflowExecution(workflow, triggerData ?? {}, undefined as never);
+        const runId = await startWorkflowExecution(
+          workflow,
+          triggerData ?? {},
+          getExecutorRegistry(),
+        );
 
         // Check if the run was skipped due to cooldown
         const run = getWorkflowRun(runId);
