@@ -1,0 +1,33 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "89787bc91ad2",
+  "session_id": "67b96281-7549-4789-85d5-b8676fa0b7e7",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-19T01:28:49.754081Z",
+  "branch": "feat/workflow-redesign",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "scripts/e2e-workflow-redesign.sh",
+    "thoughts/taras/plans/2026-03-18-workflow-redesign.md"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "d000bf3cf541",
+  "checkpoint_transcript_start": 1019,
+  "transcript_lines_at_start": 1019,
+  "token_usage": {
+    "input_tokens": 113,
+    "cache_creation_tokens": 57708,
+    "cache_read_tokens": 12256461,
+    "output_tokens": 23185,
+    "api_call_count": 69
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-19T01:28:48.742051Z",
+    "agent_lines": 232,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 232,
+    "agent_percentage": 100
+  }
+}
