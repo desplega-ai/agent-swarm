@@ -95,6 +95,40 @@ templates-ui/    # Templates registry (Next.js app)
 - Use Bun APIs, not Node.js equivalents
 - Prefer `Bun.$` over execa for shell commands
 
+### Adding HTTP Endpoints
+
+**Always use the `route()` factory** from `src/http/route-def.ts` when creating new REST endpoints. This auto-registers the route in the OpenAPI spec. Do NOT use raw `matchRoute` — it bypasses OpenAPI generation.
+
+```typescript
+// In src/http/my-feature.ts
+import { route } from "./route-def";
+
+const myRoute = route({
+  method: "post",
+  path: "/api/my-feature",
+  pattern: ["api", "my-feature"],
+  summary: "What this endpoint does",
+  tags: ["MyTag"],
+  body: z.object({ ... }),
+  responses: { 200: { description: "Success" }, 400: { description: "Error" } },
+  auth: { apiKey: true },
+});
+
+export async function handleMyFeature(req, res, pathSegments, queryParams): Promise<boolean> {
+  if (!myRoute.match(req.method, pathSegments)) return false;
+  const parsed = await myRoute.parse(req, res, pathSegments, queryParams);
+  if (!parsed) return true; // parse() already sent 400
+  // ... business logic using parsed.body, parsed.params, parsed.query
+  json(res, result);
+  return true;
+}
+```
+
+After creating the handler:
+1. Import and add to handler chain in `src/http/index.ts`
+2. Add the import to `scripts/generate-openapi.ts` (for spec generation)
+3. Run `bun run docs:openapi` to regenerate `openapi.json` and commit it
+
 ## Related
 
 - [UI Dashboard](./new-ui/) - Next.js monitoring dashboard
@@ -239,6 +273,58 @@ Key differences between lead and worker env files:
 - `.env.docker-lead` — lead-specific `AGENT_ID`, no `OPENROUTER_API_KEY`
 - `.env.docker` — worker-specific `AGENT_ID`, includes `OPENROUTER_API_KEY`
 - `AGENT_ROLE=lead` must be passed explicitly (not in the env file)
+
+### Entrypoint Integration Testing
+
+When modifying `docker-entrypoint.sh` (e.g. adding new conditional bootstrap logic), validate beyond `bash -n` syntax checks with a full Docker round-trip:
+
+1. **Validate API endpoints first**: Before Docker testing, verify the exact HTTP methods and paths used by `curl` calls in the entrypoint against the actual route definitions in `src/http/`. Common gotcha: config API uses `PUT /api/config` (not `POST`). Use `context-mode execute` for curl calls to avoid hook blocks.
+2. **Test idempotency**: Start a container (first boot = registers), stop it, start another with the same env file (same `AGENT_ID`). Second boot should skip registration via the config check (e.g. `if [ -z "$SOME_KEY" ]`).
+3. **Test failure mode**: Stop the external service, boot a container. The entrypoint should continue (via `|| true` guards) with a warning log.
+4. **Test lead vs worker paths**: Use `.env.docker-lead` + `-e AGENT_ROLE=lead` for lead, `.env.docker` for worker. They have different `AGENT_ID` values and different bootstrap paths.
+5. **Grep logs for your feature**: `docker logs <name> 2>&1 | grep -i "<feature>"` to verify the exact log lines.
+6. **Verify persisted state**: After boot, check `GET /api/config?includeSecrets=true` to confirm secrets/config were stored correctly.
+
+**Entrypoint E2E commands:**
+```bash
+# 1. Clean DB + start API
+rm -f agent-swarm-db.sqlite agent-swarm-db.sqlite-wal agent-swarm-db.sqlite-shm
+bun run start:http &
+
+# 2. Set any required global config (use PUT, not POST!)
+curl -s -X PUT "http://localhost:3013/api/config" \
+  -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
+  -d '{"scope":"global","key":"SOME_KEY","value":"some-value","isSecret":false}'
+
+# 3. Build image with current code
+bun run docker:build:worker
+
+# 4. First boot (lead)
+docker run --rm -d --name e2e-lead \
+  --env-file .env.docker-lead -e AGENT_ROLE=lead \
+  -e MAX_CONCURRENT_TASKS=1 -p 3201:3000 agent-swarm-worker:latest
+
+# 5. First boot (worker)
+docker run --rm -d --name e2e-worker \
+  --env-file .env.docker \
+  -e MAX_CONCURRENT_TASKS=1 -p 3203:3000 agent-swarm-worker:latest
+
+# 6. Check logs (wait ~15s for boot)
+docker logs e2e-lead 2>&1 | grep -i "<feature>"
+docker logs e2e-worker 2>&1 | grep -i "<feature>"
+
+# 7. Idempotency: stop and restart same worker (same AGENT_ID)
+docker stop e2e-worker
+docker run --rm -d --name e2e-worker-2 \
+  --env-file .env.docker \
+  -e MAX_CONCURRENT_TASKS=1 -p 3203:3000 agent-swarm-worker:latest
+# Should see "Already registered" or equivalent skip message
+docker logs e2e-worker-2 2>&1 | grep -i "<feature>"
+
+# 8. Cleanup
+docker stop e2e-lead e2e-worker-2 2>/dev/null
+kill $(lsof -ti :3013) 2>/dev/null
+```
 
 ### MCP Tool Testing (Streamable HTTP)
 

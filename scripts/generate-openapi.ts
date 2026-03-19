@@ -3,6 +3,7 @@ import { generateOpenApiSpec } from "../src/http/openapi";
 import "../src/http/active-sessions";
 import "../src/http/agents";
 import "../src/http/config";
+import "../src/http/db-query";
 import "../src/http/ecosystem";
 import "../src/http/epics";
 import "../src/http/memory";

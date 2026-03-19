@@ -17,6 +17,7 @@ import { handleActiveSessions } from "./active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
 import { handleConfig } from "./config";
 import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
+import { handleDbQuery } from "./db-query";
 import { handleEcosystem } from "./ecosystem";
 import { handleEpics } from "./epics";
 import { handleMcp } from "./mcp";
@@ -100,6 +101,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleSchedules(req, res, pathSegments, queryParams, myAgentId),
     () => handleWorkflows(req, res, pathSegments, queryParams, myAgentId),
     () => handleConfig(req, res, pathSegments, queryParams),
+    () => handleDbQuery(req, res, pathSegments, queryParams),
     () => handleRepos(req, res, pathSegments, queryParams),
     () => handleMemory(req, res, pathSegments, myAgentId),
     () => handleMcp(req, res, transports),

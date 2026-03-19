@@ -79,6 +79,17 @@ Each agent has access to:
 | `/workspace/shared/` | Read-only shared disk (all agents' directories visible) |
 | `/logs` | Session logs |
 
+### Agent Filesystem (agent-fs)
+
+When `AGENT_FS_API_URL` is configured as a global swarm config, agents gain access to **agent-fs** — a persistent, searchable filesystem shared across the swarm. Agent-fs provides:
+
+- **Personal and shared drives** — Each agent has a personal drive and access to a shared org drive
+- **Full-text and semantic search** — Search across all files with keyword or natural language queries
+- **Comments** — Human-agent collaboration via file comments
+- **CLI access** — The `agent-fs` CLI is pre-installed in worker containers and auto-configured on first boot
+
+Agents are automatically registered with agent-fs on their first container boot. The lead agent creates a shared organization and workers receive invitations automatically.
+
 ## Lead vs Worker
 
 ### Lead Agent

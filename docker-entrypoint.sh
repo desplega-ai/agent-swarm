@@ -173,6 +173,89 @@ if [ -n "$AGENT_ID" ]; then
 fi
 # ---- End swarm config fetch ----
 
+# ---- agent-fs registration ----
+if [ -n "$AGENT_FS_API_URL" ] && [ -n "$AGENT_ID" ]; then
+  if [ -z "$AGENT_FS_API_KEY" ]; then
+    echo "[agent-fs] Registering with agent-fs at $AGENT_FS_API_URL..."
+    AF_EMAIL="${AGENT_EMAIL:-${AGENT_ID}@swarm.local}"
+
+    AF_RESULT=$(curl -s -X POST "${AGENT_FS_API_URL}/auth/register" \
+      -H "Content-Type: application/json" \
+      -d "{\"email\": \"$AF_EMAIL\"}" 2>/dev/null) || true
+
+    AF_API_KEY=$(echo "$AF_RESULT" | jq -r '.apiKey // empty')
+
+    if [ -n "$AF_API_KEY" ]; then
+      echo "[agent-fs] Registered successfully, storing API key..."
+      # Store as agent-scoped secret
+      curl -s -X PUT "${MCP_URL}/api/config" \
+        -H "Authorization: Bearer ${API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{
+          \"scope\": \"agent\",
+          \"scopeId\": \"${AGENT_ID}\",
+          \"key\": \"AGENT_FS_API_KEY\",
+          \"value\": \"${AF_API_KEY}\",
+          \"isSecret\": true,
+          \"description\": \"agent-fs API key for ${AF_EMAIL}\"
+        }" > /dev/null 2>&1 || true
+
+      export AGENT_FS_API_KEY="$AF_API_KEY"
+      echo "[agent-fs] API key stored and exported"
+    else
+      echo "[agent-fs] Registration failed or already registered: $(echo "$AF_RESULT" | jq -r '.error // .message // "unknown error"')"
+    fi
+  else
+    echo "[agent-fs] Already registered (API key present)"
+  fi
+
+  # Lead-specific: create shared org
+  if [ "$AGENT_ROLE" = "lead" ] && [ -n "$AGENT_FS_API_KEY" ]; then
+    if [ -z "$AGENT_FS_SHARED_ORG_ID" ]; then
+      echo "[agent-fs] Lead: Creating shared org..."
+      AF_ORG_RESULT=$(curl -s -X POST "${AGENT_FS_API_URL}/orgs" \
+        -H "Authorization: Bearer ${AGENT_FS_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d '{"name": "swarm"}' 2>/dev/null) || true
+
+      AF_SHARED_ORG_ID=$(echo "$AF_ORG_RESULT" | jq -r '.orgId // .id // empty')
+
+      if [ -n "$AF_SHARED_ORG_ID" ]; then
+        echo "[agent-fs] Shared org created: $AF_SHARED_ORG_ID"
+        # Store as global config so all agents see it
+        curl -s -X PUT "${MCP_URL}/api/config" \
+          -H "Authorization: Bearer ${API_KEY}" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"scope\": \"global\",
+            \"key\": \"AGENT_FS_SHARED_ORG_ID\",
+            \"value\": \"${AF_SHARED_ORG_ID}\",
+            \"isSecret\": false,
+            \"description\": \"agent-fs shared org ID for the swarm\"
+          }" > /dev/null 2>&1 || true
+
+        export AGENT_FS_SHARED_ORG_ID="$AF_SHARED_ORG_ID"
+
+        # Create a one-time task for the lead to invite workers
+        echo "[agent-fs] Creating invitation task for lead..."
+        curl -s -X POST "${MCP_URL}/api/tasks" \
+          -H "Authorization: Bearer ${API_KEY}" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"task\": \"Invite workers to agent-fs shared org (${AF_SHARED_ORG_ID}). For each worker: check their AGENT_EMAIL config (or default to {agentId}@swarm.local), then run: agent-fs --org ${AF_SHARED_ORG_ID} org invite --email <worker-email> --role editor. Skip any already invited.\",
+            \"agentId\": \"${AGENT_ID}\",
+            \"source\": \"system\"
+          }" > /dev/null 2>&1 || true
+      else
+        echo "[agent-fs] Failed to create shared org: $(echo "$AF_ORG_RESULT" | jq -r '.error // .message // "unknown"')"
+      fi
+    else
+      echo "[agent-fs] Shared org already exists: $AGENT_FS_SHARED_ORG_ID"
+    fi
+  fi
+fi
+# ---- End agent-fs registration ----
+
 # Create .mcp.json in /workspace (project-level config)
 echo "Creating MCP config in /workspace..."
 # Build base MCP config with jq
