@@ -72,41 +72,41 @@ async function handleTaskCompleted(data: unknown): Promise<void> {
 
   if (shouldSkipForLoopPrevention(sync)) return;
 
-  try {
-    const client = getLinearClient();
-    if (!client) {
-      console.log("[Linear Outbound] No Linear client available, skipping sync for", taskId);
-      return;
-    }
-
-    const comment = output
-      ? `Task completed by swarm agent.\n\nOutput:\n${output.slice(0, 2000)}`
-      : "Task completed by swarm agent.";
-
-    await client.createComment({ issueId: sync.externalId, body: comment });
-
-    updateTrackerSync(sync.id, {
-      lastSyncOrigin: "swarm",
-      lastSyncedAt: new Date().toISOString(),
-    });
-
-    console.log(`[Linear Outbound] Posted completion comment for task ${taskId}`);
-  } catch (error) {
-    console.error(
-      `[Linear Outbound] Failed to sync task completion for ${taskId}:`,
-      error instanceof Error ? error.message : error,
-    );
-  }
-
-  // Post to AgentSession if one exists for this task
   const sessionId = taskSessionMap.get(taskId);
+  const body = output ? `Task completed.\n\n${output.slice(0, 2000)}` : "Task completed.";
+
+  // Prefer AgentSession activity (shows in the agent panel) over issue comment (avoids duplication)
   if (sessionId) {
-    const body = output ? `Task completed.\n\n${output.slice(0, 2000)}` : "Task completed.";
     endAgentSession(sessionId, body, "response").catch((err) => {
       console.error(`[Linear Outbound] Failed to end AgentSession for task ${taskId}:`, err);
     });
     taskSessionMap.delete(taskId);
+    console.log(`[Linear Outbound] Posted completion response to AgentSession for task ${taskId}`);
+  } else {
+    // No session — fall back to issue comment
+    try {
+      const client = getLinearClient();
+      if (!client) {
+        console.log("[Linear Outbound] No Linear client available, skipping sync for", taskId);
+        return;
+      }
+      const comment = output
+        ? `Task completed by swarm agent.\n\nOutput:\n${output.slice(0, 2000)}`
+        : "Task completed by swarm agent.";
+      await client.createComment({ issueId: sync.externalId, body: comment });
+      console.log(`[Linear Outbound] Posted completion comment for task ${taskId}`);
+    } catch (error) {
+      console.error(
+        `[Linear Outbound] Failed to sync task completion for ${taskId}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
   }
+
+  updateTrackerSync(sync.id, {
+    lastSyncOrigin: "swarm",
+    lastSyncedAt: new Date().toISOString(),
+  });
 }
 
 async function handleTaskFailed(data: unknown): Promise<void> {
@@ -118,41 +118,41 @@ async function handleTaskFailed(data: unknown): Promise<void> {
 
   if (shouldSkipForLoopPrevention(sync)) return;
 
-  try {
-    const client = getLinearClient();
-    if (!client) {
-      console.log("[Linear Outbound] No Linear client available, skipping sync for", taskId);
-      return;
-    }
-
-    const comment = failureReason
-      ? `Task failed.\n\nReason:\n${failureReason.slice(0, 2000)}`
-      : "Task failed.";
-
-    await client.createComment({ issueId: sync.externalId, body: comment });
-
-    updateTrackerSync(sync.id, {
-      lastSyncOrigin: "swarm",
-      lastSyncedAt: new Date().toISOString(),
-    });
-
-    console.log(`[Linear Outbound] Posted failure comment for task ${taskId}`);
-  } catch (error) {
-    console.error(
-      `[Linear Outbound] Failed to sync task failure for ${taskId}:`,
-      error instanceof Error ? error.message : error,
-    );
-  }
-
-  // Post error to AgentSession if one exists for this task
   const sessionId = taskSessionMap.get(taskId);
+  const body = failureReason ? `Task failed.\n\n${failureReason.slice(0, 2000)}` : "Task failed.";
+
+  // Prefer AgentSession error activity over issue comment (avoids duplication)
   if (sessionId) {
-    const body = failureReason ? `Task failed.\n\n${failureReason.slice(0, 2000)}` : "Task failed.";
     endAgentSession(sessionId, body, "error").catch((err) => {
       console.error(`[Linear Outbound] Failed to end AgentSession for task ${taskId}:`, err);
     });
     taskSessionMap.delete(taskId);
+    console.log(`[Linear Outbound] Posted failure error to AgentSession for task ${taskId}`);
+  } else {
+    // No session — fall back to issue comment
+    try {
+      const client = getLinearClient();
+      if (!client) {
+        console.log("[Linear Outbound] No Linear client available, skipping sync for", taskId);
+        return;
+      }
+      const comment = failureReason
+        ? `Task failed.\n\nReason:\n${failureReason.slice(0, 2000)}`
+        : "Task failed.";
+      await client.createComment({ issueId: sync.externalId, body: comment });
+      console.log(`[Linear Outbound] Posted failure comment for task ${taskId}`);
+    } catch (error) {
+      console.error(
+        `[Linear Outbound] Failed to sync task failure for ${taskId}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
   }
+
+  updateTrackerSync(sync.id, {
+    lastSyncOrigin: "swarm",
+    lastSyncedAt: new Date().toISOString(),
+  });
 }
 
 function shouldSkipForLoopPrevention(sync: {
