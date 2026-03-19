@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "3d8d5f6a490a",
+  "strategy": "manual-commit",
+  "branch": "feat/workflow-redesign",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "new-ui/src/components/workflows/graph-utils.ts",
+    "new-ui/src/pages/workflows/[id]/page.tsx"
+  ],
+  "sessions": [
+    {
+      "metadata": "/3d/8d5f6a490a/0/metadata.json",
+      "transcript": "/3d/8d5f6a490a/0/full.jsonl",
+      "context": "/3d/8d5f6a490a/0/context.md",
+      "content_hash": "/3d/8d5f6a490a/0/content_hash.txt",
+      "prompt": "/3d/8d5f6a490a/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 67,
+    "cache_creation_tokens": 392085,
+    "cache_read_tokens": 4181153,
+    "output_tokens": 23678,
+    "api_call_count": 35
+  }
+}
