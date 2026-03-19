@@ -422,4 +422,8 @@ export class ClaudeAdapter implements ProviderAdapter {
   async canResume(_sessionId: string): Promise<boolean> {
     return true;
   }
+
+  formatCommand(commandName: string): string {
+    return `/${commandName}`;
+  }
 }
