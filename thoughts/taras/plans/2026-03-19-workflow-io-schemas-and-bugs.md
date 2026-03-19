@@ -601,10 +601,10 @@ Both paths must validate consistently. If a workflow declares `triggerSchema`, a
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Trigger schema tests pass: `bun test src/tests/workflow-trigger-schema.test.ts`
-- [ ] All workflow tests pass: `bun test src/tests/workflow-`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
+- [x] Trigger schema tests pass: `bun test src/tests/workflow-trigger-schema.test.ts`
+- [x] All workflow tests pass: `bun test src/tests/workflow-`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
 - [ ] Trigger a workflow with `triggerSchema` via `POST /api/workflows/:id/trigger` with invalid payload → get 400
@@ -708,10 +708,10 @@ function isUpstream(
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Definition validation tests pass: `bun test src/tests/workflow-definition-validation.test.ts`
-- [ ] All workflow tests pass: `bun test src/tests/workflow-`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
+- [x] Definition validation tests pass: `bun test src/tests/workflow-definition-validation.test.ts`
+- [x] All workflow tests pass: `bun test src/tests/workflow-`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
 - [ ] Create a workflow via API with an input mapping referencing a non-existent node → get validation error
