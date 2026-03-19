@@ -1,0 +1,46 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "15addf9141ac",
+  "session_id": "67b96281-7549-4789-85d5-b8676fa0b7e7",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-19T02:30:25.908763Z",
+  "branch": "feat/workflow-redesign",
+  "checkpoints_count": 12,
+  "files_touched": [
+    "new-ui/src/api/client.ts",
+    "new-ui/src/api/hooks/use-workflows.ts",
+    "new-ui/src/components/workflows/action-node.tsx",
+    "new-ui/src/components/workflows/condition-node.tsx",
+    "new-ui/src/components/workflows/graph-utils.ts",
+    "new-ui/src/components/workflows/trigger-node.tsx",
+    "new-ui/src/components/workflows/workflow-graph.tsx",
+    "new-ui/src/lib/utils.ts",
+    "new-ui/src/pages/workflow-runs/[id]/page.tsx",
+    "new-ui/src/pages/workflows/[id]/page.tsx",
+    "new-ui/vite.config.ts",
+    "src/be/db.ts",
+    "src/http/workflows.ts",
+    "src/workflows/executors/registry.ts",
+    "thoughts/taras/plans/2026-03-18-workflow-redesign.md"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "28574c8bed0c",
+  "checkpoint_transcript_start": 1752,
+  "transcript_lines_at_start": 1752,
+  "token_usage": {
+    "input_tokens": 336,
+    "cache_creation_tokens": 1321479,
+    "cache_read_tokens": 39635972,
+    "output_tokens": 42046,
+    "api_call_count": 152
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-19T02:30:24.149655Z",
+    "agent_lines": 0,
+    "human_added": 2413,
+    "human_modified": 126,
+    "human_removed": 0,
+    "total_committed": 2504,
+    "agent_percentage": 0
+  }
+}

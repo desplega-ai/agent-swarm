@@ -1,0 +1,40 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "15addf9141ac",
+  "strategy": "manual-commit",
+  "branch": "feat/workflow-redesign",
+  "checkpoints_count": 12,
+  "files_touched": [
+    "new-ui/src/api/client.ts",
+    "new-ui/src/api/hooks/use-workflows.ts",
+    "new-ui/src/components/workflows/action-node.tsx",
+    "new-ui/src/components/workflows/condition-node.tsx",
+    "new-ui/src/components/workflows/graph-utils.ts",
+    "new-ui/src/components/workflows/trigger-node.tsx",
+    "new-ui/src/components/workflows/workflow-graph.tsx",
+    "new-ui/src/lib/utils.ts",
+    "new-ui/src/pages/workflow-runs/[id]/page.tsx",
+    "new-ui/src/pages/workflows/[id]/page.tsx",
+    "new-ui/vite.config.ts",
+    "src/be/db.ts",
+    "src/http/workflows.ts",
+    "src/workflows/executors/registry.ts",
+    "thoughts/taras/plans/2026-03-18-workflow-redesign.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/15/addf9141ac/0/metadata.json",
+      "transcript": "/15/addf9141ac/0/full.jsonl",
+      "context": "/15/addf9141ac/0/context.md",
+      "content_hash": "/15/addf9141ac/0/content_hash.txt",
+      "prompt": "/15/addf9141ac/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 336,
+    "cache_creation_tokens": 1321479,
+    "cache_read_tokens": 39635972,
+    "output_tokens": 42046,
+    "api_call_count": 152
+  }
+}

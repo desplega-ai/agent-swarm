@@ -1,0 +1,1335 @@
+# Implement Plan
+
+A thin wrapper that invokes the `desplega:implementing` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse autonomy mode from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - If plan file has `autonomy:` in frontmatter, use that as default
+   - Otherwise, default to **Critical** (don't prompt - implementation is more straightforward)
+
+2. **ALWAYS invoke the `desplega:implementing` skill:**
+   - Pass the plan file path
+   - Pass the autonomy mode determined above
+   - Let the skill handle all implementation logic
+
+3. **If no plan path provided:**
+   - Respond with: "I need a plan file to proceed. Please provide the path to the plan you would like me to implement."
+
+## Example Usage
+
+```
+/implement-plan thoughts/<username|shared>/plans/2026-01-14-my-feature.md
+/implement-plan --autonomy=autopilot @plans/feature.md
+/implement-plan --autonomy=verbose @current-plan.md
+```
+
+
+ARGUMENTS: thoughts/taras/plans/2026-03-18-workflow-redesign.md
+
+---
+
+Base directory for this skill: /Users/taras/.claude/plugins/cache/desplega-ai-toolbox/desplega/1.7.0/skills/implementing
+
+# Implementing
+
+You are implementing an approved technical plan, executing it phase by phase with verification at each step.
+
+## Working Agreement
+
+These instructions establish a working agreement between you and the user. The key principles are:
+
+1. **AskUserQuestion is your primary communication tool** - Whenever you need to ask the user anything (clarifications, preferences, decisions, confirmations), use the **AskUserQuestion tool**. Don't output questions as plain text - always use the structured tool so the user can respond efficiently.
+
+2. **Establish preferences upfront** - Ask about user preferences at the start of the workflow, not at the end when they may want to move on.
+
+3. **Autonomy mode guides interaction level** - The user's chosen autonomy level determines how often you check in, but AskUserQuestion remains the mechanism for all questions.
+
+### User Preferences
+
+Before starting implementation (unless autonomy is Autopilot), establish these preferences:
+
+**File Review Preference** - Check if the `file-review` plugin is available (look for `file-review:file-review` in available commands).
+
+If file-review plugin is installed, use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like to use file-review for inline feedback on code changes during implementation?" | 1. Yes, open file-review for significant changes (Recommended), 2. No, I'll review changes directly |
+
+Store this preference and apply it throughout implementation.
+
+## When to Use
+
+This skill activates when:
+- User invokes `/implement-plan` command
+- Another skill references `**REQUIRED SUB-SKILL:** Use desplega:implementing`
+- User asks to execute or implement an existing plan
+
+## Autonomy Mode
+
+Adapt your behavior based on the autonomy mode:
+
+| Mode | Behavior |
+|------|----------|
+| **Autopilot** | Execute all phases, pause only for manual verification or blockers |
+| **Critical** (Default) | Pause between phases for approval, ask when mismatches found |
+| **Verbose** | Check in frequently, confirm before each major change |
+
+The autonomy mode is passed by the invoking command. If not specified, default to **Critical**.
+
+## Initial Setup Questions
+
+After establishing user preferences, use **AskUserQuestion** to gather implementation-specific details:
+
+### 1. Branch/Worktree Setup
+
+First, check the current branch: `git branch --show-current`
+
+Then check if the `wts` plugin is available (look for `wts:wts` in available skills).
+
+**If wts plugin is installed**, use **AskUserQuestion** with these options:
+
+| Question | Options |
+|----------|---------|
+| "You're currently on branch `<current-branch>`. Where would you like to implement?" | 1. Continue on current branch, 2. Create a new branch, 3. Create a wts worktree |
+
+**If wts plugin is NOT installed**, use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "You're currently on branch `<current-branch>`. Where would you like to implement?" | 1. Continue on current branch, 2. Create a new branch |
+
+### 2. Phase Execution Mode
+
+Use **AskUserQuestion** with these options:
+
+| Question | Options |
+|----------|---------|
+| "How would you like to execute plan phases?" | 1. Background sub-agents (Recommended — saves context, uses phase-runner), 2. Inline in this session (classic — all work happens here) |
+
+If "Background sub-agents" is selected:
+- Each phase is spawned as a background Agent running `desplega:phase-running`
+- The main session becomes an orchestrator: spawn → wait → review report → manual verification → next phase
+- This preserves main session context for cross-phase coordination
+
+If "Inline" is selected:
+- Phases execute directly in the current session (original behavior)
+- Better for small plans or when you want to watch every step
+
+### 3. Commit Strategy
+
+Use **AskUserQuestion** with these options:
+
+| Question | Options |
+|----------|---------|
+| "How would you like to handle commits during implementation?" | 1. Commit after each phase (Recommended for complex plans), 2. Commit at the end (Single commit for all changes), 3. Let me decide as I go |
+
+If "Commit after each phase" is selected:
+- After completing each phase's verification, create a commit with message: `[Phase N] <phase name>`
+- Use the plan's phase descriptions for commit messages
+
+Store these preferences and apply them throughout the implementation.
+
+## Getting Started
+
+When given a plan path:
+1. Read the plan completely
+2. Check for existing checkmarks (`- [x]`)
+3. Set plan status to `status: in-progress` by editing the frontmatter `status` field. This signals to progress-tracking hooks which plan is active.
+4. **Read files fully** - never use limit/offset parameters
+5. Think deeply about how the pieces fit together
+6. Create a todo list to track progress
+7. Start implementing if you understand what needs to be done
+
+If no plan path provided, ask for one.
+
+## Implementation Philosophy
+
+Plans are carefully designed, but reality can be messy. Your job is to:
+- Follow the plan's intent while adapting to what you find
+- Implement each phase fully before moving to the next
+- Verify your work makes sense in the broader codebase context
+- Update checkboxes in the plan as you complete sections
+
+When things don't match the plan exactly, think about why and communicate clearly.
+
+## Handling Mismatches
+
+If you encounter a mismatch (and autonomy mode is not Autopilot):
+- STOP and think deeply about why the plan can't be followed
+- Use **AskUserQuestion** to present the issue and get direction:
+
+| Question | Options |
+|----------|---------|
+| "Issue in Phase [N]: Expected [what the plan says], Found [actual situation]. Why this matters: [explanation]. How should I proceed?" | 1. Adapt plan to match reality, 2. Proceed as originally planned, 3. Stop and discuss |
+
+In Autopilot mode, use best judgment and document decisions in comments.
+
+## Verification Approach
+
+### Background Sub-Agent Mode (Recommended)
+
+If the user selected "Background sub-agents" for phase execution:
+
+1. **Read the phase overview** in the main session (minimal context usage)
+2. **Spawn a `desplega:phase-running` agent** in background with plan path + phase number:
+   - Use the Agent tool with `run_in_background: true`
+   - Pass the plan path and phase number as context
+3. **Wait for agent completion** — you'll be notified when it finishes
+4. **Review the agent's report** — check status (completed/blocked/failed), changed files, verification results
+5. **Check QA spec status** — If the phase agent reports `QA: pending`, present the QA spec's test scenarios to the user and offer:
+   - Execute QA now (→ invoke `desplega:qa` with plan path + phase context)
+   - Skip QA for this phase
+   - If `QA: passed`, note it and proceed. If `QA: n/a`, proceed normally.
+6. **Handle manual verification** with the user — present the manual verification items from the phase
+7. **Proceed to next phase** after user confirms
+
+The implementing skill becomes an **orchestrator** — it coordinates phases, handles human checkpoints, and manages cross-phase decisions, but delegates actual implementation work to phase-runner sub-agents.
+
+### Inline Mode (Classic)
+
+If the user selected "Inline" for phase execution:
+
+After implementing a phase:
+1. Run the success criteria checks (usually `make format` or folder-specific `Makefile`s)
+2. Fix any issues before proceeding
+3. If the phase has a `### QA Spec` section, execute the test scenarios or offer to invoke `/qa`
+4. Update progress in both the plan and your todos
+4. Check off completed items in the plan file using Edit
+
+### Pause for Human Verification (if not Autopilot or executing multiple phases)
+
+```
+Phase [N] Complete - Ready for Manual Verification
+
+Automated verification passed:
+- [List automated checks that passed]
+
+Please perform the manual verification steps listed in the plan:
+- [List manual verification items from the plan]
+
+Let me know when manual testing is complete so I can proceed to Phase [N+1].
+```
+
+If instructed to execute multiple phases consecutively, skip the pause until the last phase.
+
+Do not check off manual testing items until confirmed by the user.
+
+## If You Get Stuck
+
+When something isn't working as expected:
+1. Make sure you've read and understood all relevant code
+2. Consider if the codebase has evolved since the plan was written
+3. Present the mismatch clearly and ask for guidance (unless Autopilot)
+4. Use sub-tasks sparingly for targeted debugging
+
+## Resuming Work
+
+If the plan has existing checkmarks:
+- Trust that completed work is done
+- Pick up from the first unchecked item
+- Verify previous work only if something seems off
+
+## Completing Implementation
+
+When all phases are complete and verified:
+1. Set the plan frontmatter `status` field to `completed`.
+2. Ensure automated verification checkboxes are updated.
+3. Leave manual verification checkboxes unchecked until the user confirms completion.
+4. Offer post-implementation auditing: "Would you like me to run `/verify-plan` for a post-implementation audit, then `/review` for a final quality check?"
+
+Remember: You're implementing a solution, not just checking boxes. Keep the end goal in mind.
+
+## Review Integration
+
+If the `file-review` plugin is available and the user selected "Yes" during User Preferences setup:
+- After significant code changes in each phase, invoke `/file-review:file-review <changed-file-path>` for inline human comments
+- Process feedback with `file-review:process-review` skill before moving to the next phase
+- If user selected "No" or autonomy mode is Autopilot, skip this step
+
+
+ARGUMENTS: thoughts/taras/plans/2026-03-18-workflow-redesign.md --autonomy=critical
+
+---
+
+<task-notification>
+<task-id>a1820d2fc0ef81992</task-id>
+<tool-use-id>toolu_01KLV1o2EFyzA1Ufydi2p4mj</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a1820d2fc0ef81992.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 1: Foundation types/DB/registry" completed</summary>
+<result>All three verifications pass. Let me summarize the complete implementation.
+
+---
+
+## Phase 1 Implementation Complete
+
+### Files Created
+
+1. **`src/be/migrations/008_workflow_redesign.sql`** — Database migration that drops and recreates workflow tables with new schema: `workflows` (adds `triggers`, `cooldown`, `input` columns; removes `webhookSecret`), `workflow_runs` (adds `skipped` status), `workflow_run_steps` (adds `retryCount`, `maxRetries`, `nextRetryAt`, `idempotencyKey`), and new `workflow_versions` table for version history. Includes retry and idempotency indexes.
+
+2. **`src/workflows/executors/base.ts`** — `BaseExecutor<TConfig, TOutput>` abstract class with `run()` (validates config via safeParse, calls `execute()`, validates output) and abstract `execute()` method. Also exports `ExecutorDependencies`, `ExecutorInput`, `ExecutorResult`, `AsyncExecutorResult` interfaces.
+
+3. **`src/workflows/executors/registry.ts`** — `ExecutorRegistry` class with `register()`, `get()`, `has()`, `types()` methods. Factory function `createExecutorRegistry()` placeholder for Phase 2 registration.
+
+4. **`src/workflows/executors/index.ts`** — Re-exports from base and registry.
+
+5. **`src/workflows/definition.ts`** — `generateEdges()` (derives edges from `next` refs for UI), `findEntryNodes()`, `getSuccessors()`, `validateDefinition()` (checks: missing next targets, entry node count, orphaned nodes, unregistered executor types).
+
+6. **`src/tests/workflow-registry.test.ts`** — 28 tests covering executor registration, type lookup, missing executor handling, BaseExecutor config/output validation, edge generation, entry node detection, successor resolution, definition validation (missing targets, multiple entries, orphans, unregistered types, cycles), and DB integration (workflow CRUD with new fields, version history, retry-related queries).
+
+### Files Modified
+
+7. **`src/types.ts`** (lines 548-773) — Replaced workflow schemas with: `RetryPolicySchema`, `ExecutorMetaSchema`, `ValidationResultSchema`, `StepValidationConfigSchema`, new `WorkflowNodeSchema` (with `next`, `validation`, `retry` fields), `WorkflowEdgeSchema` (kept as derived type), `WorkflowDefinitionSchema` (nodes-only, no edges), `TriggerConfigSchema` (discriminated union: webhook, schedule), `CooldownConfigSchema` (with refine), `InputValueSchema`, `WorkflowTemplateSchema`, `WorkflowSnapshotSchema`, `WorkflowSchema` (with `triggers`, `cooldown`, `input`), `WorkflowVersionSchema`, updated `WorkflowRunStatusSchema` (adds `skipped`), updated `WorkflowRunStepSchema` (adds retry columns).
+
+8. **`src/be/db.ts`** — Updated `WorkflowRow` type, `rowToWorkflow()`, `createWorkflow()`, `updateWorkflow()`, `WorkflowRunStepRow`, `rowToWorkflowRunStep()`, `updateWorkflowRunStep()` for new fields. Added: `getLastSuccessfulRun()`, `getRetryableSteps()`, `getCompletedStepNodeIds()`, `getStepByIdempotencyKey()`, `createWorkflowVersion()`, `getWorkflowVersions()`, `getWorkflowVersion()`. Removed `getWorkflowByWebhookSecret()`.
+
+9. **`src/workflows/engine.ts`** — Updated `findEntryNodes()` and `getSuccessors()` to derive from `next` references instead of `edges` array. Stubbed `executeNode()` (will be replaced by executor registry in Phase 3).
+
+10. **`src/http/workflows.ts`** — Replaced `webhookSecret` check with TODO comment for Phase 6 HMAC-based verification.
+
+### Verification Results
+
+- **TypeScript**: Compiles cleanly (`bun run tsc:check`)
+- **Lint**: Passes (`bun run lint:fix` — 1 pre-existing warning about nested biome.json in new-ui/)
+- **Tests**: 28/28 pass, 70 expect() calls (`bun test src/tests/workflow-registry.test.ts`)
+- **Migration**: Applies successfully on fresh DB (verified via test initialization)
+
+### Deviations from Plan
+
+- Removed `getWorkflowByWebhookSecret()` from db.ts since the `webhookSecret` column no longer exists. No other code referenced it.
+- Had to fix `src/http/workflows.ts` line 239 (`workflow.webhookSecret` reference) to make it compile — replaced with a TODO for Phase 6.
+- Had to stub `executeNode()` in engine.ts since the old node type imports (`./nodes/*`) reference old executor types that no longer align with the new schema. The full engine rewrite happens in Phase 3.</result>
+<usage><total_tokens>119030</total_tokens><tool_uses>80</tool_uses><duration_ms>679107</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a1820d2fc0ef81992.output
+
+---
+
+ok, keep going!
+
+---
+
+<task-notification>
+<task-id>ac9173dd06a759c6f</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/ac9173dd06a759c6f.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 2: Instant executors" completed</summary>
+<result>All Phase 1 tests still pass. Here is the summary.
+
+---
+
+## Phase 2 Implementation Report
+
+### Files Created (7 executor files + 1 test file)
+
+1. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/property-match.ts`** — `PropertyMatchExecutor` with conditions array, `all`/`any` mode, dot-path resolution, and `true`/`false` port routing. Ported from `src/workflows/nodes/property-match.ts` with flat format dropped.
+
+2. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/code-match.ts`** — `CodeMatchExecutor` with sandboxed `new Function` execution (process, Bun, require, fetch, globalThis, setTimeout, setInterval all shadowed as undefined). Returns named port from outputPorts.
+
+3. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/notify.ts`** — `NotifyExecutor` supporting `swarm`/`slack`/`email` channels. Swarm uses `db.postMessage()`, slack/email are stubs.
+
+4. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/raw-llm.ts`** — `RawLlmExecutor` using AI SDK with OpenRouter. `generateObject()` when schema provided, `generateText()` otherwise. Falls back to `fallbackPort` on error.
+
+5. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/script.ts`** — `ScriptExecutor` supporting bash/ts/python runtimes via `Bun.spawn`. Configurable timeout (default 30s) via `Promise.race`. Returns `success`/`failure` port based on exit code.
+
+6. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/vcs.ts`** — `VcsExecutor` stub for `create-issue`/`create-pr`/`comment` on GitHub/GitLab. Validates config, returns mock output.
+
+7. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/validate.ts`** — `ValidateExecutor` for quality gates. Schema-based validation (basic JSON Schema checking for type, const, enum, required) and LLM-based validation (via prompt). Returns `pass`/`fail` port.
+
+8. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-executors.test.ts`** — 63 tests covering config schema validation, execute behavior, output schema validation, port routing, sandboxing, and registry wiring.
+
+### Files Modified (2)
+
+9. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/registry.ts`** — `createExecutorRegistry()` now instantiates and registers all 7 instant executors.
+
+10. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/index.ts`** — Re-exports all 7 executor classes.
+
+### Verification Results
+
+- **`bun run tsc:check`** — Clean, no errors
+- **`bun run lint:fix`** — Clean (no issues in our files; one pre-existing warning in unrelated test)
+- **`bun test src/tests/workflow-executors.test.ts`** — 63 pass, 0 fail
+- **`bun test src/tests/workflow-registry.test.ts`** — 28 pass, 0 fail (no regressions)
+
+### Deviations from Plan
+
+- **Script executor TS runtime**: Changed from `bun run -e` to `bun -e` because `bun run -e` doesn't evaluate inline scripts (it treats `-e` as a file/script name argument).
+- **RawLlm tests**: Made tests environment-adaptive since `OPENROUTER_API_KEY` may or may not be set. Tests verify correct behavior in both paths rather than assuming one.</result>
+<usage><total_tokens>89598</total_tokens><tool_uses>40</tool_uses><duration_ms>379873</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/ac9173dd06a759c6f.output
+
+---
+
+y keep going till the end, make sure to perform all needed e2e tests yourself running services and so on, there are envs available for you to use
+
+---
+
+<task-notification>
+<task-id>a49410ab7efac4cff</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a49410ab7efac4cff.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 3: Engine core rewrite" completed</summary>
+<result>Everything is clean. Let me provide the summary.
+
+---
+
+## Phase 3 Report
+
+### Files Created
+
+1. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/engine.ts`** — Full rewrite. Event-loop style graph walker with:
+   - `startWorkflowExecution(workflow, triggerData, registry)` — cooldown check, input resolution, entry node discovery, graph walk
+   - `walkGraph(def, runId, ctx, startNodes, registry, workflowId?)` — parallel execution of ready nodes, port-based successor routing, convergence handling (waits for all predecessors), memoization via idempotency keys, max iterations guard
+   - `findReadyNodes(def, completedNodeIds)` — predecessor-based readiness detection (exported for recovery/resume in Phase 4)
+   - `executeStep()` — memoization check, config interpolation, executor invocation with timeout, validation, checkpoint on success, retry policy on failure
+   - Backward-compat `NodeResult` export for old `nodes/` files
+
+2. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/checkpoint.ts`** — Atomic DB writes:
+   - `checkpointStep()` — transactional step completion + context update
+   - `checkpointStepFailure()` — step failure with retry backoff calculation
+   - `checkpointStepWaiting()` — transactional step + run waiting state
+
+3. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/validation.ts`** — Per-step validation:
+   - `runStepValidation()` — runs validation executor, returns pass/halt/retry outcome
+
+4. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/input.ts`** — Input resolution:
+   - `resolveInputs()` — resolves `${ENV_VAR}`, `secret.NAME`, and literal strings
+
+5. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/cooldown.ts`** — Cooldown check:
+   - `shouldSkipCooldown()` — queries last successful run, compares to cooldown window
+
+6. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-engine-v2.test.ts`** — 20 tests covering:
+   - Linear workflow (3 nodes, context accumulation)
+   - Branching (property-match true/false port routing)
+   - Memoization (re-walk skips completed steps)
+   - Timeout (30s default, slow executor fails)
+   - Validation pass/halt/advisory
+   - Cooldown skip
+   - Input resolution (env vars, literals, missing var error)
+   - `findReadyNodes` (entry, successor, convergence, empty)
+   - Failure handling (marks run failed, stops downstream)
+   - Context interpolation (`{{nodeId.field}}` syntax)
+
+### Files Modified
+
+- **`src/workflows/index.ts`** — Re-exports `findEntryNodes`/`getSuccessors` from `definition.ts` instead of `engine.ts`
+- **`src/workflows/resume.ts`** — Updated imports from `definition.ts` + `engine.ts`, `walkDag` -> `walkGraph`, placeholder registry arg
+- **`src/workflows/recovery.ts`** — Same import updates, `walkDag` -> `walkGraph`, placeholder registry arg
+- **`src/workflows/triggers.ts`** — Import from `definition.ts`, placeholder registry arg on `startWorkflowExecution`
+- **`src/http/workflows.ts`** — Placeholder registry arg on `startWorkflowExecution`
+- **`src/tools/workflows/trigger-workflow.ts`** — Placeholder registry arg on `startWorkflowExecution`
+
+### Verification Results
+
+- `bun run tsc:check` — passes clean
+- `bun run lint:fix` — passes (only pre-existing warning in unrelated file)
+- `bun test src/tests/workflow-engine-v2.test.ts` — **20/20 pass**
+- `bun test src/tests/workflow-registry.test.ts src/tests/workflow-executors.test.ts` — **91/91 pass** (no regressions)
+
+### Deviations / Notes
+
+- The `startWorkflowExecution` signature changed from 2 args to 3 (added `registry`). Callers in `resume.ts`, `recovery.ts`, `triggers.ts`, `http/workflows.ts`, and `trigger-workflow.ts` use `undefined as never` as a placeholder — these will be properly wired when Phase 4 (resume/recovery) and Phase 7 (initialization) add the module-level registry singleton.
+- `walkGraph` is exported as specified for Phase 4's resume mechanism.
+- The convergence logic tracks activated predecessors to correctly handle fan-out/fan-in patterns where multiple branches converge on a single node.</result>
+<usage><total_tokens>154671</total_tokens><tool_uses>95</tool_uses><duration_ms>826624</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a49410ab7efac4cff.output
+
+---
+
+ensure the endppints in the plan follow the import { route } from "./route-def"; approach as the existing ones pls, so they appear in the openapi spec and use the best method!
+
+---
+
+<task-notification>
+<task-id>ae1b9e19ae7fbd631</task-id>
+<tool-use-id>toolu_01FbAatPq4ZwavuWkrxfVHro</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/ae1b9e19ae7fbd631.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore route-def pattern" completed</summary>
+<result>Perfect. I have all the information needed. Let me compile a comprehensive report of the route definition pattern used in this project.
+
+## Route Definition Pattern - Comprehensive Report
+
+### 1. Route Helper Signature
+
+**Location:** `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/http/route-def.ts`
+
+The `route()` function is a generic factory that creates strongly-typed route handlers:
+
+```typescript
+export function route<
+  TParams extends z.ZodType = z.ZodUndefined,
+  TQuery extends z.ZodType = z.ZodUndefined,
+  TBody extends z.ZodType = z.ZodUndefined,
+>(
+  def: RouteDef<TParams, TQuery, TBody>,
+): RouteHandle<z.infer<TParams>, z.infer<TQuery>, z.infer<TBody>>
+```
+
+The function accepts a `RouteDef` object and returns a `RouteHandle` with three methods:
+- `match(method, pathSegments)` — checks if request matches this route
+- `parse(req, res, pathSegments, queryParams)` — validates and extracts params/query/body, returns `null` and sends 400 on validation failure
+- `def` — the raw route definition (used for OpenAPI generation)
+
+### 2. RouteDef Interface (Full Definition)
+
+```typescript
+interface RouteDef<
+  TParams extends z.ZodType = z.ZodType,
+  TQuery extends z.ZodType = z.ZodType,
+  TBody extends z.ZodType = z.ZodType,
+> {
+  method: HttpMethod;                    // "get" | "post" | "put" | "delete" | "patch"
+  path: string;                          // OpenAPI-style: "/api/workflows/{id}"
+  pattern: readonly (string | null)[];   // matchRoute-style: ["api", "workflows", null]
+  exact?: boolean;                       // default true
+  summary: string;
+  description?: string;
+  tags: string[];
+  params?: TParams;                      // Zod schema for path params
+  query?: TQuery;                        // Zod schema for query params
+  body?: TBody;                          // Zod schema for JSON body
+  responses: Record<number, RouteResponseDef>;  // HTTP status codes + descriptions
+  auth?: {
+    apiKey?: boolean;                    // default true (require Authorization: Bearer)
+    agentId?: boolean;                   // requires X-Agent-ID header
+  };
+}
+```
+
+### 3. Full Example Endpoint Definition
+
+From `src/http/workflows.ts`:
+
+```typescript
+const getWorkflowRoute = route({
+  method: "get",
+  path: "/api/workflows/{id}",
+  pattern: ["api", "workflows", null],
+  summary: "Get a workflow by ID",
+  tags: ["Workflows"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: { description: "Workflow details" },
+    404: { description: "Workflow not found" },
+  },
+});
+
+const createWorkflowRoute = route({
+  method: "post",
+  path: "/api/workflows",
+  pattern: ["api", "workflows"],
+  summary: "Create a new workflow",
+  tags: ["Workflows"],
+  body: z.object({
+    name: z.string().min(1),
+    description: z.string().optional(),
+    definition: z.record(z.string(), z.unknown()),
+  }),
+  responses: {
+    201: { description: "Workflow created" },
+    400: { description: "Invalid definition" },
+  },
+});
+
+const triggerWorkflow = route({
+  method: "post",
+  path: "/api/workflows/{id}/trigger",
+  pattern: ["api", "workflows", null, "trigger"],
+  summary: "Trigger a workflow execution",
+  tags: ["Workflows"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    201: { description: "Workflow run started" },
+    400: { description: "Workflow is disabled" },
+    401: { description: "Unauthorized" },
+    404: { description: "Workflow not found" },
+  },
+});
+```
+
+### 4. Handler Function Pattern
+
+Handlers are async functions that iterate through route definitions, match against incoming requests, and process them:
+
+```typescript
+export async function handleWorkflows(
+  req: IncomingMessage,
+  res: ServerResponse,
+  pathSegments: string[],
+  queryParams: URLSearchParams,
+  myAgentId: string | undefined,
+): Promise<boolean> {
+  if (listWorkflowsRoute.match(req.method, pathSegments)) {
+    const workflows = listWorkflows();
+    json(res, workflows);
+    return true;  // Route was handled
+  }
+
+  if (createWorkflowRoute.match(req.method, pathSegments)) {
+    const parsed = await createWorkflowRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;  // parse() already sent 400 error
+    
+    // Business logic here with validated data
+    const workflow = createWorkflow({
+      name: parsed.body.name,
+      description: parsed.body.description,
+      definition: defParsed.data,
+    });
+    json(res, workflow, 201);
+    return true;
+  }
+
+  return false;  // Route not handled, try next handler
+}
+```
+
+**Key Points:**
+- Return `true` if route was matched and handled
+- Return `false` if no routes matched (allows next handler to try)
+- If `parse()` returns `null`, it already sent a 400 error response
+- Use typed `parsed.params`, `parsed.query`, `parsed.body` directly (fully validated)
+
+### 5. Validation & Typing Pattern
+
+Validation uses Zod schemas and is automatic in `parse()`:
+
+```typescript
+const updateTaskProgressRoute = route({
+  method: "post",
+  path: "/api/tasks/{id}/progress",
+  pattern: ["api", "tasks", null, "progress"],
+  params: z.object({ id: z.string() }),
+  body: z.object({ progress: z.string().min(1) }),
+  responses: {
+    200: { description: "Progress updated" },
+    404: { description: "Task not found" },
+  },
+});
+
+// In handler:
+if (updateTaskProgressRoute.match(req.method, pathSegments)) {
+  const parsed = await updateTaskProgressRoute.parse(req, res, pathSegments, queryParams);
+  if (!parsed) return true;
+  
+  // TypeScript knows: parsed.params.id is string, parsed.body.progress is string
+  updateTaskProgress(parsed.params.id, parsed.body.progress);
+  json(res, { success: true });
+  return true;
+}
+```
+
+**Validation Process in `parse()`:**
+1. Extracts path params by matching `{paramName}` in `path` against `null` positions in `pattern`
+2. Parses query params from URLSearchParams
+3. Parses JSON body
+4. Validates each with their Zod schemas
+5. Returns `null` and sends 400 error on any Zod validation failure
+
+### 6. OpenAPI Spec Generation
+
+**Location:** `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/http/openapi.ts`
+
+The `routeRegistry` global array automatically collects all route definitions:
+
+```typescript
+// In route-def.ts
+export const routeRegistry: RouteDef[] = [];
+
+export function route<...>(...) {
+  routeRegistry.push(def as RouteDef);  // Auto-register
+  return { ... };
+}
+```
+
+OpenAPI generation iterates this registry:
+
+```typescript
+export function generateOpenApiSpec(opts: OpenApiOptions): string {
+  const registry = new OpenAPIRegistry();
+
+  // Register security schemes
+  registry.registerComponent("securitySchemes", "bearerAuth", {
+    type: "http",
+    scheme: "bearer",
+    description: "API key via Authorization: Bearer <API_KEY>",
+  });
+
+  registry.registerComponent("securitySchemes", "agentId", {
+    type: "apiKey",
+    in: "header",
+    name: "X-Agent-ID",
+    description: "Agent UUID for agent-scoped operations",
+  });
+
+  // Convert route definitions to OpenAPI paths
+  for (const routeDef of routeRegistry) {
+    registry.registerPath({
+      method: routeDef.method,
+      path: routeDef.path,
+      summary: routeDef.summary,
+      description: routeDef.description,
+      tags: routeDef.tags,
+      request: { params, query, body },  // Built from routeDef.params/query/body
+      responses,                           // Built from routeDef.responses
+      security: routeDef.auth?.apiKey !== false ? [{ bearerAuth: [] }] : undefined,
+    });
+  }
+
+  return JSON.stringify(doc, null, 2);
+}
+```
+
+The spec is served at `/openapi.json` and rendered via Scalar HTML at `/openapi`.
+
+### 7. Path Matching Pattern
+
+Two-part pattern:
+- **`path`** (OpenAPI format): `"/api/workflows/{id}"` — used for documentation
+- **`pattern`** (matchRoute format): `["api", "workflows", null]` — used for runtime matching
+
+```typescript
+// matchRoute utility
+export function matchRoute(
+  method: string | undefined,
+  pathSegments: string[],
+  expectedMethod: string,
+  pattern: readonly (string | null)[],
+  exact = false,
+): boolean {
+  if (method !== expectedMethod) return false;
+  for (let i = 0; i < pattern.length; i++) {
+    const seg = pattern[i];
+    if (seg === null) {
+      if (!pathSegments[i]) return false;  // Must be present
+    } else {
+      if (pathSegments[i] !== seg) return false;  // Must match exactly
+    }
+  }
+  if (exact && pathSegments[pattern.length]) return false;  // No extra segments
+  return true;
+}
+```
+
+**Examples:**
+- `pattern: ["api", "tasks"]` matches `/api/tasks`
+- `pattern: ["api", "tasks", null]` matches `/api/tasks/<anything>`
+- `pattern: ["api", "tasks", null, "progress"]` matches `/api/tasks/<id>/progress`
+
+### 8. Example with Query Parameters & Auth
+
+From `src/http/tasks.ts`:
+
+```typescript
+const listTasks = route({
+  method: "get",
+  path: "/api/tasks",
+  pattern: ["api", "tasks"],
+  summary: "List tasks with filters",
+  tags: ["Tasks"],
+  query: z.object({
+    status: z.string().optional(),
+    agentId: z.string().optional(),
+    epicId: z.string().optional(),
+    search: z.string().optional(),
+    limit: z.coerce.number().int().optional(),
+    offset: z.coerce.number().int().optional(),
+  }),
+  responses: {
+    200: { description: "Paginated task list" },
+  },
+});
+
+const finishTask = route({
+  method: "post",
+  path: "/api/tasks/{id}/finish",
+  pattern: ["api", "tasks", null, "finish"],
+  summary: "Mark task as completed or failed",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  body: z.object({
+    status: z.enum(["completed", "failed"]),
+    output: z.string().optional(),
+    failureReason: z.string().optional(),
+  }),
+  auth: { apiKey: true, agentId: true },  // Requires both headers
+  responses: {
+    200: { description: "Task finished" },
+    400: { description: "Invalid status" },
+    403: { description: "Not assigned to this agent" },
+    404: { description: "Task not found" },
+  },
+});
+```
+
+### 9. Webhook Example (Custom Body Parsing)
+
+From `src/http/webhooks.ts`:
+
+Webhooks with signature verification handle raw body manually, not using `parse()`:
+
+```typescript
+const githubWebhook = route({
+  method: "post",
+  path: "/api/github/webhook",
+  pattern: ["api", "github", "webhook"],
+  summary: "Handle GitHub webhook events",
+  tags: ["Webhooks"],
+  auth: { apiKey: false },  // No API key required
+  responses: {
+    200: { description: "Event processed" },
+    401: { description: "Invalid signature" },
+    503: { description: "GitHub integration not configured" },
+  },
+});
+
+// In handler:
+if (githubWebhook.match(req.method, pathSegments)) {
+  // Read raw body for signature verification
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(chunk);
+  }
+  const rawBody = Buffer.concat(chunks).toString();
+
+  // Verify signature
+  const isValid = await verifyWebhookSignature(rawBody, signature ?? null);
+  if (!isValid) {
+    res.writeHead(401, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Invalid signature" }));
+    return true;
+  }
+
+  // Parse JSON manually
+  const body = JSON.parse(rawBody);
+  // ... handle event
+  return true;
+}
+```
+
+---
+
+## Summary for New Endpoints
+
+To add `POST /api/webhooks/:workflowId`:
+
+1. **Define the route** in a handler file (or new file):
+```typescript
+const triggerWebhookRoute = route({
+  method: "post",
+  path: "/api/webhooks/{workflowId}",
+  pattern: ["api", "webhooks", null],
+  summary: "Trigger workflow via webhook",
+  tags: ["Webhooks"],
+  params: z.object({ workflowId: z.string().uuid() }),
+  body: z.object({
+    event: z.string(),
+    data: z.record(z.string(), z.unknown()).optional(),
+  }),
+  auth: { apiKey: false },  // Custom verification in handler
+  responses: {
+    200: { description: "Webhook processed" },
+    401: { description: "Invalid webhook signature" },
+    404: { description: "Workflow not found" },
+  },
+});
+```
+
+2. **Add handler logic** in the same file:
+```typescript
+if (triggerWebhookRoute.match(req.method, pathSegments)) {
+  const parsed = await triggerWebhookRoute.parse(req, res, pathSegments, queryParams);
+  if (!parsed) return true;
+
+  // Your business logic with validated: parsed.params.workflowId, parsed.body
+  const workflow = getWorkflow(parsed.params.workflowId);
+  if (!workflow) {
+    res.writeHead(404);
+    res.end();
+    return true;
+  }
+  
+  // Process webhook...
+  json(res, { success: true });
+  return true;
+}
+```
+
+3. **Register handler** in `src/http/index.ts` by importing and calling it in the main HTTP request handler.
+
+4. **OpenAPI spec automatically updates** — no extra configuration needed.</result>
+<usage><total_tokens>69527</total_tokens><tool_uses>10</tool_uses><duration_ms>38359</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/ae1b9e19ae7fbd631.output
+
+---
+
+make sure it applies to previus if makes sense!
+
+---
+
+<task-notification>
+<task-id>a9c0db2cdc5101293</task-id>
+<tool-use-id>toolu_01PeYox8efo9wQVAf6reULZM</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a9c0db2cdc5101293.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 4: Async flow/retry poller" completed</summary>
+<result>Everything is in place. Here is the report.
+
+---
+
+## Phase 4 Implementation Report
+
+### Files Created (4 new)
+
+1. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/agent-task.ts`** — `AgentTaskExecutor` class (mode: async). Creates tasks via `createTaskExtended()` with source "workflow", returns `AsyncExecutorResult` to pause the engine. Includes idempotency check via `getTaskByWorkflowRunStepId()`.
+
+2. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/retry-poller.ts`** — `startRetryPoller()` / `stopRetryPoller()` / `calculateDelay()`. Uses `setTimeout` chaining (no overlap). Directly re-executes failed steps using the existing step record's `retryCount`, then checkpoints success or failure. Supports exponential (with jitter), linear, and static backoff.
+
+3. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-async-v2.test.ts`** — 8 tests covering: task creation with correct fields, workflow pause at waiting, resume from completion/failure/cancellation, idempotency, template interpolation, priority/tags passthrough.
+
+4. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-retry-v2.test.ts`** — 9 tests covering: backoff calculation (static, linear, exponential), poller picks up retryable steps, retry limit enforcement, recovery of running runs with completed steps, recovery of fully-completed runs.
+
+### Files Modified (10)
+
+5. **`src/workflows/resume.ts`** — Refactored. `setupWorkflowResumeListener()` now accepts `registry` parameter. `resumeFromTaskCompletion()` uses `checkpointStep()` for atomic DB write, then calls `walkGraph()` with the registry. `retryFailedRun()` also accepts registry.
+
+6. **`src/workflows/recovery.ts`** — Rewritten. `recoverIncompleteRuns(registry)` handles two cases: (1) running runs — uses `findReadyNodes()` + `walkGraph()`, (2) waiting runs — uses `getStuckWorkflowRuns()` to detect finished tasks and resumes/fails accordingly. `recoverStuckWorkflowRuns()` kept as deprecated wrapper for heartbeat backward compat.
+
+7. **`src/workflows/engine.ts`** — Added pending-retry check before marking a run as completed. Imported `getWorkflowRunStepsByRunId`. If any step has `status='failed'` with `nextRetryAt` set, the run stays in "running" state for the retry poller.
+
+8. **`src/workflows/executors/registry.ts`** — Added `AgentTaskExecutor` registration in `createExecutorRegistry()`.
+
+9. **`src/workflows/executors/index.ts`** — Added `AgentTaskExecutor` re-export.
+
+10. **`src/workflows/index.ts`** — Updated exports: added `recoverIncompleteRuns`, `setupWorkflowResumeListener`, `startRetryPoller`, `stopRetryPoller`. Updated `initWorkflows()` to pass registry parameter placeholder.
+
+11. **`src/be/db.ts`** — Added `getTaskByWorkflowRunStepId()` function. Removed redundant `retryCount < maxRetries` guard from `getRetryableSteps()` (checkpoint already validates before setting `nextRetryAt`).
+
+12. **`src/http/workflows.ts`** — Updated `retryFailedRun()` call with registry placeholder.
+
+13. **`src/tools/workflows/retry-workflow-run.ts`** — Updated `retryFailedRun()` call with registry placeholder.
+
+14. **`src/tests/workflow-executors.test.ts`** — Updated registry wiring tests: now expects 8 executors (7 instant + 1 async), validates mode per type.
+
+### Bugs Found and Fixed
+
+- **Run completion with pending retries**: When a step failed with `shouldRetry=true`, `walkGraph` would incorrectly mark the run as "completed" because no successor nodes were queued. Fixed by checking for steps with pending retries before marking completion.
+
+- **Retry poller off-by-one**: `getRetryableSteps()` had a `retryCount < maxRetries` guard that was inconsistent with `checkpointStepFailure`'s increment logic. Steps approved for retry by the checkpoint were invisible to the poller. Fixed by removing the redundant guard (the checkpoint already validates eligibility before setting `nextRetryAt`).
+
+- **Retry poller re-execution**: The original approach of calling `walkGraph` from the poller created duplicate step records (losing `retryCount`). Fixed by having the poller directly re-execute the specific step using its existing record, preserving `retryCount`.
+
+### Verification Results
+
+```
+bun run tsc:check         ✓ (0 errors)
+bun run lint:fix          ✓ (0 fixes applied, 4 pre-existing warnings)
+workflow-async-v2.test    ✓ (8 pass, 0 fail)
+workflow-retry-v2.test    ✓ (9 pass, 0 fail)
+workflow-registry.test    ✓ (no regressions)
+workflow-executors.test   ✓ (no regressions)
+workflow-engine-v2.test   ✓ (no regressions)
+Total: 128 tests pass, 0 fail
+```
+
+### Deviations from Plan
+
+- **`getTaskByWorkflowRunStepId()`** added to `src/be/db.ts` — not in the plan but necessary for idempotency checks in the agent-task executor.
+- **`getRetryableSteps()` query simplified** — removed the `retryCount < maxRetries` guard that was causing an off-by-one with the checkpoint logic.
+- **Engine completion guard added** — the plan didn't call out the bug where `walkGraph` marks runs as completed even when retries are pending, but it was a necessary fix for correct retry behavior.</result>
+<usage><total_tokens>132204</total_tokens><tool_uses>105</tool_uses><duration_ms>1088521</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a9c0db2cdc5101293.output
+
+---
+
+<task-notification>
+<task-id>a7ae1a0fbd703ca54</task-id>
+<tool-use-id>toolu_01RGkz1Tjhm1yQipgyDsvmhb</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a7ae1a0fbd703ca54.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 5: Triggers/versions/templates" completed</summary>
+<result>All 152 tests pass (24 new Phase 5 tests + 128 regression tests from Phases 1-4).
+
+Here is the summary of what was done:
+
+---
+
+## Phase 5 Implementation Report
+
+### Files Created
+
+1. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/version.ts`** — `snapshotWorkflow(workflowId, changedByAgentId?)` function that captures a full workflow state snapshot into the `workflow_versions` table with auto-incrementing version numbers.
+
+2. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/templates.ts`** — Template system with `instantiateTemplate(template, variables)` and `validateTemplateVariables(template, provided)`. Deep-clones template definitions and replaces `{{variable}}` placeholders in all string fields.
+
+3. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-triggers-v2.test.ts`** — 14 tests covering HMAC verification (valid/invalid/missing signatures, raw hex vs sha256= format), webhook trigger lifecycle (valid HMAC starts workflow, invalid rejects, no secret accepts any, 404/400 errors), manual trigger, and cooldown (skipped run within window).
+
+4. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-versions.test.ts`** — 10 tests covering snapshot creation, version number incrementing, full state capture, changedByAgentId recording, error on missing workflow, version listing in descending order, specific version retrieval, and full update cycle.
+
+### Files Modified
+
+5. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/triggers.ts`** — Complete rewrite. Removed all event-based trigger matching (`evaluateWorkflowTriggers`, `matchTriggerNode`, filter functions). New: `handleWebhookTrigger()` loads workflow, finds webhook trigger in `triggers[]`, verifies HMAC-SHA256 if `hmacSecret` is set (with timing-safe comparison), and calls `startWorkflowExecution()`. Includes `verifyHmacSignature()` and `WebhookError` class.
+
+6. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/http/workflows.ts`** — Added `POST /api/webhooks/{workflowId}` route using the `route()` pattern with `auth: { apiKey: false }`. Handler reads raw body for HMAC, validates JSON, passes raw string to `handleWebhookTrigger()`, and returns 201/401/404 as appropriate.
+
+7. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/http/core.ts`** — Added `/api/webhooks/` to the auth bypass list so workflow webhooks skip API key authentication (they use HMAC instead).
+
+8. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/index.ts`** — Removed the 16-event trigger subscription loop from `initWorkflows()`. Added exports for `handleWebhookTrigger`, `snapshotWorkflow`, `instantiateTemplate`, `validateTemplateVariables`. Kept `setupWorkflowResumeListener()`.
+
+### Verification Results
+
+- TypeScript: compiles cleanly (`bun run tsc:check`)
+- Lint: passes (`bun run lint:fix`), 4 pre-existing warnings in other files
+- Phase 5 tests: **24/24 pass** (14 trigger + 10 version)
+- Regression tests: **128/128 pass** (registry + executors + engine + async + retry)
+
+### Deviations
+
+None. All plan items implemented as specified. The `TODO(Phase 7)` markers remain on `undefined as never` casts for the executor registry parameter — these will be resolved in Phase 7 when the module-level registry singleton is wired up via `createExecutorRegistry()`.</result>
+<usage><total_tokens>112450</total_tokens><tool_uses>63</tool_uses><duration_ms>478283</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a7ae1a0fbd703ca54.output
+
+---
+
+<task-notification>
+<task-id>a127c2dd08f2fc210</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a127c2dd08f2fc210.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 6: API layer MCP+HTTP update" completed</summary>
+<result>All 178 tests pass across all 8 test files. Zero failures.
+
+---
+
+Here is the report, Taras.
+
+## Phase 6 Complete: API Layer -- MCP Tools + HTTP Endpoints
+
+### Files Modified
+
+**MCP Tools** (6 files updated):
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/create-workflow.ts` -- Accepts new schema fields (`triggers`, `cooldown`, `input`). Validates definition via `validateDefinition()` before creating.
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/update-workflow.ts` -- Accepts new fields. Calls `snapshotWorkflow()` before update for version history. Validates definition if changed. Returns `versionCreated` in output.
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/get-workflow.ts` -- Returns `edges` (auto-generated via `generateEdges()`) alongside the workflow for UI rendering.
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/list-workflows.ts` -- Updated description; workflows now return new fields (triggers, cooldown, input) from DB layer automatically.
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/trigger-workflow.ts` -- Detects cooldown-skipped runs and returns `skipped: true/false` in output.
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/list-workflow-runs.ts` -- Added optional `status` filter parameter.
+
+**MCP Tools unchanged** (3 files -- no changes needed):
+- `delete-workflow.ts` -- cascade delete already works
+- `get-workflow-run.ts` -- already returns steps with retry columns from DB layer
+- `retry-workflow-run.ts` -- already uses `retryFailedRun()` with Phase 7 placeholder
+
+**HTTP Endpoints** (1 file updated):
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/http/workflows.ts` -- Major update:
+  - `POST /api/workflows` -- typed body schema with `definition`, `triggers`, `cooldown`, `input`. Validates definition via `validateDefinition()`.
+  - `PUT /api/workflows/:id` -- typed body schema. Calls `snapshotWorkflow()` before update. Validates definition if provided.
+  - `GET /api/workflows/:id` -- returns `edges` (auto-generated) in response.
+  - `POST /api/workflows/:id/trigger` -- returns `{ runId, skipped }` to indicate cooldown-skipped runs.
+  - `GET /api/workflows/:id/runs` -- supports `?status=` query filter.
+  - `GET /api/workflow-runs/:id` -- response shape changed to `{ run, steps }` (nested) for consistency with MCP tool.
+  - **NEW** `GET /api/workflows/:id/versions` -- list version history for a workflow.
+  - **NEW** `GET /api/workflows/:id/versions/:version` -- get specific version snapshot.
+
+**Test file** (1 file created):
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-http-v2.test.ts` -- 26 tests covering:
+  - Create with full new schema (triggers, cooldown, input)
+  - Create with minimal schema
+  - Reject invalid definitions (dangling next, multiple entries)
+  - GET with auto-generated edges
+  - Update creates version snapshots
+  - Update accepts new fields
+  - Update rejects invalid definition
+  - Delete workflow
+  - Trigger workflow (with auth, disabled, cooldown checks)
+  - List runs with status filter
+  - Get run detail with retry columns on steps
+  - Webhook with valid/invalid HMAC
+  - Version history list and get endpoints
+
+### Verification Results
+
+- **TypeScript**: `bun run tsc:check` -- passes (zero errors)
+- **Lint**: `bun run lint:fix` -- passes (zero warnings on changed files)
+- **New tests**: 26/26 pass, 83 expect() calls
+- **Regression tests**: 152/152 pass across 7 existing test files
+- **Total**: 178/178 pass across 8 files
+
+### Notes
+
+- The `TODO(Phase 7)` registry placeholders (`undefined as never`) remain in place for trigger-workflow, retry-workflow-run, and the webhook endpoint -- these get wired in Phase 7's `initWorkflows()` rewrite.
+- The `GET /api/workflow-runs/:id` response shape changed from `{ ...run, steps }` to `{ run, steps }` to match the MCP tool's shape and avoid field name collisions.</result>
+<usage><total_tokens>114382</total_tokens><tool_uses>55</tool_uses><duration_ms>526263</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a127c2dd08f2fc210.output
+
+---
+
+<task-notification>
+<task-id>a48834314dc5e21d9</task-id>
+<tool-use-id>toolu_01V1QdDwHH4oDxoeymYp4Umy</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a48834314dc5e21d9.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 7: Integration/cleanup/UI types" completed</summary>
+<result>Everything is clean. Here is the summary:
+
+---
+
+## Phase 7 Complete -- Summary
+
+### Files Modified
+
+1. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/index.ts`** -- Full rewrite of `initWorkflows()`. Creates executor registry singleton via `createExecutorRegistry()`, wires up resume listener, recovery, and retry poller. Exports `getExecutorRegistry()` for use by HTTP endpoints and MCP tools.
+
+2. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/http/workflows.ts`** -- Replaced 3 `undefined as never` placeholders with `getExecutorRegistry()` (webhook trigger, manual trigger, retry endpoints).
+
+3. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/trigger-workflow.ts`** -- Replaced 1 `undefined as never` with `getExecutorRegistry()`.
+
+4. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tools/workflows/retry-workflow-run.ts`** -- Replaced 1 `undefined as never` with `getExecutorRegistry()`.
+
+5. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/heartbeat/heartbeat.ts`** -- Replaced `recoverStuckWorkflowRuns()` with `recoverIncompleteRuns(getExecutorRegistry())`, with a try/catch for early initialization timing.
+
+6. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/recovery.ts`** -- Removed deprecated `recoverStuckWorkflowRuns()` function.
+
+7. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/engine.ts`** -- Removed deprecated `NodeResult` interface.
+
+8. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/api/types.ts`** -- Updated `WorkflowNodeType` (open string), `WorkflowNode` (added `next`, `validation`, `retry`), `WorkflowDefinition` (edges auto-generated), `Workflow` (added `triggers`, `cooldown`, `input`), `WorkflowRunStatus` (added `skipped`), `WorkflowRunStep` (added retry columns), added `TriggerConfig`, `CooldownConfig`, `RetryPolicy`, `StepValidationConfig`, `WorkflowVersion` types.
+
+9. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/api/client.ts`** -- Updated `fetchWorkflow` to nest API's top-level `edges` into `definition.edges`. Updated `fetchWorkflows` to ensure `edges` array exists. Updated `fetchWorkflowRun` to reshape `{ run, steps }` into `WorkflowRunWithSteps`. Added `fetchWorkflowVersions()`.
+
+10. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/api/hooks/use-workflows.ts`** -- Added `useWorkflowVersions()` hook.
+
+11. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/components/workflows/graph-utils.ts`** -- Updated node categorization to use open string types (`type.startsWith("trigger-")` and a Set for condition types).
+
+12. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/pages/workflows/page.tsx`** -- Added "Skipped" status filter option.
+
+13. **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-http-v2.test.ts`** -- Added `initWorkflows()` and `stopRetryPoller()` calls.
+
+### Files Deleted
+
+- `src/workflows/nodes/` directory (6 files: code-match.ts, create-task.ts, delegate-to-agent.ts, llm-classify.ts, property-match.ts, send-message.ts)
+- `src/workflows/llm-provider.ts`
+- `src/tests/workflow-engine.test.ts`
+- `src/tests/workflow-engine-errors.test.ts`
+- `src/tests/workflow-http.test.ts`
+- `src/tests/workflow-triggers.test.ts`
+- `src/tests/workflow-nodes-phase6.test.ts`
+- `src/tests/workflow-property-match.test.ts`
+- `src/tests/workflow-recovery.test.ts`
+- `src/tests/workflow-resume-retry.test.ts`
+- `src/tests/gitlab-workflow-triggers.test.ts`
+- `src/tests/llm-classify.test.ts`
+- `src/tests/pr150-dedup-triggers-webhooks.test.ts`
+
+### Verification Results
+
+- **Root tsc:check**: Clean (no errors)
+- **Root lint:fix**: Clean (only pre-existing warnings in non-workflow files)
+- **Root tests**: 1419 pass, 0 fail (including 178 workflow tests)
+- **new-ui tsc --noEmit**: Clean (no errors)
+- **new-ui lint**: Clean (no errors)
+
+### TODO(Phase 7) Placeholders Resolved
+
+**6 total** -- 1 in `index.ts`, 3 in `http/workflows.ts`, 1 in `trigger-workflow.ts`, 1 in `retry-workflow-run.ts`.
+
+### Deviations
+
+- Also deleted `src/tests/llm-classify.test.ts` and `src/tests/pr150-dedup-triggers-webhooks.test.ts` -- both imported from deleted modules (`workflows/nodes/*`, `workflows/llm-provider`, `evaluateWorkflowTriggers`).
+- `template.ts` was preserved as specified.</result>
+<usage><total_tokens>154518</total_tokens><tool_uses>104</tool_uses><duration_ms>771508</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a48834314dc5e21d9.output
+
+---
+
+describe what e2e tests you did in a table pls
+
+---
+
+nice! now from a UI perspective, what is testable? will it be completely broken? maybe spin up a server a 3015 (change the envs to point to that as it does to 3014 now) and create a few workflows so I can check?
+
+---
+
+[Request interrupted by user]
+
+---
+
+can you check who is running 5274 and run it yourself pls, so you can change ui and I can see it?
+
+installHook.js:1 TypeError: Cannot read properties of undefined (reading 'length')
+    at WorkflowDetailPage (page.tsx:133:38)
+    at Object.react_stack_bottom_frame (react-dom_client.js?v=96980937:18509:20)
+    at renderWithHooks (react-dom_client.js?v=96980937:5654:24)
+    at updateFunctionComponent (react-dom_client.js?v=96980937:7475:21)
+    at beginWork (react-dom_client.js?v=96980937:8525:20)
+    at runWithFiberInDEV (react-dom_client.js?v=96980937:997:72)
+    at performUnitOfWork (react-dom_client.js?v=96980937:12561:98)
+    at workLoopSync (react-dom_client.js?v=96980937:12424:43)
+    at renderRootSync (react-dom_client.js?v=96980937:12408:13)
+    at performWorkOnRoot (react-dom_client.js?v=96980937:11827:37)
+
+The above error occurred in the <WorkflowDetailPage> component.
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+
+overrideMethod @ installHook.js:1
+installHook.js:1 ErrorBoundary caught: TypeError: Cannot read properties of undefined (reading 'length')
+    at WorkflowDetailPage (page.tsx:133:38)
+    at Object.react_stack_bottom_frame (react-dom_client.js?v=96980937:18509:20)
+    at renderWithHooks (react-dom_client.js?v=96980937:5654:24)
+    at updateFunctionComponent (react-dom_client.js?v=96980937:7475:21)
+    at beginWork (react-dom_client.js?v=96980937:8525:20)
+    at runWithFiberInDEV (react-dom_client.js?v=96980937:997:72)
+    at performUnitOfWork (react-dom_client.js?v=96980937:12561:98)
+    at workLoopSync (react-dom_client.js?v=96980937:12424:43)
+    at renderRootSync (react-dom_client.js?v=96980937:12408:13)
+    at performWorkOnRoot (react-dom_client.js?v=96980937:11827:37) Object
+overrideMethod @ installHook.js:1
+
+---
+
+nice! it all works pretty nice! now can you make it so that the workflow run details page is split in two (vertically in desktop, horizon on mobile) and what it does essentially is show the steps executed on the right (you can expand then and it select the step in the left graph, and viceversa) and make then prettier printed, as you can see it's suuuper ugly (maybe use some pretty printing of the JSON using monaco or @microlink/react-json-view
+
+---
+
+also little detail, are we storing execution elapsed times??? if so we need to ensure we show them in the ui jejej
+
+---
+
+<task-notification>
+<task-id>a53de3d37ba7d2909</task-id>
+<tool-use-id>toolu_01NMZvwh2Bwh5zUfhqpqX4F4</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a53de3d37ba7d2909.output</output-file>
+<status>completed</status>
+<summary>Agent "Redesign workflow run detail page" completed</summary>
+<result>Both pass cleanly. Here is the report.
+
+---
+
+## Report
+
+### Files Created
+- **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/components/workflows/json-tree.tsx`** -- Custom recursive JSON tree viewer component
+
+### Files Modified
+- **`/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/pages/workflow-runs/[id]/page.tsx`** -- Complete rewrite with split layout and inline steps panel
+
+### Files Kept Unchanged
+- `step-detail-sheet.tsx` -- Left in place as instructed (no longer imported by the run detail page)
+- `workflow-graph.tsx`, `graph-utils.ts` -- Not touched
+
+### Verification Results
+- `pnpm exec tsc --noEmit` -- passes with zero errors
+- `pnpm lint` -- passes with zero errors, zero warnings
+
+### Design Summary
+
+**Split Layout**: The page now uses a `flex-row` layout at `md+` breakpoint (graph ~60% left, steps ~40% right) and stacks vertically on smaller screens. Both panels fill available height with `flex-1 min-h-0`.
+
+**Steps Panel**: A scrollable panel with a "Steps (N)" header. Each step is a collapsible card showing:
+- **Collapsed**: node label, type badge, status badge, and duration -- all in one row with a chevron toggle
+- **Expanded**: metadata grid (started/finished/duration), retry info with count badges, error alert (red, destructive variant), plus Input/Output rendered via `JsonTree`
+
+**Bidirectional Selection**:
+- Clicking a graph node expands that step, scrolls to it in the panel, and highlights it
+- Clicking a step card highlights the corresponding graph node via `selectedNodeId`
+- Selected step gets a left amber border accent (`border-l-2 border-l-amber-500`)
+
+**JsonTree Component**: Recursive renderer with:
+- Collapsible objects/arrays (chevron toggles)
+- Color-coded values: emerald (strings), amber (numbers), sky (booleans), muted (null/keys)
+- Space Mono font (`font-mono`)
+- First level expanded by default, deeper levels collapsed
+- Max height with overflow scroll
+- Collapsed summary shows key/item count (e.g., "3 keys", "2 items")</result>
+<usage><total_tokens>48232</total_tokens><tool_uses>19</tool_uses><duration_ms>151033</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a53de3d37ba7d2909.output
+
+---
+
+nice, now we are missing real durations, i always see 1h 0m in all...
+
+---
+
+I see all 0s for http://localhost:4015/workflow-runs/cc2f587d-3c57-4598-bafd-6931a7059c71 is it becayse too quick?
+
+---
+
+also make it that if something is expanded and not selected, on selected it does not auto collapse! actually to collpase make it a button near time, instead that on card click pls
+
+---
+
+for the wf details page make so:
+
+1. tabbed approach: tab one details, tab 2 runs
+2. in the details one make it similar to runs: split view but instead of run details you should see the node details and it's definition! make it pretty please!
+
+---
+
+<task-notification>
+<task-id>a5d5883abb7513e58</task-id>
+<tool-use-id>toolu_015wR41AePzy5Rj43gkzk7mw</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a5d5883abb7513e58.output</output-file>
+<status>completed</status>
+<summary>Agent "Redesign workflow detail page" completed</summary>
+<result>TypeScript passes clean. The only remaining lint error is a pre-existing formatting issue in `workflow-runs/[id]/page.tsx` -- not in my file. My changes are clean.
+
+Here is the summary:
+
+**File modified:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/pages/workflows/[id]/page.tsx` -- complete rewrite
+
+**What was done:**
+
+1. **Tabbed layout** with two tabs: "Definition" and "Runs (N)" using the existing `Tabs` component. The header (workflow name, enabled switch, node/edge count badges, Trigger + Delete buttons) stays above the tabs.
+
+2. **Definition tab -- split view** following the same `flex-[3]` / `flex-[2]` pattern as the workflow run detail page:
+   - **Left**: `WorkflowGraph` with `selectedNodeId` and `onNodeClick` (clicking a selected node deselects it)
+   - **Right**: Node Inspector panel in a `rounded-lg border bg-card` card with `ScrollArea`. Shows node ID (mono), type badge, and `JsonTree` sections for Configuration, Next, Validation, and Retry (latter two conditional). Placeholder text when no node is selected.
+
+3. **Workflow metadata** rendered above the split view showing Triggers (as badges with masked HMAC secrets), Cooldown (formatted as `1h 30m`), and Input variables (via `JsonTree`). Only renders when metadata exists.
+
+4. **Runs tab** contains the AG Grid table (moved from the bottom), filling available height (removed `domLayout="autoHeight"`).
+
+**Verification results:**
+- `pnpm exec tsc --noEmit` -- passes clean
+- `pnpm lint` -- my file passes clean (1 pre-existing error in `workflow-runs/[id]/page.tsx` is unrelated)</result>
+<usage><total_tokens>44326</total_tokens><tool_uses>19</tool_uses><duration_ms>130552</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a5d5883abb7513e58.output
+
+---
+
+remove the minimap from the react flow graphs pls
+
+---
+
+and it would be nice to add also input and output schemas to the details, I want it to be complete!
+
+---
+
+[Request interrupted by user]
+
+---
+
+dude, return the JSON schema of the input and outputs, that's fine! isn't there a way to zod to JSON schema?
+
+---
+
+vite build fails
+
+---
+
+commit and push all changes, ensure plan is updated properly, create a PR
