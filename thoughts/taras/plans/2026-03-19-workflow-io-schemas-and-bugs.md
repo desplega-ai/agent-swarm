@@ -1,7 +1,7 @@
 ---
 date: 2026-03-19T19:00:00Z
 topic: "Workflow Node I/O Schemas, Data Flow Mapping, and Engine Bug Fixes"
-status: reviewed
+status: in-progress
 autonomy: verbose
 commit_per_phase: true
 ---

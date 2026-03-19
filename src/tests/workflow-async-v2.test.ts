@@ -69,7 +69,7 @@ import * as db from "../be/db";
 const mockDeps: ExecutorDependencies = {
   db: db as typeof import("../be/db"),
   eventBus: workflowEventBus,
-  interpolate,
+  interpolate: (template, ctx) => interpolate(template, ctx).result,
 };
 
 function createTestRegistry(): ExecutorRegistry {

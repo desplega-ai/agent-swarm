@@ -772,5 +772,6 @@ export const WorkflowRunStepSchema = z.object({
   maxRetries: z.number().int().min(0).default(3),
   nextRetryAt: z.string().optional(),
   idempotencyKey: z.string().optional(),
+  diagnostics: z.string().optional(),
 });
 export type WorkflowRunStep = z.infer<typeof WorkflowRunStepSchema>;

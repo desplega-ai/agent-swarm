@@ -15,7 +15,7 @@ import { findEntryNodes, getSuccessors } from "./definition";
 import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
 import { resolveInputs } from "./input";
-import { interpolate } from "./template";
+import { deepInterpolate } from "./template";
 import { runStepValidation } from "./validation";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -263,14 +263,17 @@ async function executeStep(
   // 3. Get executor
   const executor = registry.get(node.type);
 
-  // 4. Interpolate config
-  const interpolatedConfig: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(node.config)) {
-    if (typeof value === "string") {
-      interpolatedConfig[key] = interpolate(value, ctx);
-    } else {
-      interpolatedConfig[key] = value;
-    }
+  // 4. Deep-interpolate config (handles nested objects, arrays, etc.)
+  const { value: interpolatedValue, unresolved } = deepInterpolate(node.config, ctx);
+  const interpolatedConfig = interpolatedValue as Record<string, unknown>;
+
+  if (unresolved.length > 0) {
+    console.warn(
+      `[workflow] Step ${node.id}: unresolved interpolation tokens: ${unresolved.join(", ")}`,
+    );
+    updateWorkflowRunStep(stepId, {
+      diagnostics: JSON.stringify({ unresolvedTokens: unresolved }),
+    });
   }
 
   // 5. Execute with timeout

@@ -1701,13 +1701,14 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
                 capabilities: (capabilities || []).join(", "),
               },
             };
-            if (!agentSoulMd) agentSoulMd = interpolate(cachedTemplate.files.soulMd, ctx);
+            if (!agentSoulMd) agentSoulMd = interpolate(cachedTemplate.files.soulMd, ctx).result;
             if (!agentIdentityMd)
-              agentIdentityMd = interpolate(cachedTemplate.files.identityMd, ctx);
-            if (!agentToolsMd) agentToolsMd = interpolate(cachedTemplate.files.toolsMd, ctx);
-            if (!agentClaudeMd) agentClaudeMd = interpolate(cachedTemplate.files.claudeMd, ctx);
+              agentIdentityMd = interpolate(cachedTemplate.files.identityMd, ctx).result;
+            if (!agentToolsMd) agentToolsMd = interpolate(cachedTemplate.files.toolsMd, ctx).result;
+            if (!agentClaudeMd)
+              agentClaudeMd = interpolate(cachedTemplate.files.claudeMd, ctx).result;
             if (!agentSetupScript)
-              agentSetupScript = interpolate(cachedTemplate.files.setupScript, ctx);
+              agentSetupScript = interpolate(cachedTemplate.files.setupScript, ctx).result;
             console.log(`[${role}] Applied template: ${templateId}`);
           }
 
