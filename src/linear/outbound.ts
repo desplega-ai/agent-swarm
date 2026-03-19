@@ -1,6 +1,7 @@
 import { getTrackerSync, updateTrackerSync } from "../be/db-queries/tracker";
 import { workflowEventBus } from "../workflows/event-bus";
 import { getLinearClient } from "./client";
+import { endAgentSession, taskSessionMap } from "./sync";
 
 let subscribed = false;
 
@@ -58,6 +59,16 @@ async function handleTaskCompleted(data: unknown): Promise<void> {
       error instanceof Error ? error.message : error,
     );
   }
+
+  // Post to AgentSession if one exists for this task
+  const sessionId = taskSessionMap.get(taskId);
+  if (sessionId) {
+    const body = output ? `Task completed.\n\n${output.slice(0, 2000)}` : "Task completed.";
+    endAgentSession(sessionId, body, "response").catch((err) => {
+      console.error(`[Linear Outbound] Failed to end AgentSession for task ${taskId}:`, err);
+    });
+    taskSessionMap.delete(taskId);
+  }
 }
 
 async function handleTaskFailed(data: unknown): Promise<void> {
@@ -93,6 +104,16 @@ async function handleTaskFailed(data: unknown): Promise<void> {
       `[Linear Outbound] Failed to sync task failure for ${taskId}:`,
       error instanceof Error ? error.message : error,
     );
+  }
+
+  // Post error to AgentSession if one exists for this task
+  const sessionId = taskSessionMap.get(taskId);
+  if (sessionId) {
+    const body = failureReason ? `Task failed.\n\n${failureReason.slice(0, 2000)}` : "Task failed.";
+    endAgentSession(sessionId, body, "error").catch((err) => {
+      console.error(`[Linear Outbound] Failed to end AgentSession for task ${taskId}:`, err);
+    });
+    taskSessionMap.delete(taskId);
   }
 }
 

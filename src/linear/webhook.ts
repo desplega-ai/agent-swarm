@@ -1,5 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { handleAgentSessionEvent, handleIssueDelete, handleIssueUpdate } from "./sync";
+import {
+  handleAgentSessionEvent,
+  handleAgentSessionPrompted,
+  handleIssueDelete,
+  handleIssueUpdate,
+} from "./sync";
 
 // In-memory dedup set for Linear-Delivery header
 const recentDeliveries = new Map<string, number>(); // deliveryId -> timestamp
@@ -39,6 +44,10 @@ async function processWebhookEvent(
 
   // Handle AgentSession events (Linear Agent SDK)
   if (type === "AgentSessionEvent" || type === "AgentSession") {
+    if (action === "prompted") {
+      await handleAgentSessionPrompted(event);
+      return;
+    }
     await handleAgentSessionEvent(event);
     return;
   }

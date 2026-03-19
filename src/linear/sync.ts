@@ -7,24 +7,39 @@ import {
 } from "../be/db-queries/tracker";
 
 /**
- * Acknowledge a Linear AgentSession by posting an activity.
- * The @linear/sdk doesn't support AgentSession yet, so we call the GraphQL API directly.
- * Creating an activity transitions the session from "pending" to "active".
+ * In-memory map: swarmTaskId → Linear agentSessionId.
+ * Used by outbound sync to post activities back to the AgentSession.
+ * Not persisted — sessions are ephemeral and tied to the process lifetime.
  */
-async function acknowledgeAgentSession(sessionId: string, message: string): Promise<void> {
+export const taskSessionMap = new Map<string, string>();
+
+const AGENT_ACTIVITY_MUTATION = `
+  mutation AgentActivityCreate($input: AgentActivityCreateInput!) {
+    agentActivityCreate(input: $input) { success }
+  }
+`;
+
+/**
+ * Low-level helper to post an activity to a Linear AgentSession via GraphQL.
+ */
+async function postAgentActivity(
+  sessionId: string,
+  content: { type: "thought" | "response" | "error"; body: string },
+  signal?: "stop" | "continue",
+): Promise<boolean> {
   const tokens = getOAuthTokens("linear");
   if (!tokens) {
-    console.log("[Linear Sync] No OAuth tokens, cannot acknowledge AgentSession");
-    return;
+    console.log("[Linear Sync] No OAuth tokens, cannot post AgentSession activity");
+    return false;
   }
 
-  const mutation = `
-    mutation AgentActivityCreate($input: AgentActivityCreateInput!) {
-      agentActivityCreate(input: $input) {
-        success
-      }
-    }
-  `;
+  const input: Record<string, unknown> = {
+    agentSessionId: sessionId,
+    content,
+  };
+  if (signal) {
+    input.signal = signal;
+  }
 
   const res = await fetch("https://api.linear.app/graphql", {
     method: "POST",
@@ -33,21 +48,16 @@ async function acknowledgeAgentSession(sessionId: string, message: string): Prom
       Authorization: `Bearer ${tokens.accessToken}`,
     },
     body: JSON.stringify({
-      query: mutation,
-      variables: {
-        input: {
-          agentSessionId: sessionId,
-          content: { type: "thought", body: message },
-        },
-      },
+      query: AGENT_ACTIVITY_MUTATION,
+      variables: { input },
     }),
   });
 
   if (!res.ok) {
     console.error(
-      `[Linear Sync] Failed to acknowledge AgentSession ${sessionId}: ${res.status} ${res.statusText}`,
+      `[Linear Sync] Failed to post activity to AgentSession ${sessionId}: ${res.status} ${res.statusText}`,
     );
-    return;
+    return false;
   }
 
   const result = (await res.json()) as {
@@ -55,48 +65,54 @@ async function acknowledgeAgentSession(sessionId: string, message: string): Prom
     errors?: unknown[];
   };
   if (result.errors) {
-    console.error("[Linear Sync] GraphQL errors acknowledging AgentSession:", result.errors);
-    return;
+    console.error("[Linear Sync] GraphQL errors posting AgentSession activity:", result.errors);
+    return false;
   }
 
-  console.log(`[Linear Sync] AgentSession ${sessionId} acknowledged`);
+  return true;
+}
+
+/**
+ * Acknowledge a Linear AgentSession by posting a thought activity.
+ * Creating an activity transitions the session from "pending" to "active".
+ */
+async function acknowledgeAgentSession(sessionId: string, message: string): Promise<void> {
+  const ok = await postAgentActivity(sessionId, { type: "thought", body: message });
+  if (ok) {
+    console.log(`[Linear Sync] AgentSession ${sessionId} acknowledged`);
+  }
 }
 
 /**
  * Post a response activity to a Linear AgentSession (visible as a comment).
  */
 export async function postAgentSessionResponse(sessionId: string, body: string): Promise<void> {
-  const tokens = getOAuthTokens("linear");
-  if (!tokens) return;
+  await postAgentActivity(sessionId, { type: "response", body });
+}
 
-  const mutation = `
-    mutation AgentActivityCreate($input: AgentActivityCreateInput!) {
-      agentActivityCreate(input: $input) { success }
-    }
-  `;
+/**
+ * Post a thought activity to a Linear AgentSession (dimmed internal thinking).
+ */
+export async function postAgentSessionThought(sessionId: string, body: string): Promise<void> {
+  await postAgentActivity(sessionId, { type: "thought", body });
+}
 
-  const res = await fetch("https://api.linear.app/graphql", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${tokens.accessToken}`,
-    },
-    body: JSON.stringify({
-      query: mutation,
-      variables: {
-        input: {
-          agentSessionId: sessionId,
-          content: { type: "response", body },
-        },
-      },
-    }),
-  });
+/**
+ * Post an error activity to a Linear AgentSession.
+ */
+export async function postAgentSessionError(sessionId: string, body: string): Promise<void> {
+  await postAgentActivity(sessionId, { type: "error", body });
+}
 
-  if (!res.ok) {
-    console.error(
-      `[Linear Sync] Failed to post response to AgentSession ${sessionId}: ${res.status}`,
-    );
-  }
+/**
+ * End a Linear AgentSession by posting a final response with a stop signal.
+ */
+export async function endAgentSession(
+  sessionId: string,
+  body: string,
+  type: "response" | "error" = "response",
+): Promise<void> {
+  await postAgentActivity(sessionId, { type, body }, "stop");
 }
 
 // Status mapping: Linear state names → swarm task statuses
@@ -187,9 +203,12 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
     syncDirection: "inbound",
   });
 
-  // Acknowledge the AgentSession (pending → active)
+  // Track the AgentSession so outbound sync can post activities to it
   const sessionId = agentSession ? String(agentSession.id ?? "") : "";
   if (sessionId) {
+    taskSessionMap.set(task.id, sessionId);
+
+    // Acknowledge the AgentSession (pending → active)
     acknowledgeAgentSession(
       sessionId,
       `Task received by Agent Swarm (${task.id}). Processing...`,
@@ -292,4 +311,104 @@ export async function handleIssueDelete(event: Record<string, unknown>): Promise
     cancelTask(sync.swarmId, "Linear issue deleted");
     console.log(`[Linear Sync] Cancelled task ${sync.swarmId} (Linear issue ${issueId} deleted)`);
   }
+}
+
+/**
+ * Handle "prompted" AgentSession events — user sent a follow-up message
+ * in the Linear agent chat UI.
+ */
+export async function handleAgentSessionPrompted(event: Record<string, unknown>): Promise<void> {
+  const agentSession = event.agentSession as Record<string, unknown> | undefined;
+  if (!agentSession) {
+    console.log("[Linear Sync] Prompted event has no agentSession, skipping");
+    return;
+  }
+
+  const sessionId = String(agentSession.id ?? "");
+  const issue = agentSession.issue as Record<string, unknown> | undefined;
+  const comment = agentSession.comment as Record<string, unknown> | undefined;
+  const userMessage = comment ? String(comment.body ?? "") : "";
+
+  if (!issue) {
+    console.log("[Linear Sync] Prompted event has no issue data, skipping");
+    return;
+  }
+
+  const issueId = String(issue.id ?? "");
+  const issueIdentifier = String(issue.identifier ?? "");
+  const issueTitle = String(issue.title ?? "");
+  const issueUrl = String(issue.url ?? "");
+
+  if (!issueId || !userMessage) {
+    console.log("[Linear Sync] Prompted event missing issue ID or message, skipping");
+    return;
+  }
+
+  // Look up existing tracker_sync for this issue
+  const existing = getTrackerSyncByExternalId("linear", "task", issueId);
+
+  if (existing) {
+    const existingTask = getTaskById(existing.swarmId);
+
+    // If the task is still in progress, acknowledge but don't create a new one
+    if (existingTask && !["completed", "failed", "cancelled"].includes(existingTask.status)) {
+      console.log(`[Linear Sync] Prompted on in-progress task ${existing.swarmId}, acknowledging`);
+      if (sessionId) {
+        postAgentSessionThought(
+          sessionId,
+          "Message received, but the agent is currently working on this task. Your message will be considered when possible.",
+        ).catch((err) => {
+          console.error("[Linear Sync] Failed to post thought for prompted event:", err);
+        });
+      }
+      return;
+    }
+  }
+
+  // Task is completed/failed/cancelled or doesn't exist — create a new follow-up task
+  const lead = findLeadAgent();
+
+  const taskDescription = `[Linear ${issueIdentifier}] Follow-up: ${issueTitle}\n\nSource: Linear (Agent Session follow-up)\nURL: ${issueUrl}\n\nUser message:\n${userMessage}\n\nOriginal issue: ${issueIdentifier} — ${issueTitle}`;
+
+  const task = createTaskExtended(taskDescription, {
+    agentId: lead?.id ?? "",
+    source: "linear",
+    taskType: "linear-issue",
+  });
+
+  // Update existing tracker_sync to point to the new task, or create a new one
+  if (existing) {
+    updateTrackerSync(existing.id, {
+      lastSyncOrigin: "external",
+      lastSyncedAt: new Date().toISOString(),
+    });
+  }
+
+  // Create a new tracker_sync for the follow-up task
+  createTrackerSync({
+    provider: "linear",
+    entityType: "task",
+    providerEntityType: "Issue",
+    swarmId: task.id,
+    externalId: issueId,
+    externalIdentifier: issueIdentifier,
+    externalUrl: issueUrl,
+    lastSyncOrigin: "external",
+    syncDirection: "inbound",
+  });
+
+  // Track session and acknowledge
+  if (sessionId) {
+    taskSessionMap.set(task.id, sessionId);
+    acknowledgeAgentSession(
+      sessionId,
+      `Follow-up task created (${task.id}). Processing your message...`,
+    ).catch((err) => {
+      console.error("[Linear Sync] Failed to acknowledge prompted AgentSession:", err);
+    });
+  }
+
+  console.log(
+    `[Linear Sync] Created follow-up task ${task.id} for ${issueIdentifier} (prompted) -> ${lead?.name ?? "unassigned"}`,
+  );
 }
