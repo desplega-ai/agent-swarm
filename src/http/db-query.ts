@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { z } from "zod";
 import { getDb } from "../be/db";
-import { json, jsonError, matchRoute, parseBody } from "./utils";
+import { route } from "./route-def";
+import { json, jsonError } from "./utils";
 
 export interface DbQueryResult {
   columns: string[];
@@ -39,35 +41,46 @@ export function executeReadOnlyQuery(
   return { columns, rows: rowArrays, elapsed, total: rows.length };
 }
 
+const dbQueryRoute = route({
+  method: "post",
+  path: "/api/db-query",
+  pattern: ["api", "db-query"],
+  summary: "Execute a read-only SQL query",
+  tags: ["Debug"],
+  body: z.object({
+    sql: z.string().min(1).max(10_000),
+    params: z.array(z.any()).optional().default([]),
+  }),
+  responses: {
+    200: {
+      description: "Query results",
+      schema: z.object({
+        columns: z.array(z.string()),
+        rows: z.array(z.array(z.any())),
+        elapsed: z.number(),
+        total: z.number(),
+      }),
+    },
+    400: { description: "Invalid or disallowed SQL" },
+  },
+  auth: { apiKey: true },
+});
+
 export async function handleDbQuery(
   req: IncomingMessage,
   res: ServerResponse,
   pathSegments: string[],
+  queryParams: URLSearchParams,
 ): Promise<boolean> {
-  if (!matchRoute(req.method, pathSegments, "POST", ["api", "db-query"], true)) {
+  if (!dbQueryRoute.match(req.method, pathSegments)) {
     return false;
   }
 
-  let body: { sql?: string; params?: unknown[] };
-  try {
-    body = await parseBody(req);
-  } catch {
-    jsonError(res, "Invalid JSON body");
-    return true;
-  }
-
-  if (!body.sql || typeof body.sql !== "string" || body.sql.length === 0) {
-    jsonError(res, "Missing or empty 'sql' field");
-    return true;
-  }
-
-  if (body.sql.length > 10_000) {
-    jsonError(res, "SQL query too long (max 10,000 characters)");
-    return true;
-  }
+  const parsed = await dbQueryRoute.parse(req, res, pathSegments, queryParams);
+  if (!parsed) return true;
 
   try {
-    const result = executeReadOnlyQuery(body.sql, body.params ?? []);
+    const result = executeReadOnlyQuery(parsed.body.sql, parsed.body.params);
     json(res, result);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
