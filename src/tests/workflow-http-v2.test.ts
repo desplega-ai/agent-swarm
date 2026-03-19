@@ -381,15 +381,15 @@ describe("Workflow HTTP API v2", () => {
       expect(body.skipped).toBe(false);
     });
 
-    test("returns 401 without agent ID", async () => {
+    test("succeeds without agent ID (manual trigger)", async () => {
       const workflow = await createTestWorkflow();
 
       const res = await fetch(`${baseUrl}/api/workflows/${workflow.id}/trigger`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" }, // No X-Agent-ID
+        headers: { "Content-Type": "application/json" }, // No X-Agent-ID needed
         body: JSON.stringify({}),
       });
-      expect(res.status).toBe(401);
+      expect(res.status).toBe(201);
     });
 
     test("returns 400 for disabled workflow", async () => {

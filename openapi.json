@@ -3355,7 +3355,211 @@
                   },
                   "definition": {
                     "type": "object",
-                    "additionalProperties": {}
+                    "properties": {
+                      "nodes": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "config": {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            "next": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  }
+                                }
+                              ]
+                            },
+                            "validation": {
+                              "type": "object",
+                              "properties": {
+                                "executor": {
+                                  "type": "string",
+                                  "default": "validate"
+                                },
+                                "config": {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                },
+                                "mustPass": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
+                                "retry": {
+                                  "type": "object",
+                                  "properties": {
+                                    "maxRetries": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "default": 3
+                                    },
+                                    "strategy": {
+                                      "type": "string",
+                                      "enum": [
+                                        "exponential",
+                                        "static",
+                                        "linear"
+                                      ],
+                                      "default": "exponential"
+                                    },
+                                    "baseDelayMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "default": 1000
+                                    },
+                                    "maxDelayMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "default": 60000
+                                    }
+                                  }
+                                }
+                              },
+                              "required": [
+                                "config"
+                              ]
+                            },
+                            "retry": {
+                              "type": "object",
+                              "properties": {
+                                "maxRetries": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 3
+                                },
+                                "strategy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "exponential",
+                                    "static",
+                                    "linear"
+                                  ],
+                                  "default": "exponential"
+                                },
+                                "baseDelayMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 1000
+                                },
+                                "maxDelayMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 60000
+                                }
+                              }
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "type",
+                            "config"
+                          ]
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "nodes"
+                    ]
+                  },
+                  "triggers": {
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "webhook"
+                              ]
+                            },
+                            "hmacSecret": {
+                              "type": "string"
+                            },
+                            "hmacHeader": {
+                              "type": "string",
+                              "default": "X-Hub-Signature-256"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "schedule"
+                              ]
+                            },
+                            "scheduleId": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "scheduleId"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "cooldown": {
+                    "type": "object",
+                    "properties": {
+                      "hours": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "minutes": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "seconds": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "input": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^\\$\\{.+\\}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^secret\\..+$"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ]
+                    }
                   }
                 },
                 "required": [
@@ -3399,7 +3603,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Workflow details"
+            "description": "Workflow details with auto-generated edges"
           },
           "404": {
             "description": "Workflow not found"
@@ -3431,14 +3635,238 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": {}
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "definition": {
+                    "type": "object",
+                    "properties": {
+                      "nodes": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "config": {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            "next": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  }
+                                }
+                              ]
+                            },
+                            "validation": {
+                              "type": "object",
+                              "properties": {
+                                "executor": {
+                                  "type": "string",
+                                  "default": "validate"
+                                },
+                                "config": {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                },
+                                "mustPass": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
+                                "retry": {
+                                  "type": "object",
+                                  "properties": {
+                                    "maxRetries": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "default": 3
+                                    },
+                                    "strategy": {
+                                      "type": "string",
+                                      "enum": [
+                                        "exponential",
+                                        "static",
+                                        "linear"
+                                      ],
+                                      "default": "exponential"
+                                    },
+                                    "baseDelayMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "default": 1000
+                                    },
+                                    "maxDelayMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "default": 60000
+                                    }
+                                  }
+                                }
+                              },
+                              "required": [
+                                "config"
+                              ]
+                            },
+                            "retry": {
+                              "type": "object",
+                              "properties": {
+                                "maxRetries": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 3
+                                },
+                                "strategy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "exponential",
+                                    "static",
+                                    "linear"
+                                  ],
+                                  "default": "exponential"
+                                },
+                                "baseDelayMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 1000
+                                },
+                                "maxDelayMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 60000
+                                }
+                              }
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "type",
+                            "config"
+                          ]
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "nodes"
+                    ]
+                  },
+                  "triggers": {
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "webhook"
+                              ]
+                            },
+                            "hmacSecret": {
+                              "type": "string"
+                            },
+                            "hmacHeader": {
+                              "type": "string",
+                              "default": "X-Hub-Signature-256"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "schedule"
+                              ]
+                            },
+                            "scheduleId": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "scheduleId"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "cooldown": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "hours": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "minutes": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "seconds": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "input": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^\\$\\{.+\\}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^secret\\..+$"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ]
+                    }
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Workflow updated"
+            "description": "Workflow updated (version snapshot created)"
           },
           "400": {
             "description": "Invalid definition"
@@ -3501,7 +3929,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Workflow run started"
+            "description": "Workflow run started (or skipped if cooldown active)"
           },
           "400": {
             "description": "Workflow is disabled"
@@ -3534,6 +3962,21 @@
             "required": true,
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "running",
+                "waiting",
+                "completed",
+                "failed",
+                "skipped"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
           }
         ],
         "responses": {
@@ -3545,7 +3988,7 @@
     },
     "/api/workflow-runs/{id}": {
       "get": {
-        "summary": "Get a workflow run with steps",
+        "summary": "Get a workflow run with steps (includes retry columns)",
         "tags": [
           "Workflows"
         ],
@@ -3566,7 +4009,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Workflow run details with steps"
+            "description": "Workflow run details with steps including retry info"
           },
           "404": {
             "description": "Run not found"
@@ -3601,6 +4044,155 @@
           },
           "400": {
             "description": "Cannot retry"
+          }
+        }
+      }
+    },
+    "/api/executor-types": {
+      "get": {
+        "summary": "List all executor types with their config and output schemas",
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of executor types with schemas"
+          }
+        }
+      }
+    },
+    "/api/executor-types/{type}": {
+      "get": {
+        "summary": "Get a specific executor type with its schemas",
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "type",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Executor type details"
+          },
+          "404": {
+            "description": "Executor type not found"
+          }
+        }
+      }
+    },
+    "/api/webhooks/{workflowId}": {
+      "post": {
+        "summary": "Trigger workflow via webhook",
+        "tags": [
+          "Webhooks"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "workflowId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Webhook processed"
+          },
+          "401": {
+            "description": "Invalid signature"
+          },
+          "404": {
+            "description": "Workflow not found"
+          }
+        }
+      }
+    },
+    "/api/workflows/{id}/versions": {
+      "get": {
+        "summary": "List version history for a workflow",
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Version list (newest first)"
+          },
+          "404": {
+            "description": "Workflow not found"
+          }
+        }
+      }
+    },
+    "/api/workflows/{id}/versions/{version}": {
+      "get": {
+        "summary": "Get a specific version snapshot of a workflow",
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "required": true,
+            "name": "version",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Version snapshot"
+          },
+          "404": {
+            "description": "Version not found"
           }
         }
       }
