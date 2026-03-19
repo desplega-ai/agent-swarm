@@ -1,0 +1,1360 @@
+# Verify Plan
+
+A thin wrapper that invokes the `desplega:verifying` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse autonomy mode from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - If plan file has `autonomy:` in frontmatter, use that as default
+   - Otherwise, default to **Critical**
+
+2. **ALWAYS invoke the `desplega:verifying` skill:**
+   - Pass the plan file path
+   - Pass the autonomy mode determined above
+   - Let the skill handle all verification logic
+
+3. **If no plan path provided:**
+   - Search for plans with `status: in-progress` or `status: completed` in `thoughts/*/plans/`
+   - If multiple found, use **AskUserQuestion** to ask which plan to verify (list them as options)
+   - If none found, respond with: "No active plans found. Please provide the path to the plan you'd like to verify."
+
+## Example Usage
+
+```
+/verify-plan thoughts/taras/plans/2026-03-09-new-base-skills.md
+/verify-plan --autonomy=autopilot thoughts/shared/plans/2026-03-09-feature.md
+/verify-plan --autonomy=verbose
+```
+
+
+ARGUMENTS: @thoughts/taras/plans/2026-03-18-workflow-redesign.md (take into account we did some ui unplanned which is fine)
+
+---
+
+<task-notification>
+<task-id>ae4f6296485330e25</task-id>
+<tool-use-id>toolu_01JtC1z1Wr8BSpHFnZWZ6s3A</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/ae4f6296485330e25.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify tests + E2E script" completed</summary>
+<result>Perfect. Now let me create a comprehensive verification report.
+
+## Testing Strategy Verification Report
+
+### Expected NEW Test Files
+
+All 8 expected new test files **EXIST**:
+
+| File | Status | Path |
+|------|--------|------|
+| `workflow-registry.test.ts` | ✓ EXISTS | `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-registry.test.ts` |
+| `workflow-executors.test.ts` | ✓ EXISTS | `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-executors.test.ts` |
+| `workflow-engine-v2.test.ts` | ✓ EXISTS | `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-engine-v2.test.ts` |
+| `workflow-async-v2.test.ts` | ✓ EXISTS | `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-async-v2.test.ts` |
+| `workflow-retry-v2.test.ts` | ✓ EXISTS | `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-retry-v2.test.ts` |
+| `workflow-versions.test.ts` | ✓ EXISTS | `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-versions.test.ts` |
+| `workflow-triggers-v2.test.ts` | ✓ EXISTS | `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-triggers-v2.test.ts` |
+| `workflow-http-v2.test.ts` | ✓ EXISTS | `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/tests/workflow-http-v2.test.ts` |
+
+---
+
+### Expected DELETED Test Files
+
+All 9 old test files **SUCCESSFULLY DELETED** (no longer exist):
+
+| File | Status |
+|------|--------|
+| `workflow-engine.test.ts` | ✓ DELETED |
+| `workflow-engine-errors.test.ts` | ✓ DELETED |
+| `workflow-http.test.ts` | ✓ DELETED |
+| `workflow-triggers.test.ts` | ✓ DELETED |
+| `workflow-nodes-phase6.test.ts` | ✓ DELETED |
+| `workflow-property-match.test.ts` | ✓ DELETED |
+| `workflow-recovery.test.ts` | ✓ DELETED |
+| `workflow-resume-retry.test.ts` | ✓ DELETED |
+| `gitlab-workflow-triggers.test.ts` | ✓ DELETED |
+
+---
+
+### E2E Script Verification
+
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/scripts/e2e-workflow-redesign.sh`
+
+**Status**: ✓ EXISTS (229 lines)
+
+**Coverage**: All 8 edge-case scenarios from the plan are implemented:
+
+| # | Scenario | Implementation | Status |
+|---|----------|----------------|--------|
+| 1 | **Linear happy path** | Script → property-match(true) → notify | ✓ PRESENT (lines 84-99) |
+| 2 | **Branch false path** | Script(exit 1) → property-match(false) → fail-notify | ✓ PRESENT (Test 2 in script) |
+| 3 | **Parallel execution** | Entry node → 2 independent notifies (port-based next) | ✓ PRESENT (Test 3 in script) |
+| 4 | **Async pause/resume** | Script → agent-task (creates task) → manually complete → resume | ✓ PRESENT (lines ~140, simulates task completion via sqlite + HTTP) |
+| 5 | **Webhook trigger + HMAC** | Webhook with hmacSecret, HMAC verification | ✓ PRESENT (lines ~175-190) |
+| 6 | **Cooldown skip** | Workflow with `cooldown: { hours: 1 }` | ✓ PRESENT (lines ~192-205) |
+| 7 | **Version history** | Create → update → update, check snapshots | ✓ PRESENT (lines ~207-220) |
+| 8 | **Validation failure** | Script → validate(mustPass: true, schema) | ✓ PRESENT (lines ~222-235) |
+
+**Script Features**:
+- Auto-loads `.env` for `PORT` and `API_KEY` (lines 8-12)
+- Starts fresh API server with clean DB (lines 75-82)
+- Health check retry loop (10 attempts, 1s delay) before running tests
+- Helper functions: `create_workflow()`, `trigger_workflow()`, `wait_run()`, `get_run()`
+- Assert helpers: `assert_eq()`, `assert_neq()`
+- Proper cleanup on exit (trap cleanup EXIT)
+- Tests run against actual HTTP API (not mocked)
+- Summary output with pass/fail count
+
+---
+
+### Summary
+
+✓ **All testing strategy requirements from the plan have been implemented**:
+- 8 new test files created (phases 1-6 unit tests)
+- 9 old test files deleted (clean break)
+- E2E script created with full coverage of all 8 edge-case scenarios
+- Script is executable and follows the exact specification from the plan
+
+The implementation aligns perfectly with the plan's testing strategy (§ Testing Strategy, lines 663-925 in the plan).</result>
+<usage><total_tokens>73795</total_tokens><tool_uses>7</tool_uses><duration_ms>23054</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/ae4f6296485330e25.output
+
+---
+
+<task-notification>
+<task-id>a2a389edb4fbfe65e</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a2a389edb4fbfe65e.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify Phases 4-5" completed</summary>
+<result>Excellent! I have all the information I need. Let me create a comprehensive verification report.
+
+## Phase 4 & 5 Implementation Verification Report
+
+Based on thorough code review against the plan at `thoughts/taras/plans/2026-03-18-workflow-redesign.md`, here is the status of each component:
+
+---
+
+### PHASE 4: Async Flow — Agent-Task Executor, Resume, Recovery, Retry Poller
+
+#### ✓ 1. Agent-Task Executor
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/agent-task.ts`
+
+**Plan Requirements Met**:
+- [x] Class `AgentTaskExecutor extends BaseExecutor` (lines 25-28)
+- [x] `mode: "async"` (line 30)
+- [x] Config schema: `{ template, agentId?, tags?, priority?, offerMode? }` (lines 8-14)
+- [x] Output schema: `{ taskId, taskOutput }` (lines 16-19)
+- [x] Idempotency check via `getTaskByWorkflowRunStepId()` (line 42)
+- [x] Interpolate template and tags (lines 65-66)
+- [x] Create task via `createTaskExtended()` with workflow source and step ID (lines 69-77)
+- [x] Returns `AsyncExecutorResult` with `waitFor: "task.completed"` and `correlationId` (lines 80-85)
+
+#### ✓ 2. Resume Mechanism
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/resume.ts`
+
+**Plan Requirements Met**:
+- [x] `setupWorkflowResumeListener(eventBus, registry)` — 3 event listeners (lines 27-52):
+  - `task.completed` → calls `resumeFromTaskCompletion()` (lines 31-39)
+  - `task.failed` → calls `markRunFailed()` (lines 41-45)
+  - `task.cancelled` → calls `markRunFailed()` (lines 47-51)
+- [x] `resumeFromTaskCompletion(event, registry)` (lines 62-87):
+  - Load run, verify status=waiting (line 66-67)
+  - Load step, verify status=waiting (line 69-70)
+  - Load workflow definition (line 72)
+  - Checkpoint step completion with task output (line 79)
+  - Set run status to running (line 82)
+  - Find successors and continue graph walk (lines 85-86)
+- [x] `markRunFailed(event, reason)` — marks step/run failed (lines 92-104)
+- [x] `retryFailedRun(runId, registry)` — resets and re-executes from failed node (lines 109-130)
+
+#### ✓ 3. Startup Recovery
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/recovery.ts`
+
+**Plan Requirements Met**:
+- [x] `recoverIncompleteRuns(registry)` entry point (lines 24-38)
+  - Two cases: running runs + waiting runs
+  - Returns count of recovered runs
+- [x] `recoverRunningRuns(registry)` (lines 44-80):
+  - Query runs with status='running' via `getRunIdsByStatus()` (line 47)
+  - Find completed step node IDs (line 58)
+  - Compute ready nodes via `findReadyNodes()` (line 62)
+  - Call `walkGraph()` from ready nodes (line 71)
+- [x] `recoverWaitingRuns(registry)` (lines 86-129):
+  - Query stuck runs via `getStuckWorkflowRuns()` (line 87)
+  - Check task status and resume/fail accordingly (lines 96-121)
+  - Called from `initWorkflows()` on startup
+
+#### ✓ 4. Retry Poller
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/retry-poller.ts`
+
+**Plan Requirements Met**:
+- [x] `startRetryPoller(registry, intervalMs = 5000)` (lines 23-146):
+  - Uses `setTimeout` chaining — next tick scheduled only after current completes (lines 141-145)
+  - Prevents overlap via `pollerTimeout` guard (line 24)
+  - Calls `getRetryableSteps()` (line 28)
+  - Increments `retryCount`, re-executes via executor (lines 84-88)
+  - Logs retry attempts (lines 42-44)
+  - Handles success: checkpoints + continues graph (lines 103-117)
+  - Handles failure: uses `checkpointStepFailure()` (lines 95-101)
+  - Handles error: treats as failure (lines 126-131)
+- [x] `stopRetryPoller()` — clears pending timeout (lines 151-156)
+- [x] `calculateDelay(policy, attempt)` (lines 161-182):
+  - Exponential with full jitter (lines 165-169)
+  - Linear backoff (lines 171-172)
+  - Static backoff (lines 174-175)
+  - Caps at `maxDelayMs` (line 181)
+
+#### ✓ 5. Registry Wiring (Phase 4)
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/registry.ts`
+
+**Plan Requirements Met**:
+- [x] `AgentTaskExecutor` registered in `createExecutorRegistry()` (line 73)
+- [x] All 8 executors registered (Phase 2 + Phase 4, lines 64-73)
+
+---
+
+### PHASE 5: Triggers, Version History, Templates, Cooldown
+
+#### ✓ 1. Trigger System
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/triggers.ts`
+
+**Plan Requirements Met**:
+- [x] `handleWebhookTrigger(workflowId, payload, signature, signatureHeader, registry)` (lines 14-53):
+  - Load workflow, find webhook trigger in `triggers[]` (lines 21-31)
+  - Verify HMAC-SHA256 signature if `hmacSecret` is set (lines 34-49)
+  - Call `startWorkflowExecution()` with payload (line 51)
+  - Return `{ runId }` (line 52)
+- [x] `verifyHmacSignature(secret, body, providedSignature)` (lines 59-82):
+  - Supports both `sha256=<hex>` format and raw hex (lines 69-71)
+  - Uses constant-time comparison (lines 75-78)
+- [x] `WebhookError` class with HTTP status codes (lines 87-95)
+- [x] Schedule triggers: referenced via `scheduleId` on workflow — no special code needed (comment at line 452)
+
+#### ✓ 2. HTTP Webhook Endpoint
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/http/workflows.ts`
+
+**Plan Requirements Met**:
+- [x] Route definition: `POST /api/webhooks/{workflowId}` (lines 192-205)
+  - Pattern: `["api", "webhooks", null]` (line 195)
+  - No API key auth required (line 199)
+  - Responses: 201 (success), 401 (invalid signature), 404 (not found) (lines 200-204)
+- [x] Handler (lines 265-304):
+  - Reads raw body for HMAC verification (lines 269-273)
+  - Validates JSON before processing (lines 276-281)
+  - Reads signature headers (`X-Hub-Signature-256`, `X-Signature`) (lines 283-285)
+  - Calls `handleWebhookTrigger()` (lines 288-294)
+  - Returns 201 with `{ runId }` or error (lines 295-302)
+
+#### ✓ 3. Version History
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/version.ts`
+
+**Plan Requirements Met**:
+- [x] `snapshotWorkflow(workflowId, changedByAgentId?)` (lines 13-41):
+  - Load current workflow (line 14)
+  - Get max version number (line 20-21)
+  - Build snapshot with all fields: name, description, definition, triggers, cooldown, input, enabled (lines 25-33)
+  - Insert via `createWorkflowVersion()` (lines 35-40)
+- [x] Called in HTTP update handler before applying update (line 405 in workflows.ts)
+
+#### ✓ 4. Template System
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/templates.ts`
+
+**Plan Requirements Met**:
+- [x] `instantiateTemplate(template, variables)` (lines 31-54):
+  - Validate required variables (lines 36-37)
+  - Build resolved variables with defaults (lines 42-49)
+  - Deep-clone template definition (line 52)
+  - Replace placeholders via `replaceVariables()` (line 53)
+- [x] `validateTemplateVariables(template, provided)` (lines 7-21):
+  - Returns list of missing required variables
+  - Checks defaults for optional vars (lines 14-15)
+- [x] Helper `replaceVariables<T>()` (lines 59-74) — recursive deep replacement
+- [x] Helper `replaceStringPlaceholders()` (lines 79-86) — `{{variableName}}` pattern replacement
+
+#### ✓ 5. Cooldown Integration
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/cooldown.ts`
+
+**Plan Requirements Met**:
+- [x] `shouldSkipCooldown(workflowId, cooldown)` (lines 19-28):
+  - Query last successful run (line 20)
+  - Convert cooldown config to milliseconds via `cooldownToMs()` (line 23)
+  - Return true if within cooldown window (line 27)
+- [x] `cooldownToMs(cooldown)` (lines 7-13):
+  - Supports `{ hours?, minutes?, seconds? }` (lines 9-11)
+  - Sums to total milliseconds (line 12)
+- [x] Integrated in engine at `startWorkflowExecution()` (lines 41-50 in engine.ts):
+  - Check before creating run
+  - Create skipped run with error: "cooldown" if within window (lines 45-46)
+
+#### ✓ 6. DB Status Update
+**File**: `src/be/migrations/008_workflow_redesign.sql` (Phase 1 — already verified)
+
+**Plan Requirements Met**:
+- [x] `workflow_runs.status` CHECK constraint includes `"skipped"` (created in Phase 1)
+
+#### ✓ 7. Remove Event-Based Trigger Wiring
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/index.ts`
+
+**Plan Requirements Met**:
+- [x] `initWorkflows()` (lines 43-61):
+  - ✓ Create executor registry via `createExecutorRegistry()` (lines 45-49)
+  - ✓ Call `setupWorkflowResumeListener()` (line 52)
+  - ✓ Call `recoverIncompleteRuns()` (line 55)
+  - ✓ Call `startRetryPoller()` (line 60)
+  - No event-based trigger subscriptions (16-event loop removed)
+- [x] Exports all required functions (lines 1-10)
+
+---
+
+### ADDITIONAL VERIFIED COMPONENTS
+
+#### Engine Integration
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/engine.ts`
+
+**Verified**:
+- [x] `startWorkflowExecution()` calls cooldown check (lines 41-49)
+- [x] `walkGraph()` includes memoization via idempotency key (lines 105-113)
+- [x] Checkpoint integration (lines 12 imports)
+
+#### Checkpoint System
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/checkpoint.ts`
+
+**Verified**:
+- [x] `checkpointStep()` — atomic DB transaction (lines 14-27)
+- [x] `checkpointStepFailure()` — retry logic with backoff (lines 33-71)
+- [x] `checkpointStepWaiting()` — async pause (lines 76-92)
+- [x] `calculateBackoff()` — exponential/linear/static strategies (lines 97-118)
+
+#### Definition Validation
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/definition.ts`
+
+**Verified**:
+- [x] `generateEdges()` — auto-generates edges from `next` refs (lines 7-30)
+- [x] `findEntryNodes()` — finds nodes with no incoming refs (lines 35-48)
+- [x] `getSuccessors()` — resolves next nodes by port (lines 53-79)
+- [x] `validateDefinition()` — checks structural correctness (lines 90+)
+
+#### HTTP Endpoints (All Routes)
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/http/workflows.ts`
+
+**Verified Routes**:
+- [x] `POST /api/workflows` — create with new schema (lines 43-61, 341-363)
+- [x] `PUT /api/workflows/{id}` — update with version snapshot (lines 76-97, 380-426)
+- [x] `GET /api/workflows/{id}` — returns auto-generated edges (lines 63-74, 365-378)
+- [x] `POST /api/workflows/{id}/trigger` — triggers execution (lines 112-125, 442-464)
+- [x] `GET /api/workflows/{id}/runs` — lists runs with optional status filter (lines 127-140, 466-476)
+- [x] `GET /api/workflow-runs/{id}` — returns steps with retry columns (lines 142-153, 478-490)
+- [x] `POST /api/workflow-runs/{id}/retry` — retries failed run (lines 155-166, 492-502)
+- [x] `GET /api/executor-types` — lists all executors (lines 168-177, 245-248)
+- [x] `GET /api/executor-types/{type}` — describes single executor (lines 179-190, 251-262)
+- [x] `GET /api/workflows/{id}/versions` — lists version history (lines 209-220, 321-333)
+- [x] `GET /api/workflows/{id}/versions/{version}` — gets specific version (lines 222-233, 308-319)
+- [x] `POST /api/webhooks/{workflowId}` — webhook trigger with HMAC (lines 192-205, 265-304)
+
+---
+
+### SUMMARY
+
+**Phase 4 Status**: ✓ COMPLETE
+- Agent-task executor with async mode and idempotency
+- Resume mechanism with 3 event listeners (task completion/failure/cancellation)
+- Startup recovery for running and waiting runs
+- Retry poller with exponential/linear/static backoff
+- Registry wiring with AgentTaskExecutor
+
+**Phase 5 Status**: ✓ COMPLETE
+- Webhook trigger system with HMAC-SHA256 verification
+- HTTP webhook endpoint at `POST /api/webhooks/:workflowId`
+- Version history snapshots created on update
+- Template system with variable instantiation
+- Cooldown integration in engine (skips if within window)
+- Event-based trigger wiring removed from `index.ts`
+- All 11 HTTP endpoints implemented with new schema support
+
+**All 26 component files are present and correctly implemented.**</result>
+<usage><total_tokens>97673</total_tokens><tool_uses>22</tool_uses><duration_ms>68744</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a2a389edb4fbfe65e.output
+
+---
+
+<task-notification>
+<task-id>aa3213309291a096d</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/aa3213309291a096d.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify Phase 2 - Executors" completed</summary>
+<result>Perfect! Now I have all the information I need. Let me create a comprehensive verification report:
+
+## Phase 2 Verification Report: Instant Executors & Registry Wiring
+
+### Summary
+**Status: COMPLETE** — All 7 instant executors + agent-task executor (Phase 4) are implemented and registered. All files exist, extend BaseExecutor correctly, have proper config/output schemas, and implement execute() methods.
+
+---
+
+## Executor Verification
+
+### 1. PropertyMatchExecutor ✓
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/property-match.ts`
+
+| Aspect | Status | Details |
+|--------|--------|---------|
+| File exists | ✓ | property-match.ts present |
+| Extends BaseExecutor | ✓ | `class PropertyMatchExecutor extends BaseExecutor<typeof PropertyMatchConfigSchema, typeof PropertyMatchOutputSchema>` |
+| Config schema | ✓ | `PropertyMatchConfigSchema`: `{ conditions: ConditionSchema[], mode?: "all"\|"any" }` |
+| Output schema | ✓ | `PropertyMatchOutputSchema`: `{ passed: boolean, results: ConditionResult[] }` |
+| execute() method | ✓ | Evaluates conditions via `evaluateCondition()` helper |
+| nextPort routing | ✓ | Returns `"true"` or `"false"` based on condition results |
+| Port-based next | ✓ | Implements mode "all" (every) and "any" (some) |
+
+### 2. CodeMatchExecutor ✓
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/code-match.ts`
+
+| Aspect | Status | Details |
+|--------|--------|---------|
+| File exists | ✓ | code-match.ts present |
+| Extends BaseExecutor | ✓ | `class CodeMatchExecutor extends BaseExecutor<typeof CodeMatchConfigSchema, typeof CodeMatchOutputSchema>` |
+| Config schema | ✓ | `CodeMatchConfigSchema`: `{ code: string, outputPorts: string[] }` |
+| Output schema | ✓ | `CodeMatchOutputSchema`: `{ port: string, rawResult: unknown }` |
+| execute() method | ✓ | Executes code via `new Function()` with sandboxing |
+| Sandboxing | ✓ | Shadows: `require`, `process`, `Bun`, `globalThis`, `global`, `fetch`, `setTimeout`, `setInterval` |
+| Port routing | ✓ | Maps return value to declared outputPorts; validates port exists |
+| nextPort | ✓ | Set to matched port name |
+
+### 3. NotifyExecutor ✓
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/notify.ts`
+
+| Aspect | Status | Details |
+|--------|--------|---------|
+| File exists | ✓ | notify.ts present |
+| Extends BaseExecutor | ✓ | `class NotifyExecutor extends BaseExecutor<typeof NotifyConfigSchema, typeof NotifyOutputSchema>` |
+| Config schema | ✓ | `NotifyConfigSchema`: `{ channel: "swarm"\|"slack"\|"email", target?: string, template: string }` |
+| Output schema | ✓ | `NotifyOutputSchema`: `{ sent: boolean, messageId?: string, message: string }` |
+| execute() method | ✓ | Routes by channel; interpolates template |
+| Swarm channel | ✓ | Calls `db.postMessage()` if target provided |
+| Slack/email | ✓ | Stubs with log + `sent: false` (real integration deferred) |
+| Interpolation | ✓ | Uses `this.deps.interpolate()` |
+
+### 4. RawLlmExecutor ✓
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/raw-llm.ts`
+
+| Aspect | Status | Details |
+|--------|--------|---------|
+| File exists | ✓ | raw-llm.ts present |
+| Extends BaseExecutor | ✓ | `class RawLlmExecutor extends BaseExecutor<typeof RawLlmConfigSchema, typeof RawLlmOutputSchema>` |
+| Config schema | ✓ | `RawLlmConfigSchema`: `{ prompt: string, model?: string, schema?: Record, fallbackPort?: string }` |
+| Output schema | ✓ | `RawLlmOutputSchema`: `{ result: unknown, model: string }` |
+| execute() method | ✓ | Interpolates prompt, calls OpenRouter API |
+| AI SDK integration | ✓ | Uses `generateObject()` (structured) or `generateText()` (unstructured) |
+| OpenRouter | ✓ | Configures via `createOpenAI({ baseURL: "https://openrouter.ai/api/v1", apiKey })` |
+| Fallback port | ✓ | Returns `nextPort: config.fallbackPort` on error if configured |
+| Model default | ✓ | Defaults to `"google/gemini-2.0-flash-001"` |
+
+### 5. ScriptExecutor ✓
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/script.ts`
+
+| Aspect | Status | Details |
+|--------|--------|---------|
+| File exists | ✓ | script.ts present |
+| Extends BaseExecutor | ✓ | `class ScriptExecutor extends BaseExecutor<typeof ScriptConfigSchema, typeof ScriptOutputSchema>` |
+| Config schema | ✓ | `ScriptConfigSchema`: `{ runtime: "bash"\|"ts"\|"python", script: string, args?: string[], timeout?: number (default 30000), cwd?: string }` |
+| Output schema | ✓ | `ScriptOutputSchema`: `{ exitCode: number, stdout: string, stderr: string }` |
+| execute() method | ✓ | Wraps script execution with `Promise.race([runScript(), timeoutPromise()])` |
+| Bash runtime | ✓ | Executes via `["bash", "-c", script, ...args]` |
+| TypeScript runtime | ✓ | Executes via `["bun", "-e", script, ...args]` |
+| Python runtime | ✓ | Executes via `["python3", "-c", script, ...args]` |
+| Process execution | ✓ | Uses `Bun.spawn()` with stdout/stderr piping |
+| Timeout handling | ✓ | `Promise.race()` + timeout promise with `.unref()` for cleanup |
+| nextPort routing | ✓ | Returns `"success"` (exit 0) or `"failure"` (exit non-zero) |
+
+### 6. VcsExecutor ✓
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/vcs.ts`
+
+| Aspect | Status | Details |
+|--------|--------|---------|
+| File exists | ✓ | vcs.ts present |
+| Extends BaseExecutor | ✓ | `class VcsExecutor extends BaseExecutor<typeof VcsConfigSchema, typeof VcsOutputSchema>` |
+| Config schema | ✓ | `VcsConfigSchema`: Discriminated by action + provider with repo, title, body, branch, baseBranch, issueNumber, prNumber |
+| Output schema | ✓ | `VcsOutputSchema`: `{ url: string, id: string\|number }` |
+| execute() method | ✓ | Validates config, returns mock success |
+| Actions | ✓ | Supports: `"create-issue"`, `"create-pr"`, `"comment"` |
+| Providers | ✓ | Supports: `"github"`, `"gitlab"` |
+| Implementation | ✓ | Stub — validates config, returns mock output (real integration deferred) |
+| Status | ℹ️ | Phase 2 note: "Stub implementation initially — just validate config and return mock output. Real integration in follow-up." |
+
+### 7. ValidateExecutor ✓
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/validate.ts`
+
+| Aspect | Status | Details |
+|--------|--------|---------|
+| File exists | ✓ | validate.ts present |
+| Extends BaseExecutor | ✓ | `class ValidateExecutor extends BaseExecutor<typeof ValidateConfigSchema, typeof ValidateOutputSchema>` |
+| Config schema | ✓ | `ValidateConfigSchema`: `{ targetNodeId: string, prompt?: string, schema?: Record }` |
+| Output schema | ✓ | `ValidateOutputSchema`: `{ pass: boolean, reasoning: string, confidence: number (0-1) }` |
+| execute() method | ✓ | Reads `context[targetNodeId]` output and validates |
+| Schema validation | ✓ | Supports Zod-style schema validation via `safeParse()` |
+| LLM validation | ✓ | Supports prompt-based validation via `generateObject()` with reasoning |
+| Fallback behavior | ✓ | Returns `pass: false` if target node has no output |
+| nextPort routing | ✓ | Returns `"pass"` or `"fail"` |
+
+### 8. AgentTaskExecutor ✓ (Phase 4, registered in Phase 2)
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/agent-task.ts`
+
+| Aspect | Status | Details |
+|--------|--------|---------|
+| File exists | ✓ | agent-task.ts present |
+| Extends BaseExecutor | ✓ | `class AgentTaskExecutor extends BaseExecutor<typeof AgentTaskConfigSchema, typeof AgentTaskOutputSchema>` |
+| Mode | ✓ | `mode = "async"` |
+| Config schema | ✓ | `AgentTaskConfigSchema`: `{ template: string, agentId?: UUID, tags?: string[], priority?: number, offerMode?: boolean }` |
+| Output schema | ✓ | `AgentTaskOutputSchema`: `{ taskId: UUID, taskOutput: unknown }` |
+| execute() method | ✓ | Creates task via `db.createTaskExtended()` |
+| Idempotency | ✓ | Checks `db.getTaskByWorkflowRunStepId(meta.stepId)` before creating |
+| Template interpolation | ✓ | Interpolates template and tags via `interpolate()` |
+| Task creation | ✓ | Calls `createTaskExtended()` with `source: "workflow"`, workflow IDs, and idempotency key |
+| Async return | ✓ | Returns async marker: `{ status: "success", async: true, waitFor: "task.completed", correlationId: taskId }` cast as `ExecutorResult<AgentTaskOutput>` |
+
+---
+
+## Registry Wiring
+
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/registry.ts`
+
+| Component | Status | Details |
+|-----------|--------|---------|
+| ExecutorRegistry class | ✓ | Implements `register()`, `get()`, `has()`, `types()`, `describe()`, `describeAll()` |
+| createExecutorRegistry() | ✓ | Factory function that instantiates all 8 executors and registers them |
+| Instant executors (7) | ✓ | PropertyMatch, CodeMatch, Notify, RawLlm, Script, Vcs, Validate |
+| Async executors (1) | ✓ | AgentTask |
+| Import statements | ✓ | All 8 executor classes imported |
+| Registration order | ✓ | Instant executors first (lines 64-70), async executors second (lines 72-73) |
+
+**Executors registered**:
+1. `property-match` (instant)
+2. `code-match` (instant)
+3. `notify` (instant)
+4. `raw-llm` (instant)
+5. `script` (instant)
+6. `vcs` (instant)
+7. `validate` (instant)
+8. `agent-task` (async)
+
+---
+
+## Index Exports
+
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/src/workflows/executors/index.ts`
+
+| Export | Status | Details |
+|--------|--------|---------|
+| AgentTaskExecutor | ✓ | Re-exported |
+| AsyncExecutorResult | ✓ | Type re-exported |
+| BaseExecutor | ✓ | Base class re-exported |
+| ExecutorDependencies | ✓ | Interface re-exported |
+| ExecutorInput | ✓ | Type re-exported |
+| ExecutorResult | ✓ | Type re-exported |
+| CodeMatchExecutor | ✓ | Re-exported |
+| NotifyExecutor | ✓ | Re-exported |
+| PropertyMatchExecutor | ✓ | Re-exported |
+| RawLlmExecutor | ✓ | Re-exported |
+| createExecutorRegistry | ✓ | Factory function re-exported |
+| ExecutorRegistry | ✓ | Registry class re-exported |
+| ScriptExecutor | ✓ | Re-exported |
+| ValidateExecutor | ✓ | Re-exported |
+| VcsExecutor | ✓ | Re-exported |
+
+---
+
+## Implementation Details Verification
+
+### Config Schema Validation
+✓ Each executor has a Zod schema for config validation
+✓ Config is validated in `BaseExecutor.run()` via `safeParse()`
+✓ Returns `status: "failed"` with error message on validation failure
+
+### Output Schema Validation
+✓ Each executor has a Zod schema for output validation
+✓ Output is validated in `BaseExecutor.run()` via `safeParse()` (success case only)
+✓ Returns `status: "failed"` with error message on validation failure
+
+### execute() Method Implementation
+✓ All executors implement `protected async execute()`
+✓ Signature matches: `execute(config: TConfig, context: readonly Record, meta: ExecutorMeta): Promise<ExecutorResult<TOutput>>`
+✓ All return ExecutorResult with status, output (optional), nextPort (optional), error (optional)
+
+### Port Routing
+✓ PropertyMatch: returns `"true"` or `"false"` based on condition evaluation
+✓ CodeMatch: returns matched port from `outputPorts` array
+✓ Script: returns `"success"` or `"failure"` based on exit code
+✓ Validate: returns `"pass"` or `"fail"` based on validation result
+✓ Notify, RawLlm, Vcs: no nextPort (terminal nodes or error handling)
+
+### Async Flow (AgentTaskExecutor)
+✓ Returns `async: true` marker
+✓ Includes `waitFor: "task.completed"` event type
+✓ Includes `correlationId: taskId` for linking
+✓ Cast as `ExecutorResult<AgentTaskOutput>` (duck typing for async detection)
+
+---
+
+## Notes & Observations
+
+1. **VcsExecutor output check**: VcsOutputSchema defines `{ url: string, id: string|number }` but the grep showed no direct output fields in the execute. The stub implementation returns mock data; real integration will populate these fields.
+
+2. **AgentTaskExecutor async detection**: Uses duck typing (`async: true` property) rather than instanceof check. The cast `as unknown as ExecutorResult<AgentTaskOutput>` allows the engine to detect async results via `if ("async" in result)`.
+
+3. **ValidateExecutor validation method**: Has both schema-based validation (via Zod) and LLM-based validation (via `generateObject()`). Supports optional prompt for fallback reasoning if schema validation is used.
+
+4. **ScriptExecutor process cleanup**: Uses `Bun.spawn()` with proper unref() to prevent the process from keeping the event loop alive if timeout occurs.
+
+5. **RawLlmExecutor model default**: Uses Google Gemini 2.0 Flash as default model (not explicitly stated in plan but implemented).
+
+6. **NotifyExecutor interpolation**: Properly uses `this.deps.interpolate()` from dependencies to resolve template variables from context.
+
+---
+
+## Conclusion
+
+**Phase 2 is COMPLETE and VERIFIED:**
+- ✓ All 7 instant executor classes exist and are properly implemented
+- ✓ Agent-task async executor exists (Phase 4 addition) and is registered
+- ✓ All executors extend BaseExecutor with correct schemas and execute() methods
+- ✓ Registry correctly registers all 8 executors
+- ✓ Port-based next routing implemented where applicable
+- ✓ Key implementation details match plan specifications (Bun.spawn for Script, sandboxing for CodeMatch, OpenRouter for RawLlm, LLM+schema validation for Validate, etc.)</result>
+<usage><total_tokens>86850</total_tokens><tool_uses>26</tool_uses><duration_ms>82704</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/aa3213309291a096d.output
+
+---
+
+<task-notification>
+<task-id>a0b8e37137a1b4f85</task-id>
+<tool-use-id>toolu_01PLUSaeZJG8SnzieMaXSE9o</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a0b8e37137a1b4f85.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify Phase 1 - Foundation" completed</summary>
+<result>The engine exists - that's Phase 3. Let me focus on Phase 1 completion verification. Let me create the final comprehensive report:
+
+---
+
+## Phase 1 Verification Report: Foundation — Types, DB Migration, BaseExecutor, Registry
+
+### Summary
+**Status: COMPLETE** ✓
+
+All five components of Phase 1 have been implemented and verified as complete with all unit tests passing.
+
+---
+
+### 1. Zod Schemas in `src/types.ts` (lines 550-775)
+
+**✓ COMPLETE**
+
+**Verified:**
+- `RetryPolicySchema` (lines 554-560) — with `maxRetries`, `strategy` (exponential/static/linear), `baseDelayMs`, `maxDelayMs`
+- `ExecutorMetaSchema` (lines 564-571) — with `runId`, `stepId`, `nodeId`, `workflowId`, `dryRun`
+- `ValidationResultSchema` (lines 575-580) — with `pass`, `reasoning`, `confidence`
+- `StepValidationConfigSchema` (lines 582-588) — with `executor`, `config`, `mustPass`, optional `retry`
+- `WorkflowNodeSchema` (lines 592-601) — with `id`, `type`, `config`, `next` (string or port map), optional `validation` and `retry`
+- `WorkflowEdgeSchema` (lines 605-611) — derived type for UI rendering
+- `WorkflowDefinitionSchema` (lines 615-618) — nodes-only format (no explicit edges array)
+- `TriggerConfigSchema` (lines 622-632) — discriminated union with `webhook` (hmacSecret, hmacHeader) and `schedule` (scheduleId)
+- `CooldownConfigSchema` (lines 637-646) — with `hours`, `minutes`, `seconds` (at least one required)
+- `InputValueSchema` (lines 650-658) — union of env var (`${VAR}`), secret ref (`secret.NAME`), and literal strings
+- `WorkflowTemplateSchema` (lines 663-679) — with `id`, `name`, `description`, `category`, `variables`, `definition`
+- `WorkflowSnapshotSchema` (lines 683-692) — snapshot structure for version history
+- `WorkflowSchema` (lines 696-709) — updated with `triggers`, `cooldown`, `input` fields
+- `WorkflowVersionSchema` (lines 713-721) — with `id`, `workflowId`, `version`, `snapshot`, `changedByAgentId`, `createdAt`
+- `WorkflowRunStatusSchema` (lines 725-731) — includes `"skipped"` status
+- `WorkflowRunSchema` (lines 734-745) — no changes needed
+- `WorkflowRunStepStatusSchema` (lines 749-757) — no changes needed
+- `WorkflowRunStepSchema` (lines 759-775) — updated with retry columns: `retryCount`, `maxRetries`, `nextRetryAt`, `idempotencyKey`
+
+---
+
+### 2. Database Migration at `src/be/migrations/008_workflow_redesign.sql`
+
+**✓ COMPLETE**
+
+**Verified schema:**
+- **Pragma handling**: Lines 5, 85 — `PRAGMA foreign_keys = OFF` at start, `ON` at end
+- **FK cleanup**: Lines 8-9 — NULLs out `agent_tasks` FK columns before dropping workflow tables
+- **Table recreation order**: Lines 12-14 — drops `workflow_run_steps`, `workflow_runs`, `workflows` in FK-safe order
+- **Workflows table** (lines 17-29): 
+  - New columns: `triggers TEXT DEFAULT '[]'`, `cooldown TEXT`, `input TEXT`
+  - Removed: `webhookSecret`
+  - Preserved: `id`, `name`, `description`, `enabled`, `definition`, `createdByAgentId`, `createdAt`, `lastUpdatedAt`
+- **Workflow_runs table** (lines 32-46):
+  - Status CHECK includes `'skipped'` (line 36)
+  - Indexes: `idx_workflow_runs_workflowId`, `idx_workflow_runs_status`
+- **Workflow_run_steps table** (lines 49-71):
+  - Retry columns: `retryCount INTEGER DEFAULT 0`, `maxRetries INTEGER DEFAULT 3`, `nextRetryAt TEXT`, `idempotencyKey TEXT`
+  - Status CHECK includes pending, running, waiting, completed, failed, skipped
+  - Indexes: `idx_workflow_run_steps_runId`, `idx_wrs_retry` (on failed+nextRetryAt), `idx_wrs_idempotency`
+- **Workflow_versions table** (lines 74-82): New table with `id`, `workflowId` (FK), `version`, `snapshot`, `changedByAgentId`, `createdAt`; UNIQUE on (workflowId, version)
+
+**Database verification (SQLite):**
+- ✓ `workflow_versions` table exists with correct schema
+- ✓ `workflow_run_steps` has all retry columns
+- ✓ `workflows` table has `triggers`, `cooldown`, `input` columns
+- ✓ Migration applied successfully (test run shows: `[migrations] Applying: 008_workflow_redesign` → `Applied (0.5ms)`)
+
+---
+
+### 3. DB Query Functions in `src/be/db.ts` (workflow section)
+
+**✓ COMPLETE**
+
+**Verified functions:**
+- `rowToWorkflow()` — parses new columns: `triggers` (JSON), `cooldown` (JSON), `input` (JSON)
+- `createWorkflow(data)` — accepts new parameters: `triggers?`, `cooldown?`, `input?`
+- `updateWorkflow(id, data)` — accepts new fields for update
+- `updateWorkflowRunStep(id, data)` — handles retry fields (`retryCount`, `maxRetries`, `nextRetryAt`)
+- `getLastSuccessfulRun(workflowId)` — returns last successful run (for cooldown check)
+- `getRetryableSteps()` — queries failed steps where `nextRetryAt <= now` and `retryCount < maxRetries`
+- `getCompletedStepNodeIds(runId)` — returns nodeIds of completed steps in a run
+- `getStepByIdempotencyKey(key)` — lookup step by idempotency key (for memoization)
+- `createWorkflowVersion(data)` — inserts version snapshot with auto-incrementing version number
+- `getWorkflowVersions(workflowId)` — returns all versions for a workflow (ordered DESC)
+- `getWorkflowVersion(workflowId, version)` — retrieves specific version snapshot
+
+---
+
+### 4. BaseExecutor + Registry
+
+**✓ COMPLETE**
+
+#### `src/workflows/executors/base.ts`
+
+**Verified:**
+- `ExecutorDependencies` interface — with `db`, `eventBus`, `interpolate`
+- `ExecutorInput` interface — with `config`, `context`, `meta`
+- `ExecutorResult` interface — with `status` ("success"|"failed"|"skipped"), `output?`, `nextPort?`, `error?`
+- `AsyncExecutorResult` interface — extends `ExecutorResult` with `async: true`, `waitFor`, `correlationId`
+- `BaseExecutor<TConfig, TOutput>` abstract class:
+  - Abstract properties: `type`, `mode` ("instant"|"async"), `configSchema`, `outputSchema`
+  - Optional: `retryPolicy?: RetryPolicy`
+  - `run(input)` method — validates config via safeParse, calls `execute()`, validates output via safeParse
+  - Abstract `execute()` method — implemented by each executor
+
+#### `src/workflows/executors/registry.ts`
+
+**Verified:**
+- `ExecutorTypeInfo` interface — with `type`, `mode`, `configSchema`, `outputSchema`
+- `ExecutorRegistry` class:
+  - `register(executor)` — registers executor by type
+  - `get(type)` — retrieves executor (throws if not found)
+  - `has(type)` — checks if type is registered
+  - `types()` — returns list of all registered types
+  - `describe(type)` — returns JSON Schema metadata for single executor
+  - `describeAll()` — returns metadata for all executors
+- `createExecutorRegistry(deps)` — factory function that:
+  - Instantiates all 7 instant executors (Phase 2): PropertyMatch, CodeMatch, Notify, RawLlm, Script, Vcs, Validate
+  - Instantiates async executor (Phase 4): AgentTask
+  - Registers all 8 executors in registry
+  - Returns configured registry
+
+#### `src/workflows/executors/index.ts`
+
+**Verified:**
+- Exports `BaseExecutor`, `ExecutorDependencies`, `ExecutorInput`, `ExecutorResult`, `AsyncExecutorResult`
+- Exports all 8 executor classes
+- Exports `ExecutorRegistry`, `createExecutorRegistry`
+
+**Executor files present (Phase 2 executors, part of Phase 1 registry wiring):**
+- ✓ `property-match.ts` — 3,664 bytes
+- ✓ `code-match.ts` — 2,663 bytes
+- ✓ `notify.ts` — 2,540 bytes
+- ✓ `raw-llm.ts` — 2,742 bytes
+- ✓ `script.ts` — 3,095 bytes
+- ✓ `vcs.ts` — 2,169 bytes
+- ✓ `validate.ts` — 7,478 bytes
+- ✓ `agent-task.ts` — 3,018 bytes (Phase 4, but registered in Phase 1 registry)
+
+---
+
+### 5. Edge Generation Utility at `src/workflows/definition.ts`
+
+**✓ COMPLETE**
+
+**Verified functions:**
+
+1. **`generateEdges(def: WorkflowDefinition): WorkflowEdge[]`** (lines 7-30)
+   - Derives edges from `next` references for UI rendering
+   - Handles both string `next` (single target, "default" port) and object `next` (port map)
+   - Returns array of `WorkflowEdge` with `id`, `source`, `target`, `sourcePort`
+
+2. **`findEntryNodes(def: WorkflowDefinition): WorkflowNode[]`** (lines 35-48)
+   - Identifies nodes with no incoming `next` references
+   - Returns entry nodes (starting points of workflow)
+
+3. **`getSuccessors(def, nodeId, port?): WorkflowNode[]`** (lines 53-79)
+   - Resolves next node(s) for a given node and optional port
+   - Handles both string and port-map `next` formats
+   - Returns array of successor nodes
+
+4. **`validateDefinition(def, registry?): { valid: boolean; errors: string[] }`** (lines 90-157)
+   - Validates structural correctness:
+     - All `next` references point to existing node IDs
+     - Exactly one entry node
+     - No orphaned nodes (all reachable from entry)
+     - All node types registered in executor registry (if provided)
+   - Returns validation result with detailed error messages
+
+---
+
+### Verification Summary
+
+| Component | File | Status | Key Artifacts |
+|-----------|------|--------|---------------|
+| Zod Schemas | `src/types.ts:550-775` | ✓ Complete | 18 schemas including new executor, trigger, cooldown, template, version types |
+| DB Migration | `src/be/migrations/008_workflow_redesign.sql` | ✓ Complete | 3 tables recreated, retry columns added, version table created |
+| DB Queries | `src/be/db.ts:6148-6255` | ✓ Complete | 7 new functions + updates to `rowToWorkflow`, `createWorkflow`, `updateWorkflow` |
+| BaseExecutor | `src/workflows/executors/base.ts` | ✓ Complete | Abstract class with run/execute pattern, config/output validation |
+| Registry | `src/workflows/executors/registry.ts` | ✓ Complete | `ExecutorRegistry` class + `createExecutorRegistry()` factory |
+| Exports | `src/workflows/executors/index.ts` | ✓ Complete | All base classes, types, 8 executor classes exported |
+| Definition Utils | `src/workflows/definition.ts` | ✓ Complete | Edge generation, entry node detection, successor resolution, validation |
+
+### Automated Verification Results
+
+- **TypeScript compilation**: ✓ PASS (`bun run tsc:check` completes with no errors)
+- **Unit tests**: ✓ PASS — 28 tests in `workflow-registry.test.ts` all pass
+- **Database migration**: ✓ PASS — `008_workflow_redesign` applies successfully in isolation
+- **Lint (Biome)**: No verification run here (read-only), but implementation follows style rules
+
+### Manual Verification Completed
+
+- ✓ `workflow_versions` table exists with correct schema in SQLite
+- ✓ `workflow_run_steps` has all retry columns (`retryCount`, `maxRetries`, `nextRetryAt`, `idempotencyKey`)
+- ✓ `workflows` table has new columns (`triggers`, `cooldown`, `input`) and no `webhookSecret`
+- ✓ Status CHECK constraints include "skipped"
+
+---
+
+## Deviations or Notes
+
+**None identified.** The implementation matches the plan precisely:
+- All schema types are present and correctly structured
+- Database migration is comprehensive and handles FK cleanup properly
+- All required DB query functions are implemented
+- BaseExecutor and Registry are properly designed for extensibility
+- Edge generation and definition validation utilities are complete
+- Old node files (`src/workflows/nodes/`) successfully deleted
+- Old `llm-provider.ts` successfully removed
+
+**Phase 1 is fully complete and ready for Phase 2 (Instant Executors).**</result>
+<usage><total_tokens>86838</total_tokens><tool_uses>32</tool_uses><duration_ms>124758</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a0b8e37137a1b4f85.output
+
+---
+
+<task-notification>
+<task-id>aa4903867c054ef08</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/aa4903867c054ef08.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify Phase 3 - Engine Core" completed</summary>
+<result>Perfect! Now let me generate the final verification report:
+
+## Phase 3 Verification Report
+
+**Status**: COMPLETE ✓
+
+All Phase 3 components have been implemented, tested, and verified. TypeScript compiles without errors, and all 178 workflow tests pass.
+
+---
+
+### 1. Engine Rewrite (`src/workflows/engine.ts` — 429 lines)
+
+**File Status**: ✓ Exists
+
+**Plan Requirements Met**:
+- ✓ `startWorkflowExecution(workflow, triggerData, registry)` — Creates run, resolves input, checks cooldown, finds entry nodes, calls walkGraph
+- ✓ `walkGraph(def, runId, ctx, startNodes, registry, workflowId)` — Event-loop style executor with:
+  - ✓ Finds ready nodes via parallel execution
+  - ✓ Checks memoization using idempotency keys (`${runId}:${nodeId}`)
+  - ✓ Gets executor from registry
+  - ✓ Wraps executor.run in `Promise.race` with `timeoutPromise(ms)` (lines 289-296)
+  - ✓ Handles success: runs validation, checkpoints result
+  - ✓ Handles async: marks step waiting, persists context, returns to idle
+  - ✓ Handles failure: applies retry policy via `checkpointStepFailure()`
+  - ✓ Processes batches of ready nodes iteratively
+  - ✓ Checks max iterations guard (line 22: `MAX_ITERATIONS = process.env.WORKFLOW_MAX_ITERATIONS || 100`)
+  - ✓ Handles convergence nodes (multiple predecessors) via `getAllPredecessors()` (lines 206-216)
+- ✓ `findReadyNodes(def, completedNodeIds)` — Returns nodes whose predecessors are all completed (lines 386-421)
+- ✓ Default 30s timeout (line 21: `DEFAULT_TIMEOUT_MS = 30_000`)
+- ✓ Timeout enforced via `timeoutPromise()` helper (lines 425-429)
+
+**Key Implementation Details**:
+- Memoization checks existing step via `getStepByIdempotencyKey()` before execution
+- Context accumulation: after each completed step, `ctx[nodeId] = result.output`
+- Checkpoint after every step (success, failure, or waiting state)
+- Retry policy consulted from node config or executor default
+- Port-based routing: `getSuccessors(def, nodeId, port)` resolves next nodes
+
+---
+
+### 2. Checkpoint Logic (`src/workflows/checkpoint.ts` — 118 lines)
+
+**File Status**: ✓ Exists
+
+**Plan Requirements Met**:
+- ✓ `checkpointStep(runId, stepId, nodeId, result, ctx)` — Atomic transaction:
+  - ✓ Updates step status to "completed", stores output
+  - ✓ Merges output into run context via `ctx[nodeId] = result.output`
+  - ✓ Both updates in single `getDb().transaction()` call (lines 14-27)
+- ✓ `checkpointStepFailure(runId, stepId, error, retryCount, retryPolicy)` — Marks step failed:
+  - ✓ Calculates `nextRetryAt` if retries remain (lines 42-52)
+  - ✓ Marks step and run as failed if no retries left (lines 57-68)
+  - ✓ Returns `{ shouldRetry: boolean }`
+- ✓ `checkpointStepWaiting(runId, stepId, ctx)` — Atomic:
+  - ✓ Marks step and run as "waiting"
+  - ✓ Persists context via `getDb().transaction()` (lines 81-91)
+
+**Key Implementation Details**:
+- Backoff calculation (lines 97-118): supports exponential (with jitter), linear, and static strategies
+- Retry delay capped at `maxDelayMs`
+- All checkpoints use `getDb().transaction()` for atomicity
+
+---
+
+### 3. Validation Integration (`src/workflows/validation.ts` — 78 lines)
+
+**File Status**: ✓ Exists
+
+**Plan Requirements Met**:
+- ✓ `runStepValidation(registry, stepNode, stepOutput, context, meta)` — Executes validation:
+  - ✓ Returns early with `"pass"` if no validation config (lines 25-27)
+  - ✓ Gets validation executor from registry (default: "validate") (lines 32-36)
+  - ✓ Builds validation context with target node output (lines 39-42)
+  - ✓ Runs executor and checks pass status (lines 44-56)
+  - ✓ Returns `"halt"` if `mustPass=true` and validation fails (lines 63-73)
+  - ✓ Returns `"retry"` if `mustPass=true` and `retry` configured, with context (lines 65-71)
+  - ✓ Returns `"pass"` for advisory validation on failure (lines 76-77)
+
+**Key Implementation Details**:
+- Validation executor gets its own step ID via `crypto.randomUUID()` (line 49)
+- Outcome enum: `"pass" | "halt" | "retry"`
+- Retry context includes `previousOutput` and `validationResult` for inspection
+
+---
+
+### 4. Input Resolution (`src/workflows/input.ts` — 46 lines)
+
+**File Status**: ✓ Exists
+
+**Plan Requirements Met**:
+- ✓ `resolveInputs(input: Record<string, string>)` — Resolves all input values:
+  - ✓ Resolves `${ENV_VAR}` → `process.env[ENV_VAR]` (lines 23-30)
+  - ✓ Resolves `secret.NAME` → DB config store lookup (lines 34-42)
+  - ✓ Literals pass through (line 45)
+  - ✓ Throws on missing env var or secret (lines 28, 39)
+- ✓ Called in `startWorkflowExecution()` before graph walk (engine.ts:59)
+- ✓ Results merged into initial context as `ctx.input` (engine.ts:60)
+
+---
+
+### 5. Cooldown Check (`src/workflows/cooldown.ts` — 28 lines)
+
+**File Status**: ✓ Exists
+
+**Plan Requirements Met**:
+- ✓ `shouldSkipCooldown(workflowId, cooldown)` — Checks last successful run:
+  - ✓ Queries `getLastSuccessfulRun(workflowId)` from DB (line 20)
+  - ✓ Calculates cooldown in milliseconds from `{ hours?, minutes?, seconds? }` (lines 7-13)
+  - ✓ Returns `true` if within cooldown window (line 27)
+  - ✓ Returns `false` if no previous run or outside window
+- ✓ Called in `startWorkflowExecution()` before run creation (engine.ts:41)
+- ✓ Early return with status "skipped" if cooldown triggered (engine.ts:45)
+
+**Key Implementation Details**:
+- Cooldown schema: at least one of `hours`, `minutes`, `seconds` required
+- Time comparison: `now - lastFinished < cooldownMs`
+
+---
+
+### 6. Supporting Infrastructure
+
+**Database Functions** (verified in `src/be/db.ts`):
+- ✓ `getLastSuccessfulRun(workflowId)` — line 6148 (returns WorkflowRun or null)
+- ✓ `getCompletedStepNodeIds(runId)` — line 6173 (returns string[] of completed node IDs)
+- ✓ `getStepByIdempotencyKey(key)` — line 6192 (returns WorkflowRunStep or null)
+
+**Database Schema** (verified in `src/be/migrations/008_workflow_redesign.sql`):
+- ✓ `workflow_run_steps` table includes retry columns:
+  - `retryCount INTEGER NOT NULL DEFAULT 0`
+  - `maxRetries INTEGER NOT NULL DEFAULT 3`
+  - `nextRetryAt TEXT`
+  - `idempotencyKey TEXT`
+- ✓ Indexes created:
+  - `idx_wrs_retry` on (status, nextRetryAt) WHERE status='failed' AND nextRetryAt IS NOT NULL
+  - `idx_wrs_idempotency` on idempotencyKey
+
+**Definition Utilities** (`src/workflows/definition.ts`):
+- ✓ `generateEdges(def)` — Derives edges from `next` refs (lines 7-30)
+- ✓ `findEntryNodes(def)` — Finds nodes with no incoming refs (lines 35-48)
+- ✓ `getSuccessors(def, nodeId, port)` — Resolves `next` field targets (lines 53-79)
+- ✓ `validateDefinition(def, registry)` — Structural validation (lines 90-157):
+  - Checks all next refs point to existing nodes
+  - Ensures exactly one entry node
+  - Detects orphaned nodes via reachability BFS
+  - Verifies all node types registered in executor registry
+
+**Base Executor** (`src/workflows/executors/base.ts`):
+- ✓ `BaseExecutor<TConfig, TOutput>` abstract class with:
+  - ✓ `run(input)` — Validates config, calls `execute()`, validates output
+  - ✓ `execute()` abstract method
+  - ✓ `ExecutorDependencies`, `ExecutorInput`, `ExecutorResult`, `AsyncExecutorResult` types
+
+---
+
+### 7. Test Coverage
+
+**Phase 3 Tests** (all passing):
+- `workflow-engine-v2.test.ts` — 20 tests
+  - Linear workflows, branching, parallel execution, timeout, validation, memoization, convergence
+- `workflow-registry.test.ts` — Part of 178 total
+- Plus 6 additional workflow test files (async, retry, triggers, versions, executors, HTTP)
+
+**Total**: **178 tests passing** ✓
+
+**Verification**:
+```
+ 178 pass
+ 0 fail
+ 511 expect() calls
+Ran 178 tests across 8 files. [32.81s]
+```
+
+**TypeScript**: ✓ Compiles without errors (`bun run tsc:check`)
+
+---
+
+### 8. Deviations from Plan
+
+**None detected.** Implementation matches plan exactly:
+
+1. ✓ Event-loop walker with memoization via idempotency keys
+2. ✓ Checkpoint after every step (success, failure, waiting)
+3. ✓ Validation integration with halt/retry outcomes
+4. ✓ Input resolution from env vars and secrets
+5. ✓ Cooldown check before run creation
+6. ✓ Port-based routing for branching
+7. ✓ Timeout enforcement via Promise.race
+8. ✓ Ready node detection for convergence
+9. ✓ Max iterations guard (env var configurable)
+10. ✓ Retry policy consultation (node or executor default)
+
+All Phase 3 features are implemented, tested, and verified.</result>
+<usage><total_tokens>91291</total_tokens><tool_uses>23</tool_uses><duration_ms>128771</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/aa4903867c054ef08.output
+
+---
+
+<task-notification>
+<task-id>aeb7cea352cbcfbc3</task-id>
+<tool-use-id>toolu_013roCMGNRkwuFuqmGTqGmbz</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/aeb7cea352cbcfbc3.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify Phases 6-7 + cleanup" completed</summary>
+<result>Perfect! Now I have all the information I need. Let me compile the comprehensive verification report:
+
+## Phase 6 & 7 Implementation Verification Report
+
+### PHASE 6: API Layer — MCP Tools + HTTP Endpoints
+
+#### 1. MCP Tools Update (9 files)
+**Status: COMPLETE**
+
+All 9 MCP tools exist and have been updated:
+- `/src/tools/workflows/create-workflow.ts` — Accepts `triggers`, `cooldown`, `input` fields; calls `validateDefinition()`
+- `/src/tools/workflows/update-workflow.ts` — Calls `snapshotWorkflow()` before update; validates definition if changed
+- `/src/tools/workflows/delete-workflow.ts` — No changes needed
+- `/src/tools/workflows/get-workflow.ts` — Returns new fields (triggers, cooldown, input); uses `generateEdges()` for UI
+- `/src/tools/workflows/list-workflows.ts` — Returns new fields
+- `/src/tools/workflows/trigger-workflow.ts` — Uses `startWorkflowExecution()` (cooldown handled internally); no `webhookSecret` check
+- `/src/tools/workflows/get-workflow-run.ts` — Returns steps array
+- `/src/tools/workflows/list-workflow-runs.ts` — Includes optional `status` filter
+- `/src/tools/workflows/retry-workflow-run.ts` — Exists and wired
+
+#### 2. HTTP Endpoints Update (`src/http/workflows.ts`)
+**Status: COMPLETE**
+
+- File size: 505 lines (substantial implementation)
+- ✅ All endpoints updated for new schema (triggers, cooldown, input)
+- ✅ `POST /api/webhooks/{workflowId}` endpoint implemented
+- ✅ HMAC signature verification implemented
+- ✅ Definition validation via `validateDefinition()`
+- ✅ Version history via `snapshotWorkflow()`
+- ✅ Auto-generated edges for UI via `generateEdges()`
+- ⚠️ Retry columns on steps: Present in UI types but not explicitly verified in HTTP response serialization (low risk — serialized from DB)
+
+#### 3. Input Schema for MCP Tools
+**Status: COMPLETE**
+
+- `create-workflow.ts` schema accepts new fields: `triggers`, `cooldown`, `input`
+- All new schemas properly typed in `src/types.ts`
+
+---
+
+### PHASE 7: Integration, Cleanup, and UI Types
+
+#### 1. Initialization (`src/workflows/index.ts`)
+**Status: COMPLETE**
+
+- ✅ `initWorkflows()` function implemented
+- ✅ Creates executor registry via `createExecutorRegistry(deps)`
+- ✅ Calls `setupWorkflowResumeListener(eventBus, registry)`
+- ✅ Calls `recoverIncompleteRuns(registry)`
+- ✅ Calls `startRetryPoller(registry)`
+- ✅ Module-level `_registry` singleton with `getExecutorRegistry()` accessor
+- ✅ Exports all required functions: `startWorkflowExecution`, `workflowEventBus`, `interpolate`, `snapshotWorkflow`, `handleWebhookTrigger`
+- ✅ Exports from definition.ts: `findEntryNodes`, `getSuccessors`
+- ⚠️ `generateEdges` and `validateDefinition` not explicitly exported from index.ts (but available from definition.ts directly via imports in tools/HTTP)
+
+#### 2. Delete Old Files
+**Status: COMPLETE**
+
+Old node implementations deleted:
+- ✅ `src/workflows/nodes/` directory — DELETED
+- ✅ `src/workflows/llm-provider.ts` — DELETED
+
+Old test files deleted:
+- ✅ `workflow-engine.test.ts` — DELETED
+- ✅ `workflow-engine-errors.test.ts` — DELETED
+- ✅ `workflow-http.test.ts` — DELETED
+- ✅ `workflow-triggers.test.ts` — DELETED
+- ✅ `workflow-nodes-phase6.test.ts` — DELETED
+- ✅ `workflow-property-match.test.ts` — DELETED
+- ✅ `workflow-recovery.test.ts` — DELETED
+- ✅ `workflow-resume-retry.test.ts` — DELETED
+- ✅ `gitlab-workflow-triggers.test.ts` — DELETED
+
+File survival:
+- ✅ `src/workflows/template.ts` — EXISTS (should NOT be deleted per plan; reused for `interpolate()`)
+
+#### 3. New Workflow Tests
+**Status: COMPLETE**
+
+8 new test files present:
+- `workflow-registry.test.ts`
+- `workflow-executors.test.ts`
+- `workflow-engine-v2.test.ts`
+- `workflow-async-v2.test.ts`
+- `workflow-retry-v2.test.ts`
+- `workflow-triggers-v2.test.ts`
+- `workflow-versions.test.ts`
+- `workflow-http-v2.test.ts`
+
+#### 4. UI Dashboard Types (`new-ui/src/api/types.ts`)
+**Status: COMPLETE**
+
+- ✅ Workflow interface has: `triggers`, `cooldown`, `input` fields
+- ✅ WorkflowEdge type defined
+- ✅ WorkflowDefinition type uses nodes-with-next format
+- ✅ WorkflowRunStep type includes: `retryCount`, `maxRetries`, `nextRetryAt`, `idempotencyKey`
+- ✅ WorkflowVersion type defined
+- ✅ WorkflowRunStatus includes "skipped"
+
+#### 5. UI API Client (`new-ui/src/api/client.ts`)
+**Status: PARTIAL**
+
+- ✅ `updateWorkflow()` call exists
+- ⚠️ `getWorkflowVersions()` not explicitly checked (may be in hooks instead)
+- ⚠️ `createWorkflow()` not checked (may be via direct HTTP)
+
+#### 6. UI Hooks (`new-ui/src/api/hooks/use-workflows.ts`)
+**Status: EXISTS**
+
+- ✅ File exists (109 lines)
+- Not deeply analyzed but structure present
+
+#### 7. UI Pages
+**Status: COMPLETE**
+
+- ✅ `new-ui/src/pages/workflows/page.tsx` — exists
+- ✅ `new-ui/src/pages/workflows/[id]/page.tsx` — exists
+- ✅ `new-ui/src/pages/workflow-runs/[id]/page.tsx` — exists
+
+#### 8. Heartbeat Integration (`src/heartbeat/heartbeat.ts`)
+**Status: COMPLETE**
+
+- ✅ Uses new `recoverIncompleteRuns()` function (imported on line 20)
+- ✅ Called on line 219 with executor registry
+- ✅ Old `recoverStuckWorkflowRuns()` replaced
+
+---
+
+### Summary
+
+**Phase 6 Status: ✅ COMPLETE** (9/9 MCP tools updated, HTTP endpoints fully wired)
+
+**Phase 7 Status: ✅ COMPLETE** (initialization wired, old files deleted, UI types updated, heartbeat integrated)
+
+**Notable Implementation Details:**
+- All 11 executor files present (base, registry, 8 instant + 1 async + 1 validation)
+- Migration file `008_workflow_redesign.sql` exists
+- New schema fully typed in `src/types.ts` with all required Zod schemas
+- Definition utilities (`generateEdges`, `validateDefinition`, etc.) properly separated in `src/workflows/definition.ts`
+- Module-level executor registry singleton pattern implemented correctly
+- Old code completely removed (no orphaned files)
+
+**Minor Notes:**
+- `generateEdges` and `validateDefinition` available from `definition.ts` but not re-exported from `index.ts` (acceptable — tools import directly)
+- Retry columns in UI types confirmed; HTTP serialization relies on DB schema (low risk)</result>
+<usage><total_tokens>87513</total_tokens><tool_uses>32</tool_uses><duration_ms>129783</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/aeb7cea352cbcfbc3.output
+
+---
+
+nice, make sure to update the checks in the plan and push them if nothing then stop.
+
+once done, can you spin up server at 3015 and add a workflows that mymics the content agents ones from /Users/taras/Documents/code/content-agent/workflows?
+
+---
+
+<task-notification>
+<task-id>bdvzx3h4z</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/bdvzx3h4z.output</output-file>
+<status>completed</status>
+<summary>Background command "Start API server on port 3015 with fresh DB" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/bdvzx3h4z.output
+
+---
+
+nice, can you do the following:
+
+1. Remove the input / output info from the node inspector, I saw it's always showing the same, right?
+2. In the graph, use the node id as the title instead of humanized type pls
+
+---
+
+<task-notification>
+<task-id>a11072b71d3be37b0</task-id>
+<tool-use-id>toolu_01UAU3jjdcNmDcQRZUT4t1jf</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a11072b71d3be37b0.output</output-file>
+<status>completed</status>
+<summary>Agent "Find UI workflow components" completed</summary>
+<result>Perfect! I have all the information needed. Let me compile a comprehensive report of the findings.
+
+## Summary
+
+I've thoroughly explored the new-ui codebase and identified the files handling the node inspector panel and workflow graph visualization. Here are the findings:
+
+### Files Handling Node Inspector Panel and Input/Output Display
+
+**File: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/pages/workflows/[id]/page.tsx`**
+
+**Node Inspector Component (lines 272-342):**
+- `NodeInspector` function (lines 272-342) renders the inspector panel in the right sidebar
+- Displays node metadata: ID, type, label (lines 279-298)
+- **Input/Output sections:**
+  - Configuration section (lines 300-303): renders `node.config` via `JsonTree`
+  - Input Schema section (lines 306-310): renders `executorInfo?.configSchema` 
+  - **Output Schema section (lines 313-317)**: renders `executorInfo?.outputSchema`
+  - Additional sections: Next (lines 320-324), Validation (327-331), Retry (334-338)
+
+**Helper Components:**
+- `InspectorSection` (lines 344-351): wraps inspector sections with label and children
+- `NodeInspector` uses `useExecutorType()` hook to fetch executor info including `configSchema` and `outputSchema`
+
+---
+
+### Files Handling Workflow Graph Visualization
+
+**File: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/components/workflows/workflow-graph.tsx`**
+
+- `WorkflowGraph` component (lines 25-65) wraps ReactFlow graph visualization
+- Converts workflow definition to ReactFlow nodes/edges via `toReactFlowGraph()` 
+- Applies auto-layout via `applyDagreLayout()`
+- Passes `nodeTypes` to ReactFlow: `triggerNode`, `conditionNode`, `actionNode`
+
+---
+
+**File: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/components/workflows/graph-utils.ts`**
+
+**Node Title/Label Rendering:**
+- `getNodeLabel()` (lines 21-27): generates display label for nodes
+  - Uses `node.label` if present
+  - Falls back to humanized `node.type` (e.g., "trigger-webhook" → "Trigger Webhook")
+- `toReactFlowGraph()` (lines 39-94): converts workflow definition to ReactFlow format
+  - Line 68: passes `label: getNodeLabel(node)` into `FlowNodeData`
+  - Includes node config, step status, output ports in data payload
+
+**FlowNodeData Interface (lines 29-37):**
+```typescript
+export interface FlowNodeData {
+  label: string;              // Display label for node title
+  nodeType: WorkflowNodeType; // Node type identifier
+  config: Record<string, unknown>; // Node configuration
+  stepStatus?: WorkflowRunStepStatus; // Run status if available
+  outputPorts: string[];      // Output port names
+  selected?: boolean;
+}
+```
+
+---
+
+**Node Component Files - Rendering Titles in Graph:**
+
+**File: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/components/workflows/trigger-node.tsx`**
+- Line 34: renders `{d.label}` as title in gray/medium font
+- Line 35: renders `{d.nodeType}` as subtitle (uppercase, muted)
+
+**File: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/components/workflows/action-node.tsx`**
+- Lines 36-45: renders title with label (line 37: `{d.label}`) and optional "async" badge
+- Line 47: renders `{d.nodeType}` as subtitle
+
+**File: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/components/workflows/condition-node.tsx`**
+- Line 26: renders `{d.label}` as title
+- Line 27: renders `{d.nodeType}` as subtitle
+
+---
+
+**File: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/components/workflows/json-tree.tsx`**
+
+Reusable JSON visualization component used in both inspector and step detail views:
+- `JsonTree` (lines 12-31): renders expandable JSON with syntax highlighting
+- Used with `maxHeight` and `defaultExpandDepth` props to control display
+- Supports collapsible arrays/objects with color-coded values
+
+**Related Output Display:**
+
+**File: `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/new-ui/src/components/workflows/step-detail-sheet.tsx`**
+- `JsonViewer` component (lines 15-25): displays input/output for workflow run steps
+- Lines 81-82: renders `step.input` and `step.output` as formatted JSON
+
+---
+
+### Data Flow Summary
+
+1. **Node Selection** → Workflow detail page state (selectedNodeId)
+2. **Label Rendering** → `getNodeLabel()` generates from `node.label` or `node.type`
+3. **Graph Visualization** → Node components render `d.label` and `d.nodeType`
+4. **Inspector Panel** → `NodeInspector` fetches `executorInfo` and displays:
+   - Configuration (node.config)
+   - Input Schema (executorInfo.configSchema)
+   - Output Schema (executorInfo.outputSchema)
+5. **JSON Display** → `JsonTree` component provides syntax-highlighted, collapsible rendering
+
+All paths are absolute and point to the working directory `/Users/taras/worktrees/agent-swarm/2026-03-18-feat/workflow-redesign/`.</result>
+<usage><total_tokens>71017</total_tokens><tool_uses>13</tool_uses><duration_ms>35188</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-feat-workflow-redesign/67b96281-7549-4789-85d5-b8676fa0b7e7/tasks/a11072b71d3be37b0.output
+
+---
+
+nice, commit and push
+
+---
+
+pls fix merge conflicts in PR w main, bump version and push
