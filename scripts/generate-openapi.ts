@@ -5,7 +5,6 @@ import "../src/http/agents";
 import "../src/http/config";
 import "../src/http/ecosystem";
 import "../src/http/epics";
-import "../src/http/linear";
 import "../src/http/memory";
 import "../src/http/poll";
 import "../src/http/repos";
@@ -13,6 +12,7 @@ import "../src/http/schedules";
 import "../src/http/session-data";
 import "../src/http/stats";
 import "../src/http/tasks";
+import "../src/http/trackers/linear";
 import "../src/http/webhooks";
 import "../src/http/workflows";
 

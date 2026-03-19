@@ -59,6 +59,15 @@ import {
 } from "./tools/swarm-config";
 // Task pool capability
 import { registerTaskActionTool } from "./tools/task-action";
+// Tracker capability
+import {
+  registerTrackerLinkEpicTool,
+  registerTrackerLinkTaskTool,
+  registerTrackerMapAgentTool,
+  registerTrackerStatusTool,
+  registerTrackerSyncStatusTool,
+  registerTrackerUnlinkTool,
+} from "./tools/tracker";
 import { registerUnregisterServiceTool } from "./tools/unregister-service";
 // Profiles capability
 import { registerUpdateProfileTool } from "./tools/update-profile";
@@ -193,6 +202,14 @@ export function createServer() {
     registerMemoryGetTool(server);
     registerInjectLearningTool(server);
   }
+
+  // Tracker capability - external issue tracker integration
+  registerTrackerStatusTool(server);
+  registerTrackerLinkTaskTool(server);
+  registerTrackerLinkEpicTool(server);
+  registerTrackerUnlinkTool(server);
+  registerTrackerSyncStatusTool(server);
+  registerTrackerMapAgentTool(server);
 
   // Workflows capability - DAG-based automation workflows
   if (hasCapability("workflows")) {

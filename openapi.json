@@ -1339,47 +1339,6 @@
         }
       }
     },
-    "/api/linear/authorize": {
-      "get": {
-        "summary": "Redirect to Linear OAuth consent screen",
-        "tags": [
-          "Linear"
-        ],
-        "responses": {
-          "302": {
-            "description": "Redirect to Linear OAuth"
-          },
-          "500": {
-            "description": "Failed to generate authorization URL"
-          },
-          "503": {
-            "description": "Linear integration not configured"
-          }
-        }
-      }
-    },
-    "/api/linear/callback": {
-      "get": {
-        "summary": "Handle Linear OAuth callback",
-        "tags": [
-          "Linear"
-        ],
-        "responses": {
-          "200": {
-            "description": "OAuth authorization complete"
-          },
-          "400": {
-            "description": "Missing or invalid parameters"
-          },
-          "500": {
-            "description": "OAuth callback failed"
-          },
-          "503": {
-            "description": "Linear integration not configured"
-          }
-        }
-      }
-    },
     "/api/memory/index": {
       "post": {
         "summary": "Ingest content into memory system (async embedding)",
@@ -3293,6 +3252,102 @@
           },
           "404": {
             "description": "Task not found"
+          }
+        }
+      }
+    },
+    "/api/trackers/linear/authorize": {
+      "get": {
+        "summary": "Redirect to Linear OAuth consent screen",
+        "tags": [
+          "Trackers"
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to Linear OAuth"
+          },
+          "500": {
+            "description": "Failed to generate authorization URL"
+          },
+          "503": {
+            "description": "Linear integration not configured"
+          }
+        }
+      }
+    },
+    "/api/trackers/linear/callback": {
+      "get": {
+        "summary": "Handle Linear OAuth callback",
+        "tags": [
+          "Trackers"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "code",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "state",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OAuth complete"
+          },
+          "400": {
+            "description": "Invalid state or code"
+          },
+          "500": {
+            "description": "Token exchange failed"
+          }
+        }
+      }
+    },
+    "/api/trackers/linear/status": {
+      "get": {
+        "summary": "Linear connection status, token expiry, workspace info, expected webhook URL",
+        "tags": [
+          "Trackers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Connection status"
+          },
+          "503": {
+            "description": "Linear integration not configured"
+          }
+        }
+      }
+    },
+    "/api/trackers/linear/webhook": {
+      "post": {
+        "summary": "Handle Linear webhook events (signature-verified)",
+        "tags": [
+          "Trackers"
+        ],
+        "responses": {
+          "200": {
+            "description": "Event accepted"
+          },
+          "401": {
+            "description": "Invalid signature"
+          },
+          "503": {
+            "description": "Linear integration not configured"
           }
         }
       }

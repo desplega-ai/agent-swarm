@@ -1,54 +1,84 @@
--- Linear integration: OAuth tokens, entity sync mapping, agent mapping tables.
+-- Tracker integration: generic OAuth, entity sync mapping, agent mapping tables.
 -- Also adds 'linear' to the agent_tasks source CHECK constraint.
 
 PRAGMA defer_foreign_keys = ON;
 
 -- ═══════════════════════════════════════════════════════════════════
--- New tables for Linear integration
+-- Generic OAuth tables (reusable across any OAuth provider in the swarm)
 -- ═══════════════════════════════════════════════════════════════════
 
--- OAuth token storage (single-row for workspace-level auth)
-CREATE TABLE IF NOT EXISTS linear_oauth_tokens (
+-- Generic OAuth application configuration (one row per provider)
+CREATE TABLE IF NOT EXISTS oauth_apps (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    accessToken TEXT NOT NULL,
-    refreshToken TEXT NOT NULL,
-    expiresAt TEXT NOT NULL,
-    scope TEXT NOT NULL,
+    provider TEXT NOT NULL UNIQUE,
+    clientId TEXT NOT NULL,
+    clientSecret TEXT NOT NULL,
+    authorizeUrl TEXT NOT NULL,
+    tokenUrl TEXT NOT NULL,
+    redirectUri TEXT NOT NULL,
+    scopes TEXT NOT NULL,
+    metadata TEXT DEFAULT '{}',
     createdAt TEXT NOT NULL DEFAULT (datetime('now')),
     updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Swarm ↔ Linear entity mapping
-CREATE TABLE IF NOT EXISTS linear_sync (
+-- Generic OAuth token storage (one active token set per provider)
+CREATE TABLE IF NOT EXISTS oauth_tokens (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    entityType TEXT NOT NULL CHECK (entityType IN ('task', 'epic')),
-    swarmId TEXT NOT NULL,
-    linearId TEXT NOT NULL,
-    linearIdentifier TEXT,
-    linearUrl TEXT,
-    lastSyncedAt TEXT NOT NULL DEFAULT (datetime('now')),
-    syncDirection TEXT NOT NULL DEFAULT 'outbound' CHECK (syncDirection IN ('outbound', 'inbound', 'bidirectional')),
+    provider TEXT NOT NULL UNIQUE,
+    accessToken TEXT NOT NULL,
+    refreshToken TEXT,
+    expiresAt TEXT NOT NULL,
+    scope TEXT,
     createdAt TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(entityType, swarmId),
-    UNIQUE(entityType, linearId)
+    updatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (provider) REFERENCES oauth_apps(provider)
 );
 
--- Agent ↔ Linear user mapping
-CREATE TABLE IF NOT EXISTS linear_agent_mapping (
+-- ═══════════════════════════════════════════════════════════════════
+-- Generic tracker tables (reusable across any ticket tracker)
+-- ═══════════════════════════════════════════════════════════════════
+
+-- Generic tracker entity mapping
+CREATE TABLE IF NOT EXISTS tracker_sync (
     id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-    agentId TEXT NOT NULL UNIQUE,
-    linearUserId TEXT NOT NULL UNIQUE,
-    agentName TEXT NOT NULL,
-    createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+    provider TEXT NOT NULL,
+    entityType TEXT NOT NULL CHECK (entityType IN ('task', 'epic')),
+    providerEntityType TEXT,
+    swarmId TEXT NOT NULL,
+    externalId TEXT NOT NULL,
+    externalIdentifier TEXT,
+    externalUrl TEXT,
+    lastSyncedAt TEXT NOT NULL DEFAULT (datetime('now')),
+    lastSyncOrigin TEXT CHECK (lastSyncOrigin IN ('swarm', 'external')),
+    lastDeliveryId TEXT,
+    syncDirection TEXT NOT NULL DEFAULT 'inbound' CHECK (syncDirection IN ('inbound', 'outbound', 'bidirectional')),
+    createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(provider, entityType, swarmId),
+    UNIQUE(provider, entityType, externalId)
 );
 
--- Indexes for linear_sync
-CREATE INDEX IF NOT EXISTS idx_linear_sync_swarmId ON linear_sync(entityType, swarmId);
-CREATE INDEX IF NOT EXISTS idx_linear_sync_linearId ON linear_sync(entityType, linearId);
-CREATE INDEX IF NOT EXISTS idx_linear_agent_mapping_agentId ON linear_agent_mapping(agentId);
+-- Generic agent-to-external-user mapping
+CREATE TABLE IF NOT EXISTS tracker_agent_mapping (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+    provider TEXT NOT NULL,
+    agentId TEXT NOT NULL,
+    externalUserId TEXT NOT NULL,
+    agentName TEXT NOT NULL,
+    createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(provider, agentId),
+    UNIQUE(provider, externalUserId)
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_oauth_tokens_provider ON oauth_tokens(provider);
+CREATE INDEX IF NOT EXISTS idx_tracker_sync_swarm ON tracker_sync(provider, entityType, swarmId);
+CREATE INDEX IF NOT EXISTS idx_tracker_sync_external ON tracker_sync(provider, entityType, externalId);
+CREATE INDEX IF NOT EXISTS idx_tracker_agent_agentId ON tracker_agent_mapping(provider, agentId);
 
 -- ═══════════════════════════════════════════════════════════════════
 -- agent_tasks: recreate with 'linear' added to source CHECK constraint
+-- (copied from previous 008_linear_integration.sql lines 54-114)
 -- ═══════════════════════════════════════════════════════════════════
 
 CREATE TABLE agent_tasks_new (

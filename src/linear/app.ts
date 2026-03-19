@@ -1,45 +1,23 @@
-/**
- * Linear integration initialization — follows the same pattern as src/github/app.ts.
- *
- * Provides `isLinearEnabled()`, `initLinear()`, and `resetLinear()`.
- */
-import { resetLinearClient } from "./client";
+import { upsertOAuthApp } from "../be/db-queries/oauth";
+import { initLinearOutboundSync, teardownLinearOutboundSync } from "./outbound";
 
 let initialized = false;
 
-/**
- * Check if the Linear integration is enabled.
- * Requires `LINEAR_CLIENT_ID` to be set and `LINEAR_DISABLE` to not be "true".
- */
 export function isLinearEnabled(): boolean {
   const disabled = process.env.LINEAR_DISABLE;
-  if (disabled === "true" || disabled === "1") {
-    return false;
-  }
-  // Also honour the LINEAR_ENABLED flag (defaults to enabled if not set)
+  if (disabled === "true" || disabled === "1") return false;
   const enabled = process.env.LINEAR_ENABLED;
-  if (enabled === "false" || enabled === "0") {
-    return false;
-  }
+  if (enabled === "false" || enabled === "0") return false;
   return !!process.env.LINEAR_CLIENT_ID;
 }
 
-/**
- * Reset state so `initLinear()` can be called again after config reload.
- */
 export function resetLinear(): void {
+  teardownLinearOutboundSync();
   initialized = false;
-  resetLinearClient();
 }
 
-/**
- * Initialise the Linear integration. Idempotent — safe to call multiple times.
- * Returns `true` if the integration is enabled and ready.
- */
 export function initLinear(): boolean {
-  if (initialized) {
-    return isLinearEnabled();
-  }
+  if (initialized) return isLinearEnabled();
   initialized = true;
 
   if (!isLinearEnabled()) {
@@ -47,14 +25,22 @@ export function initLinear(): boolean {
     return false;
   }
 
-  const hasSecret = !!process.env.LINEAR_CLIENT_SECRET;
-  const hasRedirect = !!process.env.LINEAR_REDIRECT_URI;
+  const clientId = process.env.LINEAR_CLIENT_ID!;
+  const clientSecret = process.env.LINEAR_CLIENT_SECRET ?? "";
+  const redirectUri =
+    process.env.LINEAR_REDIRECT_URI ?? "http://localhost:3013/api/trackers/linear/callback";
 
-  if (!hasSecret || !hasRedirect) {
-    console.log(
-      "[Linear] Missing LINEAR_CLIENT_SECRET or LINEAR_REDIRECT_URI — OAuth flow will not work until configured",
-    );
-  }
+  upsertOAuthApp("linear", {
+    clientId,
+    clientSecret,
+    authorizeUrl: "https://linear.app/oauth/authorize",
+    tokenUrl: "https://api.linear.app/oauth/token",
+    redirectUri,
+    scopes: "read,write,issues:create,comments:create,app:assignable,app:mentionable",
+    metadata: JSON.stringify({ actor: "app" }),
+  });
+
+  initLinearOutboundSync();
 
   console.log("[Linear] Integration initialized");
   return true;
