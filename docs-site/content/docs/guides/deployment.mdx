@@ -52,6 +52,15 @@ The docker-compose example uses `stop_grace_period: 60s` to allow graceful task 
 
 Use stable `AGENT_ID` values for each worker to enable task resume after restarts.
 
+### Pre-installed Agent Tools
+
+Worker containers include several tools pre-installed:
+
+- **`wts`** — Git worktree manager for isolated branch work
+- **`agent-fs`** — Persistent, searchable filesystem shared across the swarm (auto-configured on first boot when `AGENT_FS_API_URL` is set)
+- **`qa-use`** — Browser-based UI testing tool
+- **`context-mode`** — Context window compression for data-heavy operations
+
 ## Docker Worker
 
 ### Pull from Registry
