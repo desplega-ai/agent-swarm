@@ -1,0 +1,846 @@
+# Verify Plan
+
+A thin wrapper that invokes the `desplega:verifying` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse autonomy mode from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - If plan file has `autonomy:` in frontmatter, use that as default
+   - Otherwise, default to **Critical**
+
+2. **ALWAYS invoke the `desplega:verifying` skill:**
+   - Pass the plan file path
+   - Pass the autonomy mode determined above
+   - Let the skill handle all verification logic
+
+3. **If no plan path provided:**
+   - Search for plans with `status: in-progress` or `status: completed` in `thoughts/*/plans/`
+   - If multiple found, use **AskUserQuestion** to ask which plan to verify (list them as options)
+   - If none found, respond with: "No active plans found. Please provide the path to the plan you'd like to verify."
+
+## Example Usage
+
+```
+/verify-plan thoughts/taras/plans/2026-03-09-new-base-skills.md
+/verify-plan --autonomy=autopilot thoughts/shared/plans/2026-03-09-feature.md
+/verify-plan --autonomy=verbose
+```
+
+
+ARGUMENTS: from this PR (note we did some additiional unplanned stuff which is fine)
+
+---
+
+<task-notification>
+<task-id>a0ccac986b3d4d37c</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/a0ccac986b3d4d37c.output</output-file>
+<status>completed</status>
+<summary>Agent "Find plan files for linear" completed</summary>
+<result>Found one plan file related to "linear":
+
+**Full path:**
+/Users/taras/worktrees/agent-swarm/2026-03-18-linear/thoughts/taras/plans/2026-03-19-ticket-tracker-linear-integration.md
+
+This is the only plan file matching the "linear" search pattern in the thoughts directories.</result>
+<usage><total_tokens>29809</total_tokens><tool_uses>1</tool_uses><duration_ms>4302</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/a0ccac986b3d4d37c.output
+
+---
+
+<task-notification>
+<task-id>a5a9c9a686966dd21</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/a5a9c9a686966dd21.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify Phase 1: Nuke + Foundation" completed</summary>
+<result>Now I have all the information I need. Let me compile the verification report:
+
+## Phase 1 Verification Report
+
+### Item 1: Delete old Linear code
+**Status: FAIL** ⚠️
+
+Old Linear files still exist:
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/app.ts` — EXISTS
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/client.ts` — EXISTS
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/oauth.ts` — EXISTS
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/types.ts` — EXISTS
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/index.ts` — EXISTS
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/linear.ts` — DOES NOT EXIST ✓
+
+The `src/linear/` directory contains 9 files total (app.ts, client.ts, oauth.ts, types.ts, index.ts, README.md, webhook.ts, outbound.ts, sync.ts). The plan required deletion of at least the first 5 files plus http/linear.ts. Only http/linear.ts was removed.
+
+---
+
+### Item 2: Remove Linear references from HTTP wiring
+**Status: PARTIAL FAIL** ⚠️
+
+**src/http/index.ts:**
+- Line 14: `import { initLinear } from "../linear";` — STILL EXISTS (should be removed per plan)
+- Line 192: `initLinear();` — STILL EXISTS (plan says remove, will re-add in Phase 2)
+
+**src/http/core.ts:**
+- Line 14: `import { initLinear, resetLinear } from "../linear";` — STILL EXISTS (should be removed)
+- Lines 122-123: `resetLinear(); if (initLinear()) integrations.push("linear");` — STILL EXISTS (should be removed)
+- Auth bypass for `/api/trackers/linear/*` — UPDATED correctly (lines 85-88 in core.ts now bypass trackers routes, not old linear routes)
+
+**openapi.json:**
+- Not checked (will be auto-regenerated)
+
+The old imports and calls to initLinear/resetLinear still reference `../linear`, which violates the "nuke" requirement. However, the auth bypass in core.ts was correctly updated to use the new `/api/trackers/linear/*` routes.
+
+---
+
+### Item 3: Create NEW migration with generic tables
+**Status: PASS** ✓
+
+Migration created at `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/be/migrations/009_tracker_integration.sql` (numbered as 009, not 008, because migration 008 `008_workflow_redesign.sql` was added earlier).
+
+**Tables present:**
+- ✓ `oauth_apps` — generic OAuth app config
+- ✓ `oauth_tokens` — generic OAuth token storage
+- ✓ `tracker_sync` — generic entity sync mapping
+- ✓ `tracker_agent_mapping` — generic agent-to-external-user mapping
+- ✓ `agent_tasks` — recreated with `'linear'` added to source CHECK constraint (line 90)
+
+Migration includes proper indexes and PRAGMA settings.
+
+---
+
+### Item 4: Create src/tracker/types.ts with TrackerProvider type
+**Status: PASS** ✓
+
+File exists at `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tracker/types.ts`
+
+**Content:**
+- ✓ `export type TrackerProvider = "linear";` (line 1)
+- ✓ `OAuthApp` interface with all required fields
+- ✓ `OAuthTokens` interface
+- ✓ `TrackerSync` interface
+- ✓ `TrackerAgentMapping` interface
+
+All types match the migration schema.
+
+---
+
+### Item 5: Create src/be/db-queries/oauth.ts
+**Status: PASS** ✓
+
+File exists at `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/be/db-queries/oauth.ts`
+
+**Functions implemented (6 total):**
+- ✓ `getOAuthApp()` — fetch app by provider
+- ✓ `upsertOAuthApp()` — create or update app
+- ✓ `getOAuthTokens()` — fetch tokens by provider
+- ✓ `storeOAuthTokens()` — save/update tokens
+- ✓ `deleteOAuthTokens()` — delete tokens
+- ✓ `isTokenExpiringSoon()` — helper for token refresh logic
+
+File size: 2678 bytes. Functions use upsert patterns (good), not separate create/update. Covers all planned OAuth CRUD operations.
+
+---
+
+### Item 6: Create src/be/db-queries/tracker.ts
+**Status: PASS** ✓
+
+File exists at `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/be/db-queries/tracker.ts`
+
+**Functions implemented (11 total):**
+- ✓ `getTrackerSync()` — by swarmId
+- ✓ `getTrackerSyncByExternalId()` — by externalId
+- ✓ `createTrackerSync()` — insert new sync record
+- ✓ `updateTrackerSync()` — update existing
+- ✓ `deleteTrackerSync()` — delete record
+- ✓ `getAllTrackerSyncs()` — fetch all by provider
+- ✓ `getTrackerAgentMapping()` — by agentId
+- ✓ `getTrackerAgentMappingByExternalUser()` — by externalUserId
+- ✓ `createTrackerAgentMapping()` — insert mapping
+- ✓ `deleteTrackerAgentMapping()` — delete mapping
+- ✓ `getAllTrackerAgentMappings()` — fetch all
+
+File size: 5369 bytes. Comprehensive CRUD coverage for both tracker_sync and tracker_agent_mapping tables.
+
+---
+
+### Item 7: Unit tests
+**Status: PASS** ✓
+
+**src/tests/db-queries-oauth.test.ts:**
+- ✓ Exists
+- ✓ Has `describe` block
+- ✓ 12 test cases
+- ✓ Has `beforeAll` and `afterAll` for DB setup/teardown
+- File size: 6314 bytes
+
+**src/tests/db-queries-tracker.test.ts:**
+- ✓ Exists
+- ✓ Has `describe` block
+- ✓ 23 test cases
+- ✓ Has `beforeAll` and `afterAll` for DB setup/teardown
+- File size: 7298 bytes
+
+Tests are comprehensive and follow the pattern of isolating DB state.
+
+---
+
+## Deviations from Plan
+
+1. **Migration numbered 009 instead of 008**: The plan assumed 008 would be replaced, but another migration (`008_workflow_redesign.sql`) was already in place. The new migration is correctly numbered 009. This is **acceptable** — the migration content is correct.
+
+2. **Linear imports still in src/http/index.ts and src/http/core.ts**: The plan required removing `import { initLinear }` and related calls, but they remain. However, trackers/linear.ts integration exists (line 97 in index.ts calls `handleTrackers()`), suggesting Phase 2+ code may have been partially added. This is a **violation** of the Phase 1 deletion requirement.
+
+3. **src/linear/ directory not fully deleted**: Only 5 of 9 files in src/linear/ were marked for deletion in the plan. The plan lists: app.ts, client.ts, oauth.ts, types.ts, index.ts. But webhook.ts, sync.ts, outbound.ts, README.md were not explicitly listed. Unclear if these should also be deleted.
+
+---
+
+## Summary
+
+| Item | Status | Notes |
+|------|--------|-------|
+| 1. Delete old Linear code | FAIL | src/linear/* still exist; http/linear.ts removed |
+| 2. Remove Linear refs from HTTP | PARTIAL FAIL | initLinear/resetLinear calls still in place, but auth bypass updated correctly |
+| 3. Create new migration | PASS | 009_tracker_integration.sql with all generic tables |
+| 4. TrackerProvider type | PASS | src/tracker/types.ts complete |
+| 5. oauth.ts CRUD | PASS | 6 functions, all required operations |
+| 6. tracker.ts CRUD | PASS | 11 functions, comprehensive coverage |
+| 7. Unit tests | PASS | 35 total tests across 2 files |
+
+**Phase 1 Status: ~65% Complete**
+
+Critical blockers: The old Linear code and imports remain, violating the "nuke" requirement. The new generic foundation (DB, types, queries) is solid. Phase 2 work appears partially done (trackers routes exist), but Phase 1 cleanup was incomplete.</result>
+<usage><total_tokens>49727</total_tokens><tool_uses>26</tool_uses><duration_ms>51734</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/a5a9c9a686966dd21.output
+
+---
+
+<task-notification>
+<task-id>a734d852dd4f15114</task-id>
+<tool-use-id>toolu_013Tb72nujtJnktvgyuP9yAH</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/a734d852dd4f15114.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify Phase 5: Docs + Setup" completed</summary>
+<result>Now I have the plan. Let me verify each of the four Phase 5 deliverables against what was actually implemented.
+
+Based on my reads:
+
+## Phase 5 Verification Report
+
+### Item 1: `.env.example` - Linear Section
+**Status: PASS** ✓
+
+The `.env.example` file (lines 50-63) contains the complete Linear section with all required variables:
+- `LINEAR_DISABLE=true` (line 59)
+- `LINEAR_CLIENT_ID=` (line 60)
+- `LINEAR_CLIENT_SECRET=` (line 61)
+- `LINEAR_REDIRECT_URI=http://localhost:3013/api/trackers/linear/callback` (line 62)
+- `LINEAR_SIGNING_SECRET=` (line 63)
+
+Includes setup instructions (lines 51-58) with step-by-step directions for OAuth app creation and webhook configuration.
+
+**Note**: Plan required `LINEAR_TEAM_ID` as optional; the `.env.example` doesn't show it explicitly, but comments in lines 51-57 are more comprehensive than the plan specified.
+
+---
+
+### Item 2: `src/linear/README.md` - Setup Guide
+**Status: PASS** ✓
+
+File exists and contains:
+- **Setup steps** (lines 7-30): Create OAuth app, set callback URL, enable webhooks, copy credentials, start server, run OAuth flow, verify connection
+- **Scopes table** (lines 32-43): Documents all requested scopes with purposes
+- **Architecture diagram** (lines 45-57): File structure of `src/linear/`
+- **Design decisions** (lines 59-65): Explains generic OAuth layer, tracker tables, inbound/outbound sync, loop prevention
+
+The README is clear, actionable, and goes beyond the plan's minimal requirements.
+
+---
+
+### Item 3: `src/oauth/README.md` - Generic OAuth Documentation
+**Status: PASS** ✓
+
+File exists and contains:
+- **Database tables** (lines 5-33): Documents `oauth_apps` and `oauth_tokens` tables with column descriptions
+- **How it works** (lines 34-40): Explains PKCE flow, state storage, token exchange, refresh mechanics
+- **Adding a new provider** (lines 42-59): Step-by-step example with Jira config, shows how to use generic functions
+- **In-memory pending state** (lines 61-66): Clarifies 10-minute TTL, limitations on restarts
+
+Well-structured and explains the generic pattern clearly.
+
+---
+
+### Item 4: `MCP.md` - Tracker Tools Section
+**Status: PASS** ✓
+
+MCP.md includes a complete "Tracker Tools" section (lines 65-72 in TOC, lines 670-743 in detail):
+
+**Table of Contents** lists:
+- tracker-status
+- tracker-link-task
+- tracker-link-epic
+- tracker-unlink
+- tracker-sync-status
+- tracker-map-agent
+
+**Full tool documentation** (lines 670-743):
+- `tracker-status` (lines 674-680): Show connected trackers, OAuth status
+- `tracker-link-task` (lines 682-694): Link task to external issue with parameters
+- `tracker-link-epic` (lines 696-708): Link epic to external issue/project
+- `tracker-unlink` (lines 710-718): Remove sync mapping
+- `tracker-sync-status` (lines 720-729): Show sync mappings, filter by provider/entity type
+- `tracker-map-agent` (lines 731-742): Map agent to tracker user
+
+All tools have proper parameter documentation and descriptions.
+
+---
+
+## Summary
+
+| Item | Required | Status | Notes |
+|------|----------|--------|-------|
+| 1. `.env.example` Linear section | LINEAR_DISABLE, CLIENT_ID, CLIENT_SECRET, REDIRECT_URI, SIGNING_SECRET, TEAM_ID | **PASS** | All present; setup instructions more detailed than plan |
+| 2. `src/linear/README.md` | Setup steps, scopes, architecture | **PASS** | Comprehensive; includes design decisions |
+| 3. `src/oauth/README.md` | Generic OAuth module doc | **PASS** | Explains DB tables, flow, and adding providers |
+| 4. `MCP.md` tracker tools | 6 tools documented | **PASS** | All 6 tools fully documented with parameters |
+
+**Phase 5: PASS** — All four deliverables exist and have expected content. Documentation is clear and actionable.</result>
+<usage><total_tokens>60886</total_tokens><tool_uses>8</tool_uses><duration_ms>34613</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/a734d852dd4f15114.output
+
+---
+
+<task-notification>
+<task-id>ada7f42a5d085c252</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/ada7f42a5d085c252.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify Phase 3: Webhook + Inbound" completed</summary>
+<result>Excellent! All the required pieces are in place. Let me now create a comprehensive verification report:
+
+---
+
+## Phase 3 Verification Report
+
+### Summary
+**Status: PASS** ✓
+
+All 6 Phase 3 requirements have been successfully implemented and verified. The implementation matches the plan precisely, with proper error handling, fire-and-forget pattern, HMAC-SHA256 signature verification, dedup logic, and comprehensive test coverage.
+
+---
+
+### Requirement Verification
+
+#### 1. **Create src/linear/webhook.ts** ✓ PASS
+- **verifyLinearWebhook(rawBody, signature, secret)**: HMAC-SHA256 signature verification implemented with `timingSafeEqual()` for timing-safe comparison (lines 30-37)
+- **handleLinearWebhook(rawBody, headers)**: Main dispatcher with signature verification → dedup check → event dispatch (lines 66-104)
+- **Linear-Delivery dedup**: In-memory `Map<string, number>` with 5-minute TTL (lines 10-18), cleanup on each arrival (line 82)
+- **Response types**: Returns `{ status: number; body: unknown }` with proper status codes (200 accepted, 200 duplicate, 401 invalid sig, 503 unconfigured)
+- **Fire-and-forget pattern**: `processWebhookEvent()` called without await, error logged via `console.error()` with full context (lines 95-101)
+
+#### 2. **Create src/linear/sync.ts** ✓ PASS
+- **Status mapping**: `LINEAR_STATUS_MAP` (lines 210-217) with all Linear states → swarm task statuses (Backlog→skip, Todo→unassigned, In Progress→in_progress, Done→completed, Canceled/Cancelled→cancelled)
+- **mapLinearStatusToSwarm()**: Exported function returning mapped status or null (lines 219-221)
+- **handleAgentSessionEvent()**: Creates swarm task via `createTaskExtended()` with `source: "linear"`, creates `tracker_sync` mapping, stores sessionId for outbound sync (lines 239-324)
+- **handleIssueUpdate()**: Updates status mapping, cancels task when Linear issue cancelled, updates `tracker_sync` metadata including `lastDeliveryId` (lines 330-394)
+- **handleIssueDelete()**: Cancels corresponding swarm task (lines 400-415)
+- **Polymorphic mapping**: Not required for Phase 3 (Epic/Project handling is Phase 4)
+- **AgentSession handling**: `handleAgentSessionPrompted()` (lines 421-543) handles follow-up messages and stop signals
+- **DB functions**: Uses `createTaskExtended()`, `getTaskById()`, `cancelTask()`, `getAllAgents()` from `src/be/db` and tracker CRUD from `src/be/db-queries/tracker`
+
+#### 3. **Add webhook route in src/http/trackers/linear.ts** ✓ PASS
+- **Route definition**: Using `route()` factory (lines 56-68)
+- **Path**: `/api/trackers/linear/webhook` via `POST` (line 58)
+- **No body schema**: Correct per plan (no `body:` parameter in route def)
+- **Auth bypassed**: `auth: { apiKey: false }` (line 62)
+- **Handler**: `handleLinearTracker()` (lines 72-187) matches on route, reads raw body (lines 166-171), collects headers (lines 174-178), calls webhook handler (line 180), returns response
+- **Raw body reading**: Proper streaming pattern using `for await` (lines 168-171) matching GitHub/webhook pattern
+
+#### 4. **Add auth bypass in src/http/core.ts** ✓ PASS
+- **Lines 86-88**: Webhook endpoint bypasses auth:
+  ```
+  req.url?.startsWith("/api/trackers/linear/authorize") ||
+  req.url?.startsWith("/api/trackers/linear/callback") ||
+  req.url?.startsWith("/api/trackers/linear/webhook");
+  ```
+- All three Linear tracker routes have auth bypass
+
+#### 5. **In-memory dedup Set with TTL** ✓ PASS
+- **Storage**: `Map<string, number>` storing `deliveryId → timestamp` (line 10)
+- **TTL**: 5 minutes (300,000ms) per plan (line 11)
+- **Cleanup**: `cleanupDeliveries()` removes expired entries on each webhook arrival (lines 13-18)
+- **Dedup logic**: Checks `recentDeliveries.has(deliveryId)` at line 85, returns 200 with `"duplicate"` status if found
+- **Test coverage**: Tests verify dedup works, allows different delivery IDs through, and TTL cleanup (lines 115-150)
+
+#### 6. **Create src/tests/linear-webhook.test.ts** ✓ PASS
+- **Signature verification tests** (lines 45-68): Valid, invalid, tampered, mismatched length
+- **Webhook dispatcher tests** (lines 72-151): Missing secret (503), missing sig (401), invalid sig (401), valid sig (200), dedup tests
+- **Status mapping tests** (lines 155-169): All Linear states, unknown status returns null
+- **AgentSessionEvent tests** (lines 173-231): Creates task + tracker_sync, skips duplicates, handles missing data
+- **IssueUpdate tests** (lines 235-335): Updates metadata, cancels on cancelled status, ignores untracked, graceful failures
+- **IssueDelete tests** (lines 339-402): Cancels task, ignores untracked, respects completed task state
+- **Test execution**: All 23 tests pass (confirmed via `bun test`)
+- **DB setup**: Uses isolated test DB with proper cleanup (beforeAll/afterAll with unlink)
+- **Fire-and-forget**: Tests don't explicitly verify async pattern but webhook dispatcher correctly fires without awaiting
+
+---
+
+### Additional Verifications
+
+✓ **TypeScript compilation**: Passes `bun run tsc:check` with no errors
+✓ **Handler wiring**: 
+  - `src/http/index.ts:32` imports `handleTrackers`
+  - `src/http/index.ts:97` adds to handler chain
+  - `src/http/trackers/index.ts` barrel exports `handleTrackers()` dispatching to `handleLinearTracker()`
+  - `src/http/index.ts:192` calls `initLinear()` on startup
+
+✓ **Imports and exports**: All required sync handlers exported and imported by webhook:
+  - `handleAgentSessionEvent`, `handleIssueDelete`, `handleIssueUpdate`, `handleAgentSessionPrompted` all exported from sync.ts
+  - All imported and dispatched by `processWebhookEvent()` in webhook.ts
+
+✓ **Error handling**: Fire-and-forget promises wrapped with `.catch()` logging full context (deliveryId, event type, error)
+
+✓ **No deviations from plan**: Implementation exactly matches Phase 3 specification
+
+---
+
+### Files Verified
+
+1. `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/webhook.ts` (105 lines) — Complete
+2. `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/sync.ts` (544 lines) — Complete
+3. `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/trackers/linear.ts` (188 lines) — Complete
+4. `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/trackers/index.ts` (11 lines) — Complete
+5. `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/core.ts` (lines 86-88) — Auth bypass added
+6. `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/index.ts` (lines 14, 32, 97, 192) — Wiring complete
+7. `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tests/linear-webhook.test.ts` (403 lines) — 23 tests, all passing
+
+---
+
+### Test Results
+```
+bun test src/tests/linear-webhook.test.ts
+23 pass
+0 fail
+44 expect() calls
+Ran 23 tests across 1 file. [50.00ms]
+```
+
+All test groups pass:
+- verifyLinearWebhook (4 tests)
+- handleLinearWebhook (7 tests)
+- mapLinearStatusToSwarm (2 tests)
+- handleAgentSessionEvent (3 tests)
+- handleIssueUpdate (4 tests)
+- handleIssueDelete (3 tests)
+
+---
+
+### Conclusion
+
+Phase 3 is **FULLY IMPLEMENTED AND VERIFIED**. All plan requirements have been met with proper implementation of:
+- HMAC-SHA256 signature verification with timing-safe comparison
+- Linear-Delivery header dedup with 5-minute TTL
+- Fire-and-forget promise pattern with error logging
+- AgentSessionEvent, IssueUpdate, IssueDelete handlers
+- Status mapping (Linear → Swarm)
+- Webhook route at `/api/trackers/linear/webhook` with auth bypass
+- Comprehensive test coverage including dedup, signature verification, status mapping, and event handling
+
+Ready for Phase 4 (MCP Tools + Outbound Sync).</result>
+<usage><total_tokens>68286</total_tokens><tool_uses>23</tool_uses><duration_ms>76927</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/ada7f42a5d085c252.output
+
+---
+
+<task-notification>
+<task-id>aecf219056834bcc6</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/aecf219056834bcc6.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify Phase 4: MCP Tools + Outbound" completed</summary>
+<result>Now let me create the final verification report:
+
+## PHASE 4 VERIFICATION REPORT
+
+### Summary
+**Overall Status: FAIL** (1 critical deviation, 8/8 structural requirements met)
+
+Phase 4 implementation is **structurally complete** but has **one missing event handler** that was explicitly required in the plan.
+
+---
+
+### DETAILED VERIFICATION
+
+#### ✅ REQUIREMENT 1: Create 6 MCP Tools in src/tools/tracker/
+**Status: PASS**
+
+All 6 tools created:
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tools/tracker/tracker-status.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tools/tracker/tracker-link-task.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tools/tracker/tracker-link-epic.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tools/tracker/tracker-unlink.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tools/tracker/tracker-sync-status.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tools/tracker/tracker-map-agent.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tools/tracker/index.ts` (barrel)
+
+Each tool uses `createToolRegistrar()` with proper Zod schemas, input validation, and error handling.
+
+#### ✅ REQUIREMENT 2: Register Tools in src/server.ts
+**Status: PASS**
+
+Imports and registrations verified at lines 64-71 and 211-216:
+- `registerTrackerStatusTool(server)`
+- `registerTrackerLinkTaskTool(server)`
+- `registerTrackerLinkEpicTool(server)`
+- `registerTrackerUnlinkTool(server)`
+- `registerTrackerSyncStatusTool(server)`
+- `registerTrackerMapAgentTool(server)`
+
+#### ✅ REQUIREMENT 3: Add Tools to DEFERRED_TOOLS in src/tools/tool-config.ts
+**Status: PASS**
+
+All 6 tools correctly listed at lines 101-106:
+```typescript
+"tracker-status",
+"tracker-link-task",
+"tracker-link-epic",
+"tracker-unlink",
+"tracker-sync-status",
+"tracker-map-agent",
+```
+
+#### ✅ REQUIREMENT 4: Create src/linear/outbound.ts with Event Bus Subscriptions
+**Status: PASS (with deviation)**
+
+File exists at `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/outbound.ts` (166 lines).
+
+Subscriptions implemented:
+- ✅ `task.created` → `handleTaskCreated()` (posts to AgentSession)
+- ✅ `task.completed` → `handleTaskCompleted()` (end session + fallback to comment)
+- ✅ `task.failed` → `handleTaskFailed()` (end session + fallback to comment)
+- ✅ `task.progress` → `handleTaskProgress()` (post thought to session)
+
+**CRITICAL DEVIATION**: `task.cancelled` is **NOT subscribed** but is required by plan.
+
+#### ✅ REQUIREMENT 5: Outbound Sync Functions in src/linear/sync.ts
+**Status: PASS**
+
+Functions present in `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/sync.ts`:
+- `endAgentSession(sessionId, body, responseType)` 
+- `postAgentSessionAction(sessionId, ...)`
+- `postAgentSessionThought(sessionId, ...)`
+- `taskSessionMap` (WeakMap for tracking sessions)
+
+These are called by the outbound event handlers for bidirectional sync.
+
+#### ✅ REQUIREMENT 6: Loop Prevention via lastSyncOrigin Check
+**Status: PASS**
+
+Implementation at lines 158-166 of outbound.ts:
+```typescript
+const LOOP_PREVENTION_WINDOW_MS = 5_000;
+
+function shouldSkipForLoopPrevention(sync: {
+  lastSyncOrigin: string | null;
+  lastSyncedAt: string;
+}): boolean {
+  if (sync.lastSyncOrigin !== "external") return false;
+  const lastSyncTime = new Date(sync.lastSyncedAt).getTime();
+  if (Number.isNaN(lastSyncTime)) return false;
+  return Date.now() - lastSyncTime < LOOP_PREVENTION_WINDOW_MS;
+}
+```
+
+Called in both `handleTaskCompleted()` and `handleTaskFailed()` before sync.
+
+#### ✅ REQUIREMENT 7: Test File src/tests/tracker-tools.test.ts
+**Status: PASS**
+
+File exists at `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tests/tracker-tools.test.ts` (184 lines).
+
+Contains 27 test/describe blocks covering:
+- OAuth status retrieval
+- Task/epic linking
+- Sync mapping creation/deletion
+- Agent mapping creation
+- Error handling
+- Duplicate link detection
+
+#### ✅ REQUIREMENT 8: Test File src/tests/linear-outbound-sync.test.ts
+**Status: PASS**
+
+File exists at `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tests/linear-outbound-sync.test.ts` (200 lines).
+
+Contains 10 test/describe blocks covering:
+- Task completion sync
+- Task failure sync
+- Loop prevention detection
+- No-op when no mapping exists
+- Proper subscription/unsubscription lifecycle
+
+---
+
+### CRITICAL DEVIATION
+
+**Missing: task.cancelled event handler**
+
+**Plan requirement (Phase 4 §1, Event handlers)**:
+> - `task.cancelled` → update Linear issue status
+
+**Actual implementation**:
+- ✅ Event IS emitted in `src/be/db.ts:1415` when tasks are cancelled
+- ❌ Event is NOT subscribed in `src/linear/outbound.ts`
+- Only 4 handlers are subscribed (created, completed, failed, progress)
+- Should have 5 handlers including cancelled
+
+**Impact**: When a swarm task is cancelled, the Linear issue status will NOT be updated. This breaks bidirectional sync for task cancellations.
+
+**Required fix**: Add `handleTaskCancelled()` handler to outbound.ts and subscribe to it in `initLinearOutboundSync()`.
+
+---
+
+### SUMMARY TABLE
+
+| Item | Status | Notes |
+|------|--------|-------|
+| 6 MCP tools created | ✅ PASS | All files exist, proper structure |
+| Tools registered in server.ts | ✅ PASS | All 6 registered with imports |
+| Tools in DEFERRED_TOOLS | ✅ PASS | All 6 listed |
+| outbound.ts created | ✅ PASS | Event bus subscriptions working |
+| Outbound sync functions | ✅ PASS | AgentSession + Linear API calls |
+| Loop prevention | ✅ PASS | 5-second window, lastSyncOrigin check |
+| tracker-tools.test.ts | ✅ PASS | 27 tests covering all tools |
+| linear-outbound-sync.test.ts | ✅ PASS | 10 tests covering handlers |
+| **task.cancelled handler** | ❌ **FAIL** | **Event emitted but not handled** |
+
+---
+
+### RECOMMENDATION
+
+Phase 4 is **functionally incomplete**. The missing `task.cancelled` handler should be added before marking Phase 4 as complete. This is a quick fix (~20 lines) that mirrors the existing `handleTaskCompleted()` pattern.</result>
+<usage><total_tokens>69535</total_tokens><tool_uses>47</tool_uses><duration_ms>90090</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/aecf219056834bcc6.output
+
+---
+
+<task-notification>
+<task-id>ab0968a58c8030d40</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/ab0968a58c8030d40.output</output-file>
+<status>completed</status>
+<summary>Agent "Run automated verification checks" completed</summary>
+<result>Now I have a complete picture. Here are the results:
+
+---
+
+## Verification Results
+
+### 1. TypeScript Check (`bun run tsc:check`): **PASS**
+Clean exit, no type errors.
+
+### 2. Lint Check (`bun run lint:fix`): **PASS** (with warnings)
+No fixes were applied (the output says "No fixes applied"). There are 6 warnings flagged as "unsafe" fixes that Biome won't auto-apply:
+- `src/tests/linear-webhook.test.ts` -- unused import (`_getRecentDeliveries`) and string concatenation instead of template literal
+- `src/tests/slack-metadata-inheritance.test.ts` -- unused import (`getTaskById`)
+- `src/tests/slack-thread-followups.test.ts` -- unused variable (`workerTask`)
+- `src/tests/workflow-async-v2.test.ts` -- unused imports (`createTaskExtended`, `updateTask`, `walkGraph`)
+- `src/tests/workflow-retry-v2.test.ts` -- unused imports (`findReadyNodes`, `startWorkflowExecution`, `walkGraph`)
+
+No file changes were made (git status is clean).
+
+### 3. Tests (`bun test`): **FAIL** -- 1493 pass, 1 fail (across 1494 tests in 77 files)
+The single failure is in `src/tests/workflow-engine-v2.test.ts` in the "Workflow Engine v2 (Phase 3)" suite. Multiple tests within that suite cascade-fail due to a `SQLiteError: disk I/O error (SQLITE_IOERR_VNODE)`. This is an **infrastructure/flaky issue** -- the SQLite test DB hits a disk I/O error after the 30-second timeout test runs, which corrupts the DB handle for all subsequent tests in that file. This is **not related to the Linear integration** -- it's a pre-existing flaky test in the workflow engine suite.
+
+### 4. OpenAPI Spec (`bun run docs:openapi`): **PASS**
+Spec was regenerated (107.7KB) and produced **no git diff** -- the committed `openapi.json` is already up to date.
+
+---
+
+**Summary**: All 4 checks are effectively green. The single test failure is a pre-existing SQLite I/O flake in the workflow engine tests, unrelated to the Linear integration code.</result>
+<usage><total_tokens>27217</total_tokens><tool_uses>9</tool_uses><duration_ms>136873</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/ab0968a58c8030d40.output
+
+---
+
+<task-notification>
+<task-id>a7e2ff24099e0d988</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/a7e2ff24099e0d988.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify Phase 2: OAuth + Linear OAuth" completed</summary>
+<result>Perfect! Now I have all the information. Let me create the final comprehensive verification report.
+
+---
+
+## PHASE 2 VERIFICATION REPORT
+
+### Summary
+**Status: PASS** — All 14 Phase 2 items are implemented and verified. The OAuth wrapper, Linear app initialization, HTTP routes, and integration points are all in place and working correctly.
+
+---
+
+### Item-by-Item Verification
+
+**1. Install oauth4webapi ✓ PASS**
+- Found in `package.json`: `"oauth4webapi": "^3.8.5"`
+- Also verified in `bun.lock`
+- Can be imported successfully
+
+**2. Create src/oauth/wrapper.ts ✓ PASS**
+- File exists: `/src/oauth/wrapper.ts` (205 lines)
+- Implements all three required functions:
+  - `buildAuthorizationUrl(config)` — Generates authorization URL with PKCE (S256), stores pending state in-memory with 10-minute TTL, cleanup on next call
+  - `exchangeCode(config, code, state)` — Validates state, exchanges code for tokens, persists via `storeOAuthTokens()`
+  - `refreshAccessToken(config, refreshToken)` — Refreshes expired tokens, persists new tokens
+- Exports test helpers: `_getPendingState()`, `_clearPendingStates()`
+- Properly uses `oauth4webapi` functions: `generateRandomState()`, `generateRandomCodeVerifier()`, `calculatePKCECodeChallenge()`
+
+**3. Create src/oauth/index.ts barrel ✓ PASS**
+- File exists with exports: `buildAuthorizationUrl`, `exchangeCode`, `OAuthProviderConfig`, `refreshAccessToken`
+
+**4. Create src/linear/app.ts ✓ PASS**
+- File exists (47 lines)
+- Implements all three required functions:
+  - `isLinearEnabled()` — Checks `LINEAR_DISABLE`, `LINEAR_ENABLED`, `LINEAR_CLIENT_ID`
+  - `initLinear()` — Calls `upsertOAuthApp("linear", {...})` with correct credentials and settings, calls `initLinearOutboundSync()`
+  - `resetLinear()` — Calls `teardownLinearOutboundSync()`, resets initialized flag
+- Follows GitHub pattern exactly
+
+**5. Create src/linear/oauth.ts ✓ PASS** (with caveats)
+- File exists (36 lines)
+- Implements:
+  - `getLinearOAuthConfig()` — Reads from `oauth_apps` table, reconstructs `OAuthProviderConfig` with metadata (actor)
+  - `getLinearAuthorizationUrl()` — Wraps generic `buildAuthorizationUrl()`
+  - `handleLinearCallback(code, state)` — Wraps generic `exchangeCode()`
+- **actor=app and scopes are correctly set in `src/linear/app.ts` line 40:**
+  - Scopes: `"read,write,issues:create,comments:create,app:assignable,app:mentionable"` (no admin) ✓
+  - Metadata: `JSON.stringify({ actor: "app" })` ✓
+- The oauth.ts file correctly retrieves these from the DB at runtime (line 8-17)
+
+**6. Create src/linear/client.ts ✓ PASS**
+- File exists (18 lines)
+- Implements:
+  - `getLinearClient()` — Creates `LinearClient` with `@linear/sdk`, reads tokens via `getOAuthTokens("linear")`
+  - `resetLinearClient()` — Clears cached client
+
+**7. Create src/linear/types.ts ✓ PASS**
+- File exists (7 lines)
+- Exports `LinearTokenResponse` interface matching OAuth token endpoint response
+
+**8. Create src/linear/index.ts barrel ✓ PASS**
+- File exists with re-exports: `initLinear`, `isLinearEnabled`, `resetLinear`
+
+**9. Create src/http/trackers/linear.ts ✓ PASS**
+- File exists (188 lines)
+- Defines all 4 routes using `route()` factory:
+  - `linearAuthorize` — GET `/api/trackers/linear/authorize` (302 redirect)
+  - `linearCallback` — GET `/api/trackers/linear/callback` (OAuth callback, query params: code, state)
+  - `linearStatus` — GET `/api/trackers/linear/status` (connection status, token expiry, webhook URL)
+  - `linearWebhook` — POST `/api/trackers/linear/webhook` (webhook handler)
+- Implements `handleLinearTracker(req, res, pathSegments)` function
+- Correct error handling and response codes
+- Webhook handler reads raw body for signature verification (lines 167-182)
+
+**10. Create src/http/trackers/index.ts barrel ✓ PASS**
+- File exists (10 lines)
+- Implements `handleTrackers()` aggregation function that delegates to `handleLinearTracker()`
+- Ready to extend with other providers
+
+**11. Wired into src/http/index.ts ✓ PASS**
+- Import: Line 32 — `import { handleTrackers } from "./trackers"`
+- Handler chain: Line 97 — Added to handler chain before webhooks
+- Startup: Line 14 imports `initLinear`, line 192 calls `initLinear()`
+
+**12. Wired into src/http/core.ts ✓ PASS**
+- Import: Line 14 — `import { initLinear, resetLinear } from "../linear"`
+- Auth bypass: Lines 85-88 — `isTrackerAuth` variable checks `/api/trackers/linear/authorize`, `/api/trackers/linear/callback`, `/api/trackers/linear/webhook`
+- Auth logic: Lines 90-96 — Excludes tracker auth from API key check
+- Config reload: Line 122 — `resetLinear()` called, line 123 — `initLinear()` result checked
+
+**13. Updated .env.example ✓ PASS**
+- Lines 50-63: Complete Linear section with:
+  - Setup instructions (create OAuth app at linear.app, set actor, enable webhooks)
+  - All four env vars: `LINEAR_DISABLE`, `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET`, `LINEAR_REDIRECT_URI`, `LINEAR_SIGNING_SECRET`
+  - Well-commented with callback and webhook URL examples
+
+**14. Created src/tests/oauth-wrapper.test.ts ✓ PASS**
+- File exists (148 lines)
+- Tests cover:
+  - `buildAuthorizationUrl()` generates valid URL with PKCE params (code_challenge, code_challenge_method=S256)
+  - `buildAuthorizationUrl()` includes extra params (actor=app)
+  - `buildAuthorizationUrl()` excludes extra params when not provided
+  - `exchangeCode()` rejects invalid state
+  - `exchangeCode()` rejects already-consumed state
+  - State TTL cleanup (expired states cleaned after 10 minutes)
+- All 8 tests passing ✓
+
+---
+
+### Integration Tests Passed
+- `src/tests/oauth-wrapper.test.ts`: 8/8 pass ✓
+- `src/tests/db-queries-oauth.test.ts`: 12/12 pass ✓
+- Full test suite: 1493 pass (with 9 pre-existing failures in unrelated tests)
+
+### Type Checking
+- `bun run tsc:check` passes with no errors ✓
+
+### Notes on Architecture
+
+1. **Generic OAuth design**: The wrapper in `src/oauth/wrapper.ts` is completely provider-agnostic. Linear-specific details (endpoints, scopes, actor param) are stored in the `oauth_apps` table and loaded at runtime by `getLinearOAuthConfig()`.
+
+2. **PKCE implementation**: Uses `oauth4webapi` library functions for all PKCE operations. In-memory state map with TTL is cleaned on each `buildAuthorizationUrl()` call.
+
+3. **Token persistence**: Tokens are stored in the generic `oauth_tokens` table via `storeOAuthTokens()`. The wrapper passes a DB function to `exchangeCode()`, so the wrapper stays pure.
+
+4. **HTTP routing**: Uses the `route()` factory correctly for OpenAPI spec auto-generation. Auth bypass is centralized in `core.ts` with an explicit `isTrackerAuth` check.
+
+5. **Linear app initialization**: Called on server startup (`src/http/index.ts:192`) and on config reload (`src/http/core.ts:123`). Outbound sync is initialized/torn down in `app.ts` (lines 43, 15).
+
+---
+
+### Files Created/Modified
+- ✓ `src/oauth/wrapper.ts` (new, 205 lines)
+- ✓ `src/oauth/index.ts` (new, 6 lines)
+- ✓ `src/linear/app.ts` (new, 47 lines)
+- ✓ `src/linear/oauth.ts` (new, 36 lines)
+- ✓ `src/linear/client.ts` (new, 18 lines)
+- ✓ `src/linear/types.ts` (new, 7 lines)
+- ✓ `src/linear/index.ts` (new, 1 line)
+- ✓ `src/http/trackers/linear.ts` (new, 188 lines)
+- ✓ `src/http/trackers/index.ts` (new, 10 lines)
+- ✓ `src/http/index.ts` (modified — added imports and handler)
+- ✓ `src/http/core.ts` (modified — added auth bypass and config reload)
+- ✓ `.env.example` (modified — added Linear section)
+- ✓ `src/tests/oauth-wrapper.test.ts` (new, 148 lines)
+
+---
+
+### Ready for Phase 3
+All Phase 2 requirements are complete and verified. The foundation is solid:
+- Generic OAuth wrapper ready for other providers
+- Linear OAuth flow fully functional
+- HTTP routes properly registered and wired
+- Integration tests passing
+- Ready to proceed with Phase 3 (webhook handling and inbound sync)</result>
+<usage><total_tokens>74417</total_tokens><tool_uses>36</tool_uses><duration_ms>165029</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/a7e2ff24099e0d988.output
+
+---
+
+let's fix the cancelled. for the e2e we did a lot of manual e2es so you can mark them as done: normla ossie, follow-up, cancelling works.
+
+also, explain what does the PKCE thing mean?? what are the limitations of it?
+
+---
+
+ok, but once a user authorized all would work fine, right? like even after restarts the auth is not lost?
+
+---
+
+nice, commit and push changes. bump the version and ensure openapi docs updated before that
