@@ -496,18 +496,18 @@ Implement the simplified trigger system (webhook + schedule + manual), version h
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Trigger tests pass: `bun test src/tests/workflow-triggers-v2.test.ts`
-- [ ] Version history tests pass: `bun test src/tests/workflow-versions.test.ts`
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Trigger tests pass: `bun test src/tests/workflow-triggers-v2.test.ts`
+- [x] Version history tests pass: `bun test src/tests/workflow-versions.test.ts`
 
 #### Manual Verification:
-- [ ] Webhook trigger: `curl -X POST http://localhost:3013/api/webhooks/<id> -d '{"test":true}'` → workflow starts
-- [ ] HMAC verification: same curl with wrong signature → 401
-- [ ] Manual trigger: `curl -X POST http://localhost:3013/api/workflows/<id>/trigger` → workflow starts
-- [ ] Version history: update a workflow → query `workflow_versions` table → snapshot exists
-- [ ] Cooldown: trigger workflow, trigger again within cooldown → second run has status "skipped"
-- [ ] Template: instantiate a template with variables → valid workflow created
+- [x] Webhook trigger: `curl -X POST http://localhost:3013/api/webhooks/<id> -d '{"test":true}'` → workflow starts
+- [x] HMAC verification: same curl with wrong signature → 401
+- [x] Manual trigger: `curl -X POST http://localhost:3013/api/workflows/<id>/trigger` → workflow starts
+- [x] Version history: update a workflow → query `workflow_versions` table → snapshot exists
+- [x] Cooldown: trigger workflow, trigger again within cooldown → second run has status "skipped"
+- [x] Template: instantiate a template with variables → valid workflow created
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. Commit after verification passes.
 

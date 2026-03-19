@@ -13,6 +13,7 @@ import {
 import { WorkflowDefinitionSchema } from "../types";
 import { startWorkflowExecution } from "../workflows";
 import { retryFailedRun } from "../workflows/resume";
+import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
 import { route } from "./route-def";
 import { json, jsonError, parseBody } from "./utils";
 
@@ -140,6 +141,21 @@ const retryWorkflowRun = route({
   },
 });
 
+const webhookTriggerRoute = route({
+  method: "post",
+  path: "/api/webhooks/{workflowId}",
+  pattern: ["api", "webhooks", null],
+  summary: "Trigger workflow via webhook",
+  tags: ["Webhooks"],
+  params: z.object({ workflowId: z.string() }),
+  auth: { apiKey: false },
+  responses: {
+    201: { description: "Webhook processed" },
+    401: { description: "Invalid signature" },
+    404: { description: "Workflow not found" },
+  },
+});
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleWorkflows(
@@ -149,6 +165,49 @@ export async function handleWorkflows(
   queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
+  // Webhook trigger — needs raw body for HMAC verification, no API key auth
+  if (webhookTriggerRoute.match(req.method, pathSegments)) {
+    const workflowId = pathSegments[2]!;
+
+    // Read raw body for HMAC verification
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk as Buffer);
+    }
+    const rawBody = Buffer.concat(chunks).toString();
+
+    // Validate JSON before processing (but pass raw string for HMAC)
+    try {
+      if (rawBody) JSON.parse(rawBody);
+    } catch {
+      jsonError(res, "Invalid JSON body", 400);
+      return true;
+    }
+
+    const signature =
+      (req.headers["x-hub-signature-256"] as string | undefined) ??
+      (req.headers["x-signature"] as string | undefined);
+
+    try {
+      // TODO(Phase 7): inject registry from module-level singleton
+      const result = await handleWebhookTrigger(
+        workflowId,
+        rawBody, // Raw body string — used for HMAC verification + passed as triggerData
+        signature,
+        signature,
+        undefined as never,
+      );
+      json(res, result, 201);
+    } catch (err) {
+      if (err instanceof WebhookError) {
+        jsonError(res, err.message, err.statusCode);
+      } else {
+        jsonError(res, String(err), 500);
+      }
+    }
+    return true;
+  }
+
   if (listWorkflowsRoute.match(req.method, pathSegments)) {
     const workflows = listWorkflows();
     json(res, workflows);
