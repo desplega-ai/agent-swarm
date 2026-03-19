@@ -302,7 +302,6 @@ function NodeInspector({ node }: { node: WorkflowNode }) {
           <JsonTree data={node.config} defaultExpandDepth={2} maxHeight="250px" />
         </InspectorSection>
 
-
         {/* Next */}
         {node.next != null && (
           <InspectorSection label="Next">
