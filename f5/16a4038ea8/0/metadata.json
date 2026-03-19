@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "f516a4038ea8",
+  "session_id": "6fdcec51-dc48-4446-aea6-0c3edf166d88",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-19T10:58:04.891947Z",
+  "branch": "feat/workflow-redesign",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "new-ui/src/pages/workflows/[id]/page.tsx"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "009a3b7cb1fc",
+  "checkpoint_transcript_start": 870,
+  "transcript_lines_at_start": 870,
+  "token_usage": {
+    "input_tokens": 7,
+    "cache_creation_tokens": 1610,
+    "cache_read_tokens": 487894,
+    "output_tokens": 281,
+    "api_call_count": 3
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-19T10:58:04.526473Z",
+    "agent_lines": 0,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 0,
+    "agent_percentage": 0
+  }
+}
