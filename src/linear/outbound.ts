@@ -19,6 +19,7 @@ export function initLinearOutboundSync(): void {
   workflowEventBus.on("task.created", handleTaskCreated);
   workflowEventBus.on("task.completed", handleTaskCompleted);
   workflowEventBus.on("task.failed", handleTaskFailed);
+  workflowEventBus.on("task.cancelled", handleTaskCancelled);
   workflowEventBus.on("task.progress", handleTaskProgress);
   console.log("[Linear] Outbound sync subscribed to event bus");
 }
@@ -30,6 +31,7 @@ export function teardownLinearOutboundSync(): void {
   workflowEventBus.off("task.created", handleTaskCreated);
   workflowEventBus.off("task.completed", handleTaskCompleted);
   workflowEventBus.off("task.failed", handleTaskFailed);
+  workflowEventBus.off("task.cancelled", handleTaskCancelled);
   workflowEventBus.off("task.progress", handleTaskProgress);
   console.log("[Linear] Outbound sync unsubscribed from event bus");
 }
@@ -144,6 +146,50 @@ async function handleTaskFailed(data: unknown): Promise<void> {
     } catch (error) {
       console.error(
         `[Linear Outbound] Failed to sync task failure for ${taskId}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
+  updateTrackerSync(sync.id, {
+    lastSyncOrigin: "swarm",
+    lastSyncedAt: new Date().toISOString(),
+  });
+}
+
+async function handleTaskCancelled(data: unknown): Promise<void> {
+  const { taskId } = data as { taskId: string };
+  if (!taskId) return;
+
+  const sync = getTrackerSync("linear", "task", taskId);
+  if (!sync) return;
+
+  if (shouldSkipForLoopPrevention(sync)) return;
+
+  const sessionId = taskSessionMap.get(taskId);
+  const body = "Task cancelled.";
+
+  if (sessionId) {
+    endAgentSession(sessionId, body, "error").catch((err) => {
+      console.error(
+        `[Linear Outbound] Failed to end AgentSession for cancelled task ${taskId}:`,
+        err,
+      );
+    });
+    taskSessionMap.delete(taskId);
+    console.log(`[Linear Outbound] Posted cancellation to AgentSession for task ${taskId}`);
+  } else {
+    try {
+      const client = getLinearClient();
+      if (!client) {
+        console.log("[Linear Outbound] No Linear client available, skipping sync for", taskId);
+        return;
+      }
+      await client.createComment({ issueId: sync.externalId, body: "Task cancelled by swarm." });
+      console.log(`[Linear Outbound] Posted cancellation comment for task ${taskId}`);
+    } catch (error) {
+      console.error(
+        `[Linear Outbound] Failed to sync task cancellation for ${taskId}:`,
         error instanceof Error ? error.message : error,
       );
     }

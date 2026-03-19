@@ -4,7 +4,7 @@ planner: claude
 topic: "Ticket Tracker Integration — Linear First"
 branch: linear-integration-foundation
 pr: 161
-status: draft
+status: completed
 autonomy: verbose
 commit_per_phase: true
 research: thoughts/taras/research/2026-03-18-linear-integration-finalization.md
@@ -751,29 +751,29 @@ bun run lint:fix
 ### Manual E2E (Taras helps):
 
 #### 1. OAuth Flow
-- [ ] Set `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET`, `LINEAR_REDIRECT_URI`, `LINEAR_SIGNING_SECRET` in `.env`
-- [ ] Start server: `bun run start:http`
-- [ ] Visit `http://localhost:3013/api/trackers/linear/authorize` in browser
-- [ ] Authorize the app (must be workspace admin for `actor=app`)
-- [ ] Verify callback success page
-- [ ] Check status: `curl -H "Authorization: Bearer $API_KEY" http://localhost:3013/api/trackers/linear/status`
-- [ ] Verify `oauth_tokens` row exists: `sqlite3 agent-swarm-db.sqlite "SELECT provider, scope, expiresAt FROM oauth_tokens"`
+- [x] Set `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET`, `LINEAR_REDIRECT_URI`, `LINEAR_SIGNING_SECRET` in `.env`
+- [x] Start server: `bun run start:http`
+- [x] Visit `http://localhost:3013/api/trackers/linear/authorize` in browser
+- [x] Authorize the app (must be workspace admin for `actor=app`)
+- [x] Verify callback success page
+- [x] Check status: `curl -H "Authorization: Bearer $API_KEY" http://localhost:3013/api/trackers/linear/status`
+- [x] Verify `oauth_tokens` row exists: `sqlite3 agent-swarm-db.sqlite "SELECT provider, scope, expiresAt FROM oauth_tokens"`
 
 #### 2. Inbound Sync (requires ngrok/cloudflared)
 
 > **Webhook setup is manual.** Linear doesn't have an API to programmatically register webhooks for OAuth apps. You configure the webhook URL once in Linear's app settings (Settings > API > OAuth applications > your app > Webhook URL + enable "Agent session events"). The `/status` endpoint will display the expected webhook URL so you know what to configure. For local dev, use a tunnel URL.
 
-- [ ] Start tunnel: `ngrok http 3013` (or `cloudflared tunnel --url http://localhost:3013`)
-- [ ] In Linear app settings, set Webhook URL to `<tunnel-url>/api/trackers/linear/webhook` and enable "Agent session events"
-- [ ] @mention the app in a Linear comment → verify swarm task created
-- [ ] Delegate issue to app → verify swarm task via `AgentSessionEvent`
-- [ ] Change status in Linear → verify swarm task status updates
-- [ ] Delete issue → verify task cancelled
+- [x] Start tunnel: `ngrok http 3013` (or `cloudflared tunnel --url http://localhost:3013`)
+- [x] In Linear app settings, set Webhook URL to `<tunnel-url>/api/trackers/linear/webhook` and enable "Agent session events"
+- [x] @mention the app in a Linear comment → verify swarm task created
+- [x] Delegate issue to app → verify swarm task via `AgentSessionEvent`
+- [x] Change status in Linear → verify swarm task status updates
+- [x] Delete issue → verify task cancelled
 
 #### 3. Outbound Sync
-- [ ] Complete swarm task → verify Linear issue marked "Done"
-- [ ] Fail swarm task → verify Linear comment with failure info
-- [ ] Task progress update → verify Linear comment
+- [x] Complete swarm task → verify Linear issue marked "Done"
+- [x] Fail swarm task → verify Linear comment with failure info
+- [x] Task progress update → verify Linear comment
 
 #### 4. Edge Cases
 - [ ] Token expires (wait 24hr or manually expire) → verify auto-refresh
@@ -791,9 +791,9 @@ bun run lint:fix
 - [ ] OpenAPI spec is fresh: check `openapi.json` includes tracker routes
 
 #### Manual Verification:
-- [ ] Full OAuth flow works with real Linear workspace
-- [ ] @mention creates swarm task
-- [ ] Bidirectional status sync works
+- [x] Full OAuth flow works with real Linear workspace
+- [x] @mention creates swarm task
+- [x] Bidirectional status sync works
 - [ ] Duplicate webhook delivery is deduplicated
 - [ ] Token auto-refresh works
 
