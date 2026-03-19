@@ -95,6 +95,40 @@ templates-ui/    # Templates registry (Next.js app)
 - Use Bun APIs, not Node.js equivalents
 - Prefer `Bun.$` over execa for shell commands
 
+### Adding HTTP Endpoints
+
+**Always use the `route()` factory** from `src/http/route-def.ts` when creating new REST endpoints. This auto-registers the route in the OpenAPI spec. Do NOT use raw `matchRoute` — it bypasses OpenAPI generation.
+
+```typescript
+// In src/http/my-feature.ts
+import { route } from "./route-def";
+
+const myRoute = route({
+  method: "post",
+  path: "/api/my-feature",
+  pattern: ["api", "my-feature"],
+  summary: "What this endpoint does",
+  tags: ["MyTag"],
+  body: z.object({ ... }),
+  responses: { 200: { description: "Success" }, 400: { description: "Error" } },
+  auth: { apiKey: true },
+});
+
+export async function handleMyFeature(req, res, pathSegments, queryParams): Promise<boolean> {
+  if (!myRoute.match(req.method, pathSegments)) return false;
+  const parsed = await myRoute.parse(req, res, pathSegments, queryParams);
+  if (!parsed) return true; // parse() already sent 400
+  // ... business logic using parsed.body, parsed.params, parsed.query
+  json(res, result);
+  return true;
+}
+```
+
+After creating the handler:
+1. Import and add to handler chain in `src/http/index.ts`
+2. Add the import to `scripts/generate-openapi.ts` (for spec generation)
+3. Run `bun run docs:openapi` to regenerate `openapi.json` and commit it
+
 ## Related
 
 - [UI Dashboard](./new-ui/) - Next.js monitoring dashboard

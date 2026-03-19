@@ -101,7 +101,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleSchedules(req, res, pathSegments, queryParams, myAgentId),
     () => handleWorkflows(req, res, pathSegments, queryParams, myAgentId),
     () => handleConfig(req, res, pathSegments, queryParams),
-    () => handleDbQuery(req, res, pathSegments),
+    () => handleDbQuery(req, res, pathSegments, queryParams),
     () => handleRepos(req, res, pathSegments, queryParams),
     () => handleMemory(req, res, pathSegments, myAgentId),
     () => handleMcp(req, res, transports),
