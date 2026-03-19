@@ -1,0 +1,30 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "aab15cd9b13d",
+  "session_id": "ded3ec80-e4ae-41b3-81ba-71dd4824c7f6",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-19T02:00:38.226924Z",
+  "branch": "linear-integration-foundation",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "thoughts/taras/plans/2026-03-19-ticket-tracker-linear-integration.md"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "b7433484b899",
+  "token_usage": {
+    "input_tokens": 62,
+    "cache_creation_tokens": 100183,
+    "cache_read_tokens": 3444251,
+    "output_tokens": 16958,
+    "api_call_count": 38
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-19T02:00:37.13371Z",
+    "agent_lines": 847,
+    "human_added": 4005,
+    "human_modified": 3,
+    "human_removed": 0,
+    "total_committed": 4855,
+    "agent_percentage": 17.44593202883625
+  }
+}

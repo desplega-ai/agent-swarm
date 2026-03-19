@@ -1,0 +1,644 @@
+# Review Document
+
+A thin wrapper that invokes the `desplega:reviewing` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse flags from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - Check for `--output=append|separate` flag (sets output mode preference, skipping the preference question)
+   - Otherwise, default to **Critical** autonomy
+
+2. **ALWAYS invoke the `desplega:reviewing` skill:**
+   - Pass the document path
+   - Pass the autonomy mode determined above
+   - Pass the output mode if specified
+   - Let the skill handle all review logic
+
+3. **If no path provided:**
+   - Respond with: "I need a document to review. Please provide the path to the research, plan, or brainstorm document you'd like me to review."
+
+## Example Usage
+
+```
+/review thoughts/taras/research/2026-03-09-new-base-skills.md
+/review --autonomy=autopilot --output=append thoughts/taras/plans/2026-03-09-feature.md
+/review --output=separate thoughts/shared/brainstorms/2026-03-09-idea.md
+```
+
+
+ARGUMENTS: thoughts/taras/plans/2026-03-19-ticket-tracker-linear-integration.md
+
+---
+
+Base directory for this skill: /Users/taras/.claude/plugins/cache/desplega-ai-toolbox/desplega/1.7.0/skills/reviewing
+
+# Reviewing
+
+You are performing a structured critique of a document (research, plan, or brainstorm) to identify gaps, weaknesses, and quality issues.
+
+## Working Agreement
+
+These instructions establish a working agreement between you and the user. The key principles are:
+
+1. **AskUserQuestion is your primary communication tool** - Whenever you need to ask the user anything (clarifications, preferences, decisions), use the **AskUserQuestion tool**. Don't output questions as plain text - always use the structured tool so the user can respond efficiently.
+
+2. **Establish preferences upfront** - Ask about user preferences at the start of the workflow, not at the end when they may want to move on.
+
+3. **Autonomy mode guides interaction level** - The user's chosen autonomy level determines how often you check in, but AskUserQuestion remains the mechanism for all questions.
+
+### User Preferences
+
+Before starting review (unless autonomy is Autopilot), establish these preferences:
+
+**Output Mode** - Use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "How should I present the review findings?" | 1. Append errata section to the document (Recommended), 2. Write a separate review file to thoughts/*/reviews/ |
+
+**File Review Preference** - Check if the `file-review` plugin is available (look for `file-review:file-review` in available commands).
+
+If file-review plugin is installed, use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like to use file-review for inline feedback after the automated review?" | 1. Yes, open file-review after review (Recommended), 2. No, the automated review is sufficient |
+
+Store these preferences and act on them during the review process.
+
+## When to Use
+
+This skill activates when:
+- User invokes `/review` command
+- Another skill references the reviewing skill at completion
+- User asks to review, critique, or check a document
+
+## Autonomy Mode
+
+At the start of review, adapt your interaction level based on the autonomy mode:
+
+| Mode | Behavior |
+|------|----------|
+| **Autopilot** | Run full review, auto-fix minor issues, present summary at end |
+| **Critical** (Default) | Ask about Critical/Important findings, auto-fix Minor ones |
+| **Verbose** | Walk through each finding, confirm before any changes |
+
+The autonomy mode is passed by the invoking command. If not specified, default to **Critical**.
+
+## Process Steps
+
+### Step 1: Read & Classify
+
+Read the input document fully. Determine the document type from its path and content structure:
+
+| Path contains | Type |
+|---------------|------|
+| `/research/` | Research document |
+| `/plans/` | Plan |
+| `/brainstorms/` | Brainstorm |
+| `/qa/` | QA report |
+
+If the type is ambiguous, infer from content structure or use **AskUserQuestion** to clarify.
+
+### Step 2: Structural Check
+
+Verify required sections exist based on document type:
+
+**Research documents:**
+- YAML frontmatter with required fields (date, researcher, topic, status)
+- Research Question section
+- Summary section
+- Detailed Findings with file:line references
+- Code References table
+- Open Questions section
+
+**Plans:**
+- YAML frontmatter with required fields (date, planner, topic, status)
+- Overview section
+- Current State Analysis
+- Desired End State with Key Discoveries
+- What We're NOT Doing
+- Phases with Changes Required and Success Criteria (both Automated and Manual Verification)
+- Quick Verification Reference
+
+**Brainstorms:**
+- YAML frontmatter with required fields (date, author, topic, status)
+- Context section
+- Exploration section with Q&A pairs
+- Synthesis section
+- Next Steps section
+
+**QA reports:**
+- YAML frontmatter with required fields (date, author, topic, status)
+- Context section
+- Scope section (In Scope / Out of Scope)
+- Test Cases with Steps, Expected, Actual, Status per case
+- Evidence section (Screenshots, Videos, Logs, or External Links)
+- Verdict section with overall status and summary
+
+### Step 3: Content Analysis
+
+Apply type-specific quality criteria:
+
+**Research documents:**
+- Are findings supported by specific file:line references?
+- Are there claims without evidence from the codebase?
+- Are there obvious areas that weren't investigated?
+- Are open questions actually open (not answerable from the findings)?
+
+**Plans:**
+- Are there missing phases or gaps in the implementation sequence?
+- Are success criteria specific enough to be actionable?
+- Are there unstated assumptions about the codebase?
+- Is error handling or rollback addressed?
+- Is there scope creep risk (doing more than stated)?
+
+**Brainstorms:**
+- Were important angles left unexplored?
+- Were conclusions reached prematurely before sufficient exploration?
+- Are constraints and requirements clearly identified?
+- Is the document ready to feed into research or planning?
+
+**QA reports:**
+- Does every test case have an actual result and status?
+- Is evidence provided for failures (screenshots, logs)?
+- Is the verdict consistent with individual test case results?
+- Are edge cases and exploratory testing documented?
+- Are external references (Sentry, PRs, CI) linked where relevant?
+
+### Step 4: Gap Identification
+
+Look for what's missing or assumed:
+- Cross-reference claims against the codebase if needed (spawn **codebase-analyzer** agent for verification)
+- Identify unstated assumptions
+- Check for internal contradictions
+- Verify external references are still valid
+
+### Step 5: Present Findings
+
+Categorize all findings into three severity levels:
+
+| Severity | Meaning | Action |
+|----------|---------|--------|
+| **Critical** | Blocks correctness or completeness — must be addressed | Discuss with user |
+| **Important** | Significant gap or weakness — should be addressed | Discuss with user (or auto-fix in Autopilot) |
+| **Minor** | Formatting, typos, small inconsistencies | Auto-fix unless Verbose mode |
+
+Present a summary as text output with findings grouped by severity.
+
+### Step 6: Apply or Discuss
+
+Based on output mode preference:
+
+**If "Append errata":**
+- Auto-fix Minor issues directly in the document
+- For Critical/Important items, append a `## Review Errata` section at the end of the document with:
+  ```
+  ## Review Errata
+
+  _Reviewed: YYYY-MM-DD by [reviewer]_
+
+  ### Critical
+  - [ ] [Finding description and recommended action]
+
+  ### Important
+  - [ ] [Finding description and recommended action]
+
+  ### Resolved
+  - [x] [Minor issue] — auto-fixed
+  ```
+
+**If "Separate file":**
+- Write review to `thoughts/*/reviews/YYYY-MM-DD-review-of-<original-slug>.md`
+- Include all findings with references back to the original document
+
+### Step 7: Workflow Handoff
+
+After the review is complete, determine the document type (from frontmatter, file path, or content) and propose the appropriate next step.
+
+Use **AskUserQuestion** with context-dependent options:
+
+**If reviewing a brainstorm document:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this brainstorm?" | 1. Start research (→ `/research`), 2. Create a plan directly (→ `/create-plan`), 3. Done for now |
+
+**If reviewing a research document:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this research?" | 1. Create a plan (→ `/create-plan`), 2. Done for now |
+
+**If reviewing a plan document:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this plan?" | 1. Start implementation (→ `/implement-plan`), 2. Done for now |
+
+**If reviewing a post-implementation verification:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next?" | 1. Done — mark as complete, 2. Address remaining items |
+
+**If reviewing a QA report:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this QA report?" | 1. Run post-QA verification (→ `/verify-plan`), 2. Address issues found, 3. Done |
+
+**If document type is unclear**, ask a generic question:
+
+| Question | Options |
+|----------|---------|
+| "Review complete. Would you like to proceed to the next workflow step?" | 1. Yes, suggest next step, 2. Done for now |
+
+## No Rewriting Rule
+
+**CRITICAL**: The reviewer identifies issues — the reviewer does NOT rewrite the document. Present findings and let the original author address them. The only exception is Minor auto-fixes (typos, formatting).
+
+## Review Integration
+
+If the `file-review` plugin is available and the user selected "Yes" during User Preferences setup:
+- After the automated review, invoke `/file-review:file-review <path>` for inline human comments
+- Process feedback with `file-review:process-review` skill
+- If user selected "No" or autonomy mode is Autopilot, skip this step
+
+
+ARGUMENTS: thoughts/taras/plans/2026-03-19-ticket-tracker-linear-integration.md --autonomy=critical
+
+---
+
+<task-notification>
+<task-id>a99efa5e3c78469b7</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/a99efa5e3c78469b7.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify plan codebase references" completed</summary>
+<result>
+
+Now I have all the data needed. Here is the full verification report, Taras.
+
+---
+
+## Verification Report: Plan Document References
+
+### 1. `src/http/core.ts:85-87` -- auth bypass for `/api/linear/authorize` and `/api/linear/callback`
+
+**ACCURATE** (lines 85-86 define the variable, line 87 uses it in the guard)
+
+```
+85:  const isLinearOAuth =
+86:    req.url?.startsWith("/api/linear/authorize") || req.url?.startsWith("/api/linear/callback");
+87:  if (apiKey && !isGitHubWebhook && !isGitLabWebhook && !isAgentMailWebhook && !isLinearOAuth) {
+```
+
+---
+
+### 2. `src/http/index.ts:96` -- calls `handleLinear()` in handler chain
+
+**ACCURATE** (exactly line 96)
+
+```
+96:    () => handleLinear(req, res, pathSegments),
+```
+
+---
+
+### 3. `src/http/index.ts:190` -- calls `initLinear()` on startup
+
+**ACCURATE** (exactly line 190)
+
+```
+190:    initLinear();
+```
+
+---
+
+### 4. `src/http/index.ts:23` -- imports `handleLinear`
+
+**ACCURATE** (exactly line 23)
+
+```
+23:import { handleLinear } from "./linear";
+```
+
+---
+
+### 5. `src/http/core.ts:14` -- imports `initLinear`/`resetLinear` from `../linear`
+
+**ACCURATE** (exactly line 14)
+
+```
+14:import { initLinear, resetLinear } from "../linear";
+```
+
+---
+
+### 6. `src/http/core.ts:112-113` -- `resetLinear()` call
+
+**ACCURATE** (exactly lines 112-113)
+
+```
+112:      resetLinear();
+113:      if (initLinear()) integrations.push("linear");
+```
+
+---
+
+### 7. `src/server.ts:114-180` -- registers all MCP tools
+
+**INACCURATE on the range.** Tool registration begins at line 114 (`registerJoinSwarmTool`) and ends at line 208 (`registerRetryWorkflowRunTool`), with the function returning at line 210. The plan's claim of lines 114-180 captures core tools through the epics capability block, but misses the memory capability block (lines 191-195) and the workflows capability block (lines 198-208). The accurate range is **lines 114-208**.
+
+---
+
+### 8. `src/tools/tool-config.ts` -- has `DEFERRED_TOOLS` set
+
+**ACCURATE.** `DEFERRED_TOOLS` is defined as a `Set` at line 41 (`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tools/tool-config.ts:41`), and `CORE_TOOLS` at line 13, and `ALL_TOOLS` at line 106.
+
+---
+
+### 9. `src/types.ts:66` -- has `"linear"` in `AgentTaskSourceSchema`
+
+**ACCURATE** (exactly line 66)
+
+```
+66:  "linear",
+```
+
+The `AgentTaskSourceSchema` is defined at lines 56-67, and `"linear"` is the last enum value.
+
+---
+
+### 10. `src/be/db.ts` -- has `createTaskExtended()` function
+
+**ACCURATE.** The function exists at line 1762:
+
+```
+1762:export function createTaskExtended(task: string, options?: CreateTaskOptions): AgentTask {
+```
+
+---
+
+### 11. `src/http/route-def.ts` -- has `route()` factory
+
+**ACCURATE.** The `route()` factory function is defined at lines 65-123 (`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/route-def.ts:65`). It also exports the `routeRegistry` array at line 61 and the `RouteDef` interface at line 14.
+
+---
+
+### Additional Checks
+
+#### Does `@linear/sdk` appear in `package.json`?
+
+**YES.** At line 87:
+
+```
+"@linear/sdk": "^77.0.0",
+```
+
+The plan mentions installing `oauth4webapi` but does not mention `@linear/sdk` -- however `@linear/sdk` is already present in the current dependencies.
+
+---
+
+#### What existing files are in `src/linear/`?
+
+Five files exist:
+
+| File | Path |
+|------|------|
+| `app.ts` | `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/app.ts` |
+| `client.ts` | `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/client.ts` |
+| `index.ts` | `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/index.ts` |
+| `oauth.ts` | `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/oauth.ts` |
+| `types.ts` | `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/types.ts` |
+
+---
+
+#### What does `src/be/migrations/008_linear_integration.sql` contain?
+
+The migration (115 lines) does three things:
+
+1. **Creates three new tables** (lines 11-43):
+   - `linear_oauth_tokens` -- single-row OAuth token storage (accessToken, refreshToken, expiresAt, scope)
+   - `linear_sync` -- entity mapping between swarm IDs and Linear IDs (supports `task` and `epic` entity types, with sync direction)
+   - `linear_agent_mapping` -- maps agent IDs to Linear user IDs
+
+2. **Creates indexes** (lines 46-48) for `linear_sync` and `linear_agent_mapping`.
+
+3. **Recreates `agent_tasks` table** (lines 54-114) to add `'linear'` to the `source` CHECK constraint. Uses the standard SQLite pattern: create `agent_tasks_new` with the updated constraint, copy data via `INSERT INTO ... SELECT * FROM`, drop the old table, rename, and recreate all indexes.
+
+---
+
+#### Is there a `src/be/db-queries/` directory?
+
+**NO.** That directory does not exist. No files were found matching that glob pattern.
+
+---
+
+#### Does `openapi.json` have auto-generation, or is it manually maintained?
+
+**Auto-generated.** The system works in two layers:
+
+1. **Runtime generation**: `src/http/openapi.ts` (line 18: `generateOpenApiSpec()`) dynamically generates the OpenAPI spec from the `routeRegistry` populated by `route()` calls in handler files. This is served at `/openapi.json` by the running server (`src/http/core.ts:66-71`).
+
+2. **Static file generation**: `scripts/generate-openapi.ts` imports all handler modules to trigger their `route()` registrations, then calls `generateOpenApiSpec()` and writes the result to the root `openapi.json` file. This is invoked via `bun run docs:openapi` (defined in `package.json:65`). The CI merge gate checks freshness of this file.
+
+---
+
+### Summary
+
+| # | Claim | Verdict |
+|---|-------|---------|
+| 1 | `core.ts:85-87` auth bypass | ACCURATE |
+| 2 | `index.ts:96` handleLinear | ACCURATE |
+| 3 | `index.ts:190` initLinear | ACCURATE |
+| 4 | `index.ts:23` import handleLinear | ACCURATE |
+| 5 | `core.ts:14` import initLinear/resetLinear | ACCURATE |
+| 6 | `core.ts:112-113` resetLinear | ACCURATE |
+| 7 | `server.ts:114-180` tool registration | INACCURATE (actual range: 114-208) |
+| 8 | `tool-config.ts` DEFERRED_TOOLS | ACCURATE |
+| 9 | `types.ts:66` "linear" in source schema | ACCURATE |
+| 10 | `db.ts` createTaskExtended | ACCURATE (line 1762) |
+| 11 | `route-def.ts` route() factory | ACCURATE (line 65) |</result>
+<usage><total_tokens>41424</total_tokens><tool_uses>22</tool_uses><duration_ms>72839</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/a99efa5e3c78469b7.output
+
+---
+
+<task-notification>
+<task-id>a72844a5ee099808c</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/a72844a5ee099808c.output</output-file>
+<status>completed</status>
+<summary>Agent "Check outbound sync coupling" completed</summary>
+<result>
+
+I now have a thorough picture. Let me compile the analysis.
+
+## Analysis: Task Lifecycle Functions in `db.ts` and Integration Hook Patterns
+
+### Overview
+
+The three target functions (`completeTask`, `failTask`, `updateTaskProgress`) in `src/be/db.ts` are **not** pure DB operations today. They already contain side effects: log entry creation and async event emission via the workflow event bus. The existing integrations (GitHub, Slack) do **not** hook into these functions at all -- they use completely different patterns. Adding Linear-specific outbound sync directly into `db.ts` would be a departure from every existing integration pattern in the codebase.
+
+---
+
+### 1. What the Three Functions Look Like Today
+
+#### `completeTask()` (`src/be/db.ts:1317-1351`)
+
+- Fetches the old task state via `getTaskById(id)` (line 1318)
+- Executes `taskQueries.updateStatus().get("completed", finishedAt, id)` to set status (line 1320)
+- Optionally sets output via `taskQueries.setOutput().get(output, id)` (lines 1323-1325)
+- **Side effect 1**: Creates a log entry via `createLogEntry()` with event type `"task_status_change"` (lines 1329-1336), wrapped in `try {} catch {}`
+- **Side effect 2**: Dynamic `import("../workflows/event-bus")` followed by `workflowEventBus.emit("task.completed", {...})` (lines 1338-1346), wrapped in `try {} catch {}`
+- Returns `rowToAgentTask(row)` or `null`
+
+#### `failTask()` (`src/be/db.ts:1353-1381`)
+
+- Same structure: fetches old task, executes `taskQueries.setFailure().get(reason, finishedAt, id)` (line 1356)
+- **Side effect 1**: Log entry with `"task_status_change"` and metadata `{ reason }` (lines 1359-1367)
+- **Side effect 2**: `workflowEventBus.emit("task.failed", {...})` via dynamic import (lines 1369-1377)
+- Returns `rowToAgentTask(row)` or `null`
+
+#### `updateTaskProgress()` (`src/be/db.ts:1537-1550`)
+
+- Simplest of the three: just `taskQueries.setProgress().get(progress, id)` (line 1538)
+- **Side effect 1**: Log entry with event type `"task_progress"` (lines 1541-1547)
+- **No event bus emission** -- unlike the other two, this function does not emit any workflow event
+- Returns `rowToAgentTask(row)` or `null`
+
+#### Complexity Assessment
+
+All three functions are compact (15-35 lines each). Their side effects follow a uniform pattern: a `createLogEntry()` call and (for complete/fail) a dynamic `import().then()` for the event bus, both wrapped in bare `try {} catch {}` blocks that silently swallow errors.
+
+---
+
+### 2. Existing Pattern for Post-Update Hooks / Event Emission
+
+There **is** an existing event system: the `workflowEventBus` at `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/workflows/event-bus.ts`.
+
+It is a thin wrapper around Node.js `EventEmitter` (lines 1-29), exported as a singleton at line 29. The interface is minimal: `emit()`, `on()`, `off()`.
+
+**How `db.ts` uses it**: All four emission points in `db.ts` (lines 1338, 1369, 1409, 1859) use **dynamic import** rather than a top-level import:
+
+```typescript
+import("../workflows/event-bus").then(({ workflowEventBus }) => {
+  workflowEventBus.emit("task.completed", { ... });
+});
+```
+
+This is the only module that uses dynamic import for the event bus; every other consumer uses a static top-level import (e.g., `src/slack/handlers.ts:12`, `src/http/webhooks.ts:44`, `src/agentmail/handlers.ts:8`).
+
+**Who listens**: `src/workflows/index.ts:11-41` sets up listeners in `initWorkflows()`. It subscribes to a fixed list of events (lines 15-35) including `"task.created"` and `"task.completed"` (but notably **not** `"task.failed"` or `"task.cancelled"`). Each listener calls `evaluateWorkflowTriggers(event, data)` (line 38).
+
+The events currently emitted from `db.ts` are:
+| Event | Emitted from | Subscribed to in `initWorkflows()` |
+|---|---|---|
+| `task.created` | `createTaskExtended` (line 1860) | Yes (line 16) |
+| `task.completed` | `completeTask` (line 1339) | Yes (line 17) |
+| `task.failed` | `failTask` (line 1370) | No |
+| `task.cancelled` | `cancelTask` (line 1410) | No |
+
+---
+
+### 3. How GitHub and Slack Integrate -- Neither Hooks Into `db.ts`
+
+#### GitHub Integration Pattern
+
+The GitHub integration at `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/github/handlers.ts` operates **inbound only**. It:
+
+- Imports `createTaskExtended` and `failTask` from `../be/db` (line 1)
+- **Calls** these db functions as a consumer, not as a hook target
+- Creates swarm tasks from GitHub events (webhooks arrive at `src/http/webhooks.ts`, which dispatches to these handlers)
+- Cancels tasks when bots are unassigned (e.g., line 149: `failTask(task.id, ...)`)
+
+GitHub **never syncs outbound** (i.e., when a swarm task completes, there is no code that updates a GitHub issue). The data flow is strictly: GitHub webhook -> handler -> `createTaskExtended()`/`failTask()`. There are no hooks, callbacks, or listeners attached to task lifecycle from the GitHub module.
+
+#### Slack Integration Pattern
+
+The Slack integration at `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/slack/watcher.ts` uses a **polling pattern**:
+
+- `startTaskWatcher()` (line 71) starts a `setInterval` loop every 3 seconds (default)
+- Each cycle calls `getInProgressSlackTasks()` and `getCompletedSlackTasks()` from `../be/db` (lines 92, 184)
+- It compares current state against in-memory tracking maps (`sentProgress`, `notifiedCompletions`) to detect changes
+- When changes are found, it sends Slack messages via `sendProgressUpdate()`, `updateProgressInPlace()`, `sendTaskResponse()`, `updateToFinal()`
+
+Slack does **not** hook into `completeTask()`, `failTask()`, or `updateTaskProgress()`. It discovers state changes by polling the DB every 3 seconds and doing diff-based detection. It filters for tasks that have Slack metadata (`slackChannelId`, `slackThreadTs`) set.
+
+#### Summary of Integration Patterns
+
+| Integration | Direction | Mechanism | Hooks into db.ts functions? |
+|---|---|---|---|
+| GitHub | Inbound only | Webhook -> handler -> calls db functions | No (caller, not listener) |
+| Slack | Outbound only | Polling interval, reads DB state | No (polls DB) |
+| Workflows | Listens to events | `workflowEventBus.on()` subscription | No (subscribes to event bus) |
+
+**No existing integration modifies the db.ts functions themselves or injects behavior into them.**
+
+---
+
+### 4. Impact of Adding Linear-Specific Imports Into `db.ts`
+
+#### Current Import Footprint of `db.ts`
+
+`db.ts` currently has exactly **three** top-level imports (lines 1-41):
+
+1. `Database` from `"bun:sqlite"` (line 1)
+2. Type-only imports from `"../types"` (lines 2-40)
+3. `runMigrations` from `"./migrations/runner"` (line 41)
+
+The dynamic imports of `"../workflows/event-bus"` at four call sites (lines 1338, 1369, 1409, 1859) are the only cross-module runtime dependency, and they use dynamic `import()` specifically to avoid a top-level import.
+
+#### What the Plan Proposes
+
+Phase 4, section 3 of the plan (lines 529-534) proposes modifying `completeTask()`, `failTask()`, and `updateTaskProgress()` in `src/be/db.ts` to:
+
+1. Check for a `tracker_sync` mapping for the task
+2. Call Linear-specific sync functions (`syncTaskCompletionToLinear()`, etc.) from `src/linear/sync.ts`
+3. Check `lastSyncOrigin` for loop prevention
+4. Update `lastSyncOrigin` after pushing to Linear
+
+This would mean `db.ts` would need to either:
+- Add a top-level import of `src/linear/sync.ts` (breaking the pattern of zero integration-specific imports)
+- Or add more dynamic `import("../linear/sync")` calls (following the event-bus pattern)
+
+Either way, this would make `db.ts` directly aware of Linear as an integration, whereas today it knows nothing about GitHub, Slack, or any specific integration. It only knows about the generic `workflowEventBus`.
+
+#### Callers of These Functions
+
+The functions are called from multiple sites:
+
+- `completeTask()`: called from `src/http/tasks.ts:356`, `src/tools/store-progress.ts:124`, and 8+ test files
+- `failTask()`: called from `src/http/tasks.ts:365`, `src/tools/store-progress.ts:133`, `src/github/handlers.ts` (3 sites), `src/gitlab/handlers.ts` (2 sites)
+- `updateTaskProgress()`: called from `src/http/tasks.ts:325`, `src/tools/store-progress.ts:117`
+
+---
+
+### Key Files Referenced
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/be/db.ts` -- core DB functions with the three target functions
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/workflows/event-bus.ts` -- the existing event bus (EventEmitter wrapper)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/workflows/index.ts` -- event bus subscription setup
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/github/handlers.ts` -- GitHub integration (inbound, calls db functions as consumer)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/slack/watcher.ts` -- Slack integration (outbound via polling)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/tasks.ts` -- HTTP task endpoints that call these functions
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tools/store-progress.ts` -- MCP tool that calls these functions
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/thoughts/taras/plans/2026-03-19-ticket-tracker-linear-integration.md` -- the plan under review</result>
+<usage><total_tokens>54100</total_tokens><tool_uses>25</tool_uses><duration_ms>145558</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/a72844a5ee099808c.output
+
+---
+
+<task-notification>
+<task-id>brvum792h</task-id>
+<tool-use-id>toolu_01AuNmcoDJ5NoS8hyiaR2emB</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/brvum792h.output</output-file>
+<status>completed</status>
+<summary>Background command "Open plan in file-review for inline human comments" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/brvum792h.output
