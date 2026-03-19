@@ -1,0 +1,1547 @@
+# Research Codebase
+
+A thin wrapper that invokes the `desplega:researching` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse autonomy mode from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - If document frontmatter has `autonomy:` field, use that as default
+   - Otherwise, ask the user via AskUserQuestion:
+
+   ```
+   How much should I check in with you during this research?
+   - Autopilot: Work independently, only present final results
+   - Critical questions (Recommended): Ask only when blocked or for major decisions
+   - Verbose: Check in frequently, validate approach at each step
+   ```
+
+2. **ALWAYS invoke the `desplega:researching` skill:**
+   - Pass the research query (everything after the flag)
+   - Pass the autonomy mode determined above
+   - Let the skill handle all research logic
+
+3. **If no query provided:**
+   - Respond with: "I'm ready to research the codebase. Please provide your research question or area of interest."
+
+## Example Usage
+
+```
+/research how does the authentication system work
+/research --autonomy=autopilot document all API endpoints
+/research --autonomy=verbose analyze the database schema
+```
+
+
+ARGUMENTS: I want you to help me review the current PR and create a research on what is missing and how we can finalize the linear integration. it should contain clear missing gaps, refactors, testing, manual qa, etc we should do. Note that it's important to mention what we should do to test it (on the linear side).
+
+Ask me questions in missing parts, but what I think is that there should be a 1 (linear issue) - N (tasks), 1 (linear issue) - 1 (epic), 1 (linear project) - 1 (epic), i.e. it's polymorphic really and depends on the use case essentially
+
+---
+
+<task-notification>
+<task-id>a5d279aebf3e88d6d</task-id>
+<tool-use-id>toolu_01XFi91wwsJ4oD3uN7z3AdS2</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/a5d279aebf3e88d6d.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore PR review comments and status" completed</summary>
+<result>Perfect. Now let me compile my findings into a clear report for Taras:
+
+## PR #161 Status Report: Linear Integration Foundation
+
+**Branch:** `linear-integration-foundation`  
+**PR:** #161 (DRAFT)  
+**Current Status:** Awaiting fixes to address blocking review feedback
+
+### CI Status: ✅ All Passing
+All checks are currently green:
+- Detect Changes
+- Lint and Type Check
+- Run Tests
+- Pi-Skills Freshness Check
+- OpenAPI Spec Freshness Check
+- Docker Build Test (both Dockerfile and Dockerfile.worker)
+- Vercel deployments (all 4 projects ready)
+
+### Review Feedback Summary
+
+The bot reviewer (`desplega-bot`) provided **two blocking issues** that need resolution:
+
+#### 🚫 **Issue 1: OAuth `/authorize` endpoint still unauthenticated**
+
+**Current state** (line 85-86 of `src/http/core.ts`):
+```ts
+const isLinearOAuth =
+  req.url?.startsWith("/api/linear/authorize") || req.url?.startsWith("/api/linear/callback");
+```
+
+**Problem:** The `/authorize` endpoint has no authentication. An attacker can:
+1. Visit `/api/linear/authorize` (no auth required)
+2. Authorize with their own Linear account
+3. The server stores the attacker's tokens, hijacking the integration
+
+**What needs fixing:** Only `/callback` should bypass auth. The `/authorize` endpoint must require API key authentication:
+```ts
+const isLinearCallback = req.url?.startsWith("/api/linear/callback");
+```
+
+Admin initiates OAuth via: `curl -H "Authorization: Bearer $API_KEY" http://localhost:3013/api/linear/authorize`
+
+#### 🚫 **Issue 2: Migration 008 uses `SELECT *` in data copy (line 101)**
+
+**Current migration code:**
+```sql
+INSERT INTO agent_tasks_new SELECT * FROM agent_tasks;
+```
+
+**Problem:** This is fragile — if column order drifts between old and new table definitions, data silently goes into wrong columns.
+
+**What needs fixing:** Use explicit column listing, matching the pattern in migration 006 (lines 58-69):
+```sql
+INSERT INTO agent_tasks_new SELECT
+    id, agentId, creatorAgentId, task, status, source,
+    taskType, tags, priority, dependsOn, offeredTo, offeredAt,
+    acceptedAt, rejectionReason, slackChannelId, slackThreadTs, slackUserId,
+    mentionMessageId, mentionChannelId, vcsProvider, vcsRepo, vcsEventType,
+    vcsNumber, vcsCommentId, vcsAuthor, vcsUrl, epicId, parentTaskId,
+    claudeSessionId, agentmailInboxId, agentmailMessageId, agentmailThreadId,
+    model, scheduleId, workflowRunId, workflowRunStepId,
+    createdAt, lastUpdatedAt, finishedAt, failureReason, output, progress, notifiedAt, dir
+FROM agent_tasks;
+```
+
+### Non-Blocking Suggestions from Review
+
+The bot also noted two improvements (already addressed in recent commits):
+
+1. ✅ **Token storage now transactional** - `db.transaction()` wrapper was added (commit `2526e47`)
+2. ✅ **`resetLinear()` calls `resetLinearClient()`** - Proper cleanup added (commit `2526e47`)
+
+### Recent Commit Activity
+
+The branch has 6 commits attempting to address feedback:
+- `fedf298` - fix: remove duplicate dir column in migration 008
+- `74ee4d8` - fix: add missing dir column to migration 008 table recreation
+- `2093b24` - fix: resolve CI failures — migration collision and OpenAPI freshness
+- `e99e0f0` - fix: resolve CI failures — migration collision + OpenAPI route registration
+- `2526e47` - fix: address PR #161 review feedback — auth scope, atomic tokens, reset
+- `d4f8981` - feat: Linear integration foundation — OAuth, DB migration, client
+
+### Files That Need Changes
+
+1. **`src/http/core.ts`** (line 85-87) - Fix auth bypass scope
+2. **`src/be/migrations/008_linear_integration.sql`** (line 101) - Replace `SELECT *` with explicit columns
+
+### Next Steps
+
+The PR appears to have attempted fixes for the issues, but they haven't fully resolved the review feedback. Specifically:
+- The `/authorize` endpoint is still in the bypass list (should be removed)
+- The migration still uses `SELECT *` instead of explicit column listing
+
+Both of these are data safety/security issues that the reviewer flagged as blocking.</result>
+<usage><total_tokens>63438</total_tokens><tool_uses>12</tool_uses><duration_ms>46352</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/a5d279aebf3e88d6d.output
+
+---
+
+<task-notification>
+<task-id>a7ba14c2586ab00b4</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/a7ba14c2586ab00b4.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore Linear integration PR changes" completed</summary>
+<result>Perfect. I now have a complete picture of the Linear integration. Let me create the final comprehensive report.
+
+## Linear Integration Foundation - Complete Exploration Report
+
+### Overview
+The `linear-integration-foundation` branch implements **Phase 1, Step 1** of the Linear integration for agent-swarm. This is a foundation layer providing OAuth 2.0 authentication and database infrastructure for future Linear task sync features. The integration is **fully optional** and gracefully disables when `LINEAR_CLIENT_ID` is not set.
+
+---
+
+### Core Components
+
+#### 1. **Database Schema** (`src/be/migrations/008_linear_integration.sql`)
+Creates three new tables plus modifies the agent_tasks table:
+
+**`linear_oauth_tokens`** - Single-row workspace-level OAuth token storage
+- Stores `accessToken`, `refreshToken`, `expiresAt`, `scope`
+- Handles token lifecycle management (creation, updates)
+
+**`linear_sync`** - Bidirectional entity mapping between Swarm and Linear
+- Maps both tasks and epics (`entityType`: 'task' or 'epic')
+- Tracks Linear identifiers (e.g., "SWARM-123"), URLs, sync timestamp
+- `syncDirection` supports three modes: 'outbound', 'inbound', 'bidirectional' (Phase 2 readiness)
+- Enforces UNIQUE constraints on (entityType, swarmId) and (entityType, linearId)
+
+**`linear_agent_mapping`** - Agent to Linear user ID mapping
+- Links swarm agents to Linear users for attribution and permission mapping
+- 1:1 relationship enforced with UNIQUE constraints
+
+**Modified `agent_tasks`** - Adds 'linear' to source CHECK constraint
+- Tasks can now originate from Linear (`source IN ('mcp', 'slack', 'api', 'github', 'gitlab', 'agentmail', 'system', 'schedule', 'workflow', 'linear')`)
+- Table recreation required to apply constraint change
+- Includes all existing columns plus `dir` (from prior migration)
+
+**Indexes for performance:**
+- `idx_linear_sync_swarmId`, `idx_linear_sync_linearId` (compound entityType lookups)
+- `idx_linear_agent_mapping_agentId` (agent lookups)
+
+---
+
+#### 2. **OAuth 2.0 Implementation** (`src/linear/oauth.ts`)
+
+**PKCE Flow** (OAuth 2.0 with Proof Key for Code Exchange)
+- Generates 64-character code verifier and computes SHA256 code challenge
+- Uses base64url encoding per spec
+- State parameter validation (10-minute TTL with automatic cleanup)
+
+**Authorization URL generation** (`getAuthorizationUrl()`)
+- Redirects to `https://linear.app/oauth/authorize` with proper parameters
+- Scopes: `"read,write,issues:create,comments:create,admin,app:assignable,app:mentionable"`
+- Requires env vars: `LINEAR_CLIENT_ID`, `LINEAR_REDIRECT_URI`
+
+**Token Exchange** (`handleOAuthCallback()`)
+- Exchanges auth code for tokens via `https://api.linear.app/oauth/token`
+- Validates state parameter against pending OAuth state map
+- Stores tokens atomically in database (wrapped in transaction)
+- Requires: `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET`, `LINEAR_REDIRECT_URI`
+
+**Token Refresh** (`refreshAccessToken()`)
+- Uses refresh_token grant type to get new access tokens
+- Automatic token refresh when expiring soon (5-minute buffer by default)
+- Gracefully returns null if credentials missing
+
+**Utility Functions**
+- `getStoredTokens()` - Retrieves latest token from DB
+- `isTokenExpiringSoon(expiresAt, bufferMs)` - Checks token expiration with buffer
+
+---
+
+#### 3. **Linear Client Wrapper** (`src/linear/client.ts`)
+
+**Auto-refresh Caching**
+- Caches LinearClient instance and access token for reuse
+- Automatically refreshes token before expiry
+- Resets cache on token changes
+
+**`getLinearClient()`**
+- Returns a LinearClient from @linear/sdk
+- Handles token refresh transparently
+- Returns null if no stored tokens (OAuth incomplete)
+
+**`withLinearClient<T>(fn)`** - Wrapper with auto-retry
+- Executes Linear API calls with automatic error handling
+- On auth errors (401/403), refreshes token and retries once
+- Useful for handling token expiration mid-request
+
+**`resetLinearClient()`** - Cache invalidation
+- Clears cached client state
+- Forces fresh client on next call
+
+---
+
+#### 4. **Integration Init & Config** (`src/linear/app.ts`)
+
+**`isLinearEnabled()`**
+- Checks if `LINEAR_CLIENT_ID` is set AND `LINEAR_DISABLE` is not "true"
+- Also respects `LINEAR_ENABLED` feature flag (defaults to enabled if `LINEAR_CLIENT_ID` present)
+
+**`initLinear()`** - Idempotent initialization
+- Logs warning if `LINEAR_CLIENT_SECRET` or `LINEAR_REDIRECT_URI` missing
+- Returns false if integration disabled
+- Safe to call multiple times
+
+**`resetLinear()`** - State cleanup for config reloads
+- Clears initialization flag
+- Calls `resetLinearClient()`
+
+---
+
+#### 5. **HTTP Endpoints** (`src/http/linear.ts`)
+
+Two OAuth endpoints with route definitions for OpenAPI registration:
+
+**`GET /api/linear/authorize`**
+- Redirects user to Linear OAuth consent screen
+- Returns 302 redirect or error responses
+- Requires: Linear integration enabled
+- No API key auth required (exempt in core.ts)
+
+**`GET /api/linear/callback`**
+- Handles OAuth callback from Linear
+- Parses code and state query parameters
+- Exchanges code for tokens via `handleOAuthCallback()`
+- Returns HTML confirmation page on success
+- Returns 400 for missing/invalid params, 500 for exchange errors
+
+**Route Definition Pattern**
+- Uses `route()` function for OpenAPI spec registration
+- Excludes from general API key auth bypass (security fix in PR #161 feedback)
+
+---
+
+#### 6. **Server Integration** (`src/http/index.ts`, `src/http/core.ts`)
+
+**Route Handler Chain**
+- `handleLinear()` called in main HTTP server handler chain
+- Positioned after ecosystem but before webhooks
+
+**Initialization**
+- `initLinear()` called during server startup
+- `resetLinear()` called on config reload (e.g., env var changes)
+- Integration added to startup logs if enabled
+
+**Auth Bypass**
+- OAuth endpoints (`/api/linear/authorize`, `/api/linear/callback`) bypass API key auth
+- Narrowed scope (not all `/api/linear/*`) per security feedback
+
+---
+
+#### 7. **Type Definitions** (`src/linear/types.ts`, `src/types.ts`)
+
+**TypeScript Interfaces:**
+- `LinearOAuthToken` - Stored token row structure
+- `LinearSyncMapping` - Entity sync mapping with direction flags
+- `LinearAgentMapping` - Agent ↔ user ID mapping
+- `LinearTokenResponse` - Linear OAuth endpoint response shape
+- `PendingOAuthState` - In-memory state during OAuth flow
+
+**Task Source Enum** (`src/types.ts`)
+- Added `"linear"` to `AgentTaskSourceSchema` (Zod validator)
+
+---
+
+#### 8. **Environment Configuration** (`.env.example`)
+
+```
+LINEAR_CLIENT_ID=                      # OAuth app client ID (required to enable)
+LINEAR_CLIENT_SECRET=                  # OAuth app client secret
+LINEAR_REDIRECT_URI=                   # e.g., https://swarm.desplega.sh/api/linear/callback
+LINEAR_TEAM_ID=                        # SWARM team UUID (populated after setup)
+LINEAR_SIGNING_SECRET=                 # Webhook verification secret (Phase 2)
+LINEAR_DISABLE=true                    # Set to disable integration
+LINEAR_ENABLED=true                    # Feature flag (enabled by default if CLIENT_ID set)
+LINEAR_SYNC_PROGRESS=true              # Sync progress updates as Linear comments (Phase 2)
+```
+
+---
+
+### Commit History & Fixes
+
+**Foundation Commit** (`d4f8981`)
+- Initial Linear integration with OAuth, DB migration, client wrapper
+- Added @linear/sdk dependency
+- Created HTTP endpoints and server integration
+
+**Review Feedback Fixes** (`2526e47`)
+- Narrowed auth bypass to specific OAuth routes (security)
+- Wrapped token storage in db.transaction() for atomicity
+- Added resetLinearClient() to resetLinear()
+
+**CI Resolution** (`e99e0f0`, `2093b24`)
+- Renumbered migration from 007 → 008 (collision with main branch 007_task_dir)
+- Refactored HTTP handlers to use route() pattern for OpenAPI registration
+- Updated generate-openapi.ts to include linear routes
+
+**Migration Fixes** (`74ee4d8`, `fedf298`)
+- Added missing `dir` column to agent_tasks_new during table recreation
+- Removed duplicate `dir` column definition
+
+---
+
+### Key Design Decisions
+
+1. **Workspace-level OAuth** - Single shared token per workspace (not per-agent)
+2. **PKCE Flow** - More secure than basic auth code flow
+3. **Auto-token Refresh** - Transparent to API callers via wrapper
+4. **Optional Integration** - Gracefully disabled when LINEAR_CLIENT_ID unset
+5. **Bidirectional Mapping** - `syncDirection` field prepared for future bi-sync features
+6. **Atomic Token Storage** - Transaction-wrapped upsert prevents corruption
+7. **Cache with Expiry Check** - Reduces API calls while ensuring fresh tokens
+
+---
+
+### Files Changed Summary
+
+**New Files:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/index.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/types.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/oauth.ts` (209 lines)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/client.ts` (86 lines)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/app.ts` (61 lines)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/linear.ts` (113 lines)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/be/migrations/008_linear_integration.sql` (114 lines)
+
+**Modified Files:**
+- `src/http/index.ts` - Added Linear handler to route chain
+- `src/http/core.ts` - Bypass auth for OAuth endpoints
+- `src/types.ts` - Added 'linear' to AgentTaskSource enum
+- `.env.example` - Added Linear env variables
+- `package.json` - Added @linear/sdk dependency
+- `openapi.json` - Added Linear OAuth routes
+
+---
+
+### Next Steps (Implied for Phase 1.2, Phase 2)
+
+Based on env vars and sync table design:
+- **Phase 1.2:** Webhook handlers for Linear events
+- **Phase 2:** Task sync (outbound: Swarm tasks → Linear issues)
+- **Phase 2:** Inbound sync (Linear issues → Swarm tasks)
+- **Phase 2:** Progress sync (updating Linear comments with task status)
+- **Phase 3:** Bidirectional sync with conflict resolution</result>
+<usage><total_tokens>70623</total_tokens><tool_uses>33</tool_uses><duration_ms>80698</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/a7ba14c2586ab00b4.output
+
+---
+
+<task-notification>
+<task-id>a534e17916b0eab6a</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/a534e17916b0eab6a.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore existing epic/task system" completed</summary>
+<result>Now I have enough information. Let me compile a comprehensive exploration report.
+
+## Exploration Summary: Epic and Task System in Agent Swarm
+
+I've thoroughly explored the existing epic and task system in the agent-swarm codebase. Here's what I found:
+
+---
+
+### **1. DATA MODEL & TYPES (src/types.ts)**
+
+#### **Task Schema (AgentTaskSchema)**
+- **Core fields**: `id`, `agentId`, `task` description, `status`, `source`
+- **Status enum**: `backlog`, `unassigned`, `offered`, `reviewing`, `pending`, `in_progress`, `paused`, `completed`, `failed`, `cancelled`
+- **Source enum**: `mcp`, `slack`, `api`, `github`, `gitlab`, `agentmail`, `system`, `schedule`, `workflow`, `linear` (recently added)
+- **Epic association**: `epicId` (optional, nullable) — direct foreign key to epic
+- **Task metadata**: `taskType` (max 50 chars), `tags` (array), `priority` (0-100), `dependsOn` (array of task IDs)
+- **VCS metadata**: `vcsProvider`, `vcsRepo`, `vcsEventType`, `vcsNumber`, `vcsCommentId`, `vcsAuthor`, `vcsUrl`
+- **Session attachment**: `parentTaskId`, `claudeSessionId`, `model` selection
+- **Schedule/Workflow linking**: `scheduleId`, `workflowRunId`, `workflowRunStepId`
+- **Acceptance tracking**: `offeredTo`, `offeredAt`, `acceptedAt`, `rejectionReason`
+- **Completion data**: `output`, `failureReason`, `progress`, `finishedAt`
+
+#### **Epic Schema (EpicSchema)**
+- **Core fields**: `id`, `name` (unique), `goal`, `description`, `status`
+- **Status enum**: `draft`, `active`, `paused`, `completed`, `cancelled`
+- **Documentation**: `prd` (markdown), `plan` (markdown), `researchDocPath`, `planDocPath`
+- **Leadership**: `createdByAgentId`, `leadAgentId`
+- **Internal comms**: `channelId` — auto-created public channel for each epic
+- **VCS integration**: `vcsProvider`, `vcsRepo`, `vcsMilestone`
+- **Slack context**: `slackChannelId`, `slackThreadTs`
+- **Progress tracking**: `priority`, `tags`, `nextSteps`, `progressNotifiedAt`, `startedAt`, `completedAt`
+- **Computed view**: `EpicWithProgress` includes `taskStats` (total, completed, failed, inProgress, pending, unassigned) and `progress` percentage
+
+#### **Task-Epic Relationship**
+- **Direction**: One-to-many (one epic → many tasks)
+- **Association**: Via `epicId` field on `agent_tasks` table
+- **Storage**: SQL foreign key with `ON DELETE SET NULL`
+- **Lookup**: `getTasksByEpicId(epicId)` returns all tasks for an epic
+
+---
+
+### **2. DATABASE SCHEMA & MIGRATIONS**
+
+#### **Migration Files**
+Located in `/src/be/migrations/`:
+- `001_initial.sql` — Baseline schema with `epics` and `agent_tasks` tables
+- `008_linear_integration.sql` — **Most recent**, adds Linear integration tables and updates task source enum
+
+#### **Epics Table** (from 001_initial.sql)
+```sql
+CREATE TABLE epics (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT,
+  goal TEXT NOT NULL,
+  prd TEXT,
+  plan TEXT,
+  status TEXT CHECK(status IN ('draft', 'active', 'paused', 'completed', 'cancelled')),
+  priority INTEGER DEFAULT 50,
+  tags TEXT DEFAULT '[]',
+  createdByAgentId TEXT,
+  leadAgentId TEXT,
+  channelId TEXT REFERENCES channels(id),
+  researchDocPath TEXT,
+  planDocPath TEXT,
+  slackChannelId TEXT,
+  slackThreadTs TEXT,
+  vcsProvider TEXT,  -- Added in 006_vcs_provider.sql
+  vcsRepo TEXT,
+  vcsMilestone TEXT,
+  nextSteps TEXT,    -- Added in 005_epic_next_steps.sql
+  progressNotifiedAt TEXT,
+  createdAt TEXT NOT NULL,
+  lastUpdatedAt TEXT NOT NULL,
+  startedAt TEXT,
+  completedAt TEXT
+);
+```
+
+#### **Linear Integration Tables** (from 008_linear_integration.sql)
+```sql
+CREATE TABLE linear_oauth_tokens (
+  id TEXT PRIMARY KEY,
+  accessToken TEXT NOT NULL,
+  refreshToken TEXT NOT NULL,
+  expiresAt TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  createdAt TEXT, updatedAt TEXT
+);
+
+CREATE TABLE linear_sync (
+  id TEXT PRIMARY KEY,
+  entityType TEXT CHECK(entityType IN ('task', 'epic')),
+  swarmId TEXT NOT NULL,
+  linearId TEXT NOT NULL,
+  linearIdentifier TEXT,
+  linearUrl TEXT,
+  lastSyncedAt TEXT NOT NULL,
+  syncDirection TEXT CHECK(syncDirection IN ('outbound', 'inbound', 'bidirectional')),
+  createdAt TEXT,
+  UNIQUE(entityType, swarmId),
+  UNIQUE(entityType, linearId)
+);
+
+CREATE TABLE linear_agent_mapping (
+  id TEXT PRIMARY KEY,
+  agentId TEXT NOT NULL UNIQUE,
+  linearUserId TEXT NOT NULL UNIQUE,
+  agentName TEXT NOT NULL,
+  createdAt TEXT
+);
+```
+
+---
+
+### **3. DATABASE LAYER FUNCTIONS (src/be/db.ts)**
+
+#### **Epic CRUD**
+- `createEpic(data: CreateEpicData)` — Creates epic + auto-creates messaging channel
+  - Auto-generates channel name: `epic-{name-slugified}`
+  - Sets initial status to `draft`
+  - Creates log entry
+- `getEpicById(id: string)` — Returns epic or null
+- `getEpicByName(name: string)` — Returns epic by unique name
+- `getEpics(filters?: EpicFilters)` — List with optional filters (status, createdBy, leadAgent, search, limit)
+- `updateEpic(id: string, data: UpdateEpicData)` — Partial update, handles status transitions (draft→active sets startedAt, status=completed sets completedAt)
+- `deleteEpic(id: string)` — Deletes and unassigns all associated tasks
+
+#### **Epic Progress & Stats**
+- `getEpicTaskStats(epicId: string)` — Returns counts: total, completed, failed, inProgress, pending, unassigned
+- `getEpicWithProgress(id: string)` — Returns epic + computed progress % and task stats
+- `getTasksByEpicId(epicId: string)` — Returns tasks ordered by priority DESC, createdAt ASC
+- `getEpicsWithProgressUpdates()` — Returns active epics with task completions since last notification (used for lead polling)
+- `markEpicProgressNotified(epicId: string)` — Sets `progressNotifiedAt` timestamp
+- `markEpicsProgressNotified(epicIds: string[])` — Batch mark notified
+
+#### **Task-Epic Association**
+- `assignTaskToEpic(taskId: string, epicId: string)` — Updates task.epicId
+- `unassignTaskFromEpic(taskId: string)` — Clears task.epicId to NULL
+
+#### **Task CRUD**
+- `createTask(agentId, task, options)` — Creates task with optional Slack context
+- `createTaskExtended(task: string, options?: CreateTaskOptions)` — Extended creation with dedup, epic assignment, dependencies, scheduling
+- `getTaskById(id: string)`
+- `getTasksByAgentId(agentId: string)`
+- `getTasksByStatus(status: AgentTaskStatus)`
+- `getAllTasks(filters?: TaskFilters)` — Complex filtering by status, agentId, epicId, search, unassigned, offeredTo, taskType, tags, scheduleId, readyOnly
+- `getTasksCount(filters)` — Count for pagination
+
+#### **Task State Transitions**
+- `startTask(taskId)` — pending → in_progress (guards against terminal states)
+- `completeTask(id, output?)` — Terminal state, sets finishedAt
+- `failTask(id, reason)` — Terminal state, sets finishedAt + failureReason
+- `cancelTask(id, reason?)` — Terminal state
+- `pauseTask(id)` — in_progress → paused (for graceful shutdown)
+- `resumeTask(taskId)` — paused → pending
+
+#### **Task Pool Operations**
+- `claimTask(taskId, agentId)` — unassigned → pending
+- `releaseTask(taskId)` — pending → unassigned
+- `acceptTask(taskId, agentId)` — offered → pending
+- `rejectTask(taskId, agentId, reason?)` — offered → unassigned
+- `moveTaskToBacklog(taskId)` — Any → backlog
+- `moveTaskFromBacklog(taskId)` — backlog → unassigned
+
+#### **Dependency & Capacity**
+- `checkDependencies(taskId)` — Returns {ready, blockedBy}
+- `getPendingTaskForAgent(agentId)` — Returns first pending task with met dependencies
+- `hasCapacity(agentId)` — Checks maxTasks vs active count
+- `getActiveTaskCount(agentId)` — Returns count of non-terminal tasks
+
+---
+
+### **4. MCP TOOLS (src/tools/)**
+
+#### **Epic Tools** (src/tools/epics/)
+All tools check lead-agent authorization where noted:
+
+1. **create-epic.ts**
+   - Auth: **Lead agent only**
+   - Input: name, goal, description, prd, plan, priority, tags, leadAgentId, researchDocPath, planDocPath, Slack/VCS context
+   - Output: Created epic + auto-created channel
+   - Validation: Prevents duplicate names
+
+2. **list-epics.ts**
+   - Auth: Public (read-only)
+   - Filters: status, search, leadAgentId, createdByAgentId, limit
+   - Output: Epics with progress info (taskStats, progress %)
+
+3. **get-epic-details.ts**
+   - Auth: Public (read-only)
+   - Lookup: By epicId or name
+   - Output: Epic with progress + associated tasks
+
+4. **update-epic.ts**
+   - Auth: **Creator, epic lead, or swarm lead**
+   - Fields: name, description, goal, prd, plan, status, priority, tags, leadAgentId, researchDocPath, planDocPath, nextSteps, Slack/VCS context
+   - Validations: leadAgentId must exist, prevents unauthorized updates
+
+5. **delete-epic.ts**
+   - Auth: **Creator or swarm lead**
+   - Side effect: Unassigns all tasks (doesn't delete them)
+
+6. **assign-task-to-epic.ts**
+   - Auth: **Lead agent only**
+   - Input: taskId, epicId (or epicName)
+   - Output: Updated task
+
+7. **unassign-task-from-epic.ts**
+   - Auth: **Lead agent only**
+   - Input: taskId
+   - Output: Updated task
+
+#### **Task Pool Tools** (src/tools/)
+
+1. **send-task.ts**
+   - Dispatch task to agent, offer for acceptance, or create unassigned
+   - Input: agentId (optional), task, offerMode, taskType, tags, priority, dependsOn, epicId, dir, parentTaskId, vcsRepo, model, allowDuplicate
+   - Dedup: Checks for similar existing tasks (skipped if allowDuplicate=true)
+   - Output: Created/updated task
+
+2. **task-action.ts**
+   - Pool operations: create, claim, release, accept, reject, to_backlog, from_backlog
+   - Flexible input based on action type
+   - Output: Updated task
+
+3. **poll-task.ts**, **get-task-details.ts**, **cancel-task.ts**, **store-progress.ts**
+   - Standard query/mutation operations
+
+---
+
+### **5. RELATIONSHIP MODEL**
+
+```
+┌─────────────────────────────┐
+│      Epics                  │
+├─────────────────────────────┤
+│ id (PK)                     │
+│ name (UNIQUE)               │
+│ goal                        │
+│ status (enum)               │
+│ leadAgentId (FK→agents)     │
+│ createdByAgentId (FK→agents)│
+│ channelId (FK→channels)     │
+│ progressNotifiedAt          │
+└──────────────┬──────────────┘
+               │ (1:N)
+               │
+               ↓ epicId (FK)
+┌─────────────────────────────┐
+│      Agent Tasks            │
+├─────────────────────────────┤
+│ id (PK)                     │
+│ epicId (nullable, FK→epics) │
+│ agentId (nullable, FK→agents)
+│ status (enum)               │
+│ source (enum)               │
+│ task (description)          │
+│ tags, priority, dependsOn   │
+│ Slack/VCS metadata          │
+│ parentTaskId (session link) │
+│ scheduleId, workflowRunId   │
+└─────────────────────────────┘
+```
+
+**Key Properties:**
+- Many tasks → one epic (via `epicId` foreign key)
+- Task's `source` field can be: `mcp`, `slack`, `api`, `github`, `gitlab`, `agentmail`, `system`, `schedule`, `workflow`, **or `linear`** (new)
+- Epic's `channelId` points to an auto-created internal messaging channel
+- Task `dependsOn` is a JSON array of task IDs
+- Epic `progressNotifiedAt` enables incremental polling of progress updates
+
+---
+
+### **6. LINEAR INTEGRATION FOUNDATION (Migration 008)**
+
+The migration adds infrastructure for Linear sync:
+- **OAuth tokens table** — Stores access/refresh tokens with expiry and scope
+- **Entity mapping table** — Maps swarm tasks/epics to Linear issues/projects
+  - Bidirectional lookup: swarmId ↔ linearId
+  - Tracks `lastSyncedAt` and `syncDirection` (outbound/inbound/bidirectional)
+  - Stores Linear identifier and URL for external reference
+- **Agent mapping table** — Maps swarm agents to Linear users (1:1)
+- **Source enum update** — `agent_tasks.source` now includes `'linear'`
+
+**What's NOT in the schema yet:**
+- No Linear-specific fields on epics or tasks tables (metadata would be in linear_sync table)
+- No webhook endpoint or polling schedule defined
+- No sync state machine or conflict resolution logic
+- No reverse-sync trigger from Linear back to swarm
+
+---
+
+### **7. KEY DESIGN PATTERNS**
+
+1. **Auto-created channels for epics** — Every epic gets a messaging channel for collaboration
+2. **Progress notification system** — Lead polling detects epic progress via `progressNotifiedAt` timestamp
+3. **Flexible task creation** — `createTaskExtended()` supports dedup, epic assignment, dependencies, scheduling in one call
+4. **Authorization hierarchy** — Epic operations restricted to creators, leads, or swarm lead
+5. **Source tracking** — All tasks track their origin (Slack, API, GitHub, Linear, etc.)
+6. **JSON storage** — Tags and dependencies stored as JSON arrays in SQLite
+7. **Terminal state guards** — Once task reaches completed/failed/cancelled, it cannot be revived
+
+---
+
+### **8. FILE LOCATIONS**
+
+**Type Definitions**: `/src/types.ts` (lines 406-458 for epics, 56-143 for tasks)
+
+**Database Layer**: `/src/be/db.ts`
+- Epic functions: Lines 4368-4812
+- Task functions: Lines 816-2129
+- Row converters: Lines 656-750 (tasks), 4311-4366 (epics)
+
+**Migrations**: `/src/be/migrations/`
+- `001_initial.sql` — Epic and task schema baseline
+- `008_linear_integration.sql` — Linear integration tables + task source update
+
+**MCP Tools**:
+- Epic tools: `/src/tools/epics/{create,list,get-details,update,delete,assign-task,unassign-task}.ts`
+- Task tools: `/src/tools/{send-task,task-action,poll-task,get-task-details,cancel-task,store-progress}.ts`
+
+**HTTP Layer**: `/src/http.ts` (MCP server registration)
+
+---
+
+### **9. OBSERVATIONS FOR LINEAR INTEGRATION**
+
+**Opportunities:**
+- Epic statuses align well with Linear project/cycle states (draft→active→completed)
+- Task source "linear" already in enum — easy to tag Linear-originated tasks
+- Entity mapping table is prepared for bidirectional syncing
+- Progress notification pattern could inform Linear of swarm task completions
+
+**Considerations:**
+- Swarm uses SQLite JSON for arrays (tags, dependencies); Linear uses different structure
+- Agent mapping assumes 1:1 relationship; need to handle agents without Linear accounts
+- Epic auto-creates internal channel; Linear has its own project structure
+- Task dependencies within swarm are simpler than Linear's issue linking model
+- Lead-only operations (epic create/update) may need role mapping to Linear
+
+---
+
+This completes the thorough exploration of the existing epic and task system. The foundation is well-structured with clear separation of concerns: database layer, type layer, MCP tools, and HTTP routing. The Linear integration tables are prepared, and the task source enum is ready.</result>
+<usage><total_tokens>94446</total_tokens><tool_uses>33</tool_uses><duration_ms>94443</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/a534e17916b0eab6a.output
+
+---
+
+[Request interrupted by user]
+
+---
+
+continue
+
+---
+
+continue
+
+---
+
+continue
+
+---
+
+<task-notification>
+<task-id>bgu7lq2ky</task-id>
+<tool-use-id>toolu_01KcMtHfNz2JpA8JY3ifc3z1</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/bgu7lq2ky.output</output-file>
+<status>completed</status>
+<summary>Background command "Open research doc in file-review GUI" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/bgu7lq2ky.output
+
+---
+
+<task-notification>
+<task-id>a67557baad2341ce0</task-id>
+<tool-use-id>toolu_01T7AsDKEFGTGEwN9D7cSwPJ</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/a67557baad2341ce0.output</output-file>
+<status>completed</status>
+<summary>Agent "Research Linear OAuth app setup details" completed</summary>
+<result>
+
+Good, the thoughts directory is tracked in git. Now let me write the research file.
+
+Here is the complete research, Taras. I'll present it in full below and explain the key takeaways afterward.
+
+---
+
+## Summary
+
+Linear's integration model is substantially different from both GitHub Apps and Slack Apps. The most important findings for the agent-swarm integration are:
+
+1. **Yes, a Linear app CAN be @mentioned in issues/comments** -- this requires the `app:mentionable` OAuth scope and the `actor=app` authorization mode.
+2. **Yes, issues can be "assigned" to a Linear app** -- but it uses a **delegation** model, not direct assignment. The human remains the assignee; the app becomes the delegate. This requires the `app:assignable` scope.
+3. **Webhooks use HMAC-SHA256** with a `Linear-Signature` header (hex-encoded, no prefix). Simpler than GitHub's `sha256=` prefixed format.
+4. **The Agent Interaction SDK** provides `AgentSessionEvent` webhooks that fire when the app is mentioned or delegated work -- this is the primary entry point, not generic issue/comment webhooks.
+5. **Linear supports `actor=app` OAuth** which creates a dedicated bot user in the workspace. This is the correct mode for agent-swarm (not user-delegated OAuth).
+
+---
+
+## 1. Creating a Linear OAuth Application
+
+### Where to Create
+
+Navigate to **Settings > Administration > API > OAuth applications** in your Linear workspace, or go directly to `https://linear.app/settings/api/applications` and click "Create new OAuth Application."
+
+### Available Settings
+
+When creating/editing the OAuth app, you configure:
+
+| Setting | Description |
+|---|---|
+| **Application Name** | Display name shown to users during authorization |
+| **Developer Name** | Your company/developer name |
+| **Developer URL** | Link to your website |
+| **Description** | What the app does |
+| **Icon** | App avatar (shown in Linear UI when the app acts) |
+| **Callback URLs** | OAuth redirect URIs (e.g., `http://localhost:3013/api/linear/callback`) |
+| **Public** | Toggle to allow ALL Linear workspaces to authorize (vs. only your workspace) |
+| **Client credentials** | Toggle to enable `client_credentials` grant type for server-to-server tokens |
+| **Enable webhooks** | Toggle + set a **Webhook URL** for the app |
+| **Agent session events** | Checkbox under webhooks -- enables `AgentSessionEvent` delivery |
+
+After saving, you get:
+- **Client ID**
+- **Client Secret**
+- **Webhook Signing Secret** (on the webhook detail page)
+
+### OAuth Endpoints
+
+| Endpoint | URL |
+|---|---|
+| Authorization | `https://linear.app/oauth/authorize` |
+| Token exchange | `https://api.linear.app/oauth/token` |
+| GraphQL API | `https://api.linear.app/graphql` |
+
+### Available OAuth Scopes
+
+| Scope | Description |
+|---|---|
+| `read` | Read access (default) |
+| `write` | Write access to the user's account |
+| `issues:create` | Create new issues and attachments |
+| `comments:create` | Create new issue comments |
+| `timeSchedule:write` | Create/modify time schedules |
+| `admin` | Full admin-level endpoint access |
+| `app:assignable` | App appears in the assignee/delegate picker |
+| `app:mentionable` | App appears in the @mention dropdown |
+
+### Two Authorization Modes
+
+**Standard OAuth (user-actor):** The token acts on behalf of the authorizing user. Actions appear as that user.
+
+**App-actor OAuth (`actor=app`):** The token acts as the **application itself**. Linear creates a **dedicated bot user** in the workspace to represent the app. This is required for agents.
+
+Example authorization URL with `actor=app`:
+```
+https://linear.app/oauth/authorize
+  ?client_id=YOUR_CLIENT_ID
+  &redirect_uri=http://localhost:3013/api/linear/callback
+  &response_type=code
+  &scope=read,write,app:assignable,app:mentionable
+  &actor=app
+```
+
+**Important**: `actor=app` requires the authorizing user to be a **workspace admin**.
+
+### Token Lifecycle
+
+- Access tokens are valid for **24 hours**
+- Refresh tokens are enabled by default (for apps created after Oct 1, 2025)
+- `client_credentials` tokens are valid for **30 days** and act as app-actor tokens with access to all public teams
+- Only one active `client_credentials` token per app at a time
+
+---
+
+## 2. Can a Linear App Be @mentioned?
+
+**Yes.** When these conditions are met:
+
+1. The OAuth app requests the `app:mentionable` scope
+2. The app is installed with `actor=app` mode
+3. The "Agent session events" webhook category is enabled in the OAuth app config
+
+The app will then appear in Linear's `@` mention autocomplete dropdown alongside regular users. Users can @mention the app in:
+- Issue comments
+- Documents
+
+When mentioned, Linear sends an `AgentSessionEvent` webhook (not a regular `Comment` webhook) to the app's configured webhook URL.
+
+---
+
+## 3. What `app:assignable` and `app:mentionable` Mean
+
+### `app:assignable`
+
+When this scope is granted, the app appears in Linear's **assignee picker**. However, assigning an issue to the app does **not** make the app the assignee in the traditional sense. Instead:
+
+- The **human user** remains the primary assignee (owner)
+- The **app becomes the delegate** -- it acts on behalf of the user
+- This triggers a **delegation** event, not a standard assignment
+
+This is a deliberate design choice by Linear: "humans maintain ownership while agents act on their behalf."
+
+### `app:mentionable`
+
+When this scope is granted, the app appears in the **@mention autocomplete**. Users can reference the app in comments and documents, which triggers an `AgentSessionEvent` webhook.
+
+Both scopes are **opt-in**. Existing apps without these scopes remain unchanged.
+
+---
+
+## 4. Linear Webhooks
+
+### Two Ways to Create Webhooks
+
+1. **Workspace-level webhooks**: Created in Settings > Administration > API > Webhooks. Requires admin privileges. Team-scoped or workspace-wide.
+
+2. **OAuth app webhooks**: Configured in the OAuth app settings. When a workspace authorizes the app, Linear **automatically creates a webhook** for that workspace pointing to the configured URL. This is the correct approach for a distributed integration.
+
+### Webhook HTTP Headers
+
+Every webhook request includes:
+
+| Header | Value |
+|---|---|
+| `Content-Type` | `application/json; charset=utf-8` |
+| `Accept-Charset` | `utf-8` |
+| `User-Agent` | `Linear-Webhook` |
+| `Linear-Delivery` | Unique delivery UUID (e.g., `234d1a4e-b617-4388-90fe-adc3633d6b72`) |
+| `Linear-Event` | Event type (e.g., `Issue`, `Comment`, `AgentSessionEvent`) |
+| `Linear-Signature` | Hex-encoded HMAC-SHA256 signature |
+
+### Payload Structure
+
+```json
+{
+  "action": "create",
+  "type": "Issue",
+  "createdAt": "2025-01-24T14:32:18.084Z",
+  "organizationId": "...",
+  "webhookTimestamp": 1706107938084,
+  "webhookId": "...",
+  "url": "https://linear.app/company/issue/ENG-123",
+  "data": { /* full entity object */ },
+  "actor": { /* user who triggered the change */ }
+}
+```
+
+For update events, the payload also includes previous values for all changed properties.
+
+### Signature Verification Mechanism
+
+**Algorithm**: HMAC-SHA256
+**Encoding**: Hex (lowercase), **no prefix** (unlike GitHub's `sha256=` prefix)
+**Header**: `Linear-Signature`
+**Secret**: The webhook signing secret from the OAuth app / webhook detail page
+
+**Verification code (Node.js / Bun)**:
+
+```typescript
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+function verifyLinearWebhook(
+  rawBody: string,          // Must be raw body, NOT re-stringified JSON
+  signature: string | null, // From Linear-Signature header
+  signingSecret: string,
+): boolean {
+  if (!signature) return false;
+
+  const computed = createHmac("sha256", signingSecret)
+    .update(rawBody)
+    .digest("hex");
+
+  // Timing-safe comparison
+  if (computed.length !== signature.length) return false;
+  return timingSafeEqual(
+    Buffer.from(computed),
+    Buffer.from(signature),
+  );
+}
+```
+
+**Replay protection**: The JSON body contains `webhookTimestamp` (UNIX milliseconds). Verify it is within ~60 seconds of your system time.
+
+**Critical detail**: You MUST use the **raw request body** for signature computation. Re-stringifying parsed JSON will likely produce different output and fail verification.
+
+### AgentSessionEvent Webhooks
+
+When the "Agent session events" category is enabled, the app receives `AgentSessionEvent` webhooks for:
+- **Delegation**: User assigns/delegates an issue to the app
+- **Mention**: User @mentions the app in a comment
+- **Prompt**: User provides additional input to an active agent session
+
+The payload uses `payload.agentSession` (not `payload.data`), and the `Linear-Event` header is `AgentSessionEvent`.
+
+**Responsiveness requirement**: When you receive a `created` event, you must send an activity update or set an `externalUrls` within **10 seconds**, or the session is marked as unresponsive.
+
+### Agent Session States
+
+Sessions have 5 states: `pending`, `active`, `error`, `awaitingInput`, `complete`.
+
+---
+
+## 5. Required Environment Variables
+
+Based on the official linear-agent-demo and the existing `.env.example` in this repo:
+
+| Env Var | Purpose | Source |
+|---|---|---|
+| `LINEAR_CLIENT_ID` | OAuth app client ID | OAuth app settings page |
+| `LINEAR_CLIENT_SECRET` | OAuth app client secret | OAuth app settings page |
+| `LINEAR_SIGNING_SECRET` | Webhook HMAC verification secret | Webhook detail page in OAuth app config |
+| `LINEAR_REDIRECT_URI` | OAuth callback URL | Must match what's configured in the app |
+| `LINEAR_TEAM_ID` | Scoped Linear team UUID | Populated after setup / from Linear UI |
+| `LINEAR_DISABLE` | Feature flag to skip integration | Optional, set to `true` to disable |
+
+**Not needed** (unlike GitHub/Slack):
+- No private key / PEM file (Linear uses standard OAuth2, not JWT-based app auth)
+- No app-level token separate from bot token (Linear uses a single OAuth token per installation)
+- No separate socket mode token (Linear uses webhooks, not persistent connections)
+
+---
+
+## 6. How Linear Setup Differs from GitHub App and Slack App
+
+### Credential Model Comparison
+
+| Aspect | GitHub App | Slack App | Linear App |
+|---|---|---|---|
+| **Identity credentials** | App ID + Private Key (PEM) | Bot Token + App Token | Client ID + Client Secret |
+| **Webhook verification** | `x-hub-signature-256` header, `sha256=` prefixed HMAC-SHA256 | `x-slack-signature` header, `v0=` HMAC-SHA256 with versioned payload | `Linear-Signature` header, plain hex HMAC-SHA256 |
+| **Webhook secret env var** | `GITHUB_WEBHOOK_SECRET` | `SLACK_SIGNING_SECRET` | `LINEAR_SIGNING_SECRET` |
+| **Auth model** | JWT -> Installation Token (1hr, per-repo) | Bot token (long-lived) + App token (Socket Mode) | OAuth access token (24hr) + refresh token |
+| **Bot identity** | GitHub App acts as bot user automatically | Slack bot user created on install | `actor=app` creates a dedicated bot user |
+| **Connection method** | Webhooks (HTTP POST) | Socket Mode (WebSocket) OR Events API (HTTP) | Webhooks (HTTP POST) |
+| **Total env vars needed** | 3-4 (`APP_ID`, `PRIVATE_KEY`, `WEBHOOK_SECRET`, `BOT_NAME`) | 2-3 (`BOT_TOKEN`, `APP_TOKEN`, `SIGNING_SECRET`) | 3-4 (`CLIENT_ID`, `CLIENT_SECRET`, `SIGNING_SECRET`, `REDIRECT_URI`) |
+
+### Token Refresh Comparison
+
+| Platform | Token Lifetime | Refresh Mechanism |
+|---|---|---|
+| GitHub | Installation tokens: 1 hour | Generate new via JWT + private key (no refresh token) |
+| Slack | Bot token: effectively permanent | No refresh needed (revoke and reinstall to rotate) |
+| Linear | Access token: 24 hours | Standard OAuth2 refresh token flow to `https://api.linear.app/oauth/token` |
+
+### Key Architectural Differences
+
+**GitHub App**: Uses asymmetric crypto (RSA private key) for authentication. The app generates JWTs signed with its private key, then exchanges them for short-lived installation tokens. Most complex credential management.
+
+**Slack App**: Uses two pre-generated long-lived tokens. Socket Mode means no public endpoint needed for events (WebSocket connection initiated from your server). Simplest credential model.
+
+**Linear App**: Uses standard OAuth 2.0 with refresh tokens. Closest to a "normal" web app OAuth flow. The `actor=app` mode is unique -- it creates a workspace-level bot identity, similar to GitHub's automatic bot user but achieved through the OAuth flow rather than app installation. Token refresh is the main operational concern (24hr access tokens).
+
+### Webhook Verification Implementation Differences
+
+**GitHub** (current codebase pattern in `src/github/app.ts`):
+- Signature in `x-hub-signature-256` header
+- Format: `sha256=<hex>` (must strip prefix before comparing)
+- Uses Web Crypto API for HMAC
+
+**Linear** (what needs to be built):
+- Signature in `Linear-Signature` header (note: lowercase in practice)
+- Format: `<hex>` (plain, no prefix -- simpler)
+- Same HMAC-SHA256 algorithm
+- Additional replay protection via `webhookTimestamp` in body
+
+The Linear verification is actually simpler than GitHub's because there's no signature prefix to strip.
+
+---
+
+## 7. Can Issues Be Assigned to a Linear App/Bot Actor?
+
+**Yes, but with an important nuance.** Linear uses a **delegation model**, not direct assignment:
+
+- When a user "assigns" an issue to an app with `app:assignable`, the app becomes the **delegate**, not the assignee
+- The original user remains the **assignee/owner**
+- The delegation triggers an `AgentSessionEvent` webhook with a `created` action
+- The app is expected to work on the issue and update the `AgentSession` state accordingly
+
+This is intentionally different from how GitHub or Slack handle bot assignments. Linear's model preserves human accountability while allowing bots to do work.
+
+### Practical Implications for agent-swarm
+
+For the agent-swarm integration, the entry points for creating tasks are:
+
+1. **Delegation (assignment)**: User assigns issue to the app -> `AgentSessionEvent` webhook -> create swarm task
+2. **@Mention**: User mentions the app in a comment -> `AgentSessionEvent` webhook -> create swarm task or respond
+3. **Generic webhooks**: Subscribe to `Issue`, `Comment`, etc. for broader sync (not agent-specific)
+
+The cleanest approach (matching Taras's comment "assigned to app or via tag") is to use `AgentSessionEvent` webhooks as the primary trigger, which fire only when the app is explicitly invoked by a user. This avoids the complexity of syncing ALL issues and keeps the integration scoped to intentional interactions.
+
+---
+
+## Sources
+
+- [OAuth 2.0 authentication - Linear Developers](https://linear.app/developers/oauth-2-0-authentication)
+- [OAuth actor authorization - Linear Developers](https://linear.app/developers/oauth-actor-authorization)
+- [Webhooks - Linear Developers](https://linear.app/developers/webhooks)
+- [Getting Started (Agents) - Linear Developers](https://linear.app/developers/agents)
+- [Developing the Agent Interaction - Linear Developers](https://linear.app/developers/agent-interaction)
+- [Our approach to building the Agent Interaction SDK - Linear](https://linear.app/now/our-approach-to-building-the-agent-interaction-sdk)
+- [AI Agents - Linear Docs](https://linear.app/docs/agents-in-linear)
+- [Assign and delegate issues - Linear Docs](https://linear.app/docs/assigning-issues)
+- [linear/linear-agent-demo - GitHub](https://github.com/linear/linear-agent-demo)
+- [How to Build Linear Agents with Hookdeck CLI](https://hookdeck.com/webhooks/platforms/how-to-build-linear-agents-with-hookdeck-cli)
+- [Linear Webhooks: Complete Guide with Payload Examples](https://inventivehq.com/blog/linear-webhooks-guide)
+- [Building Linear Agents in Node.js & Rivet](https://rivet.dev/blog/2025-05-28-building-linear-agents-in-node-js-and-rivet-full-walkthrough-and-starter-kit/)
+- [Linear Webhooks - ngrok documentation](https://ngrok.com/docs/integrations/webhooks/linear-webhooks)
+
+---
+
+**Key takeaway for the agent-swarm integration**: The existing OAuth foundation in PR #161 is using the standard user-actor OAuth flow. For the agent use case, the authorization URL should include `actor=app` and the scopes should include `app:assignable,app:mentionable`. The webhook handler should prioritize `AgentSessionEvent` over generic issue webhooks as the primary inbound trigger -- this naturally scopes the integration to "only when the app is assigned/mentioned" without needing label-based filtering.
+
+The file at `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/thoughts/taras/research/2026-03-18-linear-integration-finalization.md` already has Taras's review comments answering several open questions (single workspace, Linear as SOT for external cases, scoped to app assignment). This research fills in the gaps that were flagged in section 6.3 and section 8 of that document.</result>
+<usage><total_tokens>46412</total_tokens><tool_uses>35</tool_uses><duration_ms>234405</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/a67557baad2341ce0.output
+
+---
+
+# Process Comments
+
+Shortcut command for backward compatibility. Delegates to the unified `file-review:file-review` skill.
+
+## Instructions
+
+When the user invokes `/process-comments [path]`:
+
+1. Follow the **Process Comments** section of the `file-review:file-review` skill
+2. Pass through the file path argument
+
+
+ARGUMENTS: /Users/taras/worktrees/agent-swarm/2026-03-18-linear/thoughts/taras/research/2026-03-18-linear-integration-finalization.md
+
+---
+
+<task-notification>
+<task-id>a4f5519d3fa7b5f1e</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/a4f5519d3fa7b5f1e.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore existing VCS abstraction pattern" completed</summary>
+<result>Now I have enough information. Let me provide a comprehensive exploration report:
+
+## VCS Abstraction in Agent-Swarm: Complete Exploration Report
+
+I've thoroughly explored the VCS (Version Control System) abstraction in the agent-swarm project. Here's my detailed findings:
+
+### 1. **Overall Architecture Pattern**
+
+The VCS abstraction is **minimal but pragmatic** — it's not an elaborate interface/factory pattern, but rather a **flat namespace with provider-specific implementations**. The system supports GitHub and GitLab, with a foundation ready for Linear (and similar project trackers).
+
+**Key Files:**
+- `/src/vcs/types.ts` — Single type: `VcsProvider = "github" | "gitlab"`
+- `/src/vcs/index.ts` — Utility: `detectVcsProvider(url)` to infer provider from URL
+- `/src/github/` — GitHub-specific implementation (~800 lines across 7 files)
+- `/src/gitlab/` — GitLab-specific implementation (~380 lines across 5 files)
+- `/src/linear/` — Linear-specific implementation (~400 lines across 5 files) - foundation laid
+
+### 2. **Database Schema Design**
+
+**Tasks table** (`agent_tasks`) has **provider-agnostic VCS columns**:
+```
+vcsProvider TEXT           // 'github' | 'gitlab' | (future: 'linear', 'jira', etc.)
+vcsRepo TEXT               // e.g. 'owner/repo', 'group/project', 'workspace/project'
+vcsEventType TEXT          // e.g. 'pull_request', 'merge_request', 'issue'
+vcsNumber INTEGER          // GitHub PR #, GitLab MR iid, Linear issue #
+vcsCommentId INTEGER       // Comment/note ID if task originated from a comment
+vcsAuthor TEXT             // Author username
+vcsUrl TEXT                // Direct link to the source (PR/MR/issue URL)
+```
+
+**Epics table** also has:
+```
+vcsProvider TEXT           // Optional provider linkage for epics
+vcsRepo TEXT               // Optional repo for epic milestones/projects
+vcsMilestone TEXT          // GitHub milestone or project equivalent
+```
+
+**Linear-specific tables** (migration 008):
+- `linear_oauth_tokens` — OAuth state (access_token, refresh_token, expiresAt)
+- `linear_sync` — Bidirectional entity mapping (task ↔ Linear issue, epic ↔ Linear project)
+- `linear_agent_mapping` — Agent ↔ Linear user association
+
+### 3. **Integration Pattern: How GitHub/GitLab Work**
+
+Both GitHub and GitLab follow the **same webhook → task creation → task execution** pattern:
+
+**Webhook Flow:**
+1. **Receive**: POST `/api/github/webhook` or `/api/gitlab/webhook`
+2. **Verify**: HMAC signature (GitHub) or token header (GitLab)
+3. **Route**: By event type (`pull_request`, `issues`, `merge_request`, `issue`, etc.)
+4. **Detect**: Bot mentions/assignments using `detectMention()` or `isBotAssignee()`
+5. **Create Task**: Call `createTaskExtended()` with VCS metadata
+6. **Emit**: Workflow trigger events via `workflowEventBus`
+
+**Handler Function Pattern:**
+```typescript
+export async function handlePullRequest(event: PullRequestEvent): Promise<{ created: boolean; taskId?: string }>
+```
+
+All handlers:
+- Extract provider/repo/number/author/url from webhook payload
+- Call `createTaskExtended(taskDescription, { vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsAuthor, vcsUrl })`
+- Return `{ created: boolean; taskId?: string }`
+
+**Deduplication:** Simple in-memory map with 60-second TTL to avoid duplicate task creation from retried webhooks.
+
+### 4. **Authentication Patterns**
+
+| Provider | Auth Type | Implementation |
+|----------|-----------|-----------------|
+| **GitHub** | JWT + Installation Token | `src/github/app.ts` — Generates app JWT, exchanges for installation token, caches with TTL |
+| **GitLab** | PAT + Token Verification | `src/gitlab/auth.ts` — Simple token validation, stores API token for GraphQL calls |
+| **Linear** | OAuth 2.0 + PKCE | `src/linear/oauth.ts` — Full PKCE flow, auto-refresh expired tokens |
+
+**Initialization Pattern:**
+```typescript
+// All follow this pattern:
+export function is{Provider}Enabled(): boolean
+export function init{Provider}(): boolean
+export function reset{Provider}(): void
+```
+
+All are called during HTTP server startup in `/src/http/index.ts`.
+
+### 5. **Task Source Tracking**
+
+The `source` field in `agent_tasks` table is a **CHECK constraint** enumerating all integration types:
+```sql
+source TEXT NOT NULL DEFAULT 'mcp' CHECK(source IN (
+  'mcp',        // MCP tool calls
+  'slack',      // Slack mentions
+  'api',        // REST API
+  'github',     // GitHub webhook
+  'gitlab',     // GitLab webhook
+  'linear',     // Linear webhook (foundation ready)
+  'agentmail',  // AgentMail
+  'system',     // Internal system tasks
+  'schedule',   // Scheduled tasks
+  'workflow'    // Workflow automation
+))
+```
+
+This is the **gateway** for understanding where tasks come from.
+
+### 6. **VCS-Specific Tools & Reactions**
+
+GitHub and GitLab each provide:
+- **Reactions API**: `addReaction()`, `addGitLabReaction()` — bot can react with emoji to issues/PRs
+- **Comments**: `postComment()`, `postGitLabComment()` — bot can post follow-up comments
+- **Mention detection**: Extract @mentions from PR/issue descriptions to find tasks requiring agent attention
+
+These are called from handlers to provide **bidirectional integration**.
+
+### 7. **Linear Integration Foundation**
+
+Linear has the scaffolding in place:
+
+**What's Built:**
+- OAuth 2.0 PKCE flow (`src/linear/oauth.ts` — 220 lines)
+- Automatic token refresh
+- Database schema for sync mapping and agent associations
+- Client wrapper with transparent auth retry (`src/linear/client.ts`)
+- HTTP routes for OAuth flow (`/api/linear/authorize`, `/api/linear/callback`)
+
+**What's NOT Built:**
+- Webhook receiver (no `/api/linear/webhook` handler yet)
+- Event handlers (`handleLinearIssue`, `handleLinearCycle`, etc.)
+- Issue/cycle creation/update logic
+- Mention detection for Linear comments
+
+### 8. **HTTP Server Routing**
+
+The main dispatcher (`/src/http/index.ts`) routes handlers in order:
+```typescript
+() => handleLinear(req, res, pathSegments),      // OAuth flows
+() => handleWebhooks(req, res, pathSegments),    // GitHub, GitLab, AgentMail webhooks
+```
+
+The webhooks handler is a single function that **dispatches by provider**:
+```typescript
+if (githubWebhook.match(req.method, pathSegments)) { /* GitHub logic */ }
+if (gitlabWebhook.match(req.method, pathSegments)) { /* GitLab logic */ }
+if (agentmailWebhook.match(req.method, pathSegments)) { /* AgentMail logic */ }
+```
+
+**No common interface/base class** — each provider has its own if-statement.
+
+### 9. **Type System**
+
+**Types are split by provider:**
+- `src/github/types.ts` — `PullRequestEvent`, `IssueEvent`, `CheckRunEvent`, etc.
+- `src/gitlab/types.ts` — `MergeRequestEvent`, `IssueEvent`, `PipelineEvent`, etc.
+- `src/types.ts` — Shared `AgentTask` schema with `vcsProvider: enum(["github", "gitlab"]).optional()`
+
+**No union type** like `VcsEvent = GitHubEvent | GitLabEvent`. Each provider's handlers accept its own event type.
+
+### 10. **Workflow Event Bus Integration**
+
+Both GitHub and GitLab emit to a shared **event bus** for workflow automation:
+```typescript
+workflowEventBus.emit(`github.pull_request.opened`, { repo, number, title, ... })
+workflowEventBus.emit(`gitlab.merge_request.opened`, { repo, number, title, ... })
+```
+
+This **decouples** webhook → task logic from **workflow trigger logic**. Workflows can listen to `github.*` or `gitlab.*` events without knowing how they're created.
+
+### 11. **Proposal for Linear/Jira/Trello Abstraction**
+
+Based on the existing pattern, here's what a **"ProjectTracker" abstraction** would look like:
+
+**Type Extension:**
+```typescript
+// src/vcs/types.ts — extend to include all project trackers
+export type VcsProvider = "github" | "gitlab" | "linear" | "jira" | "trello";
+
+// OR separate into:
+export type VcsProvider = "github" | "gitlab";  // version control
+export type ProjectTrackerProvider = "linear" | "jira" | "trello" | "asana";
+```
+
+**Database Schema:**
+```sql
+-- Extend agent_tasks vcsProvider to include project trackers
+CHECK(source IN ('...', 'linear', 'jira', 'trello', 'asana'))
+CHECK(vcsProvider IN ('github', 'gitlab', 'linear', 'jira', 'trello'))
+
+-- Add mapping tables per provider (Linear template):
+CREATE TABLE IF NOT EXISTS jira_oauth_tokens (...)
+CREATE TABLE IF NOT EXISTS jira_sync (...)
+CREATE TABLE IF NOT EXISTS jira_agent_mapping (...)
+```
+
+**Handler Pattern:**
+```typescript
+// src/linear/webhook.ts (or src/jira/webhook.ts, etc.)
+export async function handleLinearIssue(event: LinearIssueEvent): Promise<{ created: boolean; taskId?: string }>
+export async function handleLinearCycleUpdate(event: LinearCycleEvent): Promise<{ created: boolean; taskId?: string }>
+
+// In /src/http/webhooks.ts — add new provider:
+if (linearWebhook.match(req.method, pathSegments)) { /* Linear webhook logic */ }
+if (jiraWebhook.match(req.method, pathSegments)) { /* Jira webhook logic */ }
+```
+
+**No breaking changes** — the abstraction is **intentionally flat** (no interface inheritance). Each provider is self-contained, and new ones are added by:
+1. Creating `src/{provider}/` directory
+2. Adding webhook handler to `handleWebhooks()`
+3. Extending `vcsProvider` enum
+4. Adding provider-specific tables (oauth, sync, mapping)
+5. Initializing provider in `http/index.ts`
+
+---
+
+### **Key Takeaways**
+
+1. **The abstraction is NOT a formal interface** — it's a **convention** (database schema + handler pattern)
+2. **No factory pattern** — providers are explicitly checked in if-statements
+3. **Task metadata is provider-agnostic** — `vcsRepo`, `vcsNumber`, `vcsAuthor`, `vcsUrl` work for all
+4. **Each provider has its own auth strategy** — JWT (GitHub), token (GitLab), OAuth (Linear)
+5. **Database tables are per-provider** — Linear has `linear_oauth_tokens`, `linear_sync`, not a generic `oauth_tokens` table
+6. **Workflow events ARE abstracted** — `github.pr.opened` vs `gitlab.mr.opened` keep the event structure parallel
+7. **Linear is 80% ready** — just needs webhook receiver + event handlers + sync logic
+
+The system is **pragmatic** — optimized for adding one new provider at a time rather than supporting unlimited providers with minimal code.
+
+---
+
+### **File Locations for Reference**
+
+| Component | Path |
+|-----------|------|
+| VCS types & detection | `/src/vcs/types.ts`, `/src/vcs/index.ts` |
+| GitHub app & handlers | `/src/github/app.ts`, `/src/github/handlers.ts` |
+| GitLab auth & handlers | `/src/gitlab/auth.ts`, `/src/gitlab/handlers.ts` |
+| Linear OAuth & client | `/src/linear/oauth.ts`, `/src/linear/client.ts` |
+| Webhook routing | `/src/http/webhooks.ts` |
+| HTTP dispatcher | `/src/http/index.ts` |
+| Task schema | `/src/types.ts` (AgentTaskSchema) |
+| Database helpers | `/src/be/db.ts` (createTaskExtended, findTaskByVcs) |
+| Database migrations | `/src/be/migrations/006_vcs_provider.sql`, `008_linear_integration.sql` |</result>
+<usage><total_tokens>94506</total_tokens><tool_uses>40</tool_uses><duration_ms>226353</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/a4f5519d3fa7b5f1e.output
+
+---
+
+# File Review
+
+Shortcut command for backward compatibility. Delegates to the unified `file-review:file-review` skill.
+
+## Instructions
+
+When the user invokes `/file-review [path]`:
+
+1. Follow the **Review a File** section of the `file-review:file-review` skill
+2. Pass through any arguments and flags (`--bg`, `--silent`, `--json`)
+3. After the GUI closes, follow the **Process Comments** section of the same skill
+
+---
+
+<task-notification>
+<task-id>b8l9wzkwl</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/b8l9wzkwl.output</output-file>
+<status>completed</status>
+<summary>Background command "Open research doc in file-review GUI for second pass" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/b8l9wzkwl.output
+
+---
+
+nono, we can nuke ALL existing code of this PR! like no regrets!
+
+---
+
+# File Review
+
+Shortcut command for backward compatibility. Delegates to the unified `file-review:file-review` skill.
+
+## Instructions
+
+When the user invokes `/file-review [path]`:
+
+1. Follow the **Review a File** section of the `file-review:file-review` skill
+2. Pass through any arguments and flags (`--bg`, `--silent`, `--json`)
+3. After the GUI closes, follow the **Process Comments** section of the same skill
+
+---
+
+<task-notification>
+<task-id>bshw3jarz</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/bshw3jarz.output</output-file>
+<status>completed</status>
+<summary>Background command "Open research doc for another review pass" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/bshw3jarz.output
+
+---
+
+<task-notification>
+<task-id>af1f8779f2c1b1051</task-id>
+<tool-use-id>toolu_01AwsoREANsoGpn7zBRhSALJ</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/af1f8779f2c1b1051.output</output-file>
+<status>completed</status>
+<summary>Agent "Research OAuth libraries for Bun/Node" completed</summary>
+<result>Here is the bottom line, Taras.
+
+## Recommendation: `oauth4webapi`
+
+It is the best fit for your use case. Here is the comparison:
+
+---
+
+### `oauth4webapi` (by Filip Skokan / panva) -- WINNER
+
+- **Bun**: Explicitly works on Bun, Deno, Node, Cloudflare Workers. Built on Web Crypto + Fetch APIs. Zero dependencies, ESM-only.
+- **PKCE**: First-class support, including S256 code challenge method.
+- **Token refresh**: Has `refreshTokenGrantRequest()` and response processing built in.
+- **Token storage**: None -- you store tokens yourself. This is what you want since you need SQLite-backed pluggable storage.
+- **Provider-agnostic**: Completely generic. You pass authorization endpoint, token endpoint, etc. Works with any RFC-compliant OAuth 2.0 server (Linear, Jira/Atlassian, Trello, anything).
+- **Maintenance**: Actively maintained. v3.8.5 published ~20 days ago (as of March 2026). OpenID Certified.
+- **Philosophy**: Low-level building blocks. You compose the flow yourself, but every step (auth URL generation, PKCE verifier/challenge, token exchange, token refresh, token revocation) is a clean function call.
+
+**Tradeoff**: It is low-level. You will write ~50-100 lines of wrapper code to build a reusable `OAuthClient` class that handles the full authorize-exchange-store-refresh cycle. But that wrapper is the same for every provider -- you just swap endpoint URLs and scopes.
+
+---
+
+### `arctic` (by pilcrowonpaper) -- Good but wrong abstraction level
+
+- **Bun**: Works fine, runtime-agnostic (built on Fetch API).
+- **Linear**: Has a [dedicated Linear provider](https://arcticjs.dev/providers/linear). Also has Atlassian (covers Jira). No Trello provider though.
+- **PKCE**: Supported.
+- **Token refresh**: Some providers expose `refreshAccessToken()`, but not all.
+- **Token storage**: None.
+- **Generic client**: Has `OAuth2Client` for unsupported providers, but it "strictly follows RFCs and may not work with providers that aren't spec-compliant."
+- **Problem**: Arctic's value proposition is pre-configured provider classes (endpoint URLs baked in). But you need a *generic* system where adding a new tracker means adding config, not code. The per-provider wrappers are overhead you don't need. And for providers not in Arctic's list, you fall back to the generic client anyway, which is basically `oauth4webapi` with less flexibility.
+
+---
+
+### `simple-oauth2` (lelylan) -- Skip it
+
+- **Last release**: v5.1.0, approximately 2 years ago (circa 2024).
+- **PKCE**: Not natively supported in the core API. Was "factored out" as a separate module back in v1.2 and unclear if it is properly maintained.
+- **Bun**: Uses `wreck` (HTTP client from hapi ecosystem) internally, not Fetch. Likely works under Bun's Node compat layer but not ideal.
+- **Verdict**: Stale, no PKCE built-in, wrong HTTP abstraction for Bun.
+
+---
+
+### `@badgateway/oauth2-client` -- Honorable mention
+
+- Has a nice `OAuth2Fetch` wrapper that auto-refreshes tokens and injects Bearer headers.
+- PKCE support, token revocation (RFC 7009).
+- Unclear on Bun compatibility -- advertised for "Node and browsers."
+- Interesting fetch-wrapper pattern, but `oauth4webapi` is more standards-compliant and explicitly Bun-tested.
+
+---
+
+## What the architecture would look like with `oauth4webapi`
+
+You would build one thin wrapper (~100 lines) like:
+
+```
+GenericOAuthManager
+  - constructor(providerConfig: { authEndpoint, tokenEndpoint, clientId, clientSecret, scopes })
+  - buildAuthorizationURL(state, codeVerifier) -> URL
+  - exchangeCode(code, codeVerifier) -> { accessToken, refreshToken, expiresAt }
+  - refreshToken(refreshToken) -> { accessToken, refreshToken, expiresAt }
+```
+
+Then each tracker provider (Linear, Jira, Trello) is just a config object with different endpoint URLs and scopes. Token persistence goes into your SQLite `oauth_tokens` table. A scheduled job or on-demand check handles refresh.
+
+No per-provider OAuth code. One generic implementation. `oauth4webapi` handles all the RFC-compliant plumbing (PKCE challenge generation, token exchange HTTP calls, response parsing/validation).
+
+---
+
+Sources:
+- [oauth4webapi - npm](https://www.npmjs.com/package/oauth4webapi)
+- [oauth4webapi - GitHub](https://github.com/panva/oauth4webapi)
+- [oauth4webapi - JSR](https://jsr.io/@panva/oauth4webapi)
+- [OAuth Libraries for Bun](https://oauth.net/code/bun/)
+- [Arctic v3 documentation](https://arcticjs.dev/)
+- [Arctic - Linear provider](https://arcticjs.dev/providers/linear)
+- [Arctic - Generic OAuth 2.0 client](https://arcticjs.dev/guides/generic-oauth2-client)
+- [Arctic - GitHub](https://github.com/pilcrowonpaper/arctic)
+- [simple-oauth2 - npm](https://www.npmjs.com/package/simple-oauth2)
+- [simple-oauth2 - GitHub](https://github.com/lelylan/simple-oauth2)
+- [@badgateway/oauth2-client - npm](https://www.npmjs.com/package/@badgateway/oauth2-client)
+- [@badgateway/oauth2-client - GitHub](https://github.com/badgateway/oauth2-client)</result>
+<usage><total_tokens>24957</total_tokens><tool_uses>20</tool_uses><duration_ms>99689</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/af1f8779f2c1b1051.output
+
+---
+
+did we do a review for the research already?

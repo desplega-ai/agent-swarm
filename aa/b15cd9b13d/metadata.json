@@ -3,7 +3,7 @@
   "checkpoint_id": "aab15cd9b13d",
   "strategy": "manual-commit",
   "branch": "linear-integration-foundation",
-  "checkpoints_count": 18,
+  "checkpoints_count": 24,
   "files_touched": [
     ".env.example",
     "MCP.md",
@@ -42,13 +42,20 @@
       "context": "/aa/b15cd9b13d/0/context.md",
       "content_hash": "/aa/b15cd9b13d/0/content_hash.txt",
       "prompt": "/aa/b15cd9b13d/0/prompt.txt"
+    },
+    {
+      "metadata": "/aa/b15cd9b13d/1/metadata.json",
+      "transcript": "/aa/b15cd9b13d/1/full.jsonl",
+      "context": "/aa/b15cd9b13d/1/context.md",
+      "content_hash": "/aa/b15cd9b13d/1/content_hash.txt",
+      "prompt": "/aa/b15cd9b13d/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 216,
-    "cache_creation_tokens": 376994,
-    "cache_read_tokens": 19688976,
-    "output_tokens": 52599,
-    "api_call_count": 132
+    "input_tokens": 335,
+    "cache_creation_tokens": 972310,
+    "cache_read_tokens": 26260153,
+    "output_tokens": 92045,
+    "api_call_count": 198
   }
 }
