@@ -1,7 +1,7 @@
 ---
 date: 2026-03-18T16:00:00Z
 topic: "Workflow Engine Redesign"
-status: in-progress
+status: completed
 planner: taras+claude
 research: thoughts/taras/research/2026-03-18-workflow-redesign.md
 ---
@@ -650,8 +650,8 @@ Wire everything together in `index.ts`, delete old files, update the dashboard U
 - [x] Full test suite passes: `bun test`
 
 #### Manual Verification:
-- [ ] Fresh DB: `rm -f agent-swarm-db.sqlite* && bun run start:http` — starts without errors
-- [ ] Create workflow via curl → trigger → watch run complete → query run detail with steps
+- [x] Fresh DB: `rm -f agent-swarm-db.sqlite* && bun run start:http` — starts without errors
+- [x] Create workflow via curl → trigger → watch run complete → query run detail with steps
 - [ ] UI dashboard: workflows page loads, shows workflow list with new fields
 - [ ] UI dashboard: workflow detail page shows definition (nodes-with-next rendered with auto-generated edges)
 - [ ] UI dashboard: run detail page shows steps with retry info
