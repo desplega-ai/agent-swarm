@@ -1,0 +1,30 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "4cd6477d2261",
+  "session_id": "2d9da23d-7517-4e13-820b-ffd31addc1a7",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-19T02:46:23.988077Z",
+  "branch": "linear-integration-foundation",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/linear/sync.ts"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "9ea974970402",
+  "token_usage": {
+    "input_tokens": 310,
+    "cache_creation_tokens": 413022,
+    "cache_read_tokens": 32031417,
+    "output_tokens": 65720,
+    "api_call_count": 190
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-19T02:46:23.182286Z",
+    "agent_lines": 0,
+    "human_added": 130,
+    "human_modified": 8,
+    "human_removed": 0,
+    "total_committed": 130,
+    "agent_percentage": 0
+  }
+}

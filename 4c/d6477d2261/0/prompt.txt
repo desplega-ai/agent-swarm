@@ -1,0 +1,1154 @@
+# Implement Plan
+
+A thin wrapper that invokes the `desplega:implementing` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse autonomy mode from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - If plan file has `autonomy:` in frontmatter, use that as default
+   - Otherwise, default to **Critical** (don't prompt - implementation is more straightforward)
+
+2. **ALWAYS invoke the `desplega:implementing` skill:**
+   - Pass the plan file path
+   - Pass the autonomy mode determined above
+   - Let the skill handle all implementation logic
+
+3. **If no plan path provided:**
+   - Respond with: "I need a plan file to proceed. Please provide the path to the plan you would like me to implement."
+
+## Example Usage
+
+```
+/implement-plan thoughts/<username|shared>/plans/2026-01-14-my-feature.md
+/implement-plan --autonomy=autopilot @plans/feature.md
+/implement-plan --autonomy=verbose @current-plan.md
+```
+
+
+ARGUMENTS: thoughts/taras/plans/2026-03-19-ticket-tracker-linear-integration.md
+
+---
+
+<task-notification>
+<task-id>ab3def0d7b4de6d38</task-id>
+<tool-use-id>toolu_014vdR5wGPhonTNANAtGrzj7</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/ab3def0d7b4de6d38.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore current Linear code state" completed</summary>
+<result>Excellent! Now let me create a comprehensive summary document:
+
+## Linear Integration Code Analysis Summary
+
+Based on my thorough exploration of the Linear integration codebase on the `linear-integration-foundation` branch, here is the complete inventory of what needs to be removed or modified:
+
+### **Files to DELETE (Complete Removal)**
+
+1. **`/src/linear/` directory** (5 files total):
+   - `/src/linear/index.ts` — Module entry point exporting all exports
+   - `/src/linear/app.ts` — Integration initialization (62 lines), exports `initLinear()`, `isLinearEnabled()`, `resetLinear()`
+   - `/src/linear/oauth.ts` — OAuth 2.0 flow with PKCE (221 lines), handles authorization URL, token exchange, refresh, storage
+   - `/src/linear/client.ts` — LinearClient wrapper (87 lines), OAuth-aware with auto token refresh
+   - `/src/linear/types.ts` — TypeScript interfaces for OAuth tokens, sync mappings, agent mappings (50 lines)
+
+2. **`/src/http/linear.ts`** (114 lines) — HTTP handler for OAuth routes:
+   - `GET /api/linear/authorize` — Redirect to Linear OAuth consent
+   - `GET /api/linear/callback` — Handle OAuth callback
+
+3. **`/src/be/migrations/008_linear_integration.sql`** (115 lines) — Database schema:
+   - Creates `linear_oauth_tokens` table
+   - Creates `linear_sync` table (Swarm ↔ Linear entity mapping)
+   - Creates `linear_agent_mapping` table
+   - Recreates `agent_tasks` table to add 'linear' to source CHECK constraint
+
+### **Files to MODIFY (Code Changes Required)**
+
+#### 1. **`/src/types.ts`** (Lines 59-67)
+**Current:** AgentTaskSourceSchema includes 'linear' as a valid source
+```typescript
+  "github",
+  "gitlab",
+  "agentmail",
+  "system",
+  "schedule",
+  "workflow",
+  "linear",  // ← REMOVE THIS LINE
+]);
+```
+**Action:** Remove the `"linear",` line from the AgentTaskSourceSchema z.enum() call
+
+---
+
+#### 2. **`/src/http/index.ts`**
+
+**Line 14:** Remove import
+```typescript
+import { initLinear } from "../linear";  // ← DELETE THIS LINE
+```
+
+**Line 23:** Remove import
+```typescript
+import { handleLinear } from "./linear";  // ← DELETE THIS LINE
+```
+
+**Line 96:** Remove handler from chain (inside handlers array)
+```typescript
+  const handlers: (() => Promise<boolean>)[] = [
+    () => handleAgentRegister(req, res, pathSegments, myAgentId),
+    () => handlePoll(req, res, pathSegments, myAgentId),
+    () => handleSessionData(req, res, pathSegments, queryParams, myAgentId),
+    () => handleEcosystem(req, res, pathSegments, myAgentId),
+    () => handleLinear(req, res, pathSegments),  // ← DELETE THIS LINE
+    () => handleWebhooks(req, res, pathSegments),
+    ...
+```
+
+**Line 190:** Remove initialization call
+```typescript
+    // Initialize Linear integration (if configured)
+    initLinear();  // ← DELETE THESE 2 LINES
+```
+
+---
+
+#### 3. **`/src/http/core.ts`**
+
+**Lines 14:** Remove import
+```typescript
+import { initLinear, resetLinear } from "../linear";  // ← DELETE THIS LINE
+```
+
+**Lines 85-86:** Remove Linear OAuth URL check from auth bypass logic
+```typescript
+  const isLinearOAuth =
+    req.url?.startsWith("/api/linear/authorize") || req.url?.startsWith("/api/linear/callback");
+  // ↑ DELETE THESE 2 LINES
+```
+
+**Line 87:** Remove from conditional
+```typescript
+  if (apiKey && !isGitHubWebhook && !isGitLabWebhook && !isAgentMailWebhook && !isLinearOAuth) {
+                                                                               // ↑ REMOVE && !isLinearOAuth
+```
+
+**Lines 112-113:** Remove reset/init calls from reload-config handler
+```typescript
+      resetLinear();              // ← DELETE THIS LINE
+      if (initLinear()) integrations.push("linear");  // ← DELETE THIS LINE
+```
+
+---
+
+### **Schema Considerations**
+
+⚠️ **Important:** The migration `008_linear_integration.sql` modifies the `agent_tasks` table's source CHECK constraint to include 'linear'. This is why `/src/types.ts` must be updated to match.
+
+**Options for the migration:**
+- **Keep the migration:** Existing databases will have the schema with 'linear' in the CHECK constraint. The application will still work if you remove the TypeScript reference (it just won't be used).
+- **Remove the migration:** You'd need a new migration (009) that removes 'linear' from the CHECK constraint. This requires backward compatibility for databases that already ran migration 008.
+
+**Recommendation:** Since this is the foundation branch and databases are likely fresh, **remove the migration file entirely** to keep the final schema clean.
+
+---
+
+### **Database Tables Created (Reference)**
+
+These tables will be created if migration 008 runs:
+- `linear_oauth_tokens` — Single-row OAuth token storage
+- `linear_sync` — Swarm↔Linear entity mapping (task/epic)
+- `linear_agent_mapping` — Agent↔Linear user mapping
+
+**Action:** These become orphaned if you delete the migration. If the migration has already run on existing test databases, you may want to keep it for data safety, but the application code referencing them will be gone.
+
+---
+
+### **Dependencies**
+
+The only external dependency is in `package.json`:
+- `@linear/sdk` — Used in `/src/linear/client.ts`
+
+Check if this is used elsewhere; if not, it can be removed from dependencies.
+
+---
+
+### **Summary of Changes by File**
+
+| File | Changes | Lines Affected |
+|------|---------|-----------------|
+| `/src/linear/*` | DELETE entire directory | All 5 files |
+| `/src/http/linear.ts` | DELETE entire file | All 114 lines |
+| `/src/be/migrations/008_linear_integration.sql` | DELETE entire file | All 115 lines |
+| `/src/types.ts` | Remove 'linear' from enum | Line 66 |
+| `/src/http/index.ts` | Remove 3 imports, 1 handler, 1 init call | Lines 14, 23, 96, 189-190 |
+| `/src/http/core.ts` | Remove 1 import, 2 auth checks, 2 reload calls | Lines 14, 85-86, 87, 112-113 |
+
+**Total: 6 files to delete, 6 files to modify**</result>
+<usage><total_tokens>45771</total_tokens><tool_uses>18</tool_uses><duration_ms>51716</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/ab3def0d7b4de6d38.output
+
+---
+
+[Request interrupted by user]
+
+---
+
+<task-notification>
+<task-id>a57f376db044da65a</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/a57f376db044da65a.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore existing patterns for DB queries" completed</summary>
+<result>Excellent! Now I have all the information needed. Let me compile a comprehensive report.
+
+## Codebase Pattern Summary for Agent-Swarm
+
+Based on my thorough exploration of the agent-swarm codebase, here are the exact patterns you need:
+
+---
+
+### 1. Database Initialization Pattern (`src/be/db.ts`)
+
+**initDb function** — Lines 45-192
+```typescript
+export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
+  if (db) {
+    return db;
+  }
+
+  db = new Database(dbPath, { create: true });
+  console.log(`Database initialized at ${dbPath}`);
+
+  const database = db;
+
+  database.run("PRAGMA journal_mode = WAL;");
+  database.run("PRAGMA foreign_keys = ON;");
+
+  // Run database migrations (schema creation + incremental changes)
+  runMigrations(database);
+
+  // Compatibility migration for legacy databases
+  ensureAgentProfileColumns(database);
+
+  // ... migration logic ...
+
+  // Backfill: Seed v1 for existing agents that don't have any context versions yet
+  seedContextVersions();
+
+  return db;
+}
+```
+
+**closeDb function** — Lines 195-200
+```typescript
+export function closeDb(): void {
+  if (db) {
+    db.close();
+    db = null;
+  }
+}
+```
+
+**getDb function** — Lines 185-192
+```typescript
+export function getDb(path?: string): Database {
+  if (!db) {
+    return initDb(path ?? process.env.DATABASE_PATH);
+  }
+  return db;
+}
+```
+
+---
+
+### 2. Prepared Statement Pattern (`src/be/db.ts`)
+
+**Query object pattern** — Lines 460-476
+```typescript
+export const agentQueries = {
+  insert: () =>
+    getDb().prepare<AgentRow, [string, string, number, AgentStatus, number]>(
+      "INSERT INTO agents (id, name, isLead, status, maxTasks, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *",
+    ),
+
+  getById: () => getDb().prepare<AgentRow, [string]>("SELECT * FROM agents WHERE id = ?"),
+
+  getAll: () => getDb().prepare<AgentRow, []>("SELECT * FROM agents ORDER BY name"),
+
+  updateStatus: () =>
+    getDb().prepare<AgentRow, [AgentStatus, string]>(
+      "UPDATE agents SET status = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
+    ),
+
+  delete: () => getDb().prepare<null, [string]>("DELETE FROM agents WHERE id = ?"),
+};
+```
+
+**Type signature**: `db.prepare<ReturnType, ParameterTypes[]>(sql)`
+
+**Usage pattern** — Lines 754-769
+```typescript
+export const taskQueries = {
+  insert: () =>
+    getDb().prepare<
+      AgentTaskRow,
+      [
+        string,
+        string,
+        string,
+        AgentTaskStatus,
+        AgentTaskSource,
+        string | null,
+        string | null,
+        string | null,
+      ]
+    >(
+      `INSERT INTO agent_tasks (id, agentId, task, status, source, slackChannelId, slackThreadTs, slackUserId, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
+    ),
+};
+```
+
+---
+
+### 3. createTaskExtended Pattern (`src/be/db.ts`)
+
+**Lines 1762-1850** — Complete function with:
+- Dynamic status determination based on `options.offeredTo` / `options.agentId` / `options.status`
+- Parent task metadata inheritance (Slack/AgentMail fields)
+- Single `.prepare()` call with RETURNING * clause
+- Event bus emission via dynamic import (lines 1817-1827)
+- Log entry creation
+
+Key snippet:
+```typescript
+export function createTaskExtended(task: string, options?: CreateTaskOptions): AgentTask {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const status: AgentTaskStatus = options?.offeredTo
+    ? "offered"
+    : options?.agentId
+      ? "pending"
+      : options?.status === "backlog"
+        ? "backlog"
+        : "unassigned";
+
+  // ... parent task metadata inheritance ...
+
+  const row = getDb()
+    .prepare<AgentTaskRow, (string | number | null)[]>(
+      `INSERT INTO agent_tasks (...) VALUES (...) RETURNING *`,
+    )
+    .get(...params);
+
+  // Event bus emission (dynamic import to avoid circular deps)
+  try {
+    import("../workflows/event-bus").then(({ workflowEventBus }) => {
+      workflowEventBus.emit("task.created", {
+        taskId: row.id,
+        task: row.task,
+        source: row.source,
+        tags: options?.tags ?? [],
+        agentId: row.agentId,
+        workflowRunId: row.workflowRunId,
+        workflowRunStepId: row.workflowRunStepId,
+      });
+    });
+  } catch {}
+
+  return rowToAgentTask(row);
+}
+```
+
+---
+
+### 4. Event Bus Pattern (`src/workflows/event-bus.ts`)
+
+**Lines 1-29** — Complete event bus implementation
+```typescript
+import { EventEmitter } from "node:events";
+
+export interface WorkflowEventBus {
+  emit(event: string, data: unknown): void;
+  on(event: string, handler: (data: unknown) => void): void;
+  off(event: string, handler: (data: unknown) => void): void;
+}
+
+export class InProcessEventBus implements WorkflowEventBus {
+  private emitter = new EventEmitter();
+
+  constructor() {
+    this.emitter.setMaxListeners(100);
+  }
+
+  emit(event: string, data: unknown): void {
+    this.emitter.emit(event, data);
+  }
+
+  on(event: string, handler: (data: unknown) => void): void {
+    this.emitter.on(event, handler);
+  }
+
+  off(event: string, handler: (data: unknown) => void): void {
+    this.emitter.off(event, handler);
+  }
+}
+
+export const workflowEventBus: WorkflowEventBus = new InProcessEventBus();
+```
+
+**Events emitted from db.ts**:
+- `"task.created"` (line ~1819)
+- `"task.completed"` 
+- `"task.failed"`
+
+---
+
+### 5. Integration Lifecycle Pattern (GitHub as reference, Linear as new implementation)
+
+**src/github/app.ts** — Lines 1-68 (reference pattern)
+```typescript
+let initialized = false;
+let webhookSecret: string | null = null;
+// ... state variables ...
+
+export function isGitHubEnabled(): boolean {
+  const githubDisable = process.env.GITHUB_DISABLE;
+  if (githubDisable === "true" || githubDisable === "1") {
+    return false;
+  }
+  return !!process.env.GITHUB_WEBHOOK_SECRET;
+}
+
+export function resetGitHub(): void {
+  initialized = false;
+  webhookSecret = null;
+  // ... reset all state ...
+}
+
+export function initGitHub(): boolean {
+  // Prevent double initialization
+  if (initialized) {
+    console.log("[GitHub] Already initialized, skipping");
+    return isGitHubEnabled();
+  }
+  initialized = true;
+
+  // Check if disabled
+  const githubDisable = process.env.GITHUB_DISABLE;
+  if (githubDisable === "true" || githubDisable === "1") {
+    console.log("[GitHub] Disabled via GITHUB_DISABLE");
+    return false;
+  }
+
+  // Load config
+  webhookSecret = process.env.GITHUB_WEBHOOK_SECRET ?? null;
+  if (!webhookSecret) {
+    console.log("[GitHub] Missing GITHUB_WEBHOOK_SECRET, GitHub integration disabled");
+    return false;
+  }
+
+  console.log("[GitHub] Webhook handler initialized");
+  return true;
+}
+```
+
+**src/linear/app.ts** — Lines 1-62 (your new implementation)
+```typescript
+let initialized = false;
+
+export function isLinearEnabled(): boolean {
+  const disabled = process.env.LINEAR_DISABLE;
+  if (disabled === "true" || disabled === "1") {
+    return false;
+  }
+  const enabled = process.env.LINEAR_ENABLED;
+  if (enabled === "false" || enabled === "0") {
+    return false;
+  }
+  return !!process.env.LINEAR_CLIENT_ID;
+}
+
+export function resetLinear(): void {
+  initialized = false;
+  resetLinearClient();
+}
+
+export function initLinear(): boolean {
+  if (initialized) {
+    return isLinearEnabled();
+  }
+  initialized = true;
+
+  if (!isLinearEnabled()) {
+    console.log("[Linear] Integration disabled or LINEAR_CLIENT_ID not set");
+    return false;
+  }
+
+  const hasSecret = !!process.env.LINEAR_CLIENT_SECRET;
+  const hasRedirect = !!process.env.LINEAR_REDIRECT_URI;
+
+  if (!hasSecret || !hasRedirect) {
+    console.log(
+      "[Linear] Missing LINEAR_CLIENT_SECRET or LINEAR_REDIRECT_URI — OAuth flow will not work until configured",
+    );
+  }
+
+  console.log("[Linear] Integration initialized");
+  return true;
+}
+```
+
+---
+
+### 6. Route Definition Pattern (`src/http/route-def.ts`)
+
+**Lines 65-123** — The `route()` factory
+```typescript
+export function route<
+  TParams extends z.ZodType = z.ZodUndefined,
+  TQuery extends z.ZodType = z.ZodUndefined,
+  TBody extends z.ZodType = z.ZodUndefined,
+>(
+  def: RouteDef<TParams, TQuery, TBody>,
+): RouteHandle<z.infer<TParams>, z.infer<TQuery>, z.infer<TBody>> {
+  routeRegistry.push(def as RouteDef);
+
+  return {
+    def: def as RouteDef,
+
+    match(method, pathSegments) {
+      return matchRoute(
+        method,
+        pathSegments,
+        def.method.toUpperCase(),
+        def.pattern,
+        def.exact ?? true,
+      );
+    },
+
+    async parse(req, res, pathSegments, queryParams) {
+      try {
+        // Extract path params from dynamic segments
+        const rawParams: Record<string, string> = {};
+        if (def.params) {
+          const paramNames = def.path.match(/\{(\w+)\}/g)?.map((p) => p.slice(1, -1)) ?? [];
+          for (let i = 0; i < def.pattern.length; i++) {
+            if (def.pattern[i] === null && paramNames.length > 0) {
+              rawParams[paramNames.shift()!] = pathSegments[i] ?? "";
+            }
+          }
+        }
+
+        // Parse + validate each part
+        const params = def.params ? def.params.parse(rawParams) : undefined;
+        const query = def.query ? def.query.parse(Object.fromEntries(queryParams)) : undefined;
+        const body = def.body ? def.body.parse(await parseBody(req)) : undefined;
+
+        return { params, query, body } as ParsedRequest<
+          z.infer<TParams>,
+          z.infer<TQuery>,
+          z.infer<TBody>
+        >;
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          jsonError(
+            res,
+            `Validation error: ${err.issues.map((e) => `${e.path.join(".")}: ${e.message}`).join(", ")}`,
+            400,
+          );
+          return null;
+        }
+        throw err;
+      }
+    },
+  };
+}
+```
+
+**Usage example** — `src/http/linear.ts` Lines 13-40
+```typescript
+const linearAuthorize = route({
+  method: "get",
+  path: "/api/linear/authorize",
+  pattern: ["api", "linear", "authorize"],
+  summary: "Redirect to Linear OAuth consent screen",
+  tags: ["Linear"],
+  auth: { apiKey: false },
+  responses: {
+    302: { description: "Redirect to Linear OAuth" },
+    500: { description: "Failed to generate authorization URL" },
+    503: { description: "Linear integration not configured" },
+  },
+});
+
+// In handler:
+if (linearAuthorize.match(req.method, pathSegments)) {
+  if (!isLinearEnabled()) {
+    res.writeHead(503, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Linear integration not configured" }));
+    return true;
+  }
+  // ... handler logic ...
+}
+```
+
+---
+
+### 7. Test DB Setup Pattern (`src/tests/rest-api.test.ts`)
+
+**Lines 14-240** — Complete test setup/teardown
+```typescript
+const TEST_DB_PATH = "./test-rest-api.sqlite";
+const TEST_PORT = 13015;
+
+describe("REST API Endpoints", () => {
+  let server: Server;
+  const baseUrl = `http://localhost:${TEST_PORT}`;
+
+  beforeAll(async () => {
+    // Clean up any existing test database
+    try {
+      await unlink(TEST_DB_PATH);
+    } catch {
+      // File doesn't exist, that's fine
+    }
+
+    // Initialize test database
+    initDb(TEST_DB_PATH);
+
+    // Start test server
+    server = createTestServer();
+    await new Promise<void>((resolve) => {
+      server.listen(TEST_PORT, () => {
+        console.log(`Test server listening on port ${TEST_PORT}`);
+        resolve();
+      });
+    });
+  });
+
+  afterAll(async () => {
+    // Close server
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+    });
+
+    // Close database
+    closeDb();
+
+    // Clean up test database file (including WAL and SHM files)
+    try {
+      await unlink(TEST_DB_PATH);
+      await unlink(`${TEST_DB_PATH}-wal`);
+      await unlink(`${TEST_DB_PATH}-shm`);
+    } catch {
+      // Files may not exist
+    }
+  });
+
+  describe("GET /me", () => {
+    test("should return 400 if X-Agent-ID header is missing", async () => {
+      const response = await fetch(`${baseUrl}/me`);
+      expect(response.status).toBe(400);
+      // ... assertions ...
+    });
+  });
+});
+```
+
+**Key pattern**: 
+- Use unique `TEST_DB_PATH` per test file (e.g., `./test-rest-api.sqlite`)
+- Clean up **all three files**: `-wal` and `-shm` alongside the main DB file
+- Call `initDb(TEST_DB_PATH)` in `beforeAll`
+- Call `closeDb()` in `afterAll`
+- Wrap unlink calls in try/catch (files may not exist)
+
+---
+
+### Summary Table
+
+| Pattern | File | Lines | Key Points |
+|---------|------|-------|-----------|
+| **initDb** | `src/be/db.ts` | 45-192 | Singleton, PRAGMA setup, migrations, seedContextVersions |
+| **closeDb** | `src/be/db.ts` | 195-200 | Null out global db reference |
+| **getDb** | `src/be/db.ts` | 185-192 | Lazy initialization if not yet init'd |
+| **prepared statements** | `src/be/db.ts` | 460-769 | `db.prepare<ReturnType, [ParamTypes]>()` + query object pattern |
+| **createTaskExtended** | `src/be/db.ts` | 1762+ | Status logic, parent metadata, event emission, log entry |
+| **Event Bus** | `src/workflows/event-bus.ts` | 1-29 | EventEmitter-based, `.emit()/.on()/.off()` interface |
+| **is/init/reset** | `src/github/app.ts` + `src/linear/app.ts` | 1-68 / 1-62 | Double-init guard, env checks, idempotent |
+| **route()** | `src/http/route-def.ts` | 65-123 | Factory returns RouteHandle with `.match()` and `.parse()` |
+| **Test setup** | `src/tests/rest-api.test.ts` | 14-240 | Unique DB path, clean -wal/-shm, initDb/closeDb in beforeAll/afterAll |
+
+---
+
+All line numbers are exact references within the current working tree. These patterns are consistent across the codebase and should serve as your implementation templates.</result>
+<usage><total_tokens>55420</total_tokens><tool_uses>26</tool_uses><duration_ms>78971</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/a57f376db044da65a.output
+
+---
+
+continue till the end, ping me when done and when you performed initial sanity e2e checks! if you need some testing on my end or something let me know too
+
+---
+
+<task-notification>
+<task-id>af315e1cf248af9a0</task-id>
+<tool-use-id>toolu_01THnLUkRuuG1mjJtacxHekP</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/af315e1cf248af9a0.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 2: OAuth wrapper + Linear OAuth" completed</summary>
+<result>All 1455 tests pass. Here is the summary of everything done for Phase 2.
+
+---
+
+## Phase 2 Complete: Generic OAuth Wrapper + Linear OAuth
+
+### What was done
+
+**1. Installed `oauth4webapi` v3.8.5** (`bun add oauth4webapi`)
+
+**2. Created generic OAuth wrapper** -- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/oauth/wrapper.ts`
+- `OAuthProviderConfig` interface with endpoints, clientId, scopes, extra params
+- `buildAuthorizationUrl(config)` -- generates URL with PKCE S256 challenge using `oauth4webapi` functions (`generateRandomState`, `generateRandomCodeVerifier`, `calculatePKCECodeChallenge`); stores pending state in-memory with 10-min TTL cleanup
+- `exchangeCode(config, code, state)` -- validates state, exchanges code for tokens via direct fetch to token endpoint, persists via `storeOAuthTokens()`
+- `refreshAccessToken(config, refreshToken)` -- refreshes tokens, persists new tokens
+- Test helpers `_getPendingState()` and `_clearPendingStates()` for unit tests
+
+**3. Created barrel** -- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/oauth/index.ts`
+
+**4. Created Linear app lifecycle** -- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/app.ts`
+- `isLinearEnabled()`, `initLinear()`, `resetLinear()` following the GitHub app.ts pattern
+- On init: upserts `oauth_apps` row for Linear with correct endpoints, scopes (no `admin`), and `actor=app` metadata
+
+**5. Created Linear OAuth config** -- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/oauth.ts`
+- `getLinearOAuthConfig()`, `getLinearAuthorizationUrl()`, `handleLinearCallback()`
+
+**6. Created Linear client wrapper** -- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/client.ts`
+- `getLinearClient()`, `resetLinearClient()` using `@linear/sdk`
+
+**7. Created Linear types** -- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/types.ts`
+
+**8. Created Linear barrel** -- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/index.ts`
+
+**9. Created HTTP route handler** -- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/trackers/linear.ts`
+- `GET /api/trackers/linear/authorize` -- redirects to Linear OAuth (no API key required)
+- `GET /api/trackers/linear/callback` -- handles OAuth callback with query param validation (no API key required)
+- `GET /api/trackers/linear/status` -- returns connection status, token expiry, expected webhook URL (requires API key)
+
+**10. Created trackers barrel** -- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/trackers/index.ts`
+
+**11. Wired into server**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/index.ts` -- added `handleTrackers` to handler chain (before webhooks) + `initLinear()` in listen callback
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/core.ts` -- added auth bypass for `/api/trackers/linear/authorize` and `/api/trackers/linear/callback` + `resetLinear()`/`initLinear()` in reload-config handler
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/scripts/generate-openapi.ts` -- added import for tracker route registration
+
+**12. Updated `.env.example`** -- rewrote Linear section with correct callback URL, scope documentation, and all commented-out env vars
+
+**13. Created unit test** -- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tests/oauth-wrapper.test.ts` (8 tests)
+- URL generation with PKCE params, extra params, unique state generation
+- State storage and TTL cleanup
+- Invalid/consumed state rejection
+
+### Verification results
+- `bun run tsc:check` -- passes
+- `bun run lint:fix` -- passes (pre-existing warning only)
+- `bun test src/tests/oauth-wrapper.test.ts` -- 8/8 pass
+- `bun test` -- 1455/1455 pass
+- `bun run docs:openapi` -- regenerated with all 3 tracker routes</result>
+<usage><total_tokens>90933</total_tokens><tool_uses>65</tool_uses><duration_ms>439072</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/af315e1cf248af9a0.output
+
+---
+
+<task-notification>
+<task-id>a43fae5727f640d41</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/a43fae5727f640d41.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 3: Webhook + Inbound Sync" completed</summary>
+<result>All clean — the warnings are pre-existing (not from my changes), and no fixes were needed.
+
+Here is a summary of what was done for Phase 3:
+
+**Files created:**
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/webhook.ts` — Webhook entry point with HMAC-SHA256 signature verification (`verifyLinearWebhook`), in-memory dedup via `Linear-Delivery` header with 5-minute TTL, and fire-and-forget dispatch to `processWebhookEvent` which routes `AgentSession`, `Issue` update, and `Issue` remove events to the sync layer. Exports `_getRecentDeliveries` and `_clearRecentDeliveries` for testing.
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/sync.ts` — Inbound sync logic with:
+  - `mapLinearStatusToSwarm()` — maps Linear state names to swarm statuses
+  - `handleAgentSessionEvent()` — creates a swarm task via `createTaskExtended()` with `source: "linear"` and a `tracker_sync` row linking the Linear issue to the swarm task
+  - `handleIssueUpdate()` — looks up existing `tracker_sync`, updates metadata, and cancels the swarm task if the Linear issue is cancelled
+  - `handleIssueDelete()` — cancels the swarm task if the tracked Linear issue is removed
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tests/linear-webhook.test.ts` — 23 tests covering signature verification (valid/invalid/tampered/short), webhook handler (503/401/200/dedup), status mapping, agent session task creation, issue update sync, and issue delete sync.
+
+**Files modified:**
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/trackers/linear.ts` — Added `linearWebhook` route definition and handler that reads raw body (matching the GitHub/GitLab pattern) and delegates to `handleLinearWebhook()`.
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/core.ts` — Added `/api/trackers/linear/webhook` to the auth bypass (webhooks use their own signature verification).
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/openapi.json` — Regenerated to include the new webhook route.
+
+**Verification results:**
+- `bun run tsc:check` — passes
+- `bun run lint:fix` — passes (no new warnings)
+- `bun test src/tests/linear-webhook.test.ts` — 23/23 pass
+- `bun test` — 1478/1478 pass
+- `bun run docs:openapi` — regenerated with webhook route at `/api/trackers/linear/webhook`</result>
+<usage><total_tokens>71553</total_tokens><tool_uses>34</tool_uses><duration_ms>248523</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/a43fae5727f640d41.output
+
+---
+
+<task-notification>
+<task-id>a1d4976bf0cbed84d</task-id>
+<tool-use-id>toolu_011UkE9NZk1S1pajaZGQ5xzV</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/a1d4976bf0cbed84d.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 4: MCP Tools + Outbound Sync" completed</summary>
+<result>Type check passes cleanly. The lint warnings are all in pre-existing files (linear-webhook.test.ts, slack-thread-followups.test.ts) -- not in any files I created or modified.
+
+Here is a summary of everything completed in Phase 4:
+
+**Part A: 6 MCP Tracker Tools** (all in `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tools/tracker/`)
+- `tracker-status.ts` -- read-only, shows OAuth status for all connected trackers
+- `tracker-link-task.ts` -- links a swarm task to an external tracker issue
+- `tracker-link-epic.ts` -- links a swarm epic to an external tracker issue/project
+- `tracker-unlink.ts` -- removes a tracker sync mapping by ID
+- `tracker-sync-status.ts` -- lists all tracker sync mappings with optional filtering
+- `tracker-map-agent.ts` -- maps a swarm agent to an external tracker user
+- `index.ts` -- barrel export for all 6 tools
+
+**Part B: Tool Registration**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/server.ts` -- registered all 6 tracker tools (always-on, not gated by a capability flag, matching pattern of Slack tools)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tools/tool-config.ts` -- added all 6 tools to `DEFERRED_TOOLS` set
+
+**Part C: Outbound Sync**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/outbound.ts` -- subscribes to `task.completed` and `task.failed` events on the workflow event bus, posts comments to linked Linear issues via the Linear SDK, includes loop prevention (skips if `lastSyncOrigin === "external"` within 5s window)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/app.ts` -- wired `initLinearOutboundSync()` into `initLinear()` and `teardownLinearOutboundSync()` into `resetLinear()`
+
+**Part D: Unit Tests**
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tests/tracker-tools.test.ts` -- 13 tests covering all 6 tool DB operations
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/tests/linear-outbound-sync.test.ts` -- 7 tests covering completion sync, failure sync, no-op on unmapped tasks, loop prevention, old external sync allowed, swarm origin allowed, teardown removes listeners
+
+**Verification results:**
+- `bun run tsc:check` -- passes
+- `bun run lint:fix` -- passes (no issues in new files)
+- `bun test src/tests/tracker-tools.test.ts` -- 13/13 pass
+- `bun test src/tests/linear-outbound-sync.test.ts` -- 7/7 pass
+- `bun test` -- 1498/1498 pass (up from 1478)
+- `bun run docs:openapi` -- regenerated</result>
+<usage><total_tokens>65673</total_tokens><tool_uses>45</tool_uses><duration_ms>312750</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/a1d4976bf0cbed84d.output
+
+---
+
+<task-notification>
+<task-id>ae2049a1d68c3dbd5</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/ae2049a1d68c3dbd5.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 5: Documentation + Setup Guide" completed</summary>
+<result>
+
+Everything looks good. Here's a summary of what was done:
+
+---
+
+## Phase 5 -- Documentation Complete
+
+### 1. Updated `.env.example`
+`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/.env.example` -- Replaced the verbose Linear section (12 lines with redundant comments) with the clean 7-line format specified in the plan, using the `# -- Linear Integration --` heading.
+
+### 2. Created `src/linear/README.md`
+`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/README.md` -- Step-by-step setup guide covering OAuth app creation, credential configuration, running the OAuth flow, verifying connection, and local webhook testing with ngrok. Includes a Scopes table (read, write, issues:create, comments:create, app:assignable, app:mentionable) and an Architecture section explaining the generic OAuth/tracker layer, inbound webhooks, outbound event-bus sync, and loop prevention.
+
+### 3. Created `src/oauth/README.md`
+`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/oauth/README.md` -- Documents the `oauth_apps` and `oauth_tokens` table schemas, the PKCE flow (buildAuthorizationUrl -> exchangeCode -> refreshAccessToken), how to add a new OAuth provider with a concrete Jira example, and the 10-minute TTL in-memory pending state behavior.
+
+### 4. Updated `MCP.md`
+`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/MCP.md` -- Added a "Tracker Tools" section (with TOC entries) documenting all 6 tools: tracker-status, tracker-link-task, tracker-link-epic, tracker-unlink, tracker-sync-status, tracker-map-agent. Each tool follows the existing format with parameter tables matching the actual Zod schemas in the source code.
+
+### Verification
+- `bun run lint:fix` -- passes (only pre-existing unsafe suggestions in unrelated test files)
+- `bun test` -- all 1498 tests pass, 0 failures</result>
+<usage><total_tokens>50136</total_tokens><tool_uses>32</tool_uses><duration_ms>180612</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/ae2049a1d68c3dbd5.output
+
+---
+
+ok, what should be the redirect url to be set in linear.
+
+also, shouldn't we add more scopes to the webhooks?
+
+---
+
+ok all set in the envs, ngrok at https://taras-swarm-3014.ngrok.dev.
+
+can you run the server pls?
+
+---
+
+assigned a task to the agent, check it out
+
+---
+
+{
+    "type": "AgentSessionEvent",
+    "action": "created",
+    "createdAt": "2026-03-19T01:26:58.412Z",
+    "organizationId": "bc6842cc-8fb8-4380-ab5a-a0733a6f4601",
+    "oauthClientId": "REDACTED",
+    "appUserId": "48a91e15-a5e1-4c91-b105-30ee7bb22878",
+    "agentSession": {
+        "id": "4d23d4ad-b4bb-4ef1-853f-c9c03439d37d",
+        "createdAt": "2026-03-19T01:26:57.633Z",
+        "updatedAt": "2026-03-19T01:26:57.633Z",
+        "archivedAt": null,
+        "creatorId": "7e18e975-3e80-470d-9df3-a181ed5cc783",
+        "appUserId": "48a91e15-a5e1-4c91-b105-30ee7bb22878",
+        "commentId": "351d1127-c4df-4003-bcfa-fb5ad59ebc96",
+        "sourceCommentId": null,
+        "issueId": "33c44235-3d19-49dc-93c1-39bc0d88878a",
+        "status": "pending",
+        "startedAt": null,
+        "endedAt": null,
+        "dismissedAt": null,
+        "dismissedById": null,
+        "externalLink": null,
+        "summary": null,
+        "sourceMetadata": null,
+        "plan": null,
+        "context": [],
+        "url": "https://linear.app/desplega-labs-test/issue/DES-1/get-familiar-with-linear#agent-session-4d23d4ad",
+        "externalUrls": [],
+        "organizationId": "bc6842cc-8fb8-4380-ab5a-a0733a6f4601",
+        "creator": {
+            "id": "7e18e975-3e80-470d-9df3-a181ed5cc783",
+            "name": "Taras Yarema",
+            "email": "t@desplega.ai",
+            "url": "https://linear.app/desplega-labs-test/profiles/t"
+        },
+        "comment": {
+            "id": "351d1127-c4df-4003-bcfa-fb5ad59ebc96",
+            "body": "This thread is for an agent session with devagentswarm.",
+            "issueId": "33c44235-3d19-49dc-93c1-39bc0d88878a"
+        },
+        "issue": {
+            "id": "33c44235-3d19-49dc-93c1-39bc0d88878a",
+            "title": "Get familiar with Linear",
+            "teamId": "9f03aa42-e7f3-4102-a868-0de6168b1fb6",
+            "team": {
+                "id": "9f03aa42-e7f3-4102-a868-0de6168b1fb6",
+                "key": "DES",
+                "name": "Desplega-labs-test"
+            },
+            "identifier": "DES-1",
+            "url": "https://linear.app/desplega-labs-test/issue/DES-1/get-familiar-with-linear",
+            "description": "Welcome to Linear! \n\nWatch an introductory video and access a list of resources below.\n\n<linear-embed node-type=\"video\">{\"uploadState\":\"finished\",\"uploadId\":\"upload-1768557254876-t6pc6wu\",\"src\":\"https://uploads.linear.app/fe63b3e2-bf87-46c0-8784-cd7d639287c8/a044fb03-9b84-470c-ab6f-8eae613e2529/98d7274d-de7f-4910-b3f3-f72e8e286a98\",\"title\":\"LinearH264Version_1.mp4\",\"size\":75734656,\"controls\":true,\"height\":2160,\"width\":3840,\"metadataId\":null,\"mimetype\":null}</linear-embed>\n\n### **Choose your setup guide** based on your company stage:\n\n* [Small teams](<https://linear.app/docs/how-to-use-linear-small-teams>)\n  For early-stage startups and projects\n* [Startups & mid-size companies](<https://linear.app/docs/how-to-use-linear-startups-mid-size-companies>)\n  For growing teams with cross-functional needs\n* [Large & scaling companies](<https://linear.app/docs/how-to-use-linear-large-scaling-companies>)\n  For enterprise and high-growth teams with complex workflows\n\n### **Need help getting started?**\n\n* [Join our Slack community](<https://linear.app/join-slack>)\n  Connect with other Linear users and get tips\n* [Join a live ](<https://lu.ma/welcome-to-linear?utm_source=docs>)[onboarding](<https://lu.ma/welcome-to-linear?utm_source=onboarding>)[ ](<https://lu.ma/welcome-to-linear?utm_source=docs>)[session](<https://lu.ma/welcome-to-linear?utm_source=onboarding>)\n  Learn the essentials and see demos of core workflows\n\n---\n\nIf you have any questions hit `?` in the bottom left > Contact us.\n\n![contactlinear (1).gif](https://uploads.linear.app/fe63b3e2-bf87-46c0-8784-cd7d639287c8/bc9bbf62-4192-411f-88f6-c89c9150503e/4df0346e-803b-4f58-8527-4aeb30d88411)"
+        }
+    },
+    "previousComments": null,
+    "guidance": null,
+    "promptContext": "<issue identifier=\"DES-1\">\n<title>Get familiar with Linear</title>\n<description>\nWelcome to Linear! \n\nWatch an introductory video and access a list of resources below.\n\n<linear-embed node-type=\"video\">{\"uploadState\":\"finished\",\"uploadId\":\"upload-1768557254876-t6pc6wu\",\"src\":\"https://uploads.linear.app/fe63b3e2-bf87-46c0-8784-cd7d639287c8/a044fb03-9b84-470c-ab6f-8eae613e2529/98d7274d-de7f-4910-b3f3-f72e8e286a98\",\"title\":\"LinearH264Version_1.mp4\",\"size\":75734656,\"controls\":true,\"height\":2160,\"width\":3840,\"metadataId\":null,\"mimetype\":null}</linear-embed>\n\n### **Choose your setup guide** based on your company stage:\n\n* [Small teams](<https://linear.app/docs/how-to-use-linear-small-teams>)\n  For early-stage startups and projects\n* [Startups & mid-size companies](<https://linear.app/docs/how-to-use-linear-startups-mid-size-companies>)\n  For growing teams with cross-functional needs\n* [Large & scaling companies](<https://linear.app/docs/how-to-use-linear-large-scaling-companies>)\n  For enterprise and high-growth teams with complex workflows\n\n### **Need help getting started?**\n\n* [Join our Slack community](<https://linear.app/join-slack>)\n  Connect with other Linear users and get tips\n* [Join a live ](<https://lu.ma/welcome-to-linear?utm_source=docs>)[onboarding](<https://lu.ma/welcome-to-linear?utm_source=onboarding>)[ ](<https://lu.ma/welcome-to-linear?utm_source=docs>)[session](<https://lu.ma/welcome-to-linear?utm_source=onboarding>)\n  Learn the essentials and see demos of core workflows\n\n---\n\nIf you have any questions hit `?` in the bottom left > Contact us.\n\n![contactlinear (1).gif](https://uploads.linear.app/fe63b3e2-bf87-46c0-8784-cd7d639287c8/bc9bbf62-4192-411f-88f6-c89c9150503e/4df0346e-803b-4f58-8527-4aeb30d88411)\n</description>\n<team name=\"Desplega-labs-test\"/>\n</issue>",
+    "webhookTimestamp": 1773883618540,
+    "webhookId": "31d0cec2-065d-4fac-a8b9-eac88bb48c30"
+}
+
+this was the event btw
+
+---
+
+done
+
+---
+
+check again pls
+
+---
+
+done, can you check?
+
+---
+
+still did not respond... actually can you spin up a lead connected to the api you are running and see what happens?
+
+---
+
+I see `Task received by Agent Swarm (969963fa-5bc9-4535-9c98-965d6ec2062d). Processing...` nice! Can you spin up a docker lead so it can pick up tasks (clean upi db before) and we test how it looks in the linear ui?
+
+this is how it looks now
+
+---
+
+[Image: source: /var/folders/nk/tmm_41010716v56wdjp3wn5h0000gn/T/TemporaryItems/NSIRD_screencaptureui_fKAgMz/Screenshot 2026-03-19 at 02.43.34.png]
+
+---
+
+<task-notification>
+<task-id>bfutbfs0c</task-id>
+<tool-use-id>toolu_01B9xEukob9GTnCKBsMkx5mZ</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/bfutbfs0c.output</output-file>
+<status>completed</status>
+<summary>Background command "Build Docker worker image" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/bfutbfs0c.output
+
+---
+
+https://linear.app/desplega-labs-test/issue/DES-8/say-hi 
+
+I see do not respond. I think we should make it so that automatically on progress of the task + lifecycle (like slack) we send events to that linear issue (agent events to show in the chat, no?)
+
+---
+
+let's commit current changes and then do 1 please. also when messages are sent from the agents ui in linear we get this webhook:
+
+"type": "AgentSessionEvent",
+    "action": "prompted",
+
+which we should handle somehow, maybe we should do a similar approach to slack threads
+
+---
+
+<task-notification>
+<task-id>a6f2a3419fa5191c7</task-id>
+<tool-use-id>toolu_01Q1YNkLdKUavTKw6akeKsvh</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/a6f2a3419fa5191c7.output</output-file>
+<status>completed</status>
+<summary>Agent "AgentSession lifecycle + prompted events" completed</summary>
+<result>Everything passes cleanly. Here's a summary of what was implemented:
+
+---
+
+## Summary of changes
+
+### Part 1: In-memory session tracking (`src/linear/sync.ts`)
+- Added `taskSessionMap` (`Map<string, string>`) — maps swarm task IDs to Linear AgentSession IDs
+- In `handleAgentSessionEvent`, after creating a task, the session ID is stored via `taskSessionMap.set(task.id, sessionId)`
+
+### Part 2: Lifecycle activities to AgentSession (`src/linear/sync.ts` + `src/linear/outbound.ts`)
+
+**`src/linear/sync.ts`** — Refactored the duplicated GraphQL mutation code into a single `postAgentActivity` helper, then built clean wrappers:
+- `postAgentSessionThought(sessionId, body)` — dimmed thinking text
+- `postAgentSessionError(sessionId, body)` — error display
+- `endAgentSession(sessionId, body, type)` — final activity + `"stop"` signal to end the session
+
+**`src/linear/outbound.ts`** — After posting the issue comment (existing behavior), both handlers now also:
+- `handleTaskCompleted`: posts a `response` activity with stop signal via `endAgentSession`, then cleans up the map entry
+- `handleTaskFailed`: posts an `error` activity with stop signal via `endAgentSession`, then cleans up the map entry
+
+Note: There is no `task.progress` event emitted by the event bus (progress is polled via the task's `progress` field, like Slack's watcher does), so no progress subscription was added.
+
+### Part 3: Handle "prompted" events (`src/linear/webhook.ts` + `src/linear/sync.ts`)
+
+**`src/linear/webhook.ts`** — Added routing for `action === "prompted"` before the default `handleAgentSessionEvent`, dispatching to `handleAgentSessionPrompted`.
+
+**`src/linear/sync.ts`** — Added `handleAgentSessionPrompted(event)`:
+- Extracts the user's message from `agentSession.comment.body`
+- If the existing task is still in progress: acknowledges with a thought ("Message received, but agent is currently working...")
+- If the task is completed/failed/cancelled (or no task exists): creates a new follow-up task with the user's message as context, creates a new `tracker_sync` row, stores the session in `taskSessionMap`, and acknowledges
+
+### Verification
+- `bun run tsc:check` — passes
+- `bun run lint:fix` — passes (pre-existing warnings in unrelated test files only)
+- `bun test` — all 1498 tests pass</result>
+<usage><total_tokens>58082</total_tokens><tool_uses>29</tool_uses><duration_ms>265406</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/a6f2a3419fa5191c7.output
+
+---
+
+<task-notification>
+<task-id>brhmvmrhf</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/brhmvmrhf.output</output-file>
+<status>completed</status>
+<summary>Background command "Rebuild Docker image with new code" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/brhmvmrhf.output
+
+---
+
+still see did not respond, this one nothing happened
+
+---
+
+try again
+
+---
+
+still did not respond, note that the updates should be automatic in the API!!! not in the workers! you should push task created, task assigned, progress, etc! debug why it's failing, maybe some error logs?
+
+---
+
+ok, shoud I create a new one now?
+
+---
+
+ok, restart api and lead pls so we do the e2e
+
+---
+
+ok authed, created issue. can you restart api and spin up lead to do e2e2
+
+---
+
+done, note I had to revoke and then re-auth
+
+---
+
+<task-notification>
+<task-id>ad1b994becdc762c9</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/ad1b994becdc762c9.output</output-file>
+<status>completed</status>
+<summary>Agent "Fix AgentSession + rich integration" completed</summary>
+<result>All 1498 tests pass, zero failures. Here's a summary of what was done:
+
+---
+
+## Changes Summary
+
+### Fix 1: Removed `signal` parameter from `postAgentActivity` (the root cause of "Invalid signal" errors)
+**`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/sync.ts`**
+- Removed the `signal?: "stop" | "continue"` parameter from `postAgentActivity()`
+- Removed the conditional `input.signal = signal` logic
+- Updated JSDoc to document that Linear derives session state automatically from the activity type (response -> complete, error -> error state)
+- `endAgentSession()` no longer passes `"stop"` signal -- it just posts the activity with the correct type
+
+### Fix 2: Added `externalUrls` support via `agentSessionUpdate` mutation
+**`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/sync.ts`**
+- Added `AGENT_SESSION_UPDATE_MUTATION` GraphQL mutation
+- Added `updateAgentSession()` low-level helper for the mutation
+- Added `updateAgentSessionExternalUrls()` exported helper
+- After acknowledging a session in both `handleAgentSessionEvent` and `handleAgentSessionPrompted`, it now sets `externalUrls` using `SWARM_DASHBOARD_URL` or `APP_URL` env vars, linking to `/tasks/{taskId}`
+
+### Fix 3: `endAgentSession` now correctly uses activity types for lifecycle
+**`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/sync.ts`**
+- The `response` type auto-completes the session, `error` type marks it as errored -- no signal needed
+- Outbound handlers in `outbound.ts` already pass the correct type (`"response"` or `"error"`) so they work correctly with the fix
+
+### Fix 4: Added `action` activity posting on task creation
+**`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/sync.ts`**
+- Added `postAgentSessionAction()` export for action-type activities (tool invocations)
+- Extended `postAgentActivity` content type union to include `{ type: "action"; action: string; parameter?: string; result?: string }`
+
+**`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/outbound.ts`**
+- Added `handleTaskCreated` handler subscribed to `task.created` event
+- Posts an action activity ("Processing") to the AgentSession when a Linear-sourced task is created
+- Properly subscribed/unsubscribed in `initLinearOutboundSync()`/`teardownLinearOutboundSync()`
+
+### Verification
+- `bun run tsc:check` -- passes
+- `bun run lint:fix` -- passes (warnings only in unrelated test files)
+- `bun test` -- all 1498 tests pass, 0 failures</result>
+<usage><total_tokens>47363</total_tokens><tool_uses>23</tool_uses><duration_ms>165133</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/2d9da23d-7517-4e13-820b-ffd31addc1a7/tasks/ad1b994becdc762c9.output

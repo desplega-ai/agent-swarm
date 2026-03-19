@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "4cd6477d2261",
+  "strategy": "manual-commit",
+  "branch": "linear-integration-foundation",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/linear/sync.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/4c/d6477d2261/0/metadata.json",
+      "transcript": "/4c/d6477d2261/0/full.jsonl",
+      "context": "/4c/d6477d2261/0/context.md",
+      "content_hash": "/4c/d6477d2261/0/content_hash.txt",
+      "prompt": "/4c/d6477d2261/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 310,
+    "cache_creation_tokens": 413022,
+    "cache_read_tokens": 32031417,
+    "output_tokens": 65720,
+    "api_call_count": 190
+  }
+}
