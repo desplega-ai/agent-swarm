@@ -2,6 +2,7 @@ import { cancelTask, createTaskExtended, getAllAgents, getTaskById } from "../be
 import { getOAuthTokens } from "../be/db-queries/oauth";
 import {
   createTrackerSync,
+  deleteTrackerSync,
   getTrackerSyncByExternalId,
   updateTrackerSync,
 } from "../be/db-queries/tracker";
@@ -476,15 +477,11 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
     taskType: "linear-issue",
   });
 
-  // Update existing tracker_sync to point to the new task, or create a new one
+  // Repoint the existing tracker_sync to the new follow-up task (can't create a
+  // duplicate due to UNIQUE(provider, entityType, externalId) constraint)
   if (existing) {
-    updateTrackerSync(existing.id, {
-      lastSyncOrigin: "external",
-      lastSyncedAt: new Date().toISOString(),
-    });
+    deleteTrackerSync(existing.id);
   }
-
-  // Create a new tracker_sync for the follow-up task
   createTrackerSync({
     provider: "linear",
     entityType: "task",
