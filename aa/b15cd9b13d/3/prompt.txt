@@ -1,0 +1,658 @@
+# Review Document
+
+A thin wrapper that invokes the `desplega:reviewing` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse flags from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - Check for `--output=append|separate` flag (sets output mode preference, skipping the preference question)
+   - Otherwise, default to **Critical** autonomy
+
+2. **ALWAYS invoke the `desplega:reviewing` skill:**
+   - Pass the document path
+   - Pass the autonomy mode determined above
+   - Pass the output mode if specified
+   - Let the skill handle all review logic
+
+3. **If no path provided:**
+   - Respond with: "I need a document to review. Please provide the path to the research, plan, or brainstorm document you'd like me to review."
+
+## Example Usage
+
+```
+/review thoughts/taras/research/2026-03-09-new-base-skills.md
+/review --autonomy=autopilot --output=append thoughts/taras/plans/2026-03-09-feature.md
+/review --output=separate thoughts/shared/brainstorms/2026-03-09-idea.md
+```
+
+
+ARGUMENTS: thoughts/taras/research/2026-03-18-linear-integration-finalization.md
+
+---
+
+Base directory for this skill: /Users/taras/.claude/plugins/cache/desplega-ai-toolbox/desplega/1.7.0/skills/reviewing
+
+# Reviewing
+
+You are performing a structured critique of a document (research, plan, or brainstorm) to identify gaps, weaknesses, and quality issues.
+
+## Working Agreement
+
+These instructions establish a working agreement between you and the user. The key principles are:
+
+1. **AskUserQuestion is your primary communication tool** - Whenever you need to ask the user anything (clarifications, preferences, decisions), use the **AskUserQuestion tool**. Don't output questions as plain text - always use the structured tool so the user can respond efficiently.
+
+2. **Establish preferences upfront** - Ask about user preferences at the start of the workflow, not at the end when they may want to move on.
+
+3. **Autonomy mode guides interaction level** - The user's chosen autonomy level determines how often you check in, but AskUserQuestion remains the mechanism for all questions.
+
+### User Preferences
+
+Before starting review (unless autonomy is Autopilot), establish these preferences:
+
+**Output Mode** - Use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "How should I present the review findings?" | 1. Append errata section to the document (Recommended), 2. Write a separate review file to thoughts/*/reviews/ |
+
+**File Review Preference** - Check if the `file-review` plugin is available (look for `file-review:file-review` in available commands).
+
+If file-review plugin is installed, use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like to use file-review for inline feedback after the automated review?" | 1. Yes, open file-review after review (Recommended), 2. No, the automated review is sufficient |
+
+Store these preferences and act on them during the review process.
+
+## When to Use
+
+This skill activates when:
+- User invokes `/review` command
+- Another skill references the reviewing skill at completion
+- User asks to review, critique, or check a document
+
+## Autonomy Mode
+
+At the start of review, adapt your interaction level based on the autonomy mode:
+
+| Mode | Behavior |
+|------|----------|
+| **Autopilot** | Run full review, auto-fix minor issues, present summary at end |
+| **Critical** (Default) | Ask about Critical/Important findings, auto-fix Minor ones |
+| **Verbose** | Walk through each finding, confirm before any changes |
+
+The autonomy mode is passed by the invoking command. If not specified, default to **Critical**.
+
+## Process Steps
+
+### Step 1: Read & Classify
+
+Read the input document fully. Determine the document type from its path and content structure:
+
+| Path contains | Type |
+|---------------|------|
+| `/research/` | Research document |
+| `/plans/` | Plan |
+| `/brainstorms/` | Brainstorm |
+| `/qa/` | QA report |
+
+If the type is ambiguous, infer from content structure or use **AskUserQuestion** to clarify.
+
+### Step 2: Structural Check
+
+Verify required sections exist based on document type:
+
+**Research documents:**
+- YAML frontmatter with required fields (date, researcher, topic, status)
+- Research Question section
+- Summary section
+- Detailed Findings with file:line references
+- Code References table
+- Open Questions section
+
+**Plans:**
+- YAML frontmatter with required fields (date, planner, topic, status)
+- Overview section
+- Current State Analysis
+- Desired End State with Key Discoveries
+- What We're NOT Doing
+- Phases with Changes Required and Success Criteria (both Automated and Manual Verification)
+- Quick Verification Reference
+
+**Brainstorms:**
+- YAML frontmatter with required fields (date, author, topic, status)
+- Context section
+- Exploration section with Q&A pairs
+- Synthesis section
+- Next Steps section
+
+**QA reports:**
+- YAML frontmatter with required fields (date, author, topic, status)
+- Context section
+- Scope section (In Scope / Out of Scope)
+- Test Cases with Steps, Expected, Actual, Status per case
+- Evidence section (Screenshots, Videos, Logs, or External Links)
+- Verdict section with overall status and summary
+
+### Step 3: Content Analysis
+
+Apply type-specific quality criteria:
+
+**Research documents:**
+- Are findings supported by specific file:line references?
+- Are there claims without evidence from the codebase?
+- Are there obvious areas that weren't investigated?
+- Are open questions actually open (not answerable from the findings)?
+
+**Plans:**
+- Are there missing phases or gaps in the implementation sequence?
+- Are success criteria specific enough to be actionable?
+- Are there unstated assumptions about the codebase?
+- Is error handling or rollback addressed?
+- Is there scope creep risk (doing more than stated)?
+
+**Brainstorms:**
+- Were important angles left unexplored?
+- Were conclusions reached prematurely before sufficient exploration?
+- Are constraints and requirements clearly identified?
+- Is the document ready to feed into research or planning?
+
+**QA reports:**
+- Does every test case have an actual result and status?
+- Is evidence provided for failures (screenshots, logs)?
+- Is the verdict consistent with individual test case results?
+- Are edge cases and exploratory testing documented?
+- Are external references (Sentry, PRs, CI) linked where relevant?
+
+### Step 4: Gap Identification
+
+Look for what's missing or assumed:
+- Cross-reference claims against the codebase if needed (spawn **codebase-analyzer** agent for verification)
+- Identify unstated assumptions
+- Check for internal contradictions
+- Verify external references are still valid
+
+### Step 5: Present Findings
+
+Categorize all findings into three severity levels:
+
+| Severity | Meaning | Action |
+|----------|---------|--------|
+| **Critical** | Blocks correctness or completeness — must be addressed | Discuss with user |
+| **Important** | Significant gap or weakness — should be addressed | Discuss with user (or auto-fix in Autopilot) |
+| **Minor** | Formatting, typos, small inconsistencies | Auto-fix unless Verbose mode |
+
+Present a summary as text output with findings grouped by severity.
+
+### Step 6: Apply or Discuss
+
+Based on output mode preference:
+
+**If "Append errata":**
+- Auto-fix Minor issues directly in the document
+- For Critical/Important items, append a `## Review Errata` section at the end of the document with:
+  ```
+  ## Review Errata
+
+  _Reviewed: YYYY-MM-DD by [reviewer]_
+
+  ### Critical
+  - [ ] [Finding description and recommended action]
+
+  ### Important
+  - [ ] [Finding description and recommended action]
+
+  ### Resolved
+  - [x] [Minor issue] — auto-fixed
+  ```
+
+**If "Separate file":**
+- Write review to `thoughts/*/reviews/YYYY-MM-DD-review-of-<original-slug>.md`
+- Include all findings with references back to the original document
+
+### Step 7: Workflow Handoff
+
+After the review is complete, determine the document type (from frontmatter, file path, or content) and propose the appropriate next step.
+
+Use **AskUserQuestion** with context-dependent options:
+
+**If reviewing a brainstorm document:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this brainstorm?" | 1. Start research (→ `/research`), 2. Create a plan directly (→ `/create-plan`), 3. Done for now |
+
+**If reviewing a research document:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this research?" | 1. Create a plan (→ `/create-plan`), 2. Done for now |
+
+**If reviewing a plan document:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this plan?" | 1. Start implementation (→ `/implement-plan`), 2. Done for now |
+
+**If reviewing a post-implementation verification:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next?" | 1. Done — mark as complete, 2. Address remaining items |
+
+**If reviewing a QA report:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this QA report?" | 1. Run post-QA verification (→ `/verify-plan`), 2. Address issues found, 3. Done |
+
+**If document type is unclear**, ask a generic question:
+
+| Question | Options |
+|----------|---------|
+| "Review complete. Would you like to proceed to the next workflow step?" | 1. Yes, suggest next step, 2. Done for now |
+
+## No Rewriting Rule
+
+**CRITICAL**: The reviewer identifies issues — the reviewer does NOT rewrite the document. Present findings and let the original author address them. The only exception is Minor auto-fixes (typos, formatting).
+
+## Review Integration
+
+If the `file-review` plugin is available and the user selected "Yes" during User Preferences setup:
+- After the automated review, invoke `/file-review:file-review <path>` for inline human comments
+- Process feedback with `file-review:process-review` skill
+- If user selected "No" or autonomy mode is Autopilot, skip this step
+
+
+ARGUMENTS: thoughts/taras/research/2026-03-18-linear-integration-finalization.md --autonomy=critical
+
+---
+
+<task-notification>
+<task-id>add921831dc4997d4</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/add921831dc4997d4.output</output-file>
+<status>completed</status>
+<summary>Agent "Check existing PR 161 code on branch" completed</summary>
+<result>Now I have a complete picture. Here is the full analysis, Taras.
+
+---
+
+## Analysis: Current State of `linear-integration-foundation` Branch
+
+### Overview
+
+The branch contains a **prototype-stage Linear integration** built with Linear-specific naming (not the generic tracker abstraction described in the research doc). It includes an OAuth 2.0 PKCE flow, an SDK client wrapper with auto-refresh, two HTTP routes for authorize/callback, a migration creating three Linear-specific tables, and wiring into the main HTTP server lifecycle. The `src/tracker/` directory, `src/http/trackers/` directory, `src/be/db-queries/tracker.ts` module, and all MCP tools described in the research plan **do not exist yet**.
+
+### What Exists on the Branch
+
+#### Files Created (new on this branch)
+
+| File | Purpose |
+|---|---|
+| `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/app.ts` | Init/reset lifecycle, `isLinearEnabled()` |
+| `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/client.ts` | `@linear/sdk` wrapper with cached client + auto-refresh |
+| `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/oauth.ts` | PKCE flow, token exchange, token storage, refresh |
+| `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/types.ts` | TypeScript interfaces for DB rows and API responses |
+| `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/index.ts` | Barrel re-exports |
+| `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/linear.ts` | HTTP handlers for `/api/linear/authorize` and `/api/linear/callback` |
+| `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/be/migrations/008_linear_integration.sql` | Migration creating three tables + `agent_tasks` source enum update |
+
+#### Files Modified (existing files changed on this branch)
+
+| File | Change |
+|---|---|
+| `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/index.ts` | Imports `initLinear` and `handleLinear`, wires both into server startup and handler chain (lines 14, 23, 96, 189-190) |
+| `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/core.ts` | Imports `initLinear`/`resetLinear`, adds Linear OAuth URLs to API key auth bypass (lines 85-87), adds Linear to config-reload flow (lines 112-113) |
+| `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/types.ts` | Adds `"linear"` to the `AgentTaskSourceSchema` Zod enum (line 66) |
+| `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/package.json` | Adds `"@linear/sdk": "^77.0.0"` dependency (line 87) |
+
+### What Does NOT Exist Yet (per the research plan)
+
+The following items from the research doc at `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/thoughts/taras/research/2026-03-18-linear-integration-finalization.md` are **not yet implemented**:
+
+1. **`src/tracker/types.ts`** -- Generic `TrackerProvider` type and shared interfaces (Section 1.3)
+2. **`src/be/db-queries/tracker.ts`** -- Generic provider-parameterized CRUD functions (Section 1.2)
+3. **`src/http/trackers/linear.ts`** -- Routes under `/api/trackers/linear/` (Section 1.4)
+4. **`src/linear/webhook.ts`** -- Webhook handler with signature verification and `AgentSessionEvent` routing (Section 3.2-3.3)
+5. **`src/linear/sync.ts`** -- Inbound/outbound sync logic, status mapping (Section 5)
+6. **`src/tools/tracker-*.ts`** -- All six MCP tools (Section 1.5)
+7. **Generic DB tables** (`oauth_apps`, `oauth_tokens`, `tracker_sync`, `tracker_agent_mapping`) -- the migration uses Linear-specific table names instead (Section 1.1)
+
+### Migration 008: What It Creates vs. What the Plan Calls For
+
+The existing migration at `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/be/migrations/008_linear_integration.sql` creates **Linear-specific** tables:
+
+| Existing Table (line) | Planned Generic Table |
+|---|---|
+| `linear_oauth_tokens` (line 11) | `oauth_apps` + `oauth_tokens` (provider-parameterized) |
+| `linear_sync` (line 22) | `tracker_sync` (with `provider` column) |
+| `linear_agent_mapping` (line 37) | `tracker_agent_mapping` (with `provider` column) |
+
+Key differences from the plan:
+- No `provider` column on any table (Linear-hardcoded)
+- No `oauth_apps` table (app config like `authorizeUrl`, `tokenUrl` not stored in DB)
+- `linear_sync` has no `providerEntityType` or `lastSyncOrigin` columns
+- `linear_sync.syncDirection` uses `CHECK (... IN ('outbound', 'inbound', 'bidirectional'))` while the plan uses a default of `'inbound'` with no CHECK
+- The `agent_tasks` table recreation (line 54-114) adds `'linear'` to the source CHECK constraint and explicitly lists all columns including `dir`
+
+### How the OAuth Flow Currently Works
+
+1. `getAuthorizationUrl()` in `src/linear/oauth.ts:61-94` generates a PKCE code verifier (64 hex chars), derives an S256 code challenge, stores the `{codeVerifier, createdAt}` in an in-memory `Map` keyed by a random state string, and builds the authorization URL with `LINEAR_CLIENT_ID`, `LINEAR_REDIRECT_URI`, and hardcoded scopes including `admin`.
+2. The `/api/linear/authorize` handler in `src/http/linear.ts:50-68` calls `getAuthorizationUrl()` and returns a 302 redirect.
+3. After user consent, Linear redirects to `/api/linear/callback` handled at `src/http/linear.ts:71-110`, which extracts `code` and `state` query params.
+4. `handleOAuthCallback()` at `src/linear/oauth.ts:100-138` looks up the pending state, POSTs to `https://api.linear.app/oauth/token` with the authorization code and code verifier, and calls `storeTokens()`.
+5. `storeTokens()` at `src/linear/oauth.ts:195-219` deletes all existing rows from `linear_oauth_tokens` and inserts the new token data in a transaction (single-row table pattern).
+
+Notable: The `actor=app` parameter mentioned in the research doc (Section 2.3) as required for bot identity is **not included** in the authorization URL parameters at `oauth.ts:83-93`. The scopes at `oauth.ts:17` include `admin` which the research doc's "Remaining Open Question" (Section 8) questioned.
+
+### How the Client Wrapper Works
+
+`src/linear/client.ts` provides three exports:
+- **`getLinearClient()`** (line 18): Reads tokens from DB via `getStoredTokens()`, checks expiry via `isTokenExpiringSoon()`, refreshes if needed, then returns a cached `LinearClient` instance (cache invalidated when the access token string changes).
+- **`withLinearClient(fn)`** (line 56): Executes a callback with the client; on auth errors (401/403/authentication substring match at line 71), refreshes the token, resets the cached client, and retries once.
+- **`resetLinearClient()`** (line 47): Nulls the cached client and token.
+
+### HTTP Wiring
+
+- **Auth bypass**: `src/http/core.ts:85-87` exempts both `/api/linear/authorize` and `/api/linear/callback` from API key authentication.
+- **Handler chain**: `src/http/index.ts:96` registers `handleLinear` in the route handler chain.
+- **Startup**: `src/http/index.ts:189-190` calls `initLinear()` during server initialization.
+- **Config reload**: `src/http/core.ts:112-113` calls `resetLinear()` then `initLinear()` when configuration is reloaded, adding "linear" to the integrations list if initialization succeeds.
+
+### Migration Files (All 9)
+
+All located in `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/be/migrations/`:
+
+| File | Description |
+|---|---|
+| `001_initial.sql` | Baseline schema |
+| `002_one_time_schedules.sql` | One-time schedule support |
+| `003_workflows.sql` | Workflow tables |
+| `004_workflow_source.sql` | Workflow source column |
+| `005_epic_next_steps.sql` | Epic next steps |
+| `006_vcs_provider.sql` | VCS provider support |
+| `007_task_dir.sql` | Task directory column |
+| `008_linear_integration.sql` | Linear tables + agent_tasks source enum update |
+| `runner.ts` | Migration runner |
+
+### Summary
+
+The branch contains a **working but Linear-specific prototype** covering OAuth (Phase 2 of the plan) with routes at `/api/linear/*` rather than `/api/trackers/linear/*`. The research doc's plan calls for deleting all of this and rebuilding from scratch with generic tracker tables, a `src/tracker/` abstraction layer, provider-parameterized DB queries in `src/be/db-queries/tracker.ts`, and routes under `/api/trackers/`. Phases 1, 3, 4, and 5 of the plan are entirely unimplemented. No webhook handling, no sync logic, no MCP tools, and no `oauth4webapi` library usage exist on the branch.</result>
+<usage><total_tokens>32561</total_tokens><tool_uses>22</tool_uses><duration_ms>99151</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/add921831dc4997d4.output
+
+---
+
+<task-notification>
+<task-id>ad91ed7ba65c1a234</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/ad91ed7ba65c1a234.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify research claims against codebase" completed</summary>
+<result>
+
+I now have all the information needed. Here is the full analysis, Taras.
+
+---
+
+## Analysis: Research Document Claims vs. Actual Branch State
+
+### Overview
+
+The research document at `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/thoughts/taras/research/2026-03-18-linear-integration-finalization.md` proposes a "nuke and rebuild" approach: delete the existing Linear-specific code on the branch and replace it with a generic tracker abstraction. The branch currently has a working but Linear-specific prototype that the document explicitly plans to discard.
+
+---
+
+### 1. Existing Linear Code on the Branch
+
+**Claim**: "Delete all existing Linear code on this branch. Build a generic ticket tracker abstraction with Linear as the first provider."
+
+**Reality**: There is existing Linear-specific code in `src/linear/` that the document plans to nuke. Here is what exists today:
+
+| File | Description |
+|---|---|
+| `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/app.ts` | Init/reset lifecycle with `isLinearEnabled()`, `initLinear()`, `resetLinear()` — checks `LINEAR_DISABLE`, `LINEAR_ENABLED`, `LINEAR_CLIENT_ID` env vars (lines 14-61) |
+| `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/client.ts` | `@linear/sdk` wrapper with `getLinearClient()` (auto-refresh via `isTokenExpiringSoon`), `withLinearClient()` (retry on auth errors), `resetLinearClient()` (lines 1-86) |
+| `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/oauth.ts` | Full PKCE OAuth flow: `getAuthorizationUrl()` (line 61), `handleOAuthCallback()` (line 100), `refreshAccessToken()` (line 144), `getStoredTokens()` (line 184), `storeTokens()` (line 195). Stores tokens in `linear_oauth_tokens` table directly via `getDb()` |
+| `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/types.ts` | Type interfaces: `LinearOAuthToken`, `LinearSyncMapping`, `LinearAgentMapping`, `LinearTokenResponse`, `PendingOAuthState` (lines 1-49) |
+| `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/index.ts` | Barrel re-exports from `app`, `client`, `oauth`, `types` (lines 1-17) |
+
+**No `src/tracker/` directory exists.** The `src/tracker/` path is only mentioned in the research document itself (confirmed by grep finding only the research md file).
+
+There are also Linear-related files outside `src/linear/`:
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/linear.ts` — HTTP route handler (see point 6)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/be/migrations/008_linear_integration.sql` — Migration (see point 3)
+
+**Notable detail in existing oauth.ts**: The authorization URL at line 83-93 does **not** include the `actor=app` parameter. The document's Section 9 ("Lessons from Prototype") item 3 calls this out explicitly: "Missing `actor=app`: Required for bot identity."
+
+---
+
+### 2. VCS Pattern Reference
+
+**Claim**: "Follows the same flat-convention pattern as VCS (`src/vcs/`, `src/github/`, `src/gitlab/`)."
+
+**Reality**: This directory structure exists, but the "pattern" is looser than described.
+
+`src/vcs/` is minimal — only two files:
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/vcs/types.ts` — exports `type VcsProvider = "github" | "gitlab"` (line 5)
+- `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/vcs/index.ts` — re-exports VcsProvider and provides `detectVcsProvider()` utility function (lines 1-15)
+
+`src/github/` has 7 files: `app.ts`, `handlers.ts`, `index.ts`, `mentions.ts`, `mentions.test.ts`, `reactions.ts`, `types.ts`
+
+`src/gitlab/` has 5 files: `auth.ts`, `handlers.ts`, `index.ts`, `reactions.ts`, `types.ts`
+
+The actual pattern is:
+- Each VCS provider gets its own top-level directory under `src/`
+- Each has a barrel `index.ts` for re-exports
+- Each has a `types.ts` for TypeScript interfaces
+- Each has a lifecycle module (`app.ts` for GitHub, `auth.ts` for GitLab) with `init*()`, `reset*()`, `is*Enabled()` functions
+- `src/vcs/` provides a shared type union (`VcsProvider`) and a provider detection utility
+- There are no abstract interfaces or factory patterns — the convention is structural (same directory shape, same function naming)
+
+The doc's proposed `src/tracker/types.ts` with a `TrackerProvider` type parallels `src/vcs/types.ts` with its `VcsProvider` type. This is an accurate analogy.
+
+---
+
+### 3. Migration Numbering
+
+**Claim**: "Create migration `008_tracker_integration.sql`"
+
+**Reality**: The highest migration on the branch is `008`, but it is named `008_linear_integration.sql`, not `008_tracker_integration.sql`.
+
+Full listing of `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/be/migrations/`:
+
+| File | Description |
+|---|---|
+| `001_initial.sql` | Baseline |
+| `002_one_time_schedules.sql` | |
+| `003_workflows.sql` | |
+| `004_workflow_source.sql` | |
+| `005_epic_next_steps.sql` | |
+| `006_vcs_provider.sql` | |
+| `007_task_dir.sql` | |
+| `008_linear_integration.sql` | **Current** — Linear-specific tables |
+| `runner.ts` | Migration runner |
+
+The existing `008_linear_integration.sql` creates Linear-specific tables (lines 11-43):
+- `linear_oauth_tokens` — single table, not the generic `oauth_apps` + `oauth_tokens` pair proposed in the doc
+- `linear_sync` — columns named `linearId`, `linearIdentifier`, `linearUrl` (not generic `externalId`, `externalIdentifier`, `externalUrl`)
+- `linear_agent_mapping` — columns named `linearUserId` (not generic `externalUserId`)
+
+It also recreates `agent_tasks` with `'linear'` added to the source CHECK constraint (lines 54-114).
+
+The doc proposes replacing this with `008_tracker_integration.sql` containing generic tables (`oauth_apps`, `oauth_tokens`, `tracker_sync`, `tracker_agent_mapping`). Since the doc says "nuke and rebuild," the existing `008` would be deleted and replaced with a new `008` of a different name and schema.
+
+---
+
+### 4. `AgentTaskSourceSchema` Enum
+
+**Claim**: "Add `'linear'` to the CHECK constraint"
+
+**Reality**: `'linear'` is **already present** in `AgentTaskSourceSchema`.
+
+At `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/types.ts:56-67`:
+
+```typescript
+export const AgentTaskSourceSchema = z.enum([
+  "mcp",
+  "slack",
+  "api",
+  "github",
+  "gitlab",
+  "agentmail",
+  "system",
+  "schedule",
+  "workflow",
+  "linear",
+]);
+```
+
+The value `"linear"` is at line 66. This matches the existing migration `008_linear_integration.sql` line 60, which includes `'linear'` in the SQL CHECK constraint. The doc's proposal to add it is describing work that has already been done on this branch.
+
+---
+
+### 5. DB Query Layer: `src/be/db-queries/`
+
+**Claim**: "All tracker DB functions live in a dedicated module" at `src/be/db-queries/tracker.ts`
+
+**Reality**: The directory `src/be/db-queries/` does **not exist**. The glob returned zero results. All database query functions currently live in a single monolithic file:
+
+`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/be/db.ts`
+
+The existing Linear code in `src/linear/oauth.ts` queries the database directly via `getDb()` (line 186: `db.query("SELECT * FROM linear_oauth_tokens ORDER BY createdAt DESC LIMIT 1").get()`). There is no intermediary query module.
+
+The doc's proposal to create `src/be/db-queries/tracker.ts` would be a new pattern — the first use of a `db-queries/` subdirectory in the project.
+
+---
+
+### 6. HTTP Route Patterns
+
+**Claim**: Routes at `src/http/trackers/linear.ts` under `/api/trackers/linear/*`
+
+**Reality**: There is no `src/http/trackers/` directory. The current Linear routes live at:
+
+`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/linear.ts`
+
+This file defines two routes (lines 13-40):
+- `GET /api/linear/authorize` (pattern: `["api", "linear", "authorize"]`)
+- `GET /api/linear/callback` (pattern: `["api", "linear", "callback"]`)
+
+Note the path pattern: `/api/linear/*`, not `/api/trackers/linear/*` as the doc proposes.
+
+The current route organization is flat — one file per domain directly under `src/http/`:
+
+| File | Domain |
+|---|---|
+| `agents.ts` | Agent management |
+| `tasks.ts` | Task CRUD |
+| `epics.ts` | Epics |
+| `schedules.ts` | Schedules |
+| `workflows.ts` | Workflows |
+| `webhooks.ts` | GitHub/GitLab/AgentMail webhooks |
+| `linear.ts` | Linear OAuth |
+| `repos.ts` | Repository management |
+| `memory.ts` | Memory system |
+| `config.ts` | Swarm config |
+| ... | |
+
+Routes are registered in `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/index.ts` at lines 91-108 as an ordered array of handler functions. `handleLinear` is at line 96. Each handler returns a boolean — first match wins.
+
+Routes use the `route()` factory from `src/http/route-def.ts` (line 65), which registers routes in a global `routeRegistry` array (line 61) for OpenAPI generation, and provides `match()` and `parse()` methods.
+
+Auth bypass: In `/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/http/core.ts:85-87`, both `/api/linear/authorize` and `/api/linear/callback` bypass API key auth. The doc's Section 9 item 1 notes this as a lesson: "Only `/callback` bypasses API key auth, not `/authorize`." The current code bypasses both.
+
+The doc proposes introducing a subdirectory pattern (`src/http/trackers/linear.ts`) that does not currently exist elsewhere in `src/http/`.
+
+---
+
+### 7. MCP Tool Patterns
+
+**Claim**: New `tracker-*` tools (e.g., `tracker-status`, `tracker-link-task`, etc.)
+
+**Reality**: No `tracker-*` tools exist today. The current tools in `src/tools/` follow these naming patterns:
+
+**Flat files** (one tool per file, kebab-case):
+- `send-task.ts`, `cancel-task.ts`, `get-tasks.ts`, `get-task-details.ts`, `poll-task.ts`, `task-action.ts`, `task-dedup.ts`
+- `join-swarm.ts`, `get-swarm.ts`
+- `slack-post.ts`, `slack-read.ts`, `slack-reply.ts`, `slack-list-channels.ts`, `slack-download-file.ts`, `slack-upload-file.ts`
+- `memory-get.ts`, `memory-search.ts`
+- Various others: `store-progress.ts`, `update-profile.ts`, etc.
+
+**Subdirectory grouping** (for related tool clusters, with `index.ts` barrel):
+- `src/tools/epics/` — 7 files: `create-epic.ts`, `delete-epic.ts`, `get-epic-details.ts`, `list-epics.ts`, `assign-task-to-epic.ts`, `unassign-task-from-epic.ts`, `update-epic.ts`, plus `index.ts`
+- `src/tools/schedules/` — 6 files: `create-schedule.ts`, `delete-schedule.ts`, `list-schedules.ts`, `run-schedule-now.ts`, `update-schedule.ts`, plus `index.ts`
+- `src/tools/workflows/` — 9 files: `create-workflow.ts`, `delete-workflow.ts`, `get-workflow.ts`, `get-workflow-run.ts`, `list-workflows.ts`, `list-workflow-runs.ts`, `retry-workflow-run.ts`, `trigger-workflow.ts`, `update-workflow.ts`, plus `index.ts`
+- `src/tools/swarm-config/` — 5 files: `get-config.ts`, `set-config.ts`, `delete-config.ts`, `list-config.ts`, plus `index.ts`
+
+Each tool file exports a `register*Tool` function that takes an `McpServer` and calls `createToolRegistrar(server)()` (from `src/tools/utils.ts`) with a tool name string, schema, and handler.
+
+The `slack-*` prefix pattern for flat files is the closest parallel to the proposed `tracker-*` naming. The doc's 6 proposed tracker tools could go either as flat `tracker-*.ts` files or in a `src/tools/tracker/` subdirectory with an `index.ts`.
+
+---
+
+### 8. Environment Variables
+
+**Claim**: The doc lists `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET`, `LINEAR_SIGNING_SECRET`, `LINEAR_REDIRECT_URI`, `LINEAR_TEAM_ID`
+
+**Reality**: Linear env vars are already defined in four places:
+
+**`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/.env.example:50-58`**:
+```
+LINEAR_CLIENT_ID=
+LINEAR_CLIENT_SECRET=
+LINEAR_REDIRECT_URI=                   # e.g., https://swarm.desplega.sh/api/linear/callback
+LINEAR_TEAM_ID=                        # SWARM team UUID (populated after setup)
+LINEAR_SIGNING_SECRET=                 # Webhook verification secret (Phase 2)
+# LINEAR_ENABLED=true                  # Feature flag
+# LINEAR_SYNC_PROGRESS=true            # Sync progress updates as Linear comments
+```
+
+**`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/app.ts`** references:
+- `LINEAR_DISABLE` (line 15-16)
+- `LINEAR_ENABLED` (line 19-22)
+- `LINEAR_CLIENT_ID` (line 24)
+- `LINEAR_CLIENT_SECRET` (line 50)
+- `LINEAR_REDIRECT_URI` (line 51)
+
+**`/Users/taras/worktrees/agent-swarm/2026-03-18-linear/src/linear/oauth.ts`** references:
+- `LINEAR_CLIENT_ID` (lines 62, 107)
+- `LINEAR_REDIRECT_URI` (lines 63, 109)
+- `LINEAR_CLIENT_SECRET` (lines 108, 153)
+
+The env vars listed in the doc match what already exists, with the addition of `LINEAR_SIGNING_SECRET` which is defined in `.env.example` but not yet consumed by any code (it is labeled "Phase 2" in the example file at line 56). `LINEAR_SYNC_PROGRESS` is also in the example file but not consumed by code.
+
+---
+
+### Summary of Discrepancies Between Doc and Branch
+
+| Doc Claim | Branch Reality |
+|---|---|
+| `src/tracker/` directory | Does not exist |
+| `src/be/db-queries/tracker.ts` | `src/be/db-queries/` directory does not exist; all queries in `src/be/db.ts` |
+| `src/http/trackers/linear.ts` at `/api/trackers/linear/*` | Routes at `src/http/linear.ts` under `/api/linear/*` |
+| Migration named `008_tracker_integration.sql` with generic tables | Migration is `008_linear_integration.sql` with Linear-specific table names |
+| Add `'linear'` to source enum | Already present in both `types.ts` and migration |
+| `tracker-*` MCP tools | No tracker tools exist yet |
+| `actor=app` in OAuth URL | Missing from current `oauth.ts` (doc identifies this as a known gap) |
+| Only `/callback` bypasses auth | Both `/authorize` and `/callback` bypass auth (doc identifies this as a known gap) |
+
+The discrepancies are intentional — the doc explicitly states "Delete all existing Linear code from branch (revert to main state)" and "Build from scratch with the abstraction baked in from day 1." The existing code is the prototype that the doc plans to replace.</result>
+<usage><total_tokens>51368</total_tokens><tool_uses>34</tool_uses><duration_ms>121627</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/ad91ed7ba65c1a234.output
+
+---
+
+<task-notification>
+<task-id>bxvm36iqn</task-id>
+<tool-use-id>toolu_01K3svmQKoadj6Xgtd4dWouS</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/bxvm36iqn.output</output-file>
+<status>completed</status>
+<summary>Background command "Launch file-review GUI for inline human comments" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-18-linear/8dff8357-8235-4284-9907-508b0d0b5f5e/tasks/bxvm36iqn.output

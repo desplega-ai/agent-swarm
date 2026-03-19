@@ -1,0 +1,30 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "aab15cd9b13d",
+  "session_id": "f0d0ac9c-2f6e-4f70-b3d8-99f8a17a9b57",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-19T02:00:38.507299Z",
+  "branch": "linear-integration-foundation",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "thoughts/taras/research/2026-03-18-linear-integration-finalization.md"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "20e4ea9fd89f",
+  "token_usage": {
+    "input_tokens": 42,
+    "cache_creation_tokens": 91366,
+    "cache_read_tokens": 1300595,
+    "output_tokens": 10026,
+    "api_call_count": 18
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-19T02:00:38.275785Z",
+    "agent_lines": 520,
+    "human_added": 4338,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 4858,
+    "agent_percentage": 10.703993412927131
+  }
+}
