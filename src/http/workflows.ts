@@ -242,7 +242,8 @@ export async function handleWorkflows(
       return true;
     }
     const body = await parseBody<Record<string, unknown>>(req);
-    const runId = await startWorkflowExecution(workflow, body);
+    // TODO(Phase 7): inject registry from module-level singleton
+    const runId = await startWorkflowExecution(workflow, body, undefined as never);
     json(res, { runId }, 201);
     return true;
   }

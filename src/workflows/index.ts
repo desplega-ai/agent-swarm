@@ -1,4 +1,5 @@
-export { findEntryNodes, getSuccessors, startWorkflowExecution } from "./engine";
+export { findEntryNodes, getSuccessors } from "./definition";
+export { startWorkflowExecution } from "./engine";
 export { workflowEventBus } from "./event-bus";
 export { recoverStuckWorkflowRuns } from "./recovery";
 export { retryFailedRun } from "./resume";

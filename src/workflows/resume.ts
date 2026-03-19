@@ -6,7 +6,8 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
-import { getSuccessors, walkDag } from "./engine";
+import { getSuccessors } from "./definition";
+import { walkGraph } from "./engine";
 import type { WorkflowEventBus } from "./event-bus";
 
 interface TaskEvent {
@@ -62,7 +63,8 @@ async function resumeFromTaskCompletion(event: TaskEvent): Promise<void> {
 
   // Continue DAG walk from successors
   const successors = getSuccessors(workflow.definition, step.nodeId, "default");
-  await walkDag(workflow.definition, run.id, ctx, successors);
+  // TODO(Phase 4): inject registry from module-level singleton
+  await walkGraph(workflow.definition, run.id, ctx, successors, undefined as never);
 }
 
 function markRunFailed(event: TaskEvent, reason: string): void {
@@ -98,5 +100,6 @@ export async function retryFailedRun(runId: string): Promise<void> {
   // Resume from the failed node
   const node = workflow.definition.nodes.find((n) => n.id === failedStep.nodeId);
   if (!node) throw new Error(`Node ${failedStep.nodeId} not found in workflow definition`);
-  await walkDag(workflow.definition, runId, ctx, [node]);
+  // Note: registry will be injected in Phase 4 — for now pass undefined cast
+  await walkGraph(workflow.definition, runId, ctx, [node], undefined as never);
 }

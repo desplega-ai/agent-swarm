@@ -1,6 +1,7 @@
 import { listWorkflows } from "../be/db";
 import type { WorkflowNode } from "../types";
-import { findEntryNodes, startWorkflowExecution } from "./engine";
+import { findEntryNodes } from "./definition";
+import { startWorkflowExecution } from "./engine";
 
 export function evaluateWorkflowTriggers(eventType: string, eventData: unknown): void {
   const workflows = listWorkflows({ enabled: true });
@@ -8,7 +9,8 @@ export function evaluateWorkflowTriggers(eventType: string, eventData: unknown):
     const entryNodes = findEntryNodes(workflow.definition);
     for (const node of entryNodes) {
       if (matchTriggerNode(node, eventType, eventData)) {
-        startWorkflowExecution(workflow, eventData).catch((err) => {
+        // Note: registry will be injected in Phase 5 — for now pass undefined cast
+        startWorkflowExecution(workflow, eventData, undefined as never).catch((err) => {
           console.error(`[workflows] Failed to start workflow ${workflow.name}:`, err);
         });
       }
