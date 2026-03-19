@@ -435,4 +435,8 @@ export class PiMonoAdapter implements ProviderAdapter {
       return false;
     }
   }
+
+  formatCommand(commandName: string): string {
+    return `/skill:${commandName}`;
+  }
 }
