@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "bb9203b39aa7",
+  "strategy": "manual-commit",
+  "branch": "linear-integration-foundation",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".env.example"
+  ],
+  "sessions": [
+    {
+      "metadata": "/bb/9203b39aa7/0/metadata.json",
+      "transcript": "/bb/9203b39aa7/0/full.jsonl",
+      "context": "/bb/9203b39aa7/0/context.md",
+      "content_hash": "/bb/9203b39aa7/0/content_hash.txt",
+      "prompt": "/bb/9203b39aa7/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 410,
+    "cache_creation_tokens": 694124,
+    "cache_read_tokens": 46495908,
+    "output_tokens": 81399,
+    "api_call_count": 248
+  }
+}
