@@ -50,6 +50,8 @@ Agent Swarm lets you run a team of AI coding agents that coordinate autonomously
 - **GitLab integration** — Full GitLab webhook support alongside GitHub via provider adapter pattern
 - **Working directory support** — Tasks can specify a custom starting directory for agents via the `dir` parameter
 - **Multi-provider** — Run agents with Claude Code or pi-mono (`HARNESS_PROVIDER=claude|pi`)
+- **Agent-fs integration** — Persistent, searchable filesystem shared across the swarm with auto-registration on first boot
+- **Debug dashboard** — SQL query interface with Monaco editor and AG Grid results for database inspection
 
 ## Quick Start
 

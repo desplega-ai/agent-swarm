@@ -97,6 +97,9 @@ export const DEFERRED_TOOLS = new Set([
   // AgentMail (1)
   "register-agentmail-inbox",
 
+  // Debug (1)
+  "db-query",
+
   // Other (3)
   "cancel-task",
   "inject-learning",

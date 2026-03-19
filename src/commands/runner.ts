@@ -1153,6 +1153,13 @@ async function spawnProviderProcess(
 
   // Resolve env first so we can use MODEL_OVERRIDE from config
   const freshEnv = await fetchResolvedEnv(opts.apiUrl, opts.apiKey, opts.agentId);
+
+  // Propagate agent-fs config to process.env so getBasePrompt() can read them
+  // (fetchResolvedEnv returns a new object, doesn't update process.env)
+  if (freshEnv.AGENT_FS_SHARED_ORG_ID) {
+    process.env.AGENT_FS_SHARED_ORG_ID = freshEnv.AGENT_FS_SHARED_ORG_ID as string;
+  }
+
   const model = opts.model || (freshEnv.MODEL_OVERRIDE as string) || "";
 
   const config: ProviderSessionConfig = {

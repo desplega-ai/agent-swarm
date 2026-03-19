@@ -5,6 +5,7 @@ import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerContextDiffTool } from "./tools/context-diff";
 import { registerContextHistoryTool } from "./tools/context-history";
 import { registerCreateChannelTool } from "./tools/create-channel";
+import { registerDbQueryTool } from "./tools/db-query";
 import { registerDeleteChannelTool } from "./tools/delete-channel";
 // Epics capability
 import {
@@ -120,6 +121,9 @@ export function createServer() {
   registerStoreProgressTool(server);
   registerMyAgentInfoTool(server);
   registerCancelTaskTool(server);
+
+  // Debug tools - always registered (self-guards with lead check)
+  registerDbQueryTool(server);
 
   // Swarm config tools - always registered (config management is fundamental)
   registerSetConfigTool(server);

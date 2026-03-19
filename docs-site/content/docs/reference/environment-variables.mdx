@@ -113,6 +113,16 @@ Complete reference for all environment variables used by Agent Swarm.
 | `SENTRY_AUTH_TOKEN` | Sentry Organization Auth Token |
 | `SENTRY_ORG` | Sentry organization slug |
 
+## Agent Filesystem (agent-fs)
+
+| Variable | Description |
+|----------|-------------|
+| `AGENT_FS_API_URL` | Agent-fs API URL. When set as a global swarm config, enables agent-fs integration with persistent shared filesystem |
+| `AGENT_FS_API_KEY` | Per-agent API key, auto-generated on first boot via agent-fs registration. Stored as agent-scoped secret |
+| `AGENT_FS_SHARED_ORG_ID` | Shared org ID for the swarm's agent-fs organization. Auto-created by the lead on first boot |
+
+These are managed as swarm config values (via `set-config` with `scope: "global"`), not environment variables in `.env` files. The entrypoint registers agents with agent-fs on first boot and stores API keys as agent-scoped secrets. The runner propagates `AGENT_FS_SHARED_ORG_ID` to worker processes automatically.
+
 ## x402 Payments
 
 Environment variables for the [x402 payment module](/docs/guides/x402-payments), enabling agents to make USDC micropayments on x402-gated APIs.

@@ -15,6 +15,7 @@
   - [store-progress](#store-progress)
   - [my-agent-info](#my-agent-info)
   - [cancel-task](#cancel-task)
+  - [db-query](#db-query)
   - [set-config](#set-config)
   - [get-config](#get-config)
   - [list-config](#list-config)
@@ -134,8 +135,6 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 | `task` | `string` | Yes | - | The task description to send. |
 | `dependsOn` | `array` | No | - | Task IDs this task depends on. |
 | `epicId` | `string` | No | - | Epic to associate this task with. |
-| `slackChannelId` | `string` | No | - | Slack channel ID to post progress updates to. Use this to propagate Slack context when delegating from a Slack thread. |
-| `slackThreadTs` | `string` | No | - | Slack thread timestamp. Required with slackChannelId for thread-level updates. |
 | `slackUserId` | `string` | No | - | Slack user ID of the original requester. |
 
 ### get-task-details
@@ -178,6 +177,17 @@ Cancel a task that is pending or in progress. Only the lead or task creator can 
 |-----------|------|----------|---------|-------------|
 | `taskId` | `uuid` | Yes | - | The ID of the task to cancel. |
 | `reason` | `string` | No | - | Reason for cancellation. |
+
+### db-query
+
+**Execute database query**
+
+Execute a read-only SQL query against the swarm database. Lead-only. Results capped at 100 rows.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `sql` | `string` | Yes | - | SQL query (read-only only — writes are rejected) |
+| `params` | `array` | No | [] | Query parameters |
 
 ### set-config
 
