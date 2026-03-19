@@ -86,7 +86,15 @@ export async function handleCore(
     req.url?.startsWith("/api/trackers/linear/authorize") ||
     req.url?.startsWith("/api/trackers/linear/callback") ||
     req.url?.startsWith("/api/trackers/linear/webhook");
-  if (apiKey && !isGitHubWebhook && !isGitLabWebhook && !isAgentMailWebhook && !isTrackerAuth) {
+  const isWorkflowWebhook = req.url?.startsWith("/api/webhooks/");
+  if (
+    apiKey &&
+    !isGitHubWebhook &&
+    !isGitLabWebhook &&
+    !isAgentMailWebhook &&
+    !isTrackerAuth &&
+    !isWorkflowWebhook
+  ) {
     const authHeader = req.headers.authorization;
     const providedKey = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
 

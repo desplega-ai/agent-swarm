@@ -223,6 +223,7 @@ export default function WorkflowsPage() {
                 <SelectItem value="waiting">Waiting</SelectItem>
                 <SelectItem value="completed">Completed</SelectItem>
                 <SelectItem value="failed">Failed</SelectItem>
+                <SelectItem value="skipped">Skipped</SelectItem>
               </SelectContent>
             </Select>
             <Select value={workflowFilter} onValueChange={setWorkflowFilter}>

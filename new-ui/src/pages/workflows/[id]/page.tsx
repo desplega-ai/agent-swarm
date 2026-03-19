@@ -4,12 +4,19 @@ import { useCallback, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   useDeleteWorkflow,
+  useExecutorType,
   useTriggerWorkflow,
   useUpdateWorkflow,
   useWorkflow,
   useWorkflowRuns,
 } from "@/api/hooks/use-workflows";
-import type { WorkflowRun, WorkflowRunStatus } from "@/api/types";
+import type {
+  CooldownConfig,
+  TriggerConfig,
+  WorkflowNode,
+  WorkflowRun,
+  WorkflowRunStatus,
+} from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
@@ -24,9 +31,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { JsonTree } from "@/components/workflows/json-tree";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
 import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
@@ -39,6 +48,16 @@ export default function WorkflowDetailPage() {
   const deleteWorkflow = useDeleteWorkflow();
   const triggerWorkflow = useTriggerWorkflow();
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+
+  const selectedNode = useMemo(() => {
+    if (!selectedNodeId || !workflow) return null;
+    return workflow.definition.nodes.find((n) => n.id === selectedNodeId) ?? null;
+  }, [selectedNodeId, workflow]);
+
+  const handleNodeClick = useCallback((nodeId: string) => {
+    setSelectedNodeId((prev) => (prev === nodeId ? null : nodeId));
+  }, []);
 
   const runColumns = useMemo<ColDef<WorkflowRun>[]>(
     () => [
@@ -62,7 +81,7 @@ export default function WorkflowDetailPage() {
         valueGetter: (params) =>
           params.data?.finishedAt
             ? formatElapsed(params.data.startedAt, params.data.finishedAt)
-            : "—",
+            : "\u2014",
       },
       {
         field: "error",
@@ -98,80 +117,128 @@ export default function WorkflowDetailPage() {
   }
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
-      <button
-        type="button"
-        onClick={() => navigate("/workflows")}
-        className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <ArrowLeft className="h-4 w-4" /> Back to Workflows
-      </button>
+    <div className="flex flex-col flex-1 min-h-0 gap-4">
+      {/* Header */}
+      <div className="shrink-0 space-y-3">
+        <button
+          type="button"
+          onClick={() => navigate("/workflows")}
+          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" /> Back to Workflows
+        </button>
 
-      <div className="flex items-center gap-3 flex-wrap">
-        <h1 className="text-xl font-semibold">{workflow.name}</h1>
-        <div className="flex items-center gap-2">
-          <Switch
-            checked={workflow.enabled}
-            onCheckedChange={(checked) =>
-              updateWorkflow.mutate({ id: workflow.id, data: { enabled: checked } })
-            }
-          />
-          <span className="text-xs text-muted-foreground">
-            {workflow.enabled ? "Enabled" : "Disabled"}
-          </span>
-        </div>
-        <Badge
-          variant="outline"
-          className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-        >
-          {workflow.definition.nodes.length} nodes
-        </Badge>
-        <Badge
-          variant="outline"
-          className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-        >
-          {workflow.definition.edges.length} edges
-        </Badge>
-        <div className="ml-auto flex items-center gap-1.5 shrink-0">
-          <Button
+        <div className="flex items-center gap-3 flex-wrap">
+          <h1 className="text-xl font-semibold">{workflow.name}</h1>
+          <div className="flex items-center gap-2">
+            <Switch
+              checked={workflow.enabled}
+              onCheckedChange={(checked) =>
+                updateWorkflow.mutate({ id: workflow.id, data: { enabled: checked } })
+              }
+            />
+            <span className="text-xs text-muted-foreground">
+              {workflow.enabled ? "Enabled" : "Disabled"}
+            </span>
+          </div>
+          <Badge
             variant="outline"
-            size="sm"
-            onClick={() => triggerWorkflow.mutate({ id: workflow.id })}
-            disabled={!workflow.enabled || triggerWorkflow.isPending}
+            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
           >
-            <Play className="h-3 w-3 mr-1" /> Trigger
-          </Button>
-          <Button
+            {workflow.definition.nodes.length} nodes
+          </Badge>
+          <Badge
             variant="outline"
-            size="sm"
-            className="border-red-500/30 text-red-400 hover:bg-red-500/10"
-            onClick={() => setDeleteOpen(true)}
+            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
           >
-            <Trash2 className="h-3 w-3 mr-1" /> Delete
-          </Button>
+            {workflow.definition.edges?.length ?? 0} edges
+          </Badge>
+          <div className="ml-auto flex items-center gap-1.5 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => triggerWorkflow.mutate({ id: workflow.id })}
+              disabled={!workflow.enabled || triggerWorkflow.isPending}
+            >
+              <Play className="h-3 w-3 mr-1" /> Trigger
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-red-500/30 text-red-400 hover:bg-red-500/10"
+              onClick={() => setDeleteOpen(true)}
+            >
+              <Trash2 className="h-3 w-3 mr-1" /> Delete
+            </Button>
+          </div>
         </div>
+
+        {workflow.description && (
+          <p className="text-sm text-muted-foreground">{workflow.description}</p>
+        )}
       </div>
 
-      {workflow.description && (
-        <p className="text-sm text-muted-foreground">{workflow.description}</p>
-      )}
+      {/* Tabs */}
+      <Tabs defaultValue="definition" className="flex flex-col flex-1 min-h-0">
+        <TabsList className="shrink-0">
+          <TabsTrigger value="definition">Definition</TabsTrigger>
+          <TabsTrigger value="runs">Runs ({runs?.length ?? 0})</TabsTrigger>
+        </TabsList>
 
-      <Separator />
+        {/* Definition tab */}
+        <TabsContent value="definition" className="flex flex-col flex-1 min-h-0 gap-4">
+          {/* Workflow metadata */}
+          <WorkflowMeta
+            triggers={workflow.triggers}
+            cooldown={workflow.cooldown}
+            input={workflow.input}
+          />
 
-      <WorkflowGraph definition={workflow.definition} />
+          {/* Split view: graph + inspector */}
+          <div className="flex flex-col md:flex-row flex-1 min-h-0 gap-4">
+            {/* Graph panel */}
+            <div className="flex-[3] min-h-[300px] md:min-h-0">
+              <WorkflowGraph
+                definition={workflow.definition}
+                onNodeClick={handleNodeClick}
+                selectedNodeId={selectedNodeId}
+                className="h-full min-h-[300px]"
+              />
+            </div>
 
-      <Separator />
+            {/* Node inspector panel */}
+            <div className="flex-[2] min-h-0 flex flex-col rounded-lg border bg-card">
+              <div className="shrink-0 px-4 py-3 border-b">
+                <h2 className="text-sm font-semibold">
+                  {selectedNode ? "Node Inspector" : "Inspector"}
+                </h2>
+              </div>
+              {selectedNode ? (
+                <NodeInspector node={selectedNode} />
+              ) : (
+                <div className="flex-1 flex items-center justify-center p-4">
+                  <p className="text-sm text-muted-foreground">
+                    Click a node to inspect its definition
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </TabsContent>
 
-      <h2 className="text-lg font-semibold">Recent Runs</h2>
-      <DataGrid
-        rowData={runs ?? []}
-        columnDefs={runColumns}
-        onRowClicked={onRunRowClicked}
-        loading={runsLoading}
-        emptyMessage="No runs yet"
-        domLayout="autoHeight"
-      />
+        {/* Runs tab */}
+        <TabsContent value="runs" className="flex flex-col flex-1 min-h-0">
+          <DataGrid
+            rowData={runs ?? []}
+            columnDefs={runColumns}
+            onRowClicked={onRunRowClicked}
+            loading={runsLoading}
+            emptyMessage="No runs yet"
+          />
+        </TabsContent>
+      </Tabs>
 
+      {/* Delete dialog */}
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -198,4 +265,153 @@ export default function WorkflowDetailPage() {
       </AlertDialog>
     </div>
   );
+}
+
+// --- Node Inspector ---
+
+function NodeInspector({ node }: { node: WorkflowNode }) {
+  const { data: executorInfo } = useExecutorType(node.type);
+
+  return (
+    <ScrollArea className="flex-1 min-h-0">
+      <div className="p-4 space-y-4">
+        {/* Header: ID + type + mode */}
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-medium font-mono">{node.id}</span>
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+            >
+              {node.type}
+            </Badge>
+            {executorInfo && (
+              <Badge
+                variant="outline"
+                className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase text-sky-400"
+              >
+                {executorInfo.mode}
+              </Badge>
+            )}
+          </div>
+          {node.label && <p className="text-xs text-muted-foreground">{node.label}</p>}
+        </div>
+
+        {/* Configuration */}
+        <InspectorSection label="Configuration">
+          <JsonTree data={node.config} defaultExpandDepth={2} maxHeight="250px" />
+        </InspectorSection>
+
+        {/* Next */}
+        {node.next != null && (
+          <InspectorSection label="Next">
+            <JsonTree data={node.next} defaultExpandDepth={2} maxHeight="150px" />
+          </InspectorSection>
+        )}
+
+        {/* Validation */}
+        {node.validation != null && (
+          <InspectorSection label="Validation">
+            <JsonTree data={node.validation} defaultExpandDepth={2} maxHeight="200px" />
+          </InspectorSection>
+        )}
+
+        {/* Retry */}
+        {node.retry != null && (
+          <InspectorSection label="Retry">
+            <JsonTree data={node.retry} defaultExpandDepth={2} maxHeight="150px" />
+          </InspectorSection>
+        )}
+      </div>
+    </ScrollArea>
+  );
+}
+
+function InspectorSection({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5">
+      <span className="text-xs text-muted-foreground uppercase tracking-wide">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+// --- Workflow Metadata ---
+
+function WorkflowMeta({
+  triggers,
+  cooldown,
+  input,
+}: {
+  triggers: TriggerConfig[];
+  cooldown?: CooldownConfig;
+  input?: Record<string, string>;
+}) {
+  const hasMeta =
+    triggers.length > 0 || cooldown != null || (input != null && Object.keys(input).length > 0);
+  if (!hasMeta) return null;
+
+  return (
+    <div className="shrink-0 flex flex-wrap items-start gap-4">
+      {/* Triggers */}
+      {triggers.length > 0 && (
+        <MetaBlock label="Triggers">
+          <div className="flex flex-wrap gap-1.5">
+            {triggers.map((t, i) => (
+              <Badge
+                key={i}
+                variant="outline"
+                className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase font-mono"
+              >
+                {t.type}
+                {t.type === "webhook" && t.hmacSecret ? ` (hmac: ${maskSecret(t.hmacSecret)})` : ""}
+                {t.type === "schedule" && t.scheduleId ? ` ${t.scheduleId}` : ""}
+              </Badge>
+            ))}
+          </div>
+        </MetaBlock>
+      )}
+
+      {/* Cooldown */}
+      {cooldown != null && (
+        <MetaBlock label="Cooldown">
+          <Badge
+            variant="outline"
+            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase font-mono"
+          >
+            {formatCooldown(cooldown)}
+          </Badge>
+        </MetaBlock>
+      )}
+
+      {/* Input variables */}
+      {input != null && Object.keys(input).length > 0 && (
+        <MetaBlock label="Input">
+          <JsonTree data={input} defaultExpandDepth={1} maxHeight="100px" />
+        </MetaBlock>
+      )}
+    </div>
+  );
+}
+
+function MetaBlock({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <span className="text-xs text-muted-foreground uppercase tracking-wide">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+function maskSecret(secret: string): string {
+  if (secret.length <= 4) return "****";
+  return `${secret.slice(0, 2)}${"*".repeat(Math.min(secret.length - 4, 8))}${secret.slice(-2)}`;
+}
+
+function formatCooldown(c: CooldownConfig): string {
+  const parts: string[] = [];
+  if (c.hours) parts.push(`${c.hours}h`);
+  if (c.minutes) parts.push(`${c.minutes}m`);
+  if (c.seconds) parts.push(`${c.seconds}s`);
+  return parts.length > 0 ? parts.join(" ") : "none";
 }

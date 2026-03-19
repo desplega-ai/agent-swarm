@@ -61,6 +61,22 @@ If no agents are online, the message is queued as an unassigned task in the pool
 
 When you @mention the bot in a thread where a worker is already handling a task, the message routes directly to that worker — no lead delegation needed. This keeps conversations flowing naturally.
 
+If the assigned worker is offline or unavailable, the follow-up routes to the lead agent instead of dropping the message. The lead picks up the thread context and continues the conversation, preserving `parentTaskId` continuity for chained tasks.
+
+### Slack Context Propagation
+
+Slack metadata (`slackChannelId`, `slackThreadTs`, `slackUserId`) is **auto-inherited** from the creator's current task. When a lead delegates work from a Slack-originated task, workers automatically receive the Slack context and post progress updates to the originating thread — no manual metadata passing needed.
+
+The auto-inheritance works via the `X-Source-Task-Id` header, which links the new task back to the creator's active task to look up Slack metadata.
+
+For cases where auto-inheritance isn't available (e.g., programmatic task creation without an active parent task), you can pass Slack metadata explicitly on `send-task`:
+
+- `slackChannelId` — Channel ID for progress updates
+- `slackThreadTs` — Thread timestamp for thread-level updates
+- `slackUserId` — Original requester's Slack user ID
+
+Explicit params override auto-inherited values when both are present.
+
 ### Additive Slack Buffer
 
 When enabled via `ADDITIVE_SLACK=true`, thread replies that do NOT @mention the bot are captured, buffered, and batched into a single follow-up task. This allows multi-message feedback without requiring an @mention each time.

@@ -1,13 +1,89 @@
 import {
+  getCompletedStepNodeIds,
+  getDb,
   getStuckWorkflowRuns,
   getWorkflow,
   getWorkflowRun,
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
-import { getSuccessors, walkDag } from "./engine";
+import { checkpointStep } from "./checkpoint";
+import { getSuccessors } from "./definition";
+import { findReadyNodes, walkGraph } from "./engine";
+import type { ExecutorRegistry } from "./executors/registry";
 
-export async function recoverStuckWorkflowRuns(): Promise<number> {
+/**
+ * Recover incomplete workflow runs on server startup.
+ *
+ * Two cases:
+ * 1. `running` runs — were mid-execution when server died.
+ *    Find completed steps, compute ready nodes, continue walking.
+ * 2. `waiting` runs — were waiting for a task that may have finished while we were down.
+ *    Check if the linked task is done and resume/fail accordingly.
+ */
+export async function recoverIncompleteRuns(registry: ExecutorRegistry): Promise<number> {
+  let recovered = 0;
+
+  // --- Case 1: Running runs that were interrupted mid-execution ---
+  recovered += await recoverRunningRuns(registry);
+
+  // --- Case 2: Waiting runs whose tasks may have finished ---
+  recovered += await recoverWaitingRuns(registry);
+
+  if (recovered > 0) {
+    console.log(`[workflows] Recovered ${recovered} incomplete run(s) on startup`);
+  }
+
+  return recovered;
+}
+
+/**
+ * Resume runs that were in "running" state when the server stopped.
+ * Uses checkpointed step data to find where to continue.
+ */
+async function recoverRunningRuns(registry: ExecutorRegistry): Promise<number> {
+  // Query for all running runs by scanning steps
+  // We need to find runs where status = 'running' and figure out which nodes to resume
+  const runningRunIds = getRunIdsByStatus("running");
+  let recovered = 0;
+
+  for (const runId of runningRunIds) {
+    try {
+      const run = getWorkflowRun(runId);
+      if (!run || run.status !== "running") continue;
+
+      const workflow = getWorkflow(run.workflowId);
+      if (!workflow) continue;
+
+      const completedNodeIds = new Set(getCompletedStepNodeIds(runId));
+      const ctx = (run.context ?? {}) as Record<string, unknown>;
+
+      // Find the next nodes that are ready to execute
+      const readyNodes = findReadyNodes(workflow.definition, completedNodeIds);
+      if (readyNodes.length === 0) {
+        // All nodes completed or nothing is ready — mark as completed
+        updateWorkflowRun(runId, {
+          status: "completed",
+          context: ctx,
+          finishedAt: new Date().toISOString(),
+        });
+      } else {
+        await walkGraph(workflow.definition, runId, ctx, readyNodes, registry, workflow.id);
+      }
+      recovered++;
+    } catch (err) {
+      console.error(`[workflows] Failed to recover running run ${runId}:`, err);
+    }
+  }
+
+  return recovered;
+}
+
+/**
+ * Check waiting runs whose linked tasks may have completed/failed/cancelled
+ * while the server was down.
+ */
+async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
   const stuckRuns = getStuckWorkflowRuns();
   let recovered = 0;
 
@@ -18,35 +94,46 @@ export async function recoverStuckWorkflowRuns(): Promise<number> {
       if (!run || !workflow) continue;
 
       if (stuck.taskStatus === "completed") {
-        // Resume — same logic as the event bus handler
-        updateWorkflowRunStep(stuck.stepId, {
-          status: "completed",
-          output: { taskOutput: stuck.taskOutput },
-          finishedAt: new Date().toISOString(),
-        });
+        // Task finished while we were down — checkpoint and resume
         const ctx = (run.context ?? {}) as Record<string, unknown>;
-        ctx[stuck.nodeId] = { taskOutput: stuck.taskOutput };
-        updateWorkflowRun(stuck.runId, { status: "running", context: ctx });
+        const stepOutput = { taskId: stuck.stepId, taskOutput: stuck.taskOutput };
+
+        checkpointStep(stuck.runId, stuck.stepId, stuck.nodeId, { output: stepOutput }, ctx);
+        updateWorkflowRun(stuck.runId, { status: "running" });
+
         const successors = getSuccessors(workflow.definition, stuck.nodeId, "default");
-        await walkDag(workflow.definition, stuck.runId, ctx, successors);
+        await walkGraph(workflow.definition, stuck.runId, ctx, successors, registry, workflow.id);
       } else {
         // Task failed or cancelled — mark run failed
-        const reason = stuck.taskStatus === "failed" ? "Task failed" : "Task cancelled";
+        const reason =
+          stuck.taskStatus === "failed" ? "Task failed (recovered)" : "Task cancelled (recovered)";
+        const now = new Date().toISOString();
         updateWorkflowRunStep(stuck.stepId, {
           status: "failed",
           error: reason,
-          finishedAt: new Date().toISOString(),
+          finishedAt: now,
         });
         updateWorkflowRun(stuck.runId, {
           status: "failed",
           error: reason,
-          finishedAt: new Date().toISOString(),
+          finishedAt: now,
         });
       }
       recovered++;
     } catch (err) {
-      console.error(`[workflows] Failed to recover stuck run ${stuck.runId}:`, err);
+      console.error(`[workflows] Failed to recover waiting run ${stuck.runId}:`, err);
     }
   }
+
   return recovered;
+}
+
+/**
+ * Get run IDs by status. Simple query since there's no dedicated function for this.
+ */
+function getRunIdsByStatus(status: string): string[] {
+  const rows = getDb()
+    .prepare<{ id: string }, [string]>("SELECT id FROM workflow_runs WHERE status = ?")
+    .all(status);
+  return rows.map((r) => r.id);
 }

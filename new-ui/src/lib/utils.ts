@@ -114,6 +114,7 @@ export function formatElapsed(start: string, end?: string | null): string {
 
   if (days > 0) return `${days}d ${hours % 24}h`;
   if (hours > 0) return `${hours}h ${minutes % 60}m`;
-  if (minutes > 0) return `${minutes}m`;
-  return `${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+  if (seconds > 0) return `${seconds}s`;
+  return `${diffMs}ms`;
 }

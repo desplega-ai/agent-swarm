@@ -71,7 +71,7 @@ Each worker container includes:
 - **Build tools**: gcc, g++, make, cmake
 - **Process manager**: PM2 (for background services)
 - **CLI tools**: GitHub CLI (`gh`), GitLab CLI (`glab`), sqlite3
-- **Agent tools**: `wts` (git worktree manager)
+- **Agent tools**: `wts` (git worktree manager), `agent-fs` (persistent shared filesystem)
 - **Utilities**: git, git-lfs, vim, nano, jq, curl, wget, ssh
 - **Sudo access**: Workers can install packages with `sudo apt-get install`
 
@@ -114,6 +114,7 @@ agent-swarm/
 │   │   ├── core.ts      # Core endpoints (join, poll, progress)
 │   │   ├── config.ts    # Config endpoints
 │   │   ├── memory.ts    # Memory endpoints
+│   │   ├── db-query.ts  # Read-only SQL query endpoint (lead-only)
 │   │   ├── workflows.ts # Workflow CRUD + trigger endpoints
 │   │   └── ...          # Additional route modules
 │   ├── server.ts        # MCP server setup & tool registration

@@ -50,6 +50,8 @@ Agent Swarm lets you run a team of AI coding agents that coordinate autonomously
 - **GitLab integration** — Full GitLab webhook support alongside GitHub via provider adapter pattern
 - **Working directory support** — Tasks can specify a custom starting directory for agents via the `dir` parameter
 - **Multi-provider** — Run agents with Claude Code or pi-mono (`HARNESS_PROVIDER=claude|pi`)
+- **Agent-fs integration** — Persistent, searchable filesystem shared across the swarm with auto-registration on first boot
+- **Debug dashboard** — SQL query interface with Monaco editor and AG Grid results for database inspection
 
 ## Quick Start
 
@@ -75,6 +77,8 @@ docker compose -f docker-compose.example.yml --env-file .env up -d
 ```
 
 The API runs on port `3013`. The dashboard is available separately (see [Dashboard](#dashboard)).
+
+The API includes interactive documentation at `http://localhost:3013/docs` (Scalar UI) and a machine-readable OpenAPI 3.1 spec at `http://localhost:3013/openapi.json`.
 
 ### Option B: Local API + Docker Workers
 

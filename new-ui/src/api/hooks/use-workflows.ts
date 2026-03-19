@@ -79,6 +79,23 @@ export function useTriggerWorkflow() {
   });
 }
 
+export function useWorkflowVersions(workflowId: string) {
+  return useQuery({
+    queryKey: ["workflow-versions", workflowId],
+    queryFn: () => api.fetchWorkflowVersions(workflowId),
+    enabled: !!workflowId,
+  });
+}
+
+export function useExecutorType(type: string) {
+  return useQuery({
+    queryKey: ["executor-type", type],
+    queryFn: () => api.fetchExecutorType(type),
+    enabled: !!type,
+    staleTime: 60_000, // schemas don't change at runtime
+  });
+}
+
 export function useRetryWorkflowRun() {
   const queryClient = useQueryClient();
   return useMutation({

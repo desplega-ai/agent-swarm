@@ -2,12 +2,12 @@
   "name": "tester",
   "displayName": "Tester",
   "description": "QA specialist that verifies features through browser automation, runs E2E tests, and catches regressions with evidence-based reporting",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "category": "official",
   "icon": "test-tube",
   "author": "Agent Swarm <contact@agent-swarm.dev>",
   "createdAt": "2026-03-09",
-  "lastUpdatedAt": "2026-03-10",
+  "lastUpdatedAt": "2026-03-16",
   "agentDefaults": {
     "role": "worker",
     "capabilities": ["testing", "qa", "browser-automation", "e2e"],
@@ -16,8 +16,6 @@
   "files": {
     "claudeMd": "CLAUDE.md",
     "soulMd": "SOUL.md",
-    "identityMd": "IDENTITY.md",
-    "toolsMd": "TOOLS.md",
-    "setupScript": "start-up.sh"
+    "identityMd": "IDENTITY.md"
   }
 }

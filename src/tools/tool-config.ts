@@ -105,6 +105,9 @@ export const DEFERRED_TOOLS = new Set([
   "tracker-sync-status",
   "tracker-map-agent",
 
+  // Debug (1)
+  "db-query",
+
   // Other (3)
   "cancel-task",
   "inject-learning",

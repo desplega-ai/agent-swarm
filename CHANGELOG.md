@@ -4,9 +4,56 @@ All notable changes to Agent Swarm are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [1.45.1] - 2026-03-19
+
+### Added
+- Debug tab with database explorer — SQL query interface in the dashboard with Monaco editor, table browser sidebar, and AG Grid results display
+- `db-query` MCP tool — lead-only read-only SQL queries against the swarm database (capped at 100 rows)
+- `POST /api/db-query` REST endpoint for database inspection
+- Agent-fs native integration — persistent, searchable filesystem shared across the swarm
+  - Auto-registration on first container boot (idempotent)
+  - Lead creates shared org, workers receive invitations automatically
+  - System prompt conditionally includes agent-fs CLI usage instructions
+  - `agent-fs` CLI and Claude plugin pre-installed in worker containers
+
+### Changed
+- Per-session MCP config — each Claude session gets its own `/tmp/mcp-{taskId}.json` config file instead of sharing `.mcp.json`, eliminating race conditions with concurrent sessions (#192)
+- `--strict-mcp-config` flag ensures only per-session MCP servers are loaded (#192)
+- Removed time-based `getAgentCurrentTask()` fallback — uses deterministic `sourceTaskId` only
+- Slack metadata is now auto-inherited from the creator's current task via `X-Source-Task-Id` header — explicit `slackChannelId`/`slackThreadTs`/`slackUserId` params on `send-task` remain available as optional overrides (#191)
 
 ### Fixed
+- Concurrency safety for Slack metadata auto-inheritance — pass `sourceTaskId` through MCP session context via `X-Source-Task-Id` header instead of guessing current task (#191)
+- `send-task` now propagates `sourceTaskId` for accurate Slack metadata lookup
+
+## [Unreleased]
+
+### Added
+- Multi-API-config UI for dashboard — connect to multiple swarm instances from a single browser (#189)
+  - Slug-based connection data layer with localStorage persistence (Phase 1)
+  - React context for multi-connection state management (Phase 2)
+  - Sidebar swarm switcher and header connection name display (Phase 3)
+  - Config page multi-connection management with URL param modal (Phase 4)
+  - Health indicator dots in swarm switcher (Phase 5)
+
+## [1.44.5] - 2026-03-17
+
+### Added
+- OpenAPI 3.1 spec at `/openapi.json` (~83KB, ~60 REST endpoints) generated from route registry (#184)
+- Scalar interactive API docs at `/docs` — pre-authentication API explorer (#184)
+- `MODEL_OVERRIDE` and `CAPABILITIES` env vars for content agents in `docker-compose.example.yml` (#165)
+  - `content-writer`: `MODEL_OVERRIDE=opus`, capability: `content-writing`
+  - `content-reviewer`: `MODEL_OVERRIDE=sonnet`, capability: `content-review` (uses Gemini via OpenRouter)
+  - `content-strategist`: `MODEL_OVERRIDE=sonnet`, capability: `content-strategy`
+
+### Changed
+- `route()` factory replaces all raw `matchRoute()` calls — typed route definitions with Zod schemas for params, query, and body validation (#184)
+- Lead agent now posts task results back to originating Slack threads (#183)
+- Worker agents now post start/completion/failure updates to originating Slack threads (#183)
+
+### Fixed
+- Slack thread follow-ups route to lead when assigned agent is offline (#183)
+- `parentTaskId` continuity preserved for follow-up tasks (#183)
 - ARM compatibility for Docker Compose — added `platform: linux/amd64` to all services to fix `no matching manifest for linux/arm64/v8` on Apple Silicon Macs (#180)
 
 ### Added

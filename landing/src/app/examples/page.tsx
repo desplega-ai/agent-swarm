@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import Image from "next/image";
+import Link from "next/link";
 import { ArrowLeft, ArrowRight, Zap } from "lucide-react";
 
 export const metadata: Metadata = {
@@ -57,17 +59,18 @@ const examples: Example[] = [
 
 function ExampleCard({ example }: { example: Example }) {
   return (
-    <a
+    <Link
       href={`/examples/${example.slug}`}
       className="group block rounded-2xl border border-zinc-200 bg-white hover:border-zinc-300 hover:shadow-lg hover:shadow-zinc-200/50 transition-all overflow-hidden"
     >
       {example.image && (
-        <div className="aspect-video overflow-hidden bg-zinc-100">
-          <img
+        <div className="aspect-video overflow-hidden bg-zinc-100 relative">
+          <Image
             src={example.image}
             alt={example.title}
-            className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500"
-            loading="lazy"
+            fill
+            className="object-cover group-hover:scale-[1.02] transition-transform duration-500"
+            sizes="(max-width: 768px) 100vw, 672px"
           />
         </div>
       )}
@@ -99,7 +102,7 @@ function ExampleCard({ example }: { example: Example }) {
           <ArrowRight className="w-4 h-4 text-zinc-400 group-hover:text-amber-600 group-hover:translate-x-0.5 transition-all shrink-0" />
         </div>
       </div>
-    </a>
+    </Link>
   );
 }
 
@@ -136,13 +139,13 @@ export default function ExamplesPage() {
       {/* Top bar */}
       <nav className="border-b border-zinc-200/60 bg-white/90 backdrop-blur-xl sticky top-0 z-50">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 h-12 flex items-center gap-3">
-          <a
+          <Link
             href="/"
             className="flex items-center gap-1.5 text-[13px] text-zinc-500 hover:text-zinc-900 transition-colors"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Home</span>
-          </a>
+          </Link>
           <div className="w-px h-4 bg-zinc-200" />
           <span className="text-[13px] font-medium text-zinc-700">
             Examples

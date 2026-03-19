@@ -17,11 +17,13 @@ import type {
   ChannelMessage,
   ChannelType,
   ContextVersion,
+  CooldownConfig,
   Epic,
   EpicStatus,
   EpicWithProgress,
   InboxMessage,
   InboxMessageStatus,
+  InputValue,
   ScheduledTask,
   Service,
   ServiceStatus,
@@ -29,6 +31,7 @@ import type {
   SessionLog,
   SwarmConfig,
   SwarmRepo,
+  TriggerConfig,
   VersionableField,
   VersionMeta,
   Workflow,
@@ -37,6 +40,8 @@ import type {
   WorkflowRunStatus,
   WorkflowRunStep,
   WorkflowRunStepStatus,
+  WorkflowSnapshot,
+  WorkflowVersion,
 } from "../types";
 import { runMigrations } from "./migrations/runner";
 
@@ -1731,6 +1736,7 @@ export interface CreateTaskOptions {
   scheduleId?: string;
   workflowRunId?: string;
   workflowRunStepId?: string;
+  sourceTaskId?: string;
 }
 
 /**
@@ -1798,6 +1804,18 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       if (parent.agentmailThreadId && !options.agentmailThreadId) {
         options.agentmailThreadId = parent.agentmailThreadId;
       }
+    }
+  }
+
+  // Auto-inherit Slack metadata from the creator's source task (deterministic via sourceTaskId)
+  // Priority: explicit params > parentTaskId inheritance > sourceTaskId lookup
+  // sourceTaskId is set by the adapter's X-Source-Task-Id header — each adapter carries its taskId natively
+  if (options?.creatorAgentId && !options.slackChannelId && options.sourceTaskId) {
+    const sourceTask = getTaskById(options.sourceTaskId);
+    if (sourceTask?.slackChannelId) {
+      options.slackChannelId = sourceTask.slackChannelId;
+      options.slackThreadTs = sourceTask.slackThreadTs;
+      options.slackUserId = sourceTask.slackUserId;
     }
   }
 
@@ -5728,7 +5746,9 @@ type WorkflowRow = {
   description: string | null;
   enabled: number;
   definition: string;
-  webhookSecret: string | null;
+  triggers: string;
+  cooldown: string | null;
+  input: string | null;
   createdByAgentId: string | null;
   createdAt: string;
   lastUpdatedAt: string;
@@ -5741,7 +5761,9 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
     description: row.description ?? undefined,
     enabled: row.enabled === 1,
     definition: JSON.parse(row.definition) as WorkflowDefinition,
-    webhookSecret: row.webhookSecret ?? undefined,
+    triggers: JSON.parse(row.triggers) as TriggerConfig[],
+    cooldown: row.cooldown ? (JSON.parse(row.cooldown) as CooldownConfig) : undefined,
+    input: row.input ? (JSON.parse(row.input) as Record<string, InputValue>) : undefined,
     createdByAgentId: row.createdByAgentId ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
@@ -5752,21 +5774,28 @@ export function createWorkflow(data: {
   name: string;
   description?: string;
   definition: WorkflowDefinition;
+  triggers?: TriggerConfig[];
+  cooldown?: CooldownConfig;
+  input?: Record<string, InputValue>;
   createdByAgentId?: string;
 }): Workflow {
   const id = crypto.randomUUID();
-  const webhookSecret = crypto.randomUUID();
   const row = getDb()
-    .prepare<WorkflowRow, [string, string, string | null, string, string, string | null]>(
-      `INSERT INTO workflows (id, name, description, definition, webhookSecret, createdByAgentId)
-       VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
+    .prepare<
+      WorkflowRow,
+      [string, string, string | null, string, string, string | null, string | null, string | null]
+    >(
+      `INSERT INTO workflows (id, name, description, definition, triggers, cooldown, input, createdByAgentId)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
       data.name,
       data.description ?? null,
       JSON.stringify(data.definition),
-      webhookSecret,
+      JSON.stringify(data.triggers ?? []),
+      data.cooldown ? JSON.stringify(data.cooldown) : null,
+      data.input ? JSON.stringify(data.input) : null,
       data.createdByAgentId ?? null,
     );
   if (!row) throw new Error("Failed to create workflow");
@@ -5777,13 +5806,6 @@ export function getWorkflow(id: string): Workflow | null {
   const row = getDb()
     .prepare<WorkflowRow, [string]>("SELECT * FROM workflows WHERE id = ?")
     .get(id);
-  return row ? rowToWorkflow(row) : null;
-}
-
-export function getWorkflowByWebhookSecret(secret: string): Workflow | null {
-  const row = getDb()
-    .prepare<WorkflowRow, [string]>("SELECT * FROM workflows WHERE webhookSecret = ?")
-    .get(secret);
   return row ? rowToWorkflow(row) : null;
 }
 
@@ -5808,6 +5830,9 @@ export function updateWorkflow(
     description?: string;
     enabled?: boolean;
     definition?: WorkflowDefinition;
+    triggers?: TriggerConfig[];
+    cooldown?: CooldownConfig | null;
+    input?: Record<string, InputValue> | null;
   },
 ): Workflow | null {
   const updates: string[] = [];
@@ -5827,6 +5852,18 @@ export function updateWorkflow(
   if (data.definition !== undefined) {
     updates.push("definition = ?");
     params.push(JSON.stringify(data.definition));
+  }
+  if (data.triggers !== undefined) {
+    updates.push("triggers = ?");
+    params.push(JSON.stringify(data.triggers));
+  }
+  if (data.cooldown !== undefined) {
+    updates.push("cooldown = ?");
+    params.push(data.cooldown ? JSON.stringify(data.cooldown) : null);
+  }
+  if (data.input !== undefined) {
+    updates.push("input = ?");
+    params.push(data.input ? JSON.stringify(data.input) : null);
   }
   if (updates.length === 0) return getWorkflow(id);
   updates.push("lastUpdatedAt = ?");
@@ -5895,11 +5932,12 @@ export function createWorkflowRun(data: {
   workflowId: string;
   triggerData?: unknown;
 }): WorkflowRun {
+  const now = new Date().toISOString();
   const row = getDb()
-    .prepare<WorkflowRunRow, [string, string, string | null]>(
-      `INSERT INTO workflow_runs (id, workflowId, triggerData) VALUES (?, ?, ?) RETURNING *`,
+    .prepare<WorkflowRunRow, [string, string, string, string | null]>(
+      `INSERT INTO workflow_runs (id, workflowId, startedAt, triggerData) VALUES (?, ?, ?, ?) RETURNING *`,
     )
-    .get(data.id, data.workflowId, data.triggerData ? JSON.stringify(data.triggerData) : null);
+    .get(data.id, data.workflowId, now, data.triggerData ? JSON.stringify(data.triggerData) : null);
   if (!row) throw new Error("Failed to create workflow run");
   return rowToWorkflowRun(row);
 }
@@ -5974,6 +6012,10 @@ type WorkflowRunStepRow = {
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
+  retryCount: number;
+  maxRetries: number;
+  nextRetryAt: string | null;
+  idempotencyKey: string | null;
 };
 
 function rowToWorkflowRunStep(row: WorkflowRunStepRow): WorkflowRunStep {
@@ -5988,6 +6030,10 @@ function rowToWorkflowRunStep(row: WorkflowRunStepRow): WorkflowRunStep {
     error: row.error ?? undefined,
     startedAt: row.startedAt,
     finishedAt: row.finishedAt ?? undefined,
+    retryCount: row.retryCount,
+    maxRetries: row.maxRetries,
+    nextRetryAt: row.nextRetryAt ?? undefined,
+    idempotencyKey: row.idempotencyKey ?? undefined,
   };
 }
 
@@ -5998,16 +6044,18 @@ export function createWorkflowRunStep(data: {
   nodeType: string;
   input?: unknown;
 }): WorkflowRunStep {
+  const now = new Date().toISOString();
   const row = getDb()
-    .prepare<WorkflowRunStepRow, [string, string, string, string, string | null]>(
-      `INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, input)
-       VALUES (?, ?, ?, ?, 'running', ?) RETURNING *`,
+    .prepare<WorkflowRunStepRow, [string, string, string, string, string, string | null]>(
+      `INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, startedAt, input)
+       VALUES (?, ?, ?, ?, 'running', ?, ?) RETURNING *`,
     )
     .get(
       data.id,
       data.runId,
       data.nodeId,
       data.nodeType,
+      now,
       data.input ? JSON.stringify(data.input) : null,
     );
   if (!row) throw new Error("Failed to create workflow run step");
@@ -6028,10 +6076,14 @@ export function updateWorkflowRunStep(
     output?: unknown;
     error?: string;
     finishedAt?: string;
+    retryCount?: number;
+    maxRetries?: number;
+    nextRetryAt?: string | null;
+    idempotencyKey?: string;
   },
 ): WorkflowRunStep | null {
   const updates: string[] = [];
-  const params: (string | null)[] = [];
+  const params: (string | number | null)[] = [];
   if (data.status !== undefined) {
     updates.push("status = ?");
     params.push(data.status);
@@ -6048,10 +6100,26 @@ export function updateWorkflowRunStep(
     updates.push("finishedAt = ?");
     params.push(data.finishedAt);
   }
+  if (data.retryCount !== undefined) {
+    updates.push("retryCount = ?");
+    params.push(data.retryCount);
+  }
+  if (data.maxRetries !== undefined) {
+    updates.push("maxRetries = ?");
+    params.push(data.maxRetries);
+  }
+  if (data.nextRetryAt !== undefined) {
+    updates.push("nextRetryAt = ?");
+    params.push(data.nextRetryAt);
+  }
+  if (data.idempotencyKey !== undefined) {
+    updates.push("idempotencyKey = ?");
+    params.push(data.idempotencyKey);
+  }
   if (updates.length === 0) return getWorkflowRunStep(id);
   params.push(id);
   const row = getDb()
-    .prepare<WorkflowRunStepRow, (string | null)[]>(
+    .prepare<WorkflowRunStepRow, (string | number | null)[]>(
       `UPDATE workflow_run_steps SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
     )
     .get(...params);
@@ -6095,4 +6163,122 @@ export function getStuckWorkflowRuns(): StuckWorkflowRun[] {
         AND at.status IN ('completed', 'failed', 'cancelled')`,
     )
     .all();
+}
+
+// --- New Workflow Query Functions ---
+
+export function getLastSuccessfulRun(workflowId: string): WorkflowRun | null {
+  const row = getDb()
+    .prepare<WorkflowRunRow, [string]>(
+      `SELECT * FROM workflow_runs
+       WHERE workflowId = ? AND status = 'completed'
+       ORDER BY finishedAt DESC LIMIT 1`,
+    )
+    .get(workflowId);
+  return row ? rowToWorkflowRun(row) : null;
+}
+
+export function getRetryableSteps(): WorkflowRunStep[] {
+  const now = new Date().toISOString();
+  return getDb()
+    .prepare<WorkflowRunStepRow, [string]>(
+      `SELECT * FROM workflow_run_steps
+       WHERE status = 'failed'
+         AND nextRetryAt IS NOT NULL
+         AND nextRetryAt <= ?
+       ORDER BY nextRetryAt ASC`,
+    )
+    .all(now)
+    .map(rowToWorkflowRunStep);
+}
+
+export function getCompletedStepNodeIds(runId: string): string[] {
+  const rows = getDb()
+    .prepare<{ nodeId: string }, [string]>(
+      `SELECT nodeId FROM workflow_run_steps
+       WHERE runId = ? AND status = 'completed'`,
+    )
+    .all(runId);
+  return rows.map((r) => r.nodeId);
+}
+
+export function getTaskByWorkflowRunStepId(stepId: string): AgentTask | null {
+  const row = getDb()
+    .prepare<AgentTaskRow, [string]>(
+      "SELECT * FROM agent_tasks WHERE workflowRunStepId = ? LIMIT 1",
+    )
+    .get(stepId);
+  return row ? rowToAgentTask(row) : null;
+}
+
+export function getStepByIdempotencyKey(key: string): WorkflowRunStep | null {
+  const row = getDb()
+    .prepare<WorkflowRunStepRow, [string]>(
+      "SELECT * FROM workflow_run_steps WHERE idempotencyKey = ?",
+    )
+    .get(key);
+  return row ? rowToWorkflowRunStep(row) : null;
+}
+
+// --- Workflow Version History ---
+
+type WorkflowVersionRow = {
+  id: string;
+  workflowId: string;
+  version: number;
+  snapshot: string;
+  changedByAgentId: string | null;
+  createdAt: string;
+};
+
+function rowToWorkflowVersion(row: WorkflowVersionRow): WorkflowVersion {
+  return {
+    id: row.id,
+    workflowId: row.workflowId,
+    version: row.version,
+    snapshot: JSON.parse(row.snapshot) as WorkflowSnapshot,
+    changedByAgentId: row.changedByAgentId ?? undefined,
+    createdAt: row.createdAt,
+  };
+}
+
+export function createWorkflowVersion(data: {
+  workflowId: string;
+  version: number;
+  snapshot: WorkflowSnapshot;
+  changedByAgentId?: string;
+}): WorkflowVersion {
+  const id = crypto.randomUUID();
+  const row = getDb()
+    .prepare<WorkflowVersionRow, [string, string, number, string, string | null]>(
+      `INSERT INTO workflow_versions (id, workflowId, version, snapshot, changedByAgentId)
+       VALUES (?, ?, ?, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      data.workflowId,
+      data.version,
+      JSON.stringify(data.snapshot),
+      data.changedByAgentId ?? null,
+    );
+  if (!row) throw new Error("Failed to create workflow version");
+  return rowToWorkflowVersion(row);
+}
+
+export function getWorkflowVersions(workflowId: string): WorkflowVersion[] {
+  return getDb()
+    .prepare<WorkflowVersionRow, [string]>(
+      "SELECT * FROM workflow_versions WHERE workflowId = ? ORDER BY version DESC",
+    )
+    .all(workflowId)
+    .map(rowToWorkflowVersion);
+}
+
+export function getWorkflowVersion(workflowId: string, version: number): WorkflowVersion | null {
+  const row = getDb()
+    .prepare<WorkflowVersionRow, [string, number]>(
+      "SELECT * FROM workflow_versions WHERE workflowId = ? AND version = ?",
+    )
+    .get(workflowId, version);
+  return row ? rowToWorkflowVersion(row) : null;
 }
