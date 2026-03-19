@@ -1545,6 +1545,15 @@ export function updateTaskProgress(id: string, progress: string): AgentTask | nu
         newValue: progress,
       });
     } catch {}
+    try {
+      import("../workflows/event-bus").then(({ workflowEventBus }) => {
+        workflowEventBus.emit("task.progress", {
+          taskId: id,
+          progress,
+          agentId: row.agentId,
+        });
+      });
+    } catch {}
   }
   return row ? rowToAgentTask(row) : null;
 }

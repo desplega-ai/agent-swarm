@@ -1,7 +1,12 @@
 import { getTrackerSync, updateTrackerSync } from "../be/db-queries/tracker";
 import { workflowEventBus } from "../workflows/event-bus";
 import { getLinearClient } from "./client";
-import { endAgentSession, postAgentSessionAction, taskSessionMap } from "./sync";
+import {
+  endAgentSession,
+  postAgentSessionAction,
+  postAgentSessionThought,
+  taskSessionMap,
+} from "./sync";
 
 let subscribed = false;
 
@@ -14,6 +19,7 @@ export function initLinearOutboundSync(): void {
   workflowEventBus.on("task.created", handleTaskCreated);
   workflowEventBus.on("task.completed", handleTaskCompleted);
   workflowEventBus.on("task.failed", handleTaskFailed);
+  workflowEventBus.on("task.progress", handleTaskProgress);
   console.log("[Linear] Outbound sync subscribed to event bus");
 }
 
@@ -24,6 +30,7 @@ export function teardownLinearOutboundSync(): void {
   workflowEventBus.off("task.created", handleTaskCreated);
   workflowEventBus.off("task.completed", handleTaskCompleted);
   workflowEventBus.off("task.failed", handleTaskFailed);
+  workflowEventBus.off("task.progress", handleTaskProgress);
   console.log("[Linear] Outbound sync unsubscribed from event bus");
 }
 
@@ -42,6 +49,18 @@ async function handleTaskCreated(data: unknown): Promise<void> {
       console.error(`[Linear Outbound] Failed to post action activity for task ${taskId}:`, err);
     },
   );
+}
+
+async function handleTaskProgress(data: unknown): Promise<void> {
+  const { taskId, progress } = data as { taskId: string; progress?: string };
+  if (!taskId || !progress) return;
+
+  const sessionId = taskSessionMap.get(taskId);
+  if (!sessionId) return;
+
+  postAgentSessionThought(sessionId, progress).catch((err) => {
+    console.error(`[Linear Outbound] Failed to post progress thought for task ${taskId}:`, err);
+  });
 }
 
 async function handleTaskCompleted(data: unknown): Promise<void> {
