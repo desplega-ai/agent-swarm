@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getWorkflow } from "@/be/db";
+import { getWorkflow, getWorkflowRun } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import { startWorkflowExecution } from "@/workflows";
 
@@ -11,7 +11,7 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
       title: "Trigger Workflow",
       annotations: { destructiveHint: false },
       description:
-        "Manually trigger a workflow execution, optionally passing trigger data as context.",
+        "Manually trigger a workflow execution, optionally passing trigger data as context. Respects cooldown configuration.",
       inputSchema: z.object({
         id: z.string().uuid().describe("Workflow ID to trigger"),
         triggerData: z
@@ -23,6 +23,7 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
         success: z.boolean(),
         message: z.string(),
         runId: z.string().optional(),
+        skipped: z.boolean().optional(),
       }),
     },
     async ({ id, triggerData }) => {
@@ -45,6 +46,28 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
         }
         // TODO(Phase 7): inject registry from module-level singleton
         const runId = await startWorkflowExecution(workflow, triggerData ?? {}, undefined as never);
+
+        // Check if the run was skipped due to cooldown
+        const run = getWorkflowRun(runId);
+        const skipped = run?.status === "skipped";
+
+        if (skipped) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `Workflow "${workflow.name}" skipped (cooldown active) — run ID: ${runId}.`,
+              },
+            ],
+            structuredContent: {
+              success: true,
+              message: `Workflow "${workflow.name}" skipped (cooldown).`,
+              runId,
+              skipped: true,
+            },
+          };
+        }
+
         return {
           content: [
             {
@@ -56,6 +79,7 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
             success: true,
             message: `Triggered workflow "${workflow.name}".`,
             runId,
+            skipped: false,
           },
         };
       } catch (err) {

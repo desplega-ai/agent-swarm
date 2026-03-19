@@ -556,17 +556,17 @@ Update all 9 MCP tools and 9 HTTP endpoints to work with the new schema, types, 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] HTTP tests pass: `bun test src/tests/workflow-http-v2.test.ts`
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] HTTP tests pass: `bun test src/tests/workflow-http-v2.test.ts`
 
 #### Manual Verification:
-- [ ] Create a workflow via MCP tool with new schema → persisted correctly
-- [ ] Get workflow → response includes triggers, cooldown, edges (auto-generated)
-- [ ] Trigger workflow → run created, engine executes
-- [ ] Update workflow → version snapshot created
-- [ ] List workflow runs with status filter → filtered correctly
-- [ ] Full CRUD cycle via curl against HTTP API
+- [x] Create a workflow via MCP tool with new schema → persisted correctly
+- [x] Get workflow → response includes triggers, cooldown, edges (auto-generated)
+- [x] Trigger workflow → run created, engine executes
+- [x] Update workflow → version snapshot created
+- [x] List workflow runs with status filter → filtered correctly
+- [x] Full CRUD cycle via curl against HTTP API
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. Commit after verification passes.
 
