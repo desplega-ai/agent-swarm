@@ -1,0 +1,35 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "257f17c8a3b0",
+  "strategy": "manual-commit",
+  "branch": "feat/workflow-redesign",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "src/be/db.ts",
+    "src/http/workflows.ts",
+    "src/tests/workflow-executors.test.ts",
+    "src/tools/workflows/retry-workflow-run.ts",
+    "src/workflows/executors/index.ts",
+    "src/workflows/executors/registry.ts",
+    "src/workflows/index.ts",
+    "src/workflows/recovery.ts",
+    "src/workflows/resume.ts",
+    "thoughts/taras/plans/2026-03-18-workflow-redesign.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/25/7f17c8a3b0/0/metadata.json",
+      "transcript": "/25/7f17c8a3b0/0/full.jsonl",
+      "context": "/25/7f17c8a3b0/0/context.md",
+      "content_hash": "/25/7f17c8a3b0/0/content_hash.txt",
+      "prompt": "/25/7f17c8a3b0/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 25,
+    "cache_creation_tokens": 20489,
+    "cache_read_tokens": 1569477,
+    "output_tokens": 5136,
+    "api_call_count": 13
+  }
+}
