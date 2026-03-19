@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "44640b45a055",
+  "strategy": "manual-commit",
+  "branch": "linear-integration-foundation",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "MCP.md",
+    "scripts/generate-openapi.ts",
+    "src/be/db.ts",
+    "src/http/core.ts",
+    "src/http/index.ts",
+    "src/server.ts",
+    "src/tools/tool-config.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/44/640b45a055/0/metadata.json",
+      "transcript": "/44/640b45a055/0/full.jsonl",
+      "context": "/44/640b45a055/0/context.md",
+      "content_hash": "/44/640b45a055/0/content_hash.txt",
+      "prompt": "/44/640b45a055/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 432,
+    "cache_creation_tokens": 701102,
+    "cache_read_tokens": 50354124,
+    "output_tokens": 83614,
+    "api_call_count": 262
+  }
+}
