@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "a46ba3be089d",
+  "strategy": "manual-commit",
+  "branch": "feat/workflow-redesign",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "thoughts/taras/plans/2026-03-18-workflow-redesign.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/a4/6ba3be089d/0/metadata.json",
+      "transcript": "/a4/6ba3be089d/0/full.jsonl",
+      "context": "/a4/6ba3be089d/0/context.md",
+      "content_hash": "/a4/6ba3be089d/0/content_hash.txt",
+      "prompt": "/a4/6ba3be089d/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 14,
+    "cache_creation_tokens": 11987,
+    "cache_read_tokens": 869600,
+    "output_tokens": 3937,
+    "api_call_count": 8
+  }
+}
