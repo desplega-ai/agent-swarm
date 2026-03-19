@@ -347,10 +347,10 @@ while (pendingNodes.length > 0) {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Convergence tests pass: `bun test src/tests/workflow-engine-v2.test.ts`
-- [ ] All workflow tests pass: `bun test src/tests/workflow-`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
+- [x] Convergence tests pass: `bun test src/tests/workflow-engine-v2.test.ts`
+- [x] All workflow tests pass: `bun test src/tests/workflow-`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
 - [ ] Create a workflow with conditional branch convergence (A→true:C, false:B; B→C) and verify C executes when A takes the "true" path

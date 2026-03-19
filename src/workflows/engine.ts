@@ -15,6 +15,7 @@ import { findEntryNodes, getSuccessors } from "./definition";
 import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
 import { resolveInputs } from "./input";
+import { validateJsonSchema } from "./json-schema-validator";
 import { deepInterpolate } from "./template";
 import { runStepValidation } from "./validation";
 
@@ -112,6 +113,18 @@ export async function walkGraph(
       const key = `${runId}:${nodeId}`;
       const step = getStepByIdempotencyKey(key);
       if (step?.output !== undefined) {
+        // Bug 5 fix: Validate stored output against executor schema on recovery
+        const node = def.nodes.find((n) => n.id === nodeId);
+        if (node && registry.has(node.type)) {
+          const executor = registry.get(node.type);
+          const parseResult = executor.outputSchema.safeParse(step.output);
+          if (!parseResult.success) {
+            console.warn(
+              `[workflow] Recovery: step ${nodeId} output failed validation: ${parseResult.error.message}`,
+            );
+            continue; // Skip corrupted output
+          }
+        }
         ctx[nodeId] = step.output;
       }
       // Reconstruct active edges from the stored nextPort.
@@ -281,8 +294,48 @@ async function executeStep(
   // 3. Get executor
   const executor = registry.get(node.type);
 
-  // 4. Deep-interpolate config (handles nested objects, arrays, etc.)
-  const { value: interpolatedValue, unresolved } = deepInterpolate(node.config, ctx);
+  // 3b. Build local interpolation context from explicit inputs mapping
+  let interpolationCtx: Record<string, unknown>;
+  if (node.inputs) {
+    interpolationCtx = {};
+    // Always include built-in sources
+    if (ctx.trigger !== undefined) interpolationCtx.trigger = ctx.trigger;
+    if (ctx.input !== undefined) interpolationCtx.input = ctx.input;
+    // Resolve declared inputs
+    for (const [localName, sourcePath] of Object.entries(node.inputs)) {
+      const keys = sourcePath.split(".");
+      let value: unknown = ctx;
+      for (const key of keys) {
+        if (value == null || typeof value !== "object") {
+          value = undefined;
+          break;
+        }
+        value = (value as Record<string, unknown>)[key];
+      }
+      interpolationCtx[localName] = value;
+    }
+  } else {
+    // No inputs declared — only built-in sources available
+    interpolationCtx = {};
+    if (ctx.trigger !== undefined) interpolationCtx.trigger = ctx.trigger;
+    if (ctx.input !== undefined) interpolationCtx.input = ctx.input;
+  }
+
+  // 3c. Validate resolved inputs against inputSchema if defined
+  if (node.inputSchema) {
+    const inputErrors = validateJsonSchema(
+      node.inputSchema as Record<string, unknown>,
+      interpolationCtx,
+    );
+    if (inputErrors.length > 0) {
+      const errorMsg = `Input schema validation failed: ${inputErrors.join("; ")}`;
+      checkpointStepFailure(runId, stepId, errorMsg, 0);
+      throw new Error(errorMsg);
+    }
+  }
+
+  // 4. Deep-interpolate config using local context (not global ctx)
+  const { value: interpolatedValue, unresolved } = deepInterpolate(node.config, interpolationCtx);
   const interpolatedConfig = interpolatedValue as Record<string, unknown>;
 
   if (unresolved.length > 0) {
@@ -360,6 +413,19 @@ async function executeStep(
     return { outcome: "waiting", successors: [] };
   }
 
+  // 6b. Validate output against node-level outputSchema if defined
+  if (node.outputSchema && result.status === "success") {
+    const outputErrors = validateJsonSchema(
+      node.outputSchema as Record<string, unknown>,
+      result.output,
+    );
+    if (outputErrors.length > 0) {
+      const errorMsg = `Output schema validation failed: ${outputErrors.join("; ")}`;
+      checkpointStepFailure(runId, stepId, errorMsg, 0);
+      throw new Error(errorMsg);
+    }
+  }
+
   // 7. Run validation if configured
   if (node.validation) {
     const validationResult = await runStepValidation(registry, node, result.output, ctx, meta);
@@ -371,9 +437,11 @@ async function executeStep(
     }
 
     if (validationResult.outcome === "retry") {
-      // Inject validation context and mark as failed for retry
+      // Bug 7 fix: Append validation context to history array instead of overwriting
       if (validationResult.retryContext) {
-        Object.assign(ctx, { [`${node.id}_validation`]: validationResult.retryContext });
+        const historyKey = `${node.id}_validations`;
+        const existing = (ctx[historyKey] as unknown[]) || [];
+        ctx[historyKey] = [...existing, validationResult.retryContext];
       }
       const retryPolicy = node.validation.retry || node.retry;
       const currentRetryCount = existingStep?.retryCount || 0;

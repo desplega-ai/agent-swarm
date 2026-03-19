@@ -598,6 +598,12 @@ export const WorkflowNodeSchema = z.object({
   next: z.union([z.string(), z.record(z.string(), z.string())]).optional(),
   validation: StepValidationConfigSchema.optional(),
   retry: RetryPolicySchema.optional(),
+  // Explicit data mapping: local name → context path (e.g. {prNum: "trigger.prNumber"})
+  inputs: z.record(z.string(), z.string()).optional(),
+  // JSON Schema for input validation (validated after inputs resolution)
+  inputSchema: z.record(z.string(), z.unknown()).optional(),
+  // JSON Schema for output validation (on top of executor's base schema)
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
 });
 export type WorkflowNode = z.infer<typeof WorkflowNodeSchema>;
 

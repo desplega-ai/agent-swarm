@@ -156,7 +156,12 @@ describe("Workflow Async v2 (Phase 4)", () => {
       const workflow = makeWorkflow({
         nodes: [
           { id: "s1", type: "echo", config: { message: "prep" }, next: "task1" },
-          { id: "task1", type: "agent-task", config: { template: "Work: {{s1.echo}}" } },
+          {
+            id: "task1",
+            type: "agent-task",
+            inputs: { s1Echo: "s1.echo" },
+            config: { template: "Work: {{s1Echo}}" },
+          },
         ],
       });
 
@@ -342,7 +347,8 @@ describe("Workflow Async v2 (Phase 4)", () => {
           {
             id: "task1",
             type: "agent-task",
-            config: { template: "Process: {{s1.echo}}" },
+            inputs: { s1Echo: "s1.echo" },
+            config: { template: "Process: {{s1Echo}}" },
           },
         ],
       });
