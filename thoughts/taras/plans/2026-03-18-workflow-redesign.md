@@ -266,15 +266,15 @@ Implement all 7 instant executor classes. Each gets a Zod config schema, output 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Executor unit tests pass: `bun test src/tests/workflow-executors.test.ts`
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Executor unit tests pass: `bun test src/tests/workflow-executors.test.ts`
 
 #### Manual Verification:
-- [ ] Each executor's `configSchema.parse()` rejects invalid config (spot-check 2-3 executors)
-- [ ] PropertyMatch port routing: "true"/"false" based on condition evaluation
-- [ ] CodeMatch sandboxing: confirm `process`, `Bun`, `require` are undefined inside sandbox
-- [ ] Script executor: runs a simple bash script and captures stdout/stderr
+- [x] Each executor's `configSchema.parse()` rejects invalid config (spot-check 2-3 executors)
+- [x] PropertyMatch port routing: "true"/"false" based on condition evaluation
+- [x] CodeMatch sandboxing: confirm `process`, `Bun`, `require` are undefined inside sandbox
+- [x] Script executor: runs a simple bash script and captures stdout/stderr
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. Commit after verification passes.
 

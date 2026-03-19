@@ -1,4 +1,11 @@
 import type { BaseExecutor, ExecutorDependencies } from "./base";
+import { CodeMatchExecutor } from "./code-match";
+import { NotifyExecutor } from "./notify";
+import { PropertyMatchExecutor } from "./property-match";
+import { RawLlmExecutor } from "./raw-llm";
+import { ScriptExecutor } from "./script";
+import { ValidateExecutor } from "./validate";
+import { VcsExecutor } from "./vcs";
 
 export class ExecutorRegistry {
   private executors = new Map<string, BaseExecutor>();
@@ -24,19 +31,21 @@ export class ExecutorRegistry {
 
 /**
  * Create an executor registry with all built-in executors registered.
- * Individual executor classes will be registered here as they are implemented in Phase 2.
  */
-export function createExecutorRegistry(_deps: ExecutorDependencies): ExecutorRegistry {
+export function createExecutorRegistry(deps: ExecutorDependencies): ExecutorRegistry {
   const registry = new ExecutorRegistry();
-  // Phase 2 will register all instant executors here:
-  // registry.register(new PropertyMatchExecutor(deps));
-  // registry.register(new CodeMatchExecutor(deps));
-  // registry.register(new NotifyExecutor(deps));
-  // registry.register(new RawLlmExecutor(deps));
-  // registry.register(new ScriptExecutor(deps));
-  // registry.register(new VcsExecutor(deps));
-  // registry.register(new ValidateExecutor(deps));
+
+  // Instant executors (Phase 2)
+  registry.register(new PropertyMatchExecutor(deps));
+  registry.register(new CodeMatchExecutor(deps));
+  registry.register(new NotifyExecutor(deps));
+  registry.register(new RawLlmExecutor(deps));
+  registry.register(new ScriptExecutor(deps));
+  registry.register(new VcsExecutor(deps));
+  registry.register(new ValidateExecutor(deps));
+
   // Phase 4 will add:
   // registry.register(new AgentTaskExecutor(deps));
+
   return registry;
 }
