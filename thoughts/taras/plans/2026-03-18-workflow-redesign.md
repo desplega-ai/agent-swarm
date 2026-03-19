@@ -341,16 +341,16 @@ Replace the current BFS DAG walker with the new event-loop style engine. The eng
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Engine tests pass: `bun test src/tests/workflow-engine-v2.test.ts`
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Engine tests pass: `bun test src/tests/workflow-engine-v2.test.ts`
 
 #### Manual Verification:
-- [ ] Linear workflow (3 instant nodes) executes to completion, context accumulates across steps
-- [ ] Branching workflow (property-match → two branches) follows correct port
-- [ ] Checkpoint: kill process mid-workflow, restart, confirm it resumes from last step (simulate by manually setting run status to 'running' with completed steps)
-- [ ] Memoization: re-trigger walkGraph on a run with completed steps — confirm they're skipped
-- [ ] Timeout: script executor with `sleep 60` fails after 30s default timeout
+- [x] Linear workflow (3 instant nodes) executes to completion, context accumulates across steps
+- [x] Branching workflow (property-match → two branches) follows correct port
+- [x] Checkpoint: kill process mid-workflow, restart, confirm it resumes from last step (simulate by manually setting run status to 'running' with completed steps)
+- [x] Memoization: re-trigger walkGraph on a run with completed steps — confirm they're skipped
+- [x] Timeout: script executor with `sleep 60` fails after 30s default timeout
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. Commit after verification passes.
 

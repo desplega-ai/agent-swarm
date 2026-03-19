@@ -5,7 +5,8 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
-import { getSuccessors, walkDag } from "./engine";
+import { getSuccessors } from "./definition";
+import { walkGraph } from "./engine";
 
 export async function recoverStuckWorkflowRuns(): Promise<number> {
   const stuckRuns = getStuckWorkflowRuns();
@@ -28,7 +29,8 @@ export async function recoverStuckWorkflowRuns(): Promise<number> {
         ctx[stuck.nodeId] = { taskOutput: stuck.taskOutput };
         updateWorkflowRun(stuck.runId, { status: "running", context: ctx });
         const successors = getSuccessors(workflow.definition, stuck.nodeId, "default");
-        await walkDag(workflow.definition, stuck.runId, ctx, successors);
+        // TODO(Phase 4): inject registry from module-level singleton
+        await walkGraph(workflow.definition, stuck.runId, ctx, successors, undefined as never);
       } else {
         // Task failed or cancelled — mark run failed
         const reason = stuck.taskStatus === "failed" ? "Task failed" : "Task cancelled";

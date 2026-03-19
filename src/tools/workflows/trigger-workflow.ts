@@ -43,7 +43,8 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
             },
           };
         }
-        const runId = await startWorkflowExecution(workflow, triggerData ?? {});
+        // TODO(Phase 7): inject registry from module-level singleton
+        const runId = await startWorkflowExecution(workflow, triggerData ?? {}, undefined as never);
         return {
           content: [
             {
