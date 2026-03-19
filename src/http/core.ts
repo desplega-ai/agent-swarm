@@ -81,7 +81,8 @@ export async function handleCore(
   const isGitHubWebhook = req.url?.startsWith("/api/github/webhook");
   const isGitLabWebhook = req.url?.startsWith("/api/gitlab/webhook");
   const isAgentMailWebhook = req.url?.startsWith("/api/agentmail/webhook");
-  if (apiKey && !isGitHubWebhook && !isGitLabWebhook && !isAgentMailWebhook) {
+  const isWorkflowWebhook = req.url?.startsWith("/api/webhooks/");
+  if (apiKey && !isGitHubWebhook && !isGitLabWebhook && !isAgentMailWebhook && !isWorkflowWebhook) {
     const authHeader = req.headers.authorization;
     const providedKey = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
