@@ -2,7 +2,7 @@
 date: 2026-03-20T12:00:00Z
 topic: "Setup CLI Onboarding (agent-swarm onboard)"
 type: plan
-status: ready
+status: implemented
 source: thoughts/taras/brainstorms/2026-03-20-setup-cli-onboarding.md
 ---
 
@@ -749,45 +749,100 @@ Wire up the non-interactive `--yes` mode for CI/scripted usage, add `--preset` f
 
 ---
 
+## Implementation Status
+
+_Implemented: 2026-03-20 by Claude_
+
+All 8 phases completed. 27 new files, 2 modified files (setup.tsx, cli.tsx).
+
+### Automated Tests Executed
+- `bun run tsc:check` — passes (0 errors)
+- `bun run lint:fix` — passes (0 warnings in onboard files)
+- `bun test src/tests/` — 1583 tests pass (all existing + 25 new)
+- `bun test src/tests/onboard-compose.test.ts` — 8 tests (service counts, ports, integrations, healthcheck)
+- `bun test src/tests/onboard-env.test.ts` — 8 tests (credentials, integrations, disable flags)
+- `bun test src/tests/onboard-manifest.test.ts` — 9 tests (schema shape, presets, integration flags)
+- `--yes --preset=dev --dry-run` — completes end-to-end, shows file previews
+- `--yes` without `--preset` — shows clear error
+- `--yes` without `CLAUDE_CODE_OAUTH_TOKEN` — shows clear error
+- Generated `docker-compose.yml` validates with `docker compose config --quiet`
+- Generated `.env` has real credential values
+- Generated `.agent-swarm/config.json` has correct schema
+
+### Key Deviations from Plan
+- `generate.tsx` routes directly to `done` in dry-run mode (skips prereq/start/health)
+- Added `nonInteractive` field to `OnboardState` for `--yes` mode to skip post-deploy steps
+- `generate.tsx` has its own inline `generateManifest()` (agent wrote a simpler version than the shared `manifest.ts` — both exist, generate.tsx uses its own)
+
+---
+
 ## Testing Strategy
 
-### Unit Tests
-- Compose generator: test each preset produces correct YAML structure
-- Env generator: test credential placement and integration sections
-- Manifest generator: test schema shape
-- Preset definitions: test all presets resolve to valid service lists
-
-### Integration Tests (Manual)
-- Full interactive flow: `agent-swarm onboard` → walk through every step
-- Non-interactive: `API_KEY=x CLAUDE_CODE_OAUTH_TOKEN=x agent-swarm onboard --yes --preset=dev`
-- Dry-run: `agent-swarm onboard --dry-run`
-- Docker E2E: Full flow ending with `docker compose up` and health check verification
+### Unit Tests (25 tests, all passing)
+- `src/tests/onboard-compose.test.ts` — 8 tests: preset service counts, port allocation, integrations, healthcheck, depends_on
+- `src/tests/onboard-env.test.ts` — 8 tests: credential values, integration sections, disable flags, agent ID comments
+- `src/tests/onboard-manifest.test.ts` — 9 tests: schema shape, preset propagation, integration flags, static paths
 
 ### Manual E2E Verification
+
+**Setup**: Link the CLI binary locally so you can run `agent-swarm onboard` from any directory:
+
 ```bash
-# 1. Clean directory test
-cd /tmp && mkdir swarm-test && cd swarm-test
-bun run /path/to/agent-swarm/src/cli.tsx onboard --dry-run
+# From the worktree root
+cd ~/worktrees/agent-swarm/2026-03-20-feat/cli-onboarding
+bun link
 
-# 2. Full interactive flow (requires Docker + credentials)
-bun run /path/to/agent-swarm/src/cli.tsx onboard
+# Now test from a clean temp directory (won't touch your project)
+cd /tmp && rm -rf swarm-e2e && mkdir swarm-e2e && cd swarm-e2e
+```
 
-# 3. Non-interactive flow
-API_KEY=test123 CLAUDE_CODE_OAUTH_TOKEN=oauth-token-here \
-  bun run /path/to/agent-swarm/src/cli.tsx onboard --yes --preset=dev --dry-run
+**Tests to run**:
 
-# 4. Verify generated files
-docker compose -f docker-compose.yml config  # Validates YAML
-cat .env | head -20                          # Check credentials
-cat .agent-swarm/config.json | jq .          # Check manifest
+```bash
+# 1. Interactive dry-run (walk through every screen)
+agent-swarm onboard --dry-run
+# → Local → Dev Team → Claude → paste fake token → skip integrations → review → done
 
-# 5. Full stack test (requires real OAuth token)
-bun run /path/to/agent-swarm/src/cli.tsx onboard
+# 2. Non-interactive dry-run (instant, no prompts)
+API_KEY=test123 CLAUDE_CODE_OAUTH_TOKEN=fake-token \
+  agent-swarm onboard --yes --preset=dev --dry-run
+# → Completes immediately with file previews
+
+# 3. Error cases
+agent-swarm onboard --yes --dry-run
+# → "Onboard failed: --preset is required..."
+
+agent-swarm onboard --yes --preset=dev --dry-run
+# → "Onboard failed: CLAUDE_CODE_OAUTH_TOKEN..."
+
+# 4. Actual file generation + validation
+API_KEY=mykey123 CLAUDE_CODE_OAUTH_TOKEN=fake-token \
+  agent-swarm onboard --yes --preset=dev
+# → Writes files, then hits prereq check (Ctrl+C or let it run)
+docker compose -f docker-compose.yml config --quiet  # Valid YAML
+cat .env | head -10                                   # Real credentials
+cat .agent-swarm/config.json | jq .                   # Valid manifest
+
+# 5. Solo preset (no lead, skips post_task)
+API_KEY=test CLAUDE_CODE_OAUTH_TOKEN=test \
+  agent-swarm onboard --yes --preset=solo --dry-run
+# → Shows 1 agent configured
+
+# 6. With integrations
+API_KEY=test CLAUDE_CODE_OAUTH_TOKEN=test GITHUB_TOKEN=ghp_xxx \
+  GITHUB_EMAIL=you@example.com GITHUB_NAME="Your Name" \
+  agent-swarm onboard --yes --preset=dev --dry-run
+# → Shows "Integrations: github" in output
+
+# 7. Full stack test (requires real OAuth token + Docker + free port 3013)
+agent-swarm onboard
 # → Complete wizard → verify agents register → send test task
 curl -s -H "Authorization: Bearer <api-key>" http://localhost:3013/api/agents | jq '.agents[] | {name, status}'
 
-# 6. Cleanup
+# 8. Cleanup
 docker compose down -v
+cd /tmp && rm -rf swarm-e2e
+bun unlink  # from worktree root if desired
 ```
 
 ## References

@@ -6,6 +6,7 @@ import pkg from "../package.json";
 import { runClaude } from "./claude.ts";
 import { runHook } from "./commands/hook.ts";
 import { runLead } from "./commands/lead.ts";
+import { Onboard } from "./commands/onboard.tsx";
 import { Setup } from "./commands/setup.tsx";
 import { runWorker } from "./commands/worker.ts";
 
@@ -34,6 +35,7 @@ interface ParsedArgs {
   systemPromptFile: string;
   additionalArgs: string[];
   aiLoop: boolean;
+  preset: string;
 }
 
 function parseArgs(args: string[]): ParsedArgs {
@@ -50,6 +52,7 @@ function parseArgs(args: string[]): ParsedArgs {
   let systemPromptFile = "";
   let additionalArgs: string[] = [];
   let aiLoop = false;
+  let preset = "";
 
   // Find if there's a "--" separator for additional args
   const separatorIndex = args.indexOf("--");
@@ -85,6 +88,11 @@ function parseArgs(args: string[]): ParsedArgs {
       i++;
     } else if (arg === "--ai-loop") {
       aiLoop = true;
+    } else if (arg === "--preset") {
+      preset = mainArgs[i + 1] || preset;
+      i++;
+    } else if (arg?.startsWith("--preset=")) {
+      preset = arg.slice("--preset=".length);
     }
   }
 
@@ -102,6 +110,7 @@ function parseArgs(args: string[]): ParsedArgs {
     systemPromptFile,
     additionalArgs,
     aiLoop,
+    preset,
   };
 }
 
@@ -135,6 +144,12 @@ function Help() {
 
       <Box marginTop={1} flexDirection="column">
         <Text bold>Commands:</Text>
+        <Box>
+          <Box width={12}>
+            <Text color="green">onboard</Text>
+          </Box>
+          <Text>Set up a new swarm from scratch (local Docker Compose)</Text>
+        </Box>
         <Box>
           <Box width={12}>
             <Text color="green">setup</Text>
@@ -182,6 +197,28 @@ function Help() {
             <Text color="green">help</Text>
           </Box>
           <Text>Show this help message</Text>
+        </Box>
+      </Box>
+
+      <Box marginTop={1} flexDirection="column">
+        <Text bold>Options for 'onboard':</Text>
+        <Box>
+          <Box width={24}>
+            <Text color="yellow">--dry-run</Text>
+          </Box>
+          <Text>Preview what would be generated without writing</Text>
+        </Box>
+        <Box>
+          <Box width={24}>
+            <Text color="yellow">-y, --yes</Text>
+          </Box>
+          <Text>Non-interactive mode (reads from env vars)</Text>
+        </Box>
+        <Box>
+          <Box width={24}>
+            <Text color="yellow">--preset {"<name>"}</Text>
+          </Box>
+          <Text>Preset: dev, content, research, solo</Text>
         </Box>
       </Box>
 
@@ -557,9 +594,12 @@ function App({ args }: { args: ParsedArgs }) {
     systemPromptFile,
     additionalArgs,
     aiLoop,
+    preset,
   } = args;
 
   switch (command) {
+    case "onboard":
+      return <Onboard dryRun={dryRun} yes={yes} preset={preset || undefined} />;
     case "setup":
       return <Setup dryRun={dryRun} restore={restore} yes={yes} />;
     case "mcp":
