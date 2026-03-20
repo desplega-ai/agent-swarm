@@ -481,10 +481,10 @@ Create `src/tests/prompt-template-github.test.ts`:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Types compile: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Backward compat tests pass: `bun test src/tests/prompt-template-github.test.ts`
-- [ ] All existing tests still pass: `bun test`
+- [x] Types compile: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Backward compat tests pass: `bun test src/tests/prompt-template-github.test.ts`
+- [x] All existing tests still pass: `bun test`
 
 #### Manual Verification:
 - [ ] Start server, create a test GitHub PR event via curl, verify the task description matches expected format
