@@ -237,19 +237,13 @@ export function Onboard({ dryRun = false, yes = false, preset }: OnboardProps) {
           <Text bold>How would you like to deploy your swarm?</Text>
           <Box marginTop={1}>
             <Select
-              options={[
-                { label: "Local (Docker Compose)", value: "local" },
-                { label: "Remote (SSH) — Coming soon", value: "remote" },
-              ]}
-              onChange={(value) => {
-                if (value === "remote") {
-                  addLog("Remote deploy will be available in a future release.");
-                  return;
-                }
+              options={[{ label: "Local (Docker Compose)", value: "local" }]}
+              onChange={() => {
                 goToNext({ deployType: "local" });
               }}
             />
           </Box>
+          <Text dimColor>Remote (SSH) — Coming soon</Text>
         </Box>
       </Box>
     );
