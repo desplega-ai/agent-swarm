@@ -1,0 +1,36 @@
+<task-notification>
+<task-id>a13facda03cc408b7</task-id>
+<tool-use-id>toolu_01XxLHp8U1z8NMSo8s4ipz6a</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/fea08809-d478-4a5d-a3e4-4e9c570d2288/tasks/a13facda03cc408b7.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 6: System prompts refactor" completed</summary>
+<result>Here's the summary of everything implemented:
+
+---
+
+## Report
+
+### Files Created
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/prompts/session-templates.ts` -- Registers all 14 templates (12 system + 2 session composites) via `registerTemplate()` at module load time
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tests/prompt-template-session.test.ts` -- 21 tests covering registration, individual resolution, composite resolution, and `getBasePrompt` integration
+
+### Files Modified
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/prompts/base-prompt.ts` -- Removed all 12 `BASE_PROMPT_*` constants (489 lines deleted). Refactored `getBasePrompt()` to resolve `system.session.lead` or `system.session.worker` composite templates via `resolveTemplate()`. Side-effect imports `./session-templates`. Conditional sections (`agent_fs`, `services`, `artifacts`) resolved individually via `resolveTemplate()`. Truncation logic (`BOOTSTRAP_MAX_CHARS`, `BOOTSTRAP_TOTAL_MAX_CHARS`) and dynamic sections (identity, repo context, claudeMd, toolsMd) preserved as-is.
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tests/prompt-template-remaining.test.ts` -- Added `import "../prompts/session-templates"` to include session templates in the "all templates registered" coverage
+
+### Decisions Made
+1. **Constants removed entirely** -- No deprecated constants left behind. The template bodies are now the single source of truth in `session-templates.ts`.
+2. **`{single-brace}` to `{{double-brace}}` conversion** -- All variable placeholders (`{role}`, `{agentId}`, `{swarmUrl}`, `{sharedOrgId}`) converted to `{{...}}` syntax for the interpolation engine. Literal single-brace placeholders inside code examples (e.g., `{what to research}`, `{package_name}`, `{category}`) were kept as-is since they're not interpolation targets.
+3. **Prompt ordering change** -- The old code injected identity/repo/claudeMd/toolsMd *between* the role section and the rest of the static content. The refactored version puts the full composite (role + register + lead/worker + filesystem + etc.) first, then appends identity/repo/claudeMd/toolsMd, then conditional sections. All the same content is present; all existing tests pass with this ordering.
+4. **Truncation preserved** -- The `BOOTSTRAP_MAX_CHARS`/`BOOTSTRAP_TOTAL_MAX_CHARS` budget logic remains unchanged in `getBasePrompt()`, using `conditionalSuffix` in place of the old `staticSuffix`.
+
+### Verification Results
+- `bun run tsc:check` -- passes
+- `bun run lint:fix` -- no issues (8 pre-existing warnings in other files)
+- `bun test` -- 1748 pass, 19 fail (all 19 failures are pre-existing test isolation issues, confirmed by running the same test suite on the clean branch before changes)
+- All base-prompt tests (24 tests), session template tests (21 tests), resolver tests (23 tests), remaining tests (24 tests), self-improvement tests (26 tests), artifact-sdk tests (41 tests) -- all pass (159 tests total across the 6 relevant files)
+
+### Status: Completed</result>
+<usage><total_tokens>92350</total_tokens><tool_uses>54</tool_uses><duration_ms>772357</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/fea08809-d478-4a5d-a3e4-4e9c570d2288/tasks/a13facda03cc408b7.output
