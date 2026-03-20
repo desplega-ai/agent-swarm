@@ -336,9 +336,9 @@ Create `src/tests/prompt-template-resolver.test.ts`:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Types compile: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Resolver tests pass: `bun test src/tests/prompt-template-resolver.test.ts`
+- [x] Types compile: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Resolver tests pass: `bun test src/tests/prompt-template-resolver.test.ts`
 
 #### Manual Verification:
 - [ ] Start server, verify seeding happens on startup (check logs for seed count)

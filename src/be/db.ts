@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { seedDefaultTemplates } from "../prompts/seed";
 import type {
   ActiveSession,
   Agent,
@@ -188,6 +189,9 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
 
   // Backfill: Seed v1 for existing agents that don't have any context versions yet
   seedContextVersions();
+
+  // Seed default prompt templates from the in-memory code registry
+  seedDefaultTemplates();
 
   return db;
 }
