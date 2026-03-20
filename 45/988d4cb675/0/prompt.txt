@@ -1,0 +1,64 @@
+<task-notification>
+<task-id>ac16f1d5af5d31403</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/fea08809-d478-4a5d-a3e4-4e9c570d2288/tasks/ac16f1d5af5d31403.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 3: REST API + MCP Tools" completed</summary>
+<result>Type check clean, lint clean (only pre-existing warnings in unrelated test files).
+
+---
+
+Here is the summary of what was done.
+
+## Files Created
+
+1. **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/http/prompt-templates.ts`** -- REST API handler with 9 route definitions and a single `handlePromptTemplates` handler function covering all endpoints:
+   - `GET /api/prompt-templates` -- list with filters
+   - `PUT /api/prompt-templates` -- upsert override
+   - `GET /api/prompt-templates/resolved` -- resolve template for event type
+   - `GET /api/prompt-templates/events` -- list all registered event definitions
+   - `POST /api/prompt-templates/preview` -- dry-run render
+   - `GET /api/prompt-templates/{id}` -- get with history
+   - `DELETE /api/prompt-templates/{id}` -- delete override
+   - `POST /api/prompt-templates/{id}/checkout` -- checkout version
+   - `POST /api/prompt-templates/{id}/reset` -- reset to code default
+
+2. **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tools/prompt-templates/index.ts`** -- barrel export for 5 MCP tools
+
+3. **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tools/prompt-templates/list.ts`** -- `list-prompt-templates` (readOnlyHint)
+
+4. **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tools/prompt-templates/get.ts`** -- `get-prompt-template` (readOnlyHint)
+
+5. **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tools/prompt-templates/set.ts`** -- `set-prompt-template` (idempotentHint)
+
+6. **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tools/prompt-templates/delete.ts`** -- `delete-prompt-template` (destructiveHint)
+
+7. **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tools/prompt-templates/preview.ts`** -- `preview-prompt-template` (readOnlyHint)
+
+## Files Modified
+
+- **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/http/index.ts`** -- imported `handlePromptTemplates` and added to handler chain (between config and db-query)
+- **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/server.ts`** -- imported and registered all 5 MCP tools (always-registered, alongside config tools)
+- **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tools/tool-config.ts`** -- added 5 prompt template tools to `DEFERRED_TOOLS`
+- **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tests/tool-annotations.test.ts`** -- bumped upper bound on tool count from 65 to 70
+- **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/scripts/generate-openapi.ts`** -- added `import "../src/http/prompt-templates"`
+- **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/openapi.json`** -- regenerated with all new routes
+
+## Verification Results
+
+- `bun run tsc:check` -- clean
+- `bun run lint:fix` -- clean (no new warnings)
+- `bun test` -- 1702 pass, 0 fail
+- `bun run docs:openapi` -- generated successfully, all 7 route paths present
+
+## Decisions
+
+- The 5 MCP tools are registered unconditionally (not behind a capability flag), matching the pattern used for config tools since prompt management is fundamental.
+- All 5 MCP tools are classified as `DEFERRED_TOOLS` (not core) since they're management tools, not used during routine task execution.
+- Route ordering in the handler follows the spec: literal 3-segment paths first, then 4-segment parameterized, then 3-segment parameterized, then 2-segment.
+- Fixed `z.record(z.unknown())` to `z.record(z.string(), z.unknown())` to match the project's zod version which requires 2 args.
+
+**Status: completed**</result>
+<usage><total_tokens>81265</total_tokens><tool_uses>62</tool_uses><duration_ms>645459</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/fea08809-d478-4a5d-a3e4-4e9c570d2288/tasks/ac16f1d5af5d31403.output
