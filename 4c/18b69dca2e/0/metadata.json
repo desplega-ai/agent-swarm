@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "4c18b69dca2e",
+  "session_id": "d669fe24-717a-4623-b5f0-3898a2f6d28b",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-20T18:00:18.131418Z",
+  "branch": "refactor/2026-03-20-workflows",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "src/workflows/retry-poller.ts"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "f02c8b1bbda7",
+  "checkpoint_transcript_start": 447,
+  "transcript_lines_at_start": 447,
+  "token_usage": {
+    "input_tokens": 31,
+    "cache_creation_tokens": 31056,
+    "cache_read_tokens": 1975465,
+    "output_tokens": 7182,
+    "api_call_count": 15
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-20T18:00:17.835479Z",
+    "agent_lines": 41,
+    "human_added": 282,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 323,
+    "agent_percentage": 12.693498452012383
+  }
+}
