@@ -1,0 +1,48 @@
+<task-notification>
+<task-id>a1782d64dd39de630</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/fea08809-d478-4a5d-a3e4-4e9c570d2288/tasks/a1782d64dd39de630.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 4: GitHub handler refactor" completed</summary>
+<result>All checks pass cleanly.
+
+---
+
+## Report
+
+### Files Created
+
+1. **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/github/templates.ts`** — Registers 17 template definitions (5 common + 12 event) at module load time via `registerTemplate()`.
+
+2. **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tests/prompt-template-github.test.ts`** — 20 tests covering registration verification, byte-identical backward compatibility for all 12 event types (including conditional variants), skip_event suppression, custom body override, and common template override propagation.
+
+### Files Modified
+
+3. **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/github/handlers.ts`** — Refactored all 7 handler functions to use `resolveTemplate()` instead of hardcoded template literals. Key changes:
+   - Added `import "./templates"` (side-effect import for registration)
+   - Added `import { resolveTemplate } from "../prompts/resolver"`
+   - Each handler branch now builds a variables object, calls `resolveTemplate()`, checks `result.skipped`, and uses `result.text` as the task description
+   - Removed the `DELEGATION_INSTRUCTION` constant (moved to `common.delegation_instruction` template)
+   - Kept `getReviewStateInfo()`, `getCheckConclusionInfo()`, and `getCommandSuggestions()` — they compute variable values passed to templates
+   - Made `getReviewStateInfo` and `getCheckConclusionInfo` exported (were private before)
+   - All non-prompt logic preserved exactly: deduplication, bot checks, permission checks, task creation, logging, reactions
+
+### Verification Results
+
+- `bun run tsc:check` — passes
+- `bun run lint:fix` — passes (no new warnings; 7 pre-existing warnings in unrelated files)
+- `bun test src/tests/prompt-template-github.test.ts` — 20/20 pass, 59 assertions
+- `bun test` — 1722/1722 pass, 0 failures
+
+### Design Decisions
+
+1. **Common templates via `{{@template[...]}}` references**: `DELEGATION_INSTRUCTION` and command suggestions are registered as `common.*` templates. The PR/issue event templates reference them with `{{@template[common.delegation_instruction]}}` and `{{@template[common.command_suggestions.github_pr]}}`. This makes them independently overridable via the DB.
+
+2. **Conditional parts as pre-computed variables**: For templates with conditional logic (closed PR merged/not-merged, review states, comment PR vs issue, related task sections), the handler code computes the final string values BEFORE calling `resolveTemplate()` and passes them as variables. This keeps templates simple and avoids template-level conditionals.
+
+3. **Comment template uses variables for suggestions**: Since comment command suggestions depend on whether the target is a PR or Issue, and the delegation instruction is a template ref, the comment template uses `{{command_suggestions}}` as a plain variable (not a template ref) to allow the handler to pick the right one. An alternative would have been separate event types, but this keeps it simpler.
+
+4. **Helper functions kept and exported**: `getReviewStateInfo()` and `getCheckConclusionInfo()` remain in `handlers.ts` since they compute variable values needed before calling the resolver. They're now exported for potential reuse.</result>
+<usage><total_tokens>87919</total_tokens><tool_uses>22</tool_uses><duration_ms>494986</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/fea08809-d478-4a5d-a3e4-4e9c570d2288/tasks/a1782d64dd39de630.output
