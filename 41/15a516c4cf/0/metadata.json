@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "4115a516c4cf",
+  "session_id": "95571ac3-2eb9-42f4-9152-5c609f71fc06",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-20T19:39:37.478709Z",
+  "branch": "feat/cli-onboarding",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "src/commands/onboard.tsx"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "52e92bf16391",
+  "checkpoint_transcript_start": 1505,
+  "transcript_lines_at_start": 1505,
+  "token_usage": {
+    "input_tokens": 23,
+    "cache_creation_tokens": 6654,
+    "cache_read_tokens": 2491634,
+    "output_tokens": 2996,
+    "api_call_count": 13
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-20T19:39:36.74059Z",
+    "agent_lines": 3,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 3,
+    "agent_percentage": 100
+  }
+}
