@@ -10,7 +10,6 @@ const MANIFEST_URL =
 
 async function copyToClipboard(text: string): Promise<boolean> {
   try {
-    // macOS
     await Bun.$`echo ${text} | pbcopy`.quiet();
     return true;
   } catch {
@@ -18,15 +17,22 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
-export function IntegrationSlackStep({ state: _state, goToNext, goToError }: StepProps) {
+export function IntegrationSlackStep({ goToNext }: StepProps) {
   const [subStep, setSubStep] = useState<SubStep>("manifest_options");
   const [copied, setCopied] = useState(false);
   const [botToken, setBotToken] = useState("");
+  const [error, setError] = useState("");
 
   return (
     <Box flexDirection="column" padding={1}>
       <Text bold>Slack Integration</Text>
       <Text dimColor>Team notifications, task updates, and chat with agents.</Text>
+
+      {error && (
+        <Box marginTop={1}>
+          <Text color="red">{error}</Text>
+        </Box>
+      )}
 
       {subStep === "manifest_options" && (
         <Box marginTop={1} flexDirection="column">
@@ -103,13 +109,14 @@ export function IntegrationSlackStep({ state: _state, goToNext, goToError }: Ste
               onSubmit={(value) => {
                 const trimmed = value.trim();
                 if (!trimmed) {
-                  goToError("Slack bot token is required");
+                  setError("Bot token is required. Please enter it above.");
                   return;
                 }
                 if (!trimmed.startsWith("xoxb-")) {
-                  goToError("Slack bot token must start with xoxb-");
+                  setError("Bot token should start with xoxb- — please check and re-enter.");
                   return;
                 }
+                setError("");
                 setBotToken(trimmed);
                 setSubStep("app_token");
               }}
@@ -136,13 +143,14 @@ export function IntegrationSlackStep({ state: _state, goToNext, goToError }: Ste
               onSubmit={(value) => {
                 const trimmed = value.trim();
                 if (!trimmed) {
-                  goToError("Slack app token is required");
+                  setError("App token is required. Please enter it above.");
                   return;
                 }
                 if (!trimmed.startsWith("xapp-")) {
-                  goToError("Slack app token must start with xapp-");
+                  setError("App token should start with xapp- — please check and re-enter.");
                   return;
                 }
+                setError("");
                 goToNext({
                   slackBotToken: botToken,
                   slackAppToken: trimmed,

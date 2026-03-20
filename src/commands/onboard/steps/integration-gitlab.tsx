@@ -5,9 +5,10 @@ import type { StepProps } from "../types.ts";
 
 type SubStep = "token" | "email";
 
-export function IntegrationGitLabStep({ state: _state, goToNext, goToError }: StepProps) {
+export function IntegrationGitLabStep({ goToNext }: StepProps) {
   const [subStep, setSubStep] = useState<SubStep>("token");
   const [token, setToken] = useState("");
+  const [error, setError] = useState("");
 
   return (
     <Box flexDirection="column" padding={1}>
@@ -23,6 +24,12 @@ export function IntegrationGitLabStep({ state: _state, goToNext, goToError }: St
         <Text dimColor>Required scopes: api, read_repository, write_repository</Text>
       </Box>
 
+      {error && (
+        <Box marginTop={1}>
+          <Text color="red">{error}</Text>
+        </Box>
+      )}
+
       {subStep === "token" && (
         <Box marginTop={1} flexDirection="column">
           <Text bold>GitLab Token (GITLAB_TOKEN):</Text>
@@ -32,9 +39,10 @@ export function IntegrationGitLabStep({ state: _state, goToNext, goToError }: St
             onSubmit={(value) => {
               const trimmed = value.trim();
               if (!trimmed) {
-                goToError("GitLab token is required");
+                setError("Token is required.");
                 return;
               }
+              setError("");
               setToken(trimmed);
               setSubStep("email");
             }}
@@ -44,7 +52,7 @@ export function IntegrationGitLabStep({ state: _state, goToNext, goToError }: St
 
       {subStep === "email" && (
         <Box marginTop={1} flexDirection="column">
-          <Text dimColor>Token: {token.slice(0, 10)}...</Text>
+          <Text dimColor>Token: {token.slice(0, 8)}...</Text>
           <Box marginTop={1} flexDirection="column">
             <Text bold>GitLab Email (GITLAB_EMAIL):</Text>
             <TextInput
@@ -53,9 +61,10 @@ export function IntegrationGitLabStep({ state: _state, goToNext, goToError }: St
               onSubmit={(value) => {
                 const trimmed = value.trim();
                 if (!trimmed) {
-                  goToError("GitLab email is required");
+                  setError("Email is required.");
                   return;
                 }
+                setError("");
                 goToNext({
                   gitlabToken: token,
                   gitlabEmail: trimmed,

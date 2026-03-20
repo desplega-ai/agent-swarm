@@ -5,9 +5,10 @@ import type { StepProps } from "../types.ts";
 
 type SubStep = "token" | "org";
 
-export function IntegrationSentryStep({ state: _state, goToNext, goToError }: StepProps) {
+export function IntegrationSentryStep({ goToNext }: StepProps) {
   const [subStep, setSubStep] = useState<SubStep>("token");
   const [token, setToken] = useState("");
+  const [error, setError] = useState("");
 
   return (
     <Box flexDirection="column" padding={1}>
@@ -23,6 +24,12 @@ export function IntegrationSentryStep({ state: _state, goToNext, goToError }: St
         <Text dimColor>Required scopes: project:read, org:read, event:read</Text>
       </Box>
 
+      {error && (
+        <Box marginTop={1}>
+          <Text color="red">{error}</Text>
+        </Box>
+      )}
+
       {subStep === "token" && (
         <Box marginTop={1} flexDirection="column">
           <Text bold>Sentry Auth Token (SENTRY_AUTH_TOKEN):</Text>
@@ -32,9 +39,10 @@ export function IntegrationSentryStep({ state: _state, goToNext, goToError }: St
             onSubmit={(value) => {
               const trimmed = value.trim();
               if (!trimmed) {
-                goToError("Sentry auth token is required");
+                setError("Auth token is required.");
                 return;
               }
+              setError("");
               setToken(trimmed);
               setSubStep("org");
             }}
@@ -46,17 +54,17 @@ export function IntegrationSentryStep({ state: _state, goToNext, goToError }: St
         <Box marginTop={1} flexDirection="column">
           <Text dimColor>Token: {token.slice(0, 10)}...</Text>
           <Box marginTop={1} flexDirection="column">
-            <Text bold>Sentry Organization Slug (SENTRY_ORG):</Text>
-            <Text dimColor>Found in Settings → General → Organization Slug</Text>
+            <Text bold>Sentry Organization (SENTRY_ORG):</Text>
             <TextInput
               key="sentry-org"
               placeholder="my-org"
               onSubmit={(value) => {
                 const trimmed = value.trim();
                 if (!trimmed) {
-                  goToError("Sentry organization is required");
+                  setError("Organization is required.");
                   return;
                 }
+                setError("");
                 goToNext({
                   sentryToken: token,
                   sentryOrg: trimmed,

@@ -5,10 +5,11 @@ import type { StepProps } from "../types.ts";
 
 type SubStep = "token" | "email" | "name";
 
-export function IntegrationGitHubStep({ state: _state, goToNext, goToError }: StepProps) {
+export function IntegrationGitHubStep({ goToNext }: StepProps) {
   const [subStep, setSubStep] = useState<SubStep>("token");
   const [token, setToken] = useState("");
   const [email, setEmail] = useState("");
+  const [error, setError] = useState("");
 
   return (
     <Box flexDirection="column" padding={1}>
@@ -24,6 +25,12 @@ export function IntegrationGitHubStep({ state: _state, goToNext, goToError }: St
         <Text dimColor>Required scope: repo</Text>
       </Box>
 
+      {error && (
+        <Box marginTop={1}>
+          <Text color="red">{error}</Text>
+        </Box>
+      )}
+
       {subStep === "token" && (
         <Box marginTop={1} flexDirection="column">
           <Text bold>GitHub Token (GITHUB_TOKEN):</Text>
@@ -33,9 +40,10 @@ export function IntegrationGitHubStep({ state: _state, goToNext, goToError }: St
             onSubmit={(value) => {
               const trimmed = value.trim();
               if (!trimmed) {
-                goToError("GitHub token is required");
+                setError("Token is required.");
                 return;
               }
+              setError("");
               setToken(trimmed);
               setSubStep("email");
             }}
@@ -54,9 +62,10 @@ export function IntegrationGitHubStep({ state: _state, goToNext, goToError }: St
               onSubmit={(value) => {
                 const trimmed = value.trim();
                 if (!trimmed) {
-                  goToError("GitHub email is required");
+                  setError("Email is required.");
                   return;
                 }
+                setError("");
                 setEmail(trimmed);
                 setSubStep("name");
               }}
@@ -77,9 +86,10 @@ export function IntegrationGitHubStep({ state: _state, goToNext, goToError }: St
               onSubmit={(value) => {
                 const trimmed = value.trim();
                 if (!trimmed) {
-                  goToError("GitHub name is required");
+                  setError("Name is required.");
                   return;
                 }
+                setError("");
                 goToNext({
                   githubToken: token,
                   githubEmail: email,
