@@ -239,6 +239,23 @@ export function Setup({ dryRun = false, restore = false, yes = false }: SetupPro
         // Ignore errors reading existing config
       }
 
+      // Try to read API_KEY from .env if not already found
+      if (!existingToken) {
+        try {
+          const envFile = Bun.file(`${cwd}/.env`);
+          if (await envFile.exists()) {
+            const envContent = await envFile.text();
+            const match = envContent.match(/^API_KEY=(.+)$/m);
+            if (match?.[1]) {
+              existingToken = match[1].trim();
+              addLog("Found API_KEY in .env");
+            }
+          }
+        } catch {
+          // Ignore errors reading .env
+        }
+      }
+
       // In non-interactive mode (yes=true), skip prompts and go directly to updating
       if (yes) {
         const token = process.env.API_KEY;

@@ -48,7 +48,7 @@ export function PostTaskStep({ state, addLog, goToNext }: StepProps) {
               setSubStep("sending");
               setSentTask(task);
               try {
-                const res = await fetch("http://localhost:3013/api/tasks", {
+                const res = await fetch(`http://localhost:${state.apiPort || 3013}/api/tasks`, {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/json",

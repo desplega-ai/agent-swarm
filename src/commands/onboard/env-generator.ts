@@ -12,8 +12,9 @@ export function generateEnv(state: OnboardState): string {
   // ── Core ──
   lines.push("# === Core ===");
   lines.push(`API_KEY=${state.apiKey}`);
-  lines.push("MCP_BASE_URL=http://localhost:3013");
-  lines.push("APP_URL=http://localhost:5274");
+  const port = state.apiPort || 3013;
+  lines.push(`MCP_BASE_URL=http://localhost:${port}`);
+  lines.push("APP_URL=https://app.agent-swarm.dev");
 
   // ── Authentication ──
   lines.push("");

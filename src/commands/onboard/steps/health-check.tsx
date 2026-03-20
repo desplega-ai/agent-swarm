@@ -20,7 +20,7 @@ export function HealthCheckStep({ state, addLog, goToNext }: StepProps) {
     if (executed.current) return;
     executed.current = true;
 
-    const apiUrl = "http://localhost:3013";
+    const apiUrl = `http://localhost:${state.apiPort || 3013}`;
     const apiTimeout = 60_000;
     const agentTimeout = 90_000;
     const pollInterval = 3_000;
@@ -96,7 +96,7 @@ export function HealthCheckStep({ state, addLog, goToNext }: StepProps) {
     return () => {
       cancelled = true;
     };
-  }, [state.agentIds, state.apiKey, addLog]);
+  }, [state.agentIds, state.apiKey, state.apiPort, addLog]);
 
   useEffect(() => {
     if (status === "healthy") {

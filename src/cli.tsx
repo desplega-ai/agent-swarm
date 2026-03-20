@@ -7,7 +7,7 @@ import { runClaude } from "./claude.ts";
 import { runHook } from "./commands/hook.ts";
 import { runLead } from "./commands/lead.ts";
 import { Onboard } from "./commands/onboard.tsx";
-import { Setup } from "./commands/setup.tsx";
+import { Setup as Connect } from "./commands/setup.tsx";
 import { runWorker } from "./commands/worker.ts";
 
 // Get CLI name from bin field (assumes single key)
@@ -152,9 +152,9 @@ function Help() {
         </Box>
         <Box>
           <Box width={12}>
-            <Text color="green">setup</Text>
+            <Text color="green">connect</Text>
           </Box>
-          <Text>Set up agent-swarm in your project</Text>
+          <Text>Connect this project to an existing swarm</Text>
         </Box>
         <Box>
           <Box width={12}>
@@ -223,7 +223,7 @@ function Help() {
       </Box>
 
       <Box marginTop={1} flexDirection="column">
-        <Text bold>Options for 'setup':</Text>
+        <Text bold>Options for 'connect':</Text>
         <Box>
           <Box width={24}>
             <Text color="yellow">--dry-run</Text>
@@ -324,9 +324,9 @@ function Help() {
 
       <Box marginTop={1} flexDirection="column">
         <Text bold>Examples:</Text>
-        <Text dimColor> {binName} setup</Text>
-        <Text dimColor> {binName} setup --dry-run</Text>
-        <Text dimColor> {binName} setup -y</Text>
+        <Text dimColor> {binName} connect</Text>
+        <Text dimColor> {binName} connect --dry-run</Text>
+        <Text dimColor> {binName} connect -y</Text>
         <Text dimColor> {binName} mcp</Text>
         <Text dimColor> {binName} mcp --port 8080</Text>
         <Text dimColor> {binName} mcp -p 8080 -k my-secret-key</Text>
@@ -600,8 +600,8 @@ function App({ args }: { args: ParsedArgs }) {
   switch (command) {
     case "onboard":
       return <Onboard dryRun={dryRun} yes={yes} preset={preset || undefined} />;
-    case "setup":
-      return <Setup dryRun={dryRun} restore={restore} yes={yes} />;
+    case "connect":
+      return <Connect dryRun={dryRun} restore={restore} yes={yes} />;
     case "mcp":
       return <McpServer port={port} apiKey={key} />;
     case "claude":

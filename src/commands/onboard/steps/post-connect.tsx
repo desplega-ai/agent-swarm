@@ -22,7 +22,7 @@ export function PostConnectStep({ state, dryRun, addLog, goToNext, goToStep }: S
 
     const connect = async () => {
       const cwd = process.cwd();
-      const mcpBaseUrl = "http://localhost:3013";
+      const mcpBaseUrl = `http://localhost:${state.apiPort || 3013}`;
 
       // Create .claude dir if needed
       if (!dryRun) {
@@ -95,7 +95,7 @@ export function PostConnectStep({ state, dryRun, addLog, goToNext, goToStep }: S
     };
 
     connect().catch((err) => addLog(`Connection error: ${err}`));
-  }, [subStep, state.apiKey, dryRun, addLog]);
+  }, [subStep, state.apiKey, state.apiPort, dryRun, addLog]);
 
   useEffect(() => {
     if (subStep === "done") {

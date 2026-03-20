@@ -242,7 +242,7 @@ export function Onboard({ dryRun = false, yes = false, preset }: OnboardProps) {
   const stepContent = renderStep(state.step, stepProps);
 
   if (state.step === "done") {
-    const apiUrl = "http://localhost:3013";
+    const apiUrl = `http://localhost:${state.apiPort || 3013}`;
     const dashUrl = `https://app.agent-swarm.dev?api_url=${apiUrl}&api_key=${state.apiKey}`;
     const agentCount = state.services.reduce((sum, s) => sum + s.count, 0);
 

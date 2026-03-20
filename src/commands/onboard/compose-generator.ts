@@ -55,10 +55,12 @@ export function generateCompose(state: OnboardState): string {
   lines.push("    pull_policy: always");
   lines.push("    stop_grace_period: 60s");
   lines.push("");
+  const port = state.apiPort || 3013;
+
   lines.push("    environment:");
   lines.push(ENV_API_KEY);
-  lines.push("      - MCP_BASE_URL=http://localhost:3013");
-  lines.push("      - APP_URL=http://localhost:5274");
+  lines.push(`      - MCP_BASE_URL=http://localhost:${port}`);
+  lines.push("      - APP_URL=https://app.agent-swarm.dev");
 
   if (state.integrations.slack) {
     lines.push("      - SLACK_DISABLE=false");
@@ -72,7 +74,7 @@ export function generateCompose(state: OnboardState): string {
 
   lines.push("");
   lines.push("    ports:");
-  lines.push('      - "3013:3013"');
+  lines.push(`      - "${port}:3013"`);
   lines.push("");
   lines.push("    volumes:");
   lines.push("      - swarm_data:/app/data");

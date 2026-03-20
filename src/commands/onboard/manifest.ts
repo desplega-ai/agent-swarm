@@ -31,7 +31,7 @@ export function generateManifest(state: OnboardState): object {
     },
     composePath: "./docker-compose.yml",
     envPath: "./.env",
-    apiUrl: "http://localhost:3013",
+    apiUrl: `http://localhost:${state.apiPort || 3013}`,
     dashboardUrl: "https://app.agent-swarm.dev",
   };
 }

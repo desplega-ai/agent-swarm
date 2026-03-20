@@ -48,6 +48,7 @@ export interface OnboardState {
   gitlabEmail: string;
   sentryToken: string;
   sentryOrg: string;
+  apiPort: number;
   outputDir: string;
   nonInteractive: boolean;
   error: string | null;
@@ -141,6 +142,7 @@ export const INITIAL_STATE: OnboardState = {
   gitlabEmail: "",
   sentryToken: "",
   sentryOrg: "",
+  apiPort: 0,
   outputDir: process.cwd(),
   nonInteractive: false,
   error: null,

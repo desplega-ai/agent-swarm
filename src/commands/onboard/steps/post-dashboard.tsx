@@ -3,7 +3,8 @@ import { Box, Text } from "ink";
 import type { StepProps } from "../types.ts";
 
 export function PostDashboardStep({ state, addLog, goToNext }: StepProps) {
-  const dashboardUrl = `https://app.agent-swarm.dev?api_url=http://localhost:3013&api_key=${state.apiKey}`;
+  const apiUrl = `http://localhost:${state.apiPort || 3013}`;
+  const dashboardUrl = `https://app.agent-swarm.dev?api_url=${apiUrl}&api_key=${state.apiKey}`;
 
   return (
     <Box flexDirection="column" padding={1}>
