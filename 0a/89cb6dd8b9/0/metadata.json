@@ -1,0 +1,22 @@
+{
+  "cli_version": "0.5.1",
+  "checkpoint_id": "0a89cb6dd8b9",
+  "session_id": "95571ac3-2eb9-42f4-9152-5c609f71fc06",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-20T20:57:09.4678Z",
+  "branch": "feat/cli-onboarding",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "turn_id": "a8d1d2d1b7dd",
+  "token_usage": {
+    "input_tokens": 579,
+    "cache_creation_tokens": 789173,
+    "cache_read_tokens": 78033916,
+    "output_tokens": 113934,
+    "api_call_count": 353
+  },
+  "session_metrics": {
+    "turn_count": 6
+  }
+}
