@@ -1,7 +1,7 @@
 ---
 date: 2026-03-20
 author: Claude
-status: ready
+status: in-progress
 autonomy: critical
 branch: fet/template-registry
 research: thoughts/taras/research/2026-03-20-prompt-template-registry.md
@@ -204,11 +204,11 @@ Create `src/tests/prompt-templates-db.test.ts`:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Migration applies cleanly on fresh DB: `rm -f agent-swarm-db.sqlite* && bun run start:http` (check for no errors, Ctrl+C)
-- [ ] Migration applies cleanly on existing DB: `bun run start:http` (check for no errors, Ctrl+C)
-- [ ] Types compile: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Unit tests pass: `bun test src/tests/prompt-templates-db.test.ts`
+- [x] Migration applies cleanly on fresh DB: `rm -f agent-swarm-db.sqlite* && bun run start:http` (check for no errors, Ctrl+C)
+- [x] Migration applies cleanly on existing DB: `bun run start:http` (check for no errors, Ctrl+C)
+- [x] Types compile: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Unit tests pass: `bun test src/tests/prompt-templates-db.test.ts`
 
 #### Manual Verification:
 - [ ] Inspect `agent-swarm-db.sqlite` with `sqlite3` to confirm tables and indexes exist
