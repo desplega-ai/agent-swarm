@@ -45,7 +45,7 @@ export function initWorkflows(): void {
   _registry = createExecutorRegistry({
     db,
     eventBus: workflowEventBus,
-    interpolate,
+    interpolate: (template, ctx) => interpolate(template, ctx).result,
   });
 
   // 2. Wire up resume listener (task.completed / task.failed / task.cancelled)

@@ -598,6 +598,12 @@ export const WorkflowNodeSchema = z.object({
   next: z.union([z.string(), z.record(z.string(), z.string())]).optional(),
   validation: StepValidationConfigSchema.optional(),
   retry: RetryPolicySchema.optional(),
+  // Explicit data mapping: local name → context path (e.g. {prNum: "trigger.prNumber"})
+  inputs: z.record(z.string(), z.string()).optional(),
+  // JSON Schema for input validation (validated after inputs resolution)
+  inputSchema: z.record(z.string(), z.unknown()).optional(),
+  // JSON Schema for output validation (on top of executor's base schema)
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
 });
 export type WorkflowNode = z.infer<typeof WorkflowNodeSchema>;
 
@@ -688,6 +694,7 @@ export const WorkflowSnapshotSchema = z.object({
   triggers: z.array(TriggerConfigSchema),
   cooldown: CooldownConfigSchema.optional(),
   input: z.record(z.string(), InputValueSchema).optional(),
+  triggerSchema: z.record(z.string(), z.unknown()).optional(),
   enabled: z.boolean(),
 });
 export type WorkflowSnapshot = z.infer<typeof WorkflowSnapshotSchema>;
@@ -703,6 +710,7 @@ export const WorkflowSchema = z.object({
   triggers: z.array(TriggerConfigSchema).default([]),
   cooldown: CooldownConfigSchema.optional(),
   input: z.record(z.string(), InputValueSchema).optional(),
+  triggerSchema: z.record(z.string(), z.unknown()).optional(),
   createdByAgentId: z.string().uuid().optional(),
   createdAt: z.string(),
   lastUpdatedAt: z.string(),
@@ -772,5 +780,7 @@ export const WorkflowRunStepSchema = z.object({
   maxRetries: z.number().int().min(0).default(3),
   nextRetryAt: z.string().optional(),
   idempotencyKey: z.string().optional(),
+  diagnostics: z.string().optional(),
+  nextPort: z.string().optional(),
 });
 export type WorkflowRunStep = z.infer<typeof WorkflowRunStepSchema>;

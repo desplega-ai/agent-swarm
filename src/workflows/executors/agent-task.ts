@@ -33,10 +33,10 @@ export class AgentTaskExecutor extends BaseExecutor<
 
   protected async execute(
     config: z.infer<typeof AgentTaskConfigSchema>,
-    context: Readonly<Record<string, unknown>>,
+    _context: Readonly<Record<string, unknown>>,
     meta: ExecutorMeta,
   ): Promise<ExecutorResult<AgentTaskOutput>> {
-    const { db, interpolate } = this.deps;
+    const { db } = this.deps;
 
     // 1. Idempotency: check if a task was already created for this step
     const existingTask = db.getTaskByWorkflowRunStepId(meta.stepId);
@@ -60,16 +60,11 @@ export class AgentTaskExecutor extends BaseExecutor<
       } as unknown as ExecutorResult<AgentTaskOutput>;
     }
 
-    // 2. Interpolate template and tags
-    const mutableCtx = { ...context } as Record<string, unknown>;
-    const interpolatedTemplate = interpolate(config.template, mutableCtx);
-    const interpolatedTags = config.tags?.map((tag) => interpolate(tag, mutableCtx));
-
-    // 3. Create the task
-    const task = db.createTaskExtended(interpolatedTemplate, {
+    // 2. Create the task (config is already deep-interpolated by the engine)
+    const task = db.createTaskExtended(config.template, {
       agentId: config.agentId ?? null,
       source: "workflow",
-      tags: interpolatedTags,
+      tags: config.tags,
       priority: config.priority,
       offeredTo: config.offerMode ? config.agentId : undefined,
       workflowRunId: meta.runId,
