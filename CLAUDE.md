@@ -130,6 +130,63 @@ After creating the handler:
 2. Add the import to `scripts/generate-openapi.ts` (for spec generation)
 3. Run `bun run docs:openapi` to regenerate `openapi.json` and commit it
 
+## Workflow Authoring Guide
+
+Workflows are defined as a DAG of nodes connected via `next`. Key concepts for creating workflows with `create-workflow`:
+
+### Cross-node data access (`inputs` mapping)
+
+**By default, upstream step outputs are NOT available for interpolation.** Only `trigger` (trigger data) and `input` (workflow-level resolved inputs) are in scope. To access another node's output, you MUST declare an `inputs` mapping:
+
+```json
+{
+  "id": "summarize",
+  "type": "agent-task",
+  "inputs": { "cityData": "generate-city" },
+  "config": {
+    "template": "The city is {{cityData.taskOutput.city}} in {{cityData.taskOutput.country}}"
+  }
+}
+```
+
+- Keys are local names used in `{{interpolation}}`, values are context paths (usually a node ID)
+- Agent-task output shape is `{ taskId: string, taskOutput: <agent's JSON> }`, so access fields via `localName.taskOutput.field`
+- For trigger data: `{ "pr": "trigger.pullRequest" }` → `{{pr.number}}`
+- Without `inputs`, templates referencing upstream nodes silently resolve to empty strings (check `diagnostics.unresolvedTokens` on the step)
+
+### Structured output (`outputSchema`)
+
+There are **two different `outputSchema` locations** — they validate at different layers:
+
+| Location | Validates | Example schema |
+|----------|-----------|---------------|
+| `config.outputSchema` (inside config) | The **agent's raw JSON** response | `{ type: "object", required: ["city"], properties: { city: { type: "string" } } }` |
+| Node-level `outputSchema` (sibling of config) | The **executor's return** (`{ taskId, taskOutput }` for agent-task) | Rarely needed — executor schemas are built-in |
+
+For agent-task nodes, put your schema in `config.outputSchema`. The agent will be prompted to produce JSON matching this schema, and `store-progress` validates it inline.
+
+### Interpolation
+
+- Syntax: `{{path.to.value}}` in any string field inside `config`
+- Paths traverse the interpolation context (built from `inputs` + `trigger` + `input`)
+- Objects are JSON-stringified, nulls resolve to empty string
+- Unresolved tokens are logged in step `diagnostics` and the step proceeds (soft failure)
+
+### Agent-task executor config fields
+
+```
+template       (required) — Task description / prompt for the agent
+outputSchema   (optional) — JSON Schema for agent's structured output
+agentId        (optional) — Assign to specific agent (UUID)
+tags           (optional) — Task tags for filtering
+priority       (optional) — 0-100, default 50
+offerMode      (optional) — Offer to agent instead of direct assign
+dir            (optional) — Working directory for the agent
+vcsRepo        (optional) — Git repo for workspace scoping
+model          (optional) — Model override for the agent
+parentTaskId   (optional) — Link to parent task
+```
+
 ## Related
 
 - [UI Dashboard](./new-ui/) - Next.js monitoring dashboard

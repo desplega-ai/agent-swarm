@@ -635,3 +635,89 @@ _Verified: 2026-03-20 by claude_
 ### Open Items
 
 - Claude adapter fallback E2E (Phase 3): Skipped — agent completed too fast for manual kill. Fallback path is unit-tested. Acceptable trade-off.
+
+---
+
+## E2E Verification: Structured I/O with Docker Worker
+
+_Verified: 2026-03-20 by taras+claude_
+
+**Verdict: PASS** — Full workflow with structured input/output, context propagation, and two sequential agent-task nodes completed successfully with a single Docker worker.
+
+### What was tested
+
+A 2-node sequential workflow exercising the structured I/O pipeline end-to-end:
+
+1. **Node `generate-city`** (agent-task): Asks agent to produce a JSON object with `city`, `country`, `population`. Has `config.outputSchema` for schema validation.
+2. **Node `summarize-city`** (agent-task): Uses `inputs` mapping to pull step 1's output into interpolation context. Template references `{{cityData.taskOutput.city}}` etc. Also has `config.outputSchema`.
+
+### Verification checklist
+
+| Check | Result |
+|-------|--------|
+| `config.outputSchema` flows from workflow node → task creation | ✅ Task has `outputSchema` field set |
+| Agent produces structured JSON validated against schema | ✅ `{"city":"Lisbon","country":"Portugal","population":545000}` |
+| `resume.ts` JSON-parses task output into run context | ✅ Context has parsed object, not string |
+| `inputs` mapping scopes upstream data for interpolation | ✅ `"cityData": "generate-city"` resolved correctly |
+| Template interpolation resolves nested paths | ✅ `{{cityData.taskOutput.city}}` → `"Lisbon"` |
+| Second node receives interpolated values | ✅ Task prompt: "The city is Lisbon in Portugal with population 545000" |
+| Second node produces its own structured output | ✅ `{"summary":"Lisbon is a city in Portugal with a population of 545000"}` |
+| Workflow completes with both outputs in final context | ✅ Both steps in `run.context` |
+
+### Workflow definition (copy-paste to recreate)
+
+```json
+{
+  "name": "structured-io-e2e",
+  "definition": {
+    "nodes": [
+      {
+        "id": "generate-city",
+        "type": "agent-task",
+        "label": "Generate city data",
+        "config": {
+          "template": "Respond with ONLY a valid JSON object (no markdown, no explanation, no code fences) describing a real city. Use exactly this format: {\"city\": \"Tokyo\", \"country\": \"Japan\", \"population\": 14000000}. Pick any real city you like. Output ONLY the JSON object, nothing else.",
+          "outputSchema": {
+            "type": "object",
+            "required": ["city", "country", "population"],
+            "properties": {
+              "city": { "type": "string" },
+              "country": { "type": "string" },
+              "population": { "type": "number" }
+            }
+          }
+        },
+        "next": "summarize-city"
+      },
+      {
+        "id": "summarize-city",
+        "type": "agent-task",
+        "label": "Summarize city data",
+        "inputs": { "cityData": "generate-city" },
+        "config": {
+          "template": "You received city data from a previous step. The city is {{cityData.taskOutput.city}} in {{cityData.taskOutput.country}} with population {{cityData.taskOutput.population}}. Respond with ONLY a valid JSON object (no markdown, no explanation, no code fences) in this exact format: {\"summary\": \"<city> is a city in <country> with a population of <population>\"}. Output ONLY the JSON object, nothing else.",
+          "outputSchema": {
+            "type": "object",
+            "required": ["summary"],
+            "properties": { "summary": { "type": "string" } }
+          }
+        }
+      }
+    ]
+  }
+}
+```
+
+### Learnings & roadblocks
+
+1. **`inputs` mapping is REQUIRED for cross-node data access** (gotcha): Without an explicit `inputs` mapping on a node, the interpolation context only includes `trigger` and `input` (workflow-level inputs) — upstream step outputs are NOT available. This is by design (engine.ts:316-340) for encapsulation, but it's a non-obvious foot-gun for workflow authors. The first test run failed with `unresolvedTokens` diagnostics until `"inputs": {"cityData": "generate-city"}` was added. This should be prominently documented in workflow authoring guides.
+
+2. **`outputSchema` placement matters**: Node-level `outputSchema` (on the WorkflowNode) validates the executor's return value (e.g. `{taskId, taskOutput}`). The `config.outputSchema` on agent-task nodes is what gets forwarded to the created task and validates the agent's raw output. These are different schemas at different layers. For structured agent output, the schema goes in `config.outputSchema`.
+
+3. **Stale `in_progress` tasks block worker pickup**: When a worker's Claude session claims a task but exits before completing it, the task remains `in_progress` with `assignedTo=none`. The worker polls for `unassigned` tasks only, so it never sees the stranded task. Restarting the worker doesn't help — the task is permanently stuck. This happened during testing when the first session claimed the second task within the same session but exited after completing only the first. A stale-task recovery mechanism (timeout → reset to `unassigned`) would prevent this.
+
+4. **Lead vs worker for workflow tasks**: The lead agent's polling mechanism didn't pick up workflow-created tasks during testing (it polled but never triggered). The worker agent did. For workflow E2E testing, use a worker container, not a lead.
+
+5. **Clean DB between test runs is critical**: Old stale tasks (`in_progress` from previous runs) persist across API restarts and block subsequent runs. Always `rm -f agent-swarm-db.sqlite*` before a clean E2E test, and ensure the API server is fully stopped before deleting (WAL replay can resurrect data).
+
+6. **Docker env files need port adjustment per worktree**: `.env.docker` and `.env.docker-lead` hardcode `MCP_BASE_URL=http://host.docker.internal:3013`. Worktrees on alternate ports (e.g. 3014) need manual update.

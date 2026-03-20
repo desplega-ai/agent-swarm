@@ -17,7 +17,14 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
       title: "Create Workflow",
       annotations: { destructiveHint: false },
       description:
-        "Create a new automation workflow with a nodes-with-next definition, optional triggers, cooldown, and input.",
+        "Create a new automation workflow. Key concepts:\n" +
+        "- Nodes are linked via 'next' (string or port-based record).\n" +
+        "- CROSS-NODE DATA: To use output from an upstream node, you MUST declare an 'inputs' mapping on the downstream node. " +
+        'Example: inputs: { "cityData": "generate-city" } → then use {{cityData.taskOutput.field}} in config templates. ' +
+        "Without 'inputs', only 'trigger' and workflow-level 'input' are available for interpolation.\n" +
+        "- STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. " +
+        "Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different.\n" +
+        "- Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }.",
       inputSchema: z.object({
         name: z.string().describe("Unique name for the workflow"),
         description: z.string().optional().describe("Description of what this workflow does"),

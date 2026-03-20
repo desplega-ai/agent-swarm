@@ -594,19 +594,48 @@ export type StepValidationConfig = z.infer<typeof StepValidationConfigSchema>;
 // --- Workflow Node (nodes-with-next) ---
 
 export const WorkflowNodeSchema = z.object({
-  id: z.string(),
-  type: z.string(),
-  label: z.string().optional(),
-  config: z.record(z.string(), z.unknown()),
-  next: z.union([z.string(), z.record(z.string(), z.string())]).optional(),
+  id: z.string().describe("Unique node identifier, used in 'next' and 'inputs' mappings"),
+  type: z
+    .string()
+    .describe("Executor type: 'agent-task', 'script', 'raw-llm', 'validate', 'property-match'"),
+  label: z.string().optional().describe("Human-readable label for UI display"),
+  config: z
+    .record(z.string(), z.unknown())
+    .describe(
+      "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. " +
+        "Values support {{interpolation}} from the node's inputs context. " +
+        "NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, " +
+        "while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}).",
+    ),
+  next: z
+    .union([z.string(), z.record(z.string(), z.string())])
+    .optional()
+    .describe(
+      "Next node(s): string for simple chaining, or record for port-based routing ({pass: 'a', fail: 'b'})",
+    ),
   validation: StepValidationConfigSchema.optional(),
   retry: RetryPolicySchema.optional(),
-  // Explicit data mapping: local name → context path (e.g. {prNum: "trigger.prNumber"})
-  inputs: z.record(z.string(), z.string()).optional(),
-  // JSON Schema for input validation (validated after inputs resolution)
-  inputSchema: z.record(z.string(), z.unknown()).optional(),
-  // JSON Schema for output validation (on top of executor's base schema)
-  outputSchema: z.record(z.string(), z.unknown()).optional(),
+  // REQUIRED for cross-node data access — without this, only 'trigger' and 'input' are available for interpolation.
+  inputs: z
+    .record(z.string(), z.string())
+    .optional()
+    .describe(
+      "REQUIRED for cross-node data access. Maps local names to context paths. " +
+        "Without this, upstream step outputs are NOT available for interpolation — only 'trigger' and 'input' are. " +
+        'Example: { "cityData": "generate-city" } → use {{cityData.taskOutput.field}} in config templates. ' +
+        'For trigger data: { "pr": "trigger.pullRequest" }.',
+    ),
+  inputSchema: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe("JSON Schema to validate resolved inputs before execution"),
+  outputSchema: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe(
+      "JSON Schema to validate the executor's output (e.g. {taskId, taskOutput} for agent-task). " +
+        "Different from config.outputSchema which validates the agent's raw output.",
+    ),
 });
 export type WorkflowNode = z.infer<typeof WorkflowNodeSchema>;
 
