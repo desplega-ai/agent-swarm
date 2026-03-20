@@ -1,0 +1,47 @@
+<task-notification>
+<task-id>b1o43yp98</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/b1o43yp98.output</output-file>
+<status>completed</status>
+<summary>Background command "Commit and push all changes" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/b1o43yp98.output
+
+---
+
+<task-notification>
+<task-id>b1if5s350</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/b1if5s350.output</output-file>
+<status>failed</status>
+<summary>Background command "Commit and push" failed with exit code 1</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/b1if5s350.output
+
+---
+
+<task-notification>
+<task-id>brxdo78i5</task-id>
+<tool-use-id>toolu_01EjDiN6VDzzhhdBmSGJ6Khe</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/brxdo78i5.output</output-file>
+<status>failed</status>
+<summary>Background command "Commit and push --help support" failed with exit code 1</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/brxdo78i5.output
+
+---
+
+<task-notification>
+<task-id>bkp95n321</task-id>
+<tool-use-id>toolu_01MzKbrcQMy31oSfwKV9adMA</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/bkp95n321.output</output-file>
+<status>completed</status>
+<summary>Background command "Retry push" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/bkp95n321.output
+
+---
+
+what is weird is why the fuck the --help is always the same + not all available commands are available in the help command. Also we should have per command help. also help reset the terminal scroll.
+
+like it should be like a normal CLI you know...
