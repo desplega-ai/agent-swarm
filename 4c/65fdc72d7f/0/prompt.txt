@@ -1,0 +1,84 @@
+<task-notification>
+<task-id>afaafca36e2f716e0</task-id>
+<tool-use-id>toolu_01Y5TvPK5dn7gtqTEhu82KZK</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/fea08809-d478-4a5d-a3e4-4e9c570d2288/tasks/afaafca36e2f716e0.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 5: Remaining handler refactors" completed</summary>
+<result>All 1746 tests pass, 0 failures. All verification checks are green.
+
+---
+
+## Report
+
+### Files Created (7 template files, 1 test file)
+
+**5.1 GitLab:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/gitlab/templates.ts` — 7 templates (3 common + 4 event)
+
+**5.2 AgentMail:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/agentmail/templates.ts` — 5 templates
+
+**5.3 Linear:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/linear/templates.ts` — 2 templates
+
+**5.4 Heartbeat:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/heartbeat/templates.ts` — 1 template
+
+**5.5 Store Progress:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tools/templates.ts` — 2 templates
+
+**5.6 Runner:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/commands/templates.ts` — 7 templates
+
+**5.7 Slack:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/slack/templates.ts` — 4 templates
+
+**5.8 Tests:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tests/prompt-template-remaining.test.ts` — 24 tests
+
+### Files Modified (9 handler files, 1 existing test)
+
+- `src/gitlab/handlers.ts` — Removed `DELEGATION_INSTRUCTION` and `getCommandSuggestions`, added `resolveTemplate` calls for MR open, issue open, note, and pipeline handlers
+- `src/agentmail/handlers.ts` — Added `resolveTemplate` calls for all 5 email routing paths
+- `src/linear/sync.ts` — Added `resolveTemplate` calls for `handleAgentSessionEvent` and `handleAgentSessionPrompted`
+- `src/heartbeat/heartbeat.ts` — Added `resolveTemplate` call for escalation task creation
+- `src/tools/store-progress.ts` — Added `resolveTemplate` calls for worker completed/failed follow-up descriptions
+- `src/commands/runner.ts` — Refactored `buildPromptForTrigger` (5 cases) and `buildResumePrompt` (2 cases) to use `resolveTemplate`
+- `src/slack/assistant.ts` — Added `resolveTemplate` for greeting and offline messages
+- `src/slack/handlers.ts` — Added `resolveTemplate` for thread context wrapping
+- `src/tests/linear-webhook.test.ts` — Added template re-registration guard for parallel test resilience
+
+### Verification Results
+- `bun run tsc:check` — Pass
+- `bun run lint:fix` — Pass (fixed formatting only)
+- `bun test` — 1746 pass, 0 fail
+
+### Key Decisions
+
+1. **GitLab DELEGATION_INSTRUCTION differs from GitHub's** — Created a separate `common.delegation_instruction.gitlab` template rather than unifying, since the text is semantically different (GitLab's version is less directive, more analytical).
+
+2. **GitLab command suggestions** — Created `common.command_suggestions.gitlab_mr` and `common.command_suggestions.gitlab_issue` as separate templates from GitHub's, since the text is different.
+
+3. **Slack messages** — Registered the assistant greeting, offline message, and thread context wrapper as templates (category: `system`). These are user-facing Slack messages, not agent prompts, but they benefit from being overridable via the template registry.
+
+4. **Runner templates** — Complex pre-computed sections (epic details, task descriptions) are built as variables in handler code and passed to templates. This preserves the template registry pattern while keeping the complex logic in code.
+
+5. **Test isolation** — Added `beforeEach` guards that re-register templates if cleared by parallel test files (the resolver test's `beforeEach` calls `clearTemplateDefinitions()` globally).
+
+### Total Template Count
+
+**28 new templates** registered across all sources:
+- GitLab: 7 (3 common + 4 event)
+- AgentMail: 5
+- Linear: 2
+- Heartbeat: 1
+- Store Progress: 2
+- Runner: 7
+- Slack: 4
+
+Combined with the existing 16 GitHub templates from Phase 4, the registry now has **44 total templates**.
+
+### Status: Completed</result>
+<usage><total_tokens>162255</total_tokens><tool_uses>93</tool_uses><duration_ms>1156409</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/fea08809-d478-4a5d-a3e4-4e9c570d2288/tasks/afaafca36e2f716e0.output
