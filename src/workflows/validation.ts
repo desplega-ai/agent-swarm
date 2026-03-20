@@ -10,6 +10,35 @@ export interface ValidationRunResult {
 }
 
 /**
+ * Normalize executor output to a pass/fail boolean.
+ *
+ * Different executors use different output shapes to indicate success.
+ * This adapter maps each executor type's convention to a uniform boolean.
+ */
+export function extractPassResult(executorType: string, output: unknown): boolean {
+  if (!output || typeof output !== "object") return false;
+  const o = output as Record<string, unknown>;
+
+  switch (executorType) {
+    case "validate":
+      return o.pass === true;
+    case "script":
+      return o.exitCode === 0;
+    case "property-match":
+      return o.passed === true;
+    case "raw-llm":
+      // For raw-llm used as validator, check if the LLM output contains a structured pass result
+      if (typeof o.result === "object" && o.result !== null) {
+        return (o.result as Record<string, unknown>).pass === true;
+      }
+      return false;
+    default:
+      // Generic fallback: check for common pass indicators
+      return o.pass === true || o.passed === true || o.exitCode === 0;
+  }
+}
+
+/**
  * Run per-step validation after a step completes.
  *
  * If the node has no validation config, returns "pass" immediately.
@@ -50,10 +79,7 @@ export async function runStepValidation(
     },
   });
 
-  const passed =
-    result.status === "success" &&
-    result.output &&
-    (result.output as { pass?: boolean }).pass === true;
+  const passed = result.status === "success" && extractPassResult(executorType, result.output);
 
   if (passed) {
     return { outcome: "pass" };
