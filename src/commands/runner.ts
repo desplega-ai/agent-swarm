@@ -452,8 +452,11 @@ async function resumeTaskViaAPI(config: ApiConfig, taskId: string): Promise<bool
 }
 
 /** Build prompt for a resumed task */
-function buildResumePrompt(task: { id: string; task: string; progress?: string }): string {
-  let prompt = `/work-on-task ${task.id}
+function buildResumePrompt(
+  task: { id: string; task: string; progress?: string },
+  fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
+): string {
+  let prompt = `${fmt("work-on-task")} ${task.id}
 
 **RESUMED TASK** - This task was interrupted during a deployment and is being resumed.
 
@@ -880,7 +883,11 @@ async function pollForTrigger(opts: PollOptions): Promise<Trigger | null> {
 }
 
 /** Build prompt based on trigger type */
-function buildPromptForTrigger(trigger: Trigger, defaultPrompt: string): string {
+function buildPromptForTrigger(
+  trigger: Trigger,
+  defaultPrompt: string,
+  fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
+): string {
   switch (trigger.type) {
     case "task_assigned": {
       // Use the work-on-task command with task ID and description
@@ -888,7 +895,7 @@ function buildPromptForTrigger(trigger: Trigger, defaultPrompt: string): string 
         trigger.task && typeof trigger.task === "object" && "task" in trigger.task
           ? (trigger.task as { task: string }).task
           : null;
-      let prompt = `/work-on-task ${trigger.taskId}`;
+      let prompt = `${fmt("work-on-task")} ${trigger.taskId}`;
       if (taskDesc) {
         prompt += `\n\nTask: "${taskDesc}"`;
       }
@@ -902,7 +909,7 @@ function buildPromptForTrigger(trigger: Trigger, defaultPrompt: string): string 
         trigger.task && typeof trigger.task === "object" && "task" in trigger.task
           ? (trigger.task as { task: string }).task
           : null;
-      let prompt = `/review-offered-task ${trigger.taskId}`;
+      let prompt = `${fmt("review-offered-task")} ${trigger.taskId}`;
       if (taskDesc) {
         prompt += `\n\nA task has been offered to you:\n"${taskDesc}"`;
       }
@@ -1855,7 +1862,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
 
           // Build prompt with resume context + memory injection
-          let resumePrompt = buildResumePrompt(task);
+          let resumePrompt = buildResumePrompt(task, adapter.formatCommand.bind(adapter));
 
           // Inject relevant memories for resumed tasks
           const resumeMemoryContext = await fetchRelevantMemories(
@@ -2040,7 +2047,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           console.log(`[${role}] Trigger received: ${trigger.type}`);
 
           // Build prompt based on trigger
-          let triggerPrompt = buildPromptForTrigger(trigger, prompt);
+          let triggerPrompt = buildPromptForTrigger(
+            trigger,
+            prompt,
+            adapter.formatCommand.bind(adapter),
+          );
 
           // Enrich prompt with relevant memories from past sessions
           if (trigger.type === "task_assigned" || trigger.type === "task_offered") {

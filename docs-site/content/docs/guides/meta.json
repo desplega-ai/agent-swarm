@@ -7,6 +7,7 @@
     "gitlab-integration",
     "agentmail-integration",
     "sentry-integration",
+    "linear-integration",
     "x402-payments"
   ]
 }

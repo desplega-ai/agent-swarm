@@ -117,6 +117,9 @@ docker build -f Dockerfile.worker -t agent-swarm-worker .
 
 # Or using npm script
 bun run docker:build:worker
+
+# Override the pinned Claude Code version (default: 2.1.80)
+docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 ### Run
