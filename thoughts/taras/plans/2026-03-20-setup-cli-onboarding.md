@@ -2,7 +2,7 @@
 date: 2026-03-20T12:00:00Z
 topic: "Setup CLI Onboarding (agent-swarm onboard)"
 type: plan
-status: draft
+status: ready
 source: thoughts/taras/brainstorms/2026-03-20-setup-cli-onboarding.md
 ---
 
@@ -804,30 +804,16 @@ docker compose down -v
 
 _Reviewed: 2026-03-20 by Claude_
 
-### Critical
+### All Resolved
 
-- [ ] **`Select` doesn't exist — the component is `Select`**. The plan references `Select` throughout (Phases 1-7) but `@inkjs/ui` v2.0.0 exports `Select`, not `Select`. Every reference to `Select` must be changed to `Select`. Verified at `node_modules/@inkjs/ui/build/components/select/select.d.ts`. Additionally, `MultiSelect` is available (useful for the integration menu in Phase 4) and `ProgressBar` could replace manual countdown text in the health check.
-
-- [ ] **Task API schema mismatch**. Phase 7 says `POST /api/tasks` with `{ title, description, assignedTo }` but the actual API (`src/http/tasks.ts:52-63`) accepts `{ task: string, agentId?: string }`. There is no `title`, `description`, or `assignedTo` field. Fix: `{ task: userInput, agentId: leadAgentId }`.
-
-- [ ] **Solo preset + first task = crash**. The `post_task` step assigns to `leadAgentId`, but the solo preset has no lead agent. The `nextStep()` function or the `post_task` step itself must handle this — either skip the task step for solo presets, or let the user pick which agent receives it.
-
-### Important
-
-- [ ] **`setup.tsx` functions are private — cannot "reuse directly"**. Phase 7 says "call the file generation functions directly" from `setup.tsx`, but `createDefaultSettingsLocal()`, `createDefaultMcpJson()`, and `createHooksConfig()` are all private `const`s (not exported). Either: (a) export them from `setup.tsx`, (b) extract to a shared `src/commands/shared/client-config.ts` module, or (c) duplicate the logic. Option (b) is cleanest.
-
-- [ ] **`Record<string, string>` doesn't JSON.stringify**. `state.agentIds` is typed as `Record<string, string>` but the manifest generator writes state to JSON. `JSON.stringify(new Map())` produces `{}`. Use `Record<string, string>` instead, or convert before serialization.
-
-- [ ] **Pi harness UX contradiction**. Phase 3 lets users select Pi and collect Pi credentials, but "What We're NOT Doing" says Pi compose support is out of scope. A user who selects Pi, enters their OpenRouter key, and reaches file generation will get a compose file with `CLAUDE_CODE_OAUTH_TOKEN` env vars — which they don't have. Options: (a) disable Pi in the harness selector for v1 with a "coming soon" label (like remote deploy), or (b) handle Pi env vars in the compose generator. Option (a) is simpler and consistent.
-
-- [ ] **`.env` not gitignored in the output directory**. The plan adds `.agent-swarm/` to `.gitignore` but not `.env`. The agent-swarm repo's own `.gitignore` includes `.env`, but the onboard command runs in "any directory" — the user's target directory likely has no `.gitignore` or doesn't include `.env`. Phase 5 should add both `.env` and `.agent-swarm/` to the output directory's `.gitignore`.
-
-- [ ] **Cross-platform clipboard for Slack manifest**. Phase 4 mentions `Bun.$` + `pbcopy` for clipboard, but this is macOS-only. Linux users need `xclip` or `xsel`, WSL needs `clip.exe`. Either detect OS and use the right command, or skip clipboard and just print the manifest path with instructions to copy manually.
-
-- [ ] **`onboard.tsx` will be massive**. 20+ steps with rendering + effects = easily 2000+ lines. The plan mentions `steps/` as "optional" but should commit to a split. Suggested approach: each step is a separate component in `src/commands/onboard/steps/`, the main `onboard.tsx` just orchestrates state and renders the active step. This matches the DAG architecture.
-
-### Resolved
-
-- [x] Implementation Approach says "linear state machine" (line 88) but Phase 1 now defines a DAG — auto-fixed: changed "linear" to "DAG-based" in the approach section.
+- [x] **`SelectInput` → `Select`** — replaced all references throughout. `@inkjs/ui` v2.0.0 exports `Select`, not `SelectInput`. Also noted: `MultiSelect`, `ProgressBar`, `StatusMessage`, `ConfirmInput` are available.
+- [x] **Task API schema** — fixed to `{ task: userInput, agentId: leadAgentId }` per `src/http/tasks.ts:52-63`.
+- [x] **Solo preset + first task** — `post_task` now skips for solo preset (DAG routes `post_dashboard → done`).
+- [x] **`setup.tsx` functions private** — Phase 7 extracts to `src/commands/shared/client-config.ts`. Command structure updated.
+- [x] **`Map` → `Record`** — changed `agentIds` type to `Record<string, string>`.
+- [x] **Pi harness UX contradiction** — Pi is now "coming soon" in harness selector. "What We're NOT Doing" updated.
+- [x] **`.env` gitignore** — Phase 5 now adds both `.env` and `.agent-swarm/` to output dir's `.gitignore`.
+- [x] **Cross-platform clipboard** — Phase 4 detects OS (`pbcopy`/`xclip`/`clip.exe`) with fallback.
+- [x] **`onboard.tsx` size** — committed to step-per-file split in `src/commands/onboard/steps/`. Command structure updated.
+- [x] **"Linear" → "DAG-based"** — Implementation Approach updated.
 - [x] Frontmatter missing `planner` field — minor, not blocking.
-- [x] `@inkjs/ui` also exports `ConfirmInput`, `ProgressBar`, `StatusMessage`, `Alert`, `Badge` — noted above as available components to consider.
