@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "7434806a5968",
+  "strategy": "manual-commit",
+  "branch": "feat/cli-onboarding",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "src/commands/onboard.tsx",
+    "src/commands/onboard/types.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/74/34806a5968/0/metadata.json",
+      "transcript": "/74/34806a5968/0/full.jsonl",
+      "context": "/74/34806a5968/0/context.md",
+      "content_hash": "/74/34806a5968/0/content_hash.txt",
+      "prompt": "/74/34806a5968/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 67,
+    "cache_creation_tokens": 39138,
+    "cache_read_tokens": 7889860,
+    "output_tokens": 15079,
+    "api_call_count": 37
+  }
+}
