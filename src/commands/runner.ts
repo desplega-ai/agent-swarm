@@ -8,6 +8,7 @@ import {
   generateDefaultToolsMd,
 } from "../be/db.ts";
 import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt.ts";
+import { resolveTemplate } from "../prompts/resolver.ts";
 import {
   type CostData,
   createProviderAdapter,
@@ -19,6 +20,8 @@ import { resolveCredentialPools } from "../utils/credentials.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
 import { interpolate } from "../workflows/template.ts";
+// Side-effect import: registers runner trigger/resumption templates
+import "./templates.ts";
 
 /** Save PM2 process list for persistence across container restarts */
 async function savePm2State(role: string): Promise<void> {
@@ -456,30 +459,22 @@ function buildResumePrompt(
   task: { id: string; task: string; progress?: string },
   fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
 ): string {
-  let prompt = `${fmt("work-on-task")} ${task.id}
-
-**RESUMED TASK** - This task was interrupted during a deployment and is being resumed.
-
-Task: "${task.task}"`;
-
   if (task.progress) {
-    prompt += `
-
-Previous Progress:
-${task.progress}
-
-Continue from where you left off. Review the progress above and complete the remaining work.`;
-  } else {
-    prompt += `
-
-No progress was saved before the interruption. Start the task fresh but be aware files may have been partially modified.`;
+    const result = resolveTemplate("task.resumption.with_progress", {
+      work_on_task_cmd: fmt("work-on-task"),
+      task_id: task.id,
+      task_description: task.task,
+      progress: task.progress,
+    });
+    return result.text;
   }
 
-  prompt += `
-
-When done, use \`store-progress\` with status: "completed" and include your output.`;
-
-  return prompt;
+  const result = resolveTemplate("task.resumption.no_progress", {
+    work_on_task_cmd: fmt("work-on-task"),
+    task_id: task.id,
+    task_description: task.task,
+  });
+  return result.text;
 }
 
 /** Setup signal handlers for graceful shutdown */
@@ -895,12 +890,13 @@ function buildPromptForTrigger(
         trigger.task && typeof trigger.task === "object" && "task" in trigger.task
           ? (trigger.task as { task: string }).task
           : null;
-      let prompt = `${fmt("work-on-task")} ${trigger.taskId}`;
-      if (taskDesc) {
-        prompt += `\n\nTask: "${taskDesc}"`;
-      }
-      prompt += `\n\nWhen done, use \`store-progress\` with status: "completed" and include your output.`;
-      return prompt;
+      const taskDescSection = taskDesc ? `\n\nTask: "${taskDesc}"` : "";
+      const result = resolveTemplate("task.trigger.assigned", {
+        work_on_task_cmd: fmt("work-on-task"),
+        task_id: trigger.taskId,
+        task_desc_section: taskDescSection,
+      });
+      return result.text;
     }
 
     case "task_offered": {
@@ -909,31 +905,28 @@ function buildPromptForTrigger(
         trigger.task && typeof trigger.task === "object" && "task" in trigger.task
           ? (trigger.task as { task: string }).task
           : null;
-      let prompt = `${fmt("review-offered-task")} ${trigger.taskId}`;
-      if (taskDesc) {
-        prompt += `\n\nA task has been offered to you:\n"${taskDesc}"`;
-      }
-      prompt += `\n\nAccept if you have capacity and skills. Reject with a reason if you cannot handle it.`;
-      return prompt;
+      const taskDescSection = taskDesc ? `\n\nA task has been offered to you:\n"${taskDesc}"` : "";
+      const result = resolveTemplate("task.trigger.offered", {
+        review_offered_task_cmd: fmt("review-offered-task"),
+        task_id: trigger.taskId,
+        task_desc_section: taskDescSection,
+      });
+      return result.text;
     }
 
-    case "unread_mentions":
-      // Check messages - numbered steps for clarity
-      return `You have ${trigger.count || "unread"} mention(s) in chat channels.
+    case "unread_mentions": {
+      const result = resolveTemplate("task.trigger.unread_mentions", {
+        mention_count: trigger.count || "unread",
+      });
+      return result.text;
+    }
 
-1. Use \`read-messages\` with unreadOnly: true to see them
-2. Respond to questions or requests directed at you
-3. If a message requires work, create a task using \`send-task\``;
-
-    case "pool_tasks_available":
-      // Worker: claim a task from the pool - numbered steps for clarity
-      return `${trigger.count} task(s) available in the pool.
-
-1. Run \`get-tasks\` with unassigned: true to browse
-2. Pick one matching your skills
-3. Run \`task-action\` with action: "claim" and taskId: "<id>"
-
-Note: Claims are first-come-first-serve. If claim fails, pick another.`;
+    case "pool_tasks_available": {
+      const result = resolveTemplate("task.trigger.pool_available", {
+        task_count: trigger.count,
+      });
+      return result.text;
+    }
 
     case "epic_progress_changed": {
       // Lead: Epic progress updated - tasks completed or failed for an active epic
@@ -970,19 +963,19 @@ Note: Claims are first-come-first-serve. If claim fails, pick another.`;
         return "Epic progress was updated but no details available. Use `list-epics` to check status.";
       }
 
-      let prompt = `## Epic Progress Update\n\n${trigger.count} epic(s) have progress updates:\n\n`;
-
+      // Build epics detail section as a pre-computed variable
+      let epicsDetail = "";
       for (const { epic, finishedTasks } of epics) {
-        prompt += `### Epic: "${epic.name}" (${epic.id.slice(0, 8)})\n`;
-        prompt += `**Goal:** ${epic.goal}\n`;
-        prompt += `**Progress:** ${epic.progress}% complete (${epic.taskStats.completed}/${epic.taskStats.total} tasks)\n`;
-        prompt += `**Status:** ${epic.status}\n\n`;
+        epicsDetail += `### Epic: "${epic.name}" (${epic.id.slice(0, 8)})\n`;
+        epicsDetail += `**Goal:** ${epic.goal}\n`;
+        epicsDetail += `**Progress:** ${epic.progress}% complete (${epic.taskStats.completed}/${epic.taskStats.total} tasks)\n`;
+        epicsDetail += `**Status:** ${epic.status}\n\n`;
 
         if (epic.plan) {
-          prompt += `**Plan:**\n${epic.plan.slice(0, 2000)}\n\n`;
+          epicsDetail += `**Plan:**\n${epic.plan.slice(0, 2000)}\n\n`;
         }
         if (epic.prd) {
-          prompt += `**PRD:**\n${epic.prd.slice(0, 1000)}\n\n`;
+          epicsDetail += `**PRD:**\n${epic.prd.slice(0, 1000)}\n\n`;
         }
 
         // Show finished tasks
@@ -990,48 +983,38 @@ Note: Claims are first-come-first-serve. If claim fails, pick another.`;
         const failed = finishedTasks.filter((t) => t.status === "failed");
 
         if (completed.length > 0) {
-          prompt += "**Recently Completed:**\n";
+          epicsDetail += "**Recently Completed:**\n";
           for (const t of completed) {
             const agentName = t.agentId ? `Agent ${t.agentId.slice(0, 8)}` : "Unknown";
             const output = t.output ? t.output.slice(0, 150) : "(no output)";
-            prompt += `- Task ${t.id.slice(0, 8)} by ${agentName}: "${t.task.slice(0, 80)}"\n`;
-            prompt += `  Output: ${output}${t.output && t.output.length > 150 ? "..." : ""}\n`;
+            epicsDetail += `- Task ${t.id.slice(0, 8)} by ${agentName}: "${t.task.slice(0, 80)}"\n`;
+            epicsDetail += `  Output: ${output}${t.output && t.output.length > 150 ? "..." : ""}\n`;
           }
         }
 
         if (failed.length > 0) {
-          prompt += "\n**Recently Failed:**\n";
+          epicsDetail += "\n**Recently Failed:**\n";
           for (const t of failed) {
             const agentName = t.agentId ? `Agent ${t.agentId.slice(0, 8)}` : "Unknown";
-            prompt += `- Task ${t.id.slice(0, 8)} by ${agentName}: "${t.task.slice(0, 80)}"\n`;
-            prompt += `  Reason: ${t.failureReason || "(no reason)"}\n`;
+            epicsDetail += `- Task ${t.id.slice(0, 8)} by ${agentName}: "${t.task.slice(0, 80)}"\n`;
+            epicsDetail += `  Reason: ${t.failureReason || "(no reason)"}\n`;
           }
         }
 
         // Show remaining work
         const { inProgress, pending } = epic.taskStats;
         if (inProgress > 0 || pending > 0) {
-          prompt += `\n**Remaining:** ${inProgress} in progress, ${pending} pending\n`;
+          epicsDetail += `\n**Remaining:** ${inProgress} in progress, ${pending} pending\n`;
         }
 
-        prompt += "\n---\n\n";
+        epicsDetail += "\n---\n\n";
       }
 
-      prompt += `## Your Task: Plan Next Steps
-
-For each epic:
-1. **Review** the completed work and any failures
-2. **Determine** if the epic goal is met (progress = 100% and all tasks succeeded)
-3. **If complete:** Use \`update-epic\` to mark status as "completed"
-4. **If not complete:**
-   - Retry failed tasks with \`send-task\` (reassign or modify)
-   - Create new tasks for remaining work with \`send-task\` (include epicId)
-   - Keep the epic progressing until the goal is achieved
-
-This is an iterative process - you'll be notified again when more tasks finish.
-The epic should keep progressing until 100% complete and the goal is achieved.`;
-
-      return prompt;
+      const result = resolveTemplate("task.trigger.epic_progress", {
+        epic_count: trigger.count,
+        epics_detail: epicsDetail,
+      });
+      return result.text;
     }
 
     default:

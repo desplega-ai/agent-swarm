@@ -560,9 +560,9 @@ For each source, create or extend test files verifying identical output.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Types compile: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] All backward compat tests pass: `bun test`
+- [x] Types compile: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] All backward compat tests pass: `bun test`
 
 #### Manual Verification:
 - [ ] Verify GitLab delegation instruction is unified (or intentionally separate) with GitHub

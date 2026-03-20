@@ -15,6 +15,7 @@ import {
   handleLinearWebhook,
   verifyLinearWebhook,
 } from "../linear/webhook";
+import { getTemplateDefinition } from "../prompts/registry";
 
 const TEST_DB_PATH = "./test-linear-webhook.sqlite";
 const TEST_SECRET = "test-webhook-secret-123";
@@ -36,8 +37,12 @@ afterAll(async () => {
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   _clearRecentDeliveries();
+  // Re-register Linear templates if cleared by parallel test files
+  if (!getTemplateDefinition("linear.issue.assigned")) {
+    await import(`../linear/templates?t=${Date.now()}`);
+  }
 });
 
 // ─── verifyLinearWebhook ─────────────────────────────────────────────────────

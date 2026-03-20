@@ -6,6 +6,9 @@ import {
   getTrackerSyncByExternalId,
   updateTrackerSync,
 } from "../be/db-queries/tracker";
+import { resolveTemplate } from "../prompts/resolver";
+// Side-effect import: registers all Linear event templates in the in-memory registry
+import "./templates";
 
 /**
  * In-memory map: swarmTaskId → Linear agentSessionId.
@@ -274,9 +277,21 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
 
   const lead = findLeadAgent();
 
-  const taskDescription = `[Linear ${issueIdentifier}] ${issueTitle}\n\nSource: Linear (Agent Session)\nURL: ${issueUrl}${sessionUrl ? `\nSession: ${sessionUrl}` : ""}\n${issueDescription ? `\nDescription:\n${issueDescription}\n` : ""}`;
+  const sessionSection = sessionUrl ? `\nSession: ${sessionUrl}` : "";
+  const descriptionSection = issueDescription ? `\nDescription:\n${issueDescription}\n` : "";
+  const assignedResult = resolveTemplate("linear.issue.assigned", {
+    issue_identifier: issueIdentifier,
+    issue_title: issueTitle,
+    issue_url: issueUrl,
+    session_section: sessionSection,
+    description_section: descriptionSection,
+  });
 
-  const task = createTaskExtended(taskDescription, {
+  if (assignedResult.skipped) {
+    return;
+  }
+
+  const task = createTaskExtended(assignedResult.text, {
     agentId: lead?.id ?? "",
     source: "linear",
     taskType: "linear-issue",
@@ -491,9 +506,18 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
   // Task is completed/failed/cancelled or doesn't exist — create a new follow-up task
   const lead = findLeadAgent();
 
-  const taskDescription = `[Linear ${issueIdentifier}] Follow-up: ${issueTitle}\n\nSource: Linear (Agent Session follow-up)\nURL: ${issueUrl}\n\nUser message:\n${userMessage}\n\nOriginal issue: ${issueIdentifier} — ${issueTitle}`;
+  const followupResult = resolveTemplate("linear.issue.followup", {
+    issue_identifier: issueIdentifier,
+    issue_title: issueTitle,
+    issue_url: issueUrl,
+    user_message: userMessage,
+  });
 
-  const task = createTaskExtended(taskDescription, {
+  if (followupResult.skipped) {
+    return;
+  }
+
+  const task = createTaskExtended(followupResult.text, {
     agentId: lead?.id ?? "",
     source: "linear",
     taskType: "linear-issue",
