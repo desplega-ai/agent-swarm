@@ -36,6 +36,7 @@ interface ParsedArgs {
   additionalArgs: string[];
   aiLoop: boolean;
   preset: string;
+  open: boolean;
 }
 
 function parseArgs(args: string[]): ParsedArgs {
@@ -53,6 +54,7 @@ function parseArgs(args: string[]): ParsedArgs {
   let additionalArgs: string[] = [];
   let aiLoop = false;
   let preset = "";
+  let open = false;
 
   // Find if there's a "--" separator for additional args
   const separatorIndex = args.indexOf("--");
@@ -93,6 +95,8 @@ function parseArgs(args: string[]): ParsedArgs {
       i++;
     } else if (arg?.startsWith("--preset=")) {
       preset = arg.slice("--preset=".length);
+    } else if (arg === "--open") {
+      open = true;
     }
   }
 
@@ -111,6 +115,7 @@ function parseArgs(args: string[]): ParsedArgs {
     additionalArgs,
     aiLoop,
     preset,
+    open,
   };
 }
 
@@ -185,6 +190,12 @@ function Help() {
             <Text color="green">lead</Text>
           </Box>
           <Text>Run Claude as lead agent in headless loop</Text>
+        </Box>
+        <Box>
+          <Box width={12}>
+            <Text color="green">docs</Text>
+          </Box>
+          <Text>Open documentation (--open to launch in browser)</Text>
         </Box>
         <Box>
           <Box width={12}>
@@ -324,88 +335,15 @@ function Help() {
 
       <Box marginTop={1} flexDirection="column">
         <Text bold>Examples:</Text>
+        <Text dimColor> {binName} onboard</Text>
+        <Text dimColor> {binName} onboard --dry-run</Text>
+        <Text dimColor> {binName} onboard --yes --preset=dev</Text>
         <Text dimColor> {binName} connect</Text>
         <Text dimColor> {binName} connect --dry-run</Text>
-        <Text dimColor> {binName} connect -y</Text>
-        <Text dimColor> {binName} mcp</Text>
-        <Text dimColor> {binName} mcp --port 8080</Text>
-        <Text dimColor> {binName} mcp -p 8080 -k my-secret-key</Text>
-        <Text dimColor> {binName} claude</Text>
-        <Text dimColor> {binName} claude --headless -m "Hello"</Text>
-        <Text dimColor> {binName} claude -- --resume</Text>
+        <Text dimColor> {binName} docs --open</Text>
         <Text dimColor> {binName} worker</Text>
         <Text dimColor> {binName} worker --yolo</Text>
-        <Text dimColor> {binName} worker -m "Custom prompt"</Text>
-        <Text dimColor> {binName} worker --system-prompt "You are a Python specialist"</Text>
-        <Text dimColor> {binName} worker --system-prompt-file ./prompts/specialist.txt</Text>
         <Text dimColor> {binName} lead</Text>
-        <Text dimColor> {binName} lead --yolo</Text>
-        <Text dimColor> {binName} lead -m "Custom prompt"</Text>
-        <Text dimColor> {binName} lead --system-prompt "You are a project coordinator"</Text>
-      </Box>
-
-      <Box marginTop={1} flexDirection="column">
-        <Text bold>Environment variables:</Text>
-        <Box>
-          <Box width={24}>
-            <Text color="magenta">PORT</Text>
-          </Box>
-          <Text>Default port for the MCP server</Text>
-        </Box>
-        <Box>
-          <Box width={24}>
-            <Text color="magenta">API_KEY</Text>
-          </Box>
-          <Text>API key for authentication (Bearer token)</Text>
-        </Box>
-        <Box>
-          <Box width={24}>
-            <Text color="magenta">MCP_BASE_URL</Text>
-          </Box>
-          <Text>Base URL for the MCP server (used by setup)</Text>
-        </Box>
-        <Box>
-          <Box width={24}>
-            <Text color="magenta">AGENT_ID</Text>
-          </Box>
-          <Text>UUID for agent identification</Text>
-        </Box>
-        <Box>
-          <Box width={24}>
-            <Text color="magenta">SESSION_ID</Text>
-          </Box>
-          <Text>Folder name for worker logs (auto-generated)</Text>
-        </Box>
-        <Box>
-          <Box width={24}>
-            <Text color="magenta">YOLO</Text>
-          </Box>
-          <Text>If "true", worker continues on errors</Text>
-        </Box>
-        <Box>
-          <Box width={32}>
-            <Text color="magenta">LOG_DIR</Text>
-          </Box>
-          <Text>Directory for agent logs, defaults to ./logs</Text>
-        </Box>
-        <Box>
-          <Box width={32}>
-            <Text color="magenta">SYSTEM_PROMPT</Text>
-          </Box>
-          <Text>Custom system prompt for worker</Text>
-        </Box>
-        <Box>
-          <Box width={32}>
-            <Text color="magenta">SYSTEM_PROMPT_FILE</Text>
-          </Box>
-          <Text>Path to system prompt file</Text>
-        </Box>
-        <Box>
-          <Box width={32}>
-            <Text color="magenta">AI_LOOP</Text>
-          </Box>
-          <Text>If "true", use AI-based polling</Text>
-        </Box>
       </Box>
     </Box>
   );
@@ -641,7 +579,18 @@ function App({ args }: { args: ParsedArgs }) {
 const args = parseArgs(process.argv.slice(2));
 
 // Handle non-UI commands separately
-if (args.command === "hook") {
+if (args.command === "docs") {
+  const docsUrl = "https://docs.agent-swarm.dev";
+  console.log(`\nAgent Swarm Documentation: ${docsUrl}\n`);
+  console.log("All pages are also available in markdown format by appending .md to the URL.");
+  console.log(`Example: ${docsUrl}/getting-started.md\n`);
+  if (args.open) {
+    await Bun.$`open ${docsUrl}`.quiet().catch(() => {
+      console.log(`Could not open browser. Visit: ${docsUrl}`);
+    });
+  }
+  process.exit(0);
+} else if (args.command === "hook") {
   runHook();
 } else if (args.command === "artifact") {
   // Pass all args after "artifact" directly
