@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.5.1",
+  "checkpoint_id": "31a1b3fc3e84",
+  "strategy": "manual-commit",
+  "branch": "refactor/2026-03-20-workflows",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "package.json"
+  ],
+  "sessions": [
+    {
+      "metadata": "/31/a1b3fc3e84/0/metadata.json",
+      "transcript": "/31/a1b3fc3e84/0/full.jsonl",
+      "content_hash": "/31/a1b3fc3e84/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 13,
+    "cache_creation_tokens": 2864,
+    "cache_read_tokens": 1778963,
+    "output_tokens": 1208,
+    "api_call_count": 11
+  }
+}
