@@ -14,6 +14,8 @@ const ENV_SLACK_APP_TOKEN = "      - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_CLAUDE_OAUTH = "      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_ANTHROPIC_KEY = "      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_GITHUB_TOKEN = "      - GITHUB_TOKEN=${GITHUB_TOKEN}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_GITHUB_EMAIL = "      - GITHUB_EMAIL=${GITHUB_EMAIL}";
@@ -105,7 +107,11 @@ export function generateCompose(state: OnboardState): string {
     lines.push("        condition: service_healthy");
     lines.push("");
     lines.push("    environment:");
-    lines.push(ENV_CLAUDE_OAUTH);
+    if (state.credentialType === "api_key") {
+      lines.push(ENV_ANTHROPIC_KEY);
+    } else {
+      lines.push(ENV_CLAUDE_OAUTH);
+    }
     lines.push(ENV_API_KEY);
     lines.push(`      - AGENT_ID=${svc.agentId}`);
     lines.push(`      - AGENT_NAME=${agentName}`);

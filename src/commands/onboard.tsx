@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { Select } from "@inkjs/ui";
-import { Box, Text, useApp } from "ink";
+import { Box, Text, useApp, useInput } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
 import pkg from "../../package.json";
 import { getAgentSummary, getPresetById, PRESETS } from "./onboard/presets.ts";
@@ -22,6 +22,7 @@ import { PrereqCheckStep } from "./onboard/steps/prereq-check.tsx";
 import { ReviewStep } from "./onboard/steps/review.tsx";
 import { StartStep } from "./onboard/steps/start.tsx";
 import {
+  getStepProgress,
   INITIAL_STATE,
   nextStep,
   type OnboardProps,
@@ -30,14 +31,12 @@ import {
   type StepProps,
 } from "./onboard/types.ts";
 
-const BANNER = `
-   _                    _     ____
+const BANNER = `   _                    _     ____
   / \\   __ _  ___ _ __ | |_  / ___|_      ____ _ _ __ _ __ ___
  / _ \\ / _\` |/ _ \\ '_ \\| __| \\___ \\ \\ /\\ / / _\` | '__| '_ \` _ \\
 / ___ \\ (_| |  __/ | | | |_   ___) \\ V  V / (_| | |  | | | | | |
 /_/   \\_\\__, |\\___|_| |_|\\__| |____/ \\_/\\_/ \\__,_|_|  |_| |_| |_|
-       |___/
-`;
+       |___/`;
 
 export function Onboard({ dryRun = false, yes = false, preset }: OnboardProps) {
   const { exit } = useApp();
@@ -48,6 +47,32 @@ export function Onboard({ dryRun = false, yes = false, preset }: OnboardProps) {
     }
     return initial;
   });
+
+  // Ctrl+C: first press shows message, second exits
+  const [ctrlCPressed, setCtrlCPressed] = useState(false);
+  const ctrlCTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isTTY = process.stdin.isTTY;
+
+  useInput(
+    (_input, key) => {
+      if (key.ctrl && _input === "c") {
+        if (ctrlCPressed) {
+          exit();
+          return;
+        }
+        setCtrlCPressed(true);
+        ctrlCTimer.current = setTimeout(() => setCtrlCPressed(false), 2000);
+      }
+    },
+    { isActive: !!isTTY },
+  );
+
+  // Cleanup timer
+  useEffect(() => {
+    return () => {
+      if (ctrlCTimer.current) clearTimeout(ctrlCTimer.current);
+    };
+  }, []);
 
   const executedSteps = useRef<Set<OnboardStep>>(new Set());
 
@@ -92,7 +117,6 @@ export function Onboard({ dryRun = false, yes = false, preset }: OnboardProps) {
 
     addLog("Non-interactive mode (--yes)");
 
-    // Require --preset
     if (!preset) {
       goToError(
         "--preset is required in non-interactive mode (--yes). Options: dev, content, research, solo",
@@ -106,16 +130,18 @@ export function Onboard({ dryRun = false, yes = false, preset }: OnboardProps) {
       return;
     }
 
-    // Read credentials from env
-    const claudeToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-    if (!claudeToken) {
-      goToError("CLAUDE_CODE_OAUTH_TOKEN environment variable is required in non-interactive mode");
+    const claudeToken = process.env.CLAUDE_CODE_OAUTH_TOKEN || "";
+    const anthropicKey = process.env.ANTHROPIC_API_KEY || "";
+    if (!claudeToken && !anthropicKey) {
+      goToError(
+        "CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY environment variable is required in non-interactive mode",
+      );
       return;
     }
 
+    const credentialType = anthropicKey ? "api_key" : "oauth";
     const apiKey = process.env.API_KEY || crypto.randomBytes(16).toString("hex");
 
-    // Auto-generate agent IDs
     const agentIds: Record<string, string> = {};
     for (const svc of selectedPreset.services) {
       if (svc.count === 1) {
@@ -123,13 +149,11 @@ export function Onboard({ dryRun = false, yes = false, preset }: OnboardProps) {
         agentIds[name] = crypto.randomUUID();
       } else {
         for (let i = 1; i <= svc.count; i++) {
-          const name = `worker-${svc.role}-${i}`;
-          agentIds[name] = crypto.randomUUID();
+          agentIds[`worker-${svc.role}-${i}`] = crypto.randomUUID();
         }
       }
     }
 
-    // Auto-detect integrations from env vars
     const integrations = {
       github: !!process.env.GITHUB_TOKEN,
       slack: !!process.env.SLACK_BOT_TOKEN,
@@ -140,7 +164,7 @@ export function Onboard({ dryRun = false, yes = false, preset }: OnboardProps) {
     addLog(
       `Preset: ${selectedPreset.name} (${selectedPreset.services.reduce((s, e) => s + e.count, 0)} agents)`,
     );
-    addLog(`Harness: claude`);
+    addLog(`Harness: claude (${credentialType === "api_key" ? "API key" : "OAuth token"})`);
     if (Object.values(integrations).some(Boolean)) {
       const enabled = Object.entries(integrations)
         .filter(([, v]) => v)
@@ -155,6 +179,8 @@ export function Onboard({ dryRun = false, yes = false, preset }: OnboardProps) {
       services: selectedPreset.services,
       harness: "claude",
       claudeOAuthToken: claudeToken,
+      anthropicApiKey: anthropicKey,
+      credentialType,
       apiKey,
       agentIds,
       integrations,
@@ -188,10 +214,10 @@ export function Onboard({ dryRun = false, yes = false, preset }: OnboardProps) {
     checkExisting().catch((err) => goToError(err.message));
   }, [yes, state.step, state.outputDir, addLog, goToStep, goToError]);
 
-  // Build step props to pass to all step components
+  // Build step props
   const stepProps: StepProps = { state, dryRun, addLog, goToNext, goToStep, goToError };
 
-  // --- Render by step ---
+  // --- Render ---
 
   if (state.step === "error") {
     return (
@@ -204,15 +230,7 @@ export function Onboard({ dryRun = false, yes = false, preset }: OnboardProps) {
   if (state.step === "welcome") {
     return (
       <Box flexDirection="column" padding={1}>
-        <Text color="cyan" bold>
-          {BANNER}
-        </Text>
-        <Text dimColor>v{pkg.version}</Text>
-        {dryRun && (
-          <Text color="yellow" bold>
-            DRY-RUN MODE
-          </Text>
-        )}
+        <Header dryRun={dryRun} />
         <Box marginTop={1}>
           <Text dimColor>Checking for existing setup...</Text>
         </Box>
@@ -220,74 +238,8 @@ export function Onboard({ dryRun = false, yes = false, preset }: OnboardProps) {
     );
   }
 
-  if (state.step === "deploy_type") {
-    return (
-      <Box flexDirection="column" padding={1}>
-        <Text color="cyan" bold>
-          {BANNER}
-        </Text>
-        <Text dimColor>v{pkg.version}</Text>
-        {dryRun && (
-          <Text color="yellow" bold>
-            DRY-RUN MODE
-          </Text>
-        )}
-        <Logs logs={state.logs} />
-        <Box marginTop={1} flexDirection="column">
-          <Text bold>How would you like to deploy your swarm?</Text>
-          <Box marginTop={1}>
-            <Select
-              options={[{ label: "Local (Docker Compose)", value: "local" }]}
-              onChange={() => {
-                goToNext({ deployType: "local" });
-              }}
-            />
-          </Box>
-          <Text dimColor>Remote (SSH) — Coming soon</Text>
-        </Box>
-      </Box>
-    );
-  }
-
-  if (state.step === "preset") {
-    return (
-      <Box flexDirection="column" padding={1}>
-        <Logs logs={state.logs} />
-        <Text bold>Choose a swarm preset:</Text>
-        <Box marginTop={1}>
-          <Select
-            options={PRESETS.map((p) => ({
-              label: `${p.name}${p.services.length > 0 ? ` (${getAgentSummary(p.services)})` : ""}`,
-              value: p.id,
-            }))}
-            onChange={(value) => {
-              const selected = getPresetById(value);
-              if (!selected) return;
-              goToNext({ presetId: selected.id, services: selected.services });
-            }}
-          />
-        </Box>
-      </Box>
-    );
-  }
-
-  if (state.step === "custom_templates") return <CustomTemplatesStep {...stepProps} />;
-  if (state.step === "harness") return <HarnessStep {...stepProps} />;
-  if (state.step === "harness_credentials") return <HarnessCredentialsStep {...stepProps} />;
-  if (state.step === "core_credentials") return <CoreCredentialsStep {...stepProps} />;
-  if (state.step === "integration_menu") return <IntegrationMenuStep {...stepProps} />;
-  if (state.step === "integration_github") return <IntegrationGitHubStep {...stepProps} />;
-  if (state.step === "integration_slack") return <IntegrationSlackStep {...stepProps} />;
-  if (state.step === "integration_gitlab") return <IntegrationGitLabStep {...stepProps} />;
-  if (state.step === "integration_sentry") return <IntegrationSentryStep {...stepProps} />;
-  if (state.step === "review") return <ReviewStep {...stepProps} />;
-  if (state.step === "generate") return <GenerateStep {...stepProps} />;
-  if (state.step === "prereq_check") return <PrereqCheckStep {...stepProps} />;
-  if (state.step === "start") return <StartStep {...stepProps} />;
-  if (state.step === "health_check") return <HealthCheckStep {...stepProps} />;
-  if (state.step === "post_connect") return <PostConnectStep {...stepProps} />;
-  if (state.step === "post_dashboard") return <PostDashboardStep {...stepProps} />;
-  if (state.step === "post_task") return <PostTaskStep {...stepProps} />;
+  // All other steps get the progress indicator wrapper
+  const stepContent = renderStep(state.step, stepProps);
 
   if (state.step === "done") {
     const apiUrl = "http://localhost:3013";
@@ -329,7 +281,134 @@ export function Onboard({ dryRun = false, yes = false, preset }: OnboardProps) {
     );
   }
 
-  return null;
+  return (
+    <Box flexDirection="column" padding={1}>
+      <ProgressIndicator step={state.step} dryRun={dryRun} />
+      {ctrlCPressed && (
+        <Box marginBottom={1}>
+          <Text color="yellow">Press Ctrl+C again to quit</Text>
+        </Box>
+      )}
+      {stepContent}
+    </Box>
+  );
+}
+
+function renderStep(step: OnboardStep, props: StepProps) {
+  switch (step) {
+    case "deploy_type":
+      return (
+        <Box flexDirection="column">
+          <Text bold>How would you like to deploy your swarm?</Text>
+          <Box marginTop={1}>
+            <Select
+              options={[{ label: "Local (Docker Compose)", value: "local" }]}
+              onChange={() => props.goToNext({ deployType: "local" })}
+            />
+          </Box>
+          <Text dimColor>Remote (SSH) — Coming soon</Text>
+        </Box>
+      );
+    case "preset":
+      return (
+        <Box flexDirection="column">
+          <Text bold>Choose a swarm preset:</Text>
+          <Box marginTop={1}>
+            <Select
+              options={PRESETS.map((p) => ({
+                label: `${p.name}${p.services.length > 0 ? ` (${getAgentSummary(p.services)})` : ""}`,
+                value: p.id,
+              }))}
+              onChange={(value) => {
+                const selected = getPresetById(value);
+                if (!selected) return;
+                props.goToNext({ presetId: selected.id, services: selected.services });
+              }}
+            />
+          </Box>
+        </Box>
+      );
+    case "custom_templates":
+      return <CustomTemplatesStep {...props} />;
+    case "harness":
+      return <HarnessStep {...props} />;
+    case "harness_credentials":
+      return <HarnessCredentialsStep {...props} />;
+    case "core_credentials":
+      return <CoreCredentialsStep {...props} />;
+    case "integration_menu":
+      return <IntegrationMenuStep {...props} />;
+    case "integration_github":
+      return <IntegrationGitHubStep {...props} />;
+    case "integration_slack":
+      return <IntegrationSlackStep {...props} />;
+    case "integration_gitlab":
+      return <IntegrationGitLabStep {...props} />;
+    case "integration_sentry":
+      return <IntegrationSentryStep {...props} />;
+    case "review":
+      return <ReviewStep {...props} />;
+    case "generate":
+      return <GenerateStep {...props} />;
+    case "prereq_check":
+      return <PrereqCheckStep {...props} />;
+    case "start":
+      return <StartStep {...props} />;
+    case "health_check":
+      return <HealthCheckStep {...props} />;
+    case "post_connect":
+      return <PostConnectStep {...props} />;
+    case "post_dashboard":
+      return <PostDashboardStep {...props} />;
+    case "post_task":
+      return <PostTaskStep {...props} />;
+    default:
+      return null;
+  }
+}
+
+// --- Shared UI components ---
+
+function Header({ dryRun }: { dryRun: boolean }) {
+  return (
+    <>
+      <Text color="cyan" bold>
+        {BANNER}
+      </Text>
+      <Text dimColor>v{pkg.version}</Text>
+      {dryRun && (
+        <Text color="yellow" bold>
+          DRY-RUN MODE
+        </Text>
+      )}
+    </>
+  );
+}
+
+function ProgressIndicator({ step, dryRun }: { step: OnboardStep; dryRun: boolean }) {
+  const { index, total, label } = getStepProgress(step);
+  const filled = index + 1;
+  const barWidth = 20;
+  const filledWidth = Math.round((filled / total) * barWidth);
+  const emptyWidth = barWidth - filledWidth;
+  const bar = `${"█".repeat(filledWidth)}${"░".repeat(emptyWidth)}`;
+
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <Box>
+        <Text dimColor>Agent Swarm</Text>
+        <Text dimColor> v{pkg.version}</Text>
+        {dryRun && <Text color="yellow"> [DRY-RUN]</Text>}
+      </Box>
+      <Box>
+        <Text color="cyan">{bar}</Text>
+        <Text dimColor>
+          {" "}
+          {filled}/{total} {label}
+        </Text>
+      </Box>
+    </Box>
+  );
 }
 
 function Logs({ logs }: { logs: string[] }) {

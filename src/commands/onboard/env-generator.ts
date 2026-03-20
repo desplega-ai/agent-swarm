@@ -18,7 +18,11 @@ export function generateEnv(state: OnboardState): string {
   // ── Authentication ──
   lines.push("");
   lines.push("# === Authentication ===");
-  lines.push(`CLAUDE_CODE_OAUTH_TOKEN=${state.claudeOAuthToken}`);
+  if (state.credentialType === "api_key") {
+    lines.push(`ANTHROPIC_API_KEY=${state.anthropicApiKey}`);
+  } else {
+    lines.push(`CLAUDE_CODE_OAUTH_TOKEN=${state.claudeOAuthToken}`);
+  }
 
   // ── Integrations ──
   lines.push("");

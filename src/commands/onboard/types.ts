@@ -29,6 +29,8 @@ export interface OnboardState {
   services: ServiceEntry[];
   harness: "claude" | "pi";
   claudeOAuthToken: string;
+  anthropicApiKey: string;
+  credentialType: "oauth" | "api_key";
   apiKey: string;
   agentIds: Record<string, string>;
   integrations: {
@@ -75,6 +77,49 @@ export interface StepProps {
   goToError: (error: string) => void;
 }
 
+/** Ordered steps with labels for the progress indicator. */
+export const STEP_LABELS: { step: OnboardStep; label: string }[] = [
+  { step: "deploy_type", label: "Deploy" },
+  { step: "preset", label: "Preset" },
+  { step: "harness", label: "Harness" },
+  { step: "harness_credentials", label: "Credentials" },
+  { step: "core_credentials", label: "Keys" },
+  { step: "integration_menu", label: "Integrations" },
+  { step: "review", label: "Review" },
+  { step: "generate", label: "Generate" },
+  { step: "prereq_check", label: "Docker" },
+  { step: "start", label: "Start" },
+  { step: "health_check", label: "Health" },
+  { step: "post_connect", label: "Connect" },
+  { step: "done", label: "Done" },
+];
+
+/** Get progress info for the current step. */
+export function getStepProgress(current: OnboardStep): {
+  index: number;
+  total: number;
+  label: string;
+} {
+  const total = STEP_LABELS.length;
+  // Find current or nearest match (integration sub-steps map to "Integrations")
+  const integrationSteps: OnboardStep[] = [
+    "integration_menu",
+    "integration_github",
+    "integration_slack",
+    "integration_gitlab",
+    "integration_sentry",
+  ];
+  const effectiveStep = integrationSteps.includes(current) ? "integration_menu" : current;
+  const idx = STEP_LABELS.findIndex((s) => s.step === effectiveStep);
+  if (idx === -1) {
+    // custom_templates maps to preset
+    if (current === "custom_templates") return { index: 1, total, label: "Preset" };
+    // post_dashboard, post_task map to connect
+    return { index: total - 1, total, label: "Done" };
+  }
+  return { index: idx, total, label: STEP_LABELS[idx]?.label ?? "" };
+}
+
 export const INITIAL_STATE: OnboardState = {
   step: "welcome",
   deployType: "local",
@@ -82,6 +127,8 @@ export const INITIAL_STATE: OnboardState = {
   services: [],
   harness: "claude",
   claudeOAuthToken: "",
+  anthropicApiKey: "",
+  credentialType: "oauth",
   apiKey: "",
   agentIds: {},
   integrations: { github: false, slack: false, gitlab: false, sentry: false },
