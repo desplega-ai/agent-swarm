@@ -4,6 +4,41 @@ All notable changes to Agent Swarm are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.47.0] - 2026-03-20
+
+### Added
+- Linear integration — bidirectional ticket tracker sync via OAuth + webhooks (#161)
+  - OAuth 2.0 authorization flow with PKCE
+  - Webhook handler for issue/comment events
+  - `AgentSession` lifecycle tracking for Linear issues
+  - Generic tracker abstraction layer (`tracker_sync` table) for future integrations
+  - `.env.example` updated with Linear setup instructions
+- Workflow engine redesign — DAG-based workflow automation with improved reliability (#196)
+  - Executor registry architecture for extensible step types
+  - Node I/O schemas with explicit input mappings and validation
+  - Workflow-level `triggerSchema` validation
+  - Static data flow validation for input mappings
+  - Convergence deadlock fix with active edge tracking
+  - Interpolation rewrite with unresolved variable tracking and deep config support
+  - Slack notification executor for workflow steps
+- Portless integration for local development — friendly URLs like `api.swarm.localhost:1355` (#200)
+  - `dev:http` script uses portless by default
+  - New `start:portless` script for production-like local runs
+  - `.env.example` updated with portless configuration instructions
+- `agent-fs` Claude plugin pre-installed in worker containers
+
+### Changed
+- Claude Code version pinned in Dockerfile.worker via `CLAUDE_CODE_VERSION` build arg (default: `2.1.80`) — replaces dynamic installer for reproducible builds (#202)
+- Runner prompt generation is now provider-aware for pi skill prefix
+
+### Fixed
+- Corepack permissions — `COREPACK_HOME` redirected to user-writable directory to avoid "operation rejected by your operating system" errors (#202)
+- `task.cancelled` outbound handler added for proper cancellation event propagation
+- Follow-up tasks properly repoint `tracker_sync` for session lifecycle
+- Read user message from `agentActivity` with proper stop signal handling
+- Avoid duplicate responses — prefer `AgentSession` over issue comments
+- [UI] Use node ID as graph label, remove schema sections from workflow inspector
+
 ## [1.45.1] - 2026-03-19
 
 ### Added

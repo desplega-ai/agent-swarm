@@ -57,9 +57,17 @@ Use stable `AGENT_ID` values for each worker to enable task resume after restart
 Worker containers include several tools pre-installed:
 
 - **`wts`** — Git worktree manager for isolated branch work
-- **`agent-fs`** — Persistent, searchable filesystem shared across the swarm (auto-configured on first boot when `AGENT_FS_API_URL` is set)
+- **`agent-fs`** — Persistent, searchable filesystem shared across the swarm (auto-configured on first boot when `AGENT_FS_API_URL` is set). Also available as a Claude plugin.
 - **`qa-use`** — Browser-based UI testing tool
 - **`context-mode`** — Context window compression for data-heavy operations
+
+### Claude Code Version
+
+Claude Code is installed via `npm install -g @anthropic-ai/claude-code@VERSION` with a pinned version (build arg `CLAUDE_CODE_VERSION`). To update the version, change the `CLAUDE_CODE_VERSION` ARG in `Dockerfile.worker` and rebuild.
+
+### Corepack
+
+The worker image sets `COREPACK_HOME=/home/worker/.corepack` to avoid permission errors when running npm/pnpm/yarn as the non-root worker user.
 
 ## Docker Worker
 
