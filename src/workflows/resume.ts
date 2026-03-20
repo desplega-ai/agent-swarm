@@ -74,7 +74,20 @@ async function resumeFromTaskCompletion(
 
   // Checkpoint: atomic step completion + context update
   const ctx = (run.context ?? {}) as Record<string, unknown>;
-  const stepOutput = { taskId: event.taskId, taskOutput: event.output };
+
+  // JSON-parse structured output so downstream nodes can access nested fields
+  let taskOutput: unknown = event.output;
+  if (event.output) {
+    try {
+      const parsed = JSON.parse(event.output);
+      if (typeof parsed === "object" && parsed !== null) {
+        taskOutput = parsed;
+      }
+    } catch {
+      // Not JSON — keep as string (non-structured output tasks)
+    }
+  }
+  const stepOutput = { taskId: event.taskId, taskOutput };
 
   checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput }, ctx);
 

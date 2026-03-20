@@ -41,6 +41,27 @@ function validate(
     }
   }
 
+  // Enum check
+  if (Array.isArray(schema.enum)) {
+    const allowed = schema.enum as unknown[];
+    if (!allowed.some((v) => JSON.stringify(v) === JSON.stringify(data))) {
+      errors.push(
+        `${prefix}: value ${JSON.stringify(data)} not in enum [${allowed.map((v) => JSON.stringify(v)).join(", ")}]`,
+      );
+      return;
+    }
+  }
+
+  // Const check
+  if ("const" in schema) {
+    if (JSON.stringify(data) !== JSON.stringify(schema.const)) {
+      errors.push(
+        `${prefix}: value ${JSON.stringify(data)} does not match const ${JSON.stringify(schema.const)}`,
+      );
+      return;
+    }
+  }
+
   // Recursive property validation (only for objects)
   if (
     schema.properties !== undefined &&
@@ -55,6 +76,19 @@ function validate(
       if (key in obj) {
         validate(subSchema, obj[key], path ? `${path}.${key}` : key, errors);
       }
+    }
+  }
+
+  // Items validation (for arrays)
+  if (
+    schema.items !== undefined &&
+    typeof schema.items === "object" &&
+    schema.items !== null &&
+    Array.isArray(data)
+  ) {
+    const itemSchema = schema.items as Record<string, unknown>;
+    for (let i = 0; i < data.length; i++) {
+      validate(itemSchema, data[i], `${prefix}[${i}]`, errors);
     }
   }
 }

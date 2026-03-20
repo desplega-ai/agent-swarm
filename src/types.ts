@@ -140,6 +140,9 @@ export const AgentTaskSchema = z.object({
   // Workflow linking (optional — set when task was created by a workflow)
   workflowRunId: z.string().uuid().nullable().optional(),
   workflowRunStepId: z.string().uuid().nullable().optional(),
+
+  // Structured output schema (optional — JSON Schema that task output must conform to)
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const AgentStatusSchema = z.enum(["idle", "busy", "offline"]);

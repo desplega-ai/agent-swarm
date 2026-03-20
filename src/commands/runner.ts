@@ -279,6 +279,91 @@ async function updateProgressViaAPI(
  * The API is idempotent - if the agent already marked the task as completed/failed,
  * this call will succeed without changing anything.
  */
+/**
+ * Attempt to extract structured output from a task's progress history
+ * when the agent session ends without calling store-progress with valid output.
+ *
+ * - Claude adapter: runs a fallback extraction via `claude -p --json-schema`
+ * - Pi-mono adapter: returns an error (no fallback available)
+ */
+async function handleStructuredOutputFallback(
+  config: ApiConfig,
+  taskId: string,
+  adapterType: string,
+): Promise<{ output?: string; failReason?: string } | null> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (config.apiKey) {
+    headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+
+  try {
+    // Fetch the task to check for outputSchema
+    const taskRes = await fetch(`${config.apiUrl}/api/tasks/${taskId}`, { headers });
+    if (!taskRes.ok) return null;
+
+    const taskData = (await taskRes.json()) as {
+      task?: {
+        task?: string;
+        output?: string;
+        outputSchema?: Record<string, unknown>;
+      };
+      logs?: Array<{ eventType: string; newValue?: string; createdAt?: string }>;
+    };
+
+    const task = taskData.task;
+    if (!task?.outputSchema) return null; // No schema — no fallback needed
+    if (task.output) return null; // Agent already stored valid output
+
+    if (adapterType !== "claude") {
+      return {
+        failReason:
+          "Structured output required by outputSchema but not provided via store-progress",
+      };
+    }
+
+    // Claude adapter fallback: extract structured data from progress history
+    const progressLogs = (taskData.logs ?? [])
+      .filter((l) => l.eventType === "task_progress")
+      .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
+
+    const progressEntries = progressLogs
+      .map((log, i) => `${i + 1}. [${log.createdAt}] ${log.newValue}`)
+      .join("\n");
+
+    const extractionPrompt = `Extract structured data from this task's execution history.
+
+## Task Description
+${task.task || "(no description)"}
+
+## Progress Updates (chronological)
+${progressEntries || "(no progress recorded)"}
+
+## Required Output Schema
+${JSON.stringify(task.outputSchema, null, 2)}
+
+Extract the structured data from the progress updates above. Return ONLY valid JSON matching the schema.`;
+
+    const schemaJson = JSON.stringify(task.outputSchema);
+    const result =
+      await Bun.$`claude -p ${extractionPrompt} --json-schema ${schemaJson} --output-format json --model sonnet`
+        .json()
+        .catch(() => null);
+
+    if (result && typeof result === "object") {
+      return { output: JSON.stringify(result) };
+    }
+
+    return {
+      failReason: "Structured output extraction fallback failed — could not produce valid JSON",
+    };
+  } catch (err) {
+    console.warn(`[runner] Structured output fallback failed for task ${taskId}: ${err}`);
+    return null;
+  }
+}
+
 async function ensureTaskFinished(
   config: ApiConfig,
   role: string,
@@ -296,14 +381,26 @@ async function ensureTaskFinished(
 
   // Determine status and reason based on exit code
   // Exit code 0 = success, non-zero = failure
-  const status = exitCode === 0 ? "completed" : "failed";
+  let status = exitCode === 0 ? "completed" : "failed";
   const body: Record<string, string> = { status };
 
   if (status === "failed") {
     body.failureReason = failureReason || `Claude process exited with code ${exitCode}`;
   } else {
-    body.output =
-      "Process completed (runner wrapper fallback - agent may have provided explicit output)";
+    // Try structured output fallback if the task has an outputSchema
+    const adapterType = process.env.HARNESS_PROVIDER || "claude";
+    const fallback = await handleStructuredOutputFallback(config, taskId, adapterType);
+
+    if (fallback?.output) {
+      body.output = fallback.output;
+    } else if (fallback?.failReason) {
+      status = "failed";
+      body.status = "failed";
+      body.failureReason = fallback.failReason;
+    } else {
+      body.output =
+        "Process completed (runner wrapper fallback - agent may have provided explicit output)";
+    }
   }
 
   try {
@@ -899,7 +996,14 @@ function buildPromptForTrigger(
       if (taskDesc) {
         prompt += `\n\nTask: "${taskDesc}"`;
       }
-      prompt += `\n\nWhen done, use \`store-progress\` with status: "completed" and include your output.`;
+
+      // Inject outputSchema instructions if present
+      const taskObj = trigger.task as Record<string, unknown> | undefined;
+      if (taskObj?.outputSchema && typeof taskObj.outputSchema === "object") {
+        prompt += `\n\n**Required Output Format**: When completing this task, you MUST call store-progress with output that is valid JSON conforming to this schema:\n\`\`\`json\n${JSON.stringify(taskObj.outputSchema, null, 2)}\n\`\`\`\nCall store-progress with status "completed" and your JSON output. If your output doesn't match the schema, the tool call will fail and you should fix and retry.`;
+      } else {
+        prompt += `\n\nWhen done, use \`store-progress\` with status: "completed" and include your output.`;
+      }
       return prompt;
     }
 

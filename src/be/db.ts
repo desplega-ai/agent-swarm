@@ -696,6 +696,7 @@ type AgentTaskRow = {
   scheduleId: string | null;
   workflowRunId: string | null;
   workflowRunStepId: string | null;
+  outputSchema: string | null;
   createdAt: string;
   lastUpdatedAt: string;
   finishedAt: string | null;
@@ -744,6 +745,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     scheduleId: row.scheduleId ?? undefined,
     workflowRunId: row.workflowRunId ?? undefined,
     workflowRunStepId: row.workflowRunStepId ?? undefined,
+    outputSchema: row.outputSchema ? JSON.parse(row.outputSchema) : undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     finishedAt: row.finishedAt ?? undefined,
@@ -1737,6 +1739,7 @@ export interface CreateTaskOptions {
   workflowRunId?: string;
   workflowRunStepId?: string;
   sourceTaskId?: string;
+  outputSchema?: Record<string, unknown>;
 }
 
 /**
@@ -1828,8 +1831,8 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, epicId, dir, parentTaskId, model, scheduleId,
-        workflowRunId, workflowRunStepId, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        workflowRunId, workflowRunStepId, outputSchema, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -1866,6 +1869,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.scheduleId ?? null,
       options?.workflowRunId ?? null,
       options?.workflowRunStepId ?? null,
+      options?.outputSchema ? JSON.stringify(options.outputSchema) : null,
       now,
       now,
     );

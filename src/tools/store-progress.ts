@@ -19,6 +19,7 @@ import {
 import { getEmbedding, serializeEmbedding } from "@/be/embedding";
 import { createToolRegistrar } from "@/tools/utils";
 import { AgentTaskSchema } from "@/types";
+import { validateJsonSchema } from "@/workflows/json-schema-validator";
 
 // Schema for optional cost data that agents can self-report
 const CostDataSchema = z
@@ -116,6 +117,39 @@ export const registerStoreProgressTool = (server: McpServer) => {
           if (!isDuplicate) {
             const result = updateTaskProgress(taskId, progress);
             if (result) updatedTask = result;
+          }
+        }
+
+        // Validate structured output against outputSchema if present
+        if (
+          status === "completed" &&
+          existingTask.outputSchema &&
+          typeof existingTask.outputSchema === "object"
+        ) {
+          const schema = existingTask.outputSchema as Record<string, unknown>;
+          if (!output) {
+            return {
+              success: false,
+              message: `Task has an outputSchema but no output was provided. You must call store-progress with a valid JSON output matching this schema:\n${JSON.stringify(schema, null, 2)}`,
+            };
+          }
+
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(output);
+          } catch {
+            return {
+              success: false,
+              message: `Task output must be valid JSON matching the outputSchema. Got invalid JSON. Schema:\n${JSON.stringify(schema, null, 2)}`,
+            };
+          }
+
+          const validationErrors = validateJsonSchema(schema, parsed);
+          if (validationErrors.length > 0) {
+            return {
+              success: false,
+              message: `Task output does not match the outputSchema. Errors:\n${validationErrors.join("\n")}\n\nExpected schema:\n${JSON.stringify(schema, null, 2)}\n\nPlease fix your output and retry.`,
+            };
           }
         }
 
