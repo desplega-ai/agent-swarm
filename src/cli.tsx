@@ -37,6 +37,7 @@ interface ParsedArgs {
   aiLoop: boolean;
   preset: string;
   open: boolean;
+  showHelp: boolean;
 }
 
 function parseArgs(args: string[]): ParsedArgs {
@@ -55,6 +56,7 @@ function parseArgs(args: string[]): ParsedArgs {
   let aiLoop = false;
   let preset = "";
   let open = false;
+  let showHelp = false;
 
   // Find if there's a "--" separator for additional args
   const separatorIndex = args.indexOf("--");
@@ -97,6 +99,8 @@ function parseArgs(args: string[]): ParsedArgs {
       preset = arg.slice("--preset=".length);
     } else if (arg === "--open") {
       open = true;
+    } else if (arg === "--help" || arg === "-h") {
+      showHelp = true;
     }
   }
 
@@ -116,6 +120,7 @@ function parseArgs(args: string[]): ParsedArgs {
     aiLoop,
     preset,
     open,
+    showHelp,
   };
 }
 
@@ -534,6 +539,11 @@ function App({ args }: { args: ParsedArgs }) {
     aiLoop,
     preset,
   } = args;
+
+  // --help / -h on any command shows the main help screen
+  if (args.showHelp) {
+    return <Help />;
+  }
 
   switch (command) {
     case "onboard":
