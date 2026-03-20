@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "b87d59b41844",
+  "strategy": "manual-commit",
+  "branch": "refactor/2026-03-20-workflows",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/workflows/executors/agent-task.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/b8/7d59b41844/0/metadata.json",
+      "transcript": "/b8/7d59b41844/0/full.jsonl",
+      "context": "/b8/7d59b41844/0/context.md",
+      "content_hash": "/b8/7d59b41844/0/content_hash.txt",
+      "prompt": "/b8/7d59b41844/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 230,
+    "cache_creation_tokens": 289409,
+    "cache_read_tokens": 14647552,
+    "output_tokens": 37094,
+    "api_call_count": 105
+  }
+}
