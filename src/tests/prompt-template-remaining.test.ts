@@ -16,6 +16,7 @@ import "../heartbeat/templates";
 import "../tools/templates";
 import "../commands/templates";
 import "../slack/templates";
+import "../prompts/session-templates";
 
 const TEST_DB_PATH = "./test-prompt-remaining.sqlite";
 
@@ -36,6 +37,7 @@ async function ensureTemplatesRegistered(): Promise<void> {
   await import(`../tools/templates?t=${ts}`);
   await import(`../commands/templates?t=${ts}`);
   await import(`../slack/templates?t=${ts}`);
+  await import(`../prompts/session-templates?t=${ts}`);
 }
 
 beforeAll(async () => {

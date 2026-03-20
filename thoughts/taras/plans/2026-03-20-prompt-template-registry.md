@@ -650,9 +650,9 @@ Extend existing tests or create new ones to verify `getBasePrompt()` produces id
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Types compile: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] All tests pass: `bun test`
+- [x] Types compile: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] All tests pass: `bun test`
 
 #### Manual Verification:
 - [ ] Start a Docker worker, verify system prompt in logs matches expected format

@@ -1,10 +1,20 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, initDb, upsertPromptTemplate } from "../be/db";
-import { clearTemplateDefinitions, getAllTemplateDefinitions } from "../prompts/registry";
+import {
+  clearTemplateDefinitions,
+  getAllTemplateDefinitions,
+  getTemplateDefinition,
+} from "../prompts/registry";
 import { resolveTemplate } from "../prompts/resolver";
 // Side-effect import: registers all GitHub templates
 import "../github/templates";
+
+async function ensureTemplatesRegistered(): Promise<void> {
+  if (getTemplateDefinition("github.pull_request.assigned")) return;
+  const ts = Date.now();
+  await import(`../github/templates?t=${ts}`);
+}
 
 const TEST_DB_PATH = "./test-prompt-github.sqlite";
 
@@ -17,6 +27,10 @@ beforeAll(async () => {
     }
   }
   initDb(TEST_DB_PATH);
+});
+
+beforeEach(async () => {
+  await ensureTemplatesRegistered();
 });
 
 afterAll(async () => {
