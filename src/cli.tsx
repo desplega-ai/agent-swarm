@@ -124,234 +124,161 @@ function parseArgs(args: string[]): ParsedArgs {
   };
 }
 
-function Help() {
-  const { exit } = useApp();
-  useEffect(() => {
-    exit();
-  }, [exit]);
+// --- Plain text help (no Ink, no terminal reset) ---
 
-  return (
-    <Box flexDirection="column" padding={1}>
-      <Box>
-        <Text bold color="cyan">
-          {binName}
-        </Text>
-        <Text dimColor> v{pkg.version}</Text>
-      </Box>
-      <Text dimColor>{pkg.description}</Text>
+const COMMAND_HELP: Record<
+  string,
+  { usage: string; description: string; options: string; examples: string }
+> = {
+  onboard: {
+    usage: `${binName} onboard [options]`,
+    description:
+      "Set up a new swarm from scratch using Docker Compose.\nInteractive wizard that collects credentials, generates docker-compose.yml + .env,\nstarts the stack, and verifies health.",
+    options: [
+      "  --dry-run              Preview what would be generated without writing",
+      "  -y, --yes              Non-interactive mode (reads from env vars)",
+      "  --preset <name>        Preset: dev, content, research, solo",
+      "  -h, --help             Show this help",
+    ].join("\n"),
+    examples: [
+      `  ${binName} onboard`,
+      `  ${binName} onboard --dry-run`,
+      `  ${binName} onboard --yes --preset=dev`,
+      `  ANTHROPIC_API_KEY=sk-... ${binName} onboard --yes --preset=solo`,
+    ].join("\n"),
+  },
+  connect: {
+    usage: `${binName} connect [options]`,
+    description:
+      "Connect this project to an existing swarm.\nCreates .mcp.json and .claude/settings.local.json with server URL and API key.\nAuto-reads API_KEY from .env if present.",
+    options: [
+      "  --dry-run              Show what would be changed without writing",
+      "  --restore              Restore files from .bak backups",
+      "  -y, --yes              Non-interactive mode (use env vars)",
+      "  -h, --help             Show this help",
+    ].join("\n"),
+    examples: [
+      `  ${binName} connect`,
+      `  ${binName} connect --dry-run`,
+      `  ${binName} connect -y`,
+    ].join("\n"),
+  },
+  mcp: {
+    usage: `${binName} mcp [options]`,
+    description: "Start the MCP HTTP server.",
+    options: [
+      "  -p, --port <port>      Port to listen on (default: 3013)",
+      "  -k, --key <key>        API key for authentication",
+      "  -h, --help             Show this help",
+    ].join("\n"),
+    examples: [`  ${binName} mcp`, `  ${binName} mcp --port 8080 --key my-secret`].join("\n"),
+  },
+  claude: {
+    usage: `${binName} claude [options] [-- <args...>]`,
+    description: "Run Claude CLI with optional message and headless mode.",
+    options: [
+      "  -m, --msg <message>    Message to send to Claude",
+      "  --headless             Run in headless mode (stream JSON output)",
+      "  -- <args...>           Additional arguments to pass to Claude CLI",
+      "  -h, --help             Show this help",
+    ].join("\n"),
+    examples: [
+      `  ${binName} claude`,
+      `  ${binName} claude --headless -m "Hello"`,
+      `  ${binName} claude -- --resume`,
+    ].join("\n"),
+  },
+  worker: {
+    usage: `${binName} worker [options] [-- <args...>]`,
+    description: "Run Claude in headless loop mode as a worker agent.",
+    options: [
+      "  -m, --msg <prompt>          Custom prompt (default: /agent-swarm:start-worker)",
+      "  --yolo                      Continue on errors instead of stopping",
+      "  --system-prompt <text>      Custom system prompt (appended to Claude)",
+      "  --system-prompt-file <path> Read system prompt from file",
+      "  --ai-loop                   Use AI-based polling (legacy mode)",
+      "  -- <args...>                Additional arguments to pass to Claude CLI",
+      "  -h, --help                  Show this help",
+    ].join("\n"),
+    examples: [
+      `  ${binName} worker`,
+      `  ${binName} worker --yolo`,
+      `  ${binName} worker -m "Custom prompt"`,
+      `  ${binName} worker --system-prompt "You are a Python specialist"`,
+    ].join("\n"),
+  },
+  lead: {
+    usage: `${binName} lead [options] [-- <args...>]`,
+    description: "Run Claude as lead agent in headless loop mode.\nSame options as worker.",
+    options: [
+      "  -m, --msg <prompt>          Custom prompt",
+      "  --yolo                      Continue on errors instead of stopping",
+      "  --system-prompt <text>      Custom system prompt",
+      "  --system-prompt-file <path> Read system prompt from file",
+      "  --ai-loop                   Use AI-based polling (legacy mode)",
+      "  -- <args...>                Additional arguments to pass to Claude CLI",
+      "  -h, --help                  Show this help",
+    ].join("\n"),
+    examples: [`  ${binName} lead`, `  ${binName} lead --yolo`].join("\n"),
+  },
+  docs: {
+    usage: `${binName} docs [--open]`,
+    description:
+      "Show documentation URL.\nAll pages are also available in markdown format by appending .md to the URL.",
+    options: [
+      "  --open                 Open docs in default browser",
+      "  -h, --help             Show this help",
+    ].join("\n"),
+    examples: [`  ${binName} docs`, `  ${binName} docs --open`].join("\n"),
+  },
+  hook: {
+    usage: `${binName} hook`,
+    description:
+      "Handle Claude Code hook events from stdin.\nUsed internally by the agent-swarm hooks system.",
+    options: "  -h, --help             Show this help",
+    examples: `  ${binName} hook`,
+  },
+  artifact: {
+    usage: `${binName} artifact <subcommand> [options]`,
+    description: "Manage agent artifacts (serve, list, etc.).",
+    options: "  -h, --help             Show this help",
+    examples: [`  ${binName} artifact serve`, `  ${binName} artifact help`].join("\n"),
+  },
+};
 
-      <Box marginTop={1} flexDirection="column">
-        <Text bold>Usage:</Text>
-        <Text>
-          {" "}
-          {binName} {"<command>"} [options]
-        </Text>
-        <Text dimColor>
-          {" "}
-          or: bunx {binName} {"<command>"} [options]
-        </Text>
-      </Box>
+function printHelp(command?: string) {
+  if (command && command !== "help" && COMMAND_HELP[command]) {
+    const cmd = COMMAND_HELP[command];
+    console.log(`\n${binName} ${command} — v${pkg.version}\n`);
+    console.log(cmd.description);
+    console.log(`\nUsage:\n  ${cmd.usage}\n`);
+    console.log(`Options:\n${cmd.options}\n`);
+    console.log(`Examples:\n${cmd.examples}\n`);
+    return;
+  }
 
-      <Box marginTop={1} flexDirection="column">
-        <Text bold>Commands:</Text>
-        <Box>
-          <Box width={12}>
-            <Text color="green">onboard</Text>
-          </Box>
-          <Text>Set up a new swarm from scratch (local Docker Compose)</Text>
-        </Box>
-        <Box>
-          <Box width={12}>
-            <Text color="green">connect</Text>
-          </Box>
-          <Text>Connect this project to an existing swarm</Text>
-        </Box>
-        <Box>
-          <Box width={12}>
-            <Text color="green">hook</Text>
-          </Box>
-          <Text>Handle Claude Code hook events (stdin)</Text>
-        </Box>
-        <Box>
-          <Box width={12}>
-            <Text color="green">mcp</Text>
-          </Box>
-          <Text>Start the MCP HTTP server</Text>
-        </Box>
-        <Box>
-          <Box width={12}>
-            <Text color="green">claude</Text>
-          </Box>
-          <Text>Run Claude CLI</Text>
-        </Box>
-        <Box>
-          <Box width={12}>
-            <Text color="green">worker</Text>
-          </Box>
-          <Text>Run Claude in headless loop mode</Text>
-        </Box>
-        <Box>
-          <Box width={12}>
-            <Text color="green">lead</Text>
-          </Box>
-          <Text>Run Claude as lead agent in headless loop</Text>
-        </Box>
-        <Box>
-          <Box width={12}>
-            <Text color="green">docs</Text>
-          </Box>
-          <Text>Open documentation (--open to launch in browser)</Text>
-        </Box>
-        <Box>
-          <Box width={12}>
-            <Text color="green">version</Text>
-          </Box>
-          <Text>Show version number</Text>
-        </Box>
-        <Box>
-          <Box width={12}>
-            <Text color="green">help</Text>
-          </Box>
-          <Text>Show this help message</Text>
-        </Box>
-      </Box>
-
-      <Box marginTop={1} flexDirection="column">
-        <Text bold>Options for 'onboard':</Text>
-        <Box>
-          <Box width={24}>
-            <Text color="yellow">--dry-run</Text>
-          </Box>
-          <Text>Preview what would be generated without writing</Text>
-        </Box>
-        <Box>
-          <Box width={24}>
-            <Text color="yellow">-y, --yes</Text>
-          </Box>
-          <Text>Non-interactive mode (reads from env vars)</Text>
-        </Box>
-        <Box>
-          <Box width={24}>
-            <Text color="yellow">--preset {"<name>"}</Text>
-          </Box>
-          <Text>Preset: dev, content, research, solo</Text>
-        </Box>
-      </Box>
-
-      <Box marginTop={1} flexDirection="column">
-        <Text bold>Options for 'connect':</Text>
-        <Box>
-          <Box width={24}>
-            <Text color="yellow">--dry-run</Text>
-          </Box>
-          <Text>Show what would be changed without writing</Text>
-        </Box>
-        <Box>
-          <Box width={24}>
-            <Text color="yellow">--restore</Text>
-          </Box>
-          <Text>Restore files from .bak backups</Text>
-        </Box>
-        <Box>
-          <Box width={24}>
-            <Text color="yellow">-y, --yes</Text>
-          </Box>
-          <Text>Non-interactive mode (use env vars)</Text>
-        </Box>
-      </Box>
-
-      <Box marginTop={1} flexDirection="column">
-        <Text bold>Options for 'mcp':</Text>
-        <Box>
-          <Box width={24}>
-            <Text color="yellow">-p, --port {"<port>"}</Text>
-          </Box>
-          <Text>Port to listen on (default: 3013)</Text>
-        </Box>
-        <Box>
-          <Box width={24}>
-            <Text color="yellow">-k, --key {"<key>"}</Text>
-          </Box>
-          <Text>API key for authentication</Text>
-        </Box>
-      </Box>
-
-      <Box marginTop={1} flexDirection="column">
-        <Text bold>Options for 'claude':</Text>
-        <Box>
-          <Box width={24}>
-            <Text color="yellow">-m, --msg {"<message>"}</Text>
-          </Box>
-          <Text>Message to send to Claude</Text>
-        </Box>
-        <Box>
-          <Box width={24}>
-            <Text color="yellow">--headless</Text>
-          </Box>
-          <Text>Run in headless mode (stream JSON output)</Text>
-        </Box>
-        <Box>
-          <Box width={24}>
-            <Text color="yellow">-- {"<args...>"}</Text>
-          </Box>
-          <Text>Additional arguments to pass to Claude CLI</Text>
-        </Box>
-      </Box>
-
-      <Box marginTop={1} flexDirection="column">
-        <Text bold>Options for 'worker' and 'lead':</Text>
-        <Box>
-          <Box width={30}>
-            <Text color="yellow">-m, --msg {"<prompt>"}</Text>
-          </Box>
-          <Text>Custom prompt (default: /agent-swarm:start-worker)</Text>
-        </Box>
-        <Box>
-          <Box width={30}>
-            <Text color="yellow">--yolo</Text>
-          </Box>
-          <Text>Continue on errors instead of stopping</Text>
-        </Box>
-        <Box>
-          <Box width={30}>
-            <Text color="yellow">--system-prompt {"<text>"}</Text>
-          </Box>
-          <Text>Custom system prompt (appended to Claude)</Text>
-        </Box>
-        <Box>
-          <Box width={30}>
-            <Text color="yellow">--system-prompt-file {"<path>"}</Text>
-          </Box>
-          <Text>Read system prompt from file</Text>
-        </Box>
-        <Box>
-          <Box width={30}>
-            <Text color="yellow">--ai-loop</Text>
-          </Box>
-          <Text>Use AI-based polling (legacy mode)</Text>
-        </Box>
-        <Box>
-          <Box width={30}>
-            <Text color="yellow">-- {"<args...>"}</Text>
-          </Box>
-          <Text>Additional arguments to pass to Claude CLI</Text>
-        </Box>
-      </Box>
-
-      <Box marginTop={1} flexDirection="column">
-        <Text bold>Examples:</Text>
-        <Text dimColor> {binName} onboard</Text>
-        <Text dimColor> {binName} onboard --dry-run</Text>
-        <Text dimColor> {binName} onboard --yes --preset=dev</Text>
-        <Text dimColor> {binName} connect</Text>
-        <Text dimColor> {binName} connect --dry-run</Text>
-        <Text dimColor> {binName} docs --open</Text>
-        <Text dimColor> {binName} worker</Text>
-        <Text dimColor> {binName} worker --yolo</Text>
-        <Text dimColor> {binName} lead</Text>
-      </Box>
-    </Box>
-  );
+  // General help
+  console.log(`\n${binName} v${pkg.version}`);
+  console.log(`${pkg.description}\n`);
+  console.log(`Usage: ${binName} <command> [options]\n`);
+  console.log("Commands:");
+  const commands = [
+    ["onboard", "Set up a new swarm from scratch (Docker Compose)"],
+    ["connect", "Connect this project to an existing swarm"],
+    ["worker", "Run Claude in headless loop mode"],
+    ["lead", "Run Claude as lead agent in headless loop"],
+    ["mcp", "Start the MCP HTTP server"],
+    ["claude", "Run Claude CLI"],
+    ["hook", "Handle Claude Code hook events (stdin)"],
+    ["artifact", "Manage agent artifacts"],
+    ["docs", "Open documentation (--open to launch in browser)"],
+    ["version", "Show version number"],
+    ["help", "Show this help message"],
+  ];
+  for (const entry of commands) {
+    console.log(`  ${(entry[0] ?? "").padEnd(12)} ${entry[1] ?? ""}`);
+  }
+  console.log(`\nRun '${binName} <command> --help' for details on a specific command.\n`);
 }
 
 function McpServer({ port, apiKey }: { port: string; apiKey: string }) {
@@ -507,21 +434,6 @@ function UnknownCommand({ command }: { command: string }) {
   );
 }
 
-function Version() {
-  const { exit } = useApp();
-  useEffect(() => {
-    exit();
-  }, [exit]);
-
-  return (
-    <Box padding={1}>
-      <Text>
-        {binName} v{pkg.version}
-      </Text>
-    </Box>
-  );
-}
-
 function App({ args }: { args: ParsedArgs }) {
   const {
     command,
@@ -539,11 +451,6 @@ function App({ args }: { args: ParsedArgs }) {
     aiLoop,
     preset,
   } = args;
-
-  // --help / -h on any command shows the main help screen
-  if (args.showHelp) {
-    return <Help />;
-  }
 
   switch (command) {
     case "onboard":
@@ -576,22 +483,25 @@ function App({ args }: { args: ParsedArgs }) {
           aiLoop={aiLoop}
         />
       );
-    case "version":
-      return <Version />;
-    case "help":
-    case undefined:
-      return <Help />;
+    // version, help, docs handled before render()
     default:
-      return <UnknownCommand command={command} />;
+      return <UnknownCommand command={command ?? ""} />;
   }
 }
 
 const args = parseArgs(process.argv.slice(2));
 
-// Handle non-UI commands separately
-if (args.command === "docs") {
+// Handle non-UI commands separately (plain stdout, no Ink)
+if (args.showHelp || args.command === "help" || args.command === undefined) {
+  printHelp(args.showHelp ? args.command : undefined);
+  process.exit(0);
+} else if (args.command === "version") {
+  console.log(`${binName} v${pkg.version}`);
+  process.exit(0);
+} else if (args.command === "docs") {
   const docsUrl = "https://docs.agent-swarm.dev";
-  console.log(`\nAgent Swarm Documentation: ${docsUrl}\n`);
+  console.log(`\n${binName} docs — v${pkg.version}\n`);
+  console.log(`Documentation: ${docsUrl}\n`);
   console.log("All pages are also available in markdown format by appending .md to the URL.");
   console.log(`Example: ${docsUrl}/getting-started.md\n`);
   if (args.open) {
