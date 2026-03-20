@@ -1,0 +1,81 @@
+<task-notification>
+<task-id>ac52ed46d31036f30</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/fea08809-d478-4a5d-a3e4-4e9c570d2288/tasks/ac52ed46d31036f30.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 1: DB Schema, Types & CRUD" completed</summary>
+<result>All 28 tests pass. Here's the summary:
+
+---
+
+## Report
+
+### Files created/modified
+
+1. **Created**: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/be/migrations/013_prompt_templates.sql` -- Migration with `prompt_templates` and `prompt_template_history` tables plus 3 indexes.
+
+2. **Modified**: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/types.ts` -- Added `PromptTemplateScopeSchema`, `PromptTemplateStateSchema`, `PromptTemplateSchema`, `PromptTemplateHistorySchema` and their corresponding TypeScript types at the end of the file.
+
+3. **Modified**: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/be/db.ts` -- Added imports for `PromptTemplate` and `PromptTemplateHistory`, then added ~280 lines at the end with all 9 CRUD functions: `rowToPromptTemplate`, `rowToPromptTemplateHistory`, `getPromptTemplates`, `getPromptTemplateById`, `upsertPromptTemplate`, `deletePromptTemplate`, `resetPromptTemplateToDefault`, `getPromptTemplateHistory`, `resolvePromptTemplate`, `checkoutPromptTemplate`.
+
+4. **Created**: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tests/prompt-templates-db.test.ts` -- 28 test cases covering all required scenarios.
+
+### Verification results
+
+- **`bun run tsc:check`**: Pass (no errors)
+- **`bun run lint:fix`**: Pass (fixed 2 formatting issues in the new files; all 6 warnings are pre-existing in other files)
+- **`bun test src/tests/prompt-templates-db.test.ts`**: 28 pass, 0 fail, 93 expect() calls
+
+### Design decisions
+
+1. **`upsertPromptTemplate` insert path**: New templates get `isDefault=0` (false). The only way to set `isDefault=true` is via `resetPromptTemplateToDefault`. This avoids accidental creation of "default" templates through the normal upsert flow.
+
+2. **History on insert**: The initial creation also gets a history entry with `changeReason: "Initial creation"` (when no explicit reason is provided). This ensures every version is tracked.
+
+3. **`resolvePromptTemplate` return type**: Uses a discriminated union `{ template: PromptTemplate } | { skip: true } | null` to clearly distinguish the three outcomes (found template, skip event, no match).
+
+4. **Wildcard generation**: For `a.b.c.d`, generates `["a.b.c.*", "a.b.*", "a.*"]` -- narrower wildcards are tried first, and each wildcard goes through the full agent -> repo -> global scope chain before moving to the next broader wildcard.
+
+### Status: Completed</result>
+<usage><total_tokens>60525</total_tokens><tool_uses>25</tool_uses><duration_ms>224886</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/fea08809-d478-4a5d-a3e4-4e9c570d2288/tasks/ac52ed46d31036f30.output
+
+---
+
+<task-notification>
+<task-id>a48cd3cfe1b322362</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/fea08809-d478-4a5d-a3e4-4e9c570d2288/tasks/a48cd3cfe1b322362.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 2: Resolver & Registry Core" completed</summary>
+<result>---
+
+## Report
+
+### Files Created
+1. **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/prompts/registry.ts`** — In-memory template definition registry with `registerTemplate()`, `getTemplateDefinition()`, `getAllTemplateDefinitions()`, and `clearTemplateDefinitions()` (for tests).
+
+2. **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/prompts/resolver.ts`** — Template resolver that combines the in-memory code registry with DB overrides. `resolveTemplate()` handles header+body composition, `{{@template[id]}}` expansion (recursive, max depth 3, cycle detection), and variable interpolation using the existing `interpolate()` from `src/workflows/template.ts`.
+
+3. **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/prompts/seed.ts`** — `seedDefaultTemplates()` function that syncs registered template definitions into the DB as global defaults. Handles fresh seeding, code-drift updates, and protects user customizations.
+
+4. **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tests/prompt-template-resolver.test.ts`** — 23 tests covering: registry CRUD, basic resolution, header+body composition, empty header, DB overrides, scope precedence, skip_event, default_prompt_fallback, wildcard resolution, `{{@template[id]}}` expansion (basic, nested depth 3, depth exceeded, cycle detection, DB overrides for referenced templates), unresolved variable tracking, seeding (fresh, re-seed with code drift, user customization protection, no-op with empty registry).
+
+### Files Modified
+5. **`/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/be/db.ts`** — Added import of `seedDefaultTemplates` and wired it into `initDb()` after `seedContextVersions()`.
+
+### Verification Results
+- `bun run tsc:check` — clean, no errors
+- `bun run lint:fix` — no new warnings (all 6 warnings are pre-existing in unrelated files)
+- `bun test src/tests/prompt-template-resolver.test.ts` — 23 pass, 0 fail
+- `bun test` — 1702 pass, 0 fail (all existing tests unaffected)
+- Server startup with fresh DB — clean, no errors, seeding is a no-op as expected (no templates registered yet)
+
+### Decisions & Notes
+- **`clearTemplateDefinitions()`** was added to the registry as a test utility, since tests need to reset the global in-memory Map between describe blocks. This prevents test pollution.
+- **Depth/cycle leftover tokens**: When `{{@template[...]}}` tokens survive expansion (due to depth limit or cycle), the subsequent `interpolate()` call treats them as unresolved variables (replacing with `""` and tracking in `unresolved[]`). This is correct behavior — callers can inspect `unresolved` to detect issues. The tests verify this.
+- **Seeding bug caught in tests**: The initial implementation queried only `isDefault=true` records, which missed user-customized records (`isDefault=false`), causing duplicate inserts. Fixed by querying all global records first, then checking `isDefault` status.</result>
+<usage><total_tokens>79493</total_tokens><tool_uses>42</tool_uses><duration_ms>498335</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/fea08809-d478-4a5d-a3e4-4e9c570d2288/tasks/a48cd3cfe1b322362.output
