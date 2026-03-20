@@ -11,6 +11,11 @@ const AgentTaskConfigSchema = z.object({
   tags: z.array(z.string()).optional(),
   priority: z.number().int().min(0).max(100).optional(),
   offerMode: z.boolean().optional(),
+  dir: z.string().min(1).optional(),
+  vcsRepo: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+  parentTaskId: z.string().uuid().optional(),
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
 });
 
 const AgentTaskOutputSchema = z.object({
@@ -69,6 +74,11 @@ export class AgentTaskExecutor extends BaseExecutor<
       offeredTo: config.offerMode ? config.agentId : undefined,
       workflowRunId: meta.runId,
       workflowRunStepId: meta.stepId,
+      dir: config.dir,
+      vcsRepo: config.vcsRepo,
+      model: config.model,
+      parentTaskId: config.parentTaskId,
+      outputSchema: config.outputSchema,
     });
 
     // 4. Return async result — engine will pause the workflow
