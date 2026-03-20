@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "846f28e664d1",
+  "strategy": "manual-commit",
+  "branch": "fet/template-registry",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "thoughts/taras/plans/2026-03-20-prompt-template-registry.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/84/6f28e664d1/0/metadata.json",
+      "transcript": "/84/6f28e664d1/0/full.jsonl",
+      "context": "/84/6f28e664d1/0/context.md",
+      "content_hash": "/84/6f28e664d1/0/content_hash.txt",
+      "prompt": "/84/6f28e664d1/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 90,
+    "cache_creation_tokens": 487538,
+    "cache_read_tokens": 7445474,
+    "output_tokens": 37108,
+    "api_call_count": 54
+  }
+}

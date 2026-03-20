@@ -1,0 +1,1549 @@
+# Create Plan
+
+A thin wrapper that invokes the `desplega:planning` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse autonomy mode from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - If provided file has `autonomy:` in frontmatter, use that as default
+   - Otherwise, ask the user via AskUserQuestion:
+
+   ```
+   How much should I check in with you during planning?
+   - Autopilot: Research and create plan independently, present for final review
+   - Critical questions (Recommended): Ask only for major design decisions
+   - Verbose: Check in at each step, validate approach throughout
+   ```
+
+2. **ALWAYS invoke the `desplega:planning` skill:**
+   - Pass any file paths or task descriptions
+   - Pass the autonomy mode determined above
+   - Let the skill handle all planning logic
+
+3. **If no input provided:**
+   - Respond with:
+   ```
+   I'll help you create a detailed implementation plan. Please provide:
+   1. The task description
+   2. Any relevant context, constraints, or specific requirements
+   3. Links to related research or previous implementations
+   ```
+
+## Example Usage
+
+```
+/create-plan @thoughts/<username|shared>/research/my-feature.md
+/create-plan --autonomy=autopilot implement user authentication
+/create-plan --autonomy=verbose add caching layer
+```
+
+
+ARGUMENTS: thoughts/taras/research/2026-03-20-prompt-template-registry.md
+
+---
+
+Base directory for this skill: /Users/taras/.claude/plugins/cache/desplega-ai-toolbox/desplega/1.8.0/skills/planning
+
+# Planning
+
+You are creating detailed implementation plans through an interactive, iterative process. Be skeptical, thorough, and collaborative.
+
+## Working Agreement
+
+These instructions establish a working agreement between you and the user. The key principles are:
+
+1. **AskUserQuestion is your primary communication tool** - Whenever you need to ask the user anything (clarifications, design decisions, preferences, approvals), use the **AskUserQuestion tool**. Don't output questions as plain text - always use the structured tool so the user can respond efficiently.
+
+2. **Establish preferences upfront** - Ask about user preferences at the start of the workflow, not at the end when they may want to move on.
+
+3. **Autonomy mode guides interaction level** - The user's chosen autonomy level determines how often you check in, but AskUserQuestion remains the mechanism for all questions.
+
+### User Preferences
+
+Before starting planning (unless autonomy is Autopilot), establish these preferences:
+
+**Commit After Each Phase** - Use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like me to create a commit after each phase once manual verification passes?" | 1. Yes, commit after each phase passes (Recommended), 2. No, I'll handle commits myself |
+
+Store this preference and act on it during implementation (see "Commit Integration" section).
+
+**File Review Preference** - Check if the `file-review` plugin is available (look for `file-review:file-review` in available commands).
+
+If file-review plugin is installed, use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like to use file-review for inline feedback on the plan when it's ready?" | 1. Yes, open file-review when plan is ready (Recommended), 2. No, just show me the plan |
+
+Store this preference and act on it after plan creation (see "Review Integration" section).
+
+## When to Use
+
+This skill activates when:
+- User invokes `/create-plan` command
+- Another skill references `**REQUIRED SUB-SKILL:** Use desplega:planning`
+- User asks to plan an implementation or create a technical spec
+
+## Autonomy Mode
+
+At the start of planning, adapt your interaction level based on the autonomy mode:
+
+| Mode | Behavior |
+|------|----------|
+| **Autopilot** | Research independently, create complete plan, present for final review only |
+| **Critical** (Default) | Get buy-in at major decision points, present design options for approval |
+| **Verbose** | Check in at each step, validate understanding, confirm before each phase |
+
+The autonomy mode is passed by the invoking command. If not specified, default to **Critical**.
+
+## Process Steps
+
+### Prior Learning Recall
+
+**OPTIONAL SUB-SKILL:** If `~/.agentic-learnings.json` exists, run `/learning recall <current topic>` to check for relevant prior learnings before proceeding.
+
+### Step 1: Context Gathering & Initial Analysis
+
+1. **Read all mentioned files immediately and FULLY:**
+   - Research documents, related plans, JSON/data files
+   - **IMPORTANT**: Use Read tool WITHOUT limit/offset parameters
+   - **CRITICAL**: Read files yourself before spawning sub-tasks
+
+2. **Spawn initial research tasks:**
+   - Use **codebase-locator** agent to find all files related to the task
+   - Use **codebase-analyzer** agent to understand current implementation
+   - Use **thoughts-locator** agent to find existing thoughts documents
+   - Use context7 MCP for library/framework insights
+
+3. **Read all files identified by research tasks**
+
+4. **Analyze and verify understanding:**
+   - Identify discrepancies or misunderstandings
+   - Note assumptions needing verification
+
+5. **Present understanding and questions (if not Autopilot):**
+
+   First, present your findings as text:
+   ```
+   Based on the research of the codebase, I understand we need to [summary].
+
+   I've found that:
+   - [Current implementation detail with file:line reference]
+   - [Relevant pattern or constraint discovered]
+   ```
+
+   Then, if there are questions that research couldn't answer, use **AskUserQuestion** with:
+
+   | Question | Options |
+   |----------|---------|
+   | "[Specific technical question]" | Provide relevant options based on the choices available |
+   | "[Design preference question]" | Provide relevant options based on the choices available |
+
+### Step 2: Research & Discovery
+
+1. **If the user corrects any misunderstanding:**
+   - Spawn new research tasks to verify
+   - Read specific files/directories mentioned
+
+2. **Create a research todo list** using TodoWrite
+
+3. **Spawn parallel sub-tasks:**
+   - **codebase-locator** - Find specific files
+   - **codebase-analyzer** - Understand implementation details
+   - **codebase-pattern-finder** - Find similar features to model after
+
+4. **Present findings and design options (if not Autopilot):**
+
+   First, present findings as text:
+   ```
+   **Current State:**
+   - [Key discovery about existing code]
+   ```
+
+   Then, use **AskUserQuestion** to present design options:
+
+   | Question | Options |
+   |----------|---------|
+   | "Which approach aligns best with your vision?" | 1. [Option A] - [brief description], 2. [Option B] - [brief description] |
+
+   Include pros/cons in the option descriptions to help the user decide.
+
+### Step 3: Plan Structure Development
+
+1. **Create initial plan outline (if not Autopilot):**
+
+   Present the outline as text:
+   ```
+   Here's my proposed plan structure:
+
+   ## Overview
+   [1-2 sentence summary]
+
+   ## Implementation Phases:
+   1. [Phase name] - [what it accomplishes]
+   2. [Phase name] - [what it accomplishes]
+   ```
+
+   Then, use **AskUserQuestion** to get approval:
+
+   | Question | Options |
+   |----------|---------|
+   | "Does this phasing make sense?" | 1. Yes, proceed with this structure, 2. No, let's discuss changes |
+
+2. **Get feedback on structure** before writing details
+
+### Step 4: Detailed Plan Writing
+
+Before proceeding, exit plan mode to write the plan file.
+
+Write the plan to `thoughts/<username|shared>/plans/YYYY-MM-DD-description.md`.
+
+**Path selection:** Use the user's name (e.g., `thoughts/taras/plans/`) if known from context. Fall back to `thoughts/shared/plans/` when unclear.
+
+**CRITICAL**: Every phase MUST include a `### Success Criteria:` section with both `#### Automated Verification:` and `#### Manual Verification:` subsections. See "Success Criteria Requirements" section at the end of this document for the exact format.
+
+**QA Specs (optional)**: Phases that change user-facing behavior, add UI, modify API responses, or alter auth/permissions SHOULD include an optional `### QA Spec (optional):` section after the Success Criteria. See the template for the exact format. Phases that are internal refactors, type changes, config updates, or dependency bumps should omit QA specs. QA specs can live either inline in plan phases (for per-phase validation) or as a separate standalone document (for cross-cutting or feature-level QA). The inline approach is the default for plans; the QA skill handles both sources transparently.
+
+**Template:** Read and follow the template at `cc-plugin/base/skills/planning/template.md`
+
+The template includes:
+- Standard plan sections (Overview, Current State, Desired End State, etc.)
+- Multiple phase examples with proper Success Criteria structure
+- Correct heading hierarchy throughout
+
+### Step 5: Review and Iterate
+
+1. **Present draft plan location:**
+   ```
+   I've created the implementation plan at:
+   `thoughts/<username|shared>/plans/YYYY-MM-DD-description.md`
+
+   Please review it.
+   ```
+
+2. **Iterate based on feedback** (if not Autopilot)
+
+3. **Offer structured review:**
+   - After iteration, offer: "Would you like me to run `/review` on this plan for completeness and gap analysis?"
+   - If yes, invoke the `desplega:reviewing` skill on the plan document
+
+4. **Finalize the plan** - DO NOT START implementation
+
+5. **Learning Capture:**
+
+   **OPTIONAL SUB-SKILL:** If significant insights, patterns, gotchas, or decisions emerged during this workflow, consider using `desplega:learning` to capture them via `/learning capture`. Focus on learnings that would help someone else in a future session.
+
+6. **Workflow handoff:**
+   After the plan is finalized (and optionally reviewed), use **AskUserQuestion** with:
+
+   | Question | Options |
+   |----------|---------|
+   | "The plan is ready. What's the next step?" | 1. Implement this plan (→ `/implement-plan`), 2. Run a review first (→ `/review`), 3. Done for now (park the plan) |
+
+   Based on the answer:
+   - **Implement**: Suggest the `/implement-plan` command with the plan file path
+   - **Review**: Invoke the `desplega:reviewing` skill on the plan document
+   - **Done**: Set the plan's `status` to `ready` or `parked` as appropriate
+
+## Review Integration
+
+If the `file-review` plugin is available and the user selected "Yes" during User Preferences setup:
+- After creating plans, invoke `/file-review:file-review <path>`
+- If user selected "No" or autonomy mode is Autopilot, skip this step
+
+## Commit Integration
+
+If the user selected "Yes" to commits during User Preferences setup:
+- After each phase's manual verification passes, create a commit with a descriptive message
+- Commit message format: `[phase N] <brief description of what the phase accomplished>`
+- Only commit after explicit confirmation that manual verification passed
+- If user selected "No", skip commits entirely - the user will handle them
+
+## Important Guidelines
+
+1. **Be Skeptical**: Question vague requirements, verify with code
+2. **Be Interactive**: Don't write full plan in one shot (unless Autopilot)
+3. **Be Thorough**: Read context files COMPLETELY, include file:line references
+4. **Be Practical**: Focus on incremental, testable changes
+5. **No Open Questions**: Research or clarify immediately, don't leave questions in plan
+
+## Success Criteria Requirements (MANDATORY)
+
+**Every phase MUST have a Success Criteria section.** Plans without proper success criteria are incomplete.
+
+### Required Structure
+
+Each phase must end with this exact structure:
+
+```markdown
+### Success Criteria:
+
+#### Automated Verification:
+- [ ] [Command that can be run]: `command here`
+- [ ] [Another automated check]: `command here`
+
+#### Manual Verification:
+- [ ] [Human testing step]
+- [ ] [Another manual check]
+
+**Implementation Note**: [When to pause for confirmation]
+```
+
+### Heading Hierarchy
+
+Use these exact heading levels (this is critical for consistency):
+- `### Success Criteria:` (h3) - section header
+- `#### Automated Verification:` (h4) - subsection
+- `#### Manual Verification:` (h4) - subsection
+
+### What Goes Where
+
+| Type | Examples |
+|------|----------|
+| **Automated** | `make test`, `npm run lint`, `tsc --noEmit`, `ls path/to/file`, `grep pattern file` |
+| **Manual** | UI interactions, visual checks, performance testing, edge case validation |
+
+### Validation Checklist
+
+Before finalizing any plan, verify:
+- [ ] Every phase has `### Success Criteria:` section
+- [ ] Each has `#### Automated Verification:` with runnable commands
+- [ ] Each has `#### Manual Verification:` with human testing steps
+- [ ] All items use checkbox format `- [ ]`
+- [ ] Automated checks are actual commands (not descriptions)
+- [ ] Phases with user-facing changes have optional `### QA Spec` sections (if applicable)
+
+
+ARGUMENTS: thoughts/taras/research/2026-03-20-prompt-template-registry.md --autonomy=critical
+
+---
+
+<task-notification>
+<task-id>a5fd7d14fe26e203a</task-id>
+<tool-use-id>toolu_013ftQU5Dgyb957XQQgcdHgR</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/1737807a-29e7-4cf2-9870-f5fc07b93de7/tasks/a5fd7d14fe26e203a.output</output-file>
+<status>completed</status>
+<summary>Agent "Analyze migration system and DB patterns" completed</summary>
+<result>
+
+## Analysis: Migration System, Config Scope Resolution, and Task Creation
+
+### Overview
+
+The project uses a forward-only, file-based SQL migration system backed by SQLite. Migrations are numbered `.sql` files applied sequentially on startup. The latest migration is **012**. The config system implements a three-tier scope resolution (global < agent < repo), and task creation handles complex metadata inheritance from parent/source tasks.
+
+---
+
+### 1. Migration Files
+
+**Directory:** `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/be/migrations/`
+
+All 12 migration files, in order:
+
+| # | File | Content |
+|---|------|---------|
+| 001 | `001_initial.sql` | Baseline: all tables, indexes, seed data |
+| 002 | `002_one_time_schedules.sql` | One-time schedule support |
+| 003 | `003_workflows.sql` | Workflows tables |
+| 004 | `004_workflow_source.sql` | Workflow source column |
+| 005 | `005_epic_next_steps.sql` | Epic next steps |
+| 006 | `006_vcs_provider.sql` | VCS provider support |
+| 007 | `007_task_dir.sql` | Task directory column |
+| 008 | `008_workflow_redesign.sql` | Workflow table redesign |
+| 009 | `009_tracker_integration.sql` | Tracker integration |
+| 010 | `010_step_diagnostics.sql` | Step diagnostics |
+| 011 | `011_step_next_port.sql` | Step next port |
+| 012 | `012_trigger_schema.sql` | `ALTER TABLE workflows ADD COLUMN triggerSchema TEXT;` |
+
+**The latest migration number is 012.** The next migration would be `013_<descriptive_name>.sql`.
+
+---
+
+### 2. Migration Runner (`runner.ts`)
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/be/migrations/runner.ts`
+
+The `runMigrations(db)` function at line 64 executes in five phases:
+
+#### Phase 1: Tracking Table (lines 66-73)
+Creates `_migrations` table (`CREATE TABLE IF NOT EXISTS`) with columns: `version` (integer PK), `name`, `applied_at`, `checksum`.
+
+#### Phase 2: Load Migration Files (lines 76-109)
+- Resolves the migrations directory via `import.meta.dir` (line 79). If that path is unreadable (happens in compiled Bun binaries where `import.meta.dir` resolves to `/$bunfs/root`), falls back to `process.env.MIGRATIONS_DIR` (line 84).
+- Reads all `.sql` files from the directory, sorts them alphabetically (line 97).
+- For each file: parses the version number from the numeric prefix before the first `_` (line 100), reads the SQL content, and computes a SHA-256 checksum (lines 102-103).
+
+#### Phase 3: Get Applied Migrations (lines 112-122)
+Queries `_migrations` table and builds a `Map<number, AppliedMigration>` of already-applied versions.
+
+#### Phase 4: Bootstrap Existing Databases (lines 128-153)
+This handles pre-migration-system databases. If `applied.size === 0` (no migrations recorded yet), it calls `shouldBootstrapInitialMigration(db)` (line 40). That function checks if all 18 `BASELINE_TABLES` (lines 19-38) already exist in `sqlite_master`. Two outcomes:
+
+- **All baseline tables exist** (line 52 returns `true`): The runner marks `001_initial` as applied *without executing it* (lines 133-141). The schema already exists.
+- **Tables are missing/incomplete** (returns `false`): The runner logs that the DB is incomplete (line 149) and falls through, so `001_initial` will be executed normally in Phase 5.
+
+Note: If `sqlite_master` has zero non-`_migrations` tables (line 47-48), the function returns `false` -- this is a fresh database, so 001 should run normally.
+
+#### Phase 5: Apply Pending Migrations (lines 156-187)
+Iterates all migrations in order. For each:
+
+- **Already applied:** Verifies checksum matches (lines 161-167). On mismatch, logs a warning but does not fail or re-apply.
+- **Not yet applied:** Wraps the SQL execution + `INSERT INTO _migrations` in a single `db.transaction()` (lines 175-183). This makes each migration atomic -- if the SQL fails, the tracking row is also rolled back.
+
+Performance is logged via `performance.now()` (lines 173, 185).
+
+---
+
+### 3. Config Scope Resolution (`db.ts:4845-5084`)
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/be/db.ts`
+
+#### Table Schema (from `001_initial.sql:246-258`)
+```sql
+CREATE TABLE IF NOT EXISTS swarm_config (
+    id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL CHECK(scope IN ('global', 'agent', 'repo')),
+    scopeId TEXT,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    isSecret INTEGER NOT NULL DEFAULT 0,
+    envPath TEXT,
+    description TEXT,
+    createdAt TEXT NOT NULL,
+    lastUpdatedAt TEXT NOT NULL,
+    UNIQUE(scope, scopeId, key)
+);
+```
+
+Three scopes: `global`, `agent`, `repo`. For `global` scope, `scopeId` is `NULL`. For `agent`/`repo`, `scopeId` holds the agent or repo ID.
+
+#### Row Mapping (`db.ts:4858-4871`)
+`rowToSwarmConfig()` converts the raw SQLite row (with `isSecret` as integer 0/1) into the `SwarmConfig` type (with `isSecret` as boolean).
+
+#### Secret Masking (`db.ts:4876-4878`)
+`maskSecrets()` replaces `value` with `"********"` for any entry where `isSecret` is true.
+
+#### Env File Sync (`db.ts:4884-4918`)
+`writeEnvFile()` is called after upserts when `envPath` is set. It groups configs by `envPath`, reads the existing file, finds lines starting with `KEY=`, replaces them in-place (or appends), and writes back. This keeps `.env` files in sync with DB config values.
+
+#### CRUD Operations
+
+**`getSwarmConfigs(filters?)` (lines 4923-4951):** Dynamically builds a `WHERE` clause from optional `scope`, `scopeId`, `key` filters. Returns all matching rows ordered by `key ASC`.
+
+**`getSwarmConfigById(id)` (lines 4956-4961):** Simple lookup by primary key.
+
+**`upsertSwarmConfig(data)` (lines 4966-5043):** This is the core write operation. Key detail at lines 4981-4994: it cannot rely on SQLite's `ON CONFLICT` for the `UNIQUE(scope, scopeId, key)` constraint because SQLite treats `NULL != NULL`. So for global scope (where `scopeId` is `NULL`), the uniqueness check `ON CONFLICT` never fires. Instead, it does a manual existence check:
+
+- **Global scope** (`scopeId === null`, line 4984): Uses `WHERE scope = ? AND scopeId IS NULL AND key = ?`
+- **Agent/repo scope** (`scopeId !== null`, line 4990): Uses `WHERE scope = ? AND scopeId = ? AND key = ?`
+
+If an existing row is found, it does an `UPDATE ... RETURNING *` (lines 4999-5004). Otherwise, it generates a new UUID and does an `INSERT ... RETURNING *` (lines 5006-5026). After the upsert, if the config has an `envPath`, it calls `writeEnvFile()` (lines 5034-5039).
+
+**`deleteSwarmConfig(id)` (lines 5048-5051):** Deletes by ID, returns boolean for whether a row was actually removed.
+
+#### Scope Resolution (`getResolvedConfig`, lines 5058-5084)
+
+This is the merge function. The priority order is: **repo > agent > global** (most-specific wins).
+
+The implementation uses a `Map<string, SwarmConfig>` keyed by config `key`:
+
+1. **Line 5062-5065:** Load all `global` scope configs. Each is inserted into the map by its `key`.
+2. **Lines 5068-5073:** If `agentId` is provided, load all `agent` scope configs for that agent. These overwrite any global entries with the same `key`.
+3. **Lines 5076-5081:** If `repoId` is provided, load all `repo` scope configs for that repo. These overwrite any agent or global entries with the same `key`.
+
+The final result (line 5083) is the map's values sorted alphabetically by key. Each unique key appears exactly once, with the most-specific scope's value.
+
+---
+
+### 4. Task Creation (`createTaskExtended`, `db.ts:1777-1900`)
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/be/db.ts`
+
+#### Status Determination (lines 1780-1786)
+The initial status is computed from the options via a ternary chain:
+- `offeredTo` is set --> `"offered"`
+- `agentId` is set --> `"pending"`
+- `status === "backlog"` --> `"backlog"`
+- Otherwise --> `"unassigned"`
+
+#### Metadata Inheritance (lines 1789-1820)
+Two layers of Slack/AgentMail metadata inheritance:
+
+**Parent task inheritance (lines 1789-1808):** If `parentTaskId` is provided, the function fetches the parent task and copies over five fields (`slackChannelId`, `slackThreadTs`, `slackUserId`, `agentmailInboxId`, `agentmailThreadId`) -- but only if they are not already explicitly set in `options`. This is a "fill in the blanks" pattern.
+
+**Source task inheritance (lines 1813-1820):** If `creatorAgentId` is set AND `slackChannelId` was still not filled (by explicit param or parent inheritance) AND `sourceTaskId` is set, it fetches the source task and copies its Slack metadata. The comment at line 1812 notes that `sourceTaskId` comes from the adapter's `X-Source-Task-Id` header.
+
+The priority order for Slack metadata is: **explicit params > parentTaskId > sourceTaskId**.
+
+#### Database Insert (lines 1822-1871)
+A single `INSERT ... RETURNING *` with 36 positional parameters. JSON serialization is applied to `tags` (line 1842) and `dependsOn` (line 1844). The `offeredAt` timestamp is set to `now` only if `offeredTo` is present (line 1846).
+
+#### Side Effects (lines 1875-1897)
+Two fire-and-forget operations (both wrapped in `try {} catch {}`):
+
+1. **Log entry** (lines 1876-1883): Creates an `agent_log` entry with event type `"task_offered"` or `"task_created"` depending on status.
+2. **Workflow event** (lines 1885-1897): Dynamically imports the workflow event bus and emits a `"task.created"` event with the task's core fields. The dynamic import (`import("../workflows/event-bus")`) means the workflow module is lazily loaded.
+
+---
+
+### How to Add a New Migration
+
+Based on the runner's logic:
+
+1. Create `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/be/migrations/013_<descriptive_name>.sql` (next number after 012).
+2. Write forward-only SQL. Use `IF NOT EXISTS` on `CREATE TABLE`/`CREATE INDEX` for safety.
+3. On next startup, `runMigrations()` will detect it as pending (not in `_migrations` table), execute the SQL inside a transaction, and record it in `_migrations` with a SHA-256 checksum.
+4. Test with both a fresh database (`rm agent-swarm-db.sqlite && bun run start:http`) and an existing database to verify idempotency.
+
+### Key Files
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/be/migrations/runner.ts` -- migration runner (189 lines)
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/be/migrations/012_trigger_schema.sql` -- latest migration (1 line)
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/be/migrations/001_initial.sql` -- baseline schema
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/be/db.ts` -- all config CRUD (lines 4845-5084), task creation (lines 1777-1900)</result>
+<usage><total_tokens>23211</total_tokens><tool_uses>7</tool_uses><duration_ms>86599</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/1737807a-29e7-4cf2-9870-f5fc07b93de7/tasks/a5fd7d14fe26e203a.output
+
+---
+
+<task-notification>
+<task-id>a0a75509de2e9b760</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/1737807a-29e7-4cf2-9870-f5fc07b93de7/tasks/a0a75509de2e9b760.output</output-file>
+<status>completed</status>
+<summary>Agent "Analyze HTTP route pattern and config" completed</summary>
+<result>
+
+Now I have a thorough understanding of all the patterns. Here is the analysis, Taras.
+
+---
+
+## Analysis: REST Endpoint and MCP Tool Patterns (Config as Precedent)
+
+### Overview
+
+The codebase follows two parallel patterns for exposing functionality: (1) REST endpoints defined via a `route()` factory in `src/http/` files, and (2) MCP tools defined via a `createToolRegistrar()` helper in `src/tools/` files. Both patterns share the same underlying DB functions from `src/be/db.ts` but have distinct structural conventions. The config feature (`src/http/config.ts` + `src/tools/swarm-config/`) implements both sides and serves as the canonical template.
+
+---
+
+### Pattern 1: REST Endpoints via `route()` Factory
+
+#### 1.1 Route Definition (`src/http/route-def.ts`)
+
+The `route()` factory at line 65 accepts a `RouteDef` object and returns a `RouteHandle` with two methods:
+
+- **`match(method, pathSegments)`** (line 77): Delegates to `matchRoute()` from `src/http/utils.ts:69`. Compares HTTP method (uppercased) and path segments against the route's `pattern`. The `exact` flag (default `true`) controls whether trailing segments are rejected.
+
+- **`parse(req, res, pathSegments, queryParams)`** (line 87): Extracts and validates three parts:
+  - **Path params** (line 90-98): Dynamic segments are identified by `null` entries in `pattern`. Param names are extracted from the OpenAPI-style `path` string (e.g., `{id}` in `/api/config/{id}`). Each `null` in the pattern is paired with the next param name, and the corresponding `pathSegments[i]` value is assigned.
+  - **Query params** (line 102): Parsed via `Object.fromEntries(queryParams)` and validated against the `query` Zod schema.
+  - **Body** (line 103): Read via `parseBody(req)` from `src/http/utils.ts:40` (buffers chunks, JSON.parse) and validated against the `body` Zod schema.
+  - On `ZodError`, it calls `jsonError(res, ..., 400)` at line 112-117 and returns `null`.
+
+Every call to `route()` also pushes the `RouteDef` into the global `routeRegistry` array at line 72. This registry is consumed by the OpenAPI generator.
+
+#### 1.2 Handler File Structure (`src/http/config.ts`)
+
+The config handler file follows a two-section layout:
+
+**Section 1: Route definitions** (lines 16-96) -- One `const` per route, each calling `route({...})`:
+
+| Route | Method | Path | Pattern | Key schemas |
+|-------|--------|------|---------|-------------|
+| `getResolvedConfigRoute` | GET | `/api/config/resolved` | `["api", "config", "resolved"]` | query: `{agentId?, repoId?, includeSecrets?}` |
+| `getConfigById` | GET | `/api/config/{id}` | `["api", "config", null]` | params: `{id}`, query: `{includeSecrets?}` |
+| `listConfig` | GET | `/api/config` | `["api", "config"]` | query: `{scope?, scopeId?, includeSecrets?}` |
+| `upsertConfig` | PUT | `/api/config` | `["api", "config"]` | body: `{scope, scopeId?, key, value, isSecret?, envPath?, description?}` |
+| `deleteConfig` | DELETE | `/api/config/{id}` | `["api", "config", null]` | params: `{id}` |
+
+Note that route ordering within the file matters for overlapping patterns. `getResolvedConfigRoute` (3-segment literal `"resolved"`) is checked before `getConfigById` (3-segment with `null` wildcard) at lines 106 vs 118. More specific patterns go first.
+
+**Section 2: Single exported handler function** (lines 100-191) -- `handleConfig()` with signature:
+```typescript
+(req: IncomingMessage, res: ServerResponse, pathSegments: string[], queryParams: URLSearchParams) => Promise<boolean>
+```
+
+The handler is a chain of `if` blocks, each doing:
+1. `routeHandle.match(req.method, pathSegments)` -- if no match, fall through
+2. `routeHandle.parse(req, res, pathSegments, queryParams)` -- if `null`, return `true` (parse already sent 400)
+3. Business logic using `parsed.params`, `parsed.query`, `parsed.body`
+4. Additional validation beyond Zod (e.g., scope/scopeId cross-validation at lines 149-157)
+5. Call DB function and respond with `json(res, data)` or `jsonError(res, msg, status)`
+6. Return `true`
+
+If no route matched, the function returns `false` at line 190.
+
+The response helpers `json()` and `jsonError()` are defined in `src/http/utils.ts:49-58`.
+
+#### 1.3 Handler Registration (`src/http/index.ts`)
+
+The handler is imported at line 19 and added to the ordered `handlers` array at line 106:
+
+```typescript
+() => handleConfig(req, res, pathSegments, queryParams),
+```
+
+The request loop at lines 113-115 iterates through handlers in order. The first handler to return `true` wins. If none match, a 404 is returned at lines 118-119.
+
+The handler function receives `pathSegments` and `queryParams` which are computed once at lines 87-88 via `getPathSegments()` and `parseQueryParams()` from `src/http/utils.ts`.
+
+Note that `handleCore()` at line 85 runs before the handler array -- it handles OPTIONS, health, auth, and a few other core routes. Auth (API key check) is performed there, so by the time any handler in the array runs, the request is already authenticated.
+
+#### 1.4 OpenAPI Registration (`scripts/generate-openapi.ts`)
+
+The script at line 5 imports `"../src/http/config"` as a side-effect import. This triggers the module-level `route()` calls, which push into `routeRegistry`. Then `generateOpenApiSpec()` at line 21 reads the registry and produces `openapi.json`.
+
+Adding a new handler file requires adding its import to this script (visible at lines 3-18 for all existing handlers).
+
+---
+
+### Pattern 2: MCP Tools via `createToolRegistrar()`
+
+#### 2.1 Tool Registration Helper (`src/tools/utils.ts`)
+
+`createToolRegistrar(server)` at line 95 returns a curried function that wraps `server.registerTool()`. The wrapper:
+
+1. Accepts `(name, config, callback)` where config has `title`, `description`, `inputSchema`, `outputSchema`, and `annotations`.
+2. Intercepts the MCP SDK's `meta` argument to extract `RequestInfo` via `getRequestInfo(meta)` at line 105 -- pulling `sessionId`, `agentId` (from `x-agent-id` header), and `sourceTaskId` (from `x-source-task-id` header).
+3. Injects `requestInfo` as the second argument to the callback, so each tool gets `(args, requestInfo, meta)`.
+
+#### 2.2 Tool File Structure (one tool per file)
+
+Each tool file in `src/tools/swarm-config/` exports a single `register<Name>Tool` function that takes `McpServer` and calls `createToolRegistrar(server)(...)`.
+
+The callback structure for every tool follows a consistent pattern:
+
+1. **Agent ID guard** -- Check `requestInfo.agentId`, return error if missing. This is the first thing in every callback.
+2. **try/catch block** -- All business logic inside try, with a catch that extracts `error.message`.
+3. **Dual response format** -- Every return value includes both:
+   - `content: [{ type: "text", text: "..." }]` -- human-readable text for LLM consumption
+   - `structuredContent: { success, message, ...data }` -- machine-parseable structured data
+4. **`yourAgentId`** -- Included in `structuredContent` on both success and error paths (except the missing-agent-id guard).
+
+The `annotations` field on each tool config signals intent:
+- `readOnlyHint: true` -- for get/list tools (`get-config.ts:14`, `list-config.ts:14`)
+- `idempotentHint: true` -- for set/upsert tools (`set-config.ts:14`)
+- `destructiveHint: true` -- for delete tools (`delete-config.ts:13`)
+
+#### 2.3 Tool Barrel File (`src/tools/swarm-config/index.ts`)
+
+A simple re-export barrel that exports all four `register*Tool` functions from their individual files.
+
+#### 2.4 Tool Registration in Server (`src/server.ts:137-141`)
+
+The barrel is imported at lines 55-60 and each tool is registered individually by passing `server`:
+
+```typescript
+registerSetConfigTool(server);
+registerGetConfigTool(server);
+registerListConfigTool(server);
+registerDeleteConfigTool(server);
+```
+
+These are registered in the "always registered" section (line 137 comment) -- not gated by any capability flag. Capability-gated tools use `if (hasCapability("..."))` checks visible later in the file.
+
+---
+
+### Key Structural Conventions Summary
+
+**For a new REST endpoint file (`src/http/<feature>.ts`):**
+1. Define route constants at module level using `route({...})` with method, path, pattern, summary, tags, and Zod schemas for params/query/body
+2. Export a single `handle<Feature>()` async function returning `Promise<boolean>`
+3. Chain `if` blocks: `match()` then `parse()` then business logic then `json()`/`jsonError()`
+4. Return `false` at the end if nothing matched
+5. Order specific patterns before wildcard patterns within the file
+
+**For registering the handler (`src/http/index.ts`):**
+1. Import the handler function
+2. Add a `() => handle<Feature>(req, res, pathSegments, queryParams)` entry to the `handlers` array
+
+**For OpenAPI (`scripts/generate-openapi.ts`):**
+1. Add a side-effect import of the handler file
+
+**For a new MCP tool directory (`src/tools/<feature>/`):**
+1. One file per operation (set, get, list, delete)
+2. Each exports `register<Operation>Tool = (server: McpServer) => { createToolRegistrar(server)(...) }`
+3. Barrel `index.ts` re-exports all
+4. Guard on `requestInfo.agentId` first
+5. Return both `content` (text) and `structuredContent` (typed)
+6. Set appropriate `annotations` hint
+
+**For registering tools (`src/server.ts`):**
+1. Import from the barrel
+2. Call each `register*Tool(server)` in `createServer()`
+
+---
+
+### Relevant Files
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/http/route-def.ts` -- route factory + global registry
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/http/config.ts` -- config REST handler (structural precedent)
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/http/index.ts` -- handler chain registration
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/http/utils.ts` -- matchRoute, json, jsonError, parseBody helpers
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tools/utils.ts` -- createToolRegistrar helper
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tools/swarm-config/index.ts` -- tool barrel
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tools/swarm-config/set-config.ts` -- upsert tool
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tools/swarm-config/get-config.ts` -- resolved get tool
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tools/swarm-config/list-config.ts` -- raw list tool
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tools/swarm-config/delete-config.ts` -- delete tool
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/server.ts` -- MCP server creation and tool registration (lines 105-149)
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/scripts/generate-openapi.ts` -- OpenAPI spec generation with side-effect imports</result>
+<usage><total_tokens>32263</total_tokens><tool_uses>14</tool_uses><duration_ms>94227</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/1737807a-29e7-4cf2-9870-f5fc07b93de7/tasks/a0a75509de2e9b760.output
+
+---
+
+<task-notification>
+<task-id>a1325031e25363442</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/1737807a-29e7-4cf2-9870-f5fc07b93de7/tasks/a1325031e25363442.output</output-file>
+<status>completed</status>
+<summary>Agent "Analyze existing interpolation engine" completed</summary>
+<result>
+
+Taras, here is the full analysis.
+
+---
+
+## Analysis: Workflow Interpolation Engine
+
+### Overview
+
+There are two distinct interpolation systems in the codebase. **`template.ts`** (singular) is the runtime interpolation engine used by the workflow execution engine -- it resolves `{{dot.path.tokens}}` against a nested context object and tracks unresolved tokens. **`templates.ts`** (plural) is the workflow template instantiation system -- it resolves `{{flatKey}}` tokens against a flat variables map when turning a `WorkflowTemplate` into a concrete `WorkflowDefinition`. They share the same `{{...}}` syntax but use fundamentally different resolution strategies.
+
+### Entry Points
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/workflows/template.ts:13` -- `interpolate()` function
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/workflows/template.ts:50` -- `deepInterpolate()` function
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/workflows/templates.ts:31` -- `instantiateTemplate()` function
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/workflows/templates.ts:7` -- `validateTemplateVariables()` function
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/workflows/index.ts:7-8` -- Both modules re-exported
+
+---
+
+### Core Implementation: `template.ts` (Dot-Path Engine)
+
+#### 1. `interpolate()` (`template.ts:13-32`)
+
+**Signature:**
+```typescript
+export function interpolate(template: string, ctx: Record<string, unknown>): InterpolateResult
+```
+
+**Return type** (`template.ts:8-11`):
+```typescript
+export interface InterpolateResult {
+  result: string;
+  unresolved: string[];
+}
+```
+
+**How it works:**
+
+- Uses `String.replace()` with regex `/\{\{([^}]+)\}\}/g` at line 15. This matches anything inside double-curly braces that is not a `}` character.
+- For each match, the captured group (the path string) is trimmed and split on `"."` at line 16, producing an array of keys.
+- Walks the context object one key at a time (lines 18-24). At each step:
+  - If the current `value` is `null`, `undefined`, or not an object, the path is pushed to `unresolved` and the token is replaced with `""` (empty string) -- lines 19-21.
+  - Otherwise, it descends: `value = value[key]` at line 23.
+- After walking all keys, if the final `value` is `null` or `undefined`, the path is added to `unresolved` and replaced with `""` (lines 25-28).
+- If the final value is an object, it is passed through `safeStringify()` (line 29). Otherwise, it is coerced via `String(value)`.
+
+#### 2. `safeStringify()` (`template.ts:38-44`)
+
+A private helper that wraps `JSON.stringify()` in a try/catch. On circular reference errors (or any error), returns `"[Circular]"` instead of throwing.
+
+#### 3. Unresolved Token Tracking
+
+Unresolved tokens are accumulated in a local `string[]` array (line 14). A token is considered unresolved in two cases:
+- The dot-path traversal hits a non-object (null, undefined, or primitive) before reaching the final key (lines 19-21).
+- The traversal completes but the final value is `null` or `undefined` (lines 25-27).
+
+Notably, empty string `""`, `0`, and `false` are all considered **resolved** -- only `null`/`undefined` trigger unresolved. The tests at lines 161-177 of the test file confirm this.
+
+#### 4. `deepInterpolate()` (`template.ts:50-74`)
+
+**Signature:**
+```typescript
+export function deepInterpolate(
+  value: unknown,
+  ctx: Record<string, unknown>,
+): { value: unknown; unresolved: string[] }
+```
+
+Uses a recursive `walk()` closure (lines 56-71) that:
+- **Strings**: delegates to `interpolate()`, collects unresolved tokens into `allUnresolved` (lines 57-61).
+- **Arrays**: maps each element through `walk()` (line 62).
+- **Objects** (non-null): creates a new object, walks each value (lines 63-68).
+- **Primitives** (number, boolean, null, undefined): passes through unchanged (line 70).
+
+The unresolved arrays from every string leaf are concatenated into a single flat `allUnresolved` array. The function returns both the transformed value tree and the aggregated unresolved list.
+
+---
+
+### Core Implementation: `templates.ts` (Flat-Key Engine)
+
+#### 1. `validateTemplateVariables()` (`templates.ts:7-21`)
+
+**Signature:**
+```typescript
+export function validateTemplateVariables(
+  template: WorkflowTemplate,
+  provided: Record<string, unknown>,
+): string[]
+```
+
+Iterates `template.variables` (typed as an array of `{name, description, type, default?, required}` per `WorkflowTemplateSchema` at `types.ts:670-685`). A variable is considered missing if: `required === true` AND the variable name is not a key in `provided` AND `default` is `undefined`. Returns the list of missing variable names.
+
+#### 2. `instantiateTemplate()` (`templates.ts:31-54`)
+
+**Signature:**
+```typescript
+export function instantiateTemplate(
+  template: WorkflowTemplate,
+  variables: Record<string, unknown>,
+): WorkflowDefinition
+```
+
+Three-phase process:
+1. **Validate** (line 36-39): Calls `validateTemplateVariables()`. Throws with the list of missing names if any are missing.
+2. **Resolve defaults** (lines 42-49): Builds a `resolved` map. For each declared variable, uses the provided value if present, otherwise falls back to `variable.default`. Variables with neither are simply omitted from the resolved map.
+3. **Clone and replace** (lines 52-53): Deep-clones `template.definition` via `JSON.parse(JSON.stringify(...))`, then calls `replaceVariables()`.
+
+#### 3. `replaceVariables()` (`templates.ts:59-74`)
+
+A private recursive function with the same tree-walk pattern as `deepInterpolate`:
+- Strings go to `replaceStringPlaceholders()`
+- Arrays are mapped recursively
+- Objects have each value replaced recursively
+- Primitives pass through
+
+#### 4. `replaceStringPlaceholders()` (`templates.ts:79-86`)
+
+```typescript
+function replaceStringPlaceholders(template: string, variables: Record<string, unknown>): string
+```
+
+Uses regex `/\{\{(\w+)\}\}/g` at line 80. Key differences from `template.ts`:
+- **Flat keys only**: The capture group `(\w+)` matches word characters only (no dots), so `{{user.name}}` would NOT match. This does flat `variables[name]` lookup, not dot-path resolution.
+- **Unresolved tokens are preserved**: If `variables[name]` is `undefined`, the original `{{name}}` placeholder is returned as-is (line 82: `return _match`), rather than being replaced with `""`.
+- **Object values**: JSON-stringified (line 83), same as `template.ts`.
+- **No unresolved tracking**: There is no `unresolved[]` array. Unresolved tokens silently remain in the output string.
+
+---
+
+### How They Are Wired Into the System
+
+#### Engine-level deep interpolation (`engine.ts:355-366`)
+
+The workflow engine calls `deepInterpolate(node.config, interpolationCtx)` at line 356 before passing `config` to executors. The `interpolationCtx` is built at lines 316-340:
+- If `node.inputs` is defined, a scoped context is built by resolving each declared input via dot-path traversal of the global `ctx`. Built-ins `trigger` and `input` are always included.
+- If `node.inputs` is not defined, only `trigger` and `input` are exposed.
+
+When `unresolved.length > 0` (line 359), the engine logs a warning and stores the unresolved tokens in the step's `diagnostics` JSON field (lines 360-366). Execution still proceeds -- unresolved tokens do not block execution.
+
+#### Executor-level string interpolation (`index.ts:45-49`)
+
+At initialization time (`initWorkflows()`, line 48), the `interpolate` function from `template.ts` is wrapped to discard the `unresolved` array:
+
+```typescript
+interpolate: (template, ctx) => interpolate(template, ctx).result,
+```
+
+This wrapper is injected as an `ExecutorDependencies.interpolate` method (`executors/base.ts:10`), typed as:
+```typescript
+interpolate: (template: string, ctx: Record<string, unknown>) => string;
+```
+
+Executors that need to interpolate individual string fields (beyond the pre-interpolated config) use this dependency:
+- **NotifyExecutor** (`executors/notify.ts:35`): interpolates `config.template` against the full step context.
+- **VcsExecutor** (`executors/vcs.ts:40-43`): interpolates `config.title` and `config.body`.
+- **ValidateExecutor** (`executors/validate.ts:109`): interpolates the prompt.
+- **RawLlmExecutor** (`executors/raw-llm.ts:35`): interpolates the prompt.
+
+#### Retry poller (`retry-poller.ts:63-65`)
+
+The retry poller independently calls `deepInterpolate(node.config, ctx)` when re-executing a failed step. It does not check `unresolved` -- the return value is destructured but only `value` is used.
+
+#### Template instantiation
+
+`instantiateTemplate` and `validateTemplateVariables` are exported from `workflows/index.ts:8` but have **no import consumers** in the `src/` tree today. They are exposed as public API surface but not called internally by any other module.
+
+---
+
+### Key Differences Between the Two Engines
+
+| Aspect | `template.ts` (dot-path) | `templates.ts` (flat-key) |
+|---|---|---|
+| **Regex** | `/\{\{([^}]+)\}\}/g` | `/\{\{(\w+)\}\}/g` |
+| **Path resolution** | Dot-separated traversal of nested objects | Single flat key lookup |
+| **Unresolved behavior** | Replaced with `""`, tracked in `unresolved[]` | Left as-is (`{{name}}`), not tracked |
+| **Used by** | Workflow engine + executors at runtime | Template instantiation (pre-execution) |
+| **Deep variant** | `deepInterpolate()` walks trees | `replaceVariables()` walks trees |
+| **Context shape** | Nested objects (workflow context with step outputs) | Flat `Record<string, unknown>` (template variables) |
+
+### Relevant Files
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/workflows/template.ts` -- dot-path interpolation engine
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/workflows/templates.ts` -- flat-key template instantiation
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/workflows/index.ts` -- re-exports and `initWorkflows()` wiring
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/workflows/executors/base.ts` -- `ExecutorDependencies` interface with string-only `interpolate`
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/workflows/engine.ts` (lines 315-366) -- interpolation context building and `deepInterpolate` call site
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/workflows/retry-poller.ts` (lines 63-65) -- retry-time `deepInterpolate` call
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/types.ts` (lines 670-686) -- `WorkflowTemplateSchema` / `WorkflowTemplate` type
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/tests/workflow-template.test.ts` -- comprehensive test coverage for both functions</result>
+<usage><total_tokens>29647</total_tokens><tool_uses>17</tool_uses><duration_ms>102547</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/1737807a-29e7-4cf2-9870-f5fc07b93de7/tasks/a1325031e25363442.output
+
+---
+
+<task-notification>
+<task-id>a667cfb39c9f03ba5</task-id>
+<tool-use-id>toolu_01BtZmpcQcAyua6Mc6CKhhPk</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/1737807a-29e7-4cf2-9870-f5fc07b93de7/tasks/a667cfb39c9f03ba5.output</output-file>
+<status>completed</status>
+<summary>Agent "Analyze GitHub handler structure" completed</summary>
+<result>
+
+Now I have all the information needed. Here is the full analysis.
+
+---
+
+## Analysis: GitHub Event Handlers -- Task Description Assembly and Creation
+
+### Overview
+
+`src/github/handlers.ts` contains seven exported handler functions that convert GitHub webhook events into agent tasks. Each handler follows an identical pattern: validate the event, deduplicate, find a lead agent, build a plaintext task description string by interpolating event data with hardcoded instruction constants, then persist via `createTaskExtended()` with structured VCS metadata.
+
+### Entry Points
+
+All seven exported handlers share the same signature pattern:
+
+```typescript
+export async function handleXxx(event: XxxEvent): Promise<{ created: boolean; taskId?: string }>
+```
+
+- `handlePullRequest` -- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/github/handlers.ts:74`
+- `handleIssue` -- `:376`
+- `handleComment` -- `:509` (takes an additional `eventType` parameter)
+- `handlePullRequestReview` -- `:606`
+- `handleCheckRun` -- `:715`
+- `handleCheckSuite` -- `:793`
+- `handleWorkflowRun` -- `:870`
+
+### Core Implementation
+
+#### 1. DELEGATION_INSTRUCTION and getCommandSuggestions() (lines 19-38)
+
+**`DELEGATION_INSTRUCTION`** (line 19-20) is a static string constant:
+
+```
+"⚠️ As lead, DELEGATE this task to a worker agent - do not tackle it yourself."
+```
+
+Every task-creating handler appends this verbatim into the task description. It is always present -- there is no conditional logic around it.
+
+**`getCommandSuggestions(taskType, targetType?)`** (lines 25-38) maps the `taskType` string to a hardcoded suggestion line:
+
+| taskType | targetType | Output |
+|---|---|---|
+| `"github-pr"` | (ignored) | `"💡 Suggested: /review-pr or /respond-github"` |
+| `"github-issue"` | (ignored) | `"💡 Suggested: /implement-issue or /respond-github"` |
+| `"github-comment"` | `"PR"` | `"💡 Suggested: /respond-github or /review-pr"` |
+| `"github-comment"` | other | `"💡 Suggested: /respond-github"` |
+| anything else | | `""` |
+
+This function is only called by `handlePullRequest`, `handleIssue`, and `handleComment`. The review/CI handlers produce their own inline suggestion strings instead.
+
+#### 2. Common Handler Pattern (all handlers)
+
+Every handler follows this sequence:
+
+1. **Guard on action** -- e.g., `action !== "submitted"` at line 613, `action !== "created"` at line 516
+2. **Bot relevance check** -- e.g., `isBotAssignee()` or `detectMention()` or `findTaskByVcs()`
+3. **Deduplication** -- `isDuplicate(eventKey)` using a 60-second in-memory TTL cache (lines 14-56)
+4. **Find existing related task** -- `findTaskByVcs(repo, number)` when applicable
+5. **Find lead agent** -- `findLeadAgent()` at line 62-69 (prefers online lead, falls back to any lead, or null)
+6. **Build task description** -- string template interpolation
+7. **Call `createTaskExtended()`** -- with description string + metadata object
+8. **Acknowledge via reaction** -- `addIssueReaction()` or `addReaction()` when `installation.id` is available
+9. **Return** `{ created: true, taskId }` or `{ created: false }`
+
+#### 3. Task Description Assembly -- PR Review Submitted (lines 641-653)
+
+This is a representative example of how every handler builds its prompt. The `handlePullRequestReview` handler at line 606:
+
+**Step 1: Gather contextual info** (line 642)
+- Calls `getReviewStateInfo(review.state)` (lines 582-594) which returns `{ emoji, label }` -- e.g. `{ emoji: "✅", label: "APPROVED" }` for `"approved"`
+
+**Step 2: Build conditional fragments** (lines 645-651)
+- `reviewBody`: includes the review body text if present, otherwise empty string
+- `suggestions`: a ternary chain producing one of three hardcoded suggestion strings based on `review.state` (approved/changes_requested/other)
+
+**Step 3: Assemble the full description** (line 653)
+
+The entire prompt is a single template literal. Its structure:
+
+```
+{emoji} [GitHub PR #{number} Review] {label}
+
+PR: {title}
+Reviewer: {sender.login}
+Repo: {repository.full_name}
+URL: {review.html_url}{reviewBody}
+
+---
+{if existingTask: "Related task: {id}\n🔀 Consider routing to the same agent working on the related task.\n"}
+⚠️ As lead, DELEGATE this task to a worker agent - do not tackle it yourself.
+{suggestions}
+```
+
+Key observations about the template:
+- The header line combines emoji + bracketed section identifier + label
+- There is a metadata block (PR title, reviewer, repo, URL)
+- A `---` separator divides metadata from instructions
+- The "related task" routing hint is conditional on `existingTask` (found at line 630 via `findTaskByVcs`)
+- `DELEGATION_INSTRUCTION` is always appended after the separator
+- Suggestions are the last line
+
+#### 4. How createTaskExtended() Is Called (line 656-666)
+
+```typescript
+const task = createTaskExtended(taskDescription, {
+  agentId: lead?.id ?? "",
+  source: "github",
+  vcsProvider: "github",
+  taskType: "github-review",
+  vcsRepo: repository.full_name,
+  vcsEventType: "pull_request_review",
+  vcsNumber: pr.number,
+  vcsAuthor: sender.login,
+  vcsUrl: review.html_url,
+});
+```
+
+The first argument is always the full description string. The second is a `CreateTaskOptions` object (defined at `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/be/db.ts:1707-1740`).
+
+**Fields consistently used by GitHub handlers:**
+
+| Field | Value pattern | Purpose |
+|---|---|---|
+| `agentId` | `lead?.id ?? ""` | Assigns to lead agent; empty string if no lead |
+| `source` | Always `"github"` | Marks task origin (one of the `AgentTaskSource` enum values) |
+| `vcsProvider` | Always `"github"` | VCS provider identifier |
+| `taskType` | Varies per handler | Distinguishes event kind |
+| `vcsRepo` | `repository.full_name` | e.g. `"org/repo"` |
+| `vcsEventType` | Matches webhook event name | e.g. `"pull_request_review"`, `"issues"`, `"check_run"` |
+| `vcsNumber` | PR or issue number | Used for `findTaskByVcs` lookups |
+| `vcsAuthor` | `sender.login` | GitHub username who triggered the event |
+| `vcsUrl` | URL to the specific resource | Review URL, comment URL, PR URL, etc. |
+| `vcsCommentId` | Only in `handleComment` (line 558) | The comment ID for comment events |
+
+**Fields NOT used by GitHub handlers:** `creatorAgentId`, `tags`, `priority`, `dependsOn`, `offeredTo`, `slackChannelId`, `slackThreadTs`, `slackUserId`, `parentTaskId`, `model`, `scheduleId`, `workflowRunId`, `workflowRunStepId`, `epicId`, `dir`, `agentmail*`, `mention*`, `sourceTaskId`.
+
+#### 5. Inside createTaskExtended() (db.ts:1777-1900)
+
+The function at `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/be/db.ts:1777`:
+
+1. Generates a UUID for the task (line 1778)
+2. Determines initial status (line 1780-1786): for GitHub tasks, `agentId` is `lead?.id ?? ""` -- when a lead exists, status becomes `"pending"`; when empty string, the truthiness check fails and it falls to `"unassigned"` (since no `offeredTo` or `status: "backlog"` is passed)
+3. Parent task metadata inheritance (lines 1789-1808): not exercised by GitHub handlers since they never pass `parentTaskId`
+4. Source task Slack inheritance (lines 1813-1820): also not exercised
+5. Inserts a single row into `agent_tasks` with all 36 columns (lines 1822-1871)
+6. Creates a log entry of type `"task_created"` (lines 1875-1883)
+7. Emits a `"task.created"` event on the workflow event bus (lines 1885-1897)
+8. Returns the created `AgentTask` via `rowToAgentTask(row)` (line 1899)
+
+#### 6. taskType Values Used Across Handlers
+
+| Handler | taskType |
+|---|---|
+| `handlePullRequest` (assigned/review_requested/mention) | `"github-pr"` |
+| `handlePullRequest` (closed/merged) | `"github-pr-status"` |
+| `handlePullRequest` (synchronize) | `"github-pr-update"` |
+| `handleIssue` | `"github-issue"` |
+| `handleComment` | `"github-comment"` |
+| `handlePullRequestReview` | `"github-review"` |
+| `handleCheckRun` | `"github-ci"` |
+| `handleCheckSuite` | `"github-ci"` |
+| `handleWorkflowRun` | `"github-ci"` |
+
+### Data Flow
+
+1. GitHub webhook arrives (routed by code outside this file)
+2. Typed event object is passed to the appropriate handler (e.g., `handlePullRequestReview(event)`)
+3. Handler destructures event payload fields at the top of the function
+4. Guard clauses filter irrelevant actions/states
+5. `findTaskByVcs()` (db.ts:936-947) queries `agent_tasks` for an active task matching the repo+number
+6. `findLeadAgent()` (handlers.ts:62-69) queries `getAllAgents()` for a lead agent
+7. Task description assembled as a template literal string -- all prompt text is inline
+8. `createTaskExtended(description, metadata)` persists to SQLite and emits events
+9. Optional reaction added to the GitHub entity via the GitHub API
+10. Handler returns `{ created: true, taskId }` to caller
+
+### Key Patterns
+
+- **Prompt-as-string**: Every task description is a single template literal with no abstraction layer. The "prompt" to the agent is the `task` column in the database -- a flat string mixing structured metadata (PR number, repo, URL) with behavioral instructions (DELEGATION_INSTRUCTION, suggestions).
+- **Two-layer metadata**: Event information exists in two places simultaneously: embedded in the human-readable `taskDescription` string AND as structured fields in the `CreateTaskOptions` metadata object. The description is what agents read; the metadata enables programmatic queries like `findTaskByVcs`.
+- **Conditional sections**: Some handlers conditionally inject a "Related task" routing hint when `existingTask` is found (review handler at line 653, comment handler at line 547, CI handlers). Others never have this section (PR opened, issue opened).
+- **Suggestion variance**: `getCommandSuggestions()` covers PR/issue/comment types. Review and CI handlers produce their own inline suggestion text directly in the template literal rather than calling this function.
+- **Uniform VCS metadata shape**: All GitHub handlers pass the same core set of VCS fields (`vcsProvider`, `vcsRepo`, `vcsEventType`, `vcsNumber`, `vcsAuthor`, `vcsUrl`) plus `source: "github"`. The only variance is `vcsCommentId` (comment handler only) and `vcsAuthor` being empty string for CI handlers.
+
+### Relevant Files
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/github/handlers.ts` -- All handler functions, DELEGATION_INSTRUCTION, getCommandSuggestions()
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/be/db.ts` -- `CreateTaskOptions` interface (line 1707), `createTaskExtended()` (line 1777), `findTaskByVcs()` (line 936)
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/types.ts` -- `AgentTaskSourceSchema` (line 56), includes `"github"` as a valid source value
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/github/mentions.ts` -- `detectMention()`, `extractMentionContext()`, `GITHUB_BOT_NAME`, `isBotAssignee()`
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/github/reactions.ts` -- `addIssueReaction()`, `addReaction()`</result>
+<usage><total_tokens>33416</total_tokens><tool_uses>16</tool_uses><duration_ms>114194</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/1737807a-29e7-4cf2-9870-f5fc07b93de7/tasks/a667cfb39c9f03ba5.output
+
+---
+
+<task-notification>
+<task-id>a7f09a589b22c3f8f</task-id>
+<tool-use-id>toolu_01Y1cx1XzrLmmtWDaMTNYd92</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/1737807a-29e7-4cf2-9870-f5fc07b93de7/tasks/a7f09a589b22c3f8f.output</output-file>
+<status>completed</status>
+<summary>Agent "Find plan template file" completed</summary>
+<result>Perfect! I found the planning template files. The latest version is in the v1.8.0 cache directory. Here's the exact path:
+
+**`/Users/taras/.claude/plugins/cache/desplega-ai-toolbox/desplega/1.8.0/skills/planning/template.md`**
+
+There are also older versions available:
+- v1.7.0: `/Users/taras/.claude/plugins/cache/desplega-ai-toolbox/desplega/1.7.0/skills/planning/template.md`
+- v1.6.0: `/Users/taras/.claude/plugins/cache/desplega-ai-toolbox/desplega/1.6.0/skills/planning/template.md`
+- v1.5.1: `/Users/taras/.claude/plugins/cache/desplega-ai-toolbox/desplega/1.5.1/skills/planning/template.md`
+
+The current active version is **1.8.0**.</result>
+<usage><total_tokens>55108</total_tokens><tool_uses>4</tool_uses><duration_ms>131506</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/1737807a-29e7-4cf2-9870-f5fc07b93de7/tasks/a7f09a589b22c3f8f.output
+
+---
+
+<task-notification>
+<task-id>bbbjmtb12</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/1737807a-29e7-4cf2-9870-f5fc07b93de7/tasks/bbbjmtb12.output</output-file>
+<status>killed</status>
+<summary>Background command "Find planning-related plugin/skill directories" was stopped</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/1737807a-29e7-4cf2-9870-f5fc07b93de7/tasks/bbbjmtb12.output
+
+---
+
+<task-notification>
+<task-id>bgnhbdw0m</task-id>
+<tool-use-id>toolu_01RpjMUYzwDp6EarU2t661sC</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/1737807a-29e7-4cf2-9870-f5fc07b93de7/tasks/bgnhbdw0m.output</output-file>
+<status>completed</status>
+<summary>Background command "Open plan in file-review GUI for inline comments" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/1737807a-29e7-4cf2-9870-f5fc07b93de7/tasks/bgnhbdw0m.output
+
+---
+
+Base directory for this skill: /Users/taras/.claude/plugins/cache/desplega-ai-toolbox/desplega/1.8.0/skills/reviewing
+
+# Reviewing
+
+You are performing a structured critique of a document (research, plan, or brainstorm) to identify gaps, weaknesses, and quality issues.
+
+## Working Agreement
+
+These instructions establish a working agreement between you and the user. The key principles are:
+
+1. **AskUserQuestion is your primary communication tool** - Whenever you need to ask the user anything (clarifications, preferences, decisions), use the **AskUserQuestion tool**. Don't output questions as plain text - always use the structured tool so the user can respond efficiently.
+
+2. **Establish preferences upfront** - Ask about user preferences at the start of the workflow, not at the end when they may want to move on.
+
+3. **Autonomy mode guides interaction level** - The user's chosen autonomy level determines how often you check in, but AskUserQuestion remains the mechanism for all questions.
+
+### User Preferences
+
+Before starting review (unless autonomy is Autopilot), establish these preferences:
+
+**Output Mode** - Use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "How should I present the review findings?" | 1. Append errata section to the document (Recommended), 2. Write a separate review file to thoughts/*/reviews/ |
+
+**File Review Preference** - Check if the `file-review` plugin is available (look for `file-review:file-review` in available commands).
+
+If file-review plugin is installed, use **AskUserQuestion** with:
+
+| Question | Options |
+|----------|---------|
+| "Would you like to use file-review for inline feedback after the automated review?" | 1. Yes, open file-review after review (Recommended), 2. No, the automated review is sufficient |
+
+Store these preferences and act on them during the review process.
+
+## When to Use
+
+This skill activates when:
+- User invokes `/review` command
+- Another skill references the reviewing skill at completion
+- User asks to review, critique, or check a document
+
+## Autonomy Mode
+
+At the start of review, adapt your interaction level based on the autonomy mode:
+
+| Mode | Behavior |
+|------|----------|
+| **Autopilot** | Run full review, auto-fix minor issues, present summary at end |
+| **Critical** (Default) | Ask about Critical/Important findings, auto-fix Minor ones |
+| **Verbose** | Walk through each finding, confirm before any changes |
+
+The autonomy mode is passed by the invoking command. If not specified, default to **Critical**.
+
+## Process Steps
+
+### Step 1: Read & Classify
+
+Read the input document fully. Determine the document type from its path and content structure:
+
+| Path contains | Type |
+|---------------|------|
+| `/research/` | Research document |
+| `/plans/` | Plan |
+| `/brainstorms/` | Brainstorm |
+| `/qa/` | QA report |
+
+If the type is ambiguous, infer from content structure or use **AskUserQuestion** to clarify.
+
+### Step 2: Structural Check
+
+Verify required sections exist based on document type:
+
+**Research documents:**
+- YAML frontmatter with required fields (date, researcher, topic, status)
+- Research Question section
+- Summary section
+- Detailed Findings with file:line references
+- Code References table
+- Open Questions section
+
+**Plans:**
+- YAML frontmatter with required fields (date, planner, topic, status)
+- Overview section
+- Current State Analysis
+- Desired End State with Key Discoveries
+- What We're NOT Doing
+- Phases with Changes Required and Success Criteria (both Automated and Manual Verification)
+- Quick Verification Reference
+
+**Brainstorms:**
+- YAML frontmatter with required fields (date, author, topic, status)
+- Context section
+- Exploration section with Q&A pairs
+- Synthesis section
+- Next Steps section
+
+**QA reports:**
+- YAML frontmatter with required fields (date, author, topic, status)
+- Context section
+- Scope section (In Scope / Out of Scope)
+- Test Cases with Steps, Expected, Actual, Status per case
+- Evidence section (Screenshots, Videos, Logs, or External Links)
+- Verdict section with overall status and summary
+
+### Step 3: Content Analysis
+
+Apply type-specific quality criteria:
+
+**Research documents:**
+- Are findings supported by specific file:line references?
+- Are there claims without evidence from the codebase?
+- Are there obvious areas that weren't investigated?
+- Are open questions actually open (not answerable from the findings)?
+
+**Plans:**
+- Are there missing phases or gaps in the implementation sequence?
+- Are success criteria specific enough to be actionable?
+- Are there unstated assumptions about the codebase?
+- Is error handling or rollback addressed?
+- Is there scope creep risk (doing more than stated)?
+
+**Brainstorms:**
+- Were important angles left unexplored?
+- Were conclusions reached prematurely before sufficient exploration?
+- Are constraints and requirements clearly identified?
+- Is the document ready to feed into research or planning?
+
+**QA reports:**
+- Does every test case have an actual result and status?
+- Is evidence provided for failures (screenshots, logs)?
+- Is the verdict consistent with individual test case results?
+- Are edge cases and exploratory testing documented?
+- Are external references (Sentry, PRs, CI) linked where relevant?
+
+### Step 4: Gap Identification
+
+Look for what's missing or assumed:
+- Cross-reference claims against the codebase if needed (spawn **codebase-analyzer** agent for verification)
+- Identify unstated assumptions
+- Check for internal contradictions
+- Verify external references are still valid
+
+### Step 5: Present Findings
+
+Categorize all findings into three severity levels:
+
+| Severity | Meaning | Action |
+|----------|---------|--------|
+| **Critical** | Blocks correctness or completeness — must be addressed | Discuss with user |
+| **Important** | Significant gap or weakness — should be addressed | Discuss with user (or auto-fix in Autopilot) |
+| **Minor** | Formatting, typos, small inconsistencies | Auto-fix unless Verbose mode |
+
+Present a summary as text output with findings grouped by severity.
+
+### Step 6: Apply or Discuss
+
+Based on output mode preference:
+
+**If "Append errata":**
+- Auto-fix Minor issues directly in the document
+- For Critical/Important items, append a `## Review Errata` section at the end of the document with:
+  ```
+  ## Review Errata
+
+  _Reviewed: YYYY-MM-DD by [reviewer]_
+
+  ### Critical
+  - [ ] [Finding description and recommended action]
+
+  ### Important
+  - [ ] [Finding description and recommended action]
+
+  ### Resolved
+  - [x] [Minor issue] — auto-fixed
+  ```
+
+**If "Separate file":**
+- Write review to `thoughts/*/reviews/YYYY-MM-DD-review-of-<original-slug>.md`
+- Include all findings with references back to the original document
+
+### Step 7: Workflow Handoff
+
+After the review is complete, determine the document type (from frontmatter, file path, or content) and propose the appropriate next step.
+
+Use **AskUserQuestion** with context-dependent options:
+
+**If reviewing a brainstorm document:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this brainstorm?" | 1. Start research (→ `/research`), 2. Create a plan directly (→ `/create-plan`), 3. Done for now |
+
+**If reviewing a research document:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this research?" | 1. Create a plan (→ `/create-plan`), 2. Done for now |
+
+**If reviewing a plan document:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this plan?" | 1. Start implementation (→ `/implement-plan`), 2. Done for now |
+
+**If reviewing a post-implementation verification:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next?" | 1. Done — mark as complete, 2. Address remaining items |
+
+**If reviewing a QA report:**
+
+| Question | Options |
+|----------|---------|
+| "Review complete. What's next for this QA report?" | 1. Run post-QA verification (→ `/verify-plan`), 2. Address issues found, 3. Done |
+
+**If document type is unclear**, ask a generic question:
+
+| Question | Options |
+|----------|---------|
+| "Review complete. Would you like to proceed to the next workflow step?" | 1. Yes, suggest next step, 2. Done for now |
+
+## Learning Capture
+
+**OPTIONAL SUB-SKILL:** If significant insights, patterns, gotchas, or decisions emerged during this workflow, consider using `desplega:learning` to capture them via `/learning capture`. Focus on learnings that would help someone else in a future session.
+
+## No Rewriting Rule
+
+**CRITICAL**: The reviewer identifies issues — the reviewer does NOT rewrite the document. Present findings and let the original author address them. The only exception is Minor auto-fixes (typos, formatting).
+
+## Review Integration
+
+If the `file-review` plugin is available and the user selected "Yes" during User Preferences setup:
+- After the automated review, invoke `/file-review:file-review <path>` for inline human comments
+- Process feedback with `file-review:process-review` skill
+- If user selected "No" or autonomy mode is Autopilot, skip this step
+
+
+ARGUMENTS: thoughts/taras/plans/2026-03-20-prompt-template-registry.md
+
+---
+
+<task-notification>
+<task-id>aa042c36b679c636b</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/1737807a-29e7-4cf2-9870-f5fc07b93de7/tasks/aa042c36b679c636b.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify plan assumptions against code" completed</summary>
+<result>
+
+I now have all the information needed to answer all four questions. Here is the analysis.
+
+---
+
+## Analysis: Four Codebase Assumptions Verified
+
+### 1. `handlePullRequest` Structure -- Sequential if-blocks, not sub-functions
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/github/handlers.ts`
+
+`handlePullRequest` (lines 74-371) is structured as a **sequential chain of `if (action === "...")` blocks** with early returns -- not an if/else chain, and not separate sub-functions. Each action is handled inline within the single function body. The dispatch order is:
+
+1. **`"assigned"`** (line 88) -- checks `isBotAssignee`, deduplicates, creates task, returns
+2. **`"unassigned"`** (line 135) -- checks `isBotAssignee`, finds+cancels task via `failTask`, returns
+3. **`"review_requested"`** (line 159) -- checks `isBotAssignee`, deduplicates, checks for existing task (`findTaskByVcs`), creates review task, returns
+4. **`"review_request_removed"`** (line 215) -- checks `isBotAssignee`, finds+cancels task, returns
+5. **`"closed"`** (line 241) -- finds related task via `findTaskByVcs`, deduplicates, creates a status-notification task (`github-pr-status`), returns
+6. **`"synchronize"`** (line 283) -- finds related task, deduplicates using SHA in key, creates update-notification task (`github-pr-update`), returns
+7. **Fallthrough for `"opened"` / `"edited"`** (line 320) -- a guard `if (action !== "opened" && action !== "edited") return` acts as the catch-all exit. The remaining code (lines 324-371) handles the mention-based flow: checks `detectMention` on title/body, deduplicates, creates task.
+
+There are no sub-function calls for the per-action logic. All task creation calls `createTaskExtended` directly inline. Shared helpers used across actions are `isDuplicate` (line 40), `findLeadAgent` (line 62), `getCommandSuggestions` (line 25), and `isBotAssignee` (imported from `./mentions`).
+
+---
+
+### 2. Startup Sequence -- `initDb` and what follows
+
+**Entry point:** `src/http.ts` (line 1) is just `import "./http/index"`.
+
+**`src/server.ts:108`** -- `initDb(process.env.DATABASE_PATH)` is called inside `createServer()` at line 108. The `createServer()` function is the MCP server factory. But for the HTTP server path, the startup lives in `src/http/index.ts`.
+
+**`src/http/index.ts`** -- The HTTP server startup sequence:
+
+The `createServer()` call from `src/server.ts` is imported indirectly. The actual `initDb()` call happens inside `createServer()` at `src/server.ts:108`. The HTTP handler chain at `src/http/index.ts:55` creates the raw `node:http` server and sets up routing.
+
+The `.listen()` callback at **line 165** runs the post-startup sequence:
+
+1. **Line 171:** `loadGlobalConfigsIntoEnv(false)` -- reads all global-scope `swarm_config` rows from DB via `getResolvedConfig()` and sets them as `process.env` keys (only filling in keys not already set by infrastructure env vars).
+2. **Line 180:** `startSlackApp()` -- starts Slack bot
+3. **Line 183:** `initGitHub()` -- initializes GitHub webhook handler
+4. **Line 186:** `initGitLab()` -- initializes GitLab webhook handler
+5. **Line 189:** `initAgentMail()` -- initializes AgentMail webhook handler
+6. **Line 192:** `initLinear()` -- initializes Linear tracker integration
+7. **Line 195:** `initWorkflows()` -- initializes workflow engine (trigger subscriptions + resume listener)
+8. **Lines 198-202:** conditionally starts the scheduler (if `"scheduling"` capability enabled)
+9. **Lines 205-209:** conditionally starts heartbeat triage (unless `HEARTBEAT_DISABLE=true`)
+
+Inside `initDb()` itself (`src/be/db.ts:50-68`), the internal sequence is:
+- Line 55: creates/opens the SQLite database
+- Line 61: `PRAGMA journal_mode = WAL`
+- Line 62: `PRAGMA foreign_keys = ON`
+- Line 65: `runMigrations(database)` -- applies pending SQL migrations
+- Line 68: `ensureAgentProfileColumns(database)` -- legacy compatibility guard
+- Lines 73-100+: inline migration to remove restrictive CHECK constraint on `agent_tasks.status`
+
+---
+
+### 3. In-Memory Caching Patterns
+
+**`getResolvedConfig()` does NOT cache.** At `src/be/db.ts:5058-5084`, every call executes fresh SQL queries via `getSwarmConfigs()` for each scope (global, agent, repo) and builds a new `Map` from scratch. No memoization, no TTL, no stale-while-revalidate. Pure DB read every time.
+
+However, the codebase does have several **other** in-memory caching patterns using `Map`:
+
+| Cache | File:Line | Pattern |
+|-------|-----------|---------|
+| **GitHub installation token cache** | `src/github/app.ts:7` | `Map<number, {token, expiresAt}>` -- TTL-based (checks `expiresAt` at line 191). Cleared on `resetGitHub()` (line 24). |
+| **GitHub event dedup cache** | `src/github/handlers.ts:15` | `Map<string, number>` -- 60-second TTL (`EVENT_TTL = 60_000`). Cleaned on each `isDuplicate()` call (lines 43-48). |
+| **GitLab event dedup cache** | `src/gitlab/handlers.ts:17` | Same pattern as GitHub dedup -- `Map<string, number>` with 60s TTL. |
+| **AgentMail event dedup cache** | `src/agentmail/handlers.ts:42` | Same pattern -- `Map<string, number>` with TTL-based cleanup. |
+| **Linear delivery dedup** | `src/linear/webhook.ts:10` | `Map<string, number>` -- `recentDeliveries` with timestamp-based dedup. |
+| **Slack user email cache** | `src/slack/handlers.ts:33` | `Map<string, string\|null>` -- no TTL, grows unbounded. Used to avoid repeated Slack API calls for email lookups. |
+| **Slack user name cache** | `src/slack/handlers.ts:160` | `Map<string, string>` -- no TTL, grows unbounded. `getUserDisplayName()` checks cache first at line 163 before calling `client.users.info`. |
+| **Slack rate limit map** | `src/slack/handlers.ts:282` | `Map<string, number>` -- tracks timestamps for rate limiting. |
+| **Slack watcher caches** | `src/slack/watcher.ts:14-28` | Multiple Maps -- `notifiedCompletions`, `sentProgress`, `lastSendTime`, `taskMessages`. |
+| **Slack thread buffer** | `src/slack/thread-buffer.ts:24` | `Map<string, BufferedThread>` -- buffers messages per thread. |
+| **OAuth pending states** | `src/oauth/wrapper.ts:27` | `Map<string, PendingState>` -- tracks in-flight OAuth flows. |
+
+The dominant caching pattern is `Map<string, number>` with a TTL constant and manual cleanup on each lookup (the dedup caches). The Slack caches are unbounded/permanent for the lifetime of the process.
+
+---
+
+### 4. GitHub Webhook Event Routing
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/http/webhooks.ts`
+
+The routing works in two layers:
+
+**Layer 1 -- HTTP route matching** (`src/http/index.ts:98`): The `handleWebhooks` function is registered in the handler chain. When a request comes in, the chain iterates at lines 113-115 until a handler returns `true`.
+
+**Layer 2 -- Event type dispatch** (`src/http/webhooks.ts:93-233`): Inside `handleWebhooks`, the GitHub path is matched at line 99 via `githubWebhook.match(req.method, pathSegments)` which checks against the pattern `["api", "github", "webhook"]`.
+
+The actual event routing uses a **`switch` statement on the `x-github-event` header** (lines 144-171):
+
+```
+const eventType = req.headers["x-github-event"]   // line 106
+```
+
+Before the switch, the function:
+1. Checks `isGitHubEnabled()` (line 100)
+2. Reads the raw body for signature verification (lines 109-113)
+3. Calls `verifyWebhookSignature(rawBody, signature)` (line 115)
+4. Handles the `"ping"` event as a special case (line 123)
+5. Parses JSON (line 132)
+
+The switch at lines 144-171 dispatches to:
+
+| `x-github-event` value | Handler called | Line |
+|------------------------|----------------|------|
+| `"pull_request"` | `handlePullRequest(body as PullRequestEvent)` | 146 |
+| `"issues"` | `handleIssue(body as IssueEvent)` | 149 |
+| `"issue_comment"` | `handleComment(body, "issue_comment")` | 152 |
+| `"pull_request_review_comment"` | `handleComment(body, "pull_request_review_comment")` | 155 |
+| `"pull_request_review"` | `handlePullRequestReview(body as PullRequestReviewEvent)` | 158 |
+| `"check_run"` | `handleCheckRun(body as CheckRunEvent)` | 161 |
+| `"check_suite"` | `handleCheckSuite(body as CheckSuiteEvent)` | 164 |
+| `"workflow_run"` | `handleWorkflowRun(body as WorkflowRunEvent)` | 167 |
+| default | logs "Ignoring unsupported event type" | 170 |
+
+After the handler switch completes, a **second switch** at lines 174-219 emits workflow trigger events on the `workflowEventBus` for `pull_request`, `issues`, `issue_comment`, and `pull_request_review` event types. This is separate from the task-creation handlers above -- it feeds the workflow engine's trigger subscription system.
+
+All handler functions are imported from `src/github/handlers.ts` via the barrel export at `src/github/index.ts`.
+
+---
+
+### Key Files Referenced
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/github/handlers.ts` -- PR/issue/comment/review/CI handler implementations
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/github/index.ts` -- barrel re-exports
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/github/app.ts` -- GitHub init, token cache, signature verification
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/http/index.ts` -- HTTP server, handler chain, startup sequence
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/http/webhooks.ts` -- webhook route handler with event-type switch dispatch
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/http/core.ts` -- `loadGlobalConfigsIntoEnv`, reload-config endpoint
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/http/config.ts` -- config CRUD REST endpoints
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/http.ts` -- single-line entry point importing `./http/index`
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/server.ts` -- `createServer()` with `initDb` call, capability system
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/be/db.ts` -- `initDb()`, `getResolvedConfig()`, migration bootstrap
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/slack/handlers.ts` -- Slack user email/name caches</result>
+<usage><total_tokens>51945</total_tokens><tool_uses>22</tool_uses><duration_ms>120304</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/1737807a-29e7-4cf2-9870-f5fc07b93de7/tasks/aa042c36b679c636b.output
+
+---
+
+[Request interrupted by user]
