@@ -1,7 +1,7 @@
 ---
 date: 2026-03-20
 author: Claude
-status: in-progress
+status: completed
 autonomy: critical
 branch: fet/template-registry
 research: thoughts/taras/research/2026-03-20-prompt-template-registry.md
