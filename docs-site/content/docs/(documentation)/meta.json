@@ -1,0 +1,19 @@
+{
+  "title": "Documentation",
+  "description": "Guides, concepts, and reference for Agent Swarm",
+  "root": true,
+  "pages": [
+    "index",
+    "getting-started",
+    "---Architecture---",
+    "architecture",
+    "---Concepts---",
+    "concepts",
+    "---Guides---",
+    "guides",
+    "---Reference---",
+    "reference",
+    "---Community---",
+    "contributing"
+  ]
+}
