@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "b89b30875def",
+  "strategy": "manual-commit",
+  "branch": "refactor/2026-03-20-workflows",
+  "checkpoints_count": 9,
+  "files_touched": [
+    "thoughts/taras/plans/2026-03-20-workflow-structured-output-validation-workspace.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/b8/9b30875def/0/metadata.json",
+      "transcript": "/b8/9b30875def/0/full.jsonl",
+      "context": "/b8/9b30875def/0/context.md",
+      "content_hash": "/b8/9b30875def/0/content_hash.txt",
+      "prompt": "/b8/9b30875def/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 422,
+    "cache_creation_tokens": 770516,
+    "cache_read_tokens": 38400876,
+    "output_tokens": 71404,
+    "api_call_count": 209
+  }
+}

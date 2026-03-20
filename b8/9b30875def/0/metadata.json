@@ -1,0 +1,30 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "b89b30875def",
+  "session_id": "d669fe24-717a-4623-b5f0-3898a2f6d28b",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-20T20:06:29.148814Z",
+  "branch": "refactor/2026-03-20-workflows",
+  "checkpoints_count": 9,
+  "files_touched": [
+    "thoughts/taras/plans/2026-03-20-workflow-structured-output-validation-workspace.md"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "f56cffb15e2b",
+  "token_usage": {
+    "input_tokens": 422,
+    "cache_creation_tokens": 770516,
+    "cache_read_tokens": 38400876,
+    "output_tokens": 71404,
+    "api_call_count": 209
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-20T20:06:27.566808Z",
+    "agent_lines": 139,
+    "human_added": 118,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 257,
+    "agent_percentage": 54.08560311284047
+  }
+}
