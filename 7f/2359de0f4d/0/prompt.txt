@@ -1,0 +1,45 @@
+<task-notification>
+<task-id>b3tpb1ok8</task-id>
+<tool-use-id>toolu_011TWYQY2kgTut1PkRrk3sR7</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/b3tpb1ok8.output</output-file>
+<status>completed</status>
+<summary>Background command "Start API server on port 3014" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/b3tpb1ok8.output
+
+---
+
+<task-notification>
+<task-id>bgrxex1zj</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/bgrxex1zj.output</output-file>
+<status>completed</status>
+<summary>Background command "Restart API server with clean DB" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/bgrxex1zj.output
+
+---
+
+<task-notification>
+<task-id>b21s63xxn</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/b21s63xxn.output</output-file>
+<status>completed</status>
+<summary>Background command "Start API with fresh DB" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/b21s63xxn.output
+
+---
+
+<task-notification>
+<task-id>bx89ncvz5</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/bx89ncvz5.output</output-file>
+<status>completed</status>
+<summary>Background command "Run workflow polling script" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/bx89ncvz5.output
+
+---
+
+what would be the best way to document this for the deployed swarm to know how to use the feature effectively?
