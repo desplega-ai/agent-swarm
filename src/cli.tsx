@@ -38,6 +38,7 @@ interface ParsedArgs {
   preset: string;
   open: boolean;
   showHelp: boolean;
+  dbPath: string;
 }
 
 function parseArgs(args: string[]): ParsedArgs {
@@ -57,6 +58,7 @@ function parseArgs(args: string[]): ParsedArgs {
   let preset = "";
   let open = false;
   let showHelp = false;
+  let dbPath = "";
 
   // Find if there's a "--" separator for additional args
   const separatorIndex = args.indexOf("--");
@@ -101,6 +103,9 @@ function parseArgs(args: string[]): ParsedArgs {
       open = true;
     } else if (arg === "--help" || arg === "-h") {
       showHelp = true;
+    } else if (arg === "--db") {
+      dbPath = mainArgs[i + 1] || dbPath;
+      i++;
     }
   }
 
@@ -121,6 +126,7 @@ function parseArgs(args: string[]): ParsedArgs {
     preset,
     open,
     showHelp,
+    dbPath,
   };
 }
 
@@ -163,15 +169,20 @@ const COMMAND_HELP: Record<
       `  ${binName} connect -y`,
     ].join("\n"),
   },
-  mcp: {
-    usage: `${binName} mcp [options]`,
-    description: "Start the MCP HTTP server.",
+  api: {
+    usage: `${binName} api [options]`,
+    description: "Start the API + MCP HTTP server.",
     options: [
       "  -p, --port <port>      Port to listen on (default: 3013)",
       "  -k, --key <key>        API key for authentication",
+      "  --db <path>            Database file path (default: ./agent-swarm-db.sqlite)",
       "  -h, --help             Show this help",
     ].join("\n"),
-    examples: [`  ${binName} mcp`, `  ${binName} mcp --port 8080 --key my-secret`].join("\n"),
+    examples: [
+      `  ${binName} api`,
+      `  ${binName} api --port 8080 --key my-secret`,
+      `  ${binName} api --db /data/swarm.sqlite`,
+    ].join("\n"),
   },
   claude: {
     usage: `${binName} claude [options] [-- <args...>]`,
@@ -267,7 +278,7 @@ function printHelp(command?: string) {
     ["connect", "Connect this project to an existing swarm"],
     ["worker", "Run Claude in headless loop mode"],
     ["lead", "Run Claude as lead agent in headless loop"],
-    ["mcp", "Start the MCP HTTP server"],
+    ["api", "Start the API + MCP HTTP server"],
     ["claude", "Run Claude CLI"],
     ["hook", "Handle Claude Code hook events (stdin)"],
     ["artifact", "Manage agent artifacts"],
@@ -281,13 +292,16 @@ function printHelp(command?: string) {
   console.log(`\nRun '${binName} <command> --help' for details on a specific command.\n`);
 }
 
-function McpServer({ port, apiKey }: { port: string; apiKey: string }) {
+function McpServer({ port, apiKey, dbPath }: { port: string; apiKey: string; dbPath: string }) {
   const [status, setStatus] = useState<"starting" | "running" | "error">("starting");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     process.env.PORT = port;
     process.env.API_KEY = apiKey;
+    if (dbPath) {
+      process.env.DATABASE_PATH = dbPath;
+    }
 
     import("./http.ts")
       .then(() => {
@@ -297,12 +311,12 @@ function McpServer({ port, apiKey }: { port: string; apiKey: string }) {
         setStatus("error");
         setError(err.message);
       });
-  }, [port, apiKey]);
+  }, [port, apiKey, dbPath]);
 
   if (status === "error") {
     return (
       <Box flexDirection="column" padding={1}>
-        <Text color="red">✗ Failed to start MCP server</Text>
+        <Text color="red">✗ Failed to start API server</Text>
         {error && <Text dimColor>{error}</Text>}
       </Box>
     );
@@ -311,7 +325,7 @@ function McpServer({ port, apiKey }: { port: string; apiKey: string }) {
   if (status === "starting") {
     return (
       <Box padding={1}>
-        <Spinner label="Starting MCP server..." />
+        <Spinner label="Starting API server..." />
       </Box>
     );
   }
@@ -320,7 +334,7 @@ function McpServer({ port, apiKey }: { port: string; apiKey: string }) {
     <Box flexDirection="column" padding={1}>
       <Box>
         <Text color="green">✓ </Text>
-        <Text>MCP HTTP server running on </Text>
+        <Text>API server running on </Text>
         <Text color="cyan" bold>
           http://localhost:{port}/mcp
         </Text>
@@ -457,8 +471,8 @@ function App({ args }: { args: ParsedArgs }) {
       return <Onboard dryRun={dryRun} yes={yes} preset={preset || undefined} />;
     case "connect":
       return <Connect dryRun={dryRun} restore={restore} yes={yes} />;
-    case "mcp":
-      return <McpServer port={port} apiKey={key} />;
+    case "api":
+      return <McpServer port={port} apiKey={key} dbPath={args.dbPath} />;
     case "claude":
       return <ClaudeRunner msg={msg} headless={headless} additionalArgs={additionalArgs} />;
     case "worker":
