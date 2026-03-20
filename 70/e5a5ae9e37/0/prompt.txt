@@ -1,0 +1,497 @@
+# Verify Plan
+
+A thin wrapper that invokes the `desplega:verifying` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse autonomy mode from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - If plan file has `autonomy:` in frontmatter, use that as default
+   - Otherwise, default to **Critical**
+
+2. **ALWAYS invoke the `desplega:verifying` skill:**
+   - Pass the plan file path
+   - Pass the autonomy mode determined above
+   - Let the skill handle all verification logic
+
+3. **If no plan path provided:**
+   - Search for plans with `status: in-progress` or `status: completed` in `thoughts/*/plans/`
+   - If multiple found, use **AskUserQuestion** to ask which plan to verify (list them as options)
+   - If none found, respond with: "No active plans found. Please provide the path to the plan you'd like to verify."
+
+## Example Usage
+
+```
+/verify-plan thoughts/taras/plans/2026-03-09-new-base-skills.md
+/verify-plan --autonomy=autopilot thoughts/shared/plans/2026-03-09-feature.md
+/verify-plan --autonomy=verbose
+```
+
+
+ARGUMENTS: 2026-03-20-workflow-structured-output-validation...
+
+---
+
+<task-notification>
+<task-id>aa626fa03603f0f42</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/aa626fa03603f0f42.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify Phase 1: Workspace scoping" completed</summary>
+<result>Perfect. I have all the data I need. Let me verify each checkpoint against the plan:
+
+## Phase 1 Verification Report
+
+### 1. AgentTaskConfigSchema (lines 8-19)
+**Status: ✓ CORRECT**
+
+The schema in `/Users/taras/worktrees/agent-swarm/2026-03-20-refactor/2026-03-20-workflows/src/workflows/executors/agent-task.ts` includes all required optional fields:
+
+```typescript
+const AgentTaskConfigSchema = z.object({
+  template: z.string(),
+  agentId: z.string().uuid().optional(),
+  tags: z.array(z.string()).optional(),
+  priority: z.number().int().min(0).max(100).optional(),
+  offerMode: z.boolean().optional(),
+  dir: z.string().min(1).optional(),           // ✓ present
+  vcsRepo: z.string().min(1).optional(),       // ✓ present
+  model: z.string().min(1).optional(),         // ✓ present
+  parentTaskId: z.string().uuid().optional(),  // ✓ present
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
+});
+```
+
+### 2. execute() method (lines 69-82)
+**Status: ✓ CORRECT**
+
+The `execute()` method properly forwards all workspace scoping fields to `createTaskExtended()`:
+
+```typescript
+const task = db.createTaskExtended(config.template, {
+  agentId: config.agentId ?? null,
+  source: "workflow",
+  tags: config.tags,
+  priority: config.priority,
+  offeredTo: config.offerMode ? config.agentId : undefined,
+  workflowRunId: meta.runId,
+  workflowRunStepId: meta.stepId,
+  dir: config.dir,                    // ✓ forwarded
+  vcsRepo: config.vcsRepo,            // ✓ forwarded
+  model: config.model,                // ✓ forwarded
+  parentTaskId: config.parentTaskId,  // ✓ forwarded
+  outputSchema: config.outputSchema,
+});
+```
+
+### 3. Unit test (src/tests/workflow-agent-task.test.ts)
+**Status: ✓ CORRECT**
+
+The test file exists at the correct location and comprehensively validates:
+- **Schema validation** (lines 97-141): Tests that schema accepts new fields, validates optional behavior, rejects invalid values
+- **Execution with fields** (lines 143-171): Creates task with `dir`, `vcsRepo`, `model` and verifies they're stored
+- **Backward compatibility** (lines 173-195): Ensures tasks work without the new optional fields
+
+All test assertions match the plan (e.g., line 167: `expect(task!.dir).toBe(...)`, line 192: `expect(task!.dir).toBeUndefined()`).
+
+### 4. Commit verification
+**Status: ✓ CORRECT**
+
+The commit `405d679` exists in the git history with message:
+```
+405d679 feat(workflow): add workspace scoping to agent-task executor
+```
+
+This is the exact commit specified in the plan.
+
+## Summary
+
+**All Phase 1 checkpoints verified successfully.** The implementation matches the plan exactly:
+- Schema has all four new optional fields with correct validation
+- execute() forwards all fields to createTaskExtended()
+- Unit tests comprehensively cover schema validation, forwarding, and backward compatibility
+- Commit is correctly attributed to Phase 1 work
+
+No discrepancies found.</result>
+<usage><total_tokens>58589</total_tokens><tool_uses>3</tool_uses><duration_ms>12554</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/aa626fa03603f0f42.output
+
+---
+
+<task-notification>
+<task-id>bf711o8ww</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/bf711o8ww.output</output-file>
+<status>completed</status>
+<summary>Background command "Run Biome lint + format" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/bf711o8ww.output
+
+---
+
+<task-notification>
+<task-id>bgs6dhubi</task-id>
+<tool-use-id>toolu_011wxzQ5toKJ8D1rHdrv4HMY</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/bgs6dhubi.output</output-file>
+<status>completed</status>
+<summary>Background command "Run TypeScript type check" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/bgs6dhubi.output
+
+---
+
+<task-notification>
+<task-id>ab393a2e6712c7442</task-id>
+<tool-use-id>toolu_01LcRYpDbszDKvYmtxggVz4L</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/ab393a2e6712c7442.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify Phase 2: Validation retry fix" completed</summary>
+<result>Excellent. Now let me create a comprehensive verification report:
+
+## Phase 2 Verification Report (Validation Retry Bug Fix)
+
+All requirements for Phase 2 have been **successfully implemented**. Here are the findings:
+
+---
+
+### 1. **retry-poller.ts** — Validation Re-run After Executor Success ✓
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-20-refactor/2026-03-20-workflows/src/workflows/retry-poller.ts`
+
+**Key Implementation (lines 98–135):**
+- **Line 99:** Checks if `node.validation` is configured
+- **Lines 100–106:** Calls `runStepValidation()` with the retry result output
+- **Lines 108–116:** Handles "halt" outcome — calls `checkpointStepFailure()` with "Validation failed (mustPass)"
+- **Lines 118–134:** Handles "retry" outcome — appends validation context to history, calls `checkpointStepFailure()` with "Validation failed, retrying", continues to next retry
+- **Line 138:** If validation passes (or no validation configured), proceeds to `checkpointStep()` and graph traversal
+
+**Assessment:** Matches plan requirements exactly. All three outcomes ("halt", "retry", "pass") are handled correctly.
+
+---
+
+### 2. **Import of runStepValidation** ✓
+
+**Line 14** of `retry-poller.ts`:
+```typescript
+import { runStepValidation } from "./validation";
+```
+
+**Assessment:** Correctly imported from `./validation` module.
+
+---
+
+### 3. **Unit Test File** ✓
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-20-refactor/2026-03-20-workflows/src/tests/workflow-retry-validation.test.ts`
+
+**Test Coverage (282 lines, created in commit 2e91344):**
+
+1. **Test: "retry succeeds but validation fails → another retry is scheduled"** (lines 156–207)
+   - Creates workflow with `value=10` (always `< 50`, validation always fails)
+   - Verifies validation config with `mustPass: true` and retry policy
+   - Runs initial execution, expects step to be failed with `nextRetryAt` set
+   - Starts retry poller, expects validation to be called again
+   - Verifies final run status is "failed" (retries exhausted)
+
+2. **Test: "retry succeeds and validation passes → step checkpointed, run completes"** (lines 209–247)
+   - Creates workflow with `value=100` (> 50, validation passes)
+   - Executes workflow, expects run to complete immediately
+   - Validates call count is tracked
+
+3. **Test: "validation halt on retry → step and run marked failed"** (lines 249–281)
+   - Creates workflow with `value=10`, validation with `mustPass: true` but NO retry config
+   - Executes, expects immediate failure (halt, no retry)
+   - Verifies `nextRetryAt` is not set on halted validation
+
+**Assessment:** All three test scenarios match plan requirements. Tests use custom executors (`NumberExecutor`, `ValidateStubExecutor`), the retry poller, and verify both retry-on-validation-failure and halt-on-must-pass-failure paths.
+
+---
+
+### 4. **Bonus Fix: Clear nextRetryAt When Retries Exhausted** ✓
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-20-refactor/2026-03-20-workflows/src/workflows/checkpoint.ts`
+
+**Key Change (line 64 in ccc5162):**
+```typescript
+// No retries left — mark step and run failed
+// Clear nextRetryAt so the poller stops picking this step up
+updateWorkflowRunStep(stepId, {
+  status: "failed",
+  error,
+  finishedAt: now,
+  nextRetryAt: null,  // ← Added in ccc5162
+});
+```
+
+**Assessment:** Correctly sets `nextRetryAt: null` when `retryCount >= maxRetries`, preventing the poller from endlessly retrying exhausted steps.
+
+---
+
+### 5. **Commits** ✓
+
+Both commits are present and in the git history:
+
+- **2e91344** (Mar 20 19:00:14): "fix(workflow): re-run validation after retry poller re-executes a step"
+  - Adds validation re-run in `retry-poller.ts` (42 lines added)
+  - Adds 282-line test file `workflow-retry-validation.test.ts`
+
+- **ccc5162** (Mar 20 21:02:58): "fix(workflow): clear nextRetryAt when retries are exhausted"
+  - Sets `nextRetryAt: null` in `checkpoint.ts` (2 lines added)
+
+---
+
+## Summary
+
+**All Phase 2 requirements are correctly implemented with no discrepancies.** The implementation:
+- Validates after successful retry execution
+- Handles all three validation outcomes (halt, retry, pass) with appropriate DB checkpoints
+- Includes comprehensive unit tests covering the critical paths
+- Clears `nextRetryAt` to prevent infinite retry loops
+- Has proper git history with descriptive commits</result>
+<usage><total_tokens>64889</total_tokens><tool_uses>10</tool_uses><duration_ms>25808</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/ab393a2e6712c7442.output
+
+---
+
+<task-notification>
+<task-id>a1cbffab45c598126</task-id>
+<tool-use-id>toolu_01MhFmB7rX7SNLkerG7M9YKF</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/a1cbffab45c598126.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify Phase 4: Validation adapters" completed</summary>
+<result>Excellent. All verification complete. Here's my comprehensive report:
+
+---
+
+## Phase 4 Verification Report: Validation Executor Adapters
+
+### ✅ PASS: All Checks Complete
+
+#### 1. **src/workflows/validation.ts** — extractPassResult() Function
+
+**Location:** Lines 18-39
+
+The function is correctly implemented with the exact mapping specified in the plan:
+
+- **Line 23-24**: `case "validate": return o.pass === true;`
+- **Line 25-26**: `case "script": return o.exitCode === 0;`
+- **Line 27-28**: `case "property-match": return o.passed === true;`
+- **Line 29-34**: `case "raw-llm": checks o.result.pass === true` with safe object traversal
+- **Line 35-37**: Default case with generic fallback: `o.pass === true || o.passed === true || o.exitCode === 0`
+
+**Edge case handling:** Lines 19-20 correctly reject `null`, `undefined`, and non-object outputs by returning `false`.
+
+#### 2. **Hardcoded Check Replacement**
+
+**Location:** Line 82
+
+The hardcoded `result.output.pass === true` check has been correctly replaced:
+
+```typescript
+const passed = result.status === "success" && extractPassResult(executorType, result.output);
+```
+
+This now dynamically adapts to each executor type via the `extractPassResult()` call, with `executorType` derived from `validation.executor || "validate"` (line 59).
+
+#### 3. **Unit Tests**
+
+**File:** `/Users/taras/worktrees/agent-swarm/2026-03-20-refactor/2026-03-20-workflows/src/tests/validation-adapters.test.ts`
+
+**Test Count:** 19 tests ✅
+
+Test groups:
+- **validate executor:** 3 tests (lines 6-16)
+- **script executor:** 3 tests (lines 19-29)
+- **property-match executor:** 2 tests (lines 32-38)
+- **raw-llm executor:** 3 tests (lines 41-51)
+- **unknown executor (generic fallback):** 4 tests (lines 54-68)
+- **edge cases:** 4 tests (lines 71-85)
+
+#### 4. **Commit**
+
+**Commit Hash:** `39bebf3`
+
+**Message:** `feat(workflow): normalize validation pass/fail across all executor types`
+
+**Author:** 2pac (Taras)
+
+**Date:** 2026-03-20 19:10:41
+
+**Files Changed:** 2
+- `src/tests/validation-adapters.test.ts` — 86 insertions
+- `src/workflows/validation.ts` — 34 insertions (+), 4 deletions (-)
+
+---
+
+## Summary
+
+**Phase 4 is fully and correctly implemented.** All four verification checkpoints align precisely with the plan:
+
+1. ✅ `extractPassResult()` adapter function with all five executor cases
+2. ✅ Hardcoded check replaced with dynamic `extractPassResult()` call
+3. ✅ 19 comprehensive unit tests with full coverage of all executor types and edge cases
+4. ✅ Commit `39bebf3` documents the work with detailed message
+
+No discrepancies found. The implementation is production-ready and fully tested.</result>
+<usage><total_tokens>58587</total_tokens><tool_uses>7</tool_uses><duration_ms>22523</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/a1cbffab45c598126.output
+
+---
+
+<task-notification>
+<task-id>bcvbgq9l6</task-id>
+<tool-use-id>toolu_01KYn7wJUmoyt8Fuw8Tx2ZUA</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/bcvbgq9l6.output</output-file>
+<status>completed</status>
+<summary>Background command "Run all unit tests" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/bcvbgq9l6.output
+
+---
+
+<task-notification>
+<task-id>a3c80d3b2ad07544f</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/a3c80d3b2ad07544f.output</output-file>
+<status>completed</status>
+<summary>Agent "Verify Phase 3: Structured output" completed</summary>
+<result>Perfect! Now I have all the information needed. Let me create the final verification report:
+
+## Phase 3 Implementation Verification Report
+
+I've completed a thorough verification of Phase 3 (Structured Output Extraction for Agent-Tasks). Here are my findings:
+
+### CHECK 1: src/types.ts — AgentTaskSchema outputSchema field
+**STATUS: ✅ PASS**
+- **Location:** Line 145
+- **Code:** `outputSchema: z.record(z.string(), z.unknown()).optional(),`
+- **Match:** Exactly matches plan specification
+
+### CHECK 2: src/be/db.ts — CreateTaskOptions and createTaskExtended
+**STATUS: ✅ PASS**
+- **Location:** Lines 1739-1742 (CreateTaskOptions interface)
+- **Code:** `outputSchema?: Record<string, unknown>;`
+- **Task Storage:** Lines 1834 and 1872 (insert statement and JSON serialization)
+- **Task Retrieval:** Lines 748-749 (JSON.parse from DB)
+- **Match:** Correctly stores and retrieves outputSchema
+
+### CHECK 3: Database Migration
+**STATUS: ✅ PASS**
+- **File:** `src/be/migrations/013_task_output_schema.sql`
+- **Code:**
+  ```sql
+  ALTER TABLE agent_tasks ADD COLUMN outputSchema TEXT;
+  ```
+- **Match:** Migration file exists and adds the outputSchema column to agent_tasks table
+
+### CHECK 4: src/tools/store-progress.ts — Structured Output Validation
+**STATUS: ✅ PASS**
+- **Location:** Lines 123-154
+- **Validation Logic:**
+  - Checks if task has outputSchema (line 125-127)
+  - Validates that output is provided when schema exists (line 130-135)
+  - JSON.parses output and validates against schema (lines 137-146)
+  - Uses `validateJsonSchema()` function (line 147)
+  - Returns tool errors (not task failures) on mismatch (lines 149-152)
+- **Match:** Exactly implements plan requirements
+
+### CHECK 5: src/commands/runner.ts — buildPromptForTrigger with outputSchema
+**STATUS: ✅ PASS**
+- **Location:** Lines 1000-1007
+- **Code:**
+  ```typescript
+  // Inject outputSchema instructions if present
+  const taskObj = trigger.task as Record<string, unknown> | undefined;
+  if (taskObj?.outputSchema && typeof taskObj.outputSchema === "object") {
+    prompt += `\n\n**Required Output Format**: When completing this task, you MUST call store-progress with output that is valid JSON conforming to this schema:\n\`\`\`json\n${JSON.stringify(taskObj.outputSchema, null, 2)}\n\`\`\`\nCall store-progress with status "completed" and your JSON output...`;
+  }
+  ```
+- **Match:** Appends outputSchema instructions to prompt as specified
+
+### CHECK 6: src/commands/runner.ts — handleStructuredOutputFallback
+**STATUS: ✅ PASS**
+- **Location:** Lines 289-365
+- **Features:**
+  - Claude adapter: Extracts structured data from progress history via `claude -p --json-schema` (lines 326-352)
+  - Pi-mono adapter: Returns error "Structured output required" (lines 319-324)
+  - Fetches task from API to check for outputSchema (line 303)
+  - Validates output before returning (lines 354-356)
+- **Called At:** Line 392 in `ensureTaskFinished()`
+- **Match:** Implements adapter branching and fallback logic per plan
+
+### CHECK 7: src/workflows/resume.ts — resumeFromTaskCompletion with JSON parsing
+**STATUS: ✅ PASS**
+- **Location:** Lines 62-100 (function definition), Lines 78-89 (JSON-parse logic)
+- **Code:**
+  ```typescript
+  let taskOutput: unknown = event.output;
+  if (event.output) {
+    try {
+      const parsed = JSON.parse(event.output);
+      if (typeof parsed === "object" && parsed !== null) {
+        taskOutput = parsed;
+      }
+    } catch {
+      // Not JSON — keep as string (non-structured output tasks)
+    }
+  }
+  ```
+- **Stored In Context:** Line 90 as `stepOutput`
+- **Match:** Correctly JSON-parses structured output before storing in workflow context
+
+### CHECK 8: src/workflows/executors/agent-task.ts — outputSchema in config
+**STATUS: ✅ PASS**
+- **Location:** Lines 15-19 (config schema) and Line 81 (forwarding)
+- **Config Schema:** `outputSchema: z.record(z.string(), z.unknown()).optional(),` (line 18)
+- **Forwarding Code:** `outputSchema: config.outputSchema,` (line 81)
+- **Match:** Accepts outputSchema in config and forwards to createTaskExtended
+
+### CHECK 9: src/workflows/json-schema-validator.ts — enum and const support
+**STATUS: ✅ PASS**
+- **Enum Support:** Lines 44-53 (array check with JSON.stringify comparison)
+- **Const Support:** Lines 55-63 (existence check and value comparison)
+- **Existing Features:** type, required, properties, items all present
+- **Match:** Both enum and const validation implemented with existing validators
+
+### CHECK 10: src/tests/structured-output.test.ts — Unit test coverage
+**STATUS: ✅ PASS**
+- **Test Count:** 18 tests (verified via grep)
+- **Test Breakdown:**
+  - Enum/const validator tests: 7 tests (lines 40-95)
+  - DB storage tests: 2 tests (lines 99-123)
+  - Validation logic tests: 3 tests (lines 127-169)
+  - Resume JSON parsing tests: 4 tests (lines 173-232)
+  - Agent-task executor schema tests: 1 test (lines 236-259)
+  - Workflow integration tests: 1 test (lines 263-311)
+- **Match:** Exactly 18 tests as required by plan
+
+---
+
+## Summary
+
+**Overall Status: ✅ ALL CHECKS PASS**
+
+All 10 verification points for Phase 3 (Structured Output Extraction) are correctly implemented:
+
+1. Type schema includes `outputSchema` field ✅
+2. DB layer stores/retrieves `outputSchema` ✅
+3. Migration file exists ✅
+4. store-progress validates structured output ✅
+5. buildPromptForTrigger appends schema instructions ✅
+6. handleStructuredOutputFallback implements adapter branching ✅
+7. resumeFromTaskCompletion JSON-parses output ✅
+8. agent-task executor forwards outputSchema ✅
+9. json-schema-validator supports enum and const ✅
+10. Unit tests provide full coverage (18 tests) ✅
+
+The implementation is complete and matches the plan specifications exactly.</result>
+<usage><total_tokens>90495</total_tokens><tool_uses>30</tool_uses><duration_ms>56323</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-refactor-2026-03-20-workflows/d669fe24-717a-4623-b5f0-3898a2f6d28b/tasks/a3c80d3b2ad07544f.output
+
+---
+
+nice, add a comment in the plan for this, and then commit and push all to a PR pls
