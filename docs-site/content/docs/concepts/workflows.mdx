@@ -5,102 +5,125 @@ description: Automate multi-step processes with DAG-based workflow definitions
 
 # Workflows
 
-Agent Swarm includes a **workflow automation engine** that lets you define multi-step processes as directed acyclic graphs (DAGs). Workflows connect triggers, conditions, and actions into pipelines that execute automatically when events occur.
+Agent Swarm includes a **workflow automation engine** that lets you define multi-step processes as directed acyclic graphs (DAGs). Workflows connect triggers, conditions, and actions into pipelines that execute automatically.
 
 ## Core Concepts
 
 A workflow consists of:
 
-- **Nodes** — Individual steps in the pipeline (triggers, conditions, or actions)
-- **Edges** — Connections between nodes that define execution order and routing
-- **Trigger data** — Context passed from the triggering event through the pipeline
+- **Nodes** — Individual steps with a `next` field that defines routing (no explicit edges needed)
+- **Executors** — Class-based step implementations with Zod-typed config and output schemas
+- **Triggers** — Entry points: webhook (HMAC-SHA256), schedule (ref), or manual
+- **Checkpoint durability** — Atomic DB write after every step; resume from last checkpoint on crash
 
-### Node Types
+### Executor Types
 
-#### Trigger Nodes (Entry Points)
+The engine includes 8 built-in executor types:
 
-| Type | Description |
-|------|-------------|
-| `trigger-new-task` | Fires when a new task is created (with optional tag/source/type filters) |
-| `trigger-task-completed` | Fires when a task completes |
-| `trigger-github-event` | Fires on GitHub events (PR opened/closed, issue opened, comments, reviews) |
-| `trigger-slack-message` | Fires on Slack messages (with optional channel/keyword filters) |
-| `trigger-email` | Fires on incoming AgentMail messages |
-| `trigger-webhook` | Fires via HTTP webhook call |
+| Executor | Description |
+|----------|-------------|
+| `script` | Run a shell script or JavaScript expression |
+| `agent-task` | Create and delegate a task to a swarm agent |
+| `raw-llm` | Call an LLM directly with a prompt template |
+| `vcs` | Version control operations (create PR, merge, etc.) |
+| `property-match` | Route based on matching properties in step input |
+| `code-match` | Route based on a custom JavaScript expression in a sandbox |
+| `notify` | Send a notification (Slack, email, or internal message) |
+| `validate` | Validate step output; can halt or trigger retry |
 
-#### Condition Nodes (Routing)
-
-| Type | Description |
-|------|-------------|
-| `property-match` | Routes based on matching properties in the trigger data |
-| `code-match` | Routes based on a custom JavaScript expression evaluated in a sandbox |
-| `llm-classify` | Routes based on LLM classification of the input |
-
-#### Action Nodes (Execution)
-
-| Type | Description |
-|------|-------------|
-| `create-task` | Creates a new task in the swarm |
-| `send-message` | Sends a message (Slack, email, or internal) |
-| `delegate-to-agent` | Assigns work to a specific agent |
+Each executor has typed config and output schemas available via `GET /api/executor-types` (returns JSON Schemas via Zod v4 `z.toJSONSchema()`).
 
 ## Defining a Workflow
 
-Workflows are defined as JSON with `nodes` and `edges` arrays:
+Workflows use a **nodes-with-next** schema. Each node declares its `next` field for routing — edges are auto-generated for the UI graph visualization.
 
 ```json
 {
   "name": "pr-review-pipeline",
-  "description": "Auto-assign PR reviews when PRs are opened",
+  "description": "Auto-assign PR reviews on webhook",
+  "triggers": [
+    { "type": "webhook", "config": { "hmacSecret": "my-secret" } }
+  ],
   "definition": {
     "nodes": [
       {
-        "id": "trigger",
-        "type": "trigger-github-event",
-        "label": "PR Opened",
-        "config": { "eventType": "pull_request.opened" }
+        "id": "check-type",
+        "type": "property-match",
+        "label": "Check Event Type",
+        "config": { "property": "event", "match": "pull_request.opened" },
+        "next": { "match": "create-review", "no_match": null }
       },
       {
-        "id": "create-review-task",
-        "type": "create-task",
+        "id": "create-review",
+        "type": "agent-task",
         "label": "Create Review Task",
         "config": {
-          "taskTemplate": "Review PR #{{trigger.number}}: {{trigger.title}}",
+          "taskTemplate": "Review PR #{{input.number}}: {{input.title}}",
           "tags": ["review", "automated"],
           "priority": 60
         }
-      }
-    ],
-    "edges": [
-      {
-        "id": "e1",
-        "source": "trigger",
-        "sourcePort": "out",
-        "target": "create-review-task"
       }
     ]
   }
 }
 ```
 
+### Triggers
+
+| Type | Description |
+|------|-------------|
+| `webhook` | HTTP POST to `/api/workflows/:id/trigger` with optional HMAC-SHA256 verification |
+| `schedule` | References a schedule by ID — the schedule creates workflow runs at configured times |
+| `manual` | Triggered via the `trigger-workflow` MCP tool or dashboard UI |
+
+### Cooldown
+
+Workflows support a cooldown period to prevent rapid re-triggering:
+
+```json
+{
+  "cooldown": { "hours": 0, "minutes": 5, "seconds": 0 }
+}
+```
+
+A second trigger within the cooldown window results in a run with `skipped` status.
+
 ## Execution Model
 
 When a workflow triggers:
 
-1. The **event bus** receives an event (task created, GitHub webhook, Slack message, etc.)
-2. All enabled workflows are checked — entry nodes are matched against the event
-3. If a trigger matches, execution starts and walks the DAG breadth-first
-4. Each node executes and produces an output port that determines which edges to follow
-5. **Async nodes** (like `delegate-to-agent`) pause the run until the delegated work completes, then resume
+1. The trigger source (webhook, schedule, or manual) creates a new **workflow run**
+2. The engine's `walkGraph()` finds ready nodes and executes them in parallel
+3. Each node's executor runs and produces output that determines port-based routing via `next`
+4. **Checkpoint durability** — after every step, an atomic DB write saves the step result and execution context
+5. On crash or restart, execution resumes from the last checkpoint
 
-### Template Interpolation
+### Per-Step Retry
 
-Action node configs support `{{variable}}` template syntax to reference trigger data and previous node outputs. For example, `{{trigger.title}}` inserts the title from the triggering event.
+Each node can define a `retryPolicy`:
 
-### Recovery and Retry
+```json
+{
+  "retryPolicy": {
+    "maxRetries": 3,
+    "backoff": "exponential",
+    "initialDelayMs": 1000
+  }
+}
+```
 
-- **Stuck run recovery** — The system detects workflow runs that stall and can recover them
-- **Retry failed runs** — Use the `retry-workflow-run` MCP tool to re-execute a failed run from the point of failure
+Backoff strategies: `exponential`, `linear`, `static`. The poller detects failed steps and re-executes them according to the policy.
+
+### Per-Step Validation
+
+The `validate` executor runs after a step to check output quality. It can:
+- **Pass** — continue to the next step
+- **Halt** — stop the workflow run
+- **Retry** — re-execute the previous step
+
+### Version History
+
+Every workflow update creates a snapshot in the version history table, recording the previous definition. This provides an audit trail and enables rollback.
 
 ## MCP Tools
 
@@ -121,9 +144,8 @@ Action node configs support `{{variable}}` template syntax to reference trigger 
 The dashboard includes a **Workflows** section (under Operations) with:
 
 - **Workflows list** — View all workflows with enable/disable status
-- **Workflow detail** — Interactive React Flow graph visualization of the DAG
-- **Runs list** — Track all workflow executions with status
-- **Run detail** — Step-by-step execution view with a visual graph overlay showing node statuses
+- **Workflow detail** — Tabbed view with Definition (node inspector showing config/input/output schemas) and Runs tabs
+- **Run detail** — Split layout with interactive graph and collapsible steps panel, JsonTree viewer, bidirectional node selection, expand/collapse all, millisecond duration display
 
 ## Related
 

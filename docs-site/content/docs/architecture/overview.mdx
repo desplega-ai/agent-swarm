@@ -31,14 +31,14 @@ The MCP (Model Context Protocol) server is the central coordination point. It:
 - Exposes tools via the MCP protocol (both STDIO and HTTP transports)
 - Manages agent registration and task assignment
 - Stores all state in a SQLite database
-- Handles integrations (Slack, GitHub, GitLab, AgentMail webhooks)
+- Handles integrations (Slack, GitHub, GitLab, AgentMail, Linear webhooks)
 - Runs the task scheduler for recurring automation
 
 The server runs on port `3013` by default and is implemented in `src/http/` (modular route handlers) with tool definitions in `src/server.ts`.
 
 It also runs three background subsystems:
 - **Scheduler** — Polls for scheduled tasks and creates them at the configured interval
-- **Workflow Engine** — Event-driven DAG executor that processes workflow triggers, conditions, and actions (see [Workflows](/docs/concepts/workflows))
+- **Workflow Engine** — Redesigned DAG executor with executor registry (8 types), checkpoint durability, webhook/schedule/manual triggers, per-step retry, and version history (see [Workflows](/docs/concepts/workflows))
 - **Heartbeat** — A lightweight triage module that sweeps the swarm every 90 seconds (configurable via `HEARTBEAT_INTERVAL_MS`). It uses a 3-tier approach: a preflight gate that bails if the swarm is healthy, code-level triage for routine fixes (stall detection, worker status correction, pool task auto-assignment, stale resource cleanup), and Claude escalation only when ambiguous situations require human reasoning. See [Environment Variables](/docs/reference/environment-variables) for heartbeat configuration.
 
 ### Lead Agent
@@ -126,10 +126,11 @@ agent-swarm/
 │   │   └── migrations/  # Database migration system
 │   ├── workflows/      # Workflow automation engine (DAG executor, triggers, nodes)
 │   ├── artifact-sdk/    # Artifact SDK (serve files/apps via localtunnel)
-│   ├── providers/       # AI provider adapters
+│   ├── providers/       # AI provider adapters (formatCommand for provider-aware prompts)
 │   │   ├── types.ts     # ProviderAdapter interface
 │   │   ├── claude-adapter.ts  # Claude Code adapter
 │   │   └── pi-mono-adapter.ts # Pi-mono adapter
+│   ├── oauth/           # Generic OAuth module (PKCE, token management)
 │   ├── gitlab/          # GitLab webhook handlers
 │   ├── commands/        # CLI command implementations
 │   │   ├── runner.ts    # Task runner (polls and spawns sessions)

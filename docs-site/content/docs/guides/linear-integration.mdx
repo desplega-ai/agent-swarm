@@ -1,0 +1,98 @@
+---
+title: Linear Integration
+description: Connect Agent Swarm to Linear for bidirectional ticket tracking with AgentSession support
+---
+
+# Linear Integration
+
+Agent Swarm integrates with [Linear](https://linear.app) as the first provider in its generic ticket tracker framework. The integration enables bidirectional sync between Linear issues/sessions and swarm tasks.
+
+## Features
+
+- **OAuth-based authentication** — PKCE flow via the generic `oauth4webapi` module
+- **AgentSession support** — Agents appear as participants in Linear's agent panel, with thought/action/response/error activity posts
+- **Bidirectional sync** — Task completion/failure syncs back to Linear; Linear follow-up messages create new swarm tasks
+- **Webhook handling** — HMAC-SHA256 verified webhooks with Linear-Delivery header dedup (5-min TTL)
+- **Dashboard linking** — `externalUrls` on sessions link back to the swarm dashboard
+
+## Setup
+
+### 1. Create a Linear OAuth App
+
+1. Go to Linear > Settings > API > Applications
+2. Create a new application with:
+   - **Actor**: Application
+   - **Callback URL**: `http://localhost:3013/api/trackers/linear/callback` (or your production URL)
+   - **Webhook URL**: `http://localhost:3013/api/trackers/linear/webhook`
+3. Enable "Agent session events" in webhook settings
+4. Copy the Client ID, Client Secret, and Webhook Signing Secret
+
+### 2. Configure Environment
+
+Add to your `.env`:
+
+```bash
+LINEAR_CLIENT_ID=your-client-id
+LINEAR_CLIENT_SECRET=your-client-secret
+LINEAR_REDIRECT_URI=http://localhost:3013/api/trackers/linear/callback
+LINEAR_SIGNING_SECRET=your-webhook-signing-secret
+```
+
+With portless:
+```bash
+LINEAR_REDIRECT_URI=https://api.swarm.localhost:1355/api/trackers/linear/callback
+```
+
+### 3. Complete OAuth
+
+Start the server and visit `/api/trackers/linear/authorize` in your browser to complete the OAuth flow.
+
+## How It Works
+
+### Inbound (Linear to Swarm)
+
+1. A user creates an AgentSession in Linear (assigns work to the agent)
+2. Linear sends a webhook to `/api/trackers/linear/webhook`
+3. The webhook handler creates a swarm task linked to the Linear session
+4. The agent acknowledges the session and begins work
+
+### Outbound (Swarm to Linear)
+
+1. Agent posts activities (thoughts, actions, responses, errors) to the Linear session
+2. On task completion, the response activity is posted and the session is auto-completed
+3. On task failure, an error activity is posted
+4. `externalUrls` are set on the session, linking to the swarm dashboard
+
+### Follow-up Messages
+
+When a user sends a follow-up message in a Linear agent chat:
+1. Linear fires a `prompted` event webhook
+2. The handler creates a new swarm task with the follow-up context
+3. The agent processes the follow-up and responds via session activities
+
+## MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `tracker-status` | Check tracker connection status |
+| `tracker-link-task` | Link a swarm task to a Linear issue |
+| `tracker-link-epic` | Link a swarm epic to a Linear project |
+| `tracker-unlink` | Remove a tracker link |
+| `tracker-sync-status` | View sync status for linked items |
+| `tracker-map-agent` | Map a swarm agent to a Linear user for assignment routing |
+
+## Architecture
+
+The integration is built on a generic tracker abstraction:
+
+- **`src/oauth/`** — Reusable OAuth module with `oauth_apps`/`oauth_tokens` tables and PKCE support
+- **`src/be/db-queries/tracker.ts`** — Generic `tracker_sync` and `tracker_agent_mapping` tables
+- **Linear provider** — Implements the tracker interface with Linear-specific webhook handling and AgentSession lifecycle
+
+This design makes it straightforward to add other ticket trackers (Jira, GitHub Issues, etc.) in the future.
+
+## Related
+
+- [Environment Variables](/docs/reference/environment-variables#linear-integration) — Linear configuration reference
+- [Task Lifecycle](/docs/concepts/task-lifecycle) — How tasks created from Linear flow through the swarm
+- [Architecture Overview](/docs/architecture/overview) — System architecture including integrations

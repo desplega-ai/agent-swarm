@@ -113,6 +113,39 @@ Complete reference for all environment variables used by Agent Swarm.
 | `SENTRY_AUTH_TOKEN` | Sentry Organization Auth Token |
 | `SENTRY_ORG` | Sentry organization slug |
 
+## Linear Integration
+
+| Variable | Description |
+|----------|-------------|
+| `LINEAR_DISABLE` | Set to `true` to disable Linear integration |
+| `LINEAR_CLIENT_ID` | OAuth app client ID (create at Linear > Settings > API > Applications) |
+| `LINEAR_CLIENT_SECRET` | OAuth app client secret (shown once on creation) |
+| `LINEAR_REDIRECT_URI` | OAuth callback URL (e.g., `http://localhost:3013/api/trackers/linear/callback`) |
+| `LINEAR_SIGNING_SECRET` | Webhook signing secret from Linear app settings |
+
+### Setup Steps
+
+1. Create an OAuth app at Linear > Settings > API > Applications
+2. Set Actor to "Application"
+3. Set Callback URL to your `/api/trackers/linear/callback` endpoint
+4. Enable "Agent session events" in webhook settings
+5. Set Webhook URL to your `/api/trackers/linear/webhook` endpoint
+6. Copy Client ID, Client Secret, and Webhook Signing Secret
+7. Start the server, then visit `/api/trackers/linear/authorize` to complete OAuth
+
+With portless: set `LINEAR_REDIRECT_URI=https://api.swarm.localhost:1355/api/trackers/linear/callback`
+
+## Portless (Local Development)
+
+[Portless](https://port1355.dev/) replaces port-based URLs with friendly domain names for local development.
+
+| Variable | With Portless | Description |
+|----------|---------------|-------------|
+| `MCP_BASE_URL` | `https://api.swarm.localhost:1355` | API server URL |
+| `APP_URL` | `https://ui.swarm.localhost:1355` | Dashboard URL |
+
+Install: `bun add -g portless`. Enable HTTPS: `portless trust && portless proxy start --https`.
+
 ## Agent Filesystem (agent-fs)
 
 | Variable | Description |
