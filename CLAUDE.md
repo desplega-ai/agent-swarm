@@ -96,6 +96,20 @@ templates-ui/    # Templates registry (Next.js app)
 - Prefer `Bun.$` over execa for shell commands
 - Use `google/gemini-3-flash-preview` as the default Gemini model in tests, workflows, and examples (not `gemini-2.0-flash-001`)
 
+### CLI Commands & Help System
+
+CLI help is plain `console.log` (not Ink), defined in `src/cli.tsx` via the `COMMAND_HELP` record and `printHelp()` function.
+
+**When adding or modifying CLI commands:**
+1. Add/update the command's entry in the `COMMAND_HELP` record (usage, description, options, examples)
+2. Add the command to the `commands` array in `printHelp()` (general help listing)
+3. Add routing in the `App` switch statement (UI commands) or the non-UI section before `render()` (simple commands like `docs`, `help`, `version`)
+4. Run `bun run src/cli.tsx help` and `bun run src/cli.tsx <command> --help` to verify
+
+**Command types:**
+- **Non-UI commands** (handled before `render()`): `help`, `version`, `docs`, `hook`, `artifact` — use `console.log` + `process.exit(0)`
+- **UI commands** (rendered by Ink): `onboard`, `connect`, `api`, `claude`, `worker`, `lead` — return JSX from the `App` switch
+
 ### Adding HTTP Endpoints
 
 **Always use the `route()` factory** from `src/http/route-def.ts` when creating new REST endpoints. This auto-registers the route in the OpenAPI spec. Do NOT use raw `matchRoute` — it bypasses OpenAPI generation.
