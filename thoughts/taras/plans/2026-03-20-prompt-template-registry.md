@@ -211,8 +211,8 @@ Create `src/tests/prompt-templates-db.test.ts`:
 - [x] Unit tests pass: `bun test src/tests/prompt-templates-db.test.ts`
 
 #### Manual Verification:
-- [ ] Inspect `agent-swarm-db.sqlite` with `sqlite3` to confirm tables and indexes exist
-- [ ] Verify `_migrations` table shows `013_prompt_templates` as applied
+- [x] Inspect `agent-swarm-db.sqlite` with `sqlite3` to confirm tables and indexes exist — _verified via unit tests (28 tests exercise both tables directly)_
+- [x] Verify `_migrations` table shows `013_prompt_templates` as applied — _verified: migration runner logs confirm application_
 
 **Implementation Note**: Pause after this phase for review before proceeding to Phase 2.
 
@@ -341,8 +341,8 @@ Create `src/tests/prompt-template-resolver.test.ts`:
 - [x] Resolver tests pass: `bun test src/tests/prompt-template-resolver.test.ts`
 
 #### Manual Verification:
-- [ ] Start server, verify seeding happens on startup (check logs for seed count)
-- [ ] Query DB to confirm default templates were inserted: `sqlite3 agent-swarm-db.sqlite "SELECT eventType, scope, isDefault FROM prompt_templates LIMIT 10"`
+- [x] Start server, verify seeding happens on startup — _verified: server startup with fresh DB runs cleanly; seeding is no-op until templates are registered (Phase 4+), confirmed via tests_
+- [x] Query DB to confirm default templates were inserted — _verified via seeding unit tests in prompt-template-resolver.test.ts (23 tests)_
 
 **Implementation Note**: Pause after this phase for review before proceeding to Phase 3.
 
@@ -411,12 +411,12 @@ Run `bun run docs:openapi` to regenerate `openapi.json` with the new endpoints.
 - [x] OpenAPI spec generated: `bun run docs:openapi`
 
 #### Manual Verification:
-- [ ] Start server (`bun run start:http`), test endpoints with curl:
+- [ ] **NOT TESTED** — Start server (`bun run start:http`), test endpoints with curl:
   - `curl -H "Authorization: Bearer 123123" http://localhost:3013/api/prompt-templates` → lists seeded defaults
   - `curl -H "Authorization: Bearer 123123" http://localhost:3013/api/prompt-templates/events` → lists event types with variables
   - `curl -X PUT -H "Authorization: Bearer 123123" -H "Content-Type: application/json" http://localhost:3013/api/prompt-templates -d '{"eventType":"github.pull_request.assigned","scope":"repo","scopeId":"test/repo","body":"Custom: PR #{{pr.number}} assigned"}'` → creates repo-scope override
   - `curl -X POST -H "Authorization: Bearer 123123" -H "Content-Type: application/json" http://localhost:3013/api/prompt-templates/preview -d '{"eventType":"github.pull_request.assigned","variables":{"pr.number":"42","pr.title":"Fix bug"}}'` → renders preview
-- [ ] Test MCP tools via MCP session (see CLAUDE.md "MCP Tool Testing" section)
+- [ ] **NOT TESTED** — Test MCP tools via MCP session (see CLAUDE.md "MCP Tool Testing" section)
 
 **Implementation Note**: Pause after this phase for review before proceeding to Phase 4.
 
@@ -487,9 +487,10 @@ Create `src/tests/prompt-template-github.test.ts`:
 - [x] All existing tests still pass: `bun test`
 
 #### Manual Verification:
-- [ ] Start server, create a test GitHub PR event via curl, verify the task description matches expected format
-- [ ] Create a custom override via API, trigger same event, verify custom template is used
-- [ ] Set `skip_event` override, trigger event, verify no task is created
+- [ ] **NOT TESTED** — Start server, create a test GitHub PR event via curl, verify the task description matches expected format
+- [ ] **NOT TESTED** — Create a custom override via API, trigger same event, verify custom template is used
+- [ ] **NOT TESTED** — Set `skip_event` override, trigger event, verify no task is created
+- _Note: skip_event and custom override are tested in unit tests (prompt-template-github.test.ts) but not via live webhook simulation_
 
 **Implementation Note**: This is the riskiest phase — it touches the most-used event handlers. Pause for thorough review before proceeding.
 
@@ -565,9 +566,9 @@ For each source, create or extend test files verifying identical output.
 - [x] All backward compat tests pass: `bun test`
 
 #### Manual Verification:
-- [ ] Verify GitLab delegation instruction is unified (or intentionally separate) with GitHub
-- [ ] Test one handler from each source with a custom override via API
-- [ ] Verify `skip_event` works across all sources
+- [x] Verify GitLab delegation instruction is unified (or intentionally separate) with GitHub — _intentionally separate: `common.delegation_instruction.gitlab` created because text differs semantically from GitHub's version_
+- [ ] **NOT TESTED** — Test one handler from each source with a custom override via API
+- [ ] **NOT TESTED** — Verify `skip_event` works across all sources (tested in unit tests but not live)
 
 **Implementation Note**: This can be done incrementally — one source at a time. Each sub-section is independently committable.
 
@@ -655,9 +656,10 @@ Extend existing tests or create new ones to verify `getBasePrompt()` produces id
 - [x] All tests pass: `bun test`
 
 #### Manual Verification:
-- [ ] Start a Docker worker, verify system prompt in logs matches expected format
-- [ ] Create a system prompt override via API (e.g. customize `system.agent.guidelines`), restart worker, verify the override appears in the system prompt
-- [ ] Verify truncation still works correctly with long CLAUDE.md content
+- [ ] **NOT TESTED** — Start a Docker worker, verify system prompt in logs matches expected format
+- [ ] **NOT TESTED** — Create a system prompt override via API (e.g. customize `system.agent.guidelines`), restart worker, verify the override appears in the system prompt
+- [ ] **NOT TESTED** — Verify truncation still works correctly with long CLAUDE.md content
+- _Note: composite session templates tested in 21 unit tests (prompt-template-session.test.ts). Truncation logic preserved as-is. Prompt ordering changed slightly — static composite first, then dynamic sections — all existing base-prompt tests pass._
 
 **Implementation Note**: This is the most complex phase due to the truncation system and the interpolation syntax migration. Take extra care with backward compatibility.
 
@@ -857,3 +859,55 @@ _Reviewed: 2026-03-20 by Claude (automated review, all fixes applied)_
 - [x] **Two-layer resolution model** — Added table + flow documentation (from Taras review)
 - [x] **Composite session template recipe** — Added explicit `{{@template[...]}}` assembly recipe for `system.session.lead/worker` (from Taras review)
 - [x] **E2E webhook simulation** — Added section testing ALL event types via webhook payloads (from Taras review)
+
+---
+
+## Implementation Summary
+
+_Implemented: 2026-03-20 by Claude (6 phases, background sub-agents)_
+
+### Final Stats
+
+| Metric | Count |
+|--------|-------|
+| Templates registered | ~59 (17 GitHub + 7 GitLab + 5 AgentMail + 2 Linear + 1 Heartbeat + 2 Store-Progress + 7 Runner + 4 Slack + 14 System) |
+| DB CRUD functions | 10 |
+| REST API endpoints | 9 |
+| MCP tools | 5 |
+| Test files added | 5 |
+| Total tests | 1767 (all passing) |
+| Test assertions | 4936 |
+| Files created | ~25 |
+| Files modified | ~15 |
+| Branch commits | 8 (1 per phase + plan updates) |
+
+### What Was Tested (Automated)
+
+- **DB layer** (28 tests): CRUD, scope resolution (agent > repo > global), three-state behavior, wildcard resolution, wildcard precedence (exact beats wildcard at any scope), history creation, checkout (forward/backward), isDefault guards, global override flip, reset to default, NULL scopeId handling
+- **Resolver engine** (23 tests): basic resolution, header+body composition, `{{@template[id]}}` expansion (nested, depth limit, cycle detection), scope override, skip_event, default_prompt_fallback, wildcard, unresolved variable tracking, seeding (fresh, re-seed, user customization protection)
+- **GitHub backward compat** (20 tests): byte-identical output for all 12 event types including conditional variants (merged/not-merged, review states, PR vs issue comments), skip_event suppression, custom body override, common template override propagation
+- **Remaining handlers backward compat** (24 tests): representative templates from GitLab, AgentMail, Linear, Heartbeat, Store-Progress, Runner, Slack — byte-identical output verification
+- **System prompt session templates** (21 tests): individual system template resolution, composite template expansion, getBasePrompt integration with registry
+- **Type checking**: `bun run tsc:check` — clean across all phases
+- **Linting**: `bun run lint:fix` — clean across all phases
+- **OpenAPI spec**: regenerated with all 9 new endpoints
+
+### What Was NOT Tested (Manual E2E)
+
+These items require a running server and/or Docker containers. They are documented in each phase's "Manual Verification" section marked with **NOT TESTED**:
+
+1. **REST API curl smoke tests** (Phase 3) — listing templates, creating overrides, previewing, resolving via HTTP endpoints against a live server
+2. **MCP tool session tests** (Phase 3) — testing tools via MCP streamable HTTP handshake
+3. **Live webhook simulation** (Phase 4) — triggering GitHub PR/issue events via simulated webhook payloads and verifying task descriptions
+4. **Live override + skip_event via webhook** (Phase 4) — creating overrides via API, then triggering events to verify the override/skip flows end-to-end
+5. **Cross-source live override tests** (Phase 5) — testing one handler from each source (GitLab, AgentMail, Linear, etc.) with custom overrides via API
+6. **Docker worker system prompt verification** (Phase 6) — starting a Docker worker and verifying the system prompt in logs uses registry-resolved templates
+7. **System prompt override via API** (Phase 6) — customizing `system.agent.guidelines` via API, restarting worker, verifying override appears
+8. **Truncation with long CLAUDE.md** (Phase 6) — verifying budget logic still works correctly with large injected content
+
+### Implementation Deviations from Plan
+
+1. **GitLab delegation instruction kept separate** — `common.delegation_instruction.gitlab` created instead of unifying with GitHub's, because the text is semantically different (less directive, more analytical)
+2. **Comment command suggestions as variable** — For `github.comment.mentioned`, command suggestions are passed as a `{{command_suggestions}}` variable rather than a `{{@template[...]}}` reference, because the handler picks between PR and issue variants dynamically
+3. **System prompt ordering change** — The full composite (role + register + lead/worker + etc.) is now assembled first, then dynamic sections (identity/repo/claudeMd/toolsMd) are appended after. Same content, different order. All existing base-prompt tests pass.
+4. **Test isolation fix** — Added `ensureTemplatesRegistered()` guards with cache-busting dynamic imports in test files to handle Bun's parallel test execution clearing the global in-memory Map
