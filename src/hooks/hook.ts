@@ -139,7 +139,7 @@ async function readTaskFile(): Promise<TaskFileData | null> {
 async function fetchTaskDetails(
   taskId: string,
 ): Promise<{ id: string; task: string; progress?: string } | null> {
-  const apiUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
+  const apiUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
   const apiKey = process.env.API_KEY || "";
   const headers: Record<string, string> = {};
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
@@ -932,7 +932,8 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
             editedPath.startsWith("/workspace/shared/memory/"))
         ) {
           try {
-            const apiUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
+            const apiUrl =
+              process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
             const apiKey = process.env.API_KEY || "";
             const fileContent = await Bun.file(editedPath).text();
             const isShared = editedPath.startsWith("/workspace/shared/");
@@ -1102,7 +1103,8 @@ ${transcript}`;
               summary.length > 20 &&
               !summary.trim().toLowerCase().includes("no significant learnings")
             ) {
-              const apiUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
+              const apiUrl =
+                process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
               const apiKey = process.env.API_KEY || "";
 
               await fetch(`${apiUrl}/api/memory/index`, {

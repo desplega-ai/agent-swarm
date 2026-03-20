@@ -28,7 +28,8 @@ export function initLinear(): boolean {
   const clientId = process.env.LINEAR_CLIENT_ID!;
   const clientSecret = process.env.LINEAR_CLIENT_SECRET ?? "";
   const redirectUri =
-    process.env.LINEAR_REDIRECT_URI ?? "http://localhost:3013/api/trackers/linear/callback";
+    process.env.LINEAR_REDIRECT_URI ??
+    `http://localhost:${process.env.PORT || "3013"}/api/trackers/linear/callback`;
 
   upsertOAuthApp("linear", {
     clientId,

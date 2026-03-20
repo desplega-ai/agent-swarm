@@ -24,7 +24,7 @@ export interface ArtifactServer {
 export function createArtifactServer(opts: ArtifactServerOptions): ArtifactServer {
   const agentId = process.env.AGENT_ID || "unknown";
   const apiKey = process.env.API_KEY || "";
-  const mcpBaseUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
+  const mcpBaseUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
 
   const app = new Hono();
 

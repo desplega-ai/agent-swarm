@@ -1602,7 +1602,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Get agent identity and swarm URL for base prompt
   const agentId = process.env.AGENT_ID || "unknown";
 
-  const apiUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
+  const apiUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
   const swarmUrl = process.env.SWARM_URL || "localhost";
 
   let capabilities = config.capabilities;
