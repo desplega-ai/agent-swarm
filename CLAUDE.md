@@ -94,6 +94,7 @@ templates-ui/    # Templates registry (Next.js app)
 - Run `bun run format` for formatting only
 - Use Bun APIs, not Node.js equivalents
 - Prefer `Bun.$` over execa for shell commands
+- Use `google/gemini-3-flash-preview` as the default Gemini model in tests, workflows, and examples (not `gemini-2.0-flash-001`)
 
 ### Adding HTTP Endpoints
 
