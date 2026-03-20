@@ -56,10 +56,12 @@ export function checkpointStepFailure(
   }
 
   // No retries left — mark step and run failed
+  // Clear nextRetryAt so the poller stops picking this step up
   updateWorkflowRunStep(stepId, {
     status: "failed",
     error,
     finishedAt: now,
+    nextRetryAt: null,
   });
 
   updateWorkflowRun(runId, {
