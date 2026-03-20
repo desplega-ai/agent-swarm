@@ -1,0 +1,41 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "d36f836eeb2d",
+  "session_id": "95571ac3-2eb9-42f4-9152-5c609f71fc06",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-20T20:29:57.172185Z",
+  "branch": "feat/cli-onboarding",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/commands/onboard/types.ts",
+    "src/commands/onboard.tsx",
+    "src/cli.tsx",
+    "src/commands/setup.tsx",
+    "src/commands/onboard/steps/health-check.tsx",
+    "src/commands/onboard/steps/post-connect.tsx",
+    "src/commands/onboard/steps/post-dashboard.tsx",
+    "src/commands/onboard/steps/post-task.tsx",
+    "src/commands/onboard/compose-generator.ts",
+    "src/commands/onboard/env-generator.ts",
+    "src/commands/onboard/manifest.ts",
+    "src/commands/onboard/steps/core-credentials.tsx"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "78ad801664a7",
+  "token_usage": {
+    "input_tokens": 407,
+    "cache_creation_tokens": 738012,
+    "cache_read_tokens": 47674084,
+    "output_tokens": 91281,
+    "api_call_count": 253
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-20T20:29:55.869913Z",
+    "agent_lines": 0,
+    "human_added": 54,
+    "human_modified": 42,
+    "human_removed": 0,
+    "total_committed": 54,
+    "agent_percentage": 0
+  }
+}

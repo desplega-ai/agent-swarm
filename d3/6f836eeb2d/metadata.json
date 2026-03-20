@@ -1,0 +1,37 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "d36f836eeb2d",
+  "strategy": "manual-commit",
+  "branch": "feat/cli-onboarding",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "src/cli.tsx",
+    "src/commands/onboard.tsx",
+    "src/commands/onboard/compose-generator.ts",
+    "src/commands/onboard/env-generator.ts",
+    "src/commands/onboard/manifest.ts",
+    "src/commands/onboard/steps/core-credentials.tsx",
+    "src/commands/onboard/steps/health-check.tsx",
+    "src/commands/onboard/steps/post-connect.tsx",
+    "src/commands/onboard/steps/post-dashboard.tsx",
+    "src/commands/onboard/steps/post-task.tsx",
+    "src/commands/onboard/types.ts",
+    "src/commands/setup.tsx"
+  ],
+  "sessions": [
+    {
+      "metadata": "/d3/6f836eeb2d/0/metadata.json",
+      "transcript": "/d3/6f836eeb2d/0/full.jsonl",
+      "context": "/d3/6f836eeb2d/0/context.md",
+      "content_hash": "/d3/6f836eeb2d/0/content_hash.txt",
+      "prompt": "/d3/6f836eeb2d/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 407,
+    "cache_creation_tokens": 738012,
+    "cache_read_tokens": 47674084,
+    "output_tokens": 91281,
+    "api_call_count": 253
+  }
+}
