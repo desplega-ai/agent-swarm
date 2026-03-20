@@ -108,7 +108,7 @@ CLI help is plain `console.log` (not Ink), defined in `src/cli.tsx` via the `COM
 
 **Command types:**
 - **Non-UI commands** (handled before `render()`): `help`, `version`, `docs`, `hook`, `artifact` — use `console.log` + `process.exit(0)`
-- **UI commands** (rendered by Ink): `onboard`, `connect`, `mcp`, `claude`, `worker`, `lead` — return JSX from the `App` switch
+- **UI commands** (rendered by Ink): `onboard`, `connect`, `api`, `claude`, `worker`, `lead` — return JSX from the `App` switch
 
 ### Adding HTTP Endpoints
 
