@@ -1,0 +1,8 @@
+<task-notification>
+<task-id>b1o43yp98</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/b1o43yp98.output</output-file>
+<status>completed</status>
+<summary>Background command "Commit and push all changes" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/b1o43yp98.output
