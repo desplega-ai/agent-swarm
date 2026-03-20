@@ -1,7 +1,7 @@
 ---
 date: 2026-03-20
 topic: "Workflow: Structured Output, Validation Fixes, Workspace Scoping"
-status: implemented
+status: verified
 author: taras+claude
 autonomy: critical
 commit-per-phase: true
@@ -608,3 +608,30 @@ extractPassResult("validate",       null)                        → false (edge
   }
 }
 ```
+
+---
+
+## Post-Implementation Verification
+
+_Verified: 2026-03-20 by claude_
+
+**Verdict: PASS** — All 4 phases correctly implemented, no discrepancies.
+
+### Automated Checks
+
+| Check | Result |
+|-------|--------|
+| `bun run tsc:check` | Pass (no errors) |
+| `bun run lint:fix` | Pass (warnings only) |
+| `bun test` | 1697/1697 pass, 0 fail |
+
+### Phase-by-Phase Code Verification
+
+- **Phase 1 (Workspace Scoping)**: `AgentTaskConfigSchema` has all 4 new fields, `execute()` forwards them, 6 unit tests pass. Commit `405d679`.
+- **Phase 2 (Validation Retry)**: `retry-poller.ts` calls `runStepValidation()` after retry, handles halt/retry/pass. `checkpoint.ts` clears `nextRetryAt` on exhaustion. 3 unit tests pass. Commits `2e91344`, `ccc5162`.
+- **Phase 3 (Structured Output)**: All 10 sub-checks verified — types, DB, migration, store-progress validation, prompt injection, fallback extraction, resume JSON-parsing, agent-task forwarding, json-schema-validator enum/const, 18 unit tests. Commit `9107205`.
+- **Phase 4 (Validation Adapters)**: `extractPassResult()` with 5 executor adapters + generic fallback. Hardcoded check replaced. 19 unit tests pass. Commit `39bebf3`.
+
+### Open Items
+
+- Claude adapter fallback E2E (Phase 3): Skipped — agent completed too fast for manual kill. Fallback path is unit-tested. Acceptable trade-off.
