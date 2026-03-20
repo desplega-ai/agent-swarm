@@ -70,12 +70,18 @@ WORKDIR /home/worker
 ENV HOME=/home/worker
 ENV BUN_INSTALL="/home/worker/.bun"
 
+# Redirect corepack home to user-writable directory (default /usr/lib/node_modules/
+# requires root and causes "operation rejected by your operating system" errors)
+ENV COREPACK_HOME=/home/worker/.corepack
+RUN mkdir -p /home/worker/.corepack
+
 # Install Bun for worker user (need to set HOME explicitly in RUN)
 RUN HOME=/home/worker BUN_INSTALL=/home/worker/.bun curl -fsSL https://bun.sh/install | bash
 ENV PATH="/home/worker/.bun/bin:$PATH"
 
-# Install Claude CLI using official installer
-RUN HOME=/home/worker curl -fsSL https://claude.ai/install.sh | bash
+# Install Claude CLI (pinned version — bump ARG to update)
+ARG CLAUDE_CODE_VERSION=2.1.80
+RUN sudo npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 ENV PATH="/home/worker/.local/bin:$PATH"
 
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
