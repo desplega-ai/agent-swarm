@@ -669,7 +669,12 @@ describe("Workflow Engine v2 (Phase 3)", () => {
       const def: WorkflowDefinition = {
         nodes: [
           { id: "first", type: "echo", config: { message: "hello" }, next: "second" },
-          { id: "second", type: "echo", config: { message: "got: {{first.echo}}" } },
+          {
+            id: "second",
+            type: "echo",
+            inputs: { firstEcho: "first.echo" },
+            config: { message: "got: {{firstEcho}}" },
+          },
         ],
       };
 

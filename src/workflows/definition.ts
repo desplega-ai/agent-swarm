@@ -79,6 +79,38 @@ export function getSuccessors(
 }
 
 /**
+ * Check whether `sourceId` is a transitive predecessor (upstream) of `targetId`.
+ * Uses reverse BFS from target backwards through the graph.
+ */
+export function isUpstream(def: WorkflowDefinition, sourceId: string, targetId: string): boolean {
+  // Build reverse dependency map: target → list of source nodes that point to it
+  const reverseDeps = new Map<string, string[]>();
+  for (const node of def.nodes) {
+    if (!node.next) continue;
+    const targets = typeof node.next === "string" ? [node.next] : Object.values(node.next);
+    for (const target of targets) {
+      if (!reverseDeps.has(target)) reverseDeps.set(target, []);
+      reverseDeps.get(target)!.push(node.id);
+    }
+  }
+
+  // BFS backwards from targetId
+  const visited = new Set<string>();
+  const queue = [targetId];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const preds = reverseDeps.get(current) || [];
+    for (const pred of preds) {
+      if (visited.has(pred)) continue;
+      visited.add(pred);
+      if (pred === sourceId) return true;
+      queue.push(pred);
+    }
+  }
+  return false;
+}
+
+/**
  * Validate a workflow definition for structural correctness.
  *
  * Checks:
@@ -86,6 +118,7 @@ export function getSuccessors(
  * 2. Exactly one entry node (no incoming `next` references)
  * 3. No orphaned nodes (every non-entry node must be reachable from entry)
  * 4. All node types are registered in the executor registry (if provided)
+ * 5. Input mappings reference existing, upstream nodes
  */
 export function validateDefinition(
   def: WorkflowDefinition,
@@ -149,6 +182,33 @@ export function validateDefinition(
     for (const node of def.nodes) {
       if (!registry.has(node.type)) {
         errors.push(`Node "${node.id}" uses unregistered executor type "${node.type}"`);
+      }
+    }
+  }
+
+  // 5. Check input mappings reference existing, upstream nodes
+  for (const node of def.nodes) {
+    if (!node.inputs) continue;
+    for (const [localName, sourcePath] of Object.entries(node.inputs)) {
+      const [sourceNodeId] = sourcePath.split(".");
+      if (!sourceNodeId) continue;
+
+      // Skip built-in context sources
+      if (sourceNodeId === "trigger" || sourceNodeId === "input") continue;
+
+      // Check source node exists
+      if (!nodeIds.has(sourceNodeId)) {
+        errors.push(
+          `Node "${node.id}" input "${localName}" references non-existent node "${sourceNodeId}"`,
+        );
+        continue;
+      }
+
+      // Check source node is upstream (transitive predecessor)
+      if (!isUpstream(def, sourceNodeId, node.id)) {
+        errors.push(
+          `Node "${node.id}" input "${localName}" references "${sourceNodeId}" which is not upstream`,
+        );
       }
     }
   }

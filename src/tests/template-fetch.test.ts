@@ -77,14 +77,14 @@ describe("Template interpolation", () => {
   test("interpolates {{agent.name}} and {{agent.role}}", () => {
     const result = interpolate("Hello {{agent.name}}, you are a {{agent.role}}", {
       agent: { name: "TestBot", role: "worker" },
-    });
+    }).result;
     expect(result).toBe("Hello TestBot, you are a worker");
   });
 
   test("replaces unknown placeholders with empty string", () => {
     const result = interpolate("Hello {{agent.unknown}}", {
       agent: { name: "TestBot" },
-    });
+    }).result;
     expect(result).toBe("Hello ");
   });
 
@@ -96,7 +96,7 @@ describe("Template interpolation", () => {
         capabilities: "typescript, react",
       },
     };
-    const result = interpolate("Caps: {{agent.capabilities}}", ctx);
+    const result = interpolate("Caps: {{agent.capabilities}}", ctx).result;
     expect(result).toBe("Caps: typescript, react");
   });
 });
@@ -138,8 +138,8 @@ describe("Template idempotency", () => {
     };
 
     // Simulate: profile fields are empty, apply template
-    if (!soulMd) soulMd = interpolate(mockTemplate.files.soulMd, ctx);
-    if (!identityMd) identityMd = interpolate(mockTemplate.files.identityMd, ctx);
+    if (!soulMd) soulMd = interpolate(mockTemplate.files.soulMd, ctx).result;
+    if (!identityMd) identityMd = interpolate(mockTemplate.files.identityMd, ctx).result;
 
     expect(soulMd).toBe("You are MyAgent, a worker agent.");
     expect(identityMd).toContain("MyAgent");
@@ -154,7 +154,7 @@ describe("Template idempotency", () => {
     };
 
     // Simulate: profile already exists, guard prevents template application
-    if (!soulMd) soulMd = interpolate(mockTemplate.files.soulMd, ctx);
+    if (!soulMd) soulMd = interpolate(mockTemplate.files.soulMd, ctx).result;
 
     // Original content preserved
     expect(soulMd).toBe(existingSoul);
@@ -168,8 +168,8 @@ describe("Template idempotency", () => {
       agent: { name: "MyAgent", role: "worker", capabilities: "ts, react" },
     };
 
-    if (!soulMd) soulMd = interpolate(mockTemplate.files.soulMd, ctx);
-    if (!claudeMd) claudeMd = interpolate(mockTemplate.files.claudeMd, ctx);
+    if (!soulMd) soulMd = interpolate(mockTemplate.files.soulMd, ctx).result;
+    if (!claudeMd) claudeMd = interpolate(mockTemplate.files.claudeMd, ctx).result;
 
     expect(soulMd).toBe("Existing soul");
     expect(claudeMd).toBe("# MyAgent - worker Agent");
@@ -181,7 +181,7 @@ describe("Template idempotency", () => {
     let soulMd: string | undefined;
 
     if (template) {
-      soulMd = interpolate(template.files.soulMd, {});
+      soulMd = interpolate(template.files.soulMd, {}).result;
     }
 
     // Template not applied, soulMd still undefined -> fallback will generate default

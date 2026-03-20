@@ -5749,6 +5749,7 @@ type WorkflowRow = {
   triggers: string;
   cooldown: string | null;
   input: string | null;
+  triggerSchema: string | null;
   createdByAgentId: string | null;
   createdAt: string;
   lastUpdatedAt: string;
@@ -5764,6 +5765,9 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
     triggers: JSON.parse(row.triggers) as TriggerConfig[],
     cooldown: row.cooldown ? (JSON.parse(row.cooldown) as CooldownConfig) : undefined,
     input: row.input ? (JSON.parse(row.input) as Record<string, InputValue>) : undefined,
+    triggerSchema: row.triggerSchema
+      ? (JSON.parse(row.triggerSchema) as Record<string, unknown>)
+      : undefined,
     createdByAgentId: row.createdByAgentId ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
@@ -5777,16 +5781,27 @@ export function createWorkflow(data: {
   triggers?: TriggerConfig[];
   cooldown?: CooldownConfig;
   input?: Record<string, InputValue>;
+  triggerSchema?: Record<string, unknown>;
   createdByAgentId?: string;
 }): Workflow {
   const id = crypto.randomUUID();
   const row = getDb()
     .prepare<
       WorkflowRow,
-      [string, string, string | null, string, string, string | null, string | null, string | null]
+      [
+        string,
+        string,
+        string | null,
+        string,
+        string,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+      ]
     >(
-      `INSERT INTO workflows (id, name, description, definition, triggers, cooldown, input, createdByAgentId)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO workflows (id, name, description, definition, triggers, cooldown, input, triggerSchema, createdByAgentId)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -5796,6 +5811,7 @@ export function createWorkflow(data: {
       JSON.stringify(data.triggers ?? []),
       data.cooldown ? JSON.stringify(data.cooldown) : null,
       data.input ? JSON.stringify(data.input) : null,
+      data.triggerSchema ? JSON.stringify(data.triggerSchema) : null,
       data.createdByAgentId ?? null,
     );
   if (!row) throw new Error("Failed to create workflow");
@@ -5833,6 +5849,7 @@ export function updateWorkflow(
     triggers?: TriggerConfig[];
     cooldown?: CooldownConfig | null;
     input?: Record<string, InputValue> | null;
+    triggerSchema?: Record<string, unknown> | null;
   },
 ): Workflow | null {
   const updates: string[] = [];
@@ -5864,6 +5881,10 @@ export function updateWorkflow(
   if (data.input !== undefined) {
     updates.push("input = ?");
     params.push(data.input ? JSON.stringify(data.input) : null);
+  }
+  if (data.triggerSchema !== undefined) {
+    updates.push("triggerSchema = ?");
+    params.push(data.triggerSchema ? JSON.stringify(data.triggerSchema) : null);
   }
   if (updates.length === 0) return getWorkflow(id);
   updates.push("lastUpdatedAt = ?");
@@ -6016,6 +6037,8 @@ type WorkflowRunStepRow = {
   maxRetries: number;
   nextRetryAt: string | null;
   idempotencyKey: string | null;
+  diagnostics: string | null;
+  nextPort: string | null;
 };
 
 function rowToWorkflowRunStep(row: WorkflowRunStepRow): WorkflowRunStep {
@@ -6034,6 +6057,8 @@ function rowToWorkflowRunStep(row: WorkflowRunStepRow): WorkflowRunStep {
     maxRetries: row.maxRetries,
     nextRetryAt: row.nextRetryAt ?? undefined,
     idempotencyKey: row.idempotencyKey ?? undefined,
+    diagnostics: row.diagnostics ?? undefined,
+    nextPort: row.nextPort ?? undefined,
   };
 }
 
@@ -6080,6 +6105,8 @@ export function updateWorkflowRunStep(
     maxRetries?: number;
     nextRetryAt?: string | null;
     idempotencyKey?: string;
+    diagnostics?: string;
+    nextPort?: string;
   },
 ): WorkflowRunStep | null {
   const updates: string[] = [];
@@ -6115,6 +6142,14 @@ export function updateWorkflowRunStep(
   if (data.idempotencyKey !== undefined) {
     updates.push("idempotencyKey = ?");
     params.push(data.idempotencyKey);
+  }
+  if (data.diagnostics !== undefined) {
+    updates.push("diagnostics = ?");
+    params.push(data.diagnostics);
+  }
+  if (data.nextPort !== undefined) {
+    updates.push("nextPort = ?");
+    params.push(data.nextPort);
   }
   if (updates.length === 0) return getWorkflowRunStep(id);
   params.push(id);

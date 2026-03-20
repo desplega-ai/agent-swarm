@@ -21,6 +21,7 @@ import {
 } from "../types";
 import { getExecutorRegistry, startWorkflowExecution } from "../workflows";
 import { generateEdges, validateDefinition } from "../workflows/definition";
+import { TriggerSchemaError } from "../workflows/engine";
 import { retryFailedRun } from "../workflows/resume";
 import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
 import { snapshotWorkflow } from "../workflows/version";
@@ -53,6 +54,7 @@ const createWorkflowRoute = route({
     triggers: z.array(TriggerConfigSchema).optional(),
     cooldown: CooldownConfigSchema.optional(),
     input: z.record(z.string(), InputValueSchema).optional(),
+    triggerSchema: z.record(z.string(), z.unknown()).optional(),
   }),
   responses: {
     201: { description: "Workflow created" },
@@ -87,6 +89,7 @@ const updateWorkflowRoute = route({
     triggers: z.array(TriggerConfigSchema).optional(),
     cooldown: CooldownConfigSchema.optional().nullable(),
     input: z.record(z.string(), InputValueSchema).optional().nullable(),
+    triggerSchema: z.record(z.string(), z.unknown()).optional().nullable(),
     enabled: z.boolean().optional(),
   }),
   responses: {
@@ -294,7 +297,9 @@ export async function handleWorkflows(
       );
       json(res, result, 201);
     } catch (err) {
-      if (err instanceof WebhookError) {
+      if (err instanceof TriggerSchemaError) {
+        jsonError(res, err.message, 400);
+      } else if (err instanceof WebhookError) {
         jsonError(res, err.message, err.statusCode);
       } else {
         jsonError(res, String(err), 500);
@@ -356,6 +361,7 @@ export async function handleWorkflows(
       triggers: parsed.body.triggers,
       cooldown: parsed.body.cooldown,
       input: parsed.body.input,
+      triggerSchema: parsed.body.triggerSchema,
       createdByAgentId: myAgentId ?? undefined,
     });
     json(res, workflow, 201);
@@ -414,6 +420,7 @@ export async function handleWorkflows(
       triggers: body.triggers,
       cooldown: body.cooldown === null ? null : body.cooldown,
       input: body.input === null ? null : body.input,
+      triggerSchema: body.triggerSchema === null ? null : body.triggerSchema,
       enabled: body.enabled,
     });
     if (!workflow) {
@@ -453,7 +460,17 @@ export async function handleWorkflows(
       return true;
     }
     const body = await parseBody<Record<string, unknown>>(req);
-    const runId = await startWorkflowExecution(workflow, body, getExecutorRegistry());
+
+    let runId: string;
+    try {
+      runId = await startWorkflowExecution(workflow, body, getExecutorRegistry());
+    } catch (err) {
+      if (err instanceof TriggerSchemaError) {
+        jsonError(res, err.message, 400);
+        return true;
+      }
+      throw err;
+    }
 
     // Check if skipped due to cooldown
     const run = getWorkflowRun(runId);

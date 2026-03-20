@@ -10,7 +10,7 @@ import { checkpointStep, checkpointStepFailure } from "./checkpoint";
 import { getSuccessors } from "./definition";
 import { walkGraph } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
-import { interpolate } from "./template";
+import { deepInterpolate } from "./template";
 
 let pollerTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -60,15 +60,9 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
 
           const ctx = (run.context ?? {}) as Record<string, unknown>;
 
-          // Interpolate config
-          const interpolatedConfig: Record<string, unknown> = {};
-          for (const [key, value] of Object.entries(node.config)) {
-            if (typeof value === "string") {
-              interpolatedConfig[key] = interpolate(value, ctx);
-            } else {
-              interpolatedConfig[key] = value;
-            }
-          }
+          // Deep-interpolate config
+          const { value: interpolatedValue } = deepInterpolate(node.config, ctx);
+          const interpolatedConfig = interpolatedValue as Record<string, unknown>;
 
           // Get executor and re-run
           const executor = registry.get(node.type);
