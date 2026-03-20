@@ -1,0 +1,33 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "ae2d1cf3e015",
+  "session_id": "95571ac3-2eb9-42f4-9152-5c609f71fc06",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-20T20:12:29.766071Z",
+  "branch": "feat/cli-onboarding",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "src/commands/onboard/steps/integration-slack.tsx",
+    "src/commands/onboard/steps/integration-github.tsx",
+    "src/commands/onboard/steps/integration-gitlab.tsx",
+    "src/commands/onboard/steps/integration-sentry.tsx"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "66512338962a",
+  "token_usage": {
+    "input_tokens": 313,
+    "cache_creation_tokens": 482605,
+    "cache_read_tokens": 34056330,
+    "output_tokens": 80857,
+    "api_call_count": 201
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-20T20:12:27.787719Z",
+    "agent_lines": 54,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 54,
+    "agent_percentage": 100
+  }
+}

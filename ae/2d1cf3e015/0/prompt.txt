@@ -1,0 +1,766 @@
+# Implement Plan
+
+A thin wrapper that invokes the `desplega:implementing` skill with autonomy controls.
+
+## When Invoked
+
+1. **Parse autonomy mode from arguments:**
+   - Check for `--autonomy=autopilot|critical|verbose` flag
+   - If plan file has `autonomy:` in frontmatter, use that as default
+   - Otherwise, default to **Critical** (don't prompt - implementation is more straightforward)
+
+2. **ALWAYS invoke the `desplega:implementing` skill:**
+   - Pass the plan file path
+   - Pass the autonomy mode determined above
+   - Let the skill handle all implementation logic
+
+3. **If no plan path provided:**
+   - Respond with: "I need a plan file to proceed. Please provide the path to the plan you would like me to implement."
+
+## Example Usage
+
+```
+/implement-plan thoughts/<username|shared>/plans/2026-01-14-my-feature.md
+/implement-plan --autonomy=autopilot @plans/feature.md
+/implement-plan --autonomy=verbose @current-plan.md
+```
+
+
+ARGUMENTS: thoughts/taras/plans/2026-03-20-setup-cli-onboarding.md
+
+---
+
+<task-notification>
+<task-id>acacce2d7d592f285</task-id>
+<tool-use-id>toolu_01687xv228CvRabbR4zGtvBu</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/acacce2d7d592f285.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore existing CLI and setup code" completed</summary>
+<result>Perfect! Now I have all the information needed. Let me compile the comprehensive findings:
+
+## Agent Swarm CLI Exploration Summary
+
+I've thoroughly explored the agent-swarm CLI codebase. Here are the key patterns, type signatures, and structures you need to replicate:
+
+### 1. **CLI Entry Point & Arg Parsing** (`src/cli.tsx`)
+
+**ParsedArgs Interface:**
+```typescript
+interface ParsedArgs {
+  command: string | undefined;
+  port: string;
+  key: string;
+  msg: string;
+  headless: boolean;
+  dryRun: boolean;
+  restore: boolean;
+  yes: boolean;
+  yolo: boolean;
+  systemPrompt: string;
+  systemPromptFile: string;
+  additionalArgs: string[];
+  aiLoop: boolean;
+}
+```
+
+**Key patterns:**
+- Command detection: `args[0] && !args[0].startsWith("-") ? args[0] : undefined`
+- Environment variable fallbacks: `process.env.PORT || "3013"`, `process.env.API_KEY || ""`
+- Separator handling: Uses `"--"` to delimit additional args (`args.indexOf("--")`)
+- Manual flag parsing with index increment in loop for value pairs (`i++` after consuming flag value)
+- Non-UI commands (like `hook`, `artifact`) are routed separately before `render()`, not through the component switch
+- Returns to `parseArgs(process.argv.slice(2))` and conditionally calls `runHook()` or renders `<App args={args} />`
+
+**Command routing switch statement:**
+```typescript
+switch (command) {
+  case "setup":
+    return <Setup dryRun={dryRun} restore={restore} yes={yes} />;
+  case "mcp":
+    return <McpServer port={port} apiKey={key} />;
+  // ... other cases
+  default:
+    return <UnknownCommand command={command} />;
+}
+```
+
+---
+
+### 2. **Setup Command State Machine** (`src/commands/setup.tsx`)
+
+**SetupStep type union:**
+```typescript
+type SetupStep =
+  | "check_dirs"
+  | "restoring"
+  | "input_token"
+  | "input_agent_id"
+  | "updating"
+  | "done"
+  | "error";
+```
+
+**SetupState interface:**
+```typescript
+interface SetupState {
+  step: SetupStep;
+  token: string;
+  agentId: string;
+  existingToken: string;
+  existingAgentId: string;
+  error: string | null;
+  logs: string[];
+  isGitRepo: boolean;
+}
+```
+
+**Deduplication pattern (critical for state machines):**
+```typescript
+const executedSteps = useRef<Set<SetupStep>>(new Set());
+
+// In each useEffect:
+if (state.step !== "input_token") return;
+if (executedSteps.current.has("input_token")) return;
+executedSteps.current.add("input_token");
+// ... effect logic
+```
+**Why:** Prevents React's StrictMode from re-executing effects in development. Each step tracks whether it's already been executed.
+
+**Step transitions via setState:**
+```typescript
+setState((s) => ({ ...s, step: "input_agent_id" }));
+setState((s) => ({ ...s, step: "error", error: "message" }));
+```
+
+**Exit on done/error with timer:**
+```typescript
+useEffect(() => {
+  if (state.step === "done" || state.step === "error") {
+    const timer = setTimeout(() => exit(), 500);
+    return () => clearTimeout(timer);
+  }
+}, [state.step, exit]);
+```
+
+---
+
+### 3. **@inkjs/ui Components** (v2.0.0)
+
+**Available components:**
+- `Spinner` — loading indicator with label
+- `TextInput` — single-line input with optional autocomplete
+- `PasswordInput` — masked text input
+- `EmailInput` — email with domain autocomplete
+- `Select` — scrollable dropdown menu
+- `MultiSelect` — checkbox list
+- `ConfirmInput` — Y/n prompt
+- `Alert` — status messages (success/error/warning/info)
+- `StatusMessage` — longer status explanation
+- `Badge` — small status indicator
+- `ProgressBar` — progress percentage
+- `UnorderedList` / `OrderedList` — list rendering
+
+**Key component signatures:**
+
+**Spinner:**
+```typescript
+type SpinnerProps = {
+  label?: string;
+  type?: string; // spinner type
+};
+```
+
+**TextInput:**
+```typescript
+type TextInputProps = {
+  isDisabled?: boolean;
+  placeholder?: string;
+  defaultValue?: string;
+  suggestions?: string[]; // autocomplete suggestions
+  onChange?: (value: string) => void;
+  onSubmit?: (value: string) => void; // on Enter
+};
+```
+
+**Select:**
+```typescript
+type SelectProps = {
+  isDisabled?: boolean;
+  visibleOptionCount?: number; // default: 5
+  highlightText?: string;
+  options: Option[];
+  defaultValue?: string;
+  onChange?: (value: string) => void;
+};
+```
+
+**Usage patterns from setup.tsx:**
+```tsx
+<TextInput
+  key="token-input"
+  defaultValue={state.existingToken}
+  placeholder="your-api-token"
+  onSubmit={(value) => {
+    if (!value.trim()) {
+      setState((s) => ({ ...s, step: "error", error: "Required" }));
+      return;
+    }
+    setState((s) => ({ ...s, token: value, step: "input_agent_id" }));
+  }}
+/>
+
+<Spinner label="Checking directories and files..." />
+```
+
+---
+
+### 4. **Template Schema** (`templates/schema.ts`)
+
+```typescript
+export interface TemplateConfig {
+  name: string;
+  displayName: string;
+  description: string;
+  version: string;
+  category: "official" | "community";
+  icon: string;
+  author: string; // "Name <email>" format
+  createdAt: string; // ISO date
+  lastUpdatedAt: string; // ISO date
+  agentDefaults: {
+    role: string;
+    capabilities: string[];
+    maxTasks: number;
+    isLead?: boolean;
+  };
+  files: {
+    claudeMd: string | null; // filename or null
+    soulMd: string | null;
+    identityMd: string | null;
+    toolsMd: string | null;
+    setupScript: string | null;
+  };
+}
+
+export interface TemplateResponse {
+  config: TemplateConfig;
+  files: {
+    claudeMd: string;
+    soulMd: string;
+    identityMd: string;
+    toolsMd: string;
+    setupScript: string;
+  };
+}
+```
+
+---
+
+### 5. **Compose Generator** (`templates-ui/src/lib/compose-generator.ts`)
+
+**Input interface:**
+```typescript
+export interface ComposeConfig {
+  services: ServiceEntry[];
+  apiImage: string;
+  workerImage: string;
+  startingPort: number;
+  integrations: {
+    slack: boolean;
+    github: boolean;
+    gitlab: boolean;
+    sentry: boolean;
+  };
+}
+
+export interface ServiceEntry {
+  template: string; // e.g. "official/lead"
+  displayName: string;
+  count: number;
+  role: string;
+  isLead?: boolean;
+}
+```
+
+**Key functions:**
+- `generateCompose(config: ComposeConfig): string` — builds docker-compose.yml YAML string
+- `generateEnv(config: ComposeConfig): string` — builds .env file string
+- `resetUUIDCounter()` — utility for deterministic UUID generation (for SSR/hydration safety)
+
+**UUID generation pattern (deterministic for SSR):**
+```typescript
+let uuidCounter = 0;
+
+function generateUUID(): string {
+  uuidCounter++;
+  const hex = uuidCounter.toString(16).padStart(12, "0");
+  return `00000000-0000-4000-8000-${hex}`;
+}
+
+export function resetUUIDCounter() {
+  uuidCounter = 0;
+}
+```
+
+**Internal GeneratedService structure:**
+```typescript
+interface GeneratedService {
+  name: string;
+  agentId: string;
+  agentName: string;
+  agentRole: string;
+  templateId: string;
+  port: number;
+  volumeName: string;
+  isLead: boolean;
+}
+```
+
+**Service naming:**
+```typescript
+const baseName = entry.isLead ? "lead" : `worker-${entry.role}`;
+const name = `${baseName}${suffix}`; // suffix = "-1", "-2" if count > 1
+const volumeSuffix = name.replace(/-/g, "_"); // lead → lead, worker-coder-1 → worker_coder_1
+```
+
+**Docker compose structure generated:**
+- API service with healthcheck
+- Agent services with `depends_on: api` (service_healthy condition)
+- Environment vars injected from config
+- Volumes: `swarm_api`, `swarm_logs`, `swarm_shared`, per-service `swarm_*` volumes
+- Port mapping: `${startingPort + offset}:3000`
+
+---
+
+### 6. **Command Pattern** (Non-UI commands)
+
+**Pattern for simple delegating commands** (`src/commands/worker.ts`, `src/commands/lead.ts`):
+```typescript
+export type WorkerOptions = RunnerOptions;
+
+const workerConfig: RunnerConfig = {
+  role: "worker",
+  defaultPrompt: "/start-worker",
+  metadataType: "worker_metadata",
+  capabilities: getEnabledCapabilities(),
+};
+
+export async function runWorker(opts: WorkerOptions) {
+  return runAgent(workerConfig, opts);
+}
+```
+
+**Hook command pattern** (`src/commands/hook.ts`):
+```typescript
+export async function runHook(): Promise<void> {
+  await handleHook();
+  process.exit(0);
+}
+```
+
+**Artifact command with subcommand routing** (`src/commands/artifact.ts`):
+```typescript
+export async function runArtifact(subcommand: string, args: ArtifactArgs) {
+  switch (subcommand) {
+    case "serve":
+      return artifactServe(args);
+    // ... other cases
+    default:
+      printHelp();
+  }
+}
+```
+
+---
+
+### 7. **Key Ink Patterns**
+
+**useApp hook for exit:**
+```typescript
+const { exit } = useApp();
+
+useEffect(() => {
+  exit();
+}, [exit]);
+```
+
+**Box + Text for layout:**
+```tsx
+<Box flexDirection="column" padding={1}>
+  <Box marginBottom={1}>
+    <Text color="green">✓ Success</Text>
+  </Box>
+  <Text dimColor>Secondary info</Text>
+</Box>
+```
+
+**Log rendering pattern (from setup.tsx):**
+```tsx
+<Box flexDirection="column" marginBottom={1}>
+  {state.logs.map((log, i) => (
+    <Text key={`log-${i}-${log.slice(0, 20)}`} dimColor>
+      {log}
+    </Text>
+  ))}
+</Box>
+```
+
+---
+
+### 8. **Bun-Specific Patterns**
+
+**File operations:**
+```typescript
+const file = Bun.file(filePath);
+if (await file.exists()) {
+  const content = await file.text();
+  await Bun.write(filePath, JSON.stringify(data, null, 2));
+}
+```
+
+**Shell execution:**
+```typescript
+const result = await Bun.$`git -C ${cwd} rev-parse --show-toplevel`.quiet();
+const exitCode = result.exitCode;
+const text = result.text().trim();
+```
+
+---
+
+### 9. **Package.json Configuration**
+
+- **@inkjs/ui**: v2.0.0 — React UI components for terminal
+- **ink**: v6.5.1 — React for terminal
+- **Bun**: >=1.0.26 — runtime
+- **bin**: `agent-swarm` → `./src/cli.tsx`
+- Dev server: `bun --hot src/http.ts` or `portless` for local dev
+
+---
+
+### 10. **File Locations Summary**
+
+```
+src/
+  cli.tsx                    # Main CLI entry, arg parsing, command routing
+  commands/
+    setup.tsx                # State machine with @inkjs/ui inputs
+    worker.ts, lead.ts       # Simple delegating commands
+    hook.ts                  # Sync hook handler
+    artifact.ts              # Subcommand router with help
+
+templates/
+  schema.ts                  # TemplateConfig, TemplateResponse types
+
+templates-ui/src/lib/
+  compose-generator.ts       # Compose/env generation from config
+```
+
+---
+
+This gives you the complete patterns, type signatures, and architectural approach needed to extend or replicate the CLI structure. The key architectural insights are:
+
+1. **State machines** use `useRef<Set>` deduplication to survive React strict mode
+2. **Command routing** happens at two levels: pre-render (non-UI like `hook`) and component switch
+3. **@inkjs/ui** provides structured input/output without manual terminal control
+4. **Compose generation** is pure function-based (no UI), accepting config and outputting strings
+5. **Bun APIs** are preferred over Node equivalents throughout</result>
+<usage><total_tokens>66872</total_tokens><tool_uses>27</tool_uses><duration_ms>64364</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/acacce2d7d592f285.output
+
+---
+
+➜  cli-onboarding git:(feat/cli-onboarding) ✗ bun run src/cli.tsx onboard --dry-run
+
+ Step "harness" not implemented yet
+
+
+
+works, continue. ensure to implement in bg agents pls (as in skill)
+
+---
+
+<task-notification>
+<task-id>a592d3e52f423a876</task-id>
+<tool-use-id>toolu_01AMzv5TJK8uCf155Cn6HCeZ</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/a592d3e52f423a876.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 6+7: Deploy and post-deploy steps" completed</summary>
+<result>
+
+Now let me create the generate step.</result>
+<usage><total_tokens>44579</total_tokens><tool_uses>19</tool_uses><duration_ms>82223</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/a592d3e52f423a876.output
+
+---
+
+<task-notification>
+<task-id>a648ff7f2f14a2ebd</task-id>
+<tool-use-id>toolu_01VuXhdaNkN2ugFjyFWCtpYb</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/a648ff7f2f14a2ebd.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 2+3: Templates + Harness steps" completed</summary>
+<result>
+
+All five files are clean. Here is a summary of what was created:
+
+**Files created:**
+
+1. `/Users/taras/worktrees/agent-swarm/2026-03-20-feat/cli-onboarding/src/commands/onboard/templates.ts` -- `fetchTemplateList()` function that GETs `{registryUrl}/api/templates`, handles both `{ templates: [...] }` and raw array response shapes, with descriptive error messages on network or HTTP failures.
+
+2. `/Users/taras/worktrees/agent-swarm/2026-03-20-feat/cli-onboarding/src/commands/onboard/steps/custom-templates.tsx` -- `CustomTemplatesStep` with three sub-phases: loading (fetches from registry with `useRef` dedup), picking (templates grouped by lead/worker, iterative "add another / Done" flow via `Select`), and confirming (shows selection summary, warns if no lead, confirm/go-back options).
+
+3. `/Users/taras/worktrees/agent-swarm/2026-03-20-feat/cli-onboarding/src/commands/onboard/steps/harness.tsx` -- `HarnessStep` with `Select` between Claude Code and Pi-mono. Claude advances via `goToNext({ harness: "claude" })`. Pi-mono shows a "coming soon" message and does not advance.
+
+4. `/Users/taras/worktrees/agent-swarm/2026-03-20-feat/cli-onboarding/src/commands/onboard/steps/harness-credentials.tsx` -- `HarnessCredentialsStep` with sub-steps: choice (1 = run `claude setup-token`, 2 = manual paste), running_cli (spawns `Bun.$\`claude setup-token\`` then falls through to manual paste), cli_error (fallback on failure), and manual_input (`TextInput` for the token). Calls `goToNext({ claudeOAuthToken })` on submission.
+
+5. `/Users/taras/worktrees/agent-swarm/2026-03-20-feat/cli-onboarding/src/commands/onboard/steps/core-credentials.tsx` -- `CoreCredentialsStep` auto-generates an API key (`randomBytes(32).toString("hex").slice(0, 24)`) and a `randomUUID()` per service entry (expanding `count > 1` with suffixed labels). Shows a masked summary, then auto-advances after 1s via `goToNext({ apiKey, agentIds })`.
+
+**Verification:** `bun run tsc:check` passes (only pre-existing errors in `integration-menu.tsx` remain). `bun run lint:fix` passes with no warnings from the new files.</result>
+<usage><total_tokens>53371</total_tokens><tool_uses>31</tool_uses><duration_ms>180026</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/a648ff7f2f14a2ebd.output
+
+---
+
+<task-notification>
+<task-id>a6829d8f8c93406f1</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/a6829d8f8c93406f1.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 4: Integration steps" completed</summary>
+<result>No warnings from our files. Here is a summary of what was done:
+
+---
+
+**Created 5 files** in `/Users/taras/worktrees/agent-swarm/2026-03-20-feat/cli-onboarding/src/commands/onboard/steps/`:
+
+1. **`integration-menu.tsx`** -- Sequential yes/no `Select` for each integration (GitHub, Slack, GitLab, Sentry). Tracks progress via `useState<number>` index, shows previous selections dimmed, then calls `goToNext({ integrations })` when all four are answered.
+
+2. **`integration-github.tsx`** -- Three-phase `TextInput` flow (`token` -> `email` -> `name`). Shows instructions for creating a PAT at `github.com/settings/tokens` with `repo` scope. Previously collected values shown dimmed above the current input.
+
+3. **`integration-slack.tsx`** -- Four-phase flow: manifest options (`Select` with copy/show/skip), app creation confirmation (`Select` continue), bot token (`TextInput` with `xoxb-` validation), app token (`TextInput` with `xapp-` validation). Uses `Bun.$` for clipboard via `pbcopy`. Manifest URL points to the repo's `slack-manifest.json` on GitHub.
+
+4. **`integration-gitlab.tsx`** -- Two-phase `TextInput` flow (`token` -> `email`). Instructions for GitLab PAT creation with `api, read_repository, write_repository` scopes.
+
+5. **`integration-sentry.tsx`** -- Two-phase `TextInput` flow (`token` -> `org`). Instructions for Sentry auth token with `project:read, org:read, event:read` scopes.
+
+All files follow the existing patterns: `StepProps` interface, `Select`/`TextInput` from `@inkjs/ui`, `Box`/`Text` from `ink`, internal `useState` for sub-step tracking. Both `bun run tsc:check` and `bun run lint:fix` pass clean with no errors or warnings in the new files.</result>
+<usage><total_tokens>48697</total_tokens><tool_uses>30</tool_uses><duration_ms>179388</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/a6829d8f8c93406f1.output
+
+---
+
+<task-notification>
+<task-id>a331695883a5a2669</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/a331695883a5a2669.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 5: File generators" completed</summary>
+<result>All 6 warnings + 1 info are pre-existing in other files. Zero issues in the new files.
+
+Here's what was created:
+
+**Files created (all under `/Users/taras/worktrees/agent-swarm/2026-03-20-feat/cli-onboarding/src/commands/onboard/`):**
+
+1. **`service-names.ts`** -- Shared utility that expands `ServiceEntry[]` (with `count` fields) into individual `ExpandedService` objects. Handles naming conventions: leads get `lead` / `lead-1`, workers get `worker-{role}` / `worker-{role}-1`. Also provides `sanitizedName` (underscores for volumes) and `containerName` (prefixed with `swarm-`).
+
+2. **`compose-generator.ts`** -- `generateCompose(state)` returns a Docker Compose YAML string. Includes the API service (`swarm-api` on port 3013 with healthcheck) and agent services (starting at port 3201, using `depends_on: service_healthy`). Conditionally adds integration env vars (GitHub, Slack, GitLab, Sentry). Docker Compose `${VAR}` references are extracted to module-level constants with biome-ignore comments to avoid false-positive lint warnings.
+
+3. **`env-generator.ts`** -- `generateEnv(state)` returns a `.env` file string with real values from state (not placeholders). Sections: Core, Authentication, Integrations (conditional), Agent IDs (as comments for reference). Disabled integrations get their `_DISABLE=true` flag.
+
+4. **`manifest.ts`** -- `generateManifest(state)` returns a JSON-serializable object capturing the full deployment configuration (version, preset, harness, expanded services with agent IDs, integration flags, file paths, URLs).
+
+All four files are pure functions with no React/Ink dependencies. TypeScript passes with zero errors. Biome lint passes with zero warnings in the new files.</result>
+<usage><total_tokens>53334</total_tokens><tool_uses>31</tool_uses><duration_ms>201435</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/a331695883a5a2669.output
+
+---
+
+y pls, then in the end let me know what shold I test (do manual e2e pls)
+
+---
+
+<task-notification>
+<task-id>aaf445e4485c681b4</task-id>
+<tool-use-id>toolu_01Psve9PVPb41stCcv9XkQvq</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/aaf445e4485c681b4.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 8: Unit tests for generators" completed</summary>
+<result>All 25 tests pass across the three files. Here is a summary of what was created:
+
+**Files created:**
+
+1. `/Users/taras/worktrees/agent-swarm/2026-03-20-feat/cli-onboarding/src/tests/onboard-compose.test.ts` -- 8 tests covering:
+   - Dev preset: 3 agent services + 1 API service count
+   - Solo preset: 1 agent service, no lead
+   - All integrations: GitHub/Slack/GitLab/Sentry env vars present
+   - No integrations: integration env vars absent
+   - Real agent IDs from state appear in output
+   - Port allocation starts at 3201 and increments
+   - API service healthcheck configuration
+   - Agent services depend on healthy API
+
+2. `/Users/taras/worktrees/agent-swarm/2026-03-20-feat/cli-onboarding/src/tests/onboard-env.test.ts` -- 8 tests covering:
+   - Claude harness: `CLAUDE_CODE_OAUTH_TOKEN` with actual value
+   - GitHub integration: `GITHUB_TOKEN`, `GITHUB_EMAIL`, `GITHUB_NAME`
+   - Slack integration: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`
+   - No integrations: only core section, disable flags set
+   - Actual credential values (not placeholders)
+   - Agent IDs as comments in output
+   - GitLab integration: `GITLAB_TOKEN`, `GITLAB_EMAIL`
+   - Sentry integration: `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`
+
+3. `/Users/taras/worktrees/agent-swarm/2026-03-20-feat/cli-onboarding/src/tests/onboard-manifest.test.ts` -- 9 tests covering:
+   - Schema shape: all required top-level fields present
+   - Version is 1, createdAt is valid ISO string
+   - Dev preset: correct services array with names, templateIds, agentIds, roles, displayNames
+   - State values (deployType, preset, harness) propagate correctly
+   - Integration flags match state
+   - All integrations false when none enabled
+   - Solo preset: single worker, no lead
+   - Static paths (composePath, envPath)
+
+**Fix applied:** The compose test initially used a regex that matched volume names in addition to service names. Fixed by splitting on the `volumes:` section boundary before counting service headers.</result>
+<usage><total_tokens>43867</total_tokens><tool_uses>20</tool_uses><duration_ms>146703</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/aaf445e4485c681b4.output
+
+---
+
+nice, update the plan accordingly and mention there the tests you did and described above. then create a pr. finally mention how I should test myself (without messing current dir, maybe linking swarm bun binary locally and testing another folder?)
+
+---
+
+<task-notification>
+<task-id>b0w5ttfsl</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/b0w5ttfsl.output</output-file>
+<status>completed</status>
+<summary>Background command "Push branch to remote" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/b0w5ttfsl.output
+
+---
+
+note that selecting remote makes the terminal go mad, just make it disable completely (you can not enter it)
+
+---
+
+<task-notification>
+<task-id>bk0nmvm38</task-id>
+<tool-use-id>toolu_01C4oL6ZkadbrmwnttdKg3w8</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/bk0nmvm38.output</output-file>
+<status>completed</status>
+<summary>Background command "Push fix" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/bk0nmvm38.output
+
+---
+
+<task-notification>
+<task-id>beet8ylk1</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/beet8ylk1.output</output-file>
+<status>completed</status>
+<summary>Background command "Commit and push harness fix" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/beet8ylk1.output
+
+---
+
+ok a few things from testing interactive:
+
+can we make it so that esc twice fast goes back (clicking once shows message)
+also ctrl c needs twice to close (show message)
+selectiv pi shows `Maximum update depth exceeded.`
+selecting claude method should be up and down as the other steps
+the setup token should should in terminal output (the terminal shows the token (you could get it automatically parsing `sk-ant-oat...` string via regex + user confirm)
+claude should have third option: provide ANTHROPIC_API_KEY
+integration skipping shold not say "already have one" rather skip configuration!
+skipping github should move to the next integration! (in fact can we have an initial selector of the integrations we want to choose and then go over them?)
+can we add a step indicator (progress) on top always??
+apply same disable thing to other coming soon stuff!
+
+---
+
+<task-notification>
+<task-id>ad96636fe46f2ac19</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/ad96636fe46f2ac19.output</output-file>
+<status>completed</status>
+<summary>Agent "Rewrite integration-menu step" completed</summary>
+<result>Clean -- no lint or format issues in the rewritten file.
+
+Here is a summary of what was done:
+
+**File rewritten**: `/Users/taras/worktrees/agent-swarm/2026-03-20-feat/cli-onboarding/src/commands/onboard/steps/integration-menu.tsx`
+
+**Changes**:
+- Replaced the sequential yes/no flow (asking about each integration one-by-one) with a multi-select checklist using a single `Select` component.
+- The 4 integrations are shown with `[x]`/`[ ]` checkbox prefixes. Selecting one toggles its state.
+- A "Continue" option at the bottom advances to the next step via `goToNext({ integrations })`, which lets the DAG's `nextStep()` route to the first enabled integration step or straight to review.
+- `useState` tracks the toggle state as `Record<IntegrationKey, boolean>`.
+- Options are rebuilt on each render to reflect current toggle state.
+- Removed the `state` and `currentIndex` tracking that powered the old sequential flow.
+- `addLog` is called once on continue with a summary of enabled integrations (or "none").
+
+**Verification**: `tsc:check` passed with zero errors. Biome check on the file reported no issues.</result>
+<usage><total_tokens>27463</total_tokens><tool_uses>8</tool_uses><duration_ms>53813</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/ad96636fe46f2ac19.output
+
+---
+
+<task-notification>
+<task-id>aedf3045308235dd2</task-id>
+<tool-use-id>toolu_01Ptt9u8i9tifQ5Ld4Xe42tN</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/aedf3045308235dd2.output</output-file>
+<status>completed</status>
+<summary>Agent "Rewrite harness-credentials step" completed</summary>
+<result>Both pass cleanly. TypeScript has zero errors, and all remaining lint warnings are pre-existing issues in test files, not in the rewritten file.
+
+Here is what was done:
+
+**Rewrote** `/Users/taras/worktrees/agent-swarm/2026-03-20-feat/cli-onboarding/src/commands/onboard/steps/harness-credentials.tsx` with these changes:
+
+1. **3 credential methods via `Select`** (up/down navigation, matching the pattern from `harness.tsx` and `integration-menu.tsx`):
+   - "Run `claude setup-token` (recommended)"
+   - "Paste OAuth token manually"
+   - "Provide ANTHROPIC_API_KEY"
+
+2. **5 internal sub-steps** via `useState<SubStep>`: `"choose_method" | "running_cli" | "confirm_token" | "manual_oauth" | "manual_api_key"`
+
+3. **CLI flow** (`setup_token`): Uses `useEffect` triggered by `subStep === "running_cli"` to spawn `Bun.$\`claude setup-token\`.quiet()`. Parses stdout with `/sk-ant-oat[^\s]+/`. If token found, shows masked token and a `Select` to confirm ("Use this token" / "Paste manually instead"). On CLI error or missing token, falls back to `manual_oauth` with an error message displayed.
+
+4. **Manual OAuth flow**: `TextInput` for pasting token, calls `goToNext({ claudeOAuthToken, anthropicApiKey: "", credentialType: "oauth" })`.
+
+5. **API key flow**: `TextInput` for pasting API key, calls `goToNext({ claudeOAuthToken: "", anthropicApiKey, credentialType: "api_key" })`.
+
+6. **No tsc or lint errors** in the rewritten file. All pre-existing warnings are in unrelated test files.</result>
+<usage><total_tokens>35026</total_tokens><tool_uses>13</tool_uses><duration_ms>95749</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/aedf3045308235dd2.output
+
+---
+
+<task-notification>
+<task-id>bsz1t643b</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/bsz1t643b.output</output-file>
+<status>completed</status>
+<summary>Background command "Commit and push all UX improvements" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-feat-cli-onboarding/95571ac3-2eb9-42f4-9152-5c609f71fc06/tasks/bsz1t643b.output
+
+---
+
+➜  taras-test-1 agent-swarm onboard
+
+ Onboard failed: Slack bot token must start with xoxb-
+
+
+can you make the errors not blocking?

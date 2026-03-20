@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.4.9",
+  "checkpoint_id": "ae2d1cf3e015",
+  "strategy": "manual-commit",
+  "branch": "feat/cli-onboarding",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "src/commands/onboard/steps/integration-github.tsx",
+    "src/commands/onboard/steps/integration-gitlab.tsx",
+    "src/commands/onboard/steps/integration-sentry.tsx",
+    "src/commands/onboard/steps/integration-slack.tsx"
+  ],
+  "sessions": [
+    {
+      "metadata": "/ae/2d1cf3e015/0/metadata.json",
+      "transcript": "/ae/2d1cf3e015/0/full.jsonl",
+      "context": "/ae/2d1cf3e015/0/context.md",
+      "content_hash": "/ae/2d1cf3e015/0/content_hash.txt",
+      "prompt": "/ae/2d1cf3e015/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 313,
+    "cache_creation_tokens": 482605,
+    "cache_read_tokens": 34056330,
+    "output_tokens": 80857,
+    "api_call_count": 201
+  }
+}
