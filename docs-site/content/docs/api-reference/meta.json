@@ -2,5 +2,5 @@
   "title": "API Reference",
   "description": "Complete REST API reference for Agent Swarm",
   "root": true,
-  "pages": ["..."]
+  "pages": ["index"]
 }
