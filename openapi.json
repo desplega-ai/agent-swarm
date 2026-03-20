@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.48.0",
+    "version": "1.49.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -3541,17 +3541,21 @@
                           "type": "object",
                           "properties": {
                             "id": {
-                              "type": "string"
+                              "type": "string",
+                              "description": "Unique node identifier, used in 'next' and 'inputs' mappings"
                             },
                             "type": {
-                              "type": "string"
+                              "type": "string",
+                              "description": "Executor type: 'agent-task', 'script', 'raw-llm', 'validate', 'property-match'"
                             },
                             "label": {
-                              "type": "string"
+                              "type": "string",
+                              "description": "Human-readable label for UI display"
                             },
                             "config": {
                               "type": "object",
-                              "additionalProperties": {}
+                              "additionalProperties": {},
+                              "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
                             },
                             "next": {
                               "anyOf": [
@@ -3564,7 +3568,8 @@
                                     "type": "string"
                                   }
                                 }
-                              ]
+                              ],
+                              "description": "Next node(s): string for simple chaining, or record for port-based routing ({pass: 'a', fail: 'b'})"
                             },
                             "validation": {
                               "type": "object",
@@ -3648,15 +3653,18 @@
                               "type": "object",
                               "additionalProperties": {
                                 "type": "string"
-                              }
+                              },
+                              "description": "REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation — only 'trigger' and 'input' are. Example: { \"cityData\": \"generate-city\" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { \"pr\": \"trigger.pullRequest\" }."
                             },
                             "inputSchema": {
                               "type": "object",
-                              "additionalProperties": {}
+                              "additionalProperties": {},
+                              "description": "JSON Schema to validate resolved inputs before execution"
                             },
                             "outputSchema": {
                               "type": "object",
-                              "additionalProperties": {}
+                              "additionalProperties": {},
+                              "description": "JSON Schema to validate the executor's output (e.g. {taskId, taskOutput} for agent-task). Different from config.outputSchema which validates the agent's raw output."
                             }
                           },
                           "required": [
@@ -3848,17 +3856,21 @@
                           "type": "object",
                           "properties": {
                             "id": {
-                              "type": "string"
+                              "type": "string",
+                              "description": "Unique node identifier, used in 'next' and 'inputs' mappings"
                             },
                             "type": {
-                              "type": "string"
+                              "type": "string",
+                              "description": "Executor type: 'agent-task', 'script', 'raw-llm', 'validate', 'property-match'"
                             },
                             "label": {
-                              "type": "string"
+                              "type": "string",
+                              "description": "Human-readable label for UI display"
                             },
                             "config": {
                               "type": "object",
-                              "additionalProperties": {}
+                              "additionalProperties": {},
+                              "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
                             },
                             "next": {
                               "anyOf": [
@@ -3871,7 +3883,8 @@
                                     "type": "string"
                                   }
                                 }
-                              ]
+                              ],
+                              "description": "Next node(s): string for simple chaining, or record for port-based routing ({pass: 'a', fail: 'b'})"
                             },
                             "validation": {
                               "type": "object",
@@ -3955,15 +3968,18 @@
                               "type": "object",
                               "additionalProperties": {
                                 "type": "string"
-                              }
+                              },
+                              "description": "REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation — only 'trigger' and 'input' are. Example: { \"cityData\": \"generate-city\" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { \"pr\": \"trigger.pullRequest\" }."
                             },
                             "inputSchema": {
                               "type": "object",
-                              "additionalProperties": {}
+                              "additionalProperties": {},
+                              "description": "JSON Schema to validate resolved inputs before execution"
                             },
                             "outputSchema": {
                               "type": "object",
-                              "additionalProperties": {}
+                              "additionalProperties": {},
+                              "description": "JSON Schema to validate the executor's output (e.g. {taskId, taskOutput} for agent-task). Different from config.outputSchema which validates the agent's raw output."
                             }
                           },
                           "required": [
