@@ -1,0 +1,22 @@
+{
+  "title": "API Reference",
+  "pages": [
+    "agents",
+    "tasks",
+    "channels",
+    "epics",
+    "workflows",
+    "schedules",
+    "config",
+    "memory",
+    "repos",
+    "active-sessions",
+    "session-data",
+    "stats",
+    "trackers",
+    "webhooks",
+    "poll",
+    "ecosystem",
+    "debug"
+  ]
+}
