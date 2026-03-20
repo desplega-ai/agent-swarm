@@ -2997,6 +2997,10 @@
                   },
                   "source": {
                     "type": "string"
+                  },
+                  "outputSchema": {
+                    "type": "object",
+                    "additionalProperties": {}
                   }
                 },
                 "required": [
