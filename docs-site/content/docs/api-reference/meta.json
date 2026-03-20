@@ -1,6 +1,25 @@
 {
-  "title": "API Reference",
-  "description": "Complete REST API reference for Agent Swarm",
+  "title": "API Reference v1.48.0",
+  "description": "REST API reference for Agent Swarm",
   "root": true,
-  "pages": ["index"]
+  "pages": [
+    "index",
+    "active-sessions",
+    "agents",
+    "channels",
+    "config",
+    "debug",
+    "ecosystem",
+    "epics",
+    "memory",
+    "poll",
+    "repos",
+    "schedules",
+    "session-data",
+    "stats",
+    "tasks",
+    "trackers",
+    "webhooks",
+    "workflows"
+  ]
 }
