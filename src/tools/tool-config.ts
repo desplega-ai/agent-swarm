@@ -105,6 +105,13 @@ export const DEFERRED_TOOLS = new Set([
   "tracker-sync-status",
   "tracker-map-agent",
 
+  // Prompt Templates (5)
+  "list-prompt-templates",
+  "get-prompt-template",
+  "set-prompt-template",
+  "delete-prompt-template",
+  "preview-prompt-template",
+
   // Debug (1)
   "db-query",
 

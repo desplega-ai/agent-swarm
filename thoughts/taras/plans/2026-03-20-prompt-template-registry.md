@@ -405,10 +405,10 @@ Run `bun run docs:openapi` to regenerate `openapi.json` with the new endpoints.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Types compile: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] All existing tests still pass: `bun test`
-- [ ] OpenAPI spec generated: `bun run docs:openapi`
+- [x] Types compile: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] All existing tests still pass: `bun test`
+- [x] OpenAPI spec generated: `bun run docs:openapi`
 
 #### Manual Verification:
 - [ ] Start server (`bun run start:http`), test endpoints with curl:
