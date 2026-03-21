@@ -66,6 +66,25 @@ const previewRoute = route({
   auth: { apiKey: true },
 });
 
+const renderRoute = route({
+  method: "post",
+  path: "/api/prompt-templates/render",
+  pattern: ["api", "prompt-templates", "render"],
+  summary: "Full scope-aware template resolution with interpolation (used by workers via HTTP)",
+  tags: ["PromptTemplates"],
+  body: z.object({
+    eventType: z.string(),
+    variables: z.record(z.string(), z.unknown()).optional(),
+    agentId: z.string().optional(),
+    repoId: z.string().optional(),
+  }),
+  responses: {
+    200: { description: "Fully resolved and interpolated template" },
+    400: { description: "Validation error" },
+  },
+  auth: { apiKey: true },
+});
+
 const checkoutRoute = route({
   method: "post",
   path: "/api/prompt-templates/{id}/checkout",
@@ -235,6 +254,17 @@ export async function handlePromptTemplates(
     const { result: rendered, unresolved } = interpolate(composed, variables ?? {});
 
     json(res, { rendered, unresolved });
+    return true;
+  }
+
+  // 3-segment literal: /api/prompt-templates/render
+  if (renderRoute.match(req.method, pathSegments)) {
+    const parsed = await renderRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const { eventType, variables, agentId, repoId } = parsed.body;
+    const result = resolveTemplate(eventType, variables ?? {}, { agentId, repoId });
+    json(res, result);
     return true;
   }
 

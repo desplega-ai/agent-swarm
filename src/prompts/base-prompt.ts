@@ -7,7 +7,7 @@
  * still assembled here based on runtime state.
  */
 
-import { resolveTemplate } from "./resolver";
+import { resolveTemplateAsync } from "./resolver";
 
 // Side-effect import: register all system + session templates
 import "./session-templates";
@@ -40,14 +40,14 @@ export type BasePromptArgs = {
   };
 };
 
-export const getBasePrompt = (args: BasePromptArgs): string => {
+export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   const { role, agentId, swarmUrl } = args;
 
   const vars: Record<string, string> = { role, agentId, swarmUrl };
 
   // Resolve the composite session template (lead or worker)
   const compositeEventType = role === "lead" ? "system.session.lead" : "system.session.worker";
-  const compositeResult = resolveTemplate(compositeEventType, vars);
+  const compositeResult = await resolveTemplateAsync(compositeEventType, vars);
   let prompt = compositeResult.text;
 
   // Inject agent identity (soul + identity + name/description) if available
@@ -92,7 +92,7 @@ export const getBasePrompt = (args: BasePromptArgs): string => {
   // Conditionally include agent-fs instructions when available
   if (process.env.AGENT_FS_API_URL) {
     const sharedOrgId = process.env.AGENT_FS_SHARED_ORG_ID || "YOUR_SHARED_ORG_ID";
-    const agentFsResult = resolveTemplate("system.agent.agent_fs", {
+    const agentFsResult = await resolveTemplateAsync("system.agent.agent_fs", {
       agentId,
       sharedOrgId,
     });
@@ -100,7 +100,7 @@ export const getBasePrompt = (args: BasePromptArgs): string => {
   }
 
   if (!args.capabilities || args.capabilities.includes("services")) {
-    const servicesResult = resolveTemplate("system.agent.services", {
+    const servicesResult = await resolveTemplateAsync("system.agent.services", {
       agentId,
       swarmUrl,
     });
@@ -108,7 +108,7 @@ export const getBasePrompt = (args: BasePromptArgs): string => {
   }
 
   if (!args.capabilities || args.capabilities.includes("artifacts")) {
-    const artifactsResult = resolveTemplate("system.agent.artifacts", {});
+    const artifactsResult = await resolveTemplateAsync("system.agent.artifacts", {});
     conditionalSuffix += artifactsResult.text;
   }
 

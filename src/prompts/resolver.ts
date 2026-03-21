@@ -1,6 +1,11 @@
 /**
  * Template resolver — combines the in-memory code registry with DB overrides
  * to produce the final interpolated prompt text for a given event.
+ *
+ * Supports two modes:
+ * - **DB mode** (default): Direct DB access via resolvePromptTemplate() — used by the API server.
+ * - **HTTP mode**: Calls the API server's /api/prompt-templates/render endpoint — used by Docker
+ *   workers which have no local database (architecture invariant: workers communicate via HTTP only).
  */
 
 import { resolvePromptTemplate } from "../be/db";
@@ -25,43 +30,151 @@ export interface ResolveResult {
   unresolved: string[];
 }
 
+// ─── HTTP Resolver Mode ─────────────────────────────────────────────────────
+
+interface HttpResolverConfig {
+  apiUrl: string;
+  apiKey: string;
+}
+
+let httpResolverConfig: HttpResolverConfig | null = null;
+
+/**
+ * Configure the resolver to use HTTP mode (for Docker workers).
+ * Once configured, all resolveTemplate() calls go through the API server
+ * instead of direct DB access.
+ */
+export function configureHttpResolver(apiUrl: string, apiKey: string): void {
+  httpResolverConfig = { apiUrl, apiKey };
+}
+
+/**
+ * Check if HTTP resolver mode is active.
+ */
+export function isHttpResolverConfigured(): boolean {
+  return httpResolverConfig !== null;
+}
+
+/**
+ * Reset to DB mode (for tests).
+ */
+export function resetHttpResolver(): void {
+  httpResolverConfig = null;
+}
+
+async function resolveTemplateViaHttp(
+  eventType: string,
+  variables: Record<string, unknown>,
+  options: ResolveOptions,
+): Promise<ResolveResult> {
+  const config = httpResolverConfig!;
+  const url = `${config.apiUrl}/api/prompt-templates/render`;
+
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        eventType,
+        variables,
+        agentId: options.agentId,
+        repoId: options.repoId,
+      }),
+    });
+
+    if (!resp.ok) {
+      console.warn(
+        `[prompt-resolver] HTTP render failed (${resp.status}), falling back to code defaults`,
+      );
+      return resolveTemplateFromCode(eventType, variables);
+    }
+
+    return (await resp.json()) as ResolveResult;
+  } catch (err) {
+    console.warn(
+      `[prompt-resolver] HTTP render error, falling back to code defaults:`,
+      err instanceof Error ? err.message : err,
+    );
+    return resolveTemplateFromCode(eventType, variables);
+  }
+}
+
+/**
+ * Fallback: resolve from code defaults only (no DB, no HTTP).
+ * Used when both DB and HTTP are unavailable.
+ */
+function resolveTemplateFromCode(
+  eventType: string,
+  variables: Record<string, unknown>,
+): ResolveResult {
+  const definition = getTemplateDefinition(eventType);
+  const header = definition?.header ?? "";
+  const body = definition?.defaultBody ?? "";
+  const composed = header ? `${header}\n\n${body}` : body;
+  const { result: text, unresolved } = interpolate(composed, variables);
+  return { text, skipped: false, unresolved };
+}
+
+// ─── Main Resolver ──────────────────────────────────────────────────────────
+
 const MAX_TEMPLATE_REF_DEPTH = 3;
 const TEMPLATE_REF_REGEX = /\{\{@template\[([^\]]+)\]\}\}/g;
 
 /**
  * Resolve an event template to its final interpolated text.
  *
- * 1. Look up EventTemplateDefinition from in-memory registry (header + defaultBody)
- * 2. Call resolvePromptTemplate() from DB to check for overrides / skip / fallback
- * 3. If skipped, return { skipped: true }
- * 4. Determine body: DB override body or code defaultBody
- * 5. Expand {{@template[id]}} references (recursive, max depth 3, cycle detection)
- * 6. Compose: header + "\n\n" + body (skip join if header is empty)
- * 7. Interpolate the composed string with the variables context
- * 8. Return ResolveResult
+ * In HTTP mode (workers): delegates to the API server's /render endpoint.
+ * In DB mode (API server): does direct DB resolution.
  */
 export function resolveTemplate(
   eventType: string,
   variables: Record<string, unknown>,
   options: ResolveOptions = {},
 ): ResolveResult {
-  const definition = getTemplateDefinition(eventType);
+  // HTTP mode: delegate to API server (workers call this path)
+  if (httpResolverConfig) {
+    // Return a synchronous fallback immediately, then the caller should use resolveTemplateAsync.
+    // For backward compat with sync callers, use code defaults as sync fallback.
+    // Callers that need HTTP resolution must use resolveTemplateAsync().
+    return resolveTemplateFromCode(eventType, variables);
+  }
 
-  // If no code-level definition exists, we still attempt DB resolution
-  // so that user-created templates (without code definitions) can work.
+  return resolveTemplateViaDb(eventType, variables, options);
+}
+
+/**
+ * Async version of resolveTemplate — required for HTTP mode (workers).
+ * Falls back to sync DB mode when HTTP is not configured.
+ */
+export async function resolveTemplateAsync(
+  eventType: string,
+  variables: Record<string, unknown>,
+  options: ResolveOptions = {},
+): Promise<ResolveResult> {
+  if (httpResolverConfig) {
+    return resolveTemplateViaHttp(eventType, variables, options);
+  }
+
+  return resolveTemplateViaDb(eventType, variables, options);
+}
+
+/**
+ * DB-mode resolution (API server path). Direct DB access.
+ */
+function resolveTemplateViaDb(
+  eventType: string,
+  variables: Record<string, unknown>,
+  options: ResolveOptions,
+): ResolveResult {
+  const definition = getTemplateDefinition(eventType);
   const header = definition?.header ?? "";
   const defaultBody = definition?.defaultBody ?? "";
 
   // DB resolution: scope chain lookup
-  // Wrapped in try/catch because in Docker workers the local SQLite DB may not
-  // have the prompt_templates table (migrations can't run inside bundled binary).
-  // When DB is unavailable, we fall back to code defaults — the system still works.
-  let dbResult: ReturnType<typeof resolvePromptTemplate>;
-  try {
-    dbResult = resolvePromptTemplate(eventType, options.agentId, options.repoId);
-  } catch {
-    dbResult = null;
-  }
+  const dbResult = resolvePromptTemplate(eventType, options.agentId, options.repoId);
 
   // skip_event
   if (dbResult && "skip" in dbResult) {
@@ -101,10 +214,7 @@ export function resolveTemplate(
 
 /**
  * Recursively expand {{@template[id]}} references in a string.
- *
- * - Max depth: 3
- * - Cycle detection: tracks visited eventType IDs
- * - On cycle or depth exceeded, leaves the token as-is
+ * Only used in DB mode (API server). HTTP mode handles expansion server-side.
  */
 function expandTemplateRefs(
   text: string,
@@ -134,16 +244,10 @@ function expandTemplateRefs(
       return fullMatch;
     }
 
-    // Resolve the referenced template (non-recursive call to get body)
+    // Resolve the referenced template
     const refDef = getTemplateDefinition(referencedId);
     const refDefaultBody = refDef?.defaultBody ?? "";
-
-    let refDbResult: ReturnType<typeof resolvePromptTemplate>;
-    try {
-      refDbResult = resolvePromptTemplate(referencedId, options.agentId, options.repoId);
-    } catch {
-      refDbResult = null;
-    }
+    const refDbResult = resolvePromptTemplate(referencedId, options.agentId, options.repoId);
 
     // If referenced template is skipped, leave token as-is
     if (refDbResult && "skip" in refDbResult) {
