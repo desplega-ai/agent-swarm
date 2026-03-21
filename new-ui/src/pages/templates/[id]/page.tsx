@@ -1,6 +1,6 @@
 import Editor from "@monaco-editor/react";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
-import { ArrowLeft, ChevronDown, ChevronRight } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Info } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -427,24 +427,56 @@ export default function TemplateDetailPage() {
         {/* Rendered Tab */}
         <TabsContent value="rendered" className="flex-1 overflow-auto">
           <div className="space-y-4">
-            {unresolved.length > 0 && (
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-muted-foreground">Unresolved variables:</span>
-                {unresolved.map((v) => (
-                  <Badge
-                    key={v}
-                    variant="outline"
-                    className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase border-amber-500/30 text-amber-400"
-                  >
-                    {v}
-                  </Badge>
-                ))}
-              </div>
-            )}
-
-            <div className="prose prose-sm dark:prose-invert max-w-none rounded-md border border-border p-4">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{rendered || body}</ReactMarkdown>
-            </div>
+            {(() => {
+              const templateRefs = unresolved.filter((v) => v.startsWith("@template["));
+              const regularVars = unresolved.filter((v) => !v.startsWith("@template["));
+              const hasContent = rendered.trim().length > 0;
+              return (
+                <>
+                  {templateRefs.length > 0 && (
+                    <div className="flex items-start gap-2 rounded-md border border-border bg-muted/50 p-3">
+                      <Info className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                      <div className="space-y-2">
+                        <p className="text-xs text-muted-foreground">
+                          This template includes composition references that are resolved at
+                          runtime:
+                        </p>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {templateRefs.map((v) => (
+                            <Badge
+                              key={v}
+                              variant="outline"
+                              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center border-muted-foreground/30 text-muted-foreground"
+                            >
+                              {v}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {regularVars.length > 0 && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs text-muted-foreground">Unresolved variables:</span>
+                      {regularVars.map((v) => (
+                        <Badge
+                          key={v}
+                          variant="outline"
+                          className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase border-amber-500/30 text-amber-400"
+                        >
+                          {v}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                  <div className="prose prose-sm dark:prose-invert max-w-none rounded-md border border-border p-4">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {hasContent ? rendered : body}
+                    </ReactMarkdown>
+                  </div>
+                </>
+              );
+            })()}
 
             {/* Variables section */}
             {eventDef && eventDef.variables.length > 0 && (
