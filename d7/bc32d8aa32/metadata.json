@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.5.1",
+  "checkpoint_id": "d7bc32d8aa32",
+  "strategy": "manual-commit",
+  "branch": "fet/template-registry",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "thoughts/taras/plans/2026-03-21-prompt-templates-ui.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/d7/bc32d8aa32/0/metadata.json",
+      "transcript": "/d7/bc32d8aa32/0/full.jsonl",
+      "content_hash": "/d7/bc32d8aa32/0/content_hash.txt",
+      "prompt": "/d7/bc32d8aa32/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 71,
+    "cache_creation_tokens": 348240,
+    "cache_read_tokens": 3215274,
+    "output_tokens": 19085,
+    "api_call_count": 31
+  }
+}

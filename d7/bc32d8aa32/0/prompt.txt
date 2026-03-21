@@ -1,0 +1,727 @@
+make it short and sweet + clear e2es for it
+
+---
+
+<task-notification>
+<task-id>aa59ff325418eaf8f</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/aa59ff325418eaf8f.output</output-file>
+<status>completed</status>
+<summary>Agent "Find PR plan document" completed</summary>
+<result>Perfect! I have all the information I need. Let me provide you with a comprehensive summary of the PR plan.
+
+---
+
+## Summary: Prompt Template Registry PR (fet/template-registry)
+
+**Plan Document**: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/thoughts/taras/plans/2026-03-20-prompt-template-registry.md`
+
+**Status**: COMPLETED (last updated 2026-03-21)
+
+### Overview
+
+This PR replaces ~70 hardcoded prompt strings across 13 source files with a centralized, scope-aware template registry. Templates are stored in SQLite, resolved via a three-tier scope chain (`agent > repo > global`), and managed through REST API + MCP tools.
+
+### Key Design Decisions
+
+- **Scope precedence**: `agent > repo > global` (agents have final say on how they receive information)
+- **Template shape**: Code-defined `header` (always-on essential event reference) + DB-customizable `body`
+- **Interpolation**: Wraps existing `interpolate()` from workflows with `{{var}}` syntax and dot-path resolution
+- **Template composition**: `{{@template[event_type]}}` recursive references with max 3-level depth + cycle detection
+- **Three-state control**: `enabled | default_prompt_fallback | skip_event`
+- **Seeding**: Current prompts as `is_default: true` on startup (discoverable, no fallback-to-code needed)
+- **Audit history**: Every change tracked in `prompt_template_history` table for version checkout
+
+### Scope of Work (6 categories, ~50 templates)
+
+1. **Event→task descriptions** (~30): GitHub, GitLab, AgentMail, Linear, heartbeat, store-progress
+2. **System prompt constants** (12): BASE_PROMPT_ROLE through BASE_PROMPT_ARTIFACTS
+3. **Reusable building blocks** (~5): delegation instruction, command suggestions, thread context
+4. **Runner trigger prompts** (7): task_assigned, task_offered, resume, epic progress, etc.
+5. **Composite session prompts** (2): `system.session.lead`, `system.session.worker`
+6. **Slack assistant messages** (4): greeting, suggested prompts, offline, channel context
+
+### Phases Completed
+
+| Phase | Goal | Status |
+|-------|------|--------|
+| **1** | DB schema, types, CRUD | ✅ Complete |
+| **2** | Template resolver, registry, seeding | ✅ Complete |
+| **3** | REST API + MCP tools | ✅ Complete |
+| **4** | Refactor GitHub handlers (12 event types) | ✅ Complete |
+| **5** | Refactor remaining handlers (GitLab, AgentMail, Linear, Slack, etc.) | ✅ Complete |
+| **6** | Refactor system prompts (`base-prompt.ts`) with composite templates | ✅ Complete |
+
+### Key Achievements
+
+**Database**: 
+- `prompt_templates` table with scope/eventType/scopeId uniqueness
+- `prompt_template_history` table for full audit trail
+- Scope resolution with exact-before-wildcard precedence
+
+**Resolver**:
+- `resolveTemplate(eventType, variables, options)` returns interpolated text + metadata
+- `{{@template[id]}}` recursive composition with cycle detection
+- Fallback to code defaults if DB fails (critical for Docker workers)
+
+**REST API** (8 endpoints):
+- List, get, preview, upsert, delete, checkout, reset templates
+- Scope-aware resolution endpoint
+- Event type discovery with variables
+
+**MCP Tools** (5):
+- `list-prompt-templates`, `get-prompt-template`, `set-prompt-template`, `delete-prompt-template`, `preview-prompt-template`
+
+**Backward Compatibility**: 
+- All 12 GitHub event handlers refactored with byte-identical output
+- Webhook simulation verified 7 event types (PR assigned, review_requested, issue assigned, review approved, PR merged, etc.)
+
+### Critical Fixes During Implementation
+
+**Annex B — Docker Worker Crash**:
+- Bug: Workers calling `resolvePromptTemplate()` from local DB (architecture violation)
+- Fix: Added try/catch fallback to code defaults
+
+**Annex C — Architecture Violation Fix** (2026-03-21):
+- Found: Workers accessing local DB directly for system template resolution
+- Fixed: New HTTP resolver endpoint `POST /api/prompt-templates/render`
+- Workers now call `configureHttpResolver(apiUrl, apiKey)` → all DB calls go through API
+- System templates seeded on API server (14 system + 2 session composites)
+- `getBasePrompt()` made async using `resolveTemplateAsync()` via HTTP
+
+**Annex C.5 — "El Jefe" E2E Proof**:
+- Created global overrides for `system.agent.guidelines` (Spanish mandate) and `system.agent.self_awareness` (El Jefe persona)
+- Docker lead boots, fetches templates via HTTP, Claude responds in Spanish as "El Jefe"
+- Full round-trip verified: override → HTTP resolution → Docker execution → output
+
+### Test Coverage
+
+- **Unit tests**: 1767 pass across 89 files (prompt-templates-db, prompt-template-resolver, prompt-template-github, prompt-template-remaining, prompt-template-session)
+- **REST API tests**: 15 manual tests (list, preview, upsert, delete, checkout, reset, skip_event, scope resolution)
+- **MCP tool tests**: 4 manual tests (list, preview, set, delete)
+- **Webhook tests**: 7 signed GitHub payloads verified (PR assigned, review_requested, issue assigned, review approved, changes_requested, PR merged, PR closed)
+- **Docker E2E**: Lead container boots, system prompt built (17710 → 22992 chars with identity injection), HTTP resolver works
+
+### What Changed (git diff summary)
+
+- **New files**: `src/http/prompt-templates.ts`, `src/prompts/registry.ts`, `src/prompts/resolver.ts`, `src/prompts/seed.ts`, `src/prompts/session-templates.ts`, `src/tools/prompt-templates/` (5 tools), handler template files (github/templates.ts, gitlab/templates.ts, etc.), 4 new test files
+- **Modified files**: `src/be/db.ts` (447 new lines), `src/be/migrations/013_prompt_templates.sql`, `src/github/handlers.ts`, `src/gitlab/handlers.ts`, `src/agentmail/handlers.ts`, `src/slack/handlers.ts`, `src/linear/sync.ts`, `src/heartbeat/heartbeat.ts`, `src/tools/store-progress.ts`, `src/commands/runner.ts`, `src/prompts/base-prompt.ts`, `CLAUDE.md`
+- **Deleted**: Old onboard command infrastructure (425+ lines), structured output validation tests, workflow validation tests
+
+### Architecture Invariants Added
+
+**From CLAUDE.md**: "Workers have NO local database. Docker workers communicate with the API server exclusively via HTTP using `API_KEY` + `X-Agent-ID` headers. All state lives in the API server's SQLite DB."
+
+This PR enforces this — system template resolution now goes through HTTP, not local DB access.
+
+---
+
+The PR is **production-ready** with full test coverage, E2E verification, and architectural compliance.</result>
+<usage><total_tokens>108589</total_tokens><tool_uses>13</tool_uses><duration_ms>48082</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/aa59ff325418eaf8f.output
+
+---
+
+<task-notification>
+<task-id>aeba91fb55e539dbb</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/aeba91fb55e539dbb.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore templates API + types" completed</summary>
+<result>Perfect! Now I have enough context. Let me create a summary document of my findings:
+
+## Exploration Summary: Agent Swarm Templates Infrastructure
+
+Based on my thorough exploration of the project, here's the complete picture of how templates are structured and served:
+
+### 1. **Template Directory Structure**
+
+Templates are organized at `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/templates/`:
+
+```
+templates/
+  official/
+    coder/              # 9 official templates
+    lead/
+    researcher/
+    reviewer/
+    tester/
+    forward-deployed-engineer/
+    content-writer/
+    content-reviewer/
+    content-strategist/
+  community/
+    (empty, for future community contributions)
+```
+
+Each template directory contains:
+- **config.json** — Metadata (name, displayName, description, version, icon, author, agentDefaults, files)
+- **CLAUDE.md** — Project-level instructions (optional)
+- **SOUL.md** — Agent persona and values
+- **IDENTITY.md** — Agent expertise and working style
+- **TOOLS.md** — Environment-specific operational knowledge
+- **start-up.sh** — Setup script (optional)
+
+### 2. **Template Type Schema**
+
+Location: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/templates/schema.ts`
+
+**TemplateConfig interface:**
+```typescript
+{
+  name: string;                      // "coder"
+  displayName: string;               // "Coder"
+  description: string;               // Role description
+  version: string;                   // "1.0.0"
+  category: "official" | "community";
+  icon: string;                      // Icon identifier
+  author: string;                    // "Name <email>"
+  createdAt: string;                 // ISO date
+  lastUpdatedAt: string;             // ISO date
+  agentDefaults: {
+    role: string;                    // "worker" or "lead"
+    capabilities: string[];          // ["implementation", "typescript", "git", "testing"]
+    maxTasks: number;
+    isLead?: boolean;
+  };
+  files: {                           // Which files exist for this template
+    claudeMd: string | null;
+    soulMd: string | null;
+    identityMd: string | null;
+    toolsMd: string | null;
+    setupScript: string | null;
+  };
+}
+```
+
+**TemplateResponse** includes both config and actual file contents.
+
+### 3. **Templates UI & Registry API**
+
+Location: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/templates-ui/`
+
+This is a **Next.js application** that serves the public template registry:
+
+**Core Files:**
+- `/src/lib/templates.ts` — Template file I/O and utility functions
+  - `getAllTemplates()` — List all templates with configs
+  - `getTemplate(category, name)` — Get specific template with files
+  - `getTemplateConfig(category, name)` — Get metadata only
+  - `getTemplateFiles(category, name)` — Get file contents
+  - `parseTemplateId(id)` — Parse "category/name@version" format
+
+**API Endpoints:**
+- `GET /api/templates` — List all templates (cors-enabled, public)
+- `GET /api/templates/[...slug]` — Get specific template by ID
+  - Example: `/api/templates/official/coder`
+  - Supports versioning: `/api/templates/official/coder@1.0.0`
+  - Returns full TemplateResponse with file contents
+
+**Frontend Pages:**
+- `/[category]/[name]` — Template detail pages
+- `/builder` — Compose builder (for custom templates)
+- `/` — Template gallery
+
+### 4. **How Workers Fetch Templates**
+
+Location: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/commands/runner.ts` (lines 1407-1463)
+
+**Process:**
+1. Worker reads `TEMPLATE_ID` env var (e.g., `official/coder`)
+2. Reads `TEMPLATE_REGISTRY_URL` env var (default: `https://templates.agent-swarm.dev`)
+3. Calls `fetchTemplate()` function which:
+   - Checks 24-hour local cache at `/workspace/.template-cache`
+   - Fetches from `{registryUrl}/api/templates/{templateId}`
+   - Falls back to expired cache if fetch fails
+   - Caches response for offline resilience
+
+**Example fetch:**
+```typescript
+const resp = await fetch(`${registryUrl}/api/templates/${templateId}`);
+const template = await resp.json() as TemplateResponse;
+```
+
+### 5. **Template Serving Architecture**
+
+**Key Architecture Principle:** Workers have NO local database access.
+
+- **API Server** (`:3013`) — Host for HTTP resolver (prompt templates, config)
+- **Templates Registry** (`:3000` locally, `templates.agent-swarm.dev` in prod) — Next.js app serving agent templates
+- **Workers** — Fetch templates via HTTP using `TEMPLATE_REGISTRY_URL`
+
+**Env vars:**
+- `TEMPLATE_ID` — Which template to use (e.g., `official/coder`)
+- `TEMPLATE_REGISTRY_URL` — Registry URL (default: `https://templates.agent-swarm.dev`)
+- `MCP_BASE_URL` — API server URL (for prompt templates, config)
+
+### 6. **Prompt Templates (Different from Agent Templates)**
+
+Location: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/http/prompt-templates.ts`
+
+These are **event-driven prompt templates** (for GitHub, Slack, workflows, etc.), NOT agent templates. API endpoints:
+- `GET /api/prompt-templates` — List prompts
+- `PUT /api/prompt-templates` — Create/update prompt overrides
+- `POST /api/prompt-templates/render` — Resolve template with interpolation
+- `GET /api/prompt-templates/resolved` — Check resolution chain
+
+These are stored in SQLite DB, not in the filesystem.
+
+### 7. **Key Files Summary**
+
+| Path | Purpose |
+|------|---------|
+| `/templates/schema.ts` | TypeScript types for templates |
+| `/templates/official/*` | 9 official agent templates |
+| `/templates-ui/src/lib/templates.ts` | Template I/O and utilities |
+| `/templates-ui/src/app/api/templates/` | Public API endpoints |
+| `/src/commands/runner.ts` (lines 1407-1463) | Worker template fetch logic |
+| `/src/http/prompt-templates.ts` | Prompt template HTTP API |
+
+All relative paths are absolute paths in the project root: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/`</result>
+<usage><total_tokens>110647</total_tokens><tool_uses>27</tool_uses><duration_ms>62738</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/aeba91fb55e539dbb.output
+
+---
+
+<task-notification>
+<task-id>a4b7c4f1372579444</task-id>
+<tool-use-id>toolu_01Nmpv9CCpgeUQW1Q9ZA938n</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/a4b7c4f1372579444.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore new-ui structure" completed</summary>
+<result>Perfect! Now I have a comprehensive understanding. Let me create a final summary document for Taras by compiling all the information:
+
+## Exploration Summary: new-ui Dashboard Project
+
+I've thoroughly explored the new-ui directory and can provide you with a complete architectural picture. Here's what I found:
+
+### 1. **Overall Project Structure & Framework**
+
+**Framework Stack:**
+- **React 19** + TypeScript (strict mode)
+- **Vite 6** (build tool with hot reload)
+- **react-router-dom v7** (routing, no Next.js)
+- **Tailwind CSS v4** with @tailwindcss/vite plugin
+- **@tanstack/react-query** (React Query for data fetching, 5s auto-polling intervals)
+- **shadcn/ui** (new-york style component library)
+- **AG Grid Community** (data tables with Quartz theme)
+- **Lucide React** (icons)
+
+**Build/Dev Setup:**
+- Vite dev server on port 5274
+- Proxy to `/api/*` and `/health` → `http://localhost:3013` (the backend API)
+- Path alias: `@/` resolves to `src/`
+- Uses Biome for linting/formatting (2-space indent, 100 char line width)
+
+### 2. **Routing Pattern** (react-router-dom v7)
+
+Routes defined in `/src/app/router.tsx`:
+- Uses `createBrowserRouter` with lazy-loaded page components
+- All pages use **default exports** for React.lazy compatibility
+- URL pattern: `/path` → `/pages/path/page.tsx`
+- Dynamic routes: `/agents/:id` → `/pages/agents/[id]/page.tsx` (Next.js-style naming convention)
+- All routes wrapped in `<RootLayout />` which provides the sidebar navigation
+
+**Current Routes:**
+- Dashboard `/` 
+- `/agents`, `/agents/:id`
+- `/tasks`, `/tasks/:id`
+- `/epics`, `/epics/:id`
+- **`/chat` (+ `/chat/:channelId`)** — This is where "comms" are implemented
+- `/services`, `/schedules`, `/schedules/:id`
+- `/workflows`, `/workflows/:id`, `/workflow-runs/:id`
+- `/usage`, `/config`, `/repos`, `/debug`
+
+### 3. **Chat/Communication Section** (`/pages/chat/page.tsx` - 675 lines)
+
+**Architecture:**
+The chat page implements a **multi-channel message system** with thread replies. It's NOT a tabbed interface internally — instead it uses:
+
+**Components:**
+- `ChannelSidebar` — Left sidebar listing all channels with create/delete
+- `MessageBubble` — Individual message rendering (supports markdown, raw code view, copy, thread replies)
+- `MessageInput` — Textarea for composing messages
+- `ThreadPanel` — Right-side panel showing thread replies (only on desktop, overlays on mobile)
+
+**Key Features:**
+- Channels: public (`#` icon) or DM (`🔒` icon)
+- Messages support markdown with react-markdown + remark-gfm
+- Each message can have threads (replies)
+- Messages show relative time ("2 minutes ago")
+- Action buttons appear on hover: show raw/formatted, copy, reply
+- Auto-scroll to latest messages
+- 5s auto-polling for new messages (via react-query)
+- Mobile responsive: channel sidebar hidden, select dropdown shown instead
+
+**Data Flow:**
+```
+useChannels() → channels list
+useMessages(channelId) → top-level messages (5s polling, 200 limit)
+useThreadMessages(channelId, messageId) → reply messages
+usePostMessage(channelId) → mutation to post new messages
+useCreateChannel() / useDeleteChannel() → channel management
+```
+
+### 4. **API Client Layer** (`/src/api/client.ts`)
+
+**Pattern:**
+- Singleton `ApiClient` class with typed methods
+- Uses native `fetch()`, not axios
+- Auto-adds `Authorization: Bearer {apiKey}` header
+- Returns typed responses matching `/src/api/types.ts`
+
+**For Chat/Comms specifically:**
+```typescript
+fetchChannels() → ChannelsResponse
+fetchMessages(channelId, filters?) → MessagesResponse
+fetchThreadMessages(channelId, messageId) → MessagesResponse
+postMessage(channelId, content, options?) → ChannelMessage
+createChannel(data) → { channel: { id, name } }
+deleteChannel(id) → { success: boolean }
+```
+
+**React-Query Hooks** (`/src/api/hooks/use-channels.ts`):
+- `useChannels()` — useQuery with 5s refetch
+- `useMessages(channelId)` — useQuery with 5s refetch, auto-enabled on channelId
+- `useThreadMessages(channelId, messageId)` — useQuery, auto-disabled if no messageId
+- `useCreateChannel()` — useMutation that invalidates channels cache on success
+- `usePostMessage(channelId)` — useMutation that invalidates messages + thread caches on success
+
+### 5. **Data Fetching & Caching Patterns**
+
+**Pattern:** Every domain has a dedicated hook file
+- `/src/api/hooks/use-agents.ts`
+- `/src/api/hooks/use-tasks.ts`
+- `/src/api/hooks/use-channels.ts`
+- etc.
+
+**Each hook follows:**
+1. **Query hooks** (read-only):
+   ```typescript
+   useQuery({
+     queryKey: ["domain", filters],
+     queryFn: () => api.fetchSomething(filters),
+     select: (data) => data.items,
+     enabled: !!someCondition,
+     refetchInterval: 5000
+   })
+   ```
+
+2. **Mutation hooks** (create/update/delete):
+   ```typescript
+   useMutation({
+     mutationFn: (data) => api.doSomething(data),
+     onSuccess: () => {
+       queryClient.invalidateQueries({ queryKey: ["domain"] });
+       queryClient.invalidateQueries({ queryKey: ["related"] });
+     }
+   })
+   ```
+
+3. **Cache invalidation on mutations** — automatically refetch related queries
+
+### 6. **Components & UI Patterns**
+
+**shadcn/ui Components Used:**
+- Layout: `Sidebar`, `Dialog`, `Tabs`, `Sheet`, `Card`
+- Form: `Input`, `Select`, `Textarea`, `Label`, `Switch`
+- Display: `Badge`, `Alert`, `AlertDialog`, `Skeleton`
+- Utilities: `Button`, `Tooltip`, `ScrollArea`, `Separator`
+- All from `@/components/ui/`
+
+**Custom Components:**
+- `DataGrid` (AG Grid wrapper with auto-fit columns)
+- `StatusBadge` (styled semantic status colors)
+- `MessageBubble` (markdown + action buttons)
+- `SessionLogViewer` (code display)
+- `NameConnectionModal` (reusable modal)
+
+**Styling Patterns:**
+- `cn()` function for conditional class merging (clsx + tailwind-merge)
+- Dark mode is default, toggle via header button
+- Semantic colors: `emerald` (success), `amber` (active), `red` (error), `zinc` (inactive)
+- Badge style (consistent across all tags):
+  ```typescript
+  className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+  ```
+- Page wrapper: `flex flex-col flex-1 min-h-0 gap-4`
+- DataGrid in tables: `flex flex-col flex-1 min-h-0 gap-4`
+
+### 7. **Detail Page Pattern** (Example: `/pages/tasks/[id]/page.tsx`)
+
+**Structure:**
+```typescript
+export default function TaskDetailPage() {
+  const { id } = useParams();
+  const { data: task } = useTask(id);
+  const navigate = useNavigate();
+  
+  return (
+    <div className="flex flex-col flex-1 min-h-0">
+      {/* Header with back button, actions */}
+      <div className="flex items-center justify-between px-4 py-3 shrink-0">
+        <button onClick={() => navigate(-1)}><ArrowLeft /></button>
+        <div>{task.name}</div>
+        <div className="flex gap-2">{/* action buttons */}</div>
+      </div>
+      
+      {/* Tab interface */}
+      <Tabs defaultValue="details">
+        <TabsList className="shrink-0 mx-1 mt-2">
+          <TabsTrigger value="details">Details</TabsTrigger>
+          <TabsTrigger value="outcome">Outcome</TabsTrigger>
+          <TabsTrigger value="logs">Session Logs</TabsTrigger>
+        </TabsList>
+        <TabsContent value="details" className="flex-1 overflow-y-auto px-1 py-3">
+          {/* Details content */}
+        </TabsContent>
+        {/* more tabs */}
+      </Tabs>
+    </div>
+  );
+}
+```
+
+**Key Patterns:**
+- Use `useParams()` to extract route params
+- Use `useNavigate()` for navigation
+- Tabs use `<Tabs defaultValue="tab-name">` + `<TabsTrigger value="tab-name">`
+- Content sections use `className="flex-1 overflow-y-auto px-1 py-3"`
+
+### 8. **Types** (`/src/api/types.ts`)
+
+**Key types for comms:**
+```typescript
+export type ChannelType = "public" | "dm";
+
+export interface Channel {
+  id: string;
+  name: string;
+  description?: string;
+  type: ChannelType;
+  createdBy?: string;
+  participants: string[];
+  createdAt: string;
+}
+
+export interface ChannelMessage {
+  id: string;
+  channelId: string;
+  agentId?: string | null;
+  agentName?: string;
+  content: string;
+  replyToId?: string;  // null means top-level, otherwise it's a thread reply
+  mentions: string[];
+  createdAt: string;
+}
+```
+
+### 9. **Other Important Patterns**
+
+**Form Handling:**
+- Use `useState` for form state
+- Use `onSubmit` with `e.preventDefault()`
+- Validation is simple JS (check `.trim()` length)
+- Dialog/Modal forms are preferred over page-level forms
+
+**List Pages:**
+- Use AG Grid for tabular data (never HTML `<Table>`)
+- Define `ColDef<RowType>[]` with column definitions
+- Use `cellRenderer` for custom cell content
+- Row click: `onRowClicked` → navigate to detail page
+- Filters: `useState` for filter state, `useMemo` to filter data client-side
+
+**Loading States:**
+- Use `isLoading` from useQuery
+- Show `<Skeleton>` components while loading
+- Disable buttons/inputs with `disabled={mutation.isPending}`
+
+**Empty States:**
+- Use `<EmptyState>` component with icon + message
+- Check `.length === 0` after filtering
+
+**Utilities:**
+- `formatRelativeTime(date)` — "2 minutes ago"
+- `formatSmartTime(date)` — "2m ago" or "Mar 5, 02:30"
+- `formatDuration(ms)` — "1h 23m"
+- `formatElapsed(start, end)` — "1h 23m"
+- `formatCurrency(amount)` — "$1.23"
+- `formatCompactNumber(num)` — "1.2K"
+- `cn()` — class merging utility
+
+### 10. **File Paths Reference**
+
+```
+new-ui/
+  src/
+    api/
+      client.ts                    # API client singleton
+      types.ts                     # All TypeScript interfaces
+      hooks/
+        use-channels.ts            # Chat-specific hooks
+        use-agents.ts, use-tasks.ts, etc.
+    app/
+      App.tsx                      # Root component
+      router.tsx                   # Route definitions
+      providers.tsx                # React Query, theme, etc.
+    components/
+      ui/                          # shadcn/ui components
+      layout/
+        app-sidebar.tsx            # Main navigation sidebar
+        root-layout.tsx            # Layout wrapper
+        app-header.tsx             # Top bar
+      shared/
+        data-grid.tsx              # AG Grid wrapper
+        status-badge.tsx           # Semantic status display
+        session-log-viewer.tsx
+    pages/
+      chat/page.tsx                # COMMS IMPLEMENTATION ★
+      agents/page.tsx              # List page pattern
+      agents/[id]/page.tsx         # Detail page pattern
+      tasks/[id]/page.tsx          # Detail with tabs pattern
+      dashboard/page.tsx
+      config/page.tsx              # Complex form page
+    lib/
+      utils.ts                     # Formatting utilities
+      config.ts                    # Config management
+    styles/
+      globals.css                  # Theme CSS variables
+      ag-grid.css                  # AG Grid styling
+    hooks/
+      use-auto-scroll.ts           # Auto-scroll to bottom
+      use-config.ts                # Config hook
+  vite.config.ts                   # Vite config with proxy
+  package.json                     # Dependencies
+```
+
+---
+
+## Summary for Your Use
+
+The **chat/comms section** at `/pages/chat/page.tsx` demonstrates:
+1. **Multi-component page** with sidebar + main area + detail panel
+2. **React Query data fetching** with 5s auto-polling
+3. **Markdown content rendering** with action buttons
+4. **Thread/reply pattern** (nested messages)
+5. **Mobile responsiveness** (sidebar hidden, drawer shown)
+6. **Dialog-based creation** (create channel modal)
+
+The codebase follows these consistent patterns everywhere:
+- **Routing**: One page per route, lazy-loaded, default exports
+- **Data**: React Query with auto-invalidation on mutations
+- **UI**: shadcn/ui + Tailwind, AG Grid for tables, dark mode default
+- **Forms**: Dialog modals, useState, simple validation
+- **Detail pages**: Tabs for sections, back button, action buttons in header
+
+All of this is in a READ-ONLY state — I have not created, modified, or deleted any files.</result>
+<usage><total_tokens>125549</total_tokens><tool_uses>21</tool_uses><duration_ms>107832</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/a4b7c4f1372579444.output
+
+---
+
+<task-notification>
+<task-id>bo1j0h89f</task-id>
+<tool-use-id>toolu_01FT8GuN117BUnMVkZUxkeDe</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/bo1j0h89f.output</output-file>
+<status>completed</status>
+<summary>Background command "Open plan for Taras to review with file-review GUI" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/bo1j0h89f.output
+
+---
+
+/desplega:review quick review this ui plan pls
+
+---
+
+<task-notification>
+<task-id>a61c6db902b28fe03</task-id>
+<tool-use-id>toolu_01Y4gMhMvmVvSabAC7zmmgwN</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/a61c6db902b28fe03.output</output-file>
+<status>completed</status>
+<summary>Agent "Review prompt templates UI plan" completed</summary>
+<result>
+
+Now I have all the information needed. Here is my structured review.
+
+---
+
+Taras, here is my review of the plan.
+
+## Structured Review: Prompt Templates UI Plan
+
+### 1. Missing Files / Modifications
+
+**Breadcrumbs component needs updating.** The plan mentions breadcrumbs in Phase 4 but doesn't list `new-ui/src/components/layout/breadcrumbs.tsx` as a file to modify. The `routeLabels` map at `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/components/layout/breadcrumbs.tsx` line 4 needs a `templates: "Templates"` entry, plus the `history` segment needs special handling. Without this, breadcrumbs will show raw path segments like "templates" (lowercase) and "history" literally. The nested route `templates/:id/history/:version` will also render awkwardly since `formatSegment` won't know how to label "history" or version numbers.
+
+**DELETE endpoint is available but not in the plan.** The API has `DELETE /api/prompt-templates/{id}` (line 132-145 of `src/http/prompt-templates.ts`), but the plan doesn't expose it in the UI at all -- no delete button on the detail page, no `useDeleteTemplate` hook, no `deletePromptTemplate` client method. This may be intentional (you might not want users casually deleting templates), but it's worth noting as a conscious omission rather than an oversight.
+
+**`/api/prompt-templates/resolved` endpoint is unused.** There's a `GET /api/prompt-templates/resolved?eventType=...&agentId=...&repoId=...` route that shows how a template resolves through the scope chain. The plan doesn't surface this. It could be useful on the detail page to show "how this template resolves for agent X" -- but maybe that's a later feature.
+
+### 2. API Interaction / Data Flow Issues
+
+**Upsert body shape mismatch.** The plan's `PromptTemplate` type (line 51-64) has fields like `id`, `version`, `isDefault`, `createdAt`, `updatedAt`. But the actual `PUT /api/prompt-templates` body schema is `{ eventType, scope?, scopeId?, state?, body, changedBy?, changeReason? }`. The plan needs a separate `UpsertPromptTemplateInput` type for the mutation -- using the full `PromptTemplate` type will cause confusion during implementation about which fields to send. The plan mentions this method on line 91 but doesn't define the input shape.
+
+**Checkout body requires `version` as a number.** The checkout route expects `{ version: z.number() }` in the body. The plan's hook definition (line 46: `useCheckoutTemplate()`) doesn't specify the argument shape. Implementation needs to know it's `(id: string, version: number)` with the version in the request body, not a query param.
+
+**Preview response shape.** The API returns `{ rendered, unresolved }` (line 254 of `prompt-templates.ts`). The plan mentions showing "unresolved variables as amber badges" (line 153) which aligns, but the `usePreviewTemplate` hook definition doesn't specify the response type. Should define `PreviewResponse` interface.
+
+**List response is wrapped.** The API returns `{ templates: [...] }` (line 364). The hooks need a `select` transform (like `useScheduledTasks` does on line 15 of `use-schedules.ts` with `select: (data) => data.scheduledTasks`). The plan doesn't mention this but it's a minor implementation detail.
+
+### 3. E2E Verification Gaps
+
+**No verification of the version detail route.** Step 7 says "click a row" from history, but doesn't verify the URL structure actually works. The route `templates/:id/history/:version` has 4 path segments -- worth confirming the router handles this with a manual curl or URL check.
+
+**No verification of error states.** There are no steps to test: (a) navigating to a non-existent template ID (`/templates/bogus-id`), (b) saving with invalid data, (c) checkout of a non-existent version. The plan should include at least one negative test.
+
+**Port assumption.** E2E section hardcodes port 5274 and 3013. The CLAUDE.md warns about worktree port conflicts. A note to check `.env` first would be safer.
+
+**No teardown step.** The E2E section starts background processes (`bun run start:http &`, `pnpm dev &`) but never kills them. Should end with cleanup commands.
+
+### 4. Edge Cases / Error Handling Gaps
+
+**No handling of templates with `scope: "agent"` or `scope: "repo"` with missing context.** When viewing a template scoped to a specific agent or repo, the detail page should ideally show which agent/repo it belongs to (resolve the `scopeId` to a name). The plan shows `scopeId` as a column on the list page but doesn't discuss resolving it to a human-readable name. Users will see raw UUIDs.
+
+**No optimistic update or cache invalidation strategy described.** When saving a template, the detail query and the list query both need invalidation. The schedule hooks (`use-schedules.ts`) show the pattern -- invalidating both `["scheduled-tasks"]` and `["scheduled-task"]`. The plan should mention invalidating both `["prompt-templates"]` and `["prompt-template", id]` query keys after mutations.
+
+**Monaco editor sizing.** Monaco needs explicit height. The plan doesn't mention how the editor height is determined. In most dashboard layouts, Monaco in a tab content area needs either a fixed height or a flex container with `min-h-0`. The debug page likely has a pattern for this worth referencing.
+
+**Preview with sample variables.** The plan says "calls `usePreviewTemplate` mutation with sample variables from event definition" (line 151). But `usePromptTemplateEvents()` needs to be called to get the event definitions and their `example` values. The plan doesn't specify: (a) what happens if the event definition doesn't exist for that eventType, (b) how to construct the sample variables object from the `variables[].example` fields. This is a non-trivial data transformation that should be spelled out.
+
+### 5. Phasing Issues
+
+**Phase 2 references `TemplateDetailPage` in router but it's built in Phase 3.** Line 121-122 says to add both the list and detail route lazy imports in Phase 2. This means Phase 2 will fail `tsc --noEmit` because the detail page file doesn't exist yet. Either: (a) add a stub detail page in Phase 2, (b) only add the list route in Phase 2 and add detail routes in Phase 3, or (c) create placeholder files. Option (b) is cleanest.
+
+This is the single most likely implementation blocker.
+
+**Phase 4 is too vague.** "Error boundaries" and "loading skeletons" are listed as bullet points without specifying where or which component boundaries. Breadcrumbs are mentioned but no file modification is listed. Keyboard shortcut (Cmd+S) is listed but there's no mention of preventing the browser's default save behavior. This phase reads more like a wishlist than a plan.
+
+### 6. Other Implementation Gotchas
+
+**Sidebar placement.** The plan puts Templates under "Communication" group. Templates are more of a system/configuration concern than communication. "System" or "Operations" might be a better fit. This is a UX judgment call.
+
+**`isDefault` semantics.** The plan says "editable unless `isDefault` is true" (line 29). But after a user edits a default template (creating an override), the override has `isDefault: false`. So the UX flow is: you see a default template (read-only) -> to customize it, you... what? There's no "Create Override" action described. The upsert endpoint creates an override implicitly when you PUT with the same eventType+scope, but the UI flow for going from "viewing a default" to "editing a custom override" is not addressed.
+
+**The `state` field.** Templates have a `state` enum (`enabled`, `default_prompt_fallback`, `skip_event`). The plan shows state as a badge but doesn't provide any UI to change it. The upsert API accepts `state`, so the edit form should probably include a state selector.
+
+### Summary of Required Fixes (priority order)
+
+1. **Phase 2/3 dependency** -- don't add detail page route in Phase 2; move it to Phase 3
+2. **Define `UpsertPromptTemplateInput` type** separate from `PromptTemplate` -- match the actual API body schema
+3. **Define `PreviewResponse` type** -- `{ rendered: string; unresolved: string[] }`
+4. **Add `templates` to breadcrumb `routeLabels`** in the file modification list
+5. **Address the "default template -> create override" UX flow** -- how does a user start editing?
+6. **Add state editing** (dropdown) to the detail page edit form
+7. **Specify cache invalidation keys** for all mutations
+8. **Add cleanup commands** to E2E section
+9. **Flesh out Phase 4** or split it into concrete sub-tasks</result>
+<usage><total_tokens>55772</total_tokens><tool_uses>21</tool_uses><duration_ms>105250</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/a61c6db902b28fe03.output
+
+---
+
+please adapt the plan accordingly w the findings, nice ones!
