@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.5.1",
+  "checkpoint_id": "ed873ba1ebe9",
+  "strategy": "manual-commit",
+  "branch": "fet/template-registry",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "new-ui/src/pages/templates/[id]/page.tsx"
+  ],
+  "sessions": [
+    {
+      "metadata": "/ed/873ba1ebe9/0/metadata.json",
+      "transcript": "/ed/873ba1ebe9/0/full.jsonl",
+      "content_hash": "/ed/873ba1ebe9/0/content_hash.txt",
+      "prompt": "/ed/873ba1ebe9/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 8,
+    "cache_creation_tokens": 158175,
+    "cache_read_tokens": 549457,
+    "output_tokens": 2610,
+    "api_call_count": 4
+  }
+}

@@ -1,0 +1,1 @@
+when I click customize I still see read-only, can you make sure to re-render that component?
