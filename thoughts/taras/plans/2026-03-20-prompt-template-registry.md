@@ -966,9 +966,9 @@ All previously untested items have been addressed in Annex B (2026-03-21):
 
 1. ~~Live webhook simulation~~ → **TESTED** (Annex B.3-B.4): 7 signed webhooks, 5 tasks created, 2 correctly suppressed, custom override + skip_event verified
 2. ~~Docker worker system prompt~~ → **TESTED** (Annex B.2): lead container boots, 17710→22992 char system prompt built from code defaults
-3. ~~System prompt override via API + Docker~~ → **ARCHITECTURAL LIMITATION** (Annex B.5): system templates not in DB, not reachable from API. Documented as known limitation with 3 future paths.
+3. ~~System prompt override via API + Docker~~ → **FIXED** (Annex C): architecture violation identified — workers were calling DB directly. Fixed with HTTP resolver mode. System templates now seeded on API server (48 total), workers resolve via `POST /api/prompt-templates/render`. Docker E2E verified: no local DB access, 17710→22992 char system prompt via HTTP.
 
-**Bug found & fixed**: `resolvePromptTemplate()` crashed Docker workers when local DB had no tables. Fixed with try/catch fallback to code defaults in `src/prompts/resolver.ts`.
+**Architecture violation found & fixed**: Workers called `resolvePromptTemplate()` from `db.ts` directly — violating the "workers have no local DB" invariant. Initial band-aid (try/catch) replaced with proper HTTP resolver mode (Annex C).
 
 ### Implementation Deviations from Plan
 
@@ -1386,16 +1386,11 @@ Payload: PR#51 merged=false
 
 ### B.5 System Prompt Override Architecture Finding
 
-**Finding**: System templates (`system.agent.*`, `system.session.*`) are registered in the **worker's code registry** (in-memory Map populated at module import time). They are NOT seeded to the DB and NOT visible to the API server. The API server doesn't import `session-templates.ts` because it never calls `getBasePrompt()`.
+**Finding**: System templates (`system.agent.*`, `system.session.*`) were registered only in the worker's code registry (in-memory Map) and NOT seeded to the DB. The API server didn't import `session-templates.ts`. Workers resolved templates by directly calling `resolvePromptTemplate()` from `db.ts` — violating the architecture invariant that **workers have no local database** and communicate exclusively via HTTP.
 
-**Implication**: System prompt overrides via REST API / MCP tools are **not possible** in the current architecture for Docker workers. The Docker worker resolves system templates entirely from code defaults (via try/catch fallback since its local DB has no tables).
+**Violation identified**: `src/prompts/resolver.ts` called `resolvePromptTemplate()` from `db.ts` directly inside Docker workers. The try/catch added earlier was a band-aid hiding the real issue.
 
-**To enable system prompt override in future**, would need one of:
-1. Worker fetches template overrides from API server (HTTP call during `getBasePrompt()`)
-2. Worker runs migrations on its local DB (requires bundling migration files in Docker image)
-3. API server seeds system templates to DB + worker fetches resolved prompts via API
-
-This is documented as a known architectural limitation, not a bug.
+**Fixed in Annex C** — see below.
 
 ### B.6 Summary
 
@@ -1406,6 +1401,85 @@ This is documented as a known architectural limitation, not a bug.
 | Webhook: no task (expected) | 2 | 2 | 0 | changes_requested (no related task), closed not merged |
 | Custom override via webhook | 1 | 1 | 0 | Custom body used, header preserved |
 | skip_event via webhook | 1 | 1 | 0 | Task creation suppressed |
-| System prompt override | 1 | 0 | 0 | N/A — architectural limitation documented |
-| Bug found + fixed | 1 | 1 | 0 | try/catch in resolver.ts for Docker DB |
-| **Total** | **12** | **11** | **0** | +1 architectural finding |
+| Bug found + fixed | 1 | 1 | 0 | try/catch in resolver.ts (interim fix, replaced in Annex C) |
+| **Total** | **11** | **11** | **0** | Architecture violation fixed in Annex C |
+
+---
+
+## Annex C: Architecture Violation Fix — HTTP Resolver (2026-03-21)
+
+### C.1 Violation: Workers Accessing Local DB
+
+**Invariant**: Workers have NO local database. Docker workers communicate with the API server exclusively via HTTP using `API_KEY` + `X-Agent-ID` headers. All state lives in the API server's SQLite DB.
+
+**Violations found** (2 sites):
+
+| # | File | Lines | Function | Severity |
+|---|------|-------|----------|----------|
+| 1 | `src/prompts/resolver.ts` | 61, 143 | `resolvePromptTemplate()` from db.ts | HIGH — called on every template resolution in Docker workers |
+| 2 | `src/prompts/seed.ts` | 29, 40-41, 48, 52 | `getPromptTemplates()`, `upsertPromptTemplate()`, `resetPromptTemplateToDefault()` | HIGH — triggered via `initDb()` when resolver accessed local DB |
+
+**Safe paths** (not violations): All webhook handlers (GitHub, GitLab, AgentMail, Slack, Linear, Heartbeat) and MCP tools run on the API server — they access the DB correctly.
+
+### C.2 Fix: HTTP Resolver Mode
+
+| Change | File | Description |
+|--------|------|-------------|
+| New endpoint | `src/http/prompt-templates.ts` | `POST /api/prompt-templates/render` — full scope-aware resolution + `{{@template[...]}}` expansion + variable interpolation. Called by workers via HTTP. |
+| HTTP resolver | `src/prompts/resolver.ts` | Added `configureHttpResolver(apiUrl, apiKey)` — switches from direct DB to API calls. Added `resolveTemplateAsync()` for HTTP mode. Removed try/catch band-aid. |
+| Worker bootstrap | `src/commands/runner.ts` | Calls `configureHttpResolver(apiUrl, process.env.API_KEY)` before any template resolution. |
+| Async getBasePrompt | `src/prompts/base-prompt.ts` | `getBasePrompt()` → `async getBasePrompt(): Promise<string>` using `resolveTemplateAsync()` |
+| Async helpers | `src/commands/runner.ts` | `buildResumePrompt()` and `buildPromptForTrigger()` made async |
+| System template seeding | `src/prompts/seed.ts` | Added `import "./session-templates"` so system templates are seeded on API server (48 total = 34 event + 14 system) |
+| Architecture invariant | `CLAUDE.md` | Added "Workers have NO local database" section under Architecture Invariants |
+| Tests updated | 4 test files | All `getBasePrompt()` calls awaited, test functions made async |
+
+### C.3 Docker E2E Verification (after fix)
+
+```
+Server: PORT=3098 DATABASE_PATH=/tmp/e2e-http.sqlite
+Docker: --env-file .env.docker-lead -e AGENT_ROLE=lead -e MCP_BASE_URL=http://host.docker.internal:3098
+```
+
+#### Lead container logs (key lines):
+```
+MCP Base URL: http://host.docker.internal:3098
+[lead] Base prompt: included (17710 chars)
+[lead] Total system prompt length: 17710 chars
+[lead] Updated system prompt length: 22992 chars
+[lead] Polling for triggers (0/1 active)...
+```
+
+**No migration errors.** No `[Migration] Failed` warnings. No local DB access at all.
+
+#### API server verification:
+```
+Templates seeded: 48 (34 event + 14 system)
+System templates: system.agent.agent_fs, system.agent.artifacts, system.agent.context_mode,
+  system.agent.filesystem, system.agent.guidelines, system.agent.lead, system.agent.register,
+  system.agent.role, system.agent.self_awareness, system.agent.services, system.agent.system,
+  system.agent.worker, system.session.lead, system.session.worker
+
+POST /api/prompt-templates/render {eventType: "system.agent.role", variables: {role: "lead", agentId: "test-123"}}
+→ 224 chars, contains "your role is: lead"
+
+POST /api/prompt-templates/render {eventType: "system.session.lead", variables: {role: "lead", ...}}
+→ 15787 chars composite with all {{@template[...]}} refs expanded
+→ Contains: role text ✅, join-swarm ✅, delegation rules ✅
+```
+
+#### Test results:
+```
+bun run tsc:check — clean
+bun run lint:fix — clean
+bun test — 1767 pass, 0 fail, 4936 assertions, 89 files
+bun run docs:openapi — regenerated with render endpoint (119.2KB)
+```
+
+### C.4 What This Enables
+
+System prompt overrides via API are now **fully functional**:
+1. System templates are seeded on the API server (14 system + 2 session composites)
+2. Users can create overrides via `PUT /api/prompt-templates` for any system template
+3. Docker workers fetch resolved templates via `POST /api/prompt-templates/render`
+4. Overrides at agent/repo/global scope work for system prompts — same scope chain as event templates
