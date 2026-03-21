@@ -256,7 +256,12 @@ function getAllPredecessors(def: WorkflowDefinition, nodeId: string): string[] {
   const preds: string[] = [];
   for (const node of def.nodes) {
     if (!node.next) continue;
-    const targets = typeof node.next === "string" ? [node.next] : Object.values(node.next);
+    const targets =
+      typeof node.next === "string"
+        ? [node.next]
+        : Array.isArray(node.next)
+          ? node.next
+          : Object.values(node.next);
     if (targets.includes(nodeId)) {
       preds.push(node.id);
     }
@@ -512,7 +517,12 @@ export function findReadyNodes(
 
   for (const node of def.nodes) {
     if (!node.next) continue;
-    const targets = typeof node.next === "string" ? [node.next] : Object.values(node.next);
+    const targets =
+      typeof node.next === "string"
+        ? [node.next]
+        : Array.isArray(node.next)
+          ? node.next
+          : Object.values(node.next);
     for (const target of targets) {
       if (!predecessors.has(target)) {
         predecessors.set(target, new Set());
