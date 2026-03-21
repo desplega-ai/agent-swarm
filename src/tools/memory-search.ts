@@ -38,6 +38,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
               source: AgentMemorySourceSchema,
               scope: AgentMemoryScopeSchema,
               similarity: z.number().optional(),
+              finalScore: z.number().optional(),
               createdAt: z.string(),
             }),
           )
@@ -77,6 +78,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
           source: r.source,
           scope: r.scope,
           similarity: r.similarity,
+          finalScore: r.finalScore,
           createdAt: r.createdAt,
         }));
 

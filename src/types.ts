@@ -526,6 +526,10 @@ export const AgentMemorySchema = z.object({
   tags: z.array(z.string()),
   createdAt: z.string(),
   accessedAt: z.string(),
+  accessCount: z.number().int().min(0).default(0),
+  expiresAt: z.string().nullable().optional(),
+  contentHash: z.string().nullable().optional(),
+  stale: z.boolean().default(false),
 });
 
 export type AgentMemoryScope = z.infer<typeof AgentMemoryScopeSchema>;

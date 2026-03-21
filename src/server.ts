@@ -26,7 +26,9 @@ import { registerJoinSwarmTool } from "./tools/join-swarm";
 import { registerListChannelsTool } from "./tools/list-channels";
 import { registerListServicesTool } from "./tools/list-services";
 // Memory capability
+import { registerMemoryDeleteTool } from "./tools/memory-delete";
 import { registerMemoryGetTool } from "./tools/memory-get";
+import { registerMemoryMarkStaleTool } from "./tools/memory-mark-stale";
 import { registerMemorySearchTool } from "./tools/memory-search";
 import { registerMyAgentInfoTool } from "./tools/my-agent-info";
 import { registerPollTaskTool } from "./tools/poll-task";
@@ -204,6 +206,8 @@ export function createServer() {
   if (hasCapability("memory")) {
     registerMemorySearchTool(server);
     registerMemoryGetTool(server);
+    registerMemoryDeleteTool(server);
+    registerMemoryMarkStaleTool(server);
     registerInjectLearningTool(server);
   }
 

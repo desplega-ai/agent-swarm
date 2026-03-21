@@ -187,6 +187,12 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   // Backfill: Seed v1 for existing agents that don't have any context versions yet
   seedContextVersions();
 
+  // Cleanup hard-expired memories (30 days past soft expiry)
+  const cleanedMemories = cleanupExpiredMemories();
+  if (cleanedMemories > 0) {
+    console.log(`[memory] Cleaned up ${cleanedMemories} hard-expired memories`);
+  }
+
   return db;
 }
 
@@ -5254,6 +5260,10 @@ type AgentMemoryRow = {
   tags: string;
   createdAt: string;
   accessedAt: string;
+  accessCount: number;
+  expiresAt: string | null;
+  contentHash: string | null;
+  stale: number;
 };
 
 function rowToAgentMemory(row: AgentMemoryRow): AgentMemory {
@@ -5272,6 +5282,10 @@ function rowToAgentMemory(row: AgentMemoryRow): AgentMemory {
     tags: JSON.parse(row.tags || "[]"),
     createdAt: row.createdAt,
     accessedAt: row.accessedAt,
+    accessCount: row.accessCount ?? 0,
+    expiresAt: row.expiresAt ?? null,
+    contentHash: row.contentHash ?? null,
+    stale: (row.stale ?? 0) === 1,
   };
 }
 
@@ -5288,11 +5302,27 @@ export interface CreateMemoryOptions {
   chunkIndex?: number;
   totalChunks?: number;
   tags?: string[];
+  ttlHours?: number | null;
+  contentHash?: string | null;
 }
+
+const DEFAULT_TTL_HOURS: Record<string, number | null> = {
+  session_summary: 168, // 7 days
+  task_completion: 336, // 14 days
+  manual: 1440, // 60 days
+  file_index: null, // no TTL — tied to files
+};
 
 export function createMemory(data: CreateMemoryOptions): AgentMemory {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
+
+  // Compute TTL-based expiry
+  const ttlHours =
+    data.ttlHours !== undefined ? data.ttlHours : (DEFAULT_TTL_HOURS[data.source] ?? null);
+  const expiresAt =
+    ttlHours != null ? new Date(Date.now() + ttlHours * 3600000).toISOString() : null;
+
   const row = getDb()
     .prepare<
       AgentMemoryRow,
@@ -5312,10 +5342,12 @@ export function createMemory(data: CreateMemoryOptions): AgentMemory {
         string,
         string,
         string,
+        string | null,
+        string | null,
       ]
     >(
-      `INSERT INTO agent_memory (id, agentId, scope, name, content, summary, embedding, source, sourceTaskId, sourcePath, chunkIndex, totalChunks, tags, createdAt, accessedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO agent_memory (id, agentId, scope, name, content, summary, embedding, source, sourceTaskId, sourcePath, chunkIndex, totalChunks, tags, createdAt, accessedAt, accessCount, expiresAt, contentHash, stale)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0) RETURNING *`,
     )
     .get(
       id,
@@ -5333,6 +5365,8 @@ export function createMemory(data: CreateMemoryOptions): AgentMemory {
       JSON.stringify(data.tags ?? []),
       now,
       now,
+      expiresAt,
+      data.contentHash ?? null,
     );
 
   if (!row) throw new Error("Failed to create memory");
@@ -5368,12 +5402,16 @@ export function searchMemoriesByVector(
   queryEmbedding: Float32Array,
   agentId: string,
   options: SearchMemoriesOptions = {},
-): (AgentMemory & { similarity: number })[] {
+): (AgentMemory & { similarity: number; finalScore?: number })[] {
   const { scope = "all", limit = 10, source, isLead = false } = options;
 
   // Build WHERE clause
   const conditions: string[] = ["embedding IS NOT NULL"];
   const params: (string | null)[] = [];
+
+  // Exclude expired and stale memories at the SQL level
+  conditions.push("(expiresAt IS NULL OR expiresAt > datetime('now'))");
+  conditions.push("stale = 0");
 
   if (!isLead) {
     // Workers see their own agent-scoped + all swarm-scoped
@@ -5411,7 +5449,7 @@ export function searchMemoriesByVector(
   // Import cosine similarity inline to avoid circular deps
   const { cosineSimilarity, deserializeEmbedding } = require("./embedding");
 
-  // Compute similarities and sort
+  // Compute similarities
   const results: (AgentMemory & { similarity: number })[] = [];
   for (const row of rows) {
     if (!row.embedding) continue;
@@ -5422,8 +5460,54 @@ export function searchMemoriesByVector(
     results.push({ ...rowToAgentMemory(row), similarity });
   }
 
-  results.sort((a, b) => b.similarity - a.similarity);
-  return results.slice(0, limit);
+  // --- Reranking pass ---
+  const HALF_LIFE_HOURS = 168; // 1 week
+  const MAX_EXPECTED_ACCESS = 50;
+  const WEIGHTS = { similarity: 0.5, recency: 0.2, access: 0.15, source: 0.15 };
+  const SOURCE_WEIGHTS: Record<string, number> = {
+    manual: 1.0,
+    file_index: 0.8,
+    task_completion: 0.6,
+    session_summary: 0.4,
+  };
+
+  // Take top 2*limit candidates by cosine similarity
+  const candidateLimit = limit * 2;
+  const candidates = results.sort((a, b) => b.similarity - a.similarity).slice(0, candidateLimit);
+
+  // Compute composite score for each candidate
+  const reranked = candidates.map((m) => {
+    const ageHours = (Date.now() - new Date(m.createdAt).getTime()) / 3600000;
+    const recencyScore = Math.exp((-Math.LN2 / HALF_LIFE_HOURS) * ageHours);
+    const accessBoost = Math.log(1 + (m.accessCount ?? 0)) / Math.log(1 + MAX_EXPECTED_ACCESS);
+    const srcWeight = SOURCE_WEIGHTS[m.source] ?? 0.5;
+
+    const finalScore =
+      WEIGHTS.similarity * m.similarity +
+      WEIGHTS.recency * recencyScore +
+      WEIGHTS.access * accessBoost +
+      WEIGHTS.source * srcWeight;
+
+    return { ...m, finalScore };
+  });
+
+  // Sort by composite score, return top N
+  reranked.sort((a, b) => b.finalScore - a.finalScore);
+  const topResults = reranked.slice(0, limit);
+
+  // Batch update accessedAt and accessCount for returned results
+  if (topResults.length > 0) {
+    const ids = topResults.map((m) => m.id);
+    const now = new Date().toISOString();
+    const placeholders = ids.map(() => "?").join(",");
+    getDb()
+      .prepare(
+        `UPDATE agent_memory SET accessedAt = ?, accessCount = accessCount + 1 WHERE id IN (${placeholders})`,
+      )
+      .run(now, ...ids);
+  }
+
+  return topResults;
 }
 
 export interface ListMemoriesOptions {
@@ -5519,6 +5603,30 @@ export function getMemoryStats(agentId: string): {
   }
 
   return { total: total?.count ?? 0, bySource, byScope };
+}
+
+/**
+ * Mark a memory as stale. Stale memories are excluded from search results
+ * but remain visible via memory-get and list.
+ */
+export function markMemoryStale(id: string): boolean {
+  const result = getDb().prepare("UPDATE agent_memory SET stale = 1 WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
+/**
+ * Hard-delete memories that have been expired for more than 30 days.
+ * Called from initDb() on API startup.
+ */
+export function cleanupExpiredMemories(): number {
+  const result = getDb()
+    .prepare(
+      `DELETE FROM agent_memory
+       WHERE expiresAt IS NOT NULL
+       AND datetime(expiresAt, '+30 days') < datetime('now')`,
+    )
+    .run();
+  return result.changes;
 }
 
 // ============================================================================

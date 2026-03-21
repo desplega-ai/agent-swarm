@@ -108,6 +108,10 @@ export const DEFERRED_TOOLS = new Set([
   // Debug (1)
   "db-query",
 
+  // Memory management (2)
+  "memory-delete",
+  "memory-mark-stale",
+
   // Other (3)
   "cancel-task",
   "inject-learning",
