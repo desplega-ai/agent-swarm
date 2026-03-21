@@ -33,6 +33,7 @@
   "scripts": {
     "build:pi-skills": "bun run plugin/build-pi-skills.ts",
     "tsc:check": "bun tsc --noEmit",
+    "check:db-boundary": "bash scripts/check-db-boundary.sh",
     "cli": "bun src/cli.tsx",
     "hook": "bun src/hooks/hook.ts",
     "claude": "bun src/cli.tsx claude",

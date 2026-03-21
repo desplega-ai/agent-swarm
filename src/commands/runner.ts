@@ -1,13 +1,13 @@
 import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import type { TemplateResponse } from "../../templates/schema.ts";
+import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt.ts";
 import {
   generateDefaultClaudeMd,
   generateDefaultIdentityMd,
   generateDefaultSoulMd,
   generateDefaultToolsMd,
-} from "../be/db.ts";
-import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt.ts";
+} from "../prompts/defaults.ts";
 import {
   type CostData,
   createProviderAdapter,

@@ -35,6 +35,16 @@ pass_filenames = false
 stages = ["pre-push"]
 
 [[repos.hooks]]
+id = "db-boundary"
+name = "Worker/API DB boundary check"
+language = "system"
+entry = "bash scripts/check-db-boundary.sh"
+always_run = true
+pass_filenames = false
+stages = ["pre-push"]
+fail_fast = true
+
+[[repos.hooks]]
 id = "pi-skills-freshness"
 name = "Pi-skills freshness check"
 language = "system"

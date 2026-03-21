@@ -88,6 +88,12 @@ templates/       # Template data (official + community)
 templates-ui/    # Templates registry (Next.js app)
 ```
 
+## Architecture Invariants
+
+**Worker/API DB boundary**: The API server (`src/http.ts`, `src/server.ts`, `src/tools/`, `src/http/`) is the **sole owner** of the SQLite database. Worker-side code (`src/commands/`, `src/hooks/`, `src/providers/`, `src/prompts/`, `src/cli.tsx`, `src/claude.ts`) must **never** import from `src/be/db` or `bun:sqlite`. Workers communicate with the API exclusively via HTTP using `API_KEY` and `X-Agent-ID` headers.
+
+Enforced by `scripts/check-db-boundary.sh` (pre-push hook + CI merge gate). If you need to share pure logic between API and worker code, put it in a shared module (e.g., `src/prompts/`, `src/utils/`).
+
 ## Code Style
 
 - Run `bun run lint:fix` before committing (lint + format)
@@ -470,9 +476,10 @@ Before pushing a PR, run the checks that CI will enforce. Which checks to run de
 
 **Root project (src/, tools/, etc.):**
 ```bash
-bun run lint:fix        # Biome lint + format
-bun run tsc:check       # TypeScript type check
-bun test                # Unit tests
+bun run lint:fix             # Biome lint + format
+bun run tsc:check            # TypeScript type check
+bun test                     # Unit tests
+bash scripts/check-db-boundary.sh  # Worker/API DB boundary
 ```
 
 **If you changed `plugin/commands/*.md`:** Rebuild pi-mono skills and commit the result:

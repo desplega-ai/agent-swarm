@@ -67,6 +67,9 @@ jobs:
       - name: Run TypeScript type check
         run: bun run tsc:check
 
+      - name: Check worker/API DB boundary
+        run: bash scripts/check-db-boundary.sh
+
   test:
     name: Run Tests
     needs: detect-changes
