@@ -4,6 +4,7 @@ import {
   checkoutPromptTemplate,
   closeDb,
   deletePromptTemplate,
+  getDb,
   getPromptTemplateById,
   getPromptTemplateHistory,
   getPromptTemplates,
@@ -301,6 +302,13 @@ describe("Prompt Templates DB", () => {
 
   describe("wildcard matching", () => {
     test("wildcard matches when exact not found", () => {
+      // Remove any seeded exact match so the wildcard can be tested
+      const seeded = getPromptTemplates({ eventType: "github.pull_request.review_submitted" });
+      for (const t of seeded) {
+        getDb().run("DELETE FROM prompt_template_history WHERE templateId = ?", [t.id]);
+        getDb().run("DELETE FROM prompt_templates WHERE id = ?", [t.id]);
+      }
+
       upsertPromptTemplate({
         eventType: "github.pull_request.*",
         scope: "global",
