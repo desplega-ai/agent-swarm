@@ -246,3 +246,7 @@ export interface PreviewResponse {
 <usage><total_tokens>121820</total_tokens><tool_uses>41</tool_uses><duration_ms>119898</duration_ms></usage>
 </task-notification>
 Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/a67b13a577b101f29.output
+
+---
+
+why are you not useing the render endpoint for the rendered tab?
