@@ -1479,7 +1479,31 @@ bun run docs:openapi — regenerated with render endpoint (119.2KB)
 ### C.4 What This Enables
 
 System prompt overrides via API are now **fully functional**:
-1. System templates are seeded on the API server (14 system + 2 session composites)
+1. System templates are seeded on the API server (14 system + 2 session composites + 7 runner triggers = 55 total)
 2. Users can create overrides via `PUT /api/prompt-templates` for any system template
 3. Docker workers fetch resolved templates via `POST /api/prompt-templates/render`
 4. Overrides at agent/repo/global scope work for system prompts — same scope chain as event templates
+
+### C.5 Full E2E Proof: "El Jefe" Test
+
+To prove the entire pipeline works end-to-end — from API override to Docker worker to Claude session output — we created two custom overrides:
+
+- **`system.agent.guidelines`** (global override): Added `🇪🇸 IMPORTANT LANGUAGE OVERRIDE — You MUST respond in Spanish at all times. Siempre responde en español, sin excepciones.`
+- **`system.agent.self_awareness`** (global override): Added `Your codename is "El Jefe" and you take great pride in being the lead agent.`
+
+Then started a Docker lead container and sent a task: _"Say hello and introduce yourself. What is your codename?"_
+
+**Task completed successfully. Output:**
+
+> ¡Hola! Soy **El Jefe** (lead-449e4422), el agente líder del swarm. Mi función es coordinar y delegar tareas a los agentes trabajadores, asegurándome de que todo fluya sin problemas. Mi nombre en clave es **"El Jefe"** — y me lo tomo muy en serio. 😎
+
+Full round trip verified:
+1. Overrides created via `PUT /api/prompt-templates` on API server
+2. Docker lead boots, calls `configureHttpResolver(apiUrl, apiKey)`
+3. `getBasePrompt()` → `resolveTemplateAsync("system.session.lead")` → `POST /api/prompt-templates/render` to API
+4. API returns composite with overridden guidelines + self_awareness sections
+5. Claude receives system prompt with Spanish mandate + El Jefe persona
+6. Task trigger prompt resolved via same HTTP path
+7. Claude responds in Spanish, introduces itself as El Jefe
+8. `store-progress` called with completed status + Spanish output
+9. Task marked `completed` in API DB
