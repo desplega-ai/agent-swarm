@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.5.1",
+  "checkpoint_id": "f8773bfc1516",
+  "strategy": "manual-commit",
+  "branch": "fet/template-registry",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "package.json",
+    "src/be/db.ts",
+    "src/be/migrations/013_prompt_templates.sql",
+    "src/be/migrations/014_prompt_templates.sql",
+    "src/tests/prompt-template-remaining.test.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/f8/773bfc1516/0/metadata.json",
+      "transcript": "/f8/773bfc1516/0/full.jsonl",
+      "content_hash": "/f8/773bfc1516/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  }
+}
