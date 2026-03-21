@@ -19,8 +19,8 @@ describe("detectMention", () => {
   });
 
   test("is case-insensitive", () => {
-    expect(detectMention("@Agent-Swarm-Bot help")).toBe(true);
-    expect(detectMention("@AGENT-SWARM-BOT help")).toBe(true);
+    expect(detectMention(`@${GITHUB_BOT_NAME.toLowerCase()} help`)).toBe(true);
+    expect(detectMention(`@${GITHUB_BOT_NAME.toUpperCase()} help`)).toBe(true);
   });
 
   test("returns false for no mention", () => {
@@ -62,7 +62,7 @@ describe("extractMentionContext", () => {
   });
 
   test("is case-insensitive", () => {
-    expect(extractMentionContext("@AGENT-SWARM-BOT help me")).toBe("help me");
+    expect(extractMentionContext(`@${GITHUB_BOT_NAME.toUpperCase()} help me`)).toBe("help me");
   });
 
   test("returns empty string for null or undefined", () => {
@@ -100,5 +100,24 @@ describe("isBotAssignee", () => {
   test("returns false for partial match", () => {
     expect(isBotAssignee(`${GITHUB_BOT_NAME}-extra`)).toBe(false);
     expect(isBotAssignee(`prefix-${GITHUB_BOT_NAME}`)).toBe(false);
+  });
+});
+
+describe("GITHUB_BOT_ALIASES support", () => {
+  test("primary bot name always works for mentions and assignee", () => {
+    expect(detectMention(`@${GITHUB_BOT_NAME} review`)).toBe(true);
+    expect(isBotAssignee(GITHUB_BOT_NAME)).toBe(true);
+  });
+
+  test("aliases from GITHUB_BOT_ALIASES env are recognized", () => {
+    const aliases = (process.env.GITHUB_BOT_ALIASES || "")
+      .split(",")
+      .map((a) => a.trim())
+      .filter(Boolean);
+
+    for (const alias of aliases) {
+      expect(detectMention(`@${alias} review this`)).toBe(true);
+      expect(isBotAssignee(alias)).toBe(true);
+    }
   });
 });
