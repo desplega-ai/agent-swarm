@@ -1,7 +1,7 @@
 ---
 date: 2026-03-21
 author: Claude
-status: in-progress
+status: completed
 tags: [plan, new-ui, prompt-templates, dashboard]
 commit_after_phase: true
 ---
@@ -242,6 +242,22 @@ cd new-ui && pnpm exec tsc --noEmit && pnpm build
 ```bash
 cd new-ui && pnpm lint && pnpm exec tsc --noEmit && pnpm build
 ```
+
+---
+
+## Post-Implementation Fixes
+
+### Fix 1: Use `/render` endpoint instead of `/preview` for Rendered tab
+The `/preview` endpoint only interpolates `{{variable}}` syntax. Template composition references (`{{@template[...]}}`) were stripped to empty strings, leaving the Rendered tab blank for composed templates. Switched to `/render` which does full scope-aware resolution including recursive `@template[...]` expansion. Added `RenderResponse` type, `renderPromptTemplate` client method, and `useRenderTemplate` hook.
+
+### Fix 2: Customize navigates to new template ID
+After clicking "Customize" on a default template, the upsert creates a new override with a different ID. The page now navigates to the new override's ID so Monaco switches to editable mode.
+
+### Fix 3: Reset button disabled when no changes
+The Reset button is now disabled when `body` and `state` match the saved template values, preventing unnecessary confirmation dialogs.
+
+### Fix 4: Use `prose-chat` for markdown rendering
+The project uses a custom `prose-chat` CSS class (in `globals.css`) — not `@tailwindcss/typography`. The `prose prose-sm dark:prose-invert` classes were non-functional. Replaced with `prose-chat` on both the detail page and version detail page for proper heading, code, list, table, and blockquote styling.
 
 ---
 
