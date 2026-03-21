@@ -32,6 +32,7 @@ describe("Self-Improvement Mechanisms", () => {
       }
     }
 
+    closeDb();
     initDb(TEST_DB_PATH);
 
     createAgent({ id: leadId, name: "Test Lead", isLead: true, status: "idle" });
