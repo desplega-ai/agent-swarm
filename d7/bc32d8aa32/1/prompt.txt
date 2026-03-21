@@ -1,0 +1,348 @@
+/desplega:implement-plan thoughts/taras/plans/2026-03-21-prompt-templates-ui.md
+
+---
+
+<task-notification>
+<task-id>a3e5a71fed5b9b090</task-id>
+<tool-use-id>toolu_01QAuHtvJsuuEUGQXHCiiMVY</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/a3e5a71fed5b9b090.output</output-file>
+<status>completed</status>
+<summary>Agent "Explore new-ui patterns" completed</summary>
+<result>Perfect. I have all the information you need. Here's a comprehensive exploration summary with exact patterns to replicate:
+
+## EXPLORATION SUMMARY: new-ui/ Patterns
+
+### 1. **API Client Pattern** (`client.ts`)
+- **Structure**: Single `ApiClient` class with private helper methods
+- **Base URL**: `getBaseUrl()` returns empty string in dev mode (for Vite proxy), or full URL otherwise
+- **Headers**: Bearer token auth via `Authorization: Bearer ${apiKey}`
+- **Pattern for methods**:
+  ```typescript
+  async fetchX(filters?: {...}): Promise<Response> {
+    const params = new URLSearchParams();
+    if (filters?.x) params.set("x", filters.x);
+    const queryString = params.toString();
+    const url = `${this.getBaseUrl()}/api/endpoint${queryString ? `?${queryString}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
+    return res.json();
+  }
+  ```
+- **POST/PUT**: `body: JSON.stringify(data)`, error handling with `.catch(() => ({}))`
+- **Singleton export**: `export const api = new ApiClient();`
+
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/api/client.ts`
+
+---
+
+### 2. **Types Pattern** (`types.ts`)
+- **Organized by domain**: Agent, Task, Channel, Service, Cost, Schedule, Epic, Workflow types
+- **Response wrappers**: `AgentsResponse`, `TasksResponse`, `ChannelsResponse` with `{ agents/tasks/channels: T[], total?: number }`
+- **Status enums**: `type AgentStatus = "idle" | "busy" | "offline"`
+- **Extended types**: `AgentWithTasks extends Agent` pattern for nested data
+- **No barrel exports**: Each type is imported directly from `types.ts`
+
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/api/types.ts`
+
+---
+
+### 3. **Hooks Pattern** (react-query + domain-specific)
+
+**Query hook structure**:
+```typescript
+export function useX(id?: string) {
+  return useQuery({
+    queryKey: ["x", id],
+    queryFn: () => api.fetchX(id),
+    select: (data) => data.x,  // optional selector
+    enabled: !!id,             // optional conditional
+  });
+}
+```
+
+**Mutation hook structure**:
+```typescript
+export function useUpdateX() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {...}) => api.updateX(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["x"] });
+      queryClient.invalidateQueries({ queryKey: ["x", id] });  // for detail views
+    },
+  });
+}
+```
+
+**Query key convention**: `["resourceName"]` for lists, `["resourceName", id]` for details, `["resourceName", id, "subresource"]` for nested
+
+**Auto-polling**: `refetchInterval: 5000` (5 seconds) on session logs and similar real-time data
+
+**Files**: 
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/api/hooks/use-agents.ts`
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/api/hooks/use-tasks.ts`
+
+---
+
+### 4. **Hooks Index** (`index.ts`)
+- **Re-exports only**: No logic, pure `export { hook } from "./use-X"` and `export type { TypeName } from "./use-X"`
+- **Organized by resource**: All agent hooks, then all task hooks, etc.
+- **Barrel export for convenience**: `import { useAgents, useCreateTask } from "@/api/hooks"`
+
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/api/hooks/index.ts`
+
+---
+
+### 5. **Router Pattern** (`router.tsx`)
+- **lazy() imports**: `const XPage = lazy(() => import("@/pages/X/page"))`
+- **createBrowserRouter**: All routes nested under `RootLayout`
+- **Dynamic segments**: `{ path: "agents/:id", element: <AgentDetailPage /> }`
+- **Optional segments**: `{ path: "chat/:channelId", element: <ChatPage /> }` (handled in component)
+- **Fallback**: `{ path: "*", element: <NotFoundPage /> }`
+
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/app/router.tsx`
+
+---
+
+### 6. **Sidebar Pattern** (`app-sidebar.tsx`)
+- **Navigation structure**: Array of groups with label + items
+  ```typescript
+  const navGroups = [
+    {
+      label: "Core",
+      items: [
+        { title: "Dashboard", path: "/", icon: LayoutDashboard },
+        { title: "Agents", path: "/agents", icon: Users },
+      ],
+    },
+    {
+      label: "Communication",  // <-- This is your group
+      items: [{ title: "Chat", path: "/chat", icon: MessageSquare }],
+    },
+  ];
+  ```
+- **Active state logic**: `isActive = item.path === "/" ? location.pathname === "/" : location.pathname.startsWith(item.path)`
+- **Icon component**: `<item.icon className="size-4" />`
+- **Responsive**: Collapsible via `collapsible="icon"` on Sidebar component
+
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/components/layout/app-sidebar.tsx`
+
+---
+
+### 7. **Breadcrumbs Pattern** (`breadcrumbs.tsx`)
+- **routeLabels map**: `{ agents: "Agents", tasks: "Tasks", ... }`
+- **UUID detection**: Regex test, format as `${segment.slice(0, 8)}...`
+- **Dynamic generation**: Parse `location.pathname.split("/").filter(Boolean)`, build crumbs array
+- **Last segment**: Not clickable, bold text
+- **Previous segments**: Clickable links
+
+**File**: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/components/layout/breadcrumbs.tsx`
+
+---
+
+### 8. **Page Patterns**
+
+#### **Monaco Editor Page** (`debug/page.tsx`)
+```typescript
+import Editor from "@monaco-editor/react";
+
+// In component:
+<Editor
+  language="sql"
+  theme={theme === "dark" ? "vs-dark" : "vs"}
+  value={sql}
+  onChange={(value) => setSql(value ?? "")}
+  onMount={handleEditorMount}
+  options={{
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    fontSize: 13,
+    lineNumbers: "on",
+    wordWrap: "on",
+    automaticLayout: true,
+    padding: { top: 8 },
+  }}
+/>
+```
+
+#### **Markdown Rendering Page** (`chat/page.tsx`)
+```typescript
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+// In component:
+<ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+```
+
+**Files**:
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/pages/debug/page.tsx`
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/pages/chat/page.tsx`
+
+---
+
+### 9. **AG Grid / DataGrid Pattern**
+
+#### **Column Definitions**:
+```typescript
+const columnDefs = useMemo<ColDef<AgentTask>[]>(
+  () => [
+    {
+      field: "name",
+      headerName: "Name",
+      width: 250,
+      minWidth: 180,
+      cellRenderer: (params: { value: string; data: AgentTask | undefined }) => (
+        <span className="font-semibold">{params.value}</span>
+      ),
+    },
+    {
+      field: "status",
+      headerName: "Status",
+      width: 120,
+      cellRenderer: (params: { value: AgentTaskStatus }) => <StatusBadge status={params.value} />,
+    },
+    {
+      field: "capabilities",
+      headerName: "Capabilities",
+      flex: 1,
+      minWidth: 250,
+      cellRenderer: (params: { value: string[] | undefined }) => (
+        <div className="flex gap-1 items-center">
+          {params.value?.slice(0, 2).map((cap) => (
+            <Badge key={cap} variant="outline" className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase shrink-0">
+              {cap}
+            </Badge>
+          ))}
+        </div>
+      ),
+      sortable: false,
+    },
+    {
+      field: "createdAt",
+      headerName: "Created",
+      width: 150,
+      valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
+    },
+  ],
+  [],
+);
+```
+
+#### **DataGrid Component Usage**:
+```typescript
+<DataGrid
+  rowData={filteredAgents}
+  columnDefs={columnDefs}
+  quickFilterText={search}          // Client-side quick filter
+  onRowClicked={onRowClicked}       // Handle row clicks
+  loading={isLoading}
+  emptyMessage="No agents found"
+  pagination                        // Server-side pagination
+  paginationPageSize={50}
+  getRowId={(params) => String(params.data?.id)}
+  domLayout="autoHeight"           // For scrollable pages (optional)
+  enableCellTextSelection          // Allow text selection (optional)
+/>
+```
+
+#### **Page Wrapper for DataGrid**:
+```typescript
+<div className="flex flex-col flex-1 min-h-0 gap-4">
+  <h1 className="text-xl font-semibold">Agents</h1>
+  <div className="flex items-center gap-3">
+    {/* Filters */}
+  </div>
+  <DataGrid ... />
+</div>
+```
+
+**Key details**:
+- **No `<Table>` components** — AG Grid only for data tables
+- **Badge style**: `text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase`
+- **Row click handling**: `useCallback((event: RowClickedEvent<T>) => navigate(...), [navigate])`
+- **Cell interactive elements**: Call `e.stopPropagation()` to prevent row click
+- **Custom row IDs**: Use `getRowId` for non-standard ID fields
+- **Status badges**: Use `StatusBadge` component (shared)
+
+**Files**:
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/pages/agents/page.tsx`
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/pages/tasks/page.tsx`
+
+---
+
+### 10. **Form & Dialog Pattern** (from tasks page)
+```typescript
+// State management
+const [open, setOpen] = useState(false);
+const [form, setForm] = useState<FormData>(emptyForm);
+
+// Dialog with form
+<Dialog open={open} onOpenChange={setOpen}>
+  <DialogContent className="max-h-[90vh] overflow-y-auto">
+    <form onSubmit={handleSubmit}>
+      <DialogHeader>
+        <DialogTitle>Create X</DialogTitle>
+        <DialogDescription>Description here.</DialogDescription>
+      </DialogHeader>
+      <div className="space-y-4 py-4">
+        <div className="space-y-2">
+          <Label>Field *</Label>
+          <Input ... />
+        </div>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+        <Button type="submit" disabled={!form.field.trim()}>Submit</Button>
+      </DialogFooter>
+    </form>
+  </DialogContent>
+</Dialog>
+```
+
+---
+
+### 11. **URL Query Params Pattern** (from tasks page)
+```typescript
+const [searchParams, setSearchParams] = useSearchParams();
+const statusFilter = searchParams.get("status") ?? "all";
+
+const setParam = useCallback(
+  (key: string, value: string, resetPage = true) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      const defaultValues: Record<string, string> = { status: "all", ... };
+      if (value === (defaultValues[key] ?? "")) {
+        next.delete(key);
+      } else {
+        next.set(key, value);
+      }
+      if (resetPage && key !== "page") next.delete("page");
+      return next;
+    });
+  },
+  [setSearchParams],
+);
+
+// Usage:
+<Select value={statusFilter} onValueChange={(v) => setParam("status", v)}>
+```
+
+---
+
+### Summary: Key Takeaways
+
+1. **API Client**: Singleton with private helpers, URLSearchParams for query strings
+2. **Hooks**: Standard react-query pattern with `queryKey` convention + mutation invalidation
+3. **Router**: `lazy()` imports + `createBrowserRouter` with nested routes
+4. **Sidebar**: Array of groups with dynamic active state logic
+5. **DataGrid**: Always use AG Grid, never `<Table>` for lists; column defs with cell renderers
+6. **Pages**: Default export for lazy loading; `flex flex-col flex-1 min-h-0` wrapper
+7. **Forms**: shadcn Dialog + controlled inputs with `useState`
+8. **URL Params**: Manage filters via `useSearchParams` with smart deletion of defaults
+9. **Theme**: CSS variable classes only (`bg-muted`, `text-foreground`), never hardcoded colors
+10. **Markdown/Editors**: `ReactMarkdown` with `remarkGfm` for chat; Monaco for code
+
+All absolute file paths are documented above. This gives you exact patterns to replicate for new features.</result>
+<usage><total_tokens>129980</total_tokens><tool_uses>24</tool_uses><duration_ms>45639</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/a3e5a71fed5b9b090.output

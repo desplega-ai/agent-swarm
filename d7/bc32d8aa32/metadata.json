@@ -3,7 +3,7 @@
   "checkpoint_id": "d7bc32d8aa32",
   "strategy": "manual-commit",
   "branch": "fet/template-registry",
-  "checkpoints_count": 3,
+  "checkpoints_count": 5,
   "files_touched": [
     "thoughts/taras/plans/2026-03-21-prompt-templates-ui.md"
   ],
@@ -13,13 +13,19 @@
       "transcript": "/d7/bc32d8aa32/0/full.jsonl",
       "content_hash": "/d7/bc32d8aa32/0/content_hash.txt",
       "prompt": "/d7/bc32d8aa32/0/prompt.txt"
+    },
+    {
+      "metadata": "/d7/bc32d8aa32/1/metadata.json",
+      "transcript": "/d7/bc32d8aa32/1/full.jsonl",
+      "content_hash": "/d7/bc32d8aa32/1/content_hash.txt",
+      "prompt": "/d7/bc32d8aa32/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 71,
-    "cache_creation_tokens": 348240,
-    "cache_read_tokens": 3215274,
-    "output_tokens": 19085,
-    "api_call_count": 31
+    "input_tokens": 108,
+    "cache_creation_tokens": 415532,
+    "cache_read_tokens": 4379535,
+    "output_tokens": 24562,
+    "api_call_count": 48
   }
 }
