@@ -429,7 +429,7 @@ Based on typical agent-swarm deployments:
 These should be resolved before or during implementation:
 
 1. **TTL extension on access**: Should accessing a memory via search reset/extend its TTL?
-   - **Recommendation**: No, for Phase 3. Add as a configurable option in a follow-up if needed. Extending TTL on access creates immortal memories, defeating the purpose.
+   - **Recommendation**: Yes, implement TTL extension on access in Phase 3. Without this, memories could expire during idle periods — e.g., if no new `session_summary` memories are created for a week, all existing ones would disappear. TTL extension on access ensures that actively-used memories survive while truly unused ones still expire. To prevent immortal memories, cap renewals (e.g., max 3 extensions) or use diminishing extensions (each renewal adds half the original TTL).
 
 2. **Per-agent vs global reranking weights**: Start global. If agents have very different memory usage patterns, add per-agent weight overrides via agent config.
 
