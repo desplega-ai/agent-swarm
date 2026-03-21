@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
-import { getWorkflow } from "../be/db";
-import type { TriggerConfig } from "../types";
+import { getWorkflow, getWorkflowsByScheduleId } from "../be/db";
+import type { ScheduledTask, TriggerConfig } from "../types";
 import { startWorkflowExecution } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
 
@@ -50,6 +50,35 @@ export async function handleWebhookTrigger(
 
   const runId = await startWorkflowExecution(workflow, payload, registry);
   return { runId };
+}
+
+/**
+ * Handle a schedule trigger: find workflows linked to this schedule and execute them.
+ * Returns an array of workflow run IDs. Empty array means no workflows matched
+ * (caller should fall through to standalone task creation).
+ */
+export async function handleScheduleTrigger(
+  scheduleId: string,
+  schedule: ScheduledTask,
+  registry: ExecutorRegistry,
+): Promise<string[]> {
+  const workflows = getWorkflowsByScheduleId(scheduleId);
+  if (workflows.length === 0) return [];
+
+  const runIds: string[] = [];
+  for (const workflow of workflows) {
+    const triggerData = {
+      scheduleId,
+      scheduleName: schedule.name,
+      firedAt: new Date().toISOString(),
+    };
+    const runId = await startWorkflowExecution(workflow, triggerData, registry);
+    runIds.push(runId);
+    console.log(
+      `[Triggers] Schedule "${schedule.name}" triggered workflow "${workflow.name}" (run: ${runId})`,
+    );
+  }
+  return runIds;
 }
 
 /**

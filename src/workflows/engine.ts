@@ -73,6 +73,12 @@ export async function startWorkflowExecution(
 
   // Resolve inputs and merge into initial context
   const ctx: Record<string, unknown> = { trigger: triggerData };
+
+  // Inject workflow-level metadata for interpolation ({{workflow.dir}}, {{workflow.vcsRepo}})
+  if (workflow.dir || workflow.vcsRepo) {
+    ctx.workflow = { dir: workflow.dir, vcsRepo: workflow.vcsRepo };
+  }
+
   if (workflow.input) {
     try {
       const resolved = resolveInputs(workflow.input);
@@ -319,6 +325,7 @@ async function executeStep(
     // Always include built-in sources
     if (ctx.trigger !== undefined) interpolationCtx.trigger = ctx.trigger;
     if (ctx.input !== undefined) interpolationCtx.input = ctx.input;
+    if (ctx.workflow !== undefined) interpolationCtx.workflow = ctx.workflow;
     // Resolve declared inputs
     for (const [localName, sourcePath] of Object.entries(node.inputs)) {
       const keys = sourcePath.split(".");
@@ -337,6 +344,7 @@ async function executeStep(
     interpolationCtx = {};
     if (ctx.trigger !== undefined) interpolationCtx.trigger = ctx.trigger;
     if (ctx.input !== undefined) interpolationCtx.input = ctx.input;
+    if (ctx.workflow !== undefined) interpolationCtx.workflow = ctx.workflow;
   }
 
   // 3c. Validate resolved inputs against inputSchema if defined

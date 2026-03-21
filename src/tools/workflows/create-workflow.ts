@@ -44,6 +44,19 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           .describe(
             "Optional input values resolved at execution time (env vars like VAR_NAME, secrets secret.NAME, or literals)",
           ),
+        dir: z
+          .string()
+          .min(1)
+          .startsWith("/")
+          .optional()
+          .describe(
+            "Default working directory for all agent-task nodes (absolute path, e.g. /tmp/workspace)",
+          ),
+        vcsRepo: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Default VCS repo for all agent-task nodes (e.g. org/repo)"),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().optional(),
@@ -52,7 +65,10 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
         workflow: z.unknown().optional(),
       }),
     },
-    async ({ name, description, definition, triggers, cooldown, input }, requestInfo) => {
+    async (
+      { name, description, definition, triggers, cooldown, input, dir, vcsRepo },
+      requestInfo,
+    ) => {
       if (!requestInfo.agentId) {
         return {
           content: [{ type: "text" as const, text: "Agent ID required." }],
@@ -84,6 +100,8 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           triggers,
           cooldown,
           input,
+          dir,
+          vcsRepo,
           createdByAgentId: requestInfo.agentId,
         });
         return {
