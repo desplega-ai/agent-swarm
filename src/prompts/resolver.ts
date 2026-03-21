@@ -8,9 +8,35 @@
  *   workers which have no local database (architecture invariant: workers communicate via HTTP only).
  */
 
-import { resolvePromptTemplate } from "../be/db";
 import { interpolate } from "../workflows/template";
 import { getTemplateDefinition } from "./registry";
+
+// ─── DB Resolver Injection ──────────────────────────────────────────────────
+// The DB resolver is injected by the API server at startup (see src/be/db.ts).
+// This avoids a direct import from ../be/db, preserving the worker/API boundary.
+// Workers use HTTP mode instead; this DB path is only used by the API server.
+
+type DbResolverFn = (
+  eventType: string,
+  agentId?: string,
+  repoId?: string,
+) => { skip: true } | { template: { id: string; body: string; scope: string } } | null;
+
+let dbResolverFn: DbResolverFn | null = null;
+
+/**
+ * Inject the DB resolver function (called by API server at startup).
+ */
+export function configureDbResolver(fn: DbResolverFn): void {
+  dbResolverFn = fn;
+}
+
+/**
+ * Reset DB resolver (for tests).
+ */
+export function resetDbResolver(): void {
+  dbResolverFn = null;
+}
 
 export interface ResolveOptions {
   agentId?: string;
@@ -174,7 +200,7 @@ function resolveTemplateViaDb(
   const defaultBody = definition?.defaultBody ?? "";
 
   // DB resolution: scope chain lookup
-  const dbResult = resolvePromptTemplate(eventType, options.agentId, options.repoId);
+  const dbResult = dbResolverFn?.(eventType, options.agentId, options.repoId) ?? null;
 
   // skip_event
   if (dbResult && "skip" in dbResult) {
@@ -247,7 +273,7 @@ function expandTemplateRefs(
     // Resolve the referenced template
     const refDef = getTemplateDefinition(referencedId);
     const refDefaultBody = refDef?.defaultBody ?? "";
-    const refDbResult = resolvePromptTemplate(referencedId, options.agentId, options.repoId);
+    const refDbResult = dbResolverFn?.(referencedId, options.agentId, options.repoId) ?? null;
 
     // If referenced template is skipped, leave token as-is
     if (refDbResult && "skip" in refDbResult) {

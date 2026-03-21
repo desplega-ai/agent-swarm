@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, getPromptTemplates, initDb, upsertPromptTemplate } from "../be/db";
+import { seedDefaultTemplates } from "../be/seed";
 import {
   clearTemplateDefinitions,
   getAllTemplateDefinitions,
@@ -8,7 +9,6 @@ import {
   registerTemplate,
 } from "../prompts/registry";
 import { resolveTemplate } from "../prompts/resolver";
-import { seedDefaultTemplates } from "../prompts/seed";
 
 const TEST_DB_PATH = "./test-prompt-resolver.sqlite";
 

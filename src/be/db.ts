@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { seedDefaultTemplates } from "../prompts/seed";
+import { configureDbResolver } from "../prompts/resolver";
 import type {
   ActiveSession,
   Agent,
@@ -47,6 +47,7 @@ import type {
   WorkflowVersion,
 } from "../types";
 import { runMigrations } from "./migrations/runner";
+import { seedDefaultTemplates } from "./seed";
 
 let db: Database | null = null;
 let currentDbPath: string | null = null;
@@ -197,6 +198,9 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
 
   // Backfill: Seed v1 for existing agents that don't have any context versions yet
   seedContextVersions();
+
+  // Inject DB resolver into the prompt template resolver (DI to avoid worker/API boundary violation)
+  configureDbResolver(resolvePromptTemplate);
 
   // Seed default prompt templates from the in-memory code registry
   seedDefaultTemplates();
