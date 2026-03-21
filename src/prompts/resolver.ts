@@ -53,7 +53,15 @@ export function resolveTemplate(
   const defaultBody = definition?.defaultBody ?? "";
 
   // DB resolution: scope chain lookup
-  const dbResult = resolvePromptTemplate(eventType, options.agentId, options.repoId);
+  // Wrapped in try/catch because in Docker workers the local SQLite DB may not
+  // have the prompt_templates table (migrations can't run inside bundled binary).
+  // When DB is unavailable, we fall back to code defaults — the system still works.
+  let dbResult: ReturnType<typeof resolvePromptTemplate>;
+  try {
+    dbResult = resolvePromptTemplate(eventType, options.agentId, options.repoId);
+  } catch {
+    dbResult = null;
+  }
 
   // skip_event
   if (dbResult && "skip" in dbResult) {
@@ -130,7 +138,12 @@ function expandTemplateRefs(
     const refDef = getTemplateDefinition(referencedId);
     const refDefaultBody = refDef?.defaultBody ?? "";
 
-    const refDbResult = resolvePromptTemplate(referencedId, options.agentId, options.repoId);
+    let refDbResult: ReturnType<typeof resolvePromptTemplate>;
+    try {
+      refDbResult = resolvePromptTemplate(referencedId, options.agentId, options.repoId);
+    } catch {
+      refDbResult = null;
+    }
 
     // If referenced template is skipped, leave token as-is
     if (refDbResult && "skip" in refDbResult) {
