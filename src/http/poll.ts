@@ -3,6 +3,7 @@ import {
   claimMentions,
   claimOfferedTask,
   getAgentById,
+  getAllChannelActivityCursors,
   getDb,
   getEpicsWithProgressUpdates,
   getInboxSummary,
@@ -12,7 +13,9 @@ import {
   hasCapacity,
   markEpicsProgressNotified,
   startTask,
+  upsertChannelActivityCursor,
 } from "../be/db";
+import { fetchChannelActivity } from "../slack/channel-activity";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -168,6 +171,51 @@ export async function handlePoll(
     if ("error" in result) {
       jsonError(res, result.error, result.status ?? 500);
       return true;
+    }
+
+    // If no trigger found and agent is lead, check for Slack channel activity
+    // This is the lowest-priority trigger, checked AFTER all others.
+    // Runs outside the transaction because it requires async Slack API calls.
+    if (result.trigger === null && process.env.LEAD_MONITOR_CHANNELS === "true") {
+      const agent = getAgentById(myAgentId);
+      if (agent?.isLead) {
+        try {
+          const cursors = getAllChannelActivityCursors();
+          const cursorMap = new Map(cursors.map((c) => [c.channelId, c.lastSeenTs]));
+          const messages = await fetchChannelActivity(cursorMap);
+
+          if (messages.length > 0) {
+            // Update cursors to the latest message ts per channel
+            const latestPerChannel = new Map<string, string>();
+            for (const msg of messages) {
+              const existing = latestPerChannel.get(msg.channelId);
+              if (!existing || Number.parseFloat(msg.ts) > Number.parseFloat(existing)) {
+                latestPerChannel.set(msg.channelId, msg.ts);
+              }
+            }
+            for (const [channelId, ts] of latestPerChannel) {
+              upsertChannelActivityCursor(channelId, ts);
+            }
+
+            result = {
+              trigger: {
+                type: "channel_activity",
+                count: messages.length,
+                messages: messages.map((m) => ({
+                  channelId: m.channelId,
+                  channelName: m.channelName,
+                  ts: m.ts,
+                  user: m.user,
+                  text: m.text.slice(0, 500),
+                })),
+              },
+            };
+          }
+        } catch (err) {
+          console.warn("[/api/poll] Channel activity check failed:", err);
+          // Don't fail the poll — just skip this trigger
+        }
+      }
     }
 
     json(res, result);
