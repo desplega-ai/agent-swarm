@@ -9,10 +9,13 @@ import {
   getMostRecentTaskInThread,
   getTasksByAgentId,
 } from "../be/db";
+import { resolveTemplate } from "../prompts/resolver";
 import { workflowEventBus } from "../workflows/event-bus";
 import { buildAssignmentSummaryBlocks } from "./blocks";
 import type { SlackFile } from "./files";
 import { extractTaskFromMessage, routeMessage } from "./router";
+// Side-effect import: registers all Slack event templates in the in-memory registry
+import "./templates";
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
 import { registerTaskMessage } from "./watcher";
 
@@ -445,9 +448,15 @@ export function registerMessageHandler(app: App): void {
         msg.ts,
         botUserId,
       );
-      const fullTaskDescription = threadContext
-        ? `<thread_context>\n${threadContext}\n</thread_context>\n\n${taskDescription}`
-        : taskDescription;
+      let fullTaskDescription: string;
+      if (threadContext) {
+        const ctxResult = resolveTemplate("slack.message.thread_context", {
+          thread_messages: threadContext,
+        });
+        fullTaskDescription = `${ctxResult.text}\n\n${taskDescription}`;
+      } else {
+        fullTaskDescription = taskDescription;
+      }
 
       const lead = getLeadAgent();
       createTaskExtended(fullTaskDescription, {
@@ -495,9 +504,15 @@ export function registerMessageHandler(app: App): void {
       msg.ts,
       botUserId,
     );
-    const fullTaskDescription = threadContext
-      ? `<thread_context>\n${threadContext}\n</thread_context>\n\n${taskDescription}`
-      : taskDescription;
+    let fullTaskDescription: string;
+    if (threadContext) {
+      const ctxResult = resolveTemplate("slack.message.thread_context", {
+        thread_messages: threadContext,
+      });
+      fullTaskDescription = `${ctxResult.text}\n\n${taskDescription}`;
+    } else {
+      fullTaskDescription = taskDescription;
+    }
     const results: {
       assigned: Array<{ agentName: string; taskId: string }>;
       queued: Array<{ agentName: string; taskId: string }>;

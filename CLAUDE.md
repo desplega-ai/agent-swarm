@@ -503,6 +503,10 @@ All of these are enforced by the Merge Gate workflow (`.github/workflows/merge-g
 
 ---
 
+## Architecture Invariants
+
+**Workers have NO local database.** Docker workers (lead and worker containers) communicate with the API server exclusively via HTTP using `API_KEY` + `X-Agent-ID` headers. All state lives in the API server's SQLite DB. Workers never import `db.ts` functions that write/query the DB directly — they call REST API endpoints instead. If worker-side code needs data that lives in the DB (e.g. template resolution, config lookup), it must fetch it from the API via HTTP, not query a local SQLite instance.
+
 ## Bun Rules
 
 Use Bun instead of Node.js, npm, pnpm, or vite.

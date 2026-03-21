@@ -32,6 +32,7 @@ describe("Self-Improvement Mechanisms", () => {
       }
     }
 
+    closeDb();
     initDb(TEST_DB_PATH);
 
     createAgent({ id: leadId, name: "Test Lead", isLead: true, status: "idle" });
@@ -438,8 +439,8 @@ describe("Self-Improvement Mechanisms", () => {
   // ==========================================================================
 
   describe("base prompt self-awareness", () => {
-    test("base prompt includes 'How You Are Built' section", () => {
-      const prompt = getBasePrompt({
+    test("base prompt includes 'How You Are Built' section", async () => {
+      const prompt = await getBasePrompt({
         role: "worker",
         agentId: workerId,
         swarmUrl: "test.example.com",
@@ -451,8 +452,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(prompt).toContain("src/hooks/hook.ts");
     });
 
-    test("self-awareness section includes change proposal instructions", () => {
-      const prompt = getBasePrompt({
+    test("self-awareness section includes change proposal instructions", async () => {
+      const prompt = await getBasePrompt({
         role: "worker",
         agentId: workerId,
         swarmUrl: "test.example.com",
@@ -462,14 +463,14 @@ describe("Self-Improvement Mechanisms", () => {
       expect(prompt).toContain("@tarasyarema");
     });
 
-    test("self-awareness is included for both worker and lead roles", () => {
-      const workerPrompt = getBasePrompt({
+    test("self-awareness is included for both worker and lead roles", async () => {
+      const workerPrompt = await getBasePrompt({
         role: "worker",
         agentId: workerId,
         swarmUrl: "test.example.com",
       });
 
-      const leadPrompt = getBasePrompt({
+      const leadPrompt = await getBasePrompt({
         role: "lead",
         agentId: leadId,
         swarmUrl: "test.example.com",

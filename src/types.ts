@@ -816,3 +816,41 @@ export const WorkflowRunStepSchema = z.object({
   nextPort: z.string().optional(),
 });
 export type WorkflowRunStep = z.infer<typeof WorkflowRunStepSchema>;
+
+// ============================================================================
+// Prompt Template Types
+// ============================================================================
+
+export const PromptTemplateScopeSchema = z.enum(["global", "agent", "repo"]);
+export const PromptTemplateStateSchema = z.enum([
+  "enabled",
+  "default_prompt_fallback",
+  "skip_event",
+]);
+
+export const PromptTemplateSchema = z.object({
+  id: z.string(),
+  eventType: z.string(),
+  scope: PromptTemplateScopeSchema,
+  scopeId: z.string().nullable(),
+  state: PromptTemplateStateSchema,
+  body: z.string(),
+  isDefault: z.boolean(),
+  version: z.number(),
+  createdBy: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type PromptTemplate = z.infer<typeof PromptTemplateSchema>;
+
+export const PromptTemplateHistorySchema = z.object({
+  id: z.string(),
+  templateId: z.string(),
+  version: z.number(),
+  body: z.string(),
+  state: z.string(),
+  changedBy: z.string().nullable(),
+  changedAt: z.string(),
+  changeReason: z.string().nullable(),
+});
+export type PromptTemplateHistory = z.infer<typeof PromptTemplateHistorySchema>;
