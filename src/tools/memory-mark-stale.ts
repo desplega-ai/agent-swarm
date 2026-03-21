@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getMemoryById, markMemoryStale } from "@/be/db";
+import { getAgentById, getMemoryById, markMemoryStale } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerMemoryMarkStaleTool = (server: McpServer) => {
@@ -44,6 +44,21 @@ export const registerMemoryMarkStaleTool = (server: McpServer) => {
             yourAgentId: requestInfo.agentId,
             success: false,
             message: `Memory "${memoryId}" not found.`,
+          },
+        };
+      }
+
+      // Ownership check: agent owns the memory or is lead
+      const agent = getAgentById(requestInfo.agentId);
+      const isLead = agent?.isLead ?? false;
+      if (memory.agentId !== requestInfo.agentId && !isLead) {
+        return {
+          content: [{ type: "text", text: "You can only mark your own memories as stale." }],
+          structuredContent: {
+            yourAgentId: requestInfo.agentId,
+            success: false,
+            message:
+              "You can only mark your own memories as stale. Lead agents can mark any memory.",
           },
         };
       }

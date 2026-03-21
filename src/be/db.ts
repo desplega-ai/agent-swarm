@@ -5515,16 +5515,33 @@ export interface ListMemoriesOptions {
   limit?: number;
   offset?: number;
   isLead?: boolean;
+  includeExpired?: boolean;
+  includeStale?: boolean;
 }
 
 export function listMemoriesByAgent(
   agentId: string,
   options: ListMemoriesOptions = {},
 ): AgentMemory[] {
-  const { scope = "all", limit = 20, offset = 0, isLead = false } = options;
+  const {
+    scope = "all",
+    limit = 20,
+    offset = 0,
+    isLead = false,
+    includeExpired = false,
+    includeStale = false,
+  } = options;
 
   const conditions: string[] = [];
   const params: (string | number)[] = [];
+
+  // Filter expired and stale memories by default
+  if (!includeExpired) {
+    conditions.push("(expiresAt IS NULL OR expiresAt > datetime('now'))");
+  }
+  if (!includeStale) {
+    conditions.push("stale = 0");
+  }
 
   if (!isLead) {
     if (scope === "agent") {
