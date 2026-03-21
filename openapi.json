@@ -1566,6 +1566,27 @@
         }
       }
     },
+    "/api/channel-activity/commit-cursors": {
+      "post": {
+        "summary": "Commit channel activity cursors after successful processing",
+        "tags": [
+          "Poll"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cursors committed"
+          },
+          "400": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
     "/api/repos/{id}": {
       "get": {
         "summary": "Get a repo by ID",

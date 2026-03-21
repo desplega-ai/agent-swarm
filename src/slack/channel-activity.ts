@@ -151,9 +151,7 @@ async function fetchAllBotChannels(
     const result = await (
       client as {
         conversations: {
-          list: (
-            args: Record<string, unknown>,
-          ) => Promise<{
+          list: (args: Record<string, unknown>) => Promise<{
             channels?: Array<{ id?: string; name?: string; is_member?: boolean }>;
             response_metadata?: { next_cursor?: string };
           }>;
