@@ -21,10 +21,6 @@ interface TaskEvent {
   failureReason?: string;
 }
 
-// Serialize resume processing per workflow run to prevent race conditions
-// during fan-out convergence (multiple tasks completing ~simultaneously)
-const resumeQueues = new Map<string, Promise<void>>();
-
 /**
  * Wire up event bus listeners for workflow resume on task lifecycle events.
  */
@@ -64,29 +60,6 @@ export function setupWorkflowResumeListener(
  * 4. Find successors and continue the graph walk
  */
 async function resumeFromTaskCompletion(
-  event: TaskEvent,
-  registry: ExecutorRegistry,
-): Promise<void> {
-  const runId = event.workflowRunId!;
-
-  // Serialize resume processing per run — prevents race conditions when
-  // multiple fan-out tasks complete simultaneously and both try to
-  // evaluate convergence + walk the graph.
-  const prev = resumeQueues.get(runId) ?? Promise.resolve();
-  const next = prev
-    .then(() => doResumeFromTaskCompletion(event, registry))
-    .catch(() => {})
-    .finally(() => {
-      // Clean up completed queue entries to prevent memory leak
-      if (resumeQueues.get(runId) === next) {
-        resumeQueues.delete(runId);
-      }
-    });
-  resumeQueues.set(runId, next);
-  await next;
-}
-
-async function doResumeFromTaskCompletion(
   event: TaskEvent,
   registry: ExecutorRegistry,
 ): Promise<void> {
