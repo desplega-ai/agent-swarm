@@ -4190,6 +4190,14 @@
                   "triggerSchema": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "dir": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "vcsRepo": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
@@ -4514,6 +4522,20 @@
                       "null"
                     ],
                     "additionalProperties": {}
+                  },
+                  "dir": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1
+                  },
+                  "vcsRepo": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1
                   },
                   "enabled": {
                     "type": "boolean"
