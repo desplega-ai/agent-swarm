@@ -65,6 +65,7 @@ export default function TemplateDetailPage() {
 
   const [body, setBody] = useState("");
   const [state, setState] = useState<string>("enabled");
+  const [editing, setEditing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [checkoutVersion, setCheckoutVersion] = useState<number | null>(null);
@@ -177,22 +178,21 @@ export default function TemplateDetailPage() {
     setCheckoutVersion(null);
   }, [id, checkoutVersion, checkoutMutation]);
 
-  // Cmd+S / Ctrl+S to save (non-default templates only)
-  const isDefault = template?.isDefault;
+  const hasChanges = template ? body !== template.body || state !== template.state : false;
+
+  // Cmd+S / Ctrl+S to save (only when editing non-default templates)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
-        if (!isDefault) {
+        if (editing && hasChanges) {
           handleSave();
         }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isDefault, handleSave]);
-
-  const hasChanges = template ? body !== template.body || state !== template.state : false;
+  }, [editing, hasChanges, handleSave]);
 
   const eventDef = useMemo(
     () => events?.find((e) => e.eventType === template?.eventType),
@@ -382,7 +382,7 @@ export default function TemplateDetailPage() {
                 />
               </div>
             </>
-          ) : (
+          ) : editing ? (
             <>
               <div className="flex items-center gap-3">
                 <Select value={state} onValueChange={setState}>
@@ -398,19 +398,29 @@ export default function TemplateDetailPage() {
                 <Button
                   size="sm"
                   onClick={handleSave}
-                  disabled={upsertMutation.isPending}
+                  disabled={upsertMutation.isPending || !hasChanges}
                   className="bg-primary hover:bg-primary/90"
                 >
                   {upsertMutation.isPending ? "Saving..." : "Save"}
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={!hasChanges}
-                  onClick={() => setResetOpen(true)}
-                >
-                  Reset
-                </Button>
+                {hasChanges ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (template) {
+                        setBody(template.body);
+                        setState(template.state);
+                      }
+                    }}
+                  >
+                    Reset
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" onClick={() => setEditing(false)}>
+                    Cancel
+                  </Button>
+                )}
               </div>
               <div className="flex-1 min-h-0 border border-border rounded-md overflow-hidden">
                 <Editor
@@ -420,6 +430,33 @@ export default function TemplateDetailPage() {
                   value={body}
                   onChange={(value) => setBody(value ?? "")}
                   options={{
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                    fontSize: 13,
+                    lineNumbers: "on",
+                    wordWrap: "on",
+                    automaticLayout: true,
+                    padding: { top: 8 },
+                  }}
+                  height="100%"
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                  Edit
+                </Button>
+              </div>
+              <div className="flex-1 min-h-0 border border-border rounded-md overflow-hidden">
+                <Editor
+                  key={`view-${id}`}
+                  language="markdown"
+                  theme={theme === "dark" ? "vs-dark" : "vs"}
+                  value={template.body}
+                  options={{
+                    readOnly: true,
                     minimap: { enabled: false },
                     scrollBeyondLastLine: false,
                     fontSize: 13,
