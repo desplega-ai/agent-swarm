@@ -199,8 +199,9 @@ httpServer
     // Start scheduler (if enabled)
     if (hasCapability("scheduling")) {
       const { startScheduler } = await import("../scheduler");
+      const { getExecutorRegistry } = await import("../workflows");
       const intervalMs = Number(process.env.SCHEDULER_INTERVAL_MS) || 10000;
-      startScheduler(intervalMs);
+      startScheduler(getExecutorRegistry(), intervalMs);
     }
 
     // Start heartbeat triage (unless disabled)

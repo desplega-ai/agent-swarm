@@ -55,6 +55,8 @@ const createWorkflowRoute = route({
     cooldown: CooldownConfigSchema.optional(),
     input: z.record(z.string(), InputValueSchema).optional(),
     triggerSchema: z.record(z.string(), z.unknown()).optional(),
+    dir: z.string().min(1).startsWith("/").optional(),
+    vcsRepo: z.string().min(1).optional(),
   }),
   responses: {
     201: { description: "Workflow created" },
@@ -90,6 +92,8 @@ const updateWorkflowRoute = route({
     cooldown: CooldownConfigSchema.optional().nullable(),
     input: z.record(z.string(), InputValueSchema).optional().nullable(),
     triggerSchema: z.record(z.string(), z.unknown()).optional().nullable(),
+    dir: z.string().min(1).startsWith("/").optional().nullable(),
+    vcsRepo: z.string().min(1).optional().nullable(),
     enabled: z.boolean().optional(),
   }),
   responses: {
@@ -362,6 +366,8 @@ export async function handleWorkflows(
       cooldown: parsed.body.cooldown,
       input: parsed.body.input,
       triggerSchema: parsed.body.triggerSchema,
+      dir: parsed.body.dir,
+      vcsRepo: parsed.body.vcsRepo,
       createdByAgentId: myAgentId ?? undefined,
     });
     json(res, workflow, 201);
@@ -421,6 +427,8 @@ export async function handleWorkflows(
       cooldown: body.cooldown === null ? null : body.cooldown,
       input: body.input === null ? null : body.input,
       triggerSchema: body.triggerSchema === null ? null : body.triggerSchema,
+      dir: body.dir === null ? null : body.dir,
+      vcsRepo: body.vcsRepo === null ? null : body.vcsRepo,
       enabled: body.enabled,
     });
     if (!workflow) {

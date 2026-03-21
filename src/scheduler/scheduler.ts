@@ -7,9 +7,12 @@ import {
   updateScheduledTask,
 } from "@/be/db";
 import type { ScheduledTask } from "@/types";
+import type { ExecutorRegistry } from "@/workflows/executors/registry";
+import { handleScheduleTrigger } from "@/workflows/triggers";
 
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 let isProcessing = false;
+let executorRegistry: ExecutorRegistry | null = null;
 
 /**
  * Recover missed scheduled task runs from downtime.
@@ -31,35 +34,50 @@ async function recoverMissedSchedules(): Promise<void> {
     );
 
     try {
-      const tx = getDb().transaction(() => {
-        createTaskExtended(schedule.taskTemplate, {
-          creatorAgentId: schedule.createdByAgentId,
-          taskType: schedule.taskType,
-          tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, "recovered"],
-          priority: schedule.priority,
-          agentId: schedule.targetAgentId,
-          model: schedule.model,
-          scheduleId: schedule.id,
-          source: "schedule",
-        });
-
-        if (schedule.scheduleType === "one_time") {
-          updateScheduledTask(schedule.id, {
-            lastRunAt: now.toISOString(),
-            nextRunAt: null,
-            enabled: false,
-            lastUpdatedAt: now.toISOString(),
-          });
-        } else {
-          const nextRun = calculateNextRun(schedule, now);
-          updateScheduledTask(schedule.id, {
-            lastRunAt: now.toISOString(),
-            nextRunAt: nextRun,
-            lastUpdatedAt: now.toISOString(),
-          });
+      // Check if any workflows are linked to this schedule
+      let triggeredWorkflows = false;
+      if (executorRegistry) {
+        const runIds = await handleScheduleTrigger(schedule.id, schedule, executorRegistry);
+        if (runIds.length > 0) {
+          triggeredWorkflows = true;
+          console.log(
+            `[Scheduler] Recovered schedule "${schedule.name}" → triggered ${runIds.length} workflow(s)`,
+          );
         }
-      });
-      tx();
+      }
+
+      if (!triggeredWorkflows) {
+        const tx = getDb().transaction(() => {
+          createTaskExtended(schedule.taskTemplate, {
+            creatorAgentId: schedule.createdByAgentId,
+            taskType: schedule.taskType,
+            tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, "recovered"],
+            priority: schedule.priority,
+            agentId: schedule.targetAgentId,
+            model: schedule.model,
+            scheduleId: schedule.id,
+            source: "schedule",
+          });
+        });
+        tx();
+      }
+
+      // Update schedule state regardless of workflow/task path
+      if (schedule.scheduleType === "one_time") {
+        updateScheduledTask(schedule.id, {
+          lastRunAt: now.toISOString(),
+          nextRunAt: null,
+          enabled: false,
+          lastUpdatedAt: now.toISOString(),
+        });
+      } else {
+        const nextRun = calculateNextRun(schedule, now);
+        updateScheduledTask(schedule.id, {
+          lastRunAt: now.toISOString(),
+          nextRunAt: nextRun,
+          lastUpdatedAt: now.toISOString(),
+        });
+      }
 
       if (schedule.scheduleType === "one_time") {
         console.log(`[Scheduler] One-time schedule "${schedule.name}" recovered and auto-disabled`);
@@ -119,33 +137,48 @@ function getBackoffMs(consecutiveErrors: number): number {
  */
 async function executeSchedule(schedule: ScheduledTask): Promise<void> {
   try {
-    const tx = getDb().transaction(() => {
-      const now = new Date().toISOString();
-
-      createTaskExtended(schedule.taskTemplate, {
-        creatorAgentId: schedule.createdByAgentId,
-        taskType: schedule.taskType,
-        tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`],
-        priority: schedule.priority,
-        agentId: schedule.targetAgentId,
-        model: schedule.model,
-        scheduleId: schedule.id,
-        source: "schedule",
-      });
-
-      if (schedule.scheduleType === "one_time") {
-        updateScheduledTask(schedule.id, {
-          lastRunAt: now,
-          nextRunAt: null,
-          enabled: false,
-          lastUpdatedAt: now,
-          consecutiveErrors: 0,
-          lastErrorAt: null,
-          lastErrorMessage: null,
-        });
-        return null;
+    // Check if any workflows are linked to this schedule
+    let triggeredWorkflows = false;
+    if (executorRegistry) {
+      const runIds = await handleScheduleTrigger(schedule.id, schedule, executorRegistry);
+      if (runIds.length > 0) {
+        triggeredWorkflows = true;
+        console.log(
+          `[Scheduler] Schedule "${schedule.name}" → triggered ${runIds.length} workflow(s)`,
+        );
       }
+    }
 
+    if (!triggeredWorkflows) {
+      // No workflows linked — create standalone task (existing behavior)
+      getDb().transaction(() => {
+        createTaskExtended(schedule.taskTemplate, {
+          creatorAgentId: schedule.createdByAgentId,
+          taskType: schedule.taskType,
+          tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`],
+          priority: schedule.priority,
+          agentId: schedule.targetAgentId,
+          model: schedule.model,
+          scheduleId: schedule.id,
+          source: "schedule",
+        });
+      })();
+    }
+
+    // Update schedule state regardless of workflow/task path
+    const now = new Date().toISOString();
+    if (schedule.scheduleType === "one_time") {
+      updateScheduledTask(schedule.id, {
+        lastRunAt: now,
+        nextRunAt: null,
+        enabled: false,
+        lastUpdatedAt: now,
+        consecutiveErrors: 0,
+        lastErrorAt: null,
+        lastErrorMessage: null,
+      });
+      console.log(`[Scheduler] Executed one-time schedule "${schedule.name}", auto-disabled`);
+    } else {
       const nextRun = calculateNextRun(schedule, new Date());
       updateScheduledTask(schedule.id, {
         lastRunAt: now,
@@ -155,14 +188,6 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
         lastErrorAt: null,
         lastErrorMessage: null,
       });
-
-      return nextRun;
-    });
-
-    const nextRun = tx();
-    if (schedule.scheduleType === "one_time") {
-      console.log(`[Scheduler] Executed one-time schedule "${schedule.name}", auto-disabled`);
-    } else {
       console.log(`[Scheduler] Executed schedule "${schedule.name}", next run: ${nextRun}`);
     }
   } catch (err) {
@@ -211,14 +236,16 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
 
 /**
  * Start the scheduler polling loop.
+ * @param registry ExecutorRegistry for triggering workflows linked to schedules
  * @param intervalMs Polling interval in milliseconds (default: 10000)
  */
-export function startScheduler(intervalMs = 10000): void {
+export function startScheduler(registry: ExecutorRegistry, intervalMs = 10000): void {
   if (schedulerInterval) {
     console.log("[Scheduler] Already running");
     return;
   }
 
+  executorRegistry = registry;
   console.log(`[Scheduler] Starting with ${intervalMs}ms polling interval`);
 
   // Recover missed schedules from downtime, then run normal processing
@@ -277,45 +304,52 @@ export async function runScheduleNow(scheduleId: string): Promise<void> {
     throw new Error(`Schedule is disabled: ${schedule.name}`);
   }
 
-  // Wrap in transaction to ensure atomicity of task creation and schedule update
-  const tx = getDb().transaction(() => {
-    const now = new Date().toISOString();
-
-    // Create the actual task
-    createTaskExtended(schedule.taskTemplate, {
-      creatorAgentId: schedule.createdByAgentId,
-      taskType: schedule.taskType,
-      tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, "manual-run"],
-      priority: schedule.priority,
-      agentId: schedule.targetAgentId,
-      model: schedule.model,
-      scheduleId: schedule.id,
-      source: "schedule",
-    });
-
-    if (schedule.scheduleType === "one_time") {
-      updateScheduledTask(schedule.id, {
-        lastRunAt: now,
-        nextRunAt: null,
-        enabled: false,
-        lastUpdatedAt: now,
-      });
-    } else {
-      // Only update lastRunAt, not nextRunAt (to not affect regular schedule)
-      updateScheduledTask(schedule.id, {
-        lastRunAt: now,
-        lastUpdatedAt: now,
-      });
+  // Check if any workflows are linked to this schedule
+  let triggeredWorkflows = false;
+  if (executorRegistry) {
+    const runIds = await handleScheduleTrigger(scheduleId, schedule, executorRegistry);
+    if (runIds.length > 0) {
+      triggeredWorkflows = true;
+      console.log(
+        `[Scheduler] Manual run of "${schedule.name}" → triggered ${runIds.length} workflow(s)`,
+      );
     }
-  });
+  }
 
-  tx();
+  if (!triggeredWorkflows) {
+    // No workflows linked — create standalone task (existing behavior)
+    getDb().transaction(() => {
+      createTaskExtended(schedule.taskTemplate, {
+        creatorAgentId: schedule.createdByAgentId,
+        taskType: schedule.taskType,
+        tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, "manual-run"],
+        priority: schedule.priority,
+        agentId: schedule.targetAgentId,
+        model: schedule.model,
+        scheduleId: schedule.id,
+        source: "schedule",
+      });
+    })();
+  }
 
+  // Update schedule state
+  const now = new Date().toISOString();
   if (schedule.scheduleType === "one_time") {
+    updateScheduledTask(schedule.id, {
+      lastRunAt: now,
+      nextRunAt: null,
+      enabled: false,
+      lastUpdatedAt: now,
+    });
     console.log(
       `[Scheduler] Manually executed one-time schedule "${schedule.name}", auto-disabled`,
     );
   } else {
+    // Only update lastRunAt, not nextRunAt (to not affect regular schedule)
+    updateScheduledTask(schedule.id, {
+      lastRunAt: now,
+      lastUpdatedAt: now,
+    });
     console.log(`[Scheduler] Manually executed schedule "${schedule.name}"`);
   }
 }

@@ -5579,6 +5579,8 @@ type WorkflowRow = {
   cooldown: string | null;
   input: string | null;
   triggerSchema: string | null;
+  dir: string | null;
+  vcs_repo: string | null;
   createdByAgentId: string | null;
   createdAt: string;
   lastUpdatedAt: string;
@@ -5597,6 +5599,8 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
     triggerSchema: row.triggerSchema
       ? (JSON.parse(row.triggerSchema) as Record<string, unknown>)
       : undefined,
+    dir: row.dir ?? undefined,
+    vcsRepo: row.vcs_repo ?? undefined,
     createdByAgentId: row.createdByAgentId ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
@@ -5611,6 +5615,8 @@ export function createWorkflow(data: {
   cooldown?: CooldownConfig;
   input?: Record<string, InputValue>;
   triggerSchema?: Record<string, unknown>;
+  dir?: string;
+  vcsRepo?: string;
   createdByAgentId?: string;
 }): Workflow {
   const id = crypto.randomUUID();
@@ -5627,10 +5633,12 @@ export function createWorkflow(data: {
         string | null,
         string | null,
         string | null,
+        string | null,
+        string | null,
       ]
     >(
-      `INSERT INTO workflows (id, name, description, definition, triggers, cooldown, input, triggerSchema, createdByAgentId)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO workflows (id, name, description, definition, triggers, cooldown, input, triggerSchema, dir, vcs_repo, createdByAgentId)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -5641,6 +5649,8 @@ export function createWorkflow(data: {
       data.cooldown ? JSON.stringify(data.cooldown) : null,
       data.input ? JSON.stringify(data.input) : null,
       data.triggerSchema ? JSON.stringify(data.triggerSchema) : null,
+      data.dir ?? null,
+      data.vcsRepo ?? null,
       data.createdByAgentId ?? null,
     );
   if (!row) throw new Error("Failed to create workflow");
@@ -5679,6 +5689,8 @@ export function updateWorkflow(
     cooldown?: CooldownConfig | null;
     input?: Record<string, InputValue> | null;
     triggerSchema?: Record<string, unknown> | null;
+    dir?: string | null;
+    vcsRepo?: string | null;
   },
 ): Workflow | null {
   const updates: string[] = [];
@@ -5715,6 +5727,14 @@ export function updateWorkflow(
     updates.push("triggerSchema = ?");
     params.push(data.triggerSchema ? JSON.stringify(data.triggerSchema) : null);
   }
+  if (data.dir !== undefined) {
+    updates.push("dir = ?");
+    params.push(data.dir ?? null);
+  }
+  if (data.vcsRepo !== undefined) {
+    updates.push("vcs_repo = ?");
+    params.push(data.vcsRepo ?? null);
+  }
   if (updates.length === 0) return getWorkflow(id);
   updates.push("lastUpdatedAt = ?");
   params.push(new Date().toISOString());
@@ -5745,6 +5765,22 @@ export function deleteWorkflow(id: string): boolean {
   // 4. Delete workflow
   const result = db.run("DELETE FROM workflows WHERE id = ?", [id]);
   return result.changes > 0;
+}
+
+/**
+ * Find enabled workflows that have a schedule trigger matching the given scheduleId.
+ * Uses SQLite JSON functions to query into the triggers JSON array.
+ */
+export function getWorkflowsByScheduleId(scheduleId: string): Workflow[] {
+  const rows = getDb()
+    .prepare<WorkflowRow, [string]>(
+      `SELECT w.* FROM workflows w, json_each(w.triggers) AS t
+       WHERE w.enabled = 1
+         AND json_extract(t.value, '$.type') = 'schedule'
+         AND json_extract(t.value, '$.scheduleId') = ?`,
+    )
+    .all(scheduleId);
+  return rows.map(rowToWorkflow);
 }
 
 // ============================================================================
