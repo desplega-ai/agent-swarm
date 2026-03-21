@@ -65,6 +65,11 @@ This is pure semantic similarity — no recency, no access frequency, no source 
 - Fallback when embeddings are unavailable
 - Orders by `createdAt DESC` with pagination
 
+**`deleteMemoriesBySourcePath()` (line ~5476):**
+- Deletes all memory chunks for a given `sourcePath` + `agentId` pair
+- Called by `/api/memory/index` before re-indexing a file — provides dedup-and-replace semantics
+- Relevant to Proposal 4 (staleness): this function already handles the "file changed" case when the file is re-edited. The gap is detecting when a file is **deleted** (no re-index hook fires).
+
 ### Memory Creation Paths
 
 | Path | Source Type | Scope |
@@ -169,16 +174,19 @@ recency_score = exp(-ln(2) / half_life_hours * age_hours)
 ```
 With `half_life_hours = 168` (1 week): a 1-week-old memory scores 0.5, a 2-week-old scores 0.25.
 
-#### Access Frequency Boost
+#### Access Frequency Boost (normalized to 0–1)
 ```
-access_boost = 1 + log(1 + access_count) * access_weight
+access_boost = log(1 + access_count) / log(1 + MAX_EXPECTED_COUNT)
 ```
-Logarithmic scaling prevents runaway boosting.
+Where `MAX_EXPECTED_COUNT = 50` (configurable). This normalizes the boost to the 0–1 range, matching the other signals. A memory accessed 50+ times saturates at 1.0. Logarithmic scaling prevents runaway boosting while keeping all signals on the same scale.
 
-#### Combined Score
+Alternative: sigmoid normalization `access_boost = 1 / (1 + exp(-0.1 * (access_count - 25)))` centers at 25 accesses with a smoother curve, but the log form is simpler and sufficient.
+
+#### Combined Score (all signals normalized 0–1)
 ```
 final_score = (w_sim * cosine_sim) + (w_rec * recency_score) + (w_acc * access_boost) + (w_src * source_weight)
 ```
+All four signals are in the 0–1 range: `cosine_sim` (cosine similarity), `recency_score` (exponential decay), `access_boost` (log-normalized), `source_weight` (fixed per type). The weights sum to 1.0, so `final_score` is also 0–1.
 
 **Recommended weights** (based on literature and our use case):
 
@@ -199,10 +207,17 @@ final_score = (w_sim * cosine_sim) + (w_rec * recency_score) + (w_acc * access_b
 | `session_summary` | 0.4 | Most ephemeral |
 
 **Implementation approach**:
-1. Expand candidate set from top-N to top-2N (e.g., fetch top 20, rerank to return top 10)
-2. Compute `recency_score`, `access_boost`, `source_weight` for each candidate
-3. Compute `final_score` using weighted combination
-4. Re-sort and return top N
+
+Since `searchMemoriesByVector()` currently loads ALL matching rows into memory for cosine computation, the reranking pass operates on the **full cosine-sorted list**, not a pre-filtered subset. The flow is:
+
+1. Load all matching rows and compute cosine similarity (existing behavior)
+2. Sort by cosine similarity descending (existing behavior)
+3. Take top 2N candidates from the cosine-sorted list (new — widens the window for reranking to promote results that are semantically close but have strong recency/access signals)
+4. Compute `recency_score`, `access_boost`, `source_weight` for each candidate
+5. Compute `final_score` using weighted combination
+6. Re-sort by `final_score` and return top N
+
+The 2N→N approach does not assume a future pre-filter. It simply ensures that memories just outside the top-N by cosine similarity can still surface if they have strong recency or access signals. If a future optimization adds pre-filtering (e.g., FTS5 or metadata filters), the same reranking logic applies to whatever candidate set is produced.
 
 **Trade-offs**:
 | Pro | Con |
@@ -219,13 +234,13 @@ final_score = (w_sim * cosine_sim) + (w_rec * recency_score) + (w_acc * access_b
 
 **What**: Add `expiresAt` column with default TTLs by source type. Expired memories are excluded from search but still retrievable via `memory-get`.
 
-**Recommended default TTLs**:
+**Recommended default TTLs** (conservative — tune down based on observed growth):
 
 | Source | Default TTL | Rationale |
 |---|---|---|
-| `session_summary` | 3 days | Highly ephemeral, context-specific |
-| `task_completion` | 7 days | Task context decays quickly |
-| `manual` | 30 days | Curated content, longer relevance |
+| `session_summary` | 7 days | Ephemeral but may be referenced in follow-up sessions |
+| `task_completion` | 14 days | Task context decays but cross-task patterns take time to surface |
+| `manual` | 60 days | Curated content, longest relevance |
 | `file_index` | No TTL | Tied to files that may still exist |
 
 **Soft vs Hard expiry**:
@@ -261,7 +276,7 @@ AND datetime(expiresAt, '+30 days') < datetime('now');
 
 **Assessment**: Medium complexity, high value. The biggest risk is discarding useful memories too early. Soft expiry mitigates this — agents can still retrieve expired memories explicitly.
 
-**Recommendation**: **Implement with conservative defaults.** Start with longer TTLs (7d/14d/60d) and tune down based on observed memory growth. Allow TTL override per-memory via an optional parameter in `createMemory()`.
+**Recommendation**: **Implement with conservative defaults** (7d/14d/60d as shown above). Tune down based on observed memory growth. Allow TTL override per-memory via an optional parameter in `createMemory()`.
 
 ### Proposal 4: Stale `file_index` Detection
 
@@ -360,7 +375,8 @@ const reranked = candidates.map(m => {
   const ageHours = (Date.now() - new Date(m.createdAt).getTime()) / 3600000;
   const recencyScore = Math.exp(-Math.LN2 / 168 * ageHours); // 1-week half-life
 
-  const accessBoost = 1 + Math.log(1 + (m.accessCount ?? 0)) * 0.15;
+  const MAX_EXPECTED_COUNT = 50;
+  const accessBoost = Math.log(1 + (m.accessCount ?? 0)) / Math.log(1 + MAX_EXPECTED_COUNT); // normalized 0–1
 
   const sourceWeights = { manual: 1.0, file_index: 0.8, task_completion: 0.6, session_summary: 0.4 };
   const srcWeight = sourceWeights[m.source] ?? 0.5;
@@ -381,11 +397,11 @@ db.run(`UPDATE agent_memory SET accessedAt = ?, accessCount = accessCount + 1 WH
 #### `createMemory()` Changes
 
 ```typescript
-// Set expiresAt based on source type defaults
+// Set expiresAt based on source type defaults (conservative — tune down as needed)
 const DEFAULT_TTL_HOURS = {
-  session_summary: 72,    // 3 days
-  task_completion: 168,   // 7 days
-  manual: 720,            // 30 days
+  session_summary: 168,   // 7 days
+  task_completion: 336,   // 14 days
+  manual: 1440,           // 60 days
   file_index: null,       // no TTL
 };
 
