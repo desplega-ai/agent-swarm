@@ -1,0 +1,252 @@
+<task-notification>
+<task-id>ace2258b73ef9fa29</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/ace2258b73ef9fa29.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 2: Templates List Page" completed</summary>
+<result>All three files I created/modified pass lint cleanly. The two lint errors in the output are pre-existing in files I didn't touch (`client.ts` formatting and `hooks/index.ts` import ordering from Phase 1).
+
+Here's what was done for Phase 2:
+
+**Created:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/pages/templates/page.tsx` -- Templates list page with:
+  - AG Grid showing columns: eventType, scope, scopeId, state (badge with variant mapping), version, isDefault (badge), updatedAt (formatted with `formatSmartTime`)
+  - Search input for client-side quick filter on AG Grid (`quickFilterText`)
+  - Scope dropdown filter (All / Global / Agent / Repo) -- filters `rowData` in JS
+  - "Defaults only" toggle button -- filters `rowData` in JS
+  - Row click navigates to `/templates/:id`
+  - Empty state message "No templates found"
+  - Matches existing page patterns exactly (agents/page.tsx style)
+
+**Modified:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/app/router.tsx` -- Added lazy import for `TemplatesPage` and route `{ path: "templates", element: <TemplatesPage /> }`
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/components/layout/app-sidebar.tsx` -- Added `FileText` to lucide imports and `{ title: "Templates", path: "/templates", icon: FileText }` to the Communication nav group
+
+**Verification:** `tsc --noEmit` passes, `pnpm build` succeeds, Biome lint passes on all three touched files.</result>
+<usage><total_tokens>50946</total_tokens><tool_uses>26</tool_uses><duration_ms>122922</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/ace2258b73ef9fa29.output
+
+---
+
+<task-notification>
+<task-id>aa90e3b2139d8ae8a</task-id>
+<tool-use-id>toolu_01GHUg1EFLu7oGfLmVazSVRh</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/aa90e3b2139d8ae8a.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 3: Template Detail Page" completed</summary>
+<result>All three checks pass: `tsc --noEmit`, `biome check`, and `vite build`. Here is a summary of what was done:
+
+**Files created:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/pages/templates/[id]/page.tsx` -- Template detail page with:
+  - Header showing eventType, scope/state/version/default badges, delete button (non-default only)
+  - **Raw tab**: Monaco editor (editable for overrides, read-only for defaults) with state dropdown, save, reset, and "Customize" button for defaults
+  - **Rendered tab**: Debounced ReactMarkdown preview with sample variables from event definitions, unresolved variable badges, and a collapsible variables section (using simple chevron toggle since no Collapsible component exists)
+  - **History tab**: AG Grid with version, state, changedBy, changedAt, changeReason columns and a "Checkout" button per row
+  - AlertDialogs for delete, reset, and checkout confirmations
+
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/pages/templates/[id]/history/[version]/page.tsx` -- Version detail page (read-only) with:
+  - Header showing version number, state badge, changedBy/changedAt/changeReason metadata
+  - Back link to parent template
+  - **Raw tab**: Monaco editor in read-only mode
+  - **Rendered tab**: ReactMarkdown preview with sample variables
+
+**Files modified:**
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/app/router.tsx` -- Added lazy imports and routes for `templates/:id` and `templates/:id/history/:version`
+- `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/components/layout/breadcrumbs.tsx` -- Added `templates: "Templates"` and `history: "History"` to routeLabels</result>
+<usage><total_tokens>88021</total_tokens><tool_uses>46</tool_uses><duration_ms>233082</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/aa90e3b2139d8ae8a.output
+
+---
+
+I see this in some of the templates, are we correctly resolving them???
+
+also is the rendered actual md preview? I think there are some new line issues in there :/
+
+---
+
+<task-notification>
+<task-id>aa01d7d8366c9edf6</task-id>
+<tool-use-id>toolu_016tnqorAsmp1QBhEuZbikib</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/aa01d7d8366c9edf6.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 4: Polish + Edge Cases" completed</summary>
+<result>
+
+Everything looks correct. All three files are properly updated and all checks pass. Here is a summary of what was done:
+
+---
+
+**Phase 4: Polish + Edge Cases -- Complete**
+
+### Changes made:
+
+**1. `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/pages/templates/page.tsx` (list page)**
+- Added `Skeleton` import
+- Destructured `isError` from `usePromptTemplates()`
+- Added loading skeleton that mirrors the page layout (title, filter bar, grid area)
+- Added error state with "Failed to load templates" message and a Retry button
+
+**2. `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/pages/templates/[id]/page.tsx` (detail page)**
+- Added `Link` import from react-router-dom and `toast` from `sonner`
+- Destructured `isError` from `usePromptTemplate()`
+- Improved error state: now shows centered "Template not found" with a "Back to Templates" link button (was just a plain `<p>` tag)
+- Added toast notifications to all 5 mutation handlers:
+  - `handleSave`: success/error toasts
+  - `handleCustomize`: success/error toasts
+  - `handleDelete`: success toast + navigate, error toast
+  - `handleReset`: success/error toasts
+  - `handleCheckout`: success toast with version number, error toast
+- Added `Cmd+S` / `Ctrl+S` keyboard shortcut to save (only fires for non-default templates). `handleSave` was already a `useCallback`, so the shortcut uses a stable reference.
+
+**3. `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/pages/templates/[id]/history/[version]/page.tsx` (version detail page)**
+- Added `Button` import
+- Destructured `isError` from `usePromptTemplate()`
+- Improved error state: shows contextual message ("Template not found" vs "Version not found") with appropriate back link (to template detail if template exists, to templates list otherwise)
+
+### Verification:
+- `pnpm lint` -- passed
+- `pnpm exec tsc --noEmit` -- passed
+- `pnpm build` -- passed</result>
+<usage><total_tokens>62523</total_tokens><tool_uses>39</tool_uses><duration_ms>174975</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/aa01d7d8366c9edf6.output
+
+---
+
+<task-notification>
+<task-id>a67b13a577b101f29</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/a67b13a577b101f29.output</output-file>
+<status>completed</status>
+<summary>Agent "Investigate preview rendering issues" completed</summary>
+<result>Perfect! Now I have all the information I need. Let me create a comprehensive summary report.
+
+## Summary: Prompt Template Preview API and Rendering
+
+Based on my thorough exploration of the codebase, here's exactly what the preview endpoint does:
+
+### 1. **Preview API Endpoint** (`POST /api/prompt-templates/preview`)
+
+**Location:** `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/http/prompt-templates.ts` (lines 244-258)
+
+**Request body:**
+```typescript
+{
+  eventType: string;
+  body?: string;           // Optional custom body to preview
+  variables?: Record<string, unknown>;  // Variables to interpolate
+}
+```
+
+**Response (PreviewResponse):**
+```typescript
+{
+  rendered: string;        // Final markdown string (header + body, interpolated)
+  unresolved: string[];    // Array of {{variable}} tokens that couldn't be resolved
+}
+```
+
+### 2. **How Preview Rendering Works**
+
+The preview endpoint does this (line 249-256):
+
+```typescript
+const { eventType, body: customBody, variables } = parsed.body;
+const definition = getTemplateDefinition(eventType);
+const templateBody = customBody ?? definition?.defaultBody ?? "";
+const header = definition?.header ?? "";
+const composed = header ? `${header}\n\n${templateBody}` : templateBody;
+const { result: rendered, unresolved } = interpolate(composed, variables ?? {});
+
+json(res, { rendered, unresolved });
+```
+
+**Key behaviors:**
+- Uses the provided `body` if supplied, else falls back to the event definition's `defaultBody`
+- Prepends the `header` (always on-prefix from code definitions)
+- Calls `interpolate()` to resolve `{{variable}}` syntax
+- **Does NOT expand `{{@template[...]}}` references** — those are only expanded in the full `/render` endpoint (DB mode only)
+
+### 3. **Template Composition Syntax**
+
+Two different syntaxes exist in templates:
+
+**`{{variable}}`** — Variable interpolation (handled by preview)
+- Replaced with values from the `variables` object passed to preview
+- Path-based: `{{path.to.value}}` supports nested objects
+- If unresolvable, added to the `unresolved` array and replaced with empty string
+
+**`{{@template[eventType]}}`** — Template composition (NOT handled by preview)
+- Used in session templates like `system.session.lead` which contains:
+  ```
+  {{@template[system.agent.role]}}
+  {{@template[system.agent.register]}}
+  {{@template[system.agent.lead]}}
+  {{@template[system.agent.filesystem]}}
+  ... (8 total references)
+  ```
+- Only expanded in `/api/prompt-templates/render` (DB mode, lines 197-198)
+- Uses recursive expansion with cycle detection and max depth (3)
+- **Not expanded by the preview endpoint**
+
+### 4. **Typical Template Structure**
+
+Example: `system.session.lead` template body (from `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/prompts/session-templates.ts`):
+
+```
+defaultBody: `{{@template[system.agent.role]}}
+
+{{@template[system.agent.register]}}
+{{@template[system.agent.lead]}}
+{{@template[system.agent.filesystem]}}
+{{@template[system.agent.self_awareness]}}
+{{@template[system.agent.context_mode]}}
+{{@template[system.agent.guidelines]}}
+{{@template[system.agent.system]}}`,
+variables: [
+  { name: "role", description: "The agent's role" },
+  { name: "agentId", description: "The agent's unique identifier" },
+]
+```
+
+### 5. **Variable Interpolation** (`src/workflows/template.ts`)
+
+The `interpolate()` function (lines 13-32):
+- Uses regex `/\{\{([^}]+)\}\}/g` to find `{{...}}` tokens
+- Splits path by `.` and traverses the context object
+- For missing/null values, records the path in `unresolved[]` and replaces with empty string
+- For object values, calls `JSON.stringify()` (with circular reference handling)
+- Returns `{ result: string, unresolved: string[] }`
+
+### 6. **UI Response Type** (`new-ui/src/api/types.ts`, lines 583-586)
+
+```typescript
+export interface PreviewResponse {
+  rendered: string;        // The final markdown to display
+  unresolved: string[];    // List of unresolved token names for warnings/UI feedback
+}
+```
+
+### 7. **Key Architectural Distinction**
+
+- **`/api/prompt-templates/preview`** → Lightweight; only interpolates `{{variable}}` syntax, used for UI preview/composition builder
+- **`/api/prompt-templates/render`** → Full resolution; expands both `{{variable}}` AND `{{@template[...]}}` references, used by workers for actual prompt generation (DB mode only)
+
+---
+
+**Files involved:**
+- API handler: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/http/prompt-templates.ts`
+- Interpolation: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/workflows/template.ts`
+- Template definitions: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/prompts/session-templates.ts`
+- Resolver (full expansion): `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/src/prompts/resolver.ts`
+- UI types: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/api/types.ts`
+- UI client: `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/api/client.ts`</result>
+<usage><total_tokens>121820</total_tokens><tool_uses>41</tool_uses><duration_ms>119898</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/a67b13a577b101f29.output
+
+---
+
+why are you not useing the render endpoint for the rendered tab?

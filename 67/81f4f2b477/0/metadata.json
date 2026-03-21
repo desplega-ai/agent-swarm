@@ -1,0 +1,22 @@
+{
+  "cli_version": "0.5.1",
+  "checkpoint_id": "6781f4f2b477",
+  "session_id": "178611d1-0106-48bf-921c-64d57816552b",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-21T15:37:37.251512Z",
+  "branch": "fet/template-registry",
+  "checkpoints_count": 2,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "turn_id": "23f42412a946",
+  "token_usage": {
+    "input_tokens": 183,
+    "cache_creation_tokens": 398676,
+    "cache_read_tokens": 10452063,
+    "output_tokens": 35171,
+    "api_call_count": 93
+  },
+  "session_metrics": {
+    "turn_count": 9
+  }
+}
