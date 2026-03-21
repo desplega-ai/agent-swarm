@@ -364,6 +364,7 @@ export default function TemplateDetailPage() {
               </div>
               <div className="flex-1 min-h-0 border border-border rounded-md overflow-hidden">
                 <Editor
+                  key={`readonly-${id}`}
                   language="markdown"
                   theme={theme === "dark" ? "vs-dark" : "vs"}
                   value={template.body}
@@ -413,6 +414,7 @@ export default function TemplateDetailPage() {
               </div>
               <div className="flex-1 min-h-0 border border-border rounded-md overflow-hidden">
                 <Editor
+                  key={`editable-${id}`}
                   language="markdown"
                   theme={theme === "dark" ? "vs-dark" : "vs"}
                   value={body}
