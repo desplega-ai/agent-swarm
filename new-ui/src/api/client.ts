@@ -868,9 +868,7 @@ class ApiClient {
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      const error = await res
-        .json()
-        .catch(() => ({ error: "Failed to upsert prompt template" }));
+      const error = await res.json().catch(() => ({ error: "Failed to upsert prompt template" }));
       throw new Error(error.error || `Failed to upsert prompt template: ${res.status}`);
     }
     return res.json();
@@ -884,9 +882,7 @@ class ApiClient {
       body: JSON.stringify({ version }),
     });
     if (!res.ok) {
-      const error = await res
-        .json()
-        .catch(() => ({ error: "Failed to checkout prompt template" }));
+      const error = await res.json().catch(() => ({ error: "Failed to checkout prompt template" }));
       throw new Error(error.error || `Failed to checkout prompt template: ${res.status}`);
     }
     return res.json();
@@ -909,9 +905,7 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/prompt-templates/${id}`;
     const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
     if (!res.ok) {
-      const error = await res
-        .json()
-        .catch(() => ({ error: "Failed to delete prompt template" }));
+      const error = await res.json().catch(() => ({ error: "Failed to delete prompt template" }));
       throw new Error(error.error || `Failed to delete prompt template: ${res.status}`);
     }
     return res.json();

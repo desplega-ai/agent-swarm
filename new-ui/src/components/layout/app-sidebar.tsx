@@ -2,6 +2,7 @@ import {
   BarChart3,
   Bug,
   Clock,
+  FileText,
   GitBranch,
   LayoutDashboard,
   ListTodo,
@@ -41,7 +42,10 @@ const navGroups = [
   },
   {
     label: "Communication",
-    items: [{ title: "Chat", path: "/chat", icon: MessageSquare }],
+    items: [
+      { title: "Chat", path: "/chat", icon: MessageSquare },
+      { title: "Templates", path: "/templates", icon: FileText },
+    ],
   },
   {
     label: "Operations",

@@ -19,6 +19,7 @@ const ReposPage = lazy(() => import("@/pages/repos/page"));
 const WorkflowsPage = lazy(() => import("@/pages/workflows/page"));
 const WorkflowDetailPage = lazy(() => import("@/pages/workflows/[id]/page"));
 const WorkflowRunDetailPage = lazy(() => import("@/pages/workflow-runs/[id]/page"));
+const TemplatesPage = lazy(() => import("@/pages/templates/page"));
 const DebugPage = lazy(() => import("@/pages/debug/page"));
 const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
 
@@ -44,6 +45,7 @@ export const router = createBrowserRouter([
       { path: "workflow-runs/:id", element: <WorkflowRunDetailPage /> },
       { path: "usage", element: <UsagePage /> },
       { path: "config", element: <ConfigPage /> },
+      { path: "templates", element: <TemplatesPage /> },
       { path: "repos", element: <ReposPage /> },
       { path: "debug", element: <DebugPage /> },
       { path: "*", element: <NotFoundPage /> },
