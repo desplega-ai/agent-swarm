@@ -454,7 +454,7 @@ describe("Workflow Async v2 (Phase 4)", () => {
         workflowRunId: runId,
         workflowRunStepId: reviewSteps.find((s) => s.nodeId === "review-a")!.id,
       });
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 50));
 
       // After A completes — merge should NOT have been created yet (B, C still pending)
       steps = getWorkflowRunStepsByRunId(runId);
@@ -469,7 +469,7 @@ describe("Workflow Async v2 (Phase 4)", () => {
         workflowRunId: runId,
         workflowRunStepId: reviewSteps.find((s) => s.nodeId === "review-b")!.id,
       });
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 50));
 
       // After B completes — merge STILL should not exist (C still pending)
       steps = getWorkflowRunStepsByRunId(runId);
@@ -484,11 +484,11 @@ describe("Workflow Async v2 (Phase 4)", () => {
         workflowRunId: runId,
         workflowRunStepId: reviewSteps.find((s) => s.nodeId === "review-c")!.id,
       });
-      await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 50));
 
       // Now ALL 3 are done — merge should execute exactly ONCE
       // Allow extra time for serialized queue processing
-      await new Promise((r) => setTimeout(r, 500));
+      await new Promise((r) => setTimeout(r, 100));
 
       steps = getWorkflowRunStepsByRunId(runId);
       const mergeSteps = steps.filter((s) => s.nodeId === "merge");

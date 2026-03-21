@@ -2,7 +2,7 @@ import type { WorkflowDefinition, WorkflowEdge, WorkflowNode } from "../types";
 import type { ExecutorRegistry } from "./executors/registry";
 
 /** Extract all target node IDs from a node's `next` field */
-function getNextTargets(next: string | string[] | Record<string, string>): string[] {
+export function getNextTargets(next: string | string[] | Record<string, string>): string[] {
   if (typeof next === "string") return [next];
   if (Array.isArray(next)) return next;
   return Object.values(next);

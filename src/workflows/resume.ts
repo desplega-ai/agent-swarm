@@ -8,7 +8,6 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import { checkpointStep } from "./checkpoint";
-import { getSuccessors } from "./definition";
 import { findReadyNodes, walkGraph } from "./engine";
 import type { WorkflowEventBus } from "./event-bus";
 import type { ExecutorRegistry } from "./executors/registry";
@@ -74,7 +73,15 @@ async function resumeFromTaskCompletion(
   // multiple fan-out tasks complete simultaneously and both try to
   // evaluate convergence + walk the graph.
   const prev = resumeQueues.get(runId) ?? Promise.resolve();
-  const next = prev.then(() => doResumeFromTaskCompletion(event, registry)).catch(() => {});
+  const next = prev
+    .then(() => doResumeFromTaskCompletion(event, registry))
+    .catch(() => {})
+    .finally(() => {
+      // Clean up completed queue entries to prevent memory leak
+      if (resumeQueues.get(runId) === next) {
+        resumeQueues.delete(runId);
+      }
+    });
   resumeQueues.set(runId, next);
   await next;
 }
@@ -166,8 +173,15 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   const ctx = (run.context ?? {}) as Record<string, unknown>;
   updateWorkflowRun(runId, { status: "running", error: undefined, context: ctx });
 
-  // Resume from the failed node
-  const node = workflow.definition.nodes.find((n) => n.id === failedStep.nodeId);
-  if (!node) throw new Error(`Node ${failedStep.nodeId} not found in workflow definition`);
-  await walkGraph(workflow.definition, runId, ctx, [node], registry, workflow.id);
+  // Resume from the failed node — use findReadyNodes for convergence safety
+  const completedNodeIds = new Set(getCompletedStepNodeIds(runId));
+  const readyNodes = findReadyNodes(workflow.definition, completedNodeIds);
+  const failedNode = workflow.definition.nodes.find((n) => n.id === failedStep.nodeId);
+  if (!failedNode) throw new Error(`Node ${failedStep.nodeId} not found in workflow definition`);
+
+  // Include the failed node if it's not already in ready nodes
+  const nodesToRun = readyNodes.some((n) => n.id === failedNode.id)
+    ? readyNodes
+    : [failedNode, ...readyNodes];
+  await walkGraph(workflow.definition, runId, ctx, nodesToRun, registry, workflow.id);
 }

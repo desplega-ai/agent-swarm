@@ -11,7 +11,7 @@ import {
 import type { Workflow, WorkflowDefinition, WorkflowNode } from "../types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
 import { shouldSkipCooldown } from "./cooldown";
-import { findEntryNodes, getSuccessors } from "./definition";
+import { findEntryNodes, getNextTargets, getSuccessors } from "./definition";
 import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
 import { resolveInputs } from "./input";
@@ -157,8 +157,20 @@ export async function walkGraph(
     }
   }
 
-  // Seed with start nodes that haven't been completed yet
-  let pendingNodes = startNodes.filter((n) => !completedNodeIds.has(n.id));
+  // Seed with start nodes that haven't been completed yet AND whose
+  // predecessors are all completed (convergence gate). This prevents callers
+  // like resumeFromTaskCompletion() and retryFailedRun() from executing a
+  // convergence node before all its fan-out predecessors are done.
+  let pendingNodes = startNodes.filter((n) => {
+    if (completedNodeIds.has(n.id)) return false;
+    const preds = getAllPredecessors(def, n.id);
+    if (preds.length === 0) return true; // Entry node — always ready
+    // Check all predecessors with active edges are completed
+    const activePreds = preds.filter((predId) => activeEdges.has(`${predId}→${n.id}`));
+    // If no active edges yet (first walk), check ALL structural predecessors
+    const predsToCheck = activePreds.length > 0 ? activePreds : preds;
+    return predsToCheck.every((p) => completedNodeIds.has(p));
+  });
 
   while (pendingNodes.length > 0) {
     nodeExecutionCount += pendingNodes.length;
@@ -256,13 +268,7 @@ function getAllPredecessors(def: WorkflowDefinition, nodeId: string): string[] {
   const preds: string[] = [];
   for (const node of def.nodes) {
     if (!node.next) continue;
-    const targets =
-      typeof node.next === "string"
-        ? [node.next]
-        : Array.isArray(node.next)
-          ? node.next
-          : Object.values(node.next);
-    if (targets.includes(nodeId)) {
+    if (getNextTargets(node.next).includes(nodeId)) {
       preds.push(node.id);
     }
   }
@@ -517,13 +523,7 @@ export function findReadyNodes(
 
   for (const node of def.nodes) {
     if (!node.next) continue;
-    const targets =
-      typeof node.next === "string"
-        ? [node.next]
-        : Array.isArray(node.next)
-          ? node.next
-          : Object.values(node.next);
-    for (const target of targets) {
+    for (const target of getNextTargets(node.next)) {
       if (!predecessors.has(target)) {
         predecessors.set(target, new Set());
       }
