@@ -51,6 +51,17 @@ export {
   useTaskSessionLogs,
   useTasks,
 } from "./use-tasks";
+export type { PromptTemplateFilters } from "./use-prompt-templates";
+export {
+  useCheckoutTemplate,
+  useDeleteTemplate,
+  usePreviewTemplate,
+  usePromptTemplate,
+  usePromptTemplateEvents,
+  usePromptTemplates,
+  useResetTemplate,
+  useUpsertTemplate,
+} from "./use-prompt-templates";
 export {
   useAllWorkflowRuns,
   useDeleteWorkflow,
