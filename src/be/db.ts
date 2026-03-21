@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { configureDbResolver } from "../prompts/resolver";
 import type {
   ActiveSession,
   Agent,
@@ -24,6 +25,8 @@ import type {
   InboxMessage,
   InboxMessageStatus,
   InputValue,
+  PromptTemplate,
+  PromptTemplateHistory,
   ScheduledTask,
   Service,
   ServiceStatus,
@@ -44,6 +47,7 @@ import type {
   WorkflowVersion,
 } from "../types";
 import { runMigrations } from "./migrations/runner";
+import { seedDefaultTemplates } from "./seed";
 
 let db: Database | null = null;
 
@@ -55,9 +59,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   db = new Database(dbPath, { create: true });
   console.log(`Database initialized at ${dbPath}`);
 
-  // Capture in local const for TypeScript (db is guaranteed non-null here)
   const database = db;
-
   database.run("PRAGMA journal_mode = WAL;");
   database.run("PRAGMA foreign_keys = ON;");
 
@@ -186,6 +188,12 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
 
   // Backfill: Seed v1 for existing agents that don't have any context versions yet
   seedContextVersions();
+
+  // Inject DB resolver into the prompt template resolver (DI to avoid worker/API boundary violation)
+  configureDbResolver(resolvePromptTemplate);
+
+  // Seed default prompt templates from the in-memory code registry
+  seedDefaultTemplates();
 
   return db;
 }
@@ -6137,4 +6145,437 @@ export function getWorkflowVersion(workflowId: string, version: number): Workflo
     )
     .get(workflowId, version);
   return row ? rowToWorkflowVersion(row) : null;
+}
+
+// ============================================================================
+// Prompt Template Operations
+// ============================================================================
+
+type PromptTemplateRow = {
+  id: string;
+  eventType: string;
+  scope: string;
+  scopeId: string | null;
+  state: string;
+  body: string;
+  isDefault: number; // SQLite boolean
+  version: number;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type PromptTemplateHistoryRow = {
+  id: string;
+  templateId: string;
+  version: number;
+  body: string;
+  state: string;
+  changedBy: string | null;
+  changedAt: string;
+  changeReason: string | null;
+};
+
+function rowToPromptTemplate(row: PromptTemplateRow): PromptTemplate {
+  return {
+    id: row.id,
+    eventType: row.eventType,
+    scope: row.scope as "global" | "agent" | "repo",
+    scopeId: row.scopeId ?? null,
+    state: row.state as "enabled" | "default_prompt_fallback" | "skip_event",
+    body: row.body,
+    isDefault: row.isDefault === 1,
+    version: row.version,
+    createdBy: row.createdBy ?? null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function rowToPromptTemplateHistory(row: PromptTemplateHistoryRow): PromptTemplateHistory {
+  return {
+    id: row.id,
+    templateId: row.templateId,
+    version: row.version,
+    body: row.body,
+    state: row.state,
+    changedBy: row.changedBy ?? null,
+    changedAt: row.changedAt,
+    changeReason: row.changeReason ?? null,
+  };
+}
+
+/**
+ * List prompt templates with optional filters.
+ */
+export function getPromptTemplates(filters?: {
+  eventType?: string;
+  scope?: string;
+  scopeId?: string;
+  isDefault?: boolean;
+}): PromptTemplate[] {
+  const conditions: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (filters?.eventType) {
+    conditions.push("eventType = ?");
+    params.push(filters.eventType);
+  }
+  if (filters?.scope) {
+    conditions.push("scope = ?");
+    params.push(filters.scope);
+  }
+  if (filters?.scopeId) {
+    conditions.push("scopeId = ?");
+    params.push(filters.scopeId);
+  }
+  if (filters?.isDefault !== undefined) {
+    conditions.push("isDefault = ?");
+    params.push(filters.isDefault ? 1 : 0);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const query = `SELECT * FROM prompt_templates ${whereClause} ORDER BY eventType ASC`;
+
+  return getDb()
+    .prepare<PromptTemplateRow, (string | number)[]>(query)
+    .all(...params)
+    .map(rowToPromptTemplate);
+}
+
+/**
+ * Get a single prompt template by ID.
+ */
+export function getPromptTemplateById(id: string): PromptTemplate | null {
+  const row = getDb()
+    .prepare<PromptTemplateRow, [string]>("SELECT * FROM prompt_templates WHERE id = ?")
+    .get(id);
+  return row ? rowToPromptTemplate(row) : null;
+}
+
+/**
+ * Upsert a prompt template. Inserts or updates by (eventType, scope, scopeId) unique constraint.
+ * Creates a history entry on both insert and update.
+ */
+export function upsertPromptTemplate(data: {
+  eventType: string;
+  scope: "global" | "agent" | "repo";
+  scopeId?: string | null;
+  state?: "enabled" | "default_prompt_fallback" | "skip_event";
+  body: string;
+  createdBy?: string | null;
+  changedBy?: string | null;
+  changeReason?: string | null;
+}): PromptTemplate {
+  const now = new Date().toISOString();
+  const scopeId = data.scope === "global" ? null : (data.scopeId ?? null);
+  const state = data.state ?? "enabled";
+  const createdBy = data.createdBy ?? data.changedBy ?? null;
+  const changedBy = data.changedBy ?? data.createdBy ?? null;
+  const changeReason = data.changeReason ?? null;
+
+  // Manual check for existing entry because SQLite's UNIQUE constraint
+  // treats NULL != NULL, so ON CONFLICT never fires when scopeId is NULL (global scope).
+  const existing =
+    scopeId === null
+      ? getDb()
+          .prepare<PromptTemplateRow, [string, string]>(
+            "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId IS NULL",
+          )
+          .get(data.eventType, data.scope)
+      : getDb()
+          .prepare<PromptTemplateRow, [string, string, string]>(
+            "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId = ?",
+          )
+          .get(data.eventType, data.scope, scopeId);
+
+  let row: PromptTemplateRow | null;
+
+  if (existing) {
+    // If upserting at global scope and existing record has isDefault=true, flip it to false
+    const newIsDefault =
+      data.scope === "global" && existing.isDefault === 1 ? 0 : existing.isDefault;
+    const newVersion = existing.version + 1;
+
+    row = getDb()
+      .prepare<PromptTemplateRow, [string, string, number, number, string, string]>(
+        `UPDATE prompt_templates SET body = ?, state = ?, isDefault = ?, version = ?, updatedAt = ?
+         WHERE id = ? RETURNING *`,
+      )
+      .get(data.body, state, newIsDefault, newVersion, now, existing.id);
+
+    // Create history entry for the update
+    getDb()
+      .prepare(
+        `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        crypto.randomUUID(),
+        existing.id,
+        newVersion,
+        data.body,
+        state,
+        changedBy,
+        now,
+        changeReason,
+      );
+  } else {
+    const id = crypto.randomUUID();
+    row = getDb()
+      .prepare<
+        PromptTemplateRow,
+        [
+          string,
+          string,
+          string,
+          string | null,
+          string,
+          string,
+          number,
+          number,
+          string | null,
+          string,
+          string,
+        ]
+      >(
+        `INSERT INTO prompt_templates (id, eventType, scope, scopeId, state, body, isDefault, version, createdBy, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      )
+      .get(id, data.eventType, data.scope, scopeId, state, data.body, 0, 1, createdBy, now, now);
+
+    // Create history entry for the insert
+    getDb()
+      .prepare(
+        `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        crypto.randomUUID(),
+        id,
+        1,
+        data.body,
+        state,
+        changedBy,
+        now,
+        changeReason ?? "Initial creation",
+      );
+  }
+
+  if (!row) throw new Error("Failed to upsert prompt template");
+  return rowToPromptTemplate(row);
+}
+
+/**
+ * Delete a prompt template by ID. Guards against deleting default templates.
+ * Does NOT delete history rows (intentional for audit trail).
+ */
+export function deletePromptTemplate(id: string): boolean {
+  const existing = getDb()
+    .prepare<PromptTemplateRow, [string]>("SELECT * FROM prompt_templates WHERE id = ?")
+    .get(id);
+
+  if (!existing) return false;
+  if (existing.isDefault === 1) {
+    throw new Error(
+      "Cannot delete a default prompt template. Use resetPromptTemplateToDefault instead.",
+    );
+  }
+
+  const result = getDb().run("DELETE FROM prompt_templates WHERE id = ?", [id]);
+  return result.changes > 0;
+}
+
+/**
+ * Reset a prompt template to its default state.
+ * Sets body to defaultBody, isDefault=true, state='enabled', bumps version.
+ */
+export function resetPromptTemplateToDefault(id: string, defaultBody: string): PromptTemplate {
+  const now = new Date().toISOString();
+  const existing = getDb()
+    .prepare<PromptTemplateRow, [string]>("SELECT * FROM prompt_templates WHERE id = ?")
+    .get(id);
+
+  if (!existing) throw new Error(`Prompt template ${id} not found`);
+
+  const newVersion = existing.version + 1;
+
+  const row = getDb()
+    .prepare<PromptTemplateRow, [string, number, string, string]>(
+      `UPDATE prompt_templates SET body = ?, state = 'enabled', isDefault = 1, version = ?, updatedAt = ?
+       WHERE id = ? RETURNING *`,
+    )
+    .get(defaultBody, newVersion, now, id);
+
+  if (!row) throw new Error("Failed to reset prompt template to default");
+
+  // Create history entry
+  getDb()
+    .prepare(
+      `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      crypto.randomUUID(),
+      id,
+      newVersion,
+      defaultBody,
+      "enabled",
+      null,
+      now,
+      "Reset to default",
+    );
+
+  return rowToPromptTemplate(row);
+}
+
+/**
+ * Get version history for a prompt template, ordered by version DESC.
+ */
+export function getPromptTemplateHistory(templateId: string): PromptTemplateHistory[] {
+  return getDb()
+    .prepare<PromptTemplateHistoryRow, [string]>(
+      "SELECT * FROM prompt_template_history WHERE templateId = ? ORDER BY version DESC",
+    )
+    .all(templateId)
+    .map(rowToPromptTemplateHistory);
+}
+
+/**
+ * Resolve the best prompt template for a given eventType using scope precedence.
+ *
+ * Two-pass resolution:
+ *   Pass 1 (exact match): Try exact eventType at agent → repo → global scope.
+ *   Pass 2 (wildcard): Generate wildcards from eventType (e.g. "github.pull_request.*", "github.*")
+ *     and try each at agent → repo → global scope.
+ *
+ * Exact match at ANY scope always beats wildcard at ANY scope.
+ *
+ * State behavior:
+ *   - 'enabled': return the template
+ *   - 'skip_event': return { skip: true }
+ *   - 'default_prompt_fallback': continue to next scope level
+ */
+export function resolvePromptTemplate(
+  eventType: string,
+  agentId?: string,
+  repoId?: string,
+): { template: PromptTemplate } | { skip: true } | null {
+  // Helper to look up a template at a specific scope
+  const lookupAtScope = (
+    et: string,
+    scope: "global" | "agent" | "repo",
+    scopeId: string | null,
+  ): PromptTemplateRow | undefined => {
+    if (scopeId === null) {
+      return (
+        getDb()
+          .prepare<PromptTemplateRow, [string, string]>(
+            "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId IS NULL",
+          )
+          .get(et, scope) ?? undefined
+      );
+    }
+    return (
+      getDb()
+        .prepare<PromptTemplateRow, [string, string, string]>(
+          "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId = ?",
+        )
+        .get(et, scope, scopeId) ?? undefined
+    );
+  };
+
+  // Try resolution at the scope chain for a given eventType string
+  const tryResolve = (et: string): { template: PromptTemplate } | { skip: true } | "continue" => {
+    // Build scope chain: agent → repo → global
+    const scopeChain: Array<{ scope: "global" | "agent" | "repo"; scopeId: string | null }> = [];
+    if (agentId) scopeChain.push({ scope: "agent", scopeId: agentId });
+    if (repoId) scopeChain.push({ scope: "repo", scopeId: repoId });
+    scopeChain.push({ scope: "global", scopeId: null });
+
+    for (const { scope, scopeId } of scopeChain) {
+      const row = lookupAtScope(et, scope, scopeId);
+      if (!row) continue;
+
+      if (row.state === "enabled") {
+        return { template: rowToPromptTemplate(row) };
+      }
+      if (row.state === "skip_event") {
+        return { skip: true };
+      }
+      // default_prompt_fallback: continue to next scope
+    }
+
+    return "continue";
+  };
+
+  // Pass 1: exact match
+  const exactResult = tryResolve(eventType);
+  if (exactResult !== "continue") return exactResult;
+
+  // Pass 2: wildcard matching
+  // e.g. "github.pull_request.review_submitted" → ["github.pull_request.*", "github.*"]
+  const parts = eventType.split(".");
+  const wildcards: string[] = [];
+  for (let i = parts.length - 1; i >= 1; i--) {
+    wildcards.push(`${parts.slice(0, i).join(".")}.*`);
+  }
+
+  for (const wildcard of wildcards) {
+    const wildcardResult = tryResolve(wildcard);
+    if (wildcardResult !== "continue") return wildcardResult;
+  }
+
+  return null;
+}
+
+/**
+ * Checkout a prompt template to a specific version from history.
+ * Copies body and state from the history entry into the live record, bumps version.
+ */
+export function checkoutPromptTemplate(id: string, targetVersion: number): PromptTemplate {
+  const now = new Date().toISOString();
+
+  const existing = getDb()
+    .prepare<PromptTemplateRow, [string]>("SELECT * FROM prompt_templates WHERE id = ?")
+    .get(id);
+  if (!existing) throw new Error(`Prompt template ${id} not found`);
+
+  const historyEntry = getDb()
+    .prepare<PromptTemplateHistoryRow, [string, number]>(
+      "SELECT * FROM prompt_template_history WHERE templateId = ? AND version = ?",
+    )
+    .get(id, targetVersion);
+  if (!historyEntry)
+    throw new Error(`No history entry at version ${targetVersion} for template ${id}`);
+
+  const newVersion = existing.version + 1;
+
+  const row = getDb()
+    .prepare<PromptTemplateRow, [string, string, number, string, string]>(
+      `UPDATE prompt_templates SET body = ?, state = ?, version = ?, updatedAt = ?
+       WHERE id = ? RETURNING *`,
+    )
+    .get(historyEntry.body, historyEntry.state, newVersion, now, id);
+
+  if (!row) throw new Error("Failed to checkout prompt template");
+
+  // Create history entry for the checkout
+  getDb()
+    .prepare(
+      `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      crypto.randomUUID(),
+      id,
+      newVersion,
+      historyEntry.body,
+      historyEntry.state,
+      null,
+      now,
+      `Checked out from version ${targetVersion}`,
+    );
+
+  return rowToPromptTemplate(row);
 }

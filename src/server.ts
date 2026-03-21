@@ -31,6 +31,14 @@ import { registerMemorySearchTool } from "./tools/memory-search";
 import { registerMyAgentInfoTool } from "./tools/my-agent-info";
 import { registerPollTaskTool } from "./tools/poll-task";
 import { registerPostMessageTool } from "./tools/post-message";
+// Prompt template tools
+import {
+  registerDeletePromptTemplateTool,
+  registerGetPromptTemplateTool,
+  registerListPromptTemplatesTool,
+  registerPreviewPromptTemplateTool,
+  registerSetPromptTemplateTool,
+} from "./tools/prompt-templates";
 import { registerReadMessagesTool } from "./tools/read-messages";
 import { registerRegisterAgentMailInboxTool } from "./tools/register-agentmail-inbox";
 // Services capability
@@ -139,6 +147,13 @@ export function createServer() {
   registerGetConfigTool(server);
   registerListConfigTool(server);
   registerDeleteConfigTool(server);
+
+  // Prompt template tools - always registered (prompt management is fundamental)
+  registerListPromptTemplatesTool(server);
+  registerGetPromptTemplateTool(server);
+  registerSetPromptTemplateTool(server);
+  registerDeletePromptTemplateTool(server);
+  registerPreviewPromptTemplateTool(server);
 
   // Slack integration tools (always registered, will no-op if Slack not configured)
   registerSlackReplyTool(server);

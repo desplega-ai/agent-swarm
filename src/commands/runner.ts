@@ -8,6 +8,7 @@ import {
   generateDefaultSoulMd,
   generateDefaultToolsMd,
 } from "../prompts/defaults.ts";
+import { configureHttpResolver, resolveTemplateAsync } from "../prompts/resolver.ts";
 import {
   type CostData,
   createProviderAdapter,
@@ -19,6 +20,8 @@ import { resolveCredentialPools } from "../utils/credentials.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
 import { interpolate } from "../workflows/template.ts";
+// Side-effect import: registers runner trigger/resumption templates
+import "./templates.ts";
 
 /** Save PM2 process list for persistence across container restarts */
 async function savePm2State(role: string): Promise<void> {
@@ -549,34 +552,26 @@ async function resumeTaskViaAPI(config: ApiConfig, taskId: string): Promise<bool
 }
 
 /** Build prompt for a resumed task */
-function buildResumePrompt(
+async function buildResumePrompt(
   task: { id: string; task: string; progress?: string },
   fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
-): string {
-  let prompt = `${fmt("work-on-task")} ${task.id}
-
-**RESUMED TASK** - This task was interrupted during a deployment and is being resumed.
-
-Task: "${task.task}"`;
-
+): Promise<string> {
   if (task.progress) {
-    prompt += `
-
-Previous Progress:
-${task.progress}
-
-Continue from where you left off. Review the progress above and complete the remaining work.`;
-  } else {
-    prompt += `
-
-No progress was saved before the interruption. Start the task fresh but be aware files may have been partially modified.`;
+    const result = await resolveTemplateAsync("task.resumption.with_progress", {
+      work_on_task_cmd: fmt("work-on-task"),
+      task_id: task.id,
+      task_description: task.task,
+      progress: task.progress,
+    });
+    return result.text;
   }
 
-  prompt += `
-
-When done, use \`store-progress\` with status: "completed" and include your output.`;
-
-  return prompt;
+  const result = await resolveTemplateAsync("task.resumption.no_progress", {
+    work_on_task_cmd: fmt("work-on-task"),
+    task_id: task.id,
+    task_description: task.task,
+  });
+  return result.text;
 }
 
 /** Setup signal handlers for graceful shutdown */
@@ -980,11 +975,11 @@ async function pollForTrigger(opts: PollOptions): Promise<Trigger | null> {
 }
 
 /** Build prompt based on trigger type */
-function buildPromptForTrigger(
+async function buildPromptForTrigger(
   trigger: Trigger,
   defaultPrompt: string,
   fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
-): string {
+): Promise<string> {
   switch (trigger.type) {
     case "task_assigned": {
       // Use the work-on-task command with task ID and description
@@ -992,19 +987,25 @@ function buildPromptForTrigger(
         trigger.task && typeof trigger.task === "object" && "task" in trigger.task
           ? (trigger.task as { task: string }).task
           : null;
-      let prompt = `${fmt("work-on-task")} ${trigger.taskId}`;
-      if (taskDesc) {
-        prompt += `\n\nTask: "${taskDesc}"`;
+      const taskDescSection = taskDesc ? `\n\nTask: "${taskDesc}"` : "";
+
+      // Build output instructions — use outputSchema if present, otherwise generic
+      const taskObj = trigger.task as Record<string, unknown> | undefined;
+      let outputInstructions: string;
+      if (taskObj?.outputSchema && typeof taskObj.outputSchema === "object") {
+        outputInstructions = `\n\n**Required Output Format**: When completing this task, you MUST call store-progress with output that is valid JSON conforming to this schema:\n\`\`\`json\n${JSON.stringify(taskObj.outputSchema, null, 2)}\n\`\`\`\nCall store-progress with status "completed" and your JSON output. If your output doesn't match the schema, the tool call will fail and you should fix and retry.`;
+      } else {
+        outputInstructions =
+          '\n\nWhen done, use `store-progress` with status: "completed" and include your output.';
       }
 
-      // Inject outputSchema instructions if present
-      const taskObj = trigger.task as Record<string, unknown> | undefined;
-      if (taskObj?.outputSchema && typeof taskObj.outputSchema === "object") {
-        prompt += `\n\n**Required Output Format**: When completing this task, you MUST call store-progress with output that is valid JSON conforming to this schema:\n\`\`\`json\n${JSON.stringify(taskObj.outputSchema, null, 2)}\n\`\`\`\nCall store-progress with status "completed" and your JSON output. If your output doesn't match the schema, the tool call will fail and you should fix and retry.`;
-      } else {
-        prompt += `\n\nWhen done, use \`store-progress\` with status: "completed" and include your output.`;
-      }
-      return prompt;
+      const result = await resolveTemplateAsync("task.trigger.assigned", {
+        work_on_task_cmd: fmt("work-on-task"),
+        task_id: trigger.taskId,
+        task_desc_section: taskDescSection,
+        output_instructions: outputInstructions,
+      });
+      return result.text;
     }
 
     case "task_offered": {
@@ -1013,31 +1014,28 @@ function buildPromptForTrigger(
         trigger.task && typeof trigger.task === "object" && "task" in trigger.task
           ? (trigger.task as { task: string }).task
           : null;
-      let prompt = `${fmt("review-offered-task")} ${trigger.taskId}`;
-      if (taskDesc) {
-        prompt += `\n\nA task has been offered to you:\n"${taskDesc}"`;
-      }
-      prompt += `\n\nAccept if you have capacity and skills. Reject with a reason if you cannot handle it.`;
-      return prompt;
+      const taskDescSection = taskDesc ? `\n\nA task has been offered to you:\n"${taskDesc}"` : "";
+      const result = await resolveTemplateAsync("task.trigger.offered", {
+        review_offered_task_cmd: fmt("review-offered-task"),
+        task_id: trigger.taskId,
+        task_desc_section: taskDescSection,
+      });
+      return result.text;
     }
 
-    case "unread_mentions":
-      // Check messages - numbered steps for clarity
-      return `You have ${trigger.count || "unread"} mention(s) in chat channels.
+    case "unread_mentions": {
+      const result = await resolveTemplateAsync("task.trigger.unread_mentions", {
+        mention_count: trigger.count || "unread",
+      });
+      return result.text;
+    }
 
-1. Use \`read-messages\` with unreadOnly: true to see them
-2. Respond to questions or requests directed at you
-3. If a message requires work, create a task using \`send-task\``;
-
-    case "pool_tasks_available":
-      // Worker: claim a task from the pool - numbered steps for clarity
-      return `${trigger.count} task(s) available in the pool.
-
-1. Run \`get-tasks\` with unassigned: true to browse
-2. Pick one matching your skills
-3. Run \`task-action\` with action: "claim" and taskId: "<id>"
-
-Note: Claims are first-come-first-serve. If claim fails, pick another.`;
+    case "pool_tasks_available": {
+      const result = await resolveTemplateAsync("task.trigger.pool_available", {
+        task_count: trigger.count,
+      });
+      return result.text;
+    }
 
     case "epic_progress_changed": {
       // Lead: Epic progress updated - tasks completed or failed for an active epic
@@ -1074,19 +1072,19 @@ Note: Claims are first-come-first-serve. If claim fails, pick another.`;
         return "Epic progress was updated but no details available. Use `list-epics` to check status.";
       }
 
-      let prompt = `## Epic Progress Update\n\n${trigger.count} epic(s) have progress updates:\n\n`;
-
+      // Build epics detail section as a pre-computed variable
+      let epicsDetail = "";
       for (const { epic, finishedTasks } of epics) {
-        prompt += `### Epic: "${epic.name}" (${epic.id.slice(0, 8)})\n`;
-        prompt += `**Goal:** ${epic.goal}\n`;
-        prompt += `**Progress:** ${epic.progress}% complete (${epic.taskStats.completed}/${epic.taskStats.total} tasks)\n`;
-        prompt += `**Status:** ${epic.status}\n\n`;
+        epicsDetail += `### Epic: "${epic.name}" (${epic.id.slice(0, 8)})\n`;
+        epicsDetail += `**Goal:** ${epic.goal}\n`;
+        epicsDetail += `**Progress:** ${epic.progress}% complete (${epic.taskStats.completed}/${epic.taskStats.total} tasks)\n`;
+        epicsDetail += `**Status:** ${epic.status}\n\n`;
 
         if (epic.plan) {
-          prompt += `**Plan:**\n${epic.plan.slice(0, 2000)}\n\n`;
+          epicsDetail += `**Plan:**\n${epic.plan.slice(0, 2000)}\n\n`;
         }
         if (epic.prd) {
-          prompt += `**PRD:**\n${epic.prd.slice(0, 1000)}\n\n`;
+          epicsDetail += `**PRD:**\n${epic.prd.slice(0, 1000)}\n\n`;
         }
 
         // Show finished tasks
@@ -1094,48 +1092,38 @@ Note: Claims are first-come-first-serve. If claim fails, pick another.`;
         const failed = finishedTasks.filter((t) => t.status === "failed");
 
         if (completed.length > 0) {
-          prompt += "**Recently Completed:**\n";
+          epicsDetail += "**Recently Completed:**\n";
           for (const t of completed) {
             const agentName = t.agentId ? `Agent ${t.agentId.slice(0, 8)}` : "Unknown";
             const output = t.output ? t.output.slice(0, 150) : "(no output)";
-            prompt += `- Task ${t.id.slice(0, 8)} by ${agentName}: "${t.task.slice(0, 80)}"\n`;
-            prompt += `  Output: ${output}${t.output && t.output.length > 150 ? "..." : ""}\n`;
+            epicsDetail += `- Task ${t.id.slice(0, 8)} by ${agentName}: "${t.task.slice(0, 80)}"\n`;
+            epicsDetail += `  Output: ${output}${t.output && t.output.length > 150 ? "..." : ""}\n`;
           }
         }
 
         if (failed.length > 0) {
-          prompt += "\n**Recently Failed:**\n";
+          epicsDetail += "\n**Recently Failed:**\n";
           for (const t of failed) {
             const agentName = t.agentId ? `Agent ${t.agentId.slice(0, 8)}` : "Unknown";
-            prompt += `- Task ${t.id.slice(0, 8)} by ${agentName}: "${t.task.slice(0, 80)}"\n`;
-            prompt += `  Reason: ${t.failureReason || "(no reason)"}\n`;
+            epicsDetail += `- Task ${t.id.slice(0, 8)} by ${agentName}: "${t.task.slice(0, 80)}"\n`;
+            epicsDetail += `  Reason: ${t.failureReason || "(no reason)"}\n`;
           }
         }
 
         // Show remaining work
         const { inProgress, pending } = epic.taskStats;
         if (inProgress > 0 || pending > 0) {
-          prompt += `\n**Remaining:** ${inProgress} in progress, ${pending} pending\n`;
+          epicsDetail += `\n**Remaining:** ${inProgress} in progress, ${pending} pending\n`;
         }
 
-        prompt += "\n---\n\n";
+        epicsDetail += "\n---\n\n";
       }
 
-      prompt += `## Your Task: Plan Next Steps
-
-For each epic:
-1. **Review** the completed work and any failures
-2. **Determine** if the epic goal is met (progress = 100% and all tasks succeeded)
-3. **If complete:** Use \`update-epic\` to mark status as "completed"
-4. **If not complete:**
-   - Retry failed tasks with \`send-task\` (reassign or modify)
-   - Create new tasks for remaining work with \`send-task\` (include epicId)
-   - Keep the epic progressing until the goal is achieved
-
-This is an iterative process - you'll be notified again when more tasks finish.
-The epic should keep progressing until 100% complete and the goal is achieved.`;
-
-      return prompt;
+      const result = await resolveTemplateAsync("task.trigger.epic_progress", {
+        epic_count: trigger.count,
+        epics_detail: epicsDetail,
+      });
+      return result.text;
     }
 
     default:
@@ -1605,6 +1593,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   const apiUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
   const swarmUrl = process.env.SWARM_URL || "localhost";
 
+  // Configure HTTP-based template resolution (workers resolve via API, not local DB)
+  if (process.env.API_KEY) {
+    configureHttpResolver(apiUrl, process.env.API_KEY);
+  }
+
   let capabilities = config.capabilities;
 
   // Agent identity fields — populated after registration by fetching full profile
@@ -1620,7 +1613,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let currentRepoContext: BasePromptArgs["repoContext"] | undefined;
 
   // Generate base prompt (identity fields injected after profile fetch below)
-  const buildSystemPrompt = () => {
+  const buildSystemPrompt = async () => {
     return getBasePrompt({
       role,
       agentId,
@@ -1636,7 +1629,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     });
   };
 
-  let basePrompt = buildSystemPrompt();
+  let basePrompt = await buildSystemPrompt();
 
   // Resolve additional system prompt: CLI flag > env var
   let additionalSystemPrompt: string | undefined;
@@ -1861,7 +1854,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         }
 
         // Rebuild system prompt with identity
-        basePrompt = buildSystemPrompt();
+        basePrompt = await buildSystemPrompt();
         resolvedSystemPrompt = additionalSystemPrompt
           ? `${basePrompt}\n\n${additionalSystemPrompt}`
           : basePrompt;
@@ -1966,7 +1959,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
 
           // Build prompt with resume context + memory injection
-          let resumePrompt = buildResumePrompt(task, adapter.formatCommand.bind(adapter));
+          let resumePrompt = await buildResumePrompt(task, adapter.formatCommand.bind(adapter));
 
           // Inject relevant memories for resumed tasks
           const resumeMemoryContext = await fetchRelevantMemories(
@@ -2151,7 +2144,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           console.log(`[${role}] Trigger received: ${trigger.type}`);
 
           // Build prompt based on trigger
-          let triggerPrompt = buildPromptForTrigger(
+          let triggerPrompt = await buildPromptForTrigger(
             trigger,
             prompt,
             adapter.formatCommand.bind(adapter),
@@ -2294,7 +2287,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
 
           // Rebuild system prompt with per-task repo context
-          const taskBasePrompt = buildSystemPrompt();
+          const taskBasePrompt = await buildSystemPrompt();
           const taskSystemPrompt =
             (additionalSystemPrompt
               ? `${taskBasePrompt}\n\n${additionalSystemPrompt}`

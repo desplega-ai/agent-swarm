@@ -1,6 +1,9 @@
 import { createTaskExtended, failTask, findTaskByVcs, getAllAgents } from "../be/db";
+import { resolveTemplate } from "../prompts/resolver";
 import { detectMention, extractMentionContext, GITHUB_BOT_NAME, isBotAssignee } from "./mentions";
 import { addIssueReaction, addReaction } from "./reactions";
+// Side-effect import: registers all GitHub event templates in the in-memory registry
+import "./templates";
 import type {
   CheckRunEvent,
   CheckSuiteEvent,
@@ -15,9 +18,50 @@ import type {
 const processedEvents = new Map<string, number>();
 const EVENT_TTL = 60_000;
 
-// Delegation instruction for lead agents receiving GitHub tasks
-const DELEGATION_INSTRUCTION =
-  "⚠️ As lead, DELEGATE this task to a worker agent - do not tackle it yourself.";
+/**
+ * Get review state emoji and label
+ */
+export function getReviewStateInfo(state: string): { emoji: string; label: string } {
+  switch (state) {
+    case "approved":
+      return { emoji: "✅", label: "APPROVED" };
+    case "changes_requested":
+      return { emoji: "🔄", label: "CHANGES REQUESTED" };
+    case "commented":
+      return { emoji: "💬", label: "COMMENTED" };
+    case "dismissed":
+      return { emoji: "🚫", label: "DISMISSED" };
+    default:
+      return { emoji: "📝", label: state.toUpperCase() };
+  }
+}
+
+/**
+ * Get conclusion emoji and label for CI checks
+ */
+export function getCheckConclusionInfo(conclusion: string | null): {
+  emoji: string;
+  label: string;
+} {
+  switch (conclusion) {
+    case "success":
+      return { emoji: "✅", label: "PASSED" };
+    case "failure":
+      return { emoji: "❌", label: "FAILED" };
+    case "cancelled":
+      return { emoji: "⏹️", label: "CANCELLED" };
+    case "timed_out":
+      return { emoji: "⏱️", label: "TIMED OUT" };
+    case "action_required":
+      return { emoji: "⚠️", label: "ACTION REQUIRED" };
+    case "skipped":
+      return { emoji: "⏭️", label: "SKIPPED" };
+    case "neutral":
+      return { emoji: "➖", label: "NEUTRAL" };
+    default:
+      return { emoji: "❓", label: conclusion?.toUpperCase() ?? "UNKNOWN" };
+  }
+}
 
 /**
  * Get suggested commands based on task type
@@ -99,10 +143,27 @@ export async function handlePullRequest(
 
     // Same task creation flow as mention-based handling
     const lead = findLeadAgent();
-    const suggestions = getCommandSuggestions("github-pr");
-    const taskDescription = `[GitHub PR #${pr.number}] ${pr.title}\n\nAssigned to: @${GITHUB_BOT_NAME}\nFrom: ${sender.login}\nRepo: ${repository.full_name}\nBranch: ${pr.head.ref} → ${pr.base.ref}\nURL: ${pr.html_url}\n\nContext:\n${pr.body || pr.title}\n\n---\n${DELEGATION_INSTRUCTION}\n${suggestions}`;
+    const result = resolveTemplate(
+      "github.pull_request.assigned",
+      {
+        pr_number: pr.number,
+        pr_title: pr.title,
+        bot_name: GITHUB_BOT_NAME,
+        sender_login: sender.login,
+        repo_full_name: repository.full_name,
+        head_ref: pr.head.ref,
+        base_ref: pr.base.ref,
+        pr_url: pr.html_url,
+        context: pr.body || pr.title,
+      },
+      { agentId: lead?.id, repoId: repository.full_name },
+    );
 
-    const task = createTaskExtended(taskDescription, {
+    if (result.skipped) {
+      return { created: false };
+    }
+
+    const task = createTaskExtended(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -179,10 +240,27 @@ export async function handlePullRequest(
 
     // Create review task
     const lead = findLeadAgent();
-    const suggestions = getCommandSuggestions("github-pr");
-    const taskDescription = `[GitHub PR #${pr.number}] ${pr.title}\n\nReview requested from: @${GITHUB_BOT_NAME}\nFrom: ${sender.login}\nRepo: ${repository.full_name}\nBranch: ${pr.head.ref} → ${pr.base.ref}\nURL: ${pr.html_url}\n\nContext:\n${pr.body || pr.title}\n\n---\n${DELEGATION_INSTRUCTION}\n${suggestions}`;
+    const result = resolveTemplate(
+      "github.pull_request.review_requested",
+      {
+        pr_number: pr.number,
+        pr_title: pr.title,
+        bot_name: GITHUB_BOT_NAME,
+        sender_login: sender.login,
+        repo_full_name: repository.full_name,
+        head_ref: pr.head.ref,
+        base_ref: pr.base.ref,
+        pr_url: pr.html_url,
+        context: pr.body || pr.title,
+      },
+      { agentId: lead?.id, repoId: repository.full_name },
+    );
 
-    const task = createTaskExtended(taskDescription, {
+    if (result.skipped) {
+      return { created: false };
+    }
+
+    const task = createTaskExtended(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -257,10 +335,31 @@ export async function handlePullRequest(
     const emoji = wasMerged ? "🎉" : "❌";
     const status = wasMerged ? "MERGED" : "CLOSED";
     const mergedBy = wasMerged && pr.merged_by ? ` by ${pr.merged_by.login}` : "";
+    const followUpSuggestion = wasMerged
+      ? "💡 PR successfully merged! Update any related issues or documentation."
+      : "💡 PR was closed without merging. Review if follow-up is needed.";
 
-    const taskDescription = `${emoji} [GitHub PR #${pr.number}] ${status}${mergedBy}\n\nPR: ${pr.title}\nRepo: ${repository.full_name}\nURL: ${pr.html_url}\n\n---\nRelated task: ${task.id}\n🔀 Consider routing to the same agent working on the related task.\n${wasMerged ? "💡 PR successfully merged! Update any related issues or documentation." : "💡 PR was closed without merging. Review if follow-up is needed."}`;
+    const result = resolveTemplate(
+      "github.pull_request.closed",
+      {
+        status_emoji: emoji,
+        pr_number: pr.number,
+        status,
+        merged_by: mergedBy,
+        pr_title: pr.title,
+        repo_full_name: repository.full_name,
+        pr_url: pr.html_url,
+        related_task_id: task.id,
+        follow_up_suggestion: followUpSuggestion,
+      },
+      { agentId: lead?.id, repoId: repository.full_name },
+    );
 
-    const notifyTask = createTaskExtended(taskDescription, {
+    if (result.skipped) {
+      return { created: false };
+    }
+
+    const notifyTask = createTaskExtended(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -295,9 +394,25 @@ export async function handlePullRequest(
     }
 
     const lead = findLeadAgent();
-    const taskDescription = `🔄 [GitHub PR #${pr.number}] New commits pushed\n\nPR: ${pr.title}\nRepo: ${repository.full_name}\nBranch: ${pr.head.ref}\nNew HEAD: ${pr.head.sha.substring(0, 7)}\nURL: ${pr.html_url}\n\n---\nRelated task: ${task.id}\n🔀 Consider routing to the same agent working on the related task.\n💡 New commits were pushed. CI will re-run - monitor for results.`;
+    const result = resolveTemplate(
+      "github.pull_request.synchronize",
+      {
+        pr_number: pr.number,
+        pr_title: pr.title,
+        repo_full_name: repository.full_name,
+        head_ref: pr.head.ref,
+        head_sha_short: pr.head.sha.substring(0, 7),
+        pr_url: pr.html_url,
+        related_task_id: task.id,
+      },
+      { agentId: lead?.id, repoId: repository.full_name },
+    );
 
-    const notifyTask = createTaskExtended(taskDescription, {
+    if (result.skipped) {
+      return { created: false };
+    }
+
+    const notifyTask = createTaskExtended(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -338,11 +453,27 @@ export async function handlePullRequest(
 
   // Build task description
   const context = extractMentionContext(pr.body) || pr.title;
-  const suggestions = getCommandSuggestions("github-pr");
-  const taskDescription = `[GitHub PR #${pr.number}] ${pr.title}\n\nFrom: ${sender.login}\nRepo: ${repository.full_name}\nBranch: ${pr.head.ref} → ${pr.base.ref}\nURL: ${pr.html_url}\n\nContext:\n${context}\n\n---\n${DELEGATION_INSTRUCTION}\n${suggestions}`;
+  const result = resolveTemplate(
+    "github.pull_request.mentioned",
+    {
+      pr_number: pr.number,
+      pr_title: pr.title,
+      sender_login: sender.login,
+      repo_full_name: repository.full_name,
+      head_ref: pr.head.ref,
+      base_ref: pr.base.ref,
+      pr_url: pr.html_url,
+      context,
+    },
+    { agentId: lead?.id, repoId: repository.full_name },
+  );
+
+  if (result.skipped) {
+    return { created: false };
+  }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = createTaskExtended(taskDescription, {
+  const task = createTaskExtended(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",
@@ -393,10 +524,25 @@ export async function handleIssue(
 
     // Same task creation flow as mention-based handling
     const lead = findLeadAgent();
-    const suggestions = getCommandSuggestions("github-issue");
-    const taskDescription = `[GitHub Issue #${issue.number}] ${issue.title}\n\nAssigned to: @${GITHUB_BOT_NAME}\nFrom: ${sender.login}\nRepo: ${repository.full_name}\nURL: ${issue.html_url}\n\nContext:\n${issue.body || issue.title}\n\n---\n${DELEGATION_INSTRUCTION}\n${suggestions}`;
+    const result = resolveTemplate(
+      "github.issue.assigned",
+      {
+        issue_number: issue.number,
+        issue_title: issue.title,
+        bot_name: GITHUB_BOT_NAME,
+        sender_login: sender.login,
+        repo_full_name: repository.full_name,
+        issue_url: issue.html_url,
+        context: issue.body || issue.title,
+      },
+      { agentId: lead?.id, repoId: repository.full_name },
+    );
 
-    const task = createTaskExtended(taskDescription, {
+    if (result.skipped) {
+      return { created: false };
+    }
+
+    const task = createTaskExtended(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -471,11 +617,25 @@ export async function handleIssue(
 
   // Build task description
   const context = extractMentionContext(issue.body) || issue.title;
-  const suggestions = getCommandSuggestions("github-issue");
-  const taskDescription = `[GitHub Issue #${issue.number}] ${issue.title}\n\nFrom: ${sender.login}\nRepo: ${repository.full_name}\nURL: ${issue.html_url}\n\nContext:\n${context}\n\n---\n${DELEGATION_INSTRUCTION}\n${suggestions}`;
+  const result = resolveTemplate(
+    "github.issue.mentioned",
+    {
+      issue_number: issue.number,
+      issue_title: issue.title,
+      sender_login: sender.login,
+      repo_full_name: repository.full_name,
+      issue_url: issue.html_url,
+      context,
+    },
+    { agentId: lead?.id, repoId: repository.full_name },
+  );
+
+  if (result.skipped) {
+    return { created: false };
+  }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = createTaskExtended(taskDescription, {
+  const task = createTaskExtended(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",
@@ -544,10 +704,32 @@ export async function handleComment(
   // Build task description
   const context = extractMentionContext(comment.body);
   const suggestions = getCommandSuggestions("github-comment", targetType);
-  const taskDescription = `[GitHub ${targetType} #${targetNumber} Comment] ${targetTitle}\n\nFrom: ${sender.login}\nRepo: ${repository.full_name}\nURL: ${comment.html_url}\n\nComment:\n${context}\n\n---\n${existingTask ? `Related task: ${existingTask.id}\n🔀 Consider routing to the same agent working on the related task.\n` : ""}${DELEGATION_INSTRUCTION}\n${suggestions}`;
+  const relatedTaskSection = existingTask
+    ? `Related task: ${existingTask.id}\n🔀 Consider routing to the same agent working on the related task.\n`
+    : "";
+
+  const result = resolveTemplate(
+    "github.comment.mentioned",
+    {
+      target_type: targetType,
+      target_number: targetNumber,
+      target_title: targetTitle,
+      sender_login: sender.login,
+      repo_full_name: repository.full_name,
+      comment_url: comment.html_url,
+      context,
+      related_task_section: relatedTaskSection,
+      command_suggestions: suggestions,
+    },
+    { agentId: lead?.id, repoId: repository.full_name },
+  );
+
+  if (result.skipped) {
+    return { created: false };
+  }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = createTaskExtended(taskDescription, {
+  const task = createTaskExtended(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",
@@ -574,24 +756,6 @@ export async function handleComment(
   }
 
   return { created: true, taskId: task.id };
-}
-
-/**
- * Get review state emoji and label
- */
-function getReviewStateInfo(state: string): { emoji: string; label: string } {
-  switch (state) {
-    case "approved":
-      return { emoji: "✅", label: "APPROVED" };
-    case "changes_requested":
-      return { emoji: "🔄", label: "CHANGES REQUESTED" };
-    case "commented":
-      return { emoji: "💬", label: "COMMENTED" };
-    case "dismissed":
-      return { emoji: "🚫", label: "DISMISSED" };
-    default:
-      return { emoji: "📝", label: state.toUpperCase() };
-  }
 }
 
 /**
@@ -642,18 +806,40 @@ export async function handlePullRequestReview(
   const { emoji, label } = getReviewStateInfo(review.state);
 
   // Build task description
-  const reviewBody = review.body ? `\n\nReview Comment:\n${review.body}` : "";
-  const suggestions =
+  const reviewBodySection = review.body ? `\n\nReview Comment:\n${review.body}` : "";
+  const relatedTaskSection = existingTask
+    ? `Related task: ${existingTask.id}\n🔀 Consider routing to the same agent working on the related task.\n`
+    : "";
+  const reviewSuggestions =
     review.state === "approved"
       ? "💡 Suggested: Merge the PR or wait for additional reviews"
       : review.state === "changes_requested"
         ? "💡 Suggested: Address the requested changes and update the PR"
         : "💡 Suggested: Review the feedback and respond if needed";
 
-  const taskDescription = `${emoji} [GitHub PR #${pr.number} Review] ${label}\n\nPR: ${pr.title}\nReviewer: ${sender.login}\nRepo: ${repository.full_name}\nURL: ${review.html_url}${reviewBody}\n\n---\n${existingTask ? `Related task: ${existingTask.id}\n🔀 Consider routing to the same agent working on the related task.\n` : ""}${DELEGATION_INSTRUCTION}\n${suggestions}`;
+  const result = resolveTemplate(
+    "github.pull_request.review_submitted",
+    {
+      review_emoji: emoji,
+      pr_number: pr.number,
+      review_label: label,
+      pr_title: pr.title,
+      sender_login: sender.login,
+      repo_full_name: repository.full_name,
+      review_url: review.html_url,
+      review_body_section: reviewBodySection,
+      related_task_section: relatedTaskSection,
+      review_suggestions: reviewSuggestions,
+    },
+    { agentId: lead?.id, repoId: repository.full_name },
+  );
+
+  if (result.skipped) {
+    return { created: false };
+  }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = createTaskExtended(taskDescription, {
+  const task = createTaskExtended(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",
@@ -681,30 +867,6 @@ export async function handlePullRequestReview(
   }
 
   return { created: true, taskId: task.id };
-}
-
-/**
- * Get conclusion emoji and label for CI checks
- */
-function getCheckConclusionInfo(conclusion: string | null): { emoji: string; label: string } {
-  switch (conclusion) {
-    case "success":
-      return { emoji: "✅", label: "PASSED" };
-    case "failure":
-      return { emoji: "❌", label: "FAILED" };
-    case "cancelled":
-      return { emoji: "⏹️", label: "CANCELLED" };
-    case "timed_out":
-      return { emoji: "⏱️", label: "TIMED OUT" };
-    case "action_required":
-      return { emoji: "⚠️", label: "ACTION REQUIRED" };
-    case "skipped":
-      return { emoji: "⏭️", label: "SKIPPED" };
-    case "neutral":
-      return { emoji: "➖", label: "NEUTRAL" };
-    default:
-      return { emoji: "❓", label: conclusion?.toUpperCase() ?? "UNKNOWN" };
-  }
 }
 
 /**
@@ -760,13 +922,30 @@ export async function handleCheckRun(
   const lead = findLeadAgent();
   const { emoji, label } = getCheckConclusionInfo(conclusion);
 
-  const outputSummary = check_run.output.summary
+  const outputSummarySection = check_run.output.summary
     ? `\n\nSummary:\n${check_run.output.summary.substring(0, 500)}`
     : "";
 
-  const taskDescription = `${emoji} [GitHub PR #${prNumber} CI] ${check_run.name} ${label}\n\nRepo: ${repository.full_name}\nCheck: ${check_run.name}\nURL: ${check_run.html_url}${outputSummary}\n\n---\nRelated task: ${relatedTask.id}\n🔀 Consider routing to the same agent working on the related task.\n💡 CI check failed. Review the logs and fix the issue.`;
+  const result = resolveTemplate(
+    "github.check_run.failed",
+    {
+      conclusion_emoji: emoji,
+      pr_number: prNumber,
+      check_name: check_run.name,
+      conclusion_label: label,
+      repo_full_name: repository.full_name,
+      check_url: check_run.html_url,
+      output_summary_section: outputSummarySection,
+      related_task_id: relatedTask.id,
+    },
+    { agentId: lead?.id, repoId: repository.full_name },
+  );
 
-  const task = createTaskExtended(taskDescription, {
+  if (result.skipped) {
+    return { created: false };
+  }
+
+  const task = createTaskExtended(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",
@@ -838,9 +1017,25 @@ export async function handleCheckSuite(
   const { emoji, label } = getCheckConclusionInfo(conclusion);
   const branch = check_suite.head_branch ?? "unknown";
 
-  const taskDescription = `${emoji} [GitHub PR #${prNumber} CI Suite] ${label}\n\nRepo: ${repository.full_name}\nBranch: ${branch}\nCommit: ${check_suite.head_sha.substring(0, 7)}\n\n---\nRelated task: ${relatedTask.id}\n🔀 Consider routing to the same agent working on the related task.\n💡 CI suite failed. Check individual check runs for details.`;
+  const result = resolveTemplate(
+    "github.check_suite.failed",
+    {
+      conclusion_emoji: emoji,
+      pr_number: prNumber,
+      conclusion_label: label,
+      repo_full_name: repository.full_name,
+      branch,
+      head_sha_short: check_suite.head_sha.substring(0, 7),
+      related_task_id: relatedTask.id,
+    },
+    { agentId: lead?.id, repoId: repository.full_name },
+  );
 
-  const task = createTaskExtended(taskDescription, {
+  if (result.skipped) {
+    return { created: false };
+  }
+
+  const task = createTaskExtended(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",
@@ -914,9 +1109,29 @@ export async function handleWorkflowRun(
   const lead = findLeadAgent();
   const { emoji, label } = getCheckConclusionInfo(conclusion);
 
-  const taskDescription = `${emoji} [GitHub PR #${prNumber} Workflow] ${workflow_run.name} ${label}\n\nRepo: ${repository.full_name}\nWorkflow: ${workflow.name}\nRun #${workflow_run.run_number}\nBranch: ${workflow_run.head_branch}\nTriggered by: ${workflow_run.event}\nLogs: ${workflow_run.html_url}\n\n---\nRelated task: ${relatedTask.id}\n🔀 Consider routing to the same agent working on the related task.\n💡 Workflow failed. Click the logs URL above to see what went wrong and fix the issue.`;
+  const result = resolveTemplate(
+    "github.workflow_run.failed",
+    {
+      conclusion_emoji: emoji,
+      pr_number: prNumber,
+      workflow_run_name: workflow_run.name,
+      conclusion_label: label,
+      repo_full_name: repository.full_name,
+      workflow_name: workflow.name,
+      run_number: workflow_run.run_number,
+      head_branch: workflow_run.head_branch,
+      trigger_event: workflow_run.event,
+      logs_url: workflow_run.html_url,
+      related_task_id: relatedTask.id,
+    },
+    { agentId: lead?.id, repoId: repository.full_name },
+  );
 
-  const task = createTaskExtended(taskDescription, {
+  if (result.skipped) {
+    return { created: false };
+  }
+
+  const task = createTaskExtended(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",
