@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { formatSmartTime } from "@/lib/utils";
 
 const STATE_VARIANTS: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
@@ -25,7 +26,7 @@ const STATE_VARIANTS: Record<string, "default" | "secondary" | "outline" | "dest
 
 export default function TemplatesPage() {
   const navigate = useNavigate();
-  const { data: templates, isLoading } = usePromptTemplates();
+  const { data: templates, isLoading, isError } = usePromptTemplates();
   const [search, setSearch] = useState("");
   const [scopeFilter, setScopeFilter] = useState("all");
   const [showDefaultsOnly, setShowDefaultsOnly] = useState(false);
@@ -91,6 +92,31 @@ export default function TemplatesPage() {
     },
     [navigate],
   );
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col flex-1 min-h-0 gap-4">
+        <Skeleton className="h-7 w-48" />
+        <div className="flex items-center gap-3">
+          <Skeleton className="h-9 w-64" />
+          <Skeleton className="h-9 w-[140px]" />
+          <Skeleton className="h-8 w-28" />
+        </div>
+        <Skeleton className="flex-1" />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="flex flex-col flex-1 items-center justify-center gap-2 text-muted-foreground">
+        <p>Failed to load templates</p>
+        <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">

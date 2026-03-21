@@ -6,6 +6,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import remarkGfm from "remark-gfm";
 import { usePreviewTemplate, usePromptTemplate, usePromptTemplateEvents } from "@/api/hooks";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useTheme } from "@/hooks/use-theme";
@@ -17,7 +18,7 @@ export default function TemplateVersionDetailPage() {
   const { theme } = useTheme();
   const versionNum = Number(versionParam);
 
-  const { data, isLoading } = usePromptTemplate(id);
+  const { data, isLoading, isError } = usePromptTemplate(id);
   const { data: events } = usePromptTemplateEvents();
   const previewMutation = usePreviewTemplate();
 
@@ -70,8 +71,17 @@ export default function TemplateVersionDetailPage() {
     );
   }
 
-  if (!template || !versionEntry) {
-    return <p className="text-muted-foreground">Version not found.</p>;
+  if (isError || !template || !versionEntry) {
+    return (
+      <div className="flex flex-col flex-1 items-center justify-center gap-2 text-muted-foreground">
+        <p>{!template ? "Template not found" : "Version not found"}</p>
+        <Button variant="outline" size="sm" asChild>
+          <Link to={template ? `/templates/${id}` : "/templates"}>
+            {template ? `Back to ${template.eventType}` : "Back to Templates"}
+          </Link>
+        </Button>
+      </div>
+    );
   }
 
   return (

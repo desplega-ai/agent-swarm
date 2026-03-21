@@ -3,8 +3,9 @@ import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { ArrowLeft, ChevronDown, ChevronRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import remarkGfm from "remark-gfm";
+import { toast } from "sonner";
 import {
   useCheckoutTemplate,
   useDeleteTemplate,
@@ -51,7 +52,7 @@ export default function TemplateDetailPage() {
   const navigate = useNavigate();
   const { theme } = useTheme();
 
-  const { data, isLoading } = usePromptTemplate(id);
+  const { data, isLoading, isError } = usePromptTemplate(id);
   const { data: events } = usePromptTemplateEvents();
   const upsertMutation = useUpsertTemplate();
   const deleteMutation = useDeleteTemplate();
@@ -111,40 +112,83 @@ export default function TemplateDetailPage() {
 
   const handleSave = useCallback(() => {
     if (!template) return;
-    upsertMutation.mutate({
-      eventType: template.eventType,
-      body,
-      state: state as "enabled" | "default_prompt_fallback" | "skip_event",
-      scope: template.scope,
-      scopeId: template.scopeId ?? undefined,
-    });
+    upsertMutation.mutate(
+      {
+        eventType: template.eventType,
+        body,
+        state: state as "enabled" | "default_prompt_fallback" | "skip_event",
+        scope: template.scope,
+        scopeId: template.scopeId ?? undefined,
+      },
+      {
+        onSuccess: () => toast.success("Template saved"),
+        onError: () => toast.error("Failed to save template"),
+      },
+    );
   }, [template, body, state, upsertMutation]);
 
   const handleCustomize = useCallback(() => {
     if (!template) return;
-    upsertMutation.mutate({
-      eventType: template.eventType,
-      body: template.body,
-      scope: "global",
-    });
+    upsertMutation.mutate(
+      {
+        eventType: template.eventType,
+        body: template.body,
+        scope: "global",
+      },
+      {
+        onSuccess: () => toast.success("Template customized — you can now edit it"),
+        onError: () => toast.error("Failed to customize template"),
+      },
+    );
   }, [template, upsertMutation]);
 
   const handleDelete = useCallback(() => {
     if (!id) return;
-    deleteMutation.mutate(id, { onSuccess: () => navigate("/templates") });
+    deleteMutation.mutate(id, {
+      onSuccess: () => {
+        toast.success("Template deleted");
+        navigate("/templates");
+      },
+      onError: () => toast.error("Failed to delete template"),
+    });
   }, [id, deleteMutation, navigate]);
 
   const handleReset = useCallback(() => {
     if (!id) return;
-    resetMutation.mutate(id);
+    resetMutation.mutate(id, {
+      onSuccess: () => toast.success("Template reset to default"),
+      onError: () => toast.error("Failed to reset template"),
+    });
     setResetOpen(false);
   }, [id, resetMutation]);
 
   const handleCheckout = useCallback(() => {
     if (!id || checkoutVersion === null) return;
-    checkoutMutation.mutate({ id, version: checkoutVersion });
+    const ver = checkoutVersion;
+    checkoutMutation.mutate(
+      { id, version: ver },
+      {
+        onSuccess: () => toast.success(`Checked out version ${ver}`),
+        onError: () => toast.error("Failed to checkout version"),
+      },
+    );
     setCheckoutVersion(null);
   }, [id, checkoutVersion, checkoutMutation]);
+
+  // Cmd+S / Ctrl+S to save (non-default templates only)
+  const isDefault = template?.isDefault;
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault();
+        if (!isDefault) {
+          handleSave();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isDefault, handleSave]);
 
   const eventDef = useMemo(
     () => events?.find((e) => e.eventType === template?.eventType),
@@ -224,8 +268,15 @@ export default function TemplateDetailPage() {
     );
   }
 
-  if (!template) {
-    return <p className="text-muted-foreground">Template not found.</p>;
+  if (isError || !template) {
+    return (
+      <div className="flex flex-col flex-1 items-center justify-center gap-2 text-muted-foreground">
+        <p>Template not found</p>
+        <Button variant="outline" size="sm" asChild>
+          <Link to="/templates">Back to Templates</Link>
+        </Button>
+      </div>
+    );
   }
 
   return (
