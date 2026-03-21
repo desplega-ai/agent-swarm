@@ -1,4 +1,5 @@
 import {
+  getCompletedStepNodeIds,
   getWorkflow,
   getWorkflowRun,
   getWorkflowRunStep,
@@ -8,7 +9,7 @@ import {
 } from "../be/db";
 import { checkpointStep } from "./checkpoint";
 import { getSuccessors } from "./definition";
-import { walkGraph } from "./engine";
+import { findReadyNodes, walkGraph } from "./engine";
 import type { WorkflowEventBus } from "./event-bus";
 import type { ExecutorRegistry } from "./executors/registry";
 
@@ -20,6 +21,10 @@ interface TaskEvent {
   workflowRunStepId?: string;
   failureReason?: string;
 }
+
+// Serialize resume processing per workflow run to prevent race conditions
+// during fan-out convergence (multiple tasks completing ~simultaneously)
+const resumeQueues = new Map<string, Promise<void>>();
 
 /**
  * Wire up event bus listeners for workflow resume on task lifecycle events.
@@ -63,8 +68,23 @@ async function resumeFromTaskCompletion(
   event: TaskEvent,
   registry: ExecutorRegistry,
 ): Promise<void> {
+  const runId = event.workflowRunId!;
+
+  // Serialize resume processing per run — prevents race conditions when
+  // multiple fan-out tasks complete simultaneously and both try to
+  // evaluate convergence + walk the graph.
+  const prev = resumeQueues.get(runId) ?? Promise.resolve();
+  const next = prev.then(() => doResumeFromTaskCompletion(event, registry)).catch(() => {});
+  resumeQueues.set(runId, next);
+  await next;
+}
+
+async function doResumeFromTaskCompletion(
+  event: TaskEvent,
+  registry: ExecutorRegistry,
+): Promise<void> {
   const run = getWorkflowRun(event.workflowRunId!);
-  if (!run || run.status !== "waiting") return;
+  if (!run || (run.status !== "waiting" && run.status !== "running")) return;
 
   const step = getWorkflowRunStep(event.workflowRunStepId!);
   if (!step || step.status !== "waiting") return;
@@ -94,9 +114,19 @@ async function resumeFromTaskCompletion(
   // Set run back to running
   updateWorkflowRun(run.id, { status: "running" });
 
-  // Find successors and continue DAG walk
-  const successors = getSuccessors(workflow.definition, step.nodeId, "default");
-  await walkGraph(workflow.definition, run.id, ctx, successors, registry, workflow.id);
+  // Use convergence-aware node detection instead of blindly passing successors.
+  // This prevents duplicate step creation for convergence nodes (e.g., fan-out → merge).
+  // findReadyNodes checks ALL predecessors are completed before marking a node ready.
+  const completedNodeIds = new Set(getCompletedStepNodeIds(run.id));
+  const readyNodes = findReadyNodes(workflow.definition, completedNodeIds);
+
+  if (readyNodes.length > 0) {
+    await walkGraph(workflow.definition, run.id, ctx, readyNodes, registry, workflow.id);
+  } else {
+    // No nodes ready — all predecessors haven't completed yet.
+    // Set run back to waiting so the next task completion can re-evaluate.
+    updateWorkflowRun(run.id, { status: "waiting" });
+  }
 }
 
 /**
