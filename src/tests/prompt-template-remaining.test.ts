@@ -377,6 +377,8 @@ describe("Runner triggers — backward compatibility", () => {
       work_on_task_cmd: "/work-on-task",
       task_id: "abc123",
       task_desc_section: '\n\nTask: "Fix the bug"',
+      output_instructions:
+        '\n\nWhen done, use `store-progress` with status: "completed" and include your output.',
     });
 
     expect(result.skipped).toBe(false);
