@@ -1,14 +1,48 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import { createServer as createHttpServer, type Server } from "node:http";
+
+// ─── Mock Slack client (must be before channel-activity import) ─────────────
+
+const mockHistory = mock<
+  (args: Record<string, unknown>) => Promise<{
+    messages?: Array<Record<string, unknown>>;
+  }>
+>(() => Promise.resolve({ messages: [] }));
+
+const mockList = mock(() =>
+  Promise.resolve({
+    channels: [
+      { id: "C001", name: "general", is_member: true },
+      { id: "C002", name: "random", is_member: true },
+      { id: "C003", name: "archived", is_member: false }, // not a member — should be excluded
+    ],
+    response_metadata: {},
+  }),
+);
+
+const mockAuthTest = mock(() => Promise.resolve({ user_id: "UBOT123" }));
+
+mock.module("../slack/app", () => ({
+  getSlackApp: () => ({
+    client: {
+      auth: { test: mockAuthTest },
+      conversations: {
+        history: mockHistory,
+        list: mockList,
+      },
+    },
+  }),
+}));
+
 import {
   closeDb,
-  createAgent,
   getAllChannelActivityCursors,
   getChannelActivityCursor,
   initDb,
   upsertChannelActivityCursor,
 } from "../be/db";
+import { fetchChannelActivity } from "../slack/channel-activity";
 
 const TEST_DB_PATH = "./test-channel-activity.sqlite";
 
@@ -203,351 +237,124 @@ describe("Channel Activity — cursor commit endpoint", () => {
   });
 });
 
-// ─── Poll Trigger — channel_activity ─────────────────────────────────────────
+// ─── fetchChannelActivity (mocked Slack) ─────────────────────────────────────
 
-describe("Channel Activity — poll trigger integration", () => {
-  test("channel_activity trigger payload shape matches expectations", () => {
-    // This tests the expected shape of the trigger payload
-    // that the poll endpoint would produce
-    const trigger = {
-      type: "channel_activity",
-      count: 2,
-      messages: [
-        {
-          channelId: "C001",
-          channelName: "general",
-          ts: "1711111111.000001",
-          user: "U123",
-          text: "Hello world",
-        },
-        {
-          channelId: "C001",
-          channelName: "general",
-          ts: "1711111111.000002",
-          user: "U456",
-          text: "Hi there",
-        },
-      ],
-      cursorUpdates: [{ channelId: "C001", ts: "1711111111.000002" }],
-    };
-
-    expect(trigger.type).toBe("channel_activity");
-    expect(trigger.count).toBe(2);
-    expect(trigger.messages).toHaveLength(2);
-    expect(trigger.cursorUpdates).toHaveLength(1);
-    // cursorUpdates should point to the latest ts per channel
-    expect(trigger.cursorUpdates[0].ts).toBe("1711111111.000002");
+describe("Channel Activity — fetchChannelActivity", () => {
+  beforeEach(() => {
+    mockHistory.mockReset();
+    mockHistory.mockImplementation(() => Promise.resolve({ messages: [] }));
   });
 
-  test("LEAD_MONITOR_CHANNELS env var gates the trigger", () => {
-    // When LEAD_MONITOR_CHANNELS is not "true", channel_activity should not fire
-    const envValue = process.env.LEAD_MONITOR_CHANNELS;
+  test("cold-start: channels without cursor get seed cursors, no messages returned", async () => {
+    mockHistory.mockImplementation(() =>
+      Promise.resolve({
+        messages: [{ ts: "1711000000.000100", user: "U123", text: "Latest" }],
+      }),
+    );
 
-    // Not set
-    delete process.env.LEAD_MONITOR_CHANNELS;
-    expect(process.env.LEAD_MONITOR_CHANNELS).toBeUndefined();
+    const result = await fetchChannelActivity(new Map());
 
-    // Set to something other than "true"
-    process.env.LEAD_MONITOR_CHANNELS = "false";
-    expect(process.env.LEAD_MONITOR_CHANNELS !== "true").toBe(true);
-
-    // Restore
-    if (envValue !== undefined) {
-      process.env.LEAD_MONITOR_CHANNELS = envValue;
-    } else {
-      delete process.env.LEAD_MONITOR_CHANNELS;
-    }
+    // Cold start should NOT return messages (prevents flood)
+    expect(result.messages).toHaveLength(0);
+    // Should have seed cursors for bot-member channels (C001 and C002; C003 is_member=false)
+    expect(result.seedCursors.size).toBe(2);
+    expect(result.seedCursors.get("C001")).toBe("1711000000.000100");
+    expect(result.seedCursors.get("C002")).toBe("1711000000.000100");
   });
 
-  test("LEAD_MONITOR_CHANNEL_IDS parses comma-separated list correctly", () => {
-    const raw = " C001, C002 ,C003 , ";
-    const allowedIds = raw
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    expect(allowedIds).toEqual(["C001", "C002", "C003"]);
-  });
-
-  test("cursorUpdates computation selects latest ts per channel", () => {
-    // Simulates the latestPerChannel logic from poll.ts
-    const messages = [
-      { channelId: "C001", ts: "1711111111.000001" },
-      { channelId: "C001", ts: "1711111111.000005" },
-      { channelId: "C002", ts: "1711111111.000002" },
-      { channelId: "C001", ts: "1711111111.000003" },
-      { channelId: "C002", ts: "1711111111.000009" },
-    ];
-
-    const latestPerChannel = new Map<string, string>();
-    for (const msg of messages) {
-      const existing = latestPerChannel.get(msg.channelId);
-      if (!existing || Number.parseFloat(msg.ts) > Number.parseFloat(existing)) {
-        latestPerChannel.set(msg.channelId, msg.ts);
+  test("incremental: returns messages newer than cursor, sorted oldest-first", async () => {
+    mockHistory.mockImplementation((args: Record<string, unknown>) => {
+      if (args.channel === "C001") {
+        return Promise.resolve({
+          messages: [
+            { ts: "1711000000.000050", user: "U123", text: "At cursor" }, // cursor itself
+            { ts: "1711000000.000060", user: "U456", text: "Newer 2" },
+            { ts: "1711000000.000055", user: "U789", text: "Newer 1" },
+          ],
+        });
       }
-    }
-
-    expect(latestPerChannel.get("C001")).toBe("1711111111.000005");
-    expect(latestPerChannel.get("C002")).toBe("1711111111.000009");
-  });
-});
-
-// ─── fetchChannelActivity logic ─────────────────────────────────────────────
-
-describe("Channel Activity — fetchChannelActivity logic", () => {
-  test("message filtering rules: skips bot messages, thread replies, empty text", () => {
-    // Simulate the filter logic from fetchChannelActivity
-    const botUserId = "UBOT";
-    const cursor = "1711000000.000000";
-
-    const rawMessages = [
-      // Valid message
-      {
-        ts: "1711000000.000001",
-        user: "U123",
-        text: "Hello",
-        bot_id: undefined,
-        subtype: undefined,
-        thread_ts: undefined,
-      },
-      // Bot message (bot_id present)
-      {
-        ts: "1711000000.000002",
-        user: "U456",
-        text: "Bot msg",
-        bot_id: "B001",
-        subtype: undefined,
-        thread_ts: undefined,
-      },
-      // Bot subtype
-      {
-        ts: "1711000000.000003",
-        user: "U789",
-        text: "Bot sub",
-        bot_id: undefined,
-        subtype: "bot_message",
-        thread_ts: undefined,
-      },
-      // Our own bot
-      {
-        ts: "1711000000.000004",
-        user: botUserId,
-        text: "Own bot",
-        bot_id: undefined,
-        subtype: undefined,
-        thread_ts: undefined,
-      },
-      // Empty text
-      {
-        ts: "1711000000.000005",
-        user: "U111",
-        text: "",
-        bot_id: undefined,
-        subtype: undefined,
-        thread_ts: undefined,
-      },
-      // Thread reply (thread_ts != ts)
-      {
-        ts: "1711000000.000006",
-        user: "U222",
-        text: "Reply",
-        bot_id: undefined,
-        subtype: undefined,
-        thread_ts: "1711000000.000001",
-      },
-      // Thread parent (thread_ts == ts, should pass)
-      {
-        ts: "1711000000.000007",
-        user: "U333",
-        text: "Thread parent",
-        bot_id: undefined,
-        subtype: undefined,
-        thread_ts: "1711000000.000007",
-      },
-      // Cursor message itself (should be skipped)
-      {
-        ts: cursor,
-        user: "U444",
-        text: "Cursor msg",
-        bot_id: undefined,
-        subtype: undefined,
-        thread_ts: undefined,
-      },
-      // No user
-      {
-        ts: "1711000000.000008",
-        user: undefined,
-        text: "No user",
-        bot_id: undefined,
-        subtype: undefined,
-        thread_ts: undefined,
-      },
-    ];
-
-    const filtered = rawMessages.filter((msg) => {
-      if (msg.ts === cursor) return false;
-      if (msg.bot_id || msg.subtype === "bot_message") return false;
-      if (msg.user === botUserId) return false;
-      if (!msg.text?.trim() || !msg.user) return false;
-      if (msg.thread_ts && msg.thread_ts !== msg.ts) return false;
-      return true;
+      // C002 has no cursor → seeds
+      return Promise.resolve({
+        messages: [{ ts: "1711000000.000200", user: "U111", text: "Seed" }],
+      });
     });
 
-    // Only the valid message and thread parent should pass
-    expect(filtered).toHaveLength(2);
-    expect(filtered[0].ts).toBe("1711000000.000001");
-    expect(filtered[1].ts).toBe("1711000000.000007");
+    const cursors = new Map([["C001", "1711000000.000050"]]);
+    const result = await fetchChannelActivity(cursors);
+
+    // Cursor message itself ("At cursor") is skipped; 2 newer messages remain
+    expect(result.messages).toHaveLength(2);
+    // Sorted oldest-first
+    expect(result.messages[0].ts).toBe("1711000000.000055");
+    expect(result.messages[0].text).toBe("Newer 1");
+    expect(result.messages[1].ts).toBe("1711000000.000060");
+    expect(result.messages[1].text).toBe("Newer 2");
+    // C002 was seeded (no cursor)
+    expect(result.seedCursors.get("C002")).toBe("1711000000.000200");
   });
 
-  test("messages are sorted oldest-first by timestamp", () => {
-    const messages = [
-      { ts: "1711000000.000005", channelId: "C001" },
-      { ts: "1711000000.000001", channelId: "C001" },
-      { ts: "1711000000.000003", channelId: "C002" },
-    ];
+  test("filters bot messages, thread replies, empty text, and own bot user", async () => {
+    mockHistory.mockImplementation(() =>
+      Promise.resolve({
+        messages: [
+          { ts: "1711000000.000051", user: "U123", text: "Valid message" },
+          { ts: "1711000000.000052", user: "U456", text: "Bot msg", bot_id: "B001" },
+          { ts: "1711000000.000053", user: "U789", text: "Bot subtype", subtype: "bot_message" },
+          { ts: "1711000000.000054", user: "UBOT123", text: "Own bot msg" },
+          { ts: "1711000000.000055", user: "U111", text: "" },
+          {
+            ts: "1711000000.000056",
+            user: "U222",
+            text: "Thread reply",
+            thread_ts: "1711000000.000001",
+          },
+          {
+            ts: "1711000000.000057",
+            user: "U333",
+            text: "Thread parent",
+            thread_ts: "1711000000.000057",
+          },
+          { ts: "1711000000.000058", user: undefined, text: "No user" },
+        ],
+      }),
+    );
 
-    messages.sort((a, b) => Number.parseFloat(a.ts) - Number.parseFloat(b.ts));
+    const cursors = new Map([
+      ["C001", "1711000000.000050"],
+      ["C002", "1711000000.000050"],
+    ]);
+    const result = await fetchChannelActivity(cursors);
 
-    expect(messages[0].ts).toBe("1711000000.000001");
-    expect(messages[1].ts).toBe("1711000000.000003");
-    expect(messages[2].ts).toBe("1711000000.000005");
+    // Both channels return the same mock messages, so we get 2 valid messages per channel = 4 total
+    const texts = result.messages.map((m) => m.text);
+    expect(texts).toContain("Valid message");
+    expect(texts).toContain("Thread parent");
+    expect(texts).not.toContain("Bot msg");
+    expect(texts).not.toContain("Bot subtype");
+    expect(texts).not.toContain("Own bot msg");
+    expect(texts).not.toContain("Thread reply");
+    expect(texts).not.toContain("No user");
+    // Each valid message appears once per channel (C001 + C002)
+    expect(texts.filter((t) => t === "Valid message")).toHaveLength(2);
   });
 
-  test("cold-start: channels without cursor get seed cursors, no messages returned", () => {
-    // When a channel has no cursor, fetchChannelActivity should:
-    // 1. Fetch the latest message for seeding
-    // 2. Add it to seedCursors
-    // 3. NOT add any messages (skip to avoid cold-start flood)
+  test("allowedChannelIds restricts which channels are processed", async () => {
+    mockHistory.mockImplementation(() =>
+      Promise.resolve({
+        messages: [{ ts: "1711000000.000100", user: "U123", text: "Hello" }],
+      }),
+    );
 
-    const cursors = new Map<string, string>();
-    // C_NEW has no cursor
-    const hasNoCursor = !cursors.has("C_NEW");
-    expect(hasNoCursor).toBe(true);
+    const cursors = new Map([
+      ["C001", "1711000000.000050"],
+      ["C002", "1711000000.000050"],
+    ]);
+    const result = await fetchChannelActivity(cursors, ["C001"]);
 
-    // Simulating seed behavior
-    const seedCursors = new Map<string, string>();
-    const latestMsgTs = "1711000000.000100";
-    seedCursors.set("C_NEW", latestMsgTs);
-
-    expect(seedCursors.get("C_NEW")).toBe(latestMsgTs);
-    // No messages should be added for cold-start channels
-  });
-
-  test("incremental: channels with cursor fetch messages newer than cursor", () => {
-    const cursors = new Map<string, string>();
-    cursors.set("C_EXISTING", "1711000000.000050");
-
-    // The oldest parameter passed to conversations.history should be the cursor
-    const oldest = cursors.get("C_EXISTING");
-    expect(oldest).toBe("1711000000.000050");
-
-    // Messages at or before cursor should be filtered out
-    const msgs = [
-      { ts: "1711000000.000050" }, // equals cursor — should be skipped
-      { ts: "1711000000.000051" }, // newer — should pass
-      { ts: "1711000000.000099" }, // newer — should pass
-    ];
-
-    const filtered = msgs.filter((m) => m.ts !== oldest);
-    expect(filtered).toHaveLength(2);
-  });
-
-  test("channel allowlist filters channels correctly", () => {
-    const allChannels = [
-      { id: "C001", name: "general" },
-      { id: "C002", name: "random" },
-      { id: "C003", name: "dev" },
-    ];
-
-    const allowedChannelIds = ["C001", "C003"];
-    const allowed = new Set(allowedChannelIds);
-    const filtered = allChannels.filter((ch) => allowed.has(ch.id));
-
-    expect(filtered).toHaveLength(2);
-    expect(filtered.map((c) => c.id)).toEqual(["C001", "C003"]);
-  });
-
-  test("empty allowlist returns no channels", () => {
-    const allChannels = [
-      { id: "C001", name: "general" },
-      { id: "C002", name: "random" },
-    ];
-
-    const allowedChannelIds: string[] = [];
-    // When allowedChannelIds is empty and length is 0, the filter is NOT applied
-    // (undefined means no filter, empty array means no channels)
-    if (allowedChannelIds.length > 0) {
-      const allowed = new Set(allowedChannelIds);
-      const filtered = allChannels.filter((ch) => allowed.has(ch.id));
-      expect(filtered).toHaveLength(0);
-    } else {
-      // No filter applied — all channels returned
-      expect(allChannels).toHaveLength(2);
-    }
-  });
-});
-
-// ─── Runner — cursor commit on success ──────────────────────────────────────
-
-describe("Channel Activity — runner cursor commit logic", () => {
-  test("cursors committed only on exitCode 0 (success)", () => {
-    const cursorUpdates = [
-      { channelId: "C001", ts: "1711000000.000001" },
-      { channelId: "C002", ts: "1711000000.000002" },
-    ];
-
-    // On success (exitCode 0), cursors should be committed
-    const exitCode0 = 0;
-    const shouldCommit = cursorUpdates.length > 0 && exitCode0 === 0;
-    expect(shouldCommit).toBe(true);
-
-    // On failure (exitCode 1), cursors should NOT be committed
-    const exitCode1 = 1;
-    const shouldNotCommit = cursorUpdates.length > 0 && exitCode1 === 0;
-    expect(shouldNotCommit).toBe(false);
-  });
-
-  test("empty cursorUpdates array skips commit", () => {
-    const cursorUpdates: Array<{ channelId: string; ts: string }> = [];
-    const exitCode = 0;
-    const shouldCommit = cursorUpdates.length > 0 && exitCode === 0;
-    expect(shouldCommit).toBe(false);
-  });
-
-  test("undefined cursorUpdates skips commit", () => {
-    const cursorUpdates: Array<{ channelId: string; ts: string }> | undefined = undefined;
-    const exitCode = 0;
-    const shouldCommit = cursorUpdates && cursorUpdates.length > 0 && exitCode === 0;
-    expect(shouldCommit).toBeFalsy();
-  });
-
-  test("cursorUpdates attached only for channel_activity trigger type", () => {
-    const trigger = {
-      type: "channel_activity",
-      cursorUpdates: [{ channelId: "C001", ts: "1711000000.000001" }],
-    };
-
-    const runningTask: { cursorUpdates?: Array<{ channelId: string; ts: string }> } = {};
-
-    if (trigger.type === "channel_activity" && trigger.cursorUpdates) {
-      runningTask.cursorUpdates = trigger.cursorUpdates;
-    }
-
-    expect(runningTask.cursorUpdates).toBeDefined();
-    expect(runningTask.cursorUpdates).toHaveLength(1);
-
-    // For non-channel_activity triggers, cursorUpdates should NOT be attached
-    const otherTrigger = {
-      type: "task_assigned",
-      cursorUpdates: undefined,
-    };
-
-    const otherTask: { cursorUpdates?: Array<{ channelId: string; ts: string }> } = {};
-    if (otherTrigger.type === "channel_activity" && otherTrigger.cursorUpdates) {
-      otherTask.cursorUpdates = otherTrigger.cursorUpdates;
-    }
-
-    expect(otherTask.cursorUpdates).toBeUndefined();
+    // Only C001 should have messages
+    const channelIds = new Set(result.messages.map((m) => m.channelId));
+    expect(channelIds.has("C001")).toBe(true);
+    expect(channelIds.has("C002")).toBe(false);
   });
 });
 
@@ -572,19 +379,5 @@ describe("Channel Activity — migration 015", () => {
 
     const cursor = getChannelActivityCursor("C_PK_MIG");
     expect(cursor!.lastSeenTs).toBe("1711000000.000999");
-  });
-});
-
-// ─── Channel cache TTL ─────────────────────────────────────────────────────
-
-describe("Channel Activity — cache behavior", () => {
-  test("channel cache TTL is 5 minutes", () => {
-    const CHANNEL_CACHE_TTL_MS = 5 * 60 * 1000;
-    expect(CHANNEL_CACHE_TTL_MS).toBe(300_000);
-  });
-
-  test("throttle interval is 60 seconds", () => {
-    const CHANNEL_ACTIVITY_INTERVAL_MS = 60_000;
-    expect(CHANNEL_ACTIVITY_INTERVAL_MS).toBe(60_000);
   });
 });
