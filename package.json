@@ -1,6 +1,6 @@
 {
   "name": "@desplega.ai/agent-swarm",
-  "version": "1.49.0",
+  "version": "1.50.0",
   "description": "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants",
   "license": "MIT",
   "author": "desplega.sh <contact@desplega.sh>",
@@ -33,6 +33,7 @@
   "scripts": {
     "build:pi-skills": "bun run plugin/build-pi-skills.ts",
     "tsc:check": "bun tsc --noEmit",
+    "check:db-boundary": "bash scripts/check-db-boundary.sh",
     "cli": "bun src/cli.tsx",
     "hook": "bun src/hooks/hook.ts",
     "claude": "bun src/cli.tsx claude",

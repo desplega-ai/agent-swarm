@@ -28,6 +28,18 @@ export {
   useEpics,
   useUpdateEpic,
 } from "./use-epics";
+export type { PromptTemplateFilters } from "./use-prompt-templates";
+export {
+  useCheckoutTemplate,
+  useDeleteTemplate,
+  usePreviewTemplate,
+  usePromptTemplate,
+  usePromptTemplateEvents,
+  usePromptTemplates,
+  useRenderTemplate,
+  useResetTemplate,
+  useUpsertTemplate,
+} from "./use-prompt-templates";
 export { useCreateRepo, useDeleteRepo, useRepos, useUpdateRepo } from "./use-repos";
 export type { ScheduledTaskFilters } from "./use-schedules";
 export {

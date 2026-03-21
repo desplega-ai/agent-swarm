@@ -7,6 +7,7 @@ import "../src/http/db-query";
 import "../src/http/ecosystem";
 import "../src/http/epics";
 import "../src/http/memory";
+import "../src/http/prompt-templates";
 import "../src/http/poll";
 import "../src/http/repos";
 import "../src/http/schedules";

@@ -8,8 +8,12 @@ import type {
   Epic,
   EpicsResponse,
   EpicWithTasks,
+  EventDefinition,
   LogsResponse,
   MessagesResponse,
+  PreviewResponse,
+  PromptTemplate,
+  PromptTemplateHistory,
   ScheduledTask,
   ScheduledTasksResponse,
   ServicesResponse,
@@ -23,6 +27,7 @@ import type {
   SwarmReposResponse,
   TasksResponse,
   TaskWithLogs,
+  UpsertPromptTemplateInput,
   UsageSummaryResponse,
   Workflow,
   WorkflowRun,
@@ -800,6 +805,127 @@ class ApiClient {
       body: JSON.stringify({ sql, params }),
     });
     if (!res.ok) throw new Error(`Failed to execute query: ${res.status}`);
+    return res.json();
+  }
+
+  // Prompt Templates
+
+  async fetchPromptTemplates(filters?: {
+    eventType?: string;
+    scope?: string;
+    isDefault?: boolean;
+  }): Promise<{ templates: PromptTemplate[] }> {
+    const params = new URLSearchParams();
+    if (filters?.eventType) params.set("eventType", filters.eventType);
+    if (filters?.scope) params.set("scope", filters.scope);
+    if (filters?.isDefault !== undefined) params.set("isDefault", String(filters.isDefault));
+    const queryString = params.toString();
+    const url = `${this.getBaseUrl()}/api/prompt-templates${queryString ? `?${queryString}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch prompt templates: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchPromptTemplate(
+    id: string,
+  ): Promise<{ template: PromptTemplate; history: PromptTemplateHistory[] }> {
+    const url = `${this.getBaseUrl()}/api/prompt-templates/${id}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch prompt template: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchPromptTemplateEvents(): Promise<{ events: EventDefinition[] }> {
+    const url = `${this.getBaseUrl()}/api/prompt-templates/events`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch prompt template events: ${res.status}`);
+    return res.json();
+  }
+
+  async previewPromptTemplate(data: {
+    eventType: string;
+    body?: string;
+    variables?: Record<string, unknown>;
+  }): Promise<PreviewResponse> {
+    const url = `${this.getBaseUrl()}/api/prompt-templates/preview`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to preview template" }));
+      throw new Error(error.error || `Failed to preview template: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async renderPromptTemplate(data: {
+    eventType: string;
+    variables?: Record<string, unknown>;
+    agentId?: string;
+    repoId?: string;
+  }): Promise<import("./types").RenderResponse> {
+    const url = `${this.getBaseUrl()}/api/prompt-templates/render`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to render prompt template: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async upsertPromptTemplate(data: UpsertPromptTemplateInput): Promise<PromptTemplate> {
+    const url = `${this.getBaseUrl()}/api/prompt-templates`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to upsert prompt template" }));
+      throw new Error(error.error || `Failed to upsert prompt template: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async checkoutPromptTemplate(id: string, version: number): Promise<PromptTemplate> {
+    const url = `${this.getBaseUrl()}/api/prompt-templates/${id}/checkout`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ version }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to checkout prompt template" }));
+      throw new Error(error.error || `Failed to checkout prompt template: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async resetPromptTemplate(id: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/prompt-templates/${id}/reset`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to reset prompt template" }));
+      throw new Error(error.error || `Failed to reset prompt template: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async deletePromptTemplate(id: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/prompt-templates/${id}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to delete prompt template" }));
+      throw new Error(error.error || `Failed to delete prompt template: ${res.status}`);
+    }
     return res.json();
   }
 }

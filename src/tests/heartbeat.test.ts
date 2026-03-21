@@ -30,6 +30,7 @@ describe("Heartbeat Triage", () => {
     } catch {
       // File doesn't exist
     }
+    closeDb();
     initDb(TEST_DB_PATH);
   });
 

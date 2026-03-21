@@ -535,6 +535,64 @@ export interface WorkflowRunsResponse {
   runs: WorkflowRun[];
 }
 
+// Prompt Templates
+
+export interface PromptTemplate {
+  id: string;
+  eventType: string;
+  scope: "global" | "agent" | "repo";
+  scopeId: string | null;
+  state: "enabled" | "default_prompt_fallback" | "skip_event";
+  body: string;
+  isDefault: boolean;
+  version: number;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PromptTemplateHistory {
+  id: string;
+  templateId: string;
+  version: number;
+  body: string;
+  state: string;
+  changedBy: string | null;
+  changedAt: string;
+  changeReason: string | null;
+}
+
+export interface EventDefinition {
+  eventType: string;
+  header: string;
+  defaultBody: string;
+  variables: { name: string; description: string; example?: string }[];
+  category: "event" | "system" | "common" | "task_lifecycle" | "session";
+}
+
+export interface UpsertPromptTemplateInput {
+  eventType: string;
+  scope?: "global" | "agent" | "repo";
+  scopeId?: string;
+  state?: "enabled" | "default_prompt_fallback" | "skip_event";
+  body: string;
+  changedBy?: string;
+  changeReason?: string;
+}
+
+export interface PreviewResponse {
+  rendered: string;
+  unresolved: string[];
+}
+
+export interface RenderResponse {
+  text: string;
+  skipped: boolean;
+  unresolved: string[];
+  templateId?: string;
+  scope?: string;
+}
+
 // Debug / DB Explorer
 export interface DbQueryRequest {
   sql: string;

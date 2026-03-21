@@ -5,7 +5,10 @@ import {
   getLeadAgent,
   getMostRecentTaskInThread,
 } from "../be/db";
+import { resolveTemplate } from "../prompts/resolver";
 import { bufferThreadMessage } from "./thread-buffer";
+// Side-effect import: registers all Slack event templates in the in-memory registry
+import "./templates";
 
 const additiveSlack = process.env.ADDITIVE_SLACK === "true";
 
@@ -15,7 +18,8 @@ export function createAssistant(): Assistant {
       try {
         await saveThreadContext();
 
-        await say("Hi! I'm your Agent Swarm assistant. How can I help?");
+        const greetingResult = resolveTemplate("slack.assistant.greeting", {});
+        await say(greetingResult.text);
 
         await setSuggestedPrompts({
           title: "Try these:",
@@ -93,9 +97,8 @@ export function createAssistant(): Assistant {
             slackThreadTs: threadTs,
             slackUserId: userId,
           });
-          await say(
-            "No agents are available right now. Your request has been queued and will be processed when agents come back online.",
-          );
+          const offlineResult = resolveTemplate("slack.assistant.offline", {});
+          await say(offlineResult.text);
           return;
         }
 
