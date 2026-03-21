@@ -35,7 +35,6 @@ beforeEach(async () => {
 
 afterAll(async () => {
   closeDb();
-  clearTemplateDefinitions();
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       await unlink(TEST_DB_PATH + suffix);
