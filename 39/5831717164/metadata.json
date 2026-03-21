@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.5.1",
+  "checkpoint_id": "395831717164",
+  "strategy": "manual-commit",
+  "branch": "fet/template-registry",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "CLAUDE.md",
+    "src/prompts/resolver.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/39/5831717164/0/metadata.json",
+      "transcript": "/39/5831717164/0/full.jsonl",
+      "content_hash": "/39/5831717164/0/content_hash.txt",
+      "prompt": "/39/5831717164/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 229,
+    "cache_creation_tokens": 253752,
+    "cache_read_tokens": 20072507,
+    "output_tokens": 28278,
+    "api_call_count": 93
+  }
+}
