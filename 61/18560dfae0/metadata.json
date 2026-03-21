@@ -3,7 +3,7 @@
   "checkpoint_id": "6118560dfae0",
   "strategy": "manual-commit",
   "branch": "fet/template-registry",
-  "checkpoints_count": 0,
+  "checkpoints_count": 1,
   "files_touched": [
     "src/tests/prompt-templates-db.test.ts",
     "src/tests/self-improvement.test.ts"
@@ -14,13 +14,19 @@
       "transcript": "/61/18560dfae0/0/full.jsonl",
       "content_hash": "/61/18560dfae0/0/content_hash.txt",
       "prompt": ""
+    },
+    {
+      "metadata": "/61/18560dfae0/1/metadata.json",
+      "transcript": "/61/18560dfae0/1/full.jsonl",
+      "content_hash": "/61/18560dfae0/1/content_hash.txt",
+      "prompt": "/61/18560dfae0/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 0,
-    "cache_creation_tokens": 0,
-    "cache_read_tokens": 0,
-    "output_tokens": 0,
-    "api_call_count": 0
+    "input_tokens": 519,
+    "cache_creation_tokens": 472993,
+    "cache_read_tokens": 31648986,
+    "output_tokens": 71325,
+    "api_call_count": 231
   }
 }
