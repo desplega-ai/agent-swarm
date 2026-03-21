@@ -63,3 +63,52 @@ Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-age
 I see this in some of the templates, are we correctly resolving them???
 
 also is the rendered actual md preview? I think there are some new line issues in there :/
+
+---
+
+<task-notification>
+<task-id>aa01d7d8366c9edf6</task-id>
+<tool-use-id>toolu_016tnqorAsmp1QBhEuZbikib</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/aa01d7d8366c9edf6.output</output-file>
+<status>completed</status>
+<summary>Agent "Phase 4: Polish + Edge Cases" completed</summary>
+<result>
+
+Everything looks correct. All three files are properly updated and all checks pass. Here is a summary of what was done:
+
+---
+
+**Phase 4: Polish + Edge Cases -- Complete**
+
+### Changes made:
+
+**1. `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/pages/templates/page.tsx` (list page)**
+- Added `Skeleton` import
+- Destructured `isError` from `usePromptTemplates()`
+- Added loading skeleton that mirrors the page layout (title, filter bar, grid area)
+- Added error state with "Failed to load templates" message and a Retry button
+
+**2. `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/pages/templates/[id]/page.tsx` (detail page)**
+- Added `Link` import from react-router-dom and `toast` from `sonner`
+- Destructured `isError` from `usePromptTemplate()`
+- Improved error state: now shows centered "Template not found" with a "Back to Templates" link button (was just a plain `<p>` tag)
+- Added toast notifications to all 5 mutation handlers:
+  - `handleSave`: success/error toasts
+  - `handleCustomize`: success/error toasts
+  - `handleDelete`: success toast + navigate, error toast
+  - `handleReset`: success/error toasts
+  - `handleCheckout`: success toast with version number, error toast
+- Added `Cmd+S` / `Ctrl+S` keyboard shortcut to save (only fires for non-default templates). `handleSave` was already a `useCallback`, so the shortcut uses a stable reference.
+
+**3. `/Users/taras/worktrees/agent-swarm/2026-03-20-fet/template-registry/new-ui/src/pages/templates/[id]/history/[version]/page.tsx` (version detail page)**
+- Added `Button` import
+- Destructured `isError` from `usePromptTemplate()`
+- Improved error state: shows contextual message ("Template not found" vs "Version not found") with appropriate back link (to template detail if template exists, to templates list otherwise)
+
+### Verification:
+- `pnpm lint` -- passed
+- `pnpm exec tsc --noEmit` -- passed
+- `pnpm build` -- passed</result>
+<usage><total_tokens>62523</total_tokens><tool_uses>39</tool_uses><duration_ms>174975</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/aa01d7d8366c9edf6.output
