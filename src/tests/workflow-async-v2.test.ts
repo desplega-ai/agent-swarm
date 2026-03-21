@@ -497,16 +497,7 @@ describe("Workflow Async v2 (Phase 4)", () => {
 
       // Workflow run should be completed
       const run = getWorkflowRun(runId)!;
-      expect(["completed", "running"]).toContain(run.status);
-      // If still running, the walkGraph completion check may not have finalized.
-      // This can happen when concurrent resume handlers set status to "running" after
-      // the walkGraph completion check. Verify the merge step is done (the important part).
-      if (run.status !== "completed") {
-        // All steps should be completed even if the run status is still "running"
-        const allSteps = getWorkflowRunStepsByRunId(runId);
-        const allCompleted = allSteps.every((s) => s.status === "completed");
-        expect(allCompleted).toBe(true);
-      }
+      expect(run.status).toBe("completed");
     });
   });
 });
