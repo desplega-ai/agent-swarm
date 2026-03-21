@@ -36,6 +36,7 @@ export {
   usePromptTemplate,
   usePromptTemplateEvents,
   usePromptTemplates,
+  useRenderTemplate,
   useResetTemplate,
   useUpsertTemplate,
 } from "./use-prompt-templates";

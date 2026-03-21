@@ -1,7 +1,7 @@
 import Editor from "@monaco-editor/react";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { ArrowLeft, ChevronDown, ChevronRight, Info } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import remarkGfm from "remark-gfm";
@@ -9,9 +9,9 @@ import { toast } from "sonner";
 import {
   useCheckoutTemplate,
   useDeleteTemplate,
-  usePreviewTemplate,
   usePromptTemplate,
   usePromptTemplateEvents,
+  useRenderTemplate,
   useResetTemplate,
   useUpsertTemplate,
 } from "@/api/hooks";
@@ -58,7 +58,7 @@ export default function TemplateDetailPage() {
   const deleteMutation = useDeleteTemplate();
   const resetMutation = useResetTemplate();
   const checkoutMutation = useCheckoutTemplate();
-  const previewMutation = usePreviewTemplate();
+  const renderMutation = useRenderTemplate();
 
   const template = data?.template;
   const history = data?.history ?? [];
@@ -73,7 +73,6 @@ export default function TemplateDetailPage() {
   const [rendered, setRendered] = useState("");
   const [unresolved, setUnresolved] = useState<string[]>([]);
   const [varsOpen, setVarsOpen] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // Sync body/state from template data
   useEffect(() => {
@@ -83,32 +82,30 @@ export default function TemplateDetailPage() {
     }
   }, [template]);
 
-  // Debounced preview
+  // Render fully resolved template (re-triggers after save/checkout/reset via version change)
   const templateEventType = template?.eventType;
-  const previewMutate = previewMutation.mutate;
+  const templateVersion = template?.version;
+  const renderMutate = renderMutation.mutate;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: templateVersion triggers re-render after save/checkout/reset
   useEffect(() => {
     if (!templateEventType) return;
-    clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      const sampleVars: Record<string, string> = {};
-      const eventDef = events?.find((e) => e.eventType === templateEventType);
-      if (eventDef) {
-        for (const v of eventDef.variables) {
-          sampleVars[v.name] = v.example ?? v.name;
-        }
+    const sampleVars: Record<string, string> = {};
+    const eventDef = events?.find((e) => e.eventType === templateEventType);
+    if (eventDef) {
+      for (const v of eventDef.variables) {
+        sampleVars[v.name] = v.example ?? v.name;
       }
-      previewMutate(
-        { eventType: templateEventType, body, variables: sampleVars },
-        {
-          onSuccess: (result) => {
-            setRendered(result.rendered);
-            setUnresolved(result.unresolved);
-          },
+    }
+    renderMutate(
+      { eventType: templateEventType, variables: sampleVars },
+      {
+        onSuccess: (result) => {
+          setRendered(result.text);
+          setUnresolved(result.unresolved);
         },
-      );
-    }, 500);
-    return () => clearTimeout(timerRef.current);
-  }, [body, templateEventType, events, previewMutate]);
+      },
+    );
+  }, [templateEventType, templateVersion, events, renderMutate]);
 
   const handleSave = useCallback(() => {
     if (!template) return;

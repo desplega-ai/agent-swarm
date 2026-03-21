@@ -585,6 +585,14 @@ export interface PreviewResponse {
   unresolved: string[];
 }
 
+export interface RenderResponse {
+  text: string;
+  skipped: boolean;
+  unresolved: string[];
+  templateId?: string;
+  scope?: string;
+}
+
 // Debug / DB Explorer
 export interface DbQueryRequest {
   sql: string;

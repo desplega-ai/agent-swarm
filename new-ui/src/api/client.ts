@@ -860,6 +860,24 @@ class ApiClient {
     return res.json();
   }
 
+  async renderPromptTemplate(data: {
+    eventType: string;
+    variables?: Record<string, unknown>;
+    agentId?: string;
+    repoId?: string;
+  }): Promise<import("./types").RenderResponse> {
+    const url = `${this.getBaseUrl()}/api/prompt-templates/render`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to render prompt template: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async upsertPromptTemplate(data: UpsertPromptTemplateInput): Promise<PromptTemplate> {
     const url = `${this.getBaseUrl()}/api/prompt-templates`;
     const res = await fetch(url, {

@@ -39,6 +39,17 @@ export function usePreviewTemplate() {
   });
 }
 
+export function useRenderTemplate() {
+  return useMutation({
+    mutationFn: (data: {
+      eventType: string;
+      variables?: Record<string, unknown>;
+      agentId?: string;
+      repoId?: string;
+    }) => api.renderPromptTemplate(data),
+  });
+}
+
 export function useUpsertTemplate() {
   const queryClient = useQueryClient();
 
