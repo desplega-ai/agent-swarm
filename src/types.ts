@@ -608,10 +608,10 @@ export const WorkflowNodeSchema = z.object({
         "while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}).",
     ),
   next: z
-    .union([z.string(), z.record(z.string(), z.string())])
+    .union([z.string(), z.array(z.string()), z.record(z.string(), z.string())])
     .optional()
     .describe(
-      "Next node(s): string for simple chaining, or record for port-based routing ({pass: 'a', fail: 'b'})",
+      "Next node(s): string for simple chaining, string[] for fan-out to parallel nodes, or record for port-based routing ({pass: 'a', fail: 'b'})",
     ),
   validation: StepValidationConfigSchema.optional(),
   retry: RetryPolicySchema.optional(),
