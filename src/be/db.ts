@@ -5438,6 +5438,7 @@ export function insertActiveSession(session: {
   triggerType: string;
   inboxMessageId?: string;
   taskDescription?: string;
+  runnerSessionId?: string;
 }): ActiveSession {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -5445,10 +5446,20 @@ export function insertActiveSession(session: {
   const row = getDb()
     .prepare<
       ActiveSession,
-      [string, string, string | null, string, string | null, string | null, string, string]
+      [
+        string,
+        string,
+        string | null,
+        string,
+        string | null,
+        string | null,
+        string | null,
+        string,
+        string,
+      ]
     >(
-      `INSERT INTO active_sessions (id, agentId, taskId, triggerType, inboxMessageId, taskDescription, startedAt, lastHeartbeatAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO active_sessions (id, agentId, taskId, triggerType, inboxMessageId, taskDescription, runnerSessionId, startedAt, lastHeartbeatAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
     )
     .get(
@@ -5458,6 +5469,7 @@ export function insertActiveSession(session: {
       session.triggerType,
       session.inboxMessageId ?? null,
       session.taskDescription ?? null,
+      session.runnerSessionId ?? null,
       now,
       now,
     );
@@ -5507,6 +5519,30 @@ export function cleanupStaleSessions(maxAgeMinutes = 30): number {
 
 export function cleanupAgentSessions(agentId: string): number {
   const result = getDb().prepare("DELETE FROM active_sessions WHERE agentId = ?").run(agentId);
+  return result.changes;
+}
+
+/** Update providerSessionId on an active session identified by taskId */
+export function updateActiveSessionProviderSessionId(
+  taskId: string,
+  providerSessionId: string,
+): boolean {
+  const result = getDb()
+    .prepare("UPDATE active_sessions SET providerSessionId = ? WHERE taskId = ?")
+    .run(providerSessionId, taskId);
+  return result.changes > 0;
+}
+
+/**
+ * Reassociate session logs from a runner session to a real task ID.
+ * Used when a pool task is claimed — logs were stored under a random UUID,
+ * this updates them to use the real task ID.
+ * Idempotent — safe to call multiple times.
+ */
+export function reassociateSessionLogs(runnerSessionId: string, realTaskId: string): number {
+  const result = getDb()
+    .prepare("UPDATE session_logs SET taskId = ? WHERE sessionId = ? AND taskId != ?")
+    .run(realTaskId, runnerSessionId, realTaskId);
   return result.changes;
 }
 

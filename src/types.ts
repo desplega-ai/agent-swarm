@@ -543,6 +543,8 @@ export const ActiveSessionSchema = z.object({
   triggerType: z.string(),
   inboxMessageId: z.string().nullable(),
   taskDescription: z.string().nullable(),
+  runnerSessionId: z.string().nullable(),
+  providerSessionId: z.string().nullable(),
   startedAt: z.iso.datetime(),
   lastHeartbeatAt: z.iso.datetime(),
 });

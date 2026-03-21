@@ -89,6 +89,9 @@
                   },
                   "taskDescription": {
                     "type": "string"
+                  },
+                  "runnerSessionId": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -189,6 +192,52 @@
         "responses": {
           "200": {
             "description": "Heartbeat updated"
+          }
+        }
+      }
+    },
+    "/api/active-sessions/provider-session/{taskId}": {
+      "put": {
+        "summary": "Update provider session ID on an active session",
+        "tags": [
+          "Active Sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "providerSessionId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "providerSessionId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider session ID updated"
           }
         }
       }

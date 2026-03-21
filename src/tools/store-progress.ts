@@ -6,12 +6,14 @@ import {
   createSessionCost,
   createTaskExtended,
   failTask,
+  getActiveSessions,
   getAgentById,
   getDb,
   getEpicWithProgress,
   getLeadAgent,
   getTaskById,
   markEpicsProgressNotified,
+  reassociateSessionLogs,
   updateAgentStatusFromCapacity,
   updateMemoryEmbedding,
   updateTaskProgress,
@@ -210,6 +212,19 @@ export const registerStoreProgressTool = (server: McpServer) => {
       });
 
       const result = txn();
+
+      // Reinforce session log reassociation for pool tasks (idempotent, no-op if already done)
+      if (result.success && requestInfo.agentId) {
+        try {
+          const sessions = getActiveSessions(requestInfo.agentId);
+          const activeSession = sessions.find((s) => s.runnerSessionId);
+          if (activeSession?.runnerSessionId) {
+            reassociateSessionLogs(activeSession.runnerSessionId, taskId);
+          }
+        } catch {
+          // Non-blocking — reassociation failure should not affect store-progress
+        }
+      }
 
       // Index completed and failed tasks as memory (async, non-blocking)
       if ((status === "completed" || status === "failed") && result.success && result.task) {
