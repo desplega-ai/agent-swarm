@@ -1,0 +1,28 @@
+{
+  "cli_version": "0.5.1",
+  "checkpoint_id": "efd5dc7ac075",
+  "strategy": "manual-commit",
+  "branch": "fet/template-registry",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "docs-site/content/docs/api-reference/index.mdx",
+    "docs-site/content/docs/api-reference/meta.json",
+    "docs-site/content/docs/api-reference/prompttemplates.mdx",
+    "openapi.json"
+  ],
+  "sessions": [
+    {
+      "metadata": "/ef/d5dc7ac075/0/metadata.json",
+      "transcript": "/ef/d5dc7ac075/0/full.jsonl",
+      "content_hash": "/ef/d5dc7ac075/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  }
+}
