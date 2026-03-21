@@ -1,0 +1,12 @@
+nice push the changes.
+
+---
+
+<task-notification>
+<task-id>b0t5kizo6</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/b0t5kizo6.output</output-file>
+<status>killed</status>
+<summary>Background command "Start fresh API server" was stopped</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-501/-Users-taras-worktrees-agent-swarm-2026-03-20-fet-template-registry/20c7ee2c-1c5f-44ab-9420-f9cf8bbe2e8a/tasks/b0t5kizo6.output
