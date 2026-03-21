@@ -1,0 +1,13 @@
+are you still running the API?
+
+---
+
+can you spin it up again pls?
+
+---
+
+Can you maybe create some templates for the base prompmt of the lead ans spin it up to see how it works? maybe pyt something like: "always respond in spanish" or stuff like that that you could check later on in the session transcript, you know?
+
+---
+
+hmm weird, please test it preperly, it should work e2e!
