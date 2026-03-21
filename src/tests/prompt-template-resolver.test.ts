@@ -23,6 +23,7 @@ describe("Prompt Template Resolver", () => {
     }
     // Clear any previously registered templates before init
     clearTemplateDefinitions();
+    closeDb();
     initDb(TEST_DB_PATH);
   });
 

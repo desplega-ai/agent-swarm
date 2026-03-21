@@ -24,6 +24,7 @@ describe("Prompt Templates DB", () => {
         // File doesn't exist
       }
     }
+    closeDb();
     initDb(TEST_DB_PATH);
   });
 

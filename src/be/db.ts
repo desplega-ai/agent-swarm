@@ -50,26 +50,16 @@ import { runMigrations } from "./migrations/runner";
 import { seedDefaultTemplates } from "./seed";
 
 let db: Database | null = null;
-let currentDbPath: string | null = null;
 
 export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
-  if (db && currentDbPath === dbPath) {
-    return db;
-  }
-  // Different path requested — close existing connection first
   if (db) {
-    db.close();
-    db = null;
-    currentDbPath = null;
+    return db;
   }
 
   db = new Database(dbPath, { create: true });
-  currentDbPath = dbPath;
   console.log(`Database initialized at ${dbPath}`);
 
-  // Capture in local const for TypeScript (db is guaranteed non-null here)
   const database = db;
-
   database.run("PRAGMA journal_mode = WAL;");
   database.run("PRAGMA foreign_keys = ON;");
 
@@ -219,7 +209,6 @@ export function closeDb(): void {
   if (db) {
     db.close();
     db = null;
-    currentDbPath = null;
   }
 }
 
