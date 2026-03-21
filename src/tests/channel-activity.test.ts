@@ -1,4 +1,8 @@
-import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, mock, setDefaultTimeout, test } from "bun:test";
+
+// Migrations + template seeding can be slow in CI — extend hook timeout
+setDefaultTimeout(30_000);
+
 import { unlinkSync } from "node:fs";
 import { createServer as createHttpServer, type Server } from "node:http";
 
