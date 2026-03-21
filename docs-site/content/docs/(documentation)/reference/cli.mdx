@@ -1,0 +1,241 @@
+---
+title: CLI Reference
+description: Complete CLI reference for managing agents, tasks, and swarm configuration from the terminal
+---
+
+# CLI Reference
+
+Agent Swarm provides a CLI for managing the swarm, running agents, and development.
+
+## Installation
+
+```bash
+# Run directly with bunx
+bunx @desplega.ai/agent-swarm <command>
+
+# Or install globally
+bun install -g @desplega.ai/agent-swarm
+agent-swarm <command>
+```
+
+## Commands
+
+### onboard
+
+Set up a new swarm from scratch using Docker Compose. Interactive wizard that collects credentials, generates `docker-compose.yml` + `.env`, starts the stack, and verifies health.
+
+```bash
+bunx @desplega.ai/agent-swarm onboard
+bunx @desplega.ai/agent-swarm onboard --dry-run
+bunx @desplega.ai/agent-swarm onboard --yes --preset=dev
+ANTHROPIC_API_KEY=sk-... bunx @desplega.ai/agent-swarm onboard --yes --preset=solo
+```
+
+| Option | Description |
+|--------|-------------|
+| `--dry-run` | Preview what would be generated without writing |
+| `-y, --yes` | Non-interactive mode (reads from env vars) |
+| `--preset <name>` | Preset: `dev`, `content`, `research`, `solo` |
+
+### connect
+
+Connect this project to an existing swarm. Creates `.mcp.json` and `.claude/settings.local.json` with server URL and API key. Auto-reads `API_KEY` from `.env` if present.
+
+```bash
+bunx @desplega.ai/agent-swarm connect
+bunx @desplega.ai/agent-swarm connect --dry-run
+bunx @desplega.ai/agent-swarm connect -y
+```
+
+| Option | Description |
+|--------|-------------|
+| `--dry-run` | Show what would be changed without writing |
+| `--restore` | Restore files from `.bak` backups |
+| `-y, --yes` | Non-interactive mode (use env vars) |
+
+### api
+
+Start the API + MCP HTTP server.
+
+```bash
+bunx @desplega.ai/agent-swarm api
+bunx @desplega.ai/agent-swarm api --port 8080 --key my-secret
+bunx @desplega.ai/agent-swarm api --db /data/swarm.sqlite
+```
+
+| Option | Description |
+|--------|-------------|
+| `-p, --port <port>` | Port to listen on (default: 3013) |
+| `-k, --key <key>` | API key for authentication |
+| `--db <path>` | Database file path (default: `./agent-swarm-db.sqlite`) |
+
+### claude
+
+Run Claude CLI with optional message and headless mode.
+
+```bash
+agent-swarm claude
+agent-swarm claude --headless -m "Hello"
+agent-swarm claude -- --resume
+```
+
+| Option | Description |
+|--------|-------------|
+| `-m, --msg <message>` | Message to send to Claude |
+| `--headless` | Run in headless mode (stream JSON output) |
+| `-- <args...>` | Additional arguments to pass to Claude CLI |
+
+### worker
+
+Run Claude in headless loop mode as a worker agent.
+
+```bash
+agent-swarm worker
+agent-swarm worker --yolo
+agent-swarm worker -m "Custom prompt"
+agent-swarm worker --system-prompt "You are a Python specialist"
+```
+
+| Option | Description |
+|--------|-------------|
+| `-m, --msg <prompt>` | Custom prompt (default: `/agent-swarm:start-worker`) |
+| `--yolo` | Continue on errors instead of stopping |
+| `--system-prompt <text>` | Custom system prompt (appended to Claude) |
+| `--system-prompt-file <path>` | Read system prompt from file |
+| `--ai-loop` | Use AI-based polling (legacy mode) |
+| `-- <args...>` | Additional arguments to pass to Claude CLI |
+
+### lead
+
+Run Claude as lead agent in headless loop mode. Same options as `worker`.
+
+```bash
+agent-swarm lead
+agent-swarm lead --yolo
+```
+
+### docs
+
+Show the documentation URL. All pages are also available in markdown format by appending `.md` to the URL.
+
+```bash
+bunx @desplega.ai/agent-swarm docs
+bunx @desplega.ai/agent-swarm docs --open
+```
+
+| Option | Description |
+|--------|-------------|
+| `--open` | Open docs in default browser |
+
+### hook
+
+Handle Claude Code hook events from stdin. Used internally by the agent-swarm hooks system.
+
+```bash
+agent-swarm hook
+```
+
+### artifact
+
+Manage agent artifacts — serve static files or Hono apps via localtunnel.
+
+```bash
+# Serve a directory as a public artifact
+agent-swarm artifact serve ./my-report --name my-report
+
+# Serve a Hono app (must export default Hono instance)
+agent-swarm artifact serve ./server.ts --name dashboard
+
+# List active artifacts
+agent-swarm artifact list
+
+# Stop an artifact
+agent-swarm artifact stop my-report
+```
+
+**Subcommands:**
+
+| Subcommand | Description |
+|------------|-------------|
+| `serve <path>` | Serve a directory or script via localtunnel |
+| `list` | List active artifacts from the service registry |
+| `stop <name>` | Stop an artifact and close its tunnel |
+
+**Options for `serve`:**
+
+| Option | Description |
+|--------|-------------|
+| `--name <name>` | Name for the artifact (derived from path if omitted) |
+| `--port <port>` | Local port to use |
+| `--no-auth` | Disable authentication |
+| `--subdomain <sub>` | Request a specific localtunnel subdomain |
+
+Artifacts are registered in the service registry and automatically cleaned up when the session ends (via the Stop hook).
+
+## Development Commands
+
+These are available when developing Agent Swarm locally:
+
+```bash
+# Start MCP server
+bun run start        # STDIO transport
+bun run start:http   # HTTP transport
+
+# Development with hot reload
+bun run dev          # STDIO
+bun run dev:http     # HTTP
+
+# MCP Inspector (debug tools)
+bun run inspector:http
+
+# Run worker/lead locally
+bun run worker
+bun run lead
+
+# Hook handler
+bun run hook
+
+# Linting and formatting
+bun run lint
+bun run lint:fix
+bun run format
+
+# Type checking
+bun run tsc:check
+
+# Build binaries
+bun run build:binary      # x64
+bun run build:binary:arm64  # ARM64
+
+# Docker
+bun run docker:build:worker
+bun run docker:run:worker
+bun run docker:run:lead
+
+# Generate MCP docs
+bun run docs:mcp
+```
+
+## Dashboard UI
+
+The React-based monitoring dashboard is in the `new-ui/` directory:
+
+```bash
+cd new-ui
+bun install
+bun run dev
+```
+
+Opens at `http://localhost:5173`. Provides real-time visibility into:
+- Agent status and activity
+- Task list and progress
+- Inter-agent chat messages
+- Service registry
+- Usage and cost tracking
+
+## Related
+
+- [Getting Started](/docs/getting-started) — Set up your first swarm
+- [Environment Variables](/docs/reference/environment-variables) — Configuration reference for all env vars
+- [MCP Tools Reference](/docs/reference/mcp-tools) — Complete reference for all swarm MCP tools
+- [Deployment Guide](/docs/guides/deployment) — Production deployment options

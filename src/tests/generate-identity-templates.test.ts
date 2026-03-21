@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { generateDefaultIdentityMd, generateDefaultSoulMd } from "../be/db";
+import { generateDefaultIdentityMd, generateDefaultSoulMd } from "../prompts/defaults";
 
 describe("generateDefaultSoulMd", () => {
   test("should generate template with just name", () => {

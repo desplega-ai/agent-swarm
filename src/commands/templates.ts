@@ -17,13 +17,16 @@ import { registerTemplate } from "../prompts/registry";
 registerTemplate({
   eventType: "task.trigger.assigned",
   header: "",
-  defaultBody: `{{work_on_task_cmd}} {{task_id}}{{task_desc_section}}
-
-When done, use \`store-progress\` with status: "completed" and include your output.`,
+  defaultBody: `{{work_on_task_cmd}} {{task_id}}{{task_desc_section}}{{output_instructions}}`,
   variables: [
     { name: "work_on_task_cmd", description: "Formatted /work-on-task command" },
     { name: "task_id", description: "Task ID" },
     { name: "task_desc_section", description: "Task description section or empty string" },
+    {
+      name: "output_instructions",
+      description:
+        "Output format instructions (with outputSchema if present, or generic store-progress)",
+    },
   ],
   category: "task_lifecycle",
 });

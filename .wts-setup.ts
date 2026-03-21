@@ -14,26 +14,30 @@ const worktreeName = basename(worktreePath);
 
 console.log(`Setting up worktree "${worktreeName}" at ${worktreePath}...`);
 
-// Generate a unique port based on worktree index
-// Main repo uses 3013, worktrees use 3014+
-async function getUniquePort(): Promise<number> {
-  const basePort = 3013;
-  try {
-    // Count existing worktrees to determine port offset
-    const worktreesDir = join(gitRoot, ".worktrees");
-    if (await exists(worktreesDir)) {
-      const worktrees = await readdir(worktreesDir);
-      return basePort + worktrees.length;
-    }
-  } catch {
-    // Fallback: use a hash of the worktree name
-    let hash = 0;
-    for (const char of worktreeName) {
-      hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
-    }
-    return basePort + 1 + (Math.abs(hash) % 100);
+// Pick a random available port in 3100-3999
+async function getRandomPort(maxAttempts = 10): Promise<number> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const port = 3100 + Math.floor(Math.random() * 900);
+    const available = await isPortAvailable(port);
+    if (available) return port;
   }
-  return basePort + 1;
+  // Final fallback: hash-based port from worktree name
+  let hash = 0;
+  for (const char of worktreeName) {
+    hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+  }
+  return 3100 + (Math.abs(hash) % 900);
+}
+
+async function isPortAvailable(port: number): Promise<boolean> {
+  try {
+    const result = await Bun.$`lsof -i :${port} -t`.quiet();
+    // If lsof returns output, port is in use
+    return result.stdout.toString().trim() === "";
+  } catch {
+    // lsof exits non-zero when nothing found — port is available
+    return true;
+  }
 }
 
 // --- Copy and configure .env ---
@@ -57,7 +61,7 @@ if (isPortless) {
   console.log(`Port mode: allocating unique port`);
 }
 
-const port = isPortless ? 0 : await getUniquePort();
+const port = isPortless ? 0 : await getRandomPort();
 const uiPort = isPortless ? 0 : port + 1000;
 
 if (!isPortless) {

@@ -67,6 +67,9 @@ jobs:
       - name: Run TypeScript type check
         run: bun run tsc:check
 
+      - name: Check worker/API DB boundary
+        run: bash scripts/check-db-boundary.sh
+
   test:
     name: Run Tests
     needs: detect-changes
@@ -139,6 +142,14 @@ jobs:
             exit 1
           fi
           echo "OpenAPI spec is up to date."
+      - name: Check generated API docs for drift
+        run: |
+          if [ -n "$(git diff --name-only docs-site/content/docs/api-reference/)" ]; then
+            echo "::error::API reference docs are out of date! Run 'bun run docs:openapi' and commit the changes."
+            git diff --stat docs-site/content/docs/api-reference/
+            exit 1
+          fi
+          echo "API reference docs are up to date."
       - name: Check for raw matchRoute usage
         run: |
           UNREGISTERED=$(grep -rn "matchRoute(" src/http/ --include="*.ts" | grep -v "route-def.ts" | grep -v "utils.ts" || true)

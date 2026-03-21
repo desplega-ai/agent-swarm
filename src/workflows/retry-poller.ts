@@ -11,6 +11,7 @@ import { getSuccessors } from "./definition";
 import { walkGraph } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
 import { deepInterpolate } from "./template";
+import { runStepValidation } from "./validation";
 
 let pollerTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -94,7 +95,46 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
                 retryPolicy,
               );
             } else {
-              // Success! Checkpoint and continue the graph
+              // Success! Re-run validation if configured before checkpointing.
+              if (node.validation) {
+                const validationResult = await runStepValidation(
+                  registry,
+                  node,
+                  result.output,
+                  ctx,
+                  meta,
+                );
+
+                if (validationResult.outcome === "halt") {
+                  checkpointStepFailure(
+                    run.id,
+                    step.id,
+                    "Validation failed (mustPass)",
+                    step.retryCount,
+                  );
+                  continue;
+                }
+
+                if (validationResult.outcome === "retry") {
+                  // Append validation context to history
+                  if (validationResult.retryContext) {
+                    const historyKey = `${node.id}_validations`;
+                    const existing = (ctx[historyKey] as unknown[]) || [];
+                    ctx[historyKey] = [...existing, validationResult.retryContext];
+                  }
+                  const retryPolicy = node.validation.retry || node.retry;
+                  checkpointStepFailure(
+                    run.id,
+                    step.id,
+                    "Validation failed, retrying",
+                    step.retryCount,
+                    retryPolicy,
+                  );
+                  continue;
+                }
+              }
+
+              // Validation passed (or no validation) — checkpoint and continue
               checkpointStep(run.id, step.id, step.nodeId, result, ctx);
 
               const port = result.nextPort || "default";

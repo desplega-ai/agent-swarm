@@ -41,9 +41,25 @@ Templates are fetched from the [Templates Registry](https://templates.agent-swar
 
 Browse all available templates at [templates.agent-swarm.dev](https://templates.agent-swarm.dev).
 
-## Option A: Docker Compose (Recommended)
+## Option A: Onboard Wizard (Recommended)
 
-The fastest way to get a full swarm running — API server, lead agent, and 2 workers.
+The fastest way to get a full swarm running. The interactive wizard collects credentials, generates `docker-compose.yml` + `.env`, starts the stack, and verifies health.
+
+```bash
+bunx @desplega.ai/agent-swarm onboard
+```
+
+Or in non-interactive mode with a preset:
+
+```bash
+ANTHROPIC_API_KEY=sk-... bunx @desplega.ai/agent-swarm onboard --yes --preset=dev
+```
+
+Available presets: `dev`, `content`, `research`, `solo`. Use `--dry-run` to preview without writing files.
+
+## Option B: Manual Docker Compose
+
+Set up manually with Docker Compose for full control.
 
 ```bash
 git clone https://github.com/desplega-ai/agent-swarm.git
@@ -60,7 +76,7 @@ docker compose -f docker-compose.example.yml --env-file .env up -d
 
 The API runs on port `3013`. The dashboard is available separately (see the [Dashboard UI](/docs/reference/cli) section).
 
-## Option B: Local API + Docker Workers
+## Option C: Local API + Docker Workers
 
 Run the API locally and connect Docker workers to it.
 
@@ -86,13 +102,13 @@ mkdir -p ./logs ./work/shared ./work/worker-1
 bun run docker:run:worker
 ```
 
-## Option C: Claude Code as Lead Agent
+## Option D: Claude Code as Lead Agent
 
 Use Claude Code directly as the lead agent — no Docker required for the lead.
 
 ```bash
-# After starting the API server (Option B, step 1):
-bunx @desplega.ai/agent-swarm setup
+# After starting the API server (Option C, step 1):
+bunx @desplega.ai/agent-swarm connect
 ```
 
 This configures Claude Code to connect to the swarm. Start Claude Code and tell it:
