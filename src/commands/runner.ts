@@ -868,7 +868,8 @@ interface Trigger {
     | "task_offered"
     | "unread_mentions"
     | "pool_tasks_available"
-    | "epic_progress_changed";
+    | "epic_progress_changed"
+    | "channel_activity";
   taskId?: string;
   task?: unknown;
   mentionsCount?: number;
@@ -885,6 +886,11 @@ interface Trigger {
   messages?: Array<{
     id: string;
     content: string;
+    channelId?: string;
+    channelName?: string;
+    ts?: string;
+    user?: string;
+    text?: string;
   }>;
   epics?: unknown; // Epic progress updates for lead
 }
@@ -1134,6 +1140,35 @@ For each epic:
 
 This is an iterative process - you'll be notified again when more tasks finish.
 The epic should keep progressing until 100% complete and the goal is achieved.`;
+
+      return prompt;
+    }
+
+    case "channel_activity": {
+      const msgs = (trigger.messages || []) as Array<{
+        channelId?: string;
+        channelName?: string;
+        ts?: string;
+        user?: string;
+        text?: string;
+      }>;
+      if (msgs.length === 0) {
+        return "New Slack channel activity detected but no message details available. Use `slack-read` to check recent messages.";
+      }
+
+      let prompt = `## Slack Channel Activity\n\n${trigger.count || msgs.length} new message(s) in monitored Slack channels:\n\n`;
+
+      for (const msg of msgs) {
+        const channel = msg.channelName ? `#${msg.channelName}` : msg.channelId || "unknown";
+        prompt += `- **${channel}** (user: ${msg.user || "unknown"}): ${msg.text?.slice(0, 200) || "(no text)"}\n`;
+      }
+
+      prompt += `\n## Your Task
+
+Review these messages and decide if any require action:
+1. If a message is a question or request, respond using \`slack-reply\` or create a task with \`send-task\`
+2. If a message is informational, no action needed
+3. Use \`slack-read\` with the channelId to get more context if needed`;
 
       return prompt;
     }
