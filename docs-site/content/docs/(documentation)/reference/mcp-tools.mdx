@@ -96,8 +96,9 @@ Store task progress, or mark a task as completed or failed.
 | `taskId` | uuid | Yes | Task ID |
 | `progress` | string | No | Progress update |
 | `status` | string | No | Set to `completed` or `failed` |
-| `output` | string | No | Output (for completion) |
+| `output` | string | No | Output (for completion). Validated against `outputSchema` if the task defines one |
 | `failureReason` | string | No | Reason (for failure) |
+| `costData` | object | No | Session cost tracking: `totalCostUsd` (required), `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `durationMs`, `numTurns`, `model` |
 
 ### cancel-task
 
@@ -330,7 +331,10 @@ Create a new automation workflow with a DAG definition.
 |-----------|------|----------|-------------|
 | `name` | string | Yes | Unique workflow name |
 | `description` | string | No | What the workflow does |
-| `definition` | object | Yes | DAG definition with `nodes` and `edges` arrays |
+| `definition` | object | Yes | DAG definition with `nodes` array |
+| `triggers` | array | No | Trigger configs: `webhook`, `schedule`, or `manual` |
+| `cooldown` | object | No | Cooldown period: `{ hours, minutes, seconds }` |
+| `input` | object | No | Workflow-level input values (env vars, secrets, or literals) |
 
 ### get-workflow
 

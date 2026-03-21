@@ -52,9 +52,10 @@ Agent Swarm lets you run a team of AI coding agents that coordinate autonomously
 - **Multi-provider** — Run agents with Claude Code or pi-mono (`HARNESS_PROVIDER=claude|pi`)
 - **Agent-fs integration** — Persistent, searchable filesystem shared across the swarm with auto-registration on first boot
 - **Debug dashboard** — SQL query interface with Monaco editor and AG Grid results for database inspection
-- **Workflow engine** — Redesigned DAG-based workflow automation with executor registry, checkpoint durability, webhook/schedule/manual triggers, per-step retry, and version history
+- **Workflow engine** — Redesigned DAG-based workflow automation with executor registry, checkpoint durability, webhook/schedule/manual triggers, per-step retry, structured I/O schemas, and version history
 - **Linear integration** — Bidirectional ticket tracker sync via OAuth + webhooks with AgentSession lifecycle and generic tracker abstraction
 - **Portless local dev** — Friendly URLs for local development (`api.swarm.localhost:1355`) via portless proxy
+- **Onboarding wizard** — Interactive CLI wizard (`agent-swarm onboard`) to set up a new swarm from scratch with presets, credential collection, and docker-compose generation
 
 ## Quick Start
 
@@ -115,7 +116,7 @@ Use Claude Code directly as the lead agent — no Docker required for the lead.
 
 ```bash
 # After starting the API server (Option B, step 1):
-bunx @desplega.ai/agent-swarm setup
+bunx @desplega.ai/agent-swarm connect
 ```
 
 This configures Claude Code to connect to the swarm. Start Claude Code and tell it:
@@ -307,7 +308,7 @@ Workers can investigate Sentry issues directly with the `/investigate-sentry-iss
 A React-based monitoring dashboard for real-time visibility into your swarm.
 
 ```bash
-cd ui && pnpm install && pnpm run dev
+cd new-ui && pnpm install && pnpm run dev
 ```
 
 Opens at `http://localhost:5173`. See [UI.md](./UI.md) for details.
@@ -320,10 +321,14 @@ bunx @desplega.ai/agent-swarm <command>
 
 | Command | Description |
 |---------|-------------|
-| `setup` | Configure Claude Code to connect to the swarm |
-| `mcp`   | Start the MCP API server |
+| `onboard` | Set up a new swarm from scratch (Docker Compose wizard) |
+| `connect` | Connect this project to an existing swarm |
+| `api`   | Start the API + MCP HTTP server |
+| `claude` | Run Claude CLI with optional message and headless mode |
 | `worker` | Run a worker agent |
 | `lead`  | Run a lead agent |
+| `docs`  | Open documentation (`--open` to launch in browser) |
+| `artifact` | Manage agent artifacts |
 
 ## Deployment
 
@@ -341,7 +346,7 @@ For production deployments, see [DEPLOYMENT.md](./DEPLOYMENT.md) which covers:
 | [docs.agent-swarm.dev](https://docs.agent-swarm.dev) | Full documentation site |
 | [app.agent-swarm.dev](https://app.agent-swarm.dev) | Hosted dashboard — connect your deployed swarm |
 | [DEPLOYMENT.md](./DEPLOYMENT.md) | Production deployment guide |
-| [docs/ENVS.md](./docs/ENVS.md) | Complete environment variables reference |
+| [Environment Variables](https://docs.agent-swarm.dev/docs/reference/environment-variables) | Complete environment variables reference |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Development setup and project structure |
 | [UI.md](./UI.md) | Dashboard UI overview |
 | [MCP.md](./MCP.md) | MCP tools reference (auto-generated) |

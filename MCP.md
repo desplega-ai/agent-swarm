@@ -62,13 +62,6 @@
   - [memory-search](#memory-search)
   - [memory-get](#memory-get)
   - [inject-learning](#inject-learning)
-- [Tracker Tools](#tracker-tools)
-  - [tracker-status](#tracker-status)
-  - [tracker-link-task](#tracker-link-task)
-  - [tracker-link-epic](#tracker-link-epic)
-  - [tracker-unlink](#tracker-unlink)
-  - [tracker-sync-status](#tracker-sync-status)
-  - [tracker-map-agent](#tracker-map-agent)
 - [Workflows Tools](#workflows-tools)
   - [create-workflow](#create-workflow)
   - [list-workflows](#list-workflows)
@@ -667,89 +660,15 @@ Allows the lead agent to push learnings into a worker's memory. The learning wil
 | `agentId` | `uuid` | Yes | - | Target worker agent ID |
 | `learning` | `string` | Yes | - | The learning content to inject |
 
-## Tracker Tools
-
-*External issue tracker integration (Linear, etc.)*
-
-### tracker-status
-
-**Tracker Status**
-
-Show all connected trackers and their OAuth status (token expiry, workspace info).
-
-*No parameters*
-
-### tracker-link-task
-
-**Link Task to Tracker**
-
-Link a swarm task to an external tracker issue.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear') |
-| `swarmTaskId` | `string` | Yes | - | The swarm task ID to link |
-| `externalId` | `string` | Yes | - | The external issue ID in the tracker |
-| `externalIdentifier` | `string` | No | - | Human-readable identifier (e.g. 'ENG-42') |
-| `externalUrl` | `string` | No | - | URL to the external issue |
-
-### tracker-link-epic
-
-**Link Epic to Tracker**
-
-Link a swarm epic to an external tracker issue or project.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear') |
-| `swarmEpicId` | `string` | Yes | - | The swarm epic ID to link |
-| `externalId` | `string` | Yes | - | The external issue/project ID in the tracker |
-| `externalIdentifier` | `string` | No | - | Human-readable identifier (e.g. 'ENG-42') |
-| `externalUrl` | `string` | No | - | URL to the external issue/project |
-
-### tracker-unlink
-
-**Unlink Tracker Sync**
-
-Remove a tracker sync mapping by ID.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `syncId` | `string` | Yes | - | The tracker sync mapping ID to remove |
-
-### tracker-sync-status
-
-**Tracker Sync Status**
-
-Show all tracker sync mappings with their state.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `provider` | `string` | No | - | Filter by provider (e.g. 'linear') |
-| `entityType` | `string` | No | - | Filter by entity type ('task' or 'epic') |
-
-### tracker-map-agent
-
-**Map Agent to Tracker User**
-
-Map a swarm agent to an external tracker user (for assignment sync).
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear') |
-| `agentId` | `string` | Yes | - | The swarm agent ID |
-| `externalUserId` | `string` | Yes | - | The external user ID in the tracker |
-| `agentName` | `string` | Yes | - | Display name for the agent mapping |
-
 ## Workflows Tools
 
-*Workflows*
+*Tracker*
 
 ### create-workflow
 
 **Create Workflow**
 
-Create a new automation workflow with a trigger → condition → action DAG definition.
+Create a new automation workflow. Key concepts:\n" + "- Nodes are linked via 'next' (string or port-based record).\n" + "- CROSS-NODE DATA: To use output from an upstream node, you MUST declare an 'inputs' mapping on the downstream node. " + 'Example: inputs: { "cityData": "generate-city" } → then use {{cityData.taskOutput.field}} in config templates. ' + "Without 'inputs', only 'trigger' and workflow-level 'input' are available for interpolation.\n" + "- STRUCTURED OUTPUT: For agent-task nodes, put outputSchema inside 'config' to validate the agent's raw JSON output. " + "Node-level outputSchema validates the executor's return ({taskId, taskOutput}), which is different.\n" + "- Agent-task config: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -760,7 +679,7 @@ Create a new automation workflow with a trigger → condition → action DAG def
 
 **List Workflows**
 
-List all automation workflows, optionally filtered by enabled status.
+List all automation workflows, optionally filtered by enabled status. Returns new fields: triggers, cooldown, input.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -770,7 +689,7 @@ List all automation workflows, optionally filtered by enabled status.
 
 **Get Workflow**
 
-Get a workflow by ID, including its full DAG definition.
+Get a workflow by ID, including its definition, triggers, cooldown, input, and auto-generated edges for UI rendering.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -780,13 +699,14 @@ Get a workflow by ID, including its full DAG definition.
 
 **Update Workflow**
 
-Update an existing workflow's name, description, definition, or enabled state.
+Update an existing workflow's name, description, definition, triggers, cooldown, input, or enabled state. Creates a version snapshot before applying changes.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | `string` | Yes | - | Workflow ID to update |
 | `name` | `string` | No | - | New name for the workflow |
 | `description` | `string` | No | - | New description |
+| `triggers` | `array` | No | - | New trigger configurations |
 | `enabled` | `boolean` | No | - | Enable or disable the workflow |
 
 ### delete-workflow
@@ -803,7 +723,7 @@ Delete a workflow by ID. This also removes all associated runs and steps.
 
 **Trigger Workflow**
 
-Manually trigger a workflow execution, optionally passing trigger data as context.
+Manually trigger a workflow execution, optionally passing trigger data as context. Respects cooldown configuration.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -813,7 +733,7 @@ Manually trigger a workflow execution, optionally passing trigger data as contex
 
 **List Workflow Runs**
 
-List all execution runs for a given workflow.
+List all execution runs for a given workflow, optionally filtered by status.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -850,4 +770,72 @@ Retry a failed workflow run from the beginning. The run must be in 'failed' stat
 Register an AgentMail inbox ID to route incoming emails to this agent. When emails arrive at this inbox, they will be routed to you as tasks (for workers) or inbox messages (for leads). Use action 'register' to add a mapping, 'unregister' to remove one, or 'list' to see your current mappings.
 
 *No parameters*
+
+### tracker-link-epic
+
+**Link Epic to Tracker**
+
+Link a swarm epic to an external tracker issue or project.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear |
+| `swarmEpicId` | `string` | Yes | - | The swarm epic ID to link |
+| `externalId` | `string` | Yes | - | The external issue/project ID in the tracker |
+| `externalUrl` | `string` | No | - | URL to the external issue/project |
+
+### tracker-map-agent
+
+**Map Agent to Tracker User**
+
+Map a swarm agent to an external tracker user (for assignment sync).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear |
+| `agentId` | `string` | Yes | - | The swarm agent ID |
+| `externalUserId` | `string` | Yes | - | The external user ID in the tracker |
+| `agentName` | `string` | Yes | - | Display name for the agent mapping |
+
+### tracker-link-task
+
+**Link Task to Tracker**
+
+Link a swarm task to an external tracker issue.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear |
+| `swarmTaskId` | `string` | Yes | - | The swarm task ID to link |
+| `externalId` | `string` | Yes | - | The external issue ID in the tracker |
+| `externalUrl` | `string` | No | - | URL to the external issue |
+
+### tracker-sync-status
+
+**Tracker Sync Status**
+
+Show all tracker sync mappings with their state.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `provider` | `string` | No | - | Filter by provider (e.g. 'linear |
+| `entityType` | `task \| epic` | No | - | Filter by entity type |
+
+### tracker-status
+
+**Tracker Status**
+
+Show all connected trackers and their OAuth status (token expiry, workspace info).
+
+*No parameters*
+
+### tracker-unlink
+
+**Unlink Tracker Sync**
+
+Remove a tracker sync mapping by ID.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `syncId` | `string` | Yes | - | The tracker sync mapping ID to remove |
 

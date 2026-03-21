@@ -4,6 +4,53 @@ All notable changes to Agent Swarm are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.49.0] - 2026-03-21
+
+### Added
+- `agent-swarm onboard` CLI wizard — interactive first-time setup that collects credentials, generates `docker-compose.yml` + `.env`, starts the stack, and verifies health (#206)
+  - Presets: `dev`, `content`, `research`, `solo`
+  - Progress indicator, `ANTHROPIC_API_KEY` support, Ctrl+C handling
+  - Inline validation errors for integration steps (GitHub, GitLab, Sentry, Slack)
+- `agent-swarm docs` command — show documentation URL with `--open` flag to launch in browser
+- `agent-swarm claude` command — run Claude CLI with optional message and headless mode
+- Workflow structured output support — agent-task nodes can define `config.outputSchema` for validated JSON responses (#207)
+  - `store-progress` validates agent output against schema inline
+  - Workspace scoping for agent-task executor via `vcsRepo`
+- Workflow I/O schemas with explicit input mappings and data flow validation (#201)
+- Fumadocs LLMs and OpenAPI integrations for docs site (#205)
+
+### Changed
+- CLI command renames: `setup` → `connect`, `mcp` → `api` (#206)
+- `api` command gains `--db` flag for custom database file path
+- CLI help rewritten as plain `console.log` with per-command `--help` support
+- `connect` command auto-reads `API_KEY` from `.env`, uses random port, supports `APP_URL`
+
+### Fixed
+- Workflow validation: clear `nextRetryAt` when retries are exhausted (#207)
+- Workflow validation: re-run validation after retry poller re-executes a step (#207)
+- Workflow validation: normalize pass/fail across all executor types (#207)
+
+## [1.48.0] - 2026-03-20
+
+### Added
+- Workflow I/O schemas with explicit input mappings and data flow validation (#201)
+  - Node-level `inputs` mapping for cross-node data flow
+  - Static data flow validation for input references
+  - `triggerSchema` for validating trigger payloads
+- Fumadocs LLMs and OpenAPI integrations for docs site (#205)
+  - API Reference pages auto-generated from OpenAPI spec
+  - Project selector for Documentation vs API Reference
+  - `.md` extension support for LLM-friendly content
+- CI merge gate for generated API docs drift detection
+- SEO: automated inbound links to new documentation pages
+
+### Changed
+- API reference consolidated to single page with tag-based subsections
+- Docs site sidebar navigation improved with API Reference visibility
+
+### Fixed
+- Docs site project selector visibility on all pages
+
 ## [1.47.0] - 2026-03-20
 
 ### Added

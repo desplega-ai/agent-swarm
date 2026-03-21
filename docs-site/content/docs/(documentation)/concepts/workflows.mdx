@@ -121,6 +121,61 @@ The `validate` executor runs after a step to check output quality. It can:
 - **Halt** — stop the workflow run
 - **Retry** — re-execute the previous step
 
+### Cross-Node Data Access (`inputs` Mapping)
+
+By default, upstream step outputs are **not** available for interpolation. Only `trigger` (trigger data) and `input` (workflow-level resolved inputs) are in scope. To access another node's output, declare an `inputs` mapping on the node:
+
+```json
+{
+  "id": "summarize",
+  "type": "agent-task",
+  "inputs": { "cityData": "generate-city" },
+  "config": {
+    "template": "The city is {{cityData.taskOutput.city}} in {{cityData.taskOutput.country}}"
+  }
+}
+```
+
+- Keys are local names used in `{{interpolation}}`, values are context paths (usually a node ID)
+- Agent-task output shape is `{ taskId, taskOutput }` — access fields via `localName.taskOutput.field`
+- For trigger data: `{ "pr": "trigger.pullRequest" }` → `{{pr.number}}`
+- Without `inputs`, templates referencing upstream nodes silently resolve to empty strings
+
+### Structured Output (`outputSchema`)
+
+Agent-task nodes can require structured JSON output from the agent via `config.outputSchema`:
+
+```json
+{
+  "id": "generate-city",
+  "type": "agent-task",
+  "config": {
+    "template": "Pick a random city and return it as JSON",
+    "outputSchema": {
+      "type": "object",
+      "required": ["city", "country"],
+      "properties": {
+        "city": { "type": "string" },
+        "country": { "type": "string" }
+      }
+    }
+  }
+}
+```
+
+There are **two different `outputSchema` locations** — they validate at different layers:
+
+| Location | Validates |
+|----------|-----------|
+| `config.outputSchema` (inside config) | The **agent's raw JSON** response |
+| Node-level `outputSchema` (sibling of config) | The **executor's return** envelope (rarely needed) |
+
+For agent-task nodes, put your schema in `config.outputSchema`. The agent is prompted to produce JSON matching this schema, and `store-progress` validates it inline.
+
+### Workspace Scoping
+
+Agent-task nodes support workspace scoping via `config.vcsRepo`. When set, the agent is started in a workspace pre-configured with the specified git repository.
+
 ### Version History
 
 Every workflow update creates a snapshot in the version history table, recording the previous definition. This provides an audit trail and enables rollback.
