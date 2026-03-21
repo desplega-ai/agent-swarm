@@ -133,11 +133,16 @@ export default function TemplateDetailPage() {
         scope: "global",
       },
       {
-        onSuccess: () => toast.success("Template customized — you can now edit it"),
+        onSuccess: (newTemplate) => {
+          toast.success("Template customized — you can now edit it");
+          if (newTemplate?.id && newTemplate.id !== id) {
+            navigate(`/templates/${newTemplate.id}`);
+          }
+        },
         onError: () => toast.error("Failed to customize template"),
       },
     );
-  }, [template, upsertMutation]);
+  }, [template, upsertMutation, id, navigate]);
 
   const handleDelete = useCallback(() => {
     if (!id) return;
@@ -186,6 +191,8 @@ export default function TemplateDetailPage() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isDefault, handleSave]);
+
+  const hasChanges = template ? body !== template.body || state !== template.state : false;
 
   const eventDef = useMemo(
     () => events?.find((e) => e.eventType === template?.eventType),
@@ -395,7 +402,12 @@ export default function TemplateDetailPage() {
                 >
                   {upsertMutation.isPending ? "Saving..." : "Save"}
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => setResetOpen(true)}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!hasChanges}
+                  onClick={() => setResetOpen(true)}
+                >
                   Reset
                 </Button>
               </div>
@@ -466,7 +478,7 @@ export default function TemplateDetailPage() {
                       ))}
                     </div>
                   )}
-                  <div className="prose prose-sm dark:prose-invert max-w-none rounded-md border border-border p-4">
+                  <div className="prose-chat text-sm text-foreground/90 rounded-md border border-border p-4 overflow-auto">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {hasContent ? rendered : body}
                     </ReactMarkdown>

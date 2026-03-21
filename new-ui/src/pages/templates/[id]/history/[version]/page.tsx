@@ -163,7 +163,7 @@ export default function TemplateVersionDetailPage() {
               </div>
             )}
 
-            <div className="prose prose-sm dark:prose-invert max-w-none rounded-md border border-border p-4">
+            <div className="prose-chat text-sm text-foreground/90 rounded-md border border-border p-4 overflow-auto">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {rendered || versionEntry.body}
               </ReactMarkdown>
