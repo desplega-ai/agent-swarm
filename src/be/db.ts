@@ -2161,6 +2161,16 @@ export function getUnassignedTasksCount(): number {
   return result?.count ?? 0;
 }
 
+/** Get unassigned task IDs, ordered by priority (highest first) then creation time */
+export function getUnassignedTaskIds(limit = 10): string[] {
+  const rows = getDb()
+    .prepare<{ id: string }, [number]>(
+      "SELECT id FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC LIMIT ?",
+    )
+    .all(limit);
+  return rows.map((r) => r.id);
+}
+
 // ============================================================================
 // Dependency Checking
 // ============================================================================
