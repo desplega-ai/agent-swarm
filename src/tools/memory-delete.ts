@@ -9,6 +9,7 @@ export const registerMemoryDeleteTool = (server: McpServer) => {
     {
       title: "Delete a memory",
       description: "Delete a memory you own. Lead agents can delete any memory.",
+      annotations: { destructiveHint: true },
 
       inputSchema: z.object({
         memoryId: z.uuid().describe("ID of the memory to delete."),

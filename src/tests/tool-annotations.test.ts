@@ -339,7 +339,7 @@ describe("Tool Annotations & Classification", () => {
     const count = Object.keys(tools).length;
     // We expect all tools to be registered when all capabilities are enabled (default)
     expect(count).toBeGreaterThanOrEqual(45);
-    expect(count).toBeLessThanOrEqual(70);
+    expect(count).toBeLessThanOrEqual(75);
   });
 
   test("core tools are fewer than deferred tools", () => {

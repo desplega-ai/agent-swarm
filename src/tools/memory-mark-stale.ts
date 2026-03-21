@@ -10,6 +10,7 @@ export const registerMemoryMarkStaleTool = (server: McpServer) => {
       title: "Mark memory as stale",
       description:
         "Mark a memory as stale (e.g., when the referenced file no longer exists). Stale memories are excluded from search results but remain accessible via memory-get.",
+      annotations: { idempotentHint: true },
 
       inputSchema: z.object({
         memoryId: z.uuid().describe("ID of the memory to mark as stale."),
