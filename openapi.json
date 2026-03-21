@@ -1652,6 +1652,54 @@
         }
       }
     },
+    "/api/prompt-templates/render": {
+      "post": {
+        "summary": "Full scope-aware template resolution with interpolation (used by workers via HTTP)",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "eventType": {
+                    "type": "string"
+                  },
+                  "variables": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "agentId": {
+                    "type": "string"
+                  },
+                  "repoId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "eventType"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fully resolved and interpolated template"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
     "/api/prompt-templates/{id}/checkout": {
       "post": {
         "summary": "Checkout a specific version of a prompt template from history",

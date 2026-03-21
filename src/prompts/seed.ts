@@ -9,6 +9,9 @@
 import { getPromptTemplates, resetPromptTemplateToDefault, upsertPromptTemplate } from "../be/db";
 import { getAllTemplateDefinitions } from "./registry";
 
+// Side-effect: register system + session templates so they're seeded on API startup
+import "./session-templates";
+
 /**
  * Seed default templates into the DB.
  *

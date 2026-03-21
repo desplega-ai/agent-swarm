@@ -8,7 +8,7 @@ import {
   generateDefaultToolsMd,
 } from "../be/db.ts";
 import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt.ts";
-import { resolveTemplate } from "../prompts/resolver.ts";
+import { configureHttpResolver, resolveTemplateAsync } from "../prompts/resolver.ts";
 import {
   type CostData,
   createProviderAdapter,
@@ -455,12 +455,12 @@ async function resumeTaskViaAPI(config: ApiConfig, taskId: string): Promise<bool
 }
 
 /** Build prompt for a resumed task */
-function buildResumePrompt(
+async function buildResumePrompt(
   task: { id: string; task: string; progress?: string },
   fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
-): string {
+): Promise<string> {
   if (task.progress) {
-    const result = resolveTemplate("task.resumption.with_progress", {
+    const result = await resolveTemplateAsync("task.resumption.with_progress", {
       work_on_task_cmd: fmt("work-on-task"),
       task_id: task.id,
       task_description: task.task,
@@ -469,7 +469,7 @@ function buildResumePrompt(
     return result.text;
   }
 
-  const result = resolveTemplate("task.resumption.no_progress", {
+  const result = await resolveTemplateAsync("task.resumption.no_progress", {
     work_on_task_cmd: fmt("work-on-task"),
     task_id: task.id,
     task_description: task.task,
@@ -878,11 +878,11 @@ async function pollForTrigger(opts: PollOptions): Promise<Trigger | null> {
 }
 
 /** Build prompt based on trigger type */
-function buildPromptForTrigger(
+async function buildPromptForTrigger(
   trigger: Trigger,
   defaultPrompt: string,
   fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
-): string {
+): Promise<string> {
   switch (trigger.type) {
     case "task_assigned": {
       // Use the work-on-task command with task ID and description
@@ -891,7 +891,7 @@ function buildPromptForTrigger(
           ? (trigger.task as { task: string }).task
           : null;
       const taskDescSection = taskDesc ? `\n\nTask: "${taskDesc}"` : "";
-      const result = resolveTemplate("task.trigger.assigned", {
+      const result = await resolveTemplateAsync("task.trigger.assigned", {
         work_on_task_cmd: fmt("work-on-task"),
         task_id: trigger.taskId,
         task_desc_section: taskDescSection,
@@ -906,7 +906,7 @@ function buildPromptForTrigger(
           ? (trigger.task as { task: string }).task
           : null;
       const taskDescSection = taskDesc ? `\n\nA task has been offered to you:\n"${taskDesc}"` : "";
-      const result = resolveTemplate("task.trigger.offered", {
+      const result = await resolveTemplateAsync("task.trigger.offered", {
         review_offered_task_cmd: fmt("review-offered-task"),
         task_id: trigger.taskId,
         task_desc_section: taskDescSection,
@@ -915,14 +915,14 @@ function buildPromptForTrigger(
     }
 
     case "unread_mentions": {
-      const result = resolveTemplate("task.trigger.unread_mentions", {
+      const result = await resolveTemplateAsync("task.trigger.unread_mentions", {
         mention_count: trigger.count || "unread",
       });
       return result.text;
     }
 
     case "pool_tasks_available": {
-      const result = resolveTemplate("task.trigger.pool_available", {
+      const result = await resolveTemplateAsync("task.trigger.pool_available", {
         task_count: trigger.count,
       });
       return result.text;
@@ -1010,7 +1010,7 @@ function buildPromptForTrigger(
         epicsDetail += "\n---\n\n";
       }
 
-      const result = resolveTemplate("task.trigger.epic_progress", {
+      const result = await resolveTemplateAsync("task.trigger.epic_progress", {
         epic_count: trigger.count,
         epics_detail: epicsDetail,
       });
@@ -1484,6 +1484,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   const apiUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
   const swarmUrl = process.env.SWARM_URL || "localhost";
 
+  // Configure HTTP-based template resolution (workers resolve via API, not local DB)
+  if (process.env.API_KEY) {
+    configureHttpResolver(apiUrl, process.env.API_KEY);
+  }
+
   let capabilities = config.capabilities;
 
   // Agent identity fields — populated after registration by fetching full profile
@@ -1499,7 +1504,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let currentRepoContext: BasePromptArgs["repoContext"] | undefined;
 
   // Generate base prompt (identity fields injected after profile fetch below)
-  const buildSystemPrompt = () => {
+  const buildSystemPrompt = async () => {
     return getBasePrompt({
       role,
       agentId,
@@ -1515,7 +1520,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     });
   };
 
-  let basePrompt = buildSystemPrompt();
+  let basePrompt = await buildSystemPrompt();
 
   // Resolve additional system prompt: CLI flag > env var
   let additionalSystemPrompt: string | undefined;
@@ -1740,7 +1745,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         }
 
         // Rebuild system prompt with identity
-        basePrompt = buildSystemPrompt();
+        basePrompt = await buildSystemPrompt();
         resolvedSystemPrompt = additionalSystemPrompt
           ? `${basePrompt}\n\n${additionalSystemPrompt}`
           : basePrompt;
@@ -1845,7 +1850,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
 
           // Build prompt with resume context + memory injection
-          let resumePrompt = buildResumePrompt(task, adapter.formatCommand.bind(adapter));
+          let resumePrompt = await buildResumePrompt(task, adapter.formatCommand.bind(adapter));
 
           // Inject relevant memories for resumed tasks
           const resumeMemoryContext = await fetchRelevantMemories(
@@ -2030,7 +2035,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           console.log(`[${role}] Trigger received: ${trigger.type}`);
 
           // Build prompt based on trigger
-          let triggerPrompt = buildPromptForTrigger(
+          let triggerPrompt = await buildPromptForTrigger(
             trigger,
             prompt,
             adapter.formatCommand.bind(adapter),
@@ -2173,7 +2178,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
 
           // Rebuild system prompt with per-task repo context
-          const taskBasePrompt = buildSystemPrompt();
+          const taskBasePrompt = await buildSystemPrompt();
           const taskSystemPrompt =
             (additionalSystemPrompt
               ? `${taskBasePrompt}\n\n${additionalSystemPrompt}`

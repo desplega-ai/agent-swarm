@@ -323,7 +323,7 @@ describe("Session templates — getBasePrompt integration", () => {
 
   test("getBasePrompt uses session composite for worker", async () => {
     const { getBasePrompt } = await import("../prompts/base-prompt");
-    const result = getBasePrompt({
+    const result = await getBasePrompt({
       role: "worker",
       agentId: "integration-test-worker",
       swarmUrl: "swarm.test.com",
@@ -347,7 +347,7 @@ describe("Session templates — getBasePrompt integration", () => {
 
   test("getBasePrompt uses session composite for lead", async () => {
     const { getBasePrompt } = await import("../prompts/base-prompt");
-    const result = getBasePrompt({
+    const result = await getBasePrompt({
       role: "lead",
       agentId: "integration-test-lead",
       swarmUrl: "swarm.test.com",
