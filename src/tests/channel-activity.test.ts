@@ -1,10 +1,9 @@
 import { afterAll, beforeAll, describe, expect, mock, setDefaultTimeout, test } from "bun:test";
-
-// Migrations + template seeding can be slow in CI — extend hook timeout
-setDefaultTimeout(30_000);
-
 import { unlinkSync } from "node:fs";
 import { createServer as createHttpServer, type Server } from "node:http";
+
+// Migrations + mock.module + @slack/bolt resolution can take >5s on cold start
+setDefaultTimeout(30_000);
 
 // ─── Mock Slack client (must be before channel-activity import) ─────────────
 
@@ -40,8 +39,9 @@ import {
   initDb,
   upsertChannelActivityCursor,
 } from "../be/db";
+import { fetchChannelActivity } from "../slack/channel-activity";
 
-const TEST_DB_PATH = "./test-channel-activity.sqlite";
+const TEST_DB_PATH = `./test-channel-activity-${process.pid}.sqlite`;
 
 beforeAll(() => {
   initDb(TEST_DB_PATH);
@@ -49,12 +49,12 @@ beforeAll(() => {
 
 afterAll(() => {
   closeDb();
-  try {
-    unlinkSync(TEST_DB_PATH);
-    unlinkSync(`${TEST_DB_PATH}-wal`);
-    unlinkSync(`${TEST_DB_PATH}-shm`);
-  } catch {
-    // ignore if files don't exist
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      unlinkSync(`${TEST_DB_PATH}${suffix}`);
+    } catch {
+      // ignore
+    }
   }
 });
 
@@ -66,9 +66,8 @@ describe("Channel Activity Cursors — DB functions", () => {
     expect(cursor).toBeNull();
   });
 
-  test("getAllChannelActivityCursors returns empty array initially", () => {
+  test("getAllChannelActivityCursors returns an array", () => {
     const cursors = getAllChannelActivityCursors();
-    // May have cursors from other tests, but the function should return an array
     expect(Array.isArray(cursors)).toBe(true);
   });
 
@@ -83,30 +82,23 @@ describe("Channel Activity Cursors — DB functions", () => {
 
   test("upsertChannelActivityCursor updates existing cursor", () => {
     upsertChannelActivityCursor("C_UPDATE_TEST", "1711111111.000001");
-    const before = getChannelActivityCursor("C_UPDATE_TEST");
-    expect(before!.lastSeenTs).toBe("1711111111.000001");
-
     upsertChannelActivityCursor("C_UPDATE_TEST", "1711111111.000099");
     const after = getChannelActivityCursor("C_UPDATE_TEST");
     expect(after!.lastSeenTs).toBe("1711111111.000099");
-    expect(after!.channelId).toBe("C_UPDATE_TEST");
   });
 
   test("getAllChannelActivityCursors returns all inserted cursors", () => {
     upsertChannelActivityCursor("C_ALL_1", "1711111111.000001");
     upsertChannelActivityCursor("C_ALL_2", "1711111111.000002");
-
-    const cursors = getAllChannelActivityCursors();
-    const ids = cursors.map((c) => c.channelId);
+    const ids = getAllChannelActivityCursors().map((c) => c.channelId);
     expect(ids).toContain("C_ALL_1");
     expect(ids).toContain("C_ALL_2");
   });
 
-  test("cursor channelId is primary key — no duplicates", () => {
+  test("channelId is primary key — no duplicates", () => {
     upsertChannelActivityCursor("C_PK_TEST", "1711111111.000001");
     upsertChannelActivityCursor("C_PK_TEST", "1711111111.000002");
     upsertChannelActivityCursor("C_PK_TEST", "1711111111.000003");
-
     const cursors = getAllChannelActivityCursors().filter((c) => c.channelId === "C_PK_TEST");
     expect(cursors.length).toBe(1);
     expect(cursors[0].lastSeenTs).toBe("1711111111.000003");
@@ -120,7 +112,6 @@ describe("Channel Activity — cursor commit endpoint", () => {
   const TEST_PORT = 13099;
 
   beforeAll(async () => {
-    // Minimal HTTP server that wraps the commit-cursors handler
     server = createHttpServer(async (req, res) => {
       if (req.method === "POST" && req.url === "/api/channel-activity/commit-cursors") {
         const body = await new Promise<string>((resolve) => {
@@ -187,11 +178,8 @@ describe("Channel Activity — cursor commit endpoint", () => {
     expect(data.success).toBe(true);
     expect(data.committed).toBe(2);
 
-    // Verify cursors were actually persisted
-    const c1 = getChannelActivityCursor("C_COMMIT_1");
-    expect(c1!.lastSeenTs).toBe("1711222222.000001");
-    const c2 = getChannelActivityCursor("C_COMMIT_2");
-    expect(c2!.lastSeenTs).toBe("1711222222.000002");
+    expect(getChannelActivityCursor("C_COMMIT_1")!.lastSeenTs).toBe("1711222222.000001");
+    expect(getChannelActivityCursor("C_COMMIT_2")!.lastSeenTs).toBe("1711222222.000002");
   });
 
   test("rejects request without cursorUpdates array", async () => {
@@ -200,7 +188,6 @@ describe("Channel Activity — cursor commit endpoint", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ foo: "bar" }),
     });
-
     expect(resp.status).toBe(400);
   });
 
@@ -210,7 +197,6 @@ describe("Channel Activity — cursor commit endpoint", () => {
       headers: { "Content-Type": "application/json" },
       body: "not json",
     });
-
     expect(resp.status).toBe(400);
   });
 
@@ -221,30 +207,27 @@ describe("Channel Activity — cursor commit endpoint", () => {
       body: JSON.stringify({
         cursorUpdates: [
           { channelId: "C_VALID", ts: "1711333333.000001" },
-          { channelId: "", ts: "1711333333.000002" }, // empty channelId
-          { channelId: "C_NO_TS", ts: "" }, // empty ts
+          { channelId: "", ts: "1711333333.000002" },
+          { channelId: "C_NO_TS", ts: "" },
         ],
       }),
     });
 
     expect(resp.status).toBe(200);
-    // Only the valid entry should have been persisted
     expect(getChannelActivityCursor("C_VALID")!.lastSeenTs).toBe("1711333333.000001");
     expect(getChannelActivityCursor("C_NO_TS")).toBeNull();
   });
 });
 
 // ─── fetchChannelActivity (mocked Slack) ─────────────────────────────────────
-// Uses dynamic import because mock.module must resolve before the module loads.
 
 describe("Channel Activity — fetchChannelActivity", () => {
-  test("cold-start: channels without cursor get seed cursors, no messages returned", async () => {
+  test("cold-start: channels without cursor get seed cursors, no messages", async () => {
     historyImpl = () =>
       Promise.resolve({
         messages: [{ ts: "1711000000.000100", user: "U123", text: "Latest" }],
       });
 
-    const { fetchChannelActivity } = await import("../slack/channel-activity");
     const result = await fetchChannelActivity(new Map());
 
     // Cold start should NOT return messages (prevents flood)
@@ -256,41 +239,31 @@ describe("Channel Activity — fetchChannelActivity", () => {
   });
 
   test("incremental: returns messages newer than cursor, sorted oldest-first", async () => {
-    historyImpl = (args) => {
-      if (args.channel === "C001") {
-        return Promise.resolve({
-          messages: [
-            { ts: "1711000000.000050", user: "U123", text: "At cursor" },
-            { ts: "1711000000.000060", user: "U456", text: "Newer 2" },
-            { ts: "1711000000.000055", user: "U789", text: "Newer 1" },
-          ],
-        });
-      }
-      // C002 already has a seed cursor from the previous test (module-level cache),
-      // so it will do an incremental fetch too
-      return Promise.resolve({
-        messages: [{ ts: "1711000000.000200", user: "U111", text: "C002 msg" }],
+    historyImpl = () =>
+      Promise.resolve({
+        messages: [
+          { ts: "1711000000.000050", user: "U123", text: "At cursor" },
+          { ts: "1711000000.000060", user: "U456", text: "Newer 2" },
+          { ts: "1711000000.000055", user: "U789", text: "Newer 1" },
+        ],
       });
-    };
 
-    const { fetchChannelActivity } = await import("../slack/channel-activity");
-    // C001 has cursor, C002 gets its seeded cursor from previous test
     const cursors = new Map([
       ["C001", "1711000000.000050"],
       ["C002", "1711000000.000050"],
     ]);
     const result = await fetchChannelActivity(cursors);
 
-    // C001: cursor message skipped, 2 newer messages remain
+    // Cursor message skipped, 2 newer per channel × 2 channels = 4
     const c001msgs = result.messages.filter((m) => m.channelId === "C001");
     expect(c001msgs).toHaveLength(2);
-    // Sorted oldest-first across all channels
+    // Sorted oldest-first
     expect(Number.parseFloat(result.messages[0].ts)).toBeLessThanOrEqual(
       Number.parseFloat(result.messages[result.messages.length - 1].ts),
     );
   });
 
-  test("filters bot messages, thread replies, empty text, and own bot user", async () => {
+  test("filters bot messages, thread replies, empty text, own bot user", async () => {
     historyImpl = () =>
       Promise.resolve({
         messages: [
@@ -315,12 +288,8 @@ describe("Channel Activity — fetchChannelActivity", () => {
         ],
       });
 
-    const { fetchChannelActivity } = await import("../slack/channel-activity");
-    const cursors = new Map([
-      ["C001", "1711000000.000050"],
-      ["C002", "1711000000.000050"],
-    ]);
-    const result = await fetchChannelActivity(cursors);
+    const cursors = new Map([["C001", "1711000000.000050"]]);
+    const result = await fetchChannelActivity(cursors, ["C001"]);
 
     const texts = result.messages.map((m) => m.text);
     expect(texts).toContain("Valid message");
@@ -338,17 +307,38 @@ describe("Channel Activity — fetchChannelActivity", () => {
         messages: [{ ts: "1711000000.000100", user: "U123", text: "Hello" }],
       });
 
-    const { fetchChannelActivity } = await import("../slack/channel-activity");
     const cursors = new Map([
       ["C001", "1711000000.000050"],
       ["C002", "1711000000.000050"],
     ]);
     const result = await fetchChannelActivity(cursors, ["C001"]);
 
-    // Only C001 should have messages
     const channelIds = new Set(result.messages.map((m) => m.channelId));
     expect(channelIds.has("C001")).toBe(true);
     expect(channelIds.has("C002")).toBe(false);
+  });
+
+  test("gracefully handles errors from conversations.history", async () => {
+    historyImpl = () => Promise.reject(new Error("channel_not_found"));
+
+    const cursors = new Map([["C001", "1711000000.000050"]]);
+    const result = await fetchChannelActivity(cursors, ["C001"]);
+
+    // Should not throw — errors are caught and logged
+    expect(result.messages).toHaveLength(0);
+  });
+
+  test("includes channelName in returned messages", async () => {
+    historyImpl = () =>
+      Promise.resolve({
+        messages: [{ ts: "1711000000.000051", user: "U123", text: "Hi" }],
+      });
+
+    const cursors = new Map([["C001", "1711000000.000050"]]);
+    const result = await fetchChannelActivity(cursors, ["C001"]);
+
+    expect(result.messages[0].channelName).toBe("general");
+    expect(result.messages[0].channelId).toBe("C001");
   });
 });
 
@@ -356,8 +346,6 @@ describe("Channel Activity — fetchChannelActivity", () => {
 
 describe("Channel Activity — migration 015", () => {
   test("channel_activity_cursors table exists and has correct schema", () => {
-    // The table should have been created by the migration during initDb
-    // Verify by inserting and querying
     upsertChannelActivityCursor("C_SCHEMA_TEST", "1711999999.000001");
     const cursor = getChannelActivityCursor("C_SCHEMA_TEST");
     expect(cursor).not.toBeNull();
@@ -368,9 +356,7 @@ describe("Channel Activity — migration 015", () => {
 
   test("channelId is PRIMARY KEY — duplicate insert updates instead of failing", () => {
     upsertChannelActivityCursor("C_PK_MIG", "1711000000.000001");
-    // This should NOT throw — upsert uses ON CONFLICT DO UPDATE
     upsertChannelActivityCursor("C_PK_MIG", "1711000000.000999");
-
     const cursor = getChannelActivityCursor("C_PK_MIG");
     expect(cursor!.lastSeenTs).toBe("1711000000.000999");
   });
