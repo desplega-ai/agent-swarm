@@ -30,6 +30,8 @@ export function snapshotWorkflow(workflowId: string, changedByAgentId?: string):
     cooldown: workflow.cooldown,
     input: workflow.input,
     triggerSchema: workflow.triggerSchema,
+    dir: workflow.dir,
+    vcsRepo: workflow.vcsRepo,
     enabled: workflow.enabled,
   };
 

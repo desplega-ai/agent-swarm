@@ -119,13 +119,33 @@ This creates a task immediately but does not affect the regular schedule timing.
 
 The MCP server runs a scheduler that polls for due schedules at a configurable interval (default: 10 seconds, set via `SCHEDULER_INTERVAL_MS`).
 
-When a schedule is due:
+When a schedule fires:
+- **If a workflow references this schedule** in its `triggers` array: the workflow executes instead of creating a standalone task. The schedule run returns `workflowRunIds` in this case.
+- **Otherwise**: a new task is created with the schedule's `taskTemplate` (default behavior, backward compatible).
+
+Task creation flow:
 1. A new task is created with the schedule's `taskTemplate`
 2. The task is linked back to its schedule via a `scheduleId` field (use the `scheduleId` filter in `get-tasks` to find all tasks from a schedule)
 3. If `targetAgentId` is set, the task is assigned to that agent; otherwise it goes into the unassigned pool
 4. If `model` is set, the task inherits that model setting
 5. The schedule's `lastRunAt` is updated
 6. **One-time schedules** are automatically disabled after execution
+
+### Linking a Schedule to a Workflow
+
+To have a schedule trigger a workflow instead of creating standalone tasks, add a `schedule` trigger to the workflow referencing the schedule ID:
+
+```json
+{
+  "name": "nightly-pipeline",
+  "triggers": [
+    { "type": "schedule", "config": { "scheduleId": "<schedule-uuid>" } }
+  ],
+  "definition": { ... }
+}
+```
+
+When the schedule fires, the workflow executes instead of creating a standalone task. Multiple workflows can reference the same schedule — all matching enabled workflows will run.
 
 Only the schedule creator or the lead agent can update or delete schedules.
 

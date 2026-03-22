@@ -12,6 +12,8 @@ import {
   updateScheduledTask,
 } from "../be/db";
 import { calculateNextRun } from "../scheduler/scheduler";
+import { getExecutorRegistry } from "../workflows";
+import { handleScheduleTrigger } from "../workflows/triggers";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -247,6 +249,39 @@ export async function handleSchedules(
     }
 
     try {
+      // Check if any workflows are linked to this schedule
+      let registry: ReturnType<typeof getExecutorRegistry> | null = null;
+      try {
+        registry = getExecutorRegistry();
+      } catch {
+        // Workflow engine not initialized — skip workflow check
+      }
+
+      if (registry) {
+        const runIds = await handleScheduleTrigger(schedule.id, schedule, registry);
+        if (runIds.length > 0) {
+          // Workflows triggered — update schedule state and return
+          const now = new Date().toISOString();
+          if (schedule.scheduleType === "one_time") {
+            updateScheduledTask(schedule.id, {
+              lastRunAt: now,
+              nextRunAt: null,
+              enabled: false,
+              lastUpdatedAt: now,
+            });
+          } else {
+            updateScheduledTask(schedule.id, {
+              lastRunAt: now,
+              lastUpdatedAt: now,
+            });
+          }
+          const updatedSchedule = getScheduledTaskById(parsed.params.id);
+          json(res, { schedule: updatedSchedule, workflowRunIds: runIds });
+          return true;
+        }
+      }
+
+      // No workflows linked — create standalone task (existing behavior)
       const now = new Date().toISOString();
 
       const task = getDb().transaction(() => {

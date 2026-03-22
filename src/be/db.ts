@@ -2161,6 +2161,16 @@ export function getUnassignedTasksCount(): number {
   return result?.count ?? 0;
 }
 
+/** Get unassigned task IDs, ordered by priority (highest first) then creation time */
+export function getUnassignedTaskIds(limit = 10): string[] {
+  const rows = getDb()
+    .prepare<{ id: string }, [number]>(
+      "SELECT id FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC LIMIT ?",
+    )
+    .all(limit);
+  return rows.map((r) => r.id);
+}
+
 // ============================================================================
 // Dependency Checking
 // ============================================================================
@@ -5438,6 +5448,7 @@ export function insertActiveSession(session: {
   triggerType: string;
   inboxMessageId?: string;
   taskDescription?: string;
+  runnerSessionId?: string;
 }): ActiveSession {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -5445,10 +5456,20 @@ export function insertActiveSession(session: {
   const row = getDb()
     .prepare<
       ActiveSession,
-      [string, string, string | null, string, string | null, string | null, string, string]
+      [
+        string,
+        string,
+        string | null,
+        string,
+        string | null,
+        string | null,
+        string | null,
+        string,
+        string,
+      ]
     >(
-      `INSERT INTO active_sessions (id, agentId, taskId, triggerType, inboxMessageId, taskDescription, startedAt, lastHeartbeatAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO active_sessions (id, agentId, taskId, triggerType, inboxMessageId, taskDescription, runnerSessionId, startedAt, lastHeartbeatAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
     )
     .get(
@@ -5458,6 +5479,7 @@ export function insertActiveSession(session: {
       session.triggerType,
       session.inboxMessageId ?? null,
       session.taskDescription ?? null,
+      session.runnerSessionId ?? null,
       now,
       now,
     );
@@ -5507,6 +5529,30 @@ export function cleanupStaleSessions(maxAgeMinutes = 30): number {
 
 export function cleanupAgentSessions(agentId: string): number {
   const result = getDb().prepare("DELETE FROM active_sessions WHERE agentId = ?").run(agentId);
+  return result.changes;
+}
+
+/** Update providerSessionId on an active session identified by taskId */
+export function updateActiveSessionProviderSessionId(
+  taskId: string,
+  providerSessionId: string,
+): boolean {
+  const result = getDb()
+    .prepare("UPDATE active_sessions SET providerSessionId = ? WHERE taskId = ?")
+    .run(providerSessionId, taskId);
+  return result.changes > 0;
+}
+
+/**
+ * Reassociate session logs from a runner session to a real task ID.
+ * Used when a pool task is claimed — logs were stored under a random UUID,
+ * this updates them to use the real task ID.
+ * Idempotent — safe to call multiple times.
+ */
+export function reassociateSessionLogs(runnerSessionId: string, realTaskId: string): number {
+  const result = getDb()
+    .prepare("UPDATE session_logs SET taskId = ? WHERE sessionId = ? AND taskId != ?")
+    .run(realTaskId, runnerSessionId, realTaskId);
   return result.changes;
 }
 
@@ -5579,6 +5625,8 @@ type WorkflowRow = {
   cooldown: string | null;
   input: string | null;
   triggerSchema: string | null;
+  dir: string | null;
+  vcs_repo: string | null;
   createdByAgentId: string | null;
   createdAt: string;
   lastUpdatedAt: string;
@@ -5597,6 +5645,8 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
     triggerSchema: row.triggerSchema
       ? (JSON.parse(row.triggerSchema) as Record<string, unknown>)
       : undefined,
+    dir: row.dir ?? undefined,
+    vcsRepo: row.vcs_repo ?? undefined,
     createdByAgentId: row.createdByAgentId ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
@@ -5611,6 +5661,8 @@ export function createWorkflow(data: {
   cooldown?: CooldownConfig;
   input?: Record<string, InputValue>;
   triggerSchema?: Record<string, unknown>;
+  dir?: string;
+  vcsRepo?: string;
   createdByAgentId?: string;
 }): Workflow {
   const id = crypto.randomUUID();
@@ -5627,10 +5679,12 @@ export function createWorkflow(data: {
         string | null,
         string | null,
         string | null,
+        string | null,
+        string | null,
       ]
     >(
-      `INSERT INTO workflows (id, name, description, definition, triggers, cooldown, input, triggerSchema, createdByAgentId)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO workflows (id, name, description, definition, triggers, cooldown, input, triggerSchema, dir, vcs_repo, createdByAgentId)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -5641,6 +5695,8 @@ export function createWorkflow(data: {
       data.cooldown ? JSON.stringify(data.cooldown) : null,
       data.input ? JSON.stringify(data.input) : null,
       data.triggerSchema ? JSON.stringify(data.triggerSchema) : null,
+      data.dir ?? null,
+      data.vcsRepo ?? null,
       data.createdByAgentId ?? null,
     );
   if (!row) throw new Error("Failed to create workflow");
@@ -5679,6 +5735,8 @@ export function updateWorkflow(
     cooldown?: CooldownConfig | null;
     input?: Record<string, InputValue> | null;
     triggerSchema?: Record<string, unknown> | null;
+    dir?: string | null;
+    vcsRepo?: string | null;
   },
 ): Workflow | null {
   const updates: string[] = [];
@@ -5715,6 +5773,14 @@ export function updateWorkflow(
     updates.push("triggerSchema = ?");
     params.push(data.triggerSchema ? JSON.stringify(data.triggerSchema) : null);
   }
+  if (data.dir !== undefined) {
+    updates.push("dir = ?");
+    params.push(data.dir ?? null);
+  }
+  if (data.vcsRepo !== undefined) {
+    updates.push("vcs_repo = ?");
+    params.push(data.vcsRepo ?? null);
+  }
   if (updates.length === 0) return getWorkflow(id);
   updates.push("lastUpdatedAt = ?");
   params.push(new Date().toISOString());
@@ -5745,6 +5811,22 @@ export function deleteWorkflow(id: string): boolean {
   // 4. Delete workflow
   const result = db.run("DELETE FROM workflows WHERE id = ?", [id]);
   return result.changes > 0;
+}
+
+/**
+ * Find enabled workflows that have a schedule trigger matching the given scheduleId.
+ * Uses SQLite JSON functions to query into the triggers JSON array.
+ */
+export function getWorkflowsByScheduleId(scheduleId: string): Workflow[] {
+  const rows = getDb()
+    .prepare<WorkflowRow, [string]>(
+      `SELECT w.* FROM workflows w, json_each(w.triggers) AS t
+       WHERE w.enabled = 1
+         AND json_extract(t.value, '$.type') = 'schedule'
+         AND json_extract(t.value, '$.scheduleId') = ?`,
+    )
+    .all(scheduleId);
+  return rows.map(rowToWorkflow);
 }
 
 // ============================================================================
