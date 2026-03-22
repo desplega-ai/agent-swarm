@@ -2,12 +2,15 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   claimMentions,
   claimOfferedTask,
+  claimTask,
   getAgentById,
   getDb,
   getEpicsWithProgressUpdates,
   getInboxSummary,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
+  getTaskById,
+  getUnassignedTaskIds,
   getUnassignedTasksCount,
   hasCapacity,
   markEpicsProgressNotified,
@@ -135,19 +138,26 @@ export async function handlePoll(
         } else {
           // === WORKER-SPECIFIC TRIGGERS ===
 
-          // Check for unassigned tasks in pool (workers can claim)
-          // NOTE: This trigger is intentionally unprotected from duplicate processing.
-          // Multiple workers should all receive this notification so they can compete
-          // to claim tasks. The actual claiming happens via task-action tool with
-          // atomic SQL guards in claimTask().
-          const unassignedCount = getUnassignedTasksCount();
-          if (unassignedCount > 0) {
-            return {
-              trigger: {
-                type: "pool_tasks_available",
-                count: unassignedCount,
-              },
-            };
+          // Auto-claim: atomically claim an unassigned task for this worker.
+          // claimTask() uses an atomic UPDATE WHERE status='unassigned', so only
+          // one worker wins if multiple poll simultaneously.
+          // This ensures session logs are correctly associated with the real task ID
+          // from the start (no reassociation needed).
+          if (hasCapacity(myAgentId)) {
+            const unassignedIds = getUnassignedTaskIds(5);
+            for (const candidateId of unassignedIds) {
+              const claimed = claimTask(candidateId, myAgentId);
+              if (claimed) {
+                return {
+                  trigger: {
+                    type: "task_assigned",
+                    taskId: claimed.id,
+                    task: claimed,
+                  },
+                };
+              }
+              // Claim failed (another worker got it) — try next
+            }
           }
         }
 
