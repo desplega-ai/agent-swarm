@@ -111,9 +111,25 @@ async function resumeFromTaskCompletion(
   if (readyNodes.length > 0) {
     await walkGraph(workflow.definition, run.id, ctx, readyNodes, registry, workflow.id);
   } else {
-    // No nodes ready — all predecessors haven't completed yet.
-    // Set run back to waiting so the next task completion can re-evaluate.
-    updateWorkflowRun(run.id, { status: "waiting" });
+    finalizeOrWait(run.id);
+  }
+}
+
+/**
+ * If no nodes are ready and no steps are still waiting, finalize the run.
+ * Otherwise set it back to waiting for the next task completion.
+ */
+function finalizeOrWait(runId: string): void {
+  const steps = getWorkflowRunStepsByRunId(runId);
+  const hasWaiting = steps.some((s) => s.status === "waiting");
+  if (hasWaiting) {
+    updateWorkflowRun(runId, { status: "waiting" });
+  } else {
+    // All steps done (completed or failed) — finalize the run
+    updateWorkflowRun(runId, {
+      status: "completed",
+      finishedAt: new Date().toISOString(),
+    });
   }
 }
 
@@ -158,7 +174,7 @@ async function handleTaskFailure(
   if (readyNodes.length > 0) {
     await walkGraph(workflow.definition, run.id, ctx, readyNodes, registry, workflow.id);
   } else {
-    updateWorkflowRun(run.id, { status: "waiting" });
+    finalizeOrWait(run.id);
   }
 }
 
