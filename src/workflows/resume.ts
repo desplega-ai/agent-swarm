@@ -41,13 +41,21 @@ export function setupWorkflowResumeListener(
   eventBus.on("task.failed", async (data: unknown) => {
     const event = data as TaskEvent;
     if (!event.workflowRunId || !event.workflowRunStepId) return;
-    markRunFailed(event, event.failureReason ?? "Task failed");
+    try {
+      await handleTaskFailure(event, event.failureReason ?? "Task failed", registry);
+    } catch (err) {
+      console.error("[workflows] Handle task failure error:", err);
+    }
   });
 
   eventBus.on("task.cancelled", async (data: unknown) => {
     const event = data as TaskEvent;
     if (!event.workflowRunId || !event.workflowRunStepId) return;
-    markRunFailed(event, "Task was cancelled");
+    try {
+      await handleTaskFailure(event, "Task was cancelled", registry);
+    } catch (err) {
+      console.error("[workflows] Handle task cancellation error:", err);
+    }
   });
 }
 
@@ -105,6 +113,51 @@ async function resumeFromTaskCompletion(
   } else {
     // No nodes ready — all predecessors haven't completed yet.
     // Set run back to waiting so the next task completion can re-evaluate.
+    updateWorkflowRun(run.id, { status: "waiting" });
+  }
+}
+
+/**
+ * Handle task failure/cancellation — respects workflow's onNodeFailure config.
+ * 'fail' (default): mark the entire run as failed.
+ * 'continue': treat as completed with error output, let convergence proceed.
+ */
+async function handleTaskFailure(
+  event: TaskEvent,
+  reason: string,
+  registry: ExecutorRegistry,
+): Promise<void> {
+  const run = getWorkflowRun(event.workflowRunId!);
+  if (!run) return;
+
+  const workflow = getWorkflow(run.workflowId);
+  if (!workflow) return;
+
+  const onFailure = workflow.definition.onNodeFailure ?? "fail";
+
+  if (onFailure === "fail") {
+    markRunFailed(event, reason);
+    return;
+  }
+
+  // "continue": treat as completed with error output
+  const step = getWorkflowRunStep(event.workflowRunStepId!);
+  if (!step) return;
+
+  const ctx = (run.context ?? {}) as Record<string, unknown>;
+  const stepOutput = {
+    taskId: event.taskId,
+    taskOutput: `[FAILED: ${reason}] This node failed or was cancelled.`,
+  };
+  checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput }, ctx);
+
+  updateWorkflowRun(run.id, { status: "running" });
+  const completedNodeIds = new Set(getCompletedStepNodeIds(run.id));
+  const readyNodes = findReadyNodes(workflow.definition, completedNodeIds);
+
+  if (readyNodes.length > 0) {
+    await walkGraph(workflow.definition, run.id, ctx, readyNodes, registry, workflow.id);
+  } else {
     updateWorkflowRun(run.id, { status: "waiting" });
   }
 }

@@ -653,6 +653,15 @@ export type WorkflowEdge = z.infer<typeof WorkflowEdgeSchema>;
 
 export const WorkflowDefinitionSchema = z.object({
   nodes: z.array(WorkflowNodeSchema).min(1),
+  onNodeFailure: z
+    .enum(["fail", "continue"])
+    .default("fail")
+    .describe(
+      "Behavior when a node's task fails or is cancelled. " +
+        "'fail' (default): mark the entire run as failed. " +
+        "'continue': treat the failed node as completed with error output and proceed — " +
+        "downstream convergence nodes receive '[FAILED: reason]' and can handle partial results.",
+    ),
 });
 export type WorkflowDefinition = z.infer<typeof WorkflowDefinitionSchema>;
 

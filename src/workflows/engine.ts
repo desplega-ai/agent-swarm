@@ -303,14 +303,22 @@ async function executeStep(
 ): Promise<StepResult> {
   const idempotencyKey = `${runId}:${node.id}`;
 
-  // 1. Memoization check
+  // 1. Memoization / deduplication check
   const existingStep = getStepByIdempotencyKey(idempotencyKey);
-  if (existingStep && existingStep.status === "completed") {
-    // Inject stored output into context
-    ctx[node.id] = existingStep.output;
-    // For memoized steps, return all successors (no port — use default)
-    const successors = getSuccessors(def, node.id);
-    return { outcome: "completed", successors };
+  if (existingStep) {
+    if (existingStep.status === "completed") {
+      // Inject stored output into context
+      ctx[node.id] = existingStep.output;
+      // For memoized steps, return all successors (no port — use default)
+      const successors = getSuccessors(def, node.id);
+      return { outcome: "completed", successors };
+    }
+    if (existingStep.status === "waiting") {
+      // Step already exists and is waiting for async completion (e.g., agent-task).
+      // Don't create a duplicate — just report as waiting.
+      return { outcome: "waiting", successors: [] };
+    }
+    // For "pending" or "failed" steps, fall through to re-execute
   }
 
   // 2. Create step
