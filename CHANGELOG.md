@@ -4,6 +4,25 @@ All notable changes to Agent Swarm are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.50.0] - 2026-03-22
+
+### Added
+- Schedule→Workflow triggering — when a schedule fires and an enabled workflow references that schedule in its `triggers` array, the workflow executes instead of creating a standalone task (#219)
+  - Backward compatible: schedules without linked workflows still create tasks as before
+  - Multiple workflows can reference the same schedule
+  - `POST /api/schedules/:id/run` returns `workflowRunIds` when workflows are triggered
+- Workflow-level `dir` and `vcsRepo` fields — all `agent-task` nodes that don't explicitly set these inherit the workflow-level defaults (#219)
+  - Available for interpolation as `{{workflow.dir}}` and `{{workflow.vcsRepo}}`
+- Prompt template registry — per-event customizable templates with scope resolution (global → agent → repo), wildcard matching, and version history (#208)
+  - HTTP render endpoint for Docker workers to resolve templates via API
+  - Templates UI (`templates-ui/`) with AG Grid list, Monaco editor, live preview, and template history
+  - Seed runner/tool/session templates from code registry on API startup
+
+### Fixed
+- Worker/API DB boundary: moved `seed.ts` to `src/be/`, use DI pattern for resolver's DB access (#208)
+- Test DB isolation for bun's single-process test model (#208)
+- Migration version collision detection (#208)
+
 ## [1.49.0] - 2026-03-21
 
 ### Added

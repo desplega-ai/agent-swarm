@@ -20,6 +20,11 @@
   - [get-config](#get-config)
   - [list-config](#list-config)
   - [delete-config](#delete-config)
+  - [list-prompt-templates](#list-prompt-templates)
+  - [get-prompt-template](#get-prompt-template)
+  - [set-prompt-template](#set-prompt-template)
+  - [delete-prompt-template](#delete-prompt-template)
+  - [preview-prompt-template](#preview-prompt-template)
   - [slack-reply](#slack-reply)
   - [slack-read](#slack-read)
   - [slack-post](#slack-post)
@@ -227,6 +232,57 @@ Delete a swarm configuration entry by its ID. Use list-config to find config IDs
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | `string` | Yes | - | The config entry ID to delete. |
+
+### list-prompt-templates
+
+**List Prompt Templates**
+
+List prompt templates with optional filters. Returns all templates matching the specified criteria, including defaults and overrides at all scope levels.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `scopeId` | `string` | No | - | Filter by scope ID (agent ID or repo ID). |
+| `isDefault` | `boolean` | No | - | Filter by default status. |
+
+### get-prompt-template
+
+**Get Prompt Template**
+
+Get a prompt template by ID, including its version history and the code-defined variable definitions for its event type.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | The prompt template ID. |
+
+### set-prompt-template
+
+**Set Prompt Template**
+
+Create or update a prompt template override. Upserts by (eventType, scope, scopeId). Use scope='global' for server-wide, 'agent' for agent-specific, or 'repo' for repo-specific overrides.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `body` | `string` | Yes | - | The template body text with {{variable}} placeholders. |
+
+### delete-prompt-template
+
+**Delete Prompt Template**
+
+Delete a prompt template override by ID. Cannot delete default templates — use reset instead. Use list-prompt-templates to find template IDs first.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | The prompt template ID to delete. |
+
+### preview-prompt-template
+
+**Preview Prompt Template**
+
+Dry-run render a prompt template with provided variables. Optionally supply a custom body to preview before saving. Returns the interpolated text and any unresolved {{variable}} tokens.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `body` | `string` | No | - | Custom body to preview instead of the default. |
 
 ### slack-reply
 

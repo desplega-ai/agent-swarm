@@ -174,7 +174,36 @@ For agent-task nodes, put your schema in `config.outputSchema`. The agent is pro
 
 ### Workspace Scoping
 
-Agent-task nodes support workspace scoping via `config.vcsRepo`. When set, the agent is started in a workspace pre-configured with the specified git repository.
+Workspace scoping can be set at two levels:
+
+**Workflow level** — Set `dir` and `vcsRepo` on the workflow itself. All `agent-task` nodes that don't explicitly set these fields inherit the workflow-level defaults. These values are also available for interpolation:
+
+```json
+{
+  "name": "my-workflow",
+  "dir": "/workspace/myrepo",
+  "vcsRepo": "https://github.com/org/repo",
+  "definition": {
+    "nodes": [
+      {
+        "id": "build",
+        "type": "agent-task",
+        "config": {
+          "template": "Build and test in {{workflow.dir}}"
+        }
+      }
+    ]
+  }
+}
+```
+
+**Node level** — Set `config.dir` or `config.vcsRepo` on individual `agent-task` nodes. Node-level settings override workflow-level defaults.
+
+Interpolation sources available in node config:
+- `{{workflow.dir}}` — Workflow-level dir
+- `{{workflow.vcsRepo}}` — Workflow-level vcsRepo
+- `{{trigger.*}}` — Trigger payload data
+- `{{input.*}}` — Workflow-level resolved inputs
 
 ### Version History
 
