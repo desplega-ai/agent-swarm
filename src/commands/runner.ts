@@ -776,6 +776,22 @@ async function saveProviderSessionId(
   });
 }
 
+/** Save provider session ID on the active session (for pool tasks where realTaskId is unknown) */
+async function saveProviderSessionIdOnActiveSession(
+  apiUrl: string,
+  apiKey: string,
+  effectiveTaskId: string,
+  providerSessionId: string,
+): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  await fetch(`${apiUrl}/api/active-sessions/provider-session/${effectiveTaskId}`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ providerSessionId }),
+  });
+}
+
 /** Fetch Claude session ID for a task (for --resume) */
 async function fetchProviderSessionId(
   apiUrl: string,
@@ -801,6 +817,7 @@ async function registerActiveSession(
     taskId: string;
     triggerType: string;
     taskDescription?: string;
+    runnerSessionId?: string;
   },
 ): Promise<void> {
   const headers: Record<string, string> = {
@@ -817,6 +834,7 @@ async function registerActiveSession(
         taskId: session.taskId,
         triggerType: session.triggerType,
         taskDescription: session.taskDescription,
+        runnerSessionId: session.runnerSessionId,
       }),
     });
   } catch {
@@ -1293,6 +1311,17 @@ async function spawnProviderProcess(
         if (realTaskId) {
           saveProviderSessionId(opts.apiUrl, opts.apiKey, realTaskId, event.sessionId).catch(
             (err) => console.warn(`[runner] Failed to save session ID: ${err}`),
+          );
+        } else {
+          // Pool task: save provider session ID on active session so it can be
+          // propagated to the real task when the agent claims one
+          saveProviderSessionIdOnActiveSession(
+            opts.apiUrl,
+            opts.apiKey,
+            effectiveTaskId,
+            event.sessionId,
+          ).catch((err) =>
+            console.warn(`[runner] Failed to save provider session on active session: ${err}`),
           );
         }
         break;
@@ -2352,6 +2381,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             taskId: runningTask.taskId,
             triggerType: trigger.type,
             taskDescription: taskDesc,
+            runnerSessionId: sessionId,
           });
 
           console.log(
