@@ -65,7 +65,18 @@ export class AgentTaskExecutor extends BaseExecutor<
       } as unknown as ExecutorResult<AgentTaskOutput>;
     }
 
-    // 2. Create the task (config is already deep-interpolated by the engine)
+    // 2. Inherit workflow-level dir/vcsRepo when node config doesn't specify them
+    let effectiveDir = config.dir;
+    let effectiveVcsRepo = config.vcsRepo;
+    if ((!effectiveDir || !effectiveVcsRepo) && meta.workflowId) {
+      const workflow = db.getWorkflow(meta.workflowId);
+      if (workflow) {
+        if (!effectiveDir && workflow.dir) effectiveDir = workflow.dir;
+        if (!effectiveVcsRepo && workflow.vcsRepo) effectiveVcsRepo = workflow.vcsRepo;
+      }
+    }
+
+    // 3. Create the task (config is already deep-interpolated by the engine)
     const task = db.createTaskExtended(config.template, {
       agentId: config.agentId ?? null,
       source: "workflow",
@@ -74,8 +85,8 @@ export class AgentTaskExecutor extends BaseExecutor<
       offeredTo: config.offerMode ? config.agentId : undefined,
       workflowRunId: meta.runId,
       workflowRunStepId: meta.stepId,
-      dir: config.dir,
-      vcsRepo: config.vcsRepo,
+      dir: effectiveDir,
+      vcsRepo: effectiveVcsRepo,
       model: config.model,
       parentTaskId: config.parentTaskId,
       outputSchema: config.outputSchema,

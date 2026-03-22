@@ -6,7 +6,7 @@ export { retryFailedRun, setupWorkflowResumeListener } from "./resume";
 export { startRetryPoller, stopRetryPoller } from "./retry-poller";
 export { interpolate } from "./template";
 export { instantiateTemplate, validateTemplateVariables } from "./templates";
-export { handleWebhookTrigger } from "./triggers";
+export { handleScheduleTrigger, handleWebhookTrigger } from "./triggers";
 export { snapshotWorkflow } from "./version";
 
 import * as db from "../be/db";

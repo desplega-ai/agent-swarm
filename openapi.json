@@ -4037,13 +4037,19 @@
                                   "type": "string"
                                 },
                                 {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                {
                                   "type": "object",
                                   "additionalProperties": {
                                     "type": "string"
                                   }
                                 }
                               ],
-                              "description": "Next node(s): string for simple chaining, or record for port-based routing ({pass: 'a', fail: 'b'})"
+                              "description": "Next node(s): string for simple chaining, string[] for fan-out to parallel nodes, or record for port-based routing ({pass: 'a', fail: 'b'})"
                             },
                             "validation": {
                               "type": "object",
@@ -4148,6 +4154,15 @@
                           ]
                         },
                         "minItems": 1
+                      },
+                      "onNodeFailure": {
+                        "type": "string",
+                        "enum": [
+                          "fail",
+                          "continue"
+                        ],
+                        "default": "fail",
+                        "description": "Behavior when a node's task fails or is cancelled. 'fail' (default): mark the entire run as failed. 'continue': treat the failed node as completed with error output and proceed — downstream convergence nodes receive '[FAILED: reason]' and can handle partial results."
                       }
                     },
                     "required": [
@@ -4239,6 +4254,14 @@
                   "triggerSchema": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "dir": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "vcsRepo": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
@@ -4352,13 +4375,19 @@
                                   "type": "string"
                                 },
                                 {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                {
                                   "type": "object",
                                   "additionalProperties": {
                                     "type": "string"
                                   }
                                 }
                               ],
-                              "description": "Next node(s): string for simple chaining, or record for port-based routing ({pass: 'a', fail: 'b'})"
+                              "description": "Next node(s): string for simple chaining, string[] for fan-out to parallel nodes, or record for port-based routing ({pass: 'a', fail: 'b'})"
                             },
                             "validation": {
                               "type": "object",
@@ -4463,6 +4492,15 @@
                           ]
                         },
                         "minItems": 1
+                      },
+                      "onNodeFailure": {
+                        "type": "string",
+                        "enum": [
+                          "fail",
+                          "continue"
+                        ],
+                        "default": "fail",
+                        "description": "Behavior when a node's task fails or is cancelled. 'fail' (default): mark the entire run as failed. 'continue': treat the failed node as completed with error output and proceed — downstream convergence nodes receive '[FAILED: reason]' and can handle partial results."
                       }
                     },
                     "required": [
@@ -4563,6 +4601,20 @@
                       "null"
                     ],
                     "additionalProperties": {}
+                  },
+                  "dir": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1
+                  },
+                  "vcsRepo": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1
                   },
                   "enabled": {
                     "type": "boolean"

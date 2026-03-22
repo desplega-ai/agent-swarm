@@ -11,7 +11,7 @@ import {
 import type { Workflow, WorkflowDefinition, WorkflowNode } from "../types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
 import { shouldSkipCooldown } from "./cooldown";
-import { findEntryNodes, getSuccessors } from "./definition";
+import { findEntryNodes, getNextTargets, getSuccessors } from "./definition";
 import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
 import { resolveInputs } from "./input";
@@ -73,6 +73,12 @@ export async function startWorkflowExecution(
 
   // Resolve inputs and merge into initial context
   const ctx: Record<string, unknown> = { trigger: triggerData };
+
+  // Inject workflow-level metadata for interpolation ({{workflow.dir}}, {{workflow.vcsRepo}})
+  if (workflow.dir || workflow.vcsRepo) {
+    ctx.workflow = { dir: workflow.dir, vcsRepo: workflow.vcsRepo };
+  }
+
   if (workflow.input) {
     try {
       const resolved = resolveInputs(workflow.input);
@@ -157,8 +163,20 @@ export async function walkGraph(
     }
   }
 
-  // Seed with start nodes that haven't been completed yet
-  let pendingNodes = startNodes.filter((n) => !completedNodeIds.has(n.id));
+  // Seed with start nodes that haven't been completed yet AND whose
+  // predecessors are all completed (convergence gate). This prevents callers
+  // like resumeFromTaskCompletion() and retryFailedRun() from executing a
+  // convergence node before all its fan-out predecessors are done.
+  let pendingNodes = startNodes.filter((n) => {
+    if (completedNodeIds.has(n.id)) return false;
+    const preds = getAllPredecessors(def, n.id);
+    if (preds.length === 0) return true; // Entry node — always ready
+    // Check all predecessors with active edges are completed
+    const activePreds = preds.filter((predId) => activeEdges.has(`${predId}→${n.id}`));
+    // If no active edges yet (first walk), check ALL structural predecessors
+    const predsToCheck = activePreds.length > 0 ? activePreds : preds;
+    return predsToCheck.every((p) => completedNodeIds.has(p));
+  });
 
   while (pendingNodes.length > 0) {
     nodeExecutionCount += pendingNodes.length;
@@ -256,8 +274,7 @@ function getAllPredecessors(def: WorkflowDefinition, nodeId: string): string[] {
   const preds: string[] = [];
   for (const node of def.nodes) {
     if (!node.next) continue;
-    const targets = typeof node.next === "string" ? [node.next] : Object.values(node.next);
-    if (targets.includes(nodeId)) {
+    if (getNextTargets(node.next).includes(nodeId)) {
       preds.push(node.id);
     }
   }
@@ -286,14 +303,22 @@ async function executeStep(
 ): Promise<StepResult> {
   const idempotencyKey = `${runId}:${node.id}`;
 
-  // 1. Memoization check
+  // 1. Memoization / deduplication check
   const existingStep = getStepByIdempotencyKey(idempotencyKey);
-  if (existingStep && existingStep.status === "completed") {
-    // Inject stored output into context
-    ctx[node.id] = existingStep.output;
-    // For memoized steps, return all successors (no port — use default)
-    const successors = getSuccessors(def, node.id);
-    return { outcome: "completed", successors };
+  if (existingStep) {
+    if (existingStep.status === "completed") {
+      // Inject stored output into context
+      ctx[node.id] = existingStep.output;
+      // For memoized steps, return all successors (no port — use default)
+      const successors = getSuccessors(def, node.id);
+      return { outcome: "completed", successors };
+    }
+    if (existingStep.status === "waiting") {
+      // Step already exists and is waiting for async completion (e.g., agent-task).
+      // Don't create a duplicate — just report as waiting.
+      return { outcome: "waiting", successors: [] };
+    }
+    // For "pending" or "failed" steps, fall through to re-execute
   }
 
   // 2. Create step
@@ -319,6 +344,7 @@ async function executeStep(
     // Always include built-in sources
     if (ctx.trigger !== undefined) interpolationCtx.trigger = ctx.trigger;
     if (ctx.input !== undefined) interpolationCtx.input = ctx.input;
+    if (ctx.workflow !== undefined) interpolationCtx.workflow = ctx.workflow;
     // Resolve declared inputs
     for (const [localName, sourcePath] of Object.entries(node.inputs)) {
       const keys = sourcePath.split(".");
@@ -337,6 +363,7 @@ async function executeStep(
     interpolationCtx = {};
     if (ctx.trigger !== undefined) interpolationCtx.trigger = ctx.trigger;
     if (ctx.input !== undefined) interpolationCtx.input = ctx.input;
+    if (ctx.workflow !== undefined) interpolationCtx.workflow = ctx.workflow;
   }
 
   // 3c. Validate resolved inputs against inputSchema if defined
@@ -512,8 +539,7 @@ export function findReadyNodes(
 
   for (const node of def.nodes) {
     if (!node.next) continue;
-    const targets = typeof node.next === "string" ? [node.next] : Object.values(node.next);
-    for (const target of targets) {
+    for (const target of getNextTargets(node.next)) {
       if (!predecessors.has(target)) {
         predecessors.set(target, new Set());
       }

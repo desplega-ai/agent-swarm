@@ -1,6 +1,13 @@
 import type { WorkflowDefinition, WorkflowEdge, WorkflowNode } from "../types";
 import type { ExecutorRegistry } from "./executors/registry";
 
+/** Extract all target node IDs from a node's `next` field */
+export function getNextTargets(next: string | string[] | Record<string, string>): string[] {
+  if (typeof next === "string") return [next];
+  if (Array.isArray(next)) return next;
+  return Object.values(next);
+}
+
 /**
  * Auto-generate edges from `next` references — for UI graph rendering.
  */
@@ -15,6 +22,15 @@ export function generateEdges(def: WorkflowDefinition): WorkflowEdge[] {
         target: node.next,
         sourcePort: "default",
       });
+    } else if (Array.isArray(node.next)) {
+      for (const targetId of node.next) {
+        edges.push({
+          id: `${node.id}→${targetId}`,
+          source: node.id,
+          target: targetId,
+          sourcePort: "default",
+        });
+      }
     } else {
       for (const [port, targetId] of Object.entries(node.next)) {
         edges.push({
@@ -36,12 +52,8 @@ export function findEntryNodes(def: WorkflowDefinition): WorkflowNode[] {
   const targets = new Set<string>();
   for (const node of def.nodes) {
     if (!node.next) continue;
-    if (typeof node.next === "string") {
-      targets.add(node.next);
-    } else {
-      for (const targetId of Object.values(node.next)) {
-        targets.add(targetId);
-      }
+    for (const targetId of getNextTargets(node.next)) {
+      targets.add(targetId);
     }
   }
   return def.nodes.filter((n) => !targets.has(n.id));
@@ -62,6 +74,9 @@ export function getSuccessors(
   if (typeof node.next === "string") {
     // Single next — any port matches
     targetIds.push(node.next);
+  } else if (Array.isArray(node.next)) {
+    // Fan-out — all targets are parallel successors (port is ignored)
+    targetIds.push(...node.next);
   } else {
     if (port) {
       // Port-based — look up the specific port
@@ -87,8 +102,7 @@ export function isUpstream(def: WorkflowDefinition, sourceId: string, targetId: 
   const reverseDeps = new Map<string, string[]>();
   for (const node of def.nodes) {
     if (!node.next) continue;
-    const targets = typeof node.next === "string" ? [node.next] : Object.values(node.next);
-    for (const target of targets) {
+    for (const target of getNextTargets(node.next)) {
       if (!reverseDeps.has(target)) reverseDeps.set(target, []);
       reverseDeps.get(target)!.push(node.id);
     }
@@ -134,6 +148,12 @@ export function validateDefinition(
       if (!nodeIds.has(node.next)) {
         errors.push(`Node "${node.id}" references non-existent next target "${node.next}"`);
       }
+    } else if (Array.isArray(node.next)) {
+      for (const targetId of node.next) {
+        if (!nodeIds.has(targetId)) {
+          errors.push(`Node "${node.id}" fan-out references non-existent target "${targetId}"`);
+        }
+      }
     } else {
       for (const [port, targetId] of Object.entries(node.next)) {
         if (!nodeIds.has(targetId)) {
@@ -164,10 +184,8 @@ export function validateDefinition(
       reachable.add(current);
       const node = def.nodes.find((n) => n.id === current);
       if (!node?.next) continue;
-      if (typeof node.next === "string") {
-        queue.push(node.next);
-      } else {
-        queue.push(...Object.values(node.next));
+      for (const targetId of getNextTargets(node.next)) {
+        queue.push(targetId);
       }
     }
     for (const node of def.nodes) {

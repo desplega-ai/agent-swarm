@@ -288,3 +288,79 @@ describe("validateDefinition — input mapping validation", () => {
     expect(errors).toHaveLength(0);
   });
 });
+
+// ─── Fan-out (array next) tests ─────────────────────────────
+
+describe("fan-out with array next", () => {
+  test("single entry fans out to 3 parallel nodes → valid", () => {
+    const def = makeDef([
+      { id: "start", type: "script", config: {}, next: ["review-a", "review-b", "review-c"] },
+      { id: "review-a", type: "script", config: {}, next: "merge" },
+      { id: "review-b", type: "script", config: {}, next: "merge" },
+      { id: "review-c", type: "script", config: {}, next: "merge" },
+      {
+        id: "merge",
+        type: "script",
+        config: {},
+        inputs: { a: "review-a", b: "review-b", c: "review-c" },
+      },
+    ]);
+    const { valid, errors } = validateDefinition(def);
+    expect(valid).toBe(true);
+    expect(errors).toHaveLength(0);
+  });
+
+  test("fan-out targets that don't exist → error", () => {
+    const def = makeDef([
+      { id: "start", type: "script", config: {}, next: ["a", "b", "nonexistent"] },
+      { id: "a", type: "script", config: {} },
+      { id: "b", type: "script", config: {} },
+    ]);
+    const { valid, errors } = validateDefinition(def);
+    expect(valid).toBe(false);
+    expect(errors.some((e) => e.includes("nonexistent"))).toBe(true);
+  });
+
+  test("fan-out nodes are not entry nodes", () => {
+    const def = makeDef([
+      { id: "start", type: "script", config: {}, next: ["a", "b"] },
+      { id: "a", type: "script", config: {} },
+      { id: "b", type: "script", config: {} },
+    ]);
+    const { valid, errors } = validateDefinition(def);
+    // Only "start" is entry node — a and b are targets
+    expect(valid).toBe(true);
+    expect(errors).toHaveLength(0);
+  });
+
+  test("isUpstream works with fan-out", () => {
+    const def = makeDef([
+      { id: "start", type: "script", config: {}, next: ["a", "b", "c"] },
+      { id: "a", type: "script", config: {}, next: "merge" },
+      { id: "b", type: "script", config: {}, next: "merge" },
+      { id: "c", type: "script", config: {}, next: "merge" },
+      { id: "merge", type: "script", config: {} },
+    ]);
+    expect(isUpstream(def, "start", "a")).toBe(true);
+    expect(isUpstream(def, "start", "merge")).toBe(true);
+    expect(isUpstream(def, "a", "merge")).toBe(true);
+    expect(isUpstream(def, "merge", "start")).toBe(false);
+  });
+
+  test("fan-out node inputs from parallel siblings → valid (all upstream via start)", () => {
+    const def = makeDef([
+      { id: "start", type: "script", config: {}, next: ["a", "b"] },
+      { id: "a", type: "script", config: {}, next: "merge" },
+      { id: "b", type: "script", config: {}, next: "merge" },
+      {
+        id: "merge",
+        type: "script",
+        config: {},
+        inputs: { fromA: "a.output", fromB: "b.output" },
+      },
+    ]);
+    const { valid, errors } = validateDefinition(def);
+    expect(valid).toBe(true);
+    expect(errors).toHaveLength(0);
+  });
+});
