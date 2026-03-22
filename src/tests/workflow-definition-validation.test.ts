@@ -298,7 +298,12 @@ describe("fan-out with array next", () => {
       { id: "review-a", type: "script", config: {}, next: "merge" },
       { id: "review-b", type: "script", config: {}, next: "merge" },
       { id: "review-c", type: "script", config: {}, next: "merge" },
-      { id: "merge", type: "script", config: {}, inputs: { a: "review-a", b: "review-b", c: "review-c" } },
+      {
+        id: "merge",
+        type: "script",
+        config: {},
+        inputs: { a: "review-a", b: "review-b", c: "review-c" },
+      },
     ]);
     const { valid, errors } = validateDefinition(def);
     expect(valid).toBe(true);

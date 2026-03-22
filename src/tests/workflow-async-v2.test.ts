@@ -3,6 +3,7 @@ import { unlink } from "node:fs/promises";
 import { z } from "zod";
 import {
   closeDb,
+  completeTask,
   createTaskExtended,
   createWorkflow,
   deleteWorkflow,
@@ -10,7 +11,6 @@ import {
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
   initDb,
-  completeTask,
 } from "../be/db";
 import type { Workflow, WorkflowDefinition } from "../types";
 import { startWorkflowExecution, walkGraph } from "../workflows/engine";
@@ -446,7 +446,9 @@ describe("Workflow Async v2 (Phase 4)", () => {
       expect(steps.filter((s) => s.nodeId === "merge")).toHaveLength(0);
 
       // Complete review-a
-      const taskA = getTaskByWorkflowRunStepId(reviewSteps.find((s) => s.nodeId === "review-a")!.id)!;
+      const taskA = getTaskByWorkflowRunStepId(
+        reviewSteps.find((s) => s.nodeId === "review-a")!.id,
+      )!;
       completeTask(taskA.id, "output-a");
       localBus.emit("task.completed", {
         taskId: taskA.id,
@@ -461,7 +463,9 @@ describe("Workflow Async v2 (Phase 4)", () => {
       expect(steps.filter((s) => s.nodeId === "merge")).toHaveLength(0);
 
       // Complete review-b
-      const taskB = getTaskByWorkflowRunStepId(reviewSteps.find((s) => s.nodeId === "review-b")!.id)!;
+      const taskB = getTaskByWorkflowRunStepId(
+        reviewSteps.find((s) => s.nodeId === "review-b")!.id,
+      )!;
       completeTask(taskB.id, "output-b");
       localBus.emit("task.completed", {
         taskId: taskB.id,
@@ -476,7 +480,9 @@ describe("Workflow Async v2 (Phase 4)", () => {
       expect(steps.filter((s) => s.nodeId === "merge")).toHaveLength(0);
 
       // Complete review-c
-      const taskC = getTaskByWorkflowRunStepId(reviewSteps.find((s) => s.nodeId === "review-c")!.id)!;
+      const taskC = getTaskByWorkflowRunStepId(
+        reviewSteps.find((s) => s.nodeId === "review-c")!.id,
+      )!;
       completeTask(taskC.id, "output-c");
       localBus.emit("task.completed", {
         taskId: taskC.id,
