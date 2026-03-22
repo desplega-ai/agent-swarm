@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { z } from "zod";
 import {
   claimMentions,
   claimOfferedTask,
@@ -52,6 +53,14 @@ const commitCursorsRoute = route({
   summary: "Commit channel activity cursors after successful processing",
   tags: ["Poll"],
   auth: { apiKey: true },
+  body: z.object({
+    cursorUpdates: z.array(
+      z.object({
+        channelId: z.string(),
+        ts: z.string(),
+      }),
+    ),
+  }),
   responses: {
     200: { description: "Cursors committed" },
     400: { description: "Invalid request" },
@@ -64,34 +73,19 @@ export async function handlePoll(
   req: IncomingMessage,
   res: ServerResponse,
   pathSegments: string[],
+  queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
   // Handle cursor commit endpoint
   if (commitCursorsRoute.match(req.method, pathSegments)) {
-    try {
-      const body = await new Promise<string>((resolve) => {
-        let data = "";
-        req.on("data", (chunk: Buffer) => {
-          data += chunk.toString();
-        });
-        req.on("end", () => resolve(data));
-      });
-      const parsed = JSON.parse(body) as {
-        cursorUpdates?: Array<{ channelId: string; ts: string }>;
-      };
-      if (!parsed.cursorUpdates || !Array.isArray(parsed.cursorUpdates)) {
-        jsonError(res, "Missing cursorUpdates array", 400);
-        return true;
+    const parsed = await commitCursorsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    for (const { channelId, ts } of parsed.body.cursorUpdates) {
+      if (channelId && ts) {
+        upsertChannelActivityCursor(channelId, ts);
       }
-      for (const { channelId, ts } of parsed.cursorUpdates) {
-        if (channelId && ts) {
-          upsertChannelActivityCursor(channelId, ts);
-        }
-      }
-      json(res, { success: true, committed: parsed.cursorUpdates.length });
-    } catch (err) {
-      jsonError(res, `Invalid request: ${err}`, 400);
     }
+    json(res, { success: true, committed: parsed.body.cursorUpdates.length });
     return true;
   }
 

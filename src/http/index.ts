@@ -92,7 +92,7 @@ const httpServer = createHttpServer(async (req, res) => {
   // ── Route handlers (order matters — first match wins) ──
   const handlers: (() => Promise<boolean>)[] = [
     () => handleAgentRegister(req, res, pathSegments, myAgentId),
-    () => handlePoll(req, res, pathSegments, myAgentId),
+    () => handlePoll(req, res, pathSegments, queryParams, myAgentId),
     () => handleSessionData(req, res, pathSegments, queryParams, myAgentId),
     () => handleEcosystem(req, res, pathSegments, myAgentId),
     () => handleTrackers(req, res, pathSegments),

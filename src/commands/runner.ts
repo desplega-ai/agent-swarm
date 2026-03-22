@@ -1165,21 +1165,17 @@ async function buildPromptForTrigger(
         return "New Slack channel activity detected but no message details available. Use `slack-read` to check recent messages.";
       }
 
-      let prompt = `## Slack Channel Activity\n\n${trigger.count || msgs.length} new message(s) in monitored Slack channels:\n\n`;
-
+      let messagesDetail = "";
       for (const msg of msgs) {
         const channel = msg.channelName ? `#${msg.channelName}` : msg.channelId || "unknown";
-        prompt += `- **${channel}** (user: ${msg.user || "unknown"}): ${msg.text?.slice(0, 200) || "(no text)"}\n`;
+        messagesDetail += `- **${channel}** (user: ${msg.user || "unknown"}): ${msg.text?.slice(0, 200) || "(no text)"}\n`;
       }
 
-      prompt += `\n## Your Task
-
-Review these messages and decide if any require action:
-1. If a message is a question or request, respond using \`slack-reply\` or create a task with \`send-task\`
-2. If a message is informational, no action needed
-3. Use \`slack-read\` with the channelId to get more context if needed`;
-
-      return prompt;
+      const result = await resolveTemplateAsync("task.trigger.channel_activity", {
+        message_count: trigger.count || msgs.length,
+        messages_detail: messagesDetail,
+      });
+      return result.text;
     }
 
     default:

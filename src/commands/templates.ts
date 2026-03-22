@@ -99,6 +99,30 @@ The epic should keep progressing until 100% complete and the goal is achieved.`,
   category: "task_lifecycle",
 });
 
+registerTemplate({
+  eventType: "task.trigger.channel_activity",
+  header: "",
+  defaultBody: `## Slack Channel Activity
+
+{{message_count}} new message(s) in monitored Slack channels:
+
+{{messages_detail}}
+## Your Task
+
+Review these messages and decide if any require action:
+1. If a message is a question or request, respond using \`slack-reply\` or create a task with \`send-task\`
+2. If a message is informational, no action needed
+3. Use \`slack-read\` with the channelId to get more context if needed`,
+  variables: [
+    { name: "message_count", description: "Number of new messages" },
+    {
+      name: "messages_detail",
+      description: "Formatted list of messages with channel and user info",
+    },
+  ],
+  category: "task_lifecycle",
+});
+
 // ============================================================================
 // Task resumption prompts
 // ============================================================================
