@@ -52,7 +52,7 @@ Agent Swarm lets you run a team of AI coding agents that coordinate autonomously
 - **Multi-provider** — Run agents with Claude Code or pi-mono (`HARNESS_PROVIDER=claude|pi`)
 - **Agent-fs integration** — Persistent, searchable filesystem shared across the swarm with auto-registration on first boot
 - **Debug dashboard** — SQL query interface with Monaco editor and AG Grid results for database inspection
-- **Workflow engine** — Redesigned DAG-based workflow automation with executor registry, checkpoint durability, webhook/schedule/manual triggers, per-step retry, structured I/O schemas, and version history
+- **Workflow engine** — DAG-based workflow automation with executor registry, checkpoint durability, webhook/schedule/manual triggers, per-step retry, structured I/O schemas, fan-out/convergence, configurable failure handling, and version history
 - **Linear integration** — Bidirectional ticket tracker sync via OAuth + webhooks with AgentSession lifecycle and generic tracker abstraction
 - **Portless local dev** — Friendly URLs for local development (`api.swarm.localhost:1355`) via portless proxy
 - **Onboarding wizard** — Interactive CLI wizard (`agent-swarm onboard`) to set up a new swarm from scratch with presets, credential collection, and docker-compose generation

@@ -4,9 +4,17 @@ All notable changes to Agent Swarm are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [1.50.0] - 2026-03-22
+## [1.50.0] - 2026-03-23
 
 ### Added
+- Workflow fan-out support — `next` field now accepts `string[]` for parallel execution of multiple nodes (#220)
+- Configurable `onNodeFailure` on workflow definitions — `"fail"` (default) or `"continue"` to proceed with partial results (#220)
+- Convergence gating — downstream nodes automatically wait for all fan-out predecessors to complete before executing (#220)
+- Step deduplication — prevents duplicate steps when async tasks resume into convergence nodes (#220)
+- Auto-claim for pool tasks — workers atomically claim unassigned tasks during poll instead of receiving notifications (#222)
+- Session log reassociation for pool tasks — logs from pool trigger sessions are correctly linked to the real task ID (#222)
+- `runnerSessionId` field on active sessions for session log tracking (#222)
+- Active sessions API endpoint for updating provider session ID (`PUT /api/active-sessions/provider-session/{taskId}`) (#222)
 - Schedule→Workflow triggering — when a schedule fires and an enabled workflow references that schedule in its `triggers` array, the workflow executes instead of creating a standalone task (#219)
   - Backward compatible: schedules without linked workflows still create tasks as before
   - Multiple workflows can reference the same schedule
@@ -19,6 +27,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Seed runner/tool/session templates from code registry on API startup
 
 ### Fixed
+- Workflow resume race condition — `finalizeOrWait` prevents stuck runs when no nodes are ready (#220)
+- Retry logic uses convergence-aware node detection instead of blindly passing successors (#220)
 - Worker/API DB boundary: moved `seed.ts` to `src/be/`, use DI pattern for resolver's DB access (#208)
 - Test DB isolation for bun's single-process test model (#208)
 - Migration version collision detection (#208)
