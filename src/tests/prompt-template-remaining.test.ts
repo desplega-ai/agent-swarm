@@ -113,7 +113,7 @@ describe("template registration — all sources", () => {
     expect(eventTypes).toContain("task.worker.failed");
   });
 
-  test("Runner trigger templates are registered (7 task_lifecycle)", () => {
+  test("Runner trigger templates are registered (8 task_lifecycle)", () => {
     const all = getAllTemplateDefinitions();
     const eventTypes = all.map((d) => d.eventType);
     expect(eventTypes).toContain("task.trigger.assigned");
@@ -121,6 +121,7 @@ describe("template registration — all sources", () => {
     expect(eventTypes).toContain("task.trigger.unread_mentions");
     expect(eventTypes).toContain("task.trigger.pool_available");
     expect(eventTypes).toContain("task.trigger.epic_progress");
+    expect(eventTypes).toContain("task.trigger.channel_activity");
     expect(eventTypes).toContain("task.resumption.with_progress");
     expect(eventTypes).toContain("task.resumption.no_progress");
   });
