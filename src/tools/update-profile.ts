@@ -134,6 +134,19 @@ export const registerUpdateProfileTool = (server: McpServer) => {
             },
           };
         }
+
+        // Validate target agent exists before proceeding
+        const targetAgent = getAgentById(targetAgentId);
+        if (!targetAgent) {
+          return {
+            content: [{ type: "text", text: "Target agent not found." }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: "Target agent not found.",
+            },
+          };
+        }
       }
 
       // At least one field must be provided
