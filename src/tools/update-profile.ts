@@ -139,11 +139,11 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         const targetAgent = getAgentById(targetAgentId);
         if (!targetAgent) {
           return {
-            content: [{ type: "text", text: "Target agent not found." }],
+            content: [{ type: "text", text: `Target agent ${targetAgentId} not found.` }],
             structuredContent: {
               yourAgentId: requestInfo.agentId,
               success: false,
-              message: "Target agent not found.",
+              message: `Target agent ${targetAgentId} not found.`,
             },
           };
         }
