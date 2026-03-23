@@ -2125,6 +2125,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             }
           }
 
+          // Per-task runner session ID so session logs are scoped to this task
+          const resumeRunnerSessionId = crypto.randomUUID();
+
           const runningTask = await spawnProviderProcess(
             adapter,
             {
@@ -2136,7 +2139,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               apiUrl,
               apiKey,
               agentId,
-              runnerSessionId: sessionId,
+              runnerSessionId: resumeRunnerSessionId,
               iteration,
               taskId: task.id,
               model: (task as { model?: string }).model,
@@ -2151,6 +2154,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             taskId: task.id,
             triggerType: "task_resumed",
             taskDescription: task.task?.slice(0, 200),
+            runnerSessionId: resumeRunnerSessionId,
           });
           console.log(
             `[${role}] Resumed task ${task.id.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active)`,
@@ -2400,6 +2404,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           };
           await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
 
+          // Per-task runner session ID so session logs are scoped to this task
+          const taskRunnerSessionId = crypto.randomUUID();
+
           // Spawn without blocking (await to set up session, but process runs async)
           const runningTask = await spawnProviderProcess(
             adapter,
@@ -2412,7 +2419,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               apiUrl,
               apiKey,
               agentId,
-              runnerSessionId: sessionId,
+              runnerSessionId: taskRunnerSessionId,
               iteration,
               taskId: trigger.taskId,
               model: taskModel,
@@ -2444,7 +2451,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             taskId: runningTask.taskId,
             triggerType: trigger.type,
             taskDescription: taskDesc,
-            runnerSessionId: sessionId,
+            runnerSessionId: taskRunnerSessionId,
           });
 
           console.log(
