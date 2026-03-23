@@ -3,7 +3,7 @@ export const GITHUB_BOT_NAME = process.env.GITHUB_BOT_NAME || "agent-swarm-bot";
 
 // Additional aliases that also trigger the bot (comma-separated env var)
 // Example: GITHUB_BOT_ALIASES=heysidekick,sidekick,review-bot
-const BOT_NAMES: string[] = (() => {
+export const BOT_NAMES: string[] = (() => {
   const primary = GITHUB_BOT_NAME.toLowerCase();
   const aliases = (process.env.GITHUB_BOT_ALIASES || "")
     .split(",")
