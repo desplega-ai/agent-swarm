@@ -15,6 +15,7 @@ A workflow consists of:
 - **Executors** — Class-based step implementations with Zod-typed config and output schemas
 - **Triggers** — Entry points: webhook (HMAC-SHA256), schedule (ref), or manual
 - **Checkpoint durability** — Atomic DB write after every step; resume from last checkpoint on crash
+- **Fan-out / convergence** — Parallel execution via array `next` with automatic convergence gating
 
 ### Executor Types
 
@@ -36,6 +37,14 @@ Each executor has typed config and output schemas available via `GET /api/execut
 ## Defining a Workflow
 
 Workflows use a **nodes-with-next** schema. Each node declares its `next` field for routing — edges are auto-generated for the UI graph visualization.
+
+The `next` field supports three formats:
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| `string` | `"next-node"` | Simple chaining to one node |
+| `string[]` | `["node-a", "node-b"]` | Fan-out to multiple parallel nodes |
+| `Record<string, string>` | `{ "pass": "ok-node", "fail": "err-node" }` | Port-based conditional routing |
 
 ```json
 {
@@ -97,6 +106,55 @@ When a workflow triggers:
 3. Each node's executor runs and produces output that determines port-based routing via `next`
 4. **Checkpoint durability** — after every step, an atomic DB write saves the step result and execution context
 5. On crash or restart, execution resumes from the last checkpoint
+
+### Fan-Out and Convergence
+
+Workflows support **fan-out** by specifying an array of node IDs in the `next` field. All target nodes execute in parallel, and downstream convergence nodes automatically wait for all predecessors to complete before executing.
+
+```json
+{
+  "definition": {
+    "nodes": [
+      {
+        "id": "start",
+        "type": "agent-task",
+        "next": ["task-a", "task-b", "task-c"]
+      },
+      { "id": "task-a", "type": "agent-task", "next": "merge" },
+      { "id": "task-b", "type": "agent-task", "next": "merge" },
+      { "id": "task-c", "type": "agent-task", "next": "merge" },
+      {
+        "id": "merge",
+        "type": "agent-task",
+        "inputs": { "a": "task-a", "b": "task-b", "c": "task-c" },
+        "config": { "template": "Combine results from {{a.taskOutput}}, {{b.taskOutput}}, {{c.taskOutput}}" }
+      }
+    ]
+  }
+}
+```
+
+The engine detects convergence nodes (nodes with multiple predecessors) and gates execution until all predecessors complete. This works correctly with async executors like `agent-task` — the resume logic uses convergence-aware node detection.
+
+### Node Failure Behavior (`onNodeFailure`)
+
+By default, if any node's task fails or is cancelled, the entire workflow run is marked as failed. You can change this with the `onNodeFailure` field on the workflow definition:
+
+```json
+{
+  "definition": {
+    "onNodeFailure": "continue",
+    "nodes": [...]
+  }
+}
+```
+
+| Value | Behavior |
+|-------|----------|
+| `"fail"` (default) | Mark the entire run as failed immediately |
+| `"continue"` | Treat the failed node as completed with error output and proceed — downstream convergence nodes receive `[FAILED: reason]` and can handle partial results |
+
+This is useful for fan-out patterns where some branches may fail but you still want to collect results from the successful ones.
 
 ### Per-Step Retry
 
