@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.49.0",
+    "version": "1.50.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -88,6 +88,9 @@
                     "type": "string"
                   },
                   "taskDescription": {
+                    "type": "string"
+                  },
+                  "runnerSessionId": {
                     "type": "string"
                   }
                 },
@@ -189,6 +192,52 @@
         "responses": {
           "200": {
             "description": "Heartbeat updated"
+          }
+        }
+      }
+    },
+    "/api/active-sessions/provider-session/{taskId}": {
+      "put": {
+        "summary": "Update provider session ID on an active session",
+        "tags": [
+          "Active Sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "providerSessionId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "providerSessionId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider session ID updated"
           }
         }
       }
@@ -1542,6 +1591,431 @@
         }
       }
     },
+    "/api/prompt-templates/resolved": {
+      "get": {
+        "summary": "Resolve a prompt template for a given event type and scope chain",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "eventType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "repoId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resolved template info"
+          },
+          "400": {
+            "description": "Missing eventType"
+          }
+        }
+      }
+    },
+    "/api/prompt-templates/events": {
+      "get": {
+        "summary": "List all registered event types with their available variables",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of event template definitions"
+          }
+        }
+      }
+    },
+    "/api/prompt-templates/preview": {
+      "post": {
+        "summary": "Dry-run render a template with provided variables",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "eventType": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "variables": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "eventType"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rendered template preview"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/prompt-templates/render": {
+      "post": {
+        "summary": "Full scope-aware template resolution with interpolation (used by workers via HTTP)",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "eventType": {
+                    "type": "string"
+                  },
+                  "variables": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "agentId": {
+                    "type": "string"
+                  },
+                  "repoId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "eventType"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fully resolved and interpolated template"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/prompt-templates/{id}/checkout": {
+      "post": {
+        "summary": "Checkout a specific version of a prompt template from history",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "version"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Checked-out template"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "404": {
+            "description": "Template or version not found"
+          }
+        }
+      }
+    },
+    "/api/prompt-templates/{id}/reset": {
+      "post": {
+        "summary": "Reset a prompt template to its code-defined default",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reset template"
+          },
+          "404": {
+            "description": "Template not found or no code default available"
+          }
+        }
+      }
+    },
+    "/api/prompt-templates/{id}": {
+      "get": {
+        "summary": "Get a single prompt template with its version history",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Template with history"
+          },
+          "404": {
+            "description": "Template not found"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a prompt template override",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Template deleted"
+          },
+          "400": {
+            "description": "Cannot delete default template"
+          },
+          "404": {
+            "description": "Template not found"
+          }
+        }
+      }
+    },
+    "/api/prompt-templates": {
+      "get": {
+        "summary": "List prompt templates with optional filters",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "eventType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scope",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scopeId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "isDefault",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of prompt templates"
+          }
+        }
+      },
+      "put": {
+        "summary": "Create or update a prompt template override",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "eventType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "global",
+                      "agent",
+                      "repo"
+                    ]
+                  },
+                  "scopeId": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "enabled",
+                      "default_prompt_fallback",
+                      "skip_event"
+                    ]
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "changedBy": {
+                    "type": "string"
+                  },
+                  "changeReason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "eventType",
+                  "body"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upserted template"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
     "/api/poll": {
       "get": {
         "summary": "Poll for triggers (tasks, mentions, epic updates)",
@@ -1562,6 +2036,59 @@
           },
           "404": {
             "description": "Agent not found"
+          }
+        }
+      }
+    },
+    "/api/channel-activity/commit-cursors": {
+      "post": {
+        "summary": "Commit channel activity cursors after successful processing",
+        "tags": [
+          "Poll"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cursorUpdates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "channelId": {
+                          "type": "string"
+                        },
+                        "ts": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "channelId",
+                        "ts"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "cursorUpdates"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cursors committed"
+          },
+          "400": {
+            "description": "Invalid request"
           }
         }
       }
@@ -3563,13 +4090,19 @@
                                   "type": "string"
                                 },
                                 {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                {
                                   "type": "object",
                                   "additionalProperties": {
                                     "type": "string"
                                   }
                                 }
                               ],
-                              "description": "Next node(s): string for simple chaining, or record for port-based routing ({pass: 'a', fail: 'b'})"
+                              "description": "Next node(s): string for simple chaining, string[] for fan-out to parallel nodes, or record for port-based routing ({pass: 'a', fail: 'b'})"
                             },
                             "validation": {
                               "type": "object",
@@ -3674,6 +4207,15 @@
                           ]
                         },
                         "minItems": 1
+                      },
+                      "onNodeFailure": {
+                        "type": "string",
+                        "enum": [
+                          "fail",
+                          "continue"
+                        ],
+                        "default": "fail",
+                        "description": "Behavior when a node's task fails or is cancelled. 'fail' (default): mark the entire run as failed. 'continue': treat the failed node as completed with error output and proceed — downstream convergence nodes receive '[FAILED: reason]' and can handle partial results."
                       }
                     },
                     "required": [
@@ -3765,6 +4307,14 @@
                   "triggerSchema": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "dir": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "vcsRepo": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
@@ -3878,13 +4428,19 @@
                                   "type": "string"
                                 },
                                 {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                {
                                   "type": "object",
                                   "additionalProperties": {
                                     "type": "string"
                                   }
                                 }
                               ],
-                              "description": "Next node(s): string for simple chaining, or record for port-based routing ({pass: 'a', fail: 'b'})"
+                              "description": "Next node(s): string for simple chaining, string[] for fan-out to parallel nodes, or record for port-based routing ({pass: 'a', fail: 'b'})"
                             },
                             "validation": {
                               "type": "object",
@@ -3989,6 +4545,15 @@
                           ]
                         },
                         "minItems": 1
+                      },
+                      "onNodeFailure": {
+                        "type": "string",
+                        "enum": [
+                          "fail",
+                          "continue"
+                        ],
+                        "default": "fail",
+                        "description": "Behavior when a node's task fails or is cancelled. 'fail' (default): mark the entire run as failed. 'continue': treat the failed node as completed with error output and proceed — downstream convergence nodes receive '[FAILED: reason]' and can handle partial results."
                       }
                     },
                     "required": [
@@ -4089,6 +4654,20 @@
                       "null"
                     ],
                     "additionalProperties": {}
+                  },
+                  "dir": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1
+                  },
+                  "vcsRepo": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1
                   },
                   "enabled": {
                     "type": "boolean"

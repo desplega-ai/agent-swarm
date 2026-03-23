@@ -33,6 +33,19 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
           .optional()
           .nullable()
           .describe("New input values (null to remove)"),
+        dir: z
+          .string()
+          .min(1)
+          .startsWith("/")
+          .optional()
+          .nullable()
+          .describe("Default working directory for all agent-task nodes (null to remove)"),
+        vcsRepo: z
+          .string()
+          .min(1)
+          .optional()
+          .nullable()
+          .describe("Default VCS repo for all agent-task nodes (null to remove)"),
         enabled: z.boolean().optional().describe("Enable or disable the workflow"),
       }),
       outputSchema: z.object({
@@ -43,7 +56,7 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
       }),
     },
     async (
-      { id, name, description, definition, triggers, cooldown, input, enabled },
+      { id, name, description, definition, triggers, cooldown, input, dir, vcsRepo, enabled },
       requestInfo,
     ) => {
       try {
@@ -85,6 +98,8 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
           triggers,
           cooldown: cooldown === null ? null : cooldown,
           input: input === null ? null : input,
+          dir: dir === null ? null : dir,
+          vcsRepo: vcsRepo === null ? null : vcsRepo,
           enabled,
         });
         if (!workflow) {

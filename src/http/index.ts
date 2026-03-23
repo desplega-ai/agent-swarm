@@ -24,6 +24,7 @@ import { handleEpics } from "./epics";
 import { handleMcp } from "./mcp";
 import { handleMemory } from "./memory";
 import { handlePoll } from "./poll";
+import { handlePromptTemplates } from "./prompt-templates";
 import { handleRepos } from "./repos";
 import { handleSchedules } from "./schedules";
 import { handleSessionData } from "./session-data";
@@ -91,7 +92,7 @@ const httpServer = createHttpServer(async (req, res) => {
   // ── Route handlers (order matters — first match wins) ──
   const handlers: (() => Promise<boolean>)[] = [
     () => handleAgentRegister(req, res, pathSegments, myAgentId),
-    () => handlePoll(req, res, pathSegments, myAgentId),
+    () => handlePoll(req, res, pathSegments, queryParams, myAgentId),
     () => handleSessionData(req, res, pathSegments, queryParams, myAgentId),
     () => handleEcosystem(req, res, pathSegments, myAgentId),
     () => handleTrackers(req, res, pathSegments),
@@ -104,6 +105,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleSchedules(req, res, pathSegments, queryParams, myAgentId),
     () => handleWorkflows(req, res, pathSegments, queryParams, myAgentId),
     () => handleConfig(req, res, pathSegments, queryParams),
+    () => handlePromptTemplates(req, res, pathSegments, queryParams),
     () => handleDbQuery(req, res, pathSegments, queryParams),
     () => handleRepos(req, res, pathSegments, queryParams),
     () => handleMemory(req, res, pathSegments, myAgentId),
@@ -197,8 +199,9 @@ httpServer
     // Start scheduler (if enabled)
     if (hasCapability("scheduling")) {
       const { startScheduler } = await import("../scheduler");
+      const { getExecutorRegistry } = await import("../workflows");
       const intervalMs = Number(process.env.SCHEDULER_INTERVAL_MS) || 10000;
-      startScheduler(intervalMs);
+      startScheduler(getExecutorRegistry(), intervalMs);
     }
 
     // Start heartbeat triage (unless disabled)

@@ -5,7 +5,10 @@ import {
   getAgentMailInboxMapping,
   getAllAgents,
 } from "../be/db";
+import { resolveTemplate } from "../prompts/resolver";
 import { workflowEventBus } from "../workflows/event-bus";
+// Side-effect import: registers all AgentMail event templates in the in-memory registry
+import "./templates";
 import type { AgentMailMessage, AgentMailWebhookPayload } from "./types";
 
 /**
@@ -109,9 +112,19 @@ export async function handleMessageReceived(
   const existingTask = findTaskByAgentMailThread(thread_id);
   if (existingTask) {
     // Create a follow-up task with parentTaskId to continue the session
-    const taskDescription = `[AgentMail] Follow-up email in thread\n\nFrom: ${from}\nSubject: ${subject}\nInbox: ${inbox_id}\nThread: ${thread_id}\n\n${preview}`;
+    const followupResult = resolveTemplate("agentmail.email.followup", {
+      from,
+      subject,
+      inbox_id,
+      thread_id,
+      preview,
+    });
 
-    const task = createTaskExtended(taskDescription, {
+    if (followupResult.skipped) {
+      return { created: false };
+    }
+
+    const task = createTaskExtended(followupResult.text, {
       agentId: existingTask.agentId,
       source: "agentmail",
       taskType: "agentmail-reply",
@@ -135,9 +148,20 @@ export async function handleMessageReceived(
     if (agent) {
       if (agent.isLead) {
         // Route to lead as task
-        const taskDescription = `[AgentMail] New email received\n\nFrom: ${from}\nSubject: ${subject}\nInbox: ${inbox_id}\nThread: ${thread_id}\nMessage: ${message_id}\n\n${preview}`;
+        const leadResult = resolveTemplate("agentmail.email.mapped_lead", {
+          from,
+          subject,
+          inbox_id,
+          thread_id,
+          message_id,
+          preview,
+        });
 
-        const task = createTaskExtended(taskDescription, {
+        if (leadResult.skipped) {
+          return { created: false };
+        }
+
+        const task = createTaskExtended(leadResult.text, {
           agentId: agent.id,
           source: "agentmail",
           taskType: "agentmail-message",
@@ -153,9 +177,19 @@ export async function handleMessageReceived(
       }
 
       // Route to worker as task
-      const taskDescription = `[AgentMail] New email received\n\nFrom: ${from}\nSubject: ${subject}\nInbox: ${inbox_id}\nThread: ${thread_id}\n\n${preview}`;
+      const workerResult = resolveTemplate("agentmail.email.mapped_worker", {
+        from,
+        subject,
+        inbox_id,
+        thread_id,
+        preview,
+      });
 
-      const task = createTaskExtended(taskDescription, {
+      if (workerResult.skipped) {
+        return { created: false };
+      }
+
+      const task = createTaskExtended(workerResult.text, {
         agentId: agent.id,
         source: "agentmail",
         taskType: "agentmail-message",
@@ -174,9 +208,20 @@ export async function handleMessageReceived(
   // No mapping found - route to lead as task
   const lead = findLeadAgent();
   if (lead) {
-    const taskDescription = `[AgentMail] New email received (unmapped inbox)\n\nFrom: ${from}\nSubject: ${subject}\nInbox: ${inbox_id}\nThread: ${thread_id}\nMessage: ${message_id}\n\n${preview}`;
+    const unmappedResult = resolveTemplate("agentmail.email.unmapped", {
+      from,
+      subject,
+      inbox_id,
+      thread_id,
+      message_id,
+      preview,
+    });
 
-    const task = createTaskExtended(taskDescription, {
+    if (unmappedResult.skipped) {
+      return { created: false };
+    }
+
+    const task = createTaskExtended(unmappedResult.text, {
       agentId: lead.id,
       source: "agentmail",
       taskType: "agentmail-message",
@@ -192,9 +237,19 @@ export async function handleMessageReceived(
   }
 
   // No lead available - create unassigned task
-  const taskDescription = `[AgentMail] New email received (no agent available)\n\nFrom: ${from}\nSubject: ${subject}\nInbox: ${inbox_id}\nThread: ${thread_id}\n\n${preview}`;
+  const noAgentResult = resolveTemplate("agentmail.email.no_agent", {
+    from,
+    subject,
+    inbox_id,
+    thread_id,
+    preview,
+  });
 
-  const task = createTaskExtended(taskDescription, {
+  if (noAgentResult.skipped) {
+    return { created: false };
+  }
+
+  const task = createTaskExtended(noAgentResult.text, {
     source: "agentmail",
     taskType: "agentmail-message",
     agentmailInboxId: inbox_id,

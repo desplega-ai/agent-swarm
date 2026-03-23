@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { generateDefaultClaudeMd } from "../be/db";
+import { generateDefaultClaudeMd } from "../prompts/defaults";
 
 describe("generateDefaultClaudeMd", () => {
   test("should generate basic template with just name", () => {

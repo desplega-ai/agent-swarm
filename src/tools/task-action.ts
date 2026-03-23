@@ -5,6 +5,7 @@ import {
   checkDependencies,
   claimTask,
   createTaskExtended,
+  getActiveSessions,
   getActiveTaskCount,
   getAgentById,
   getDb,
@@ -12,8 +13,10 @@ import {
   hasCapacity,
   moveTaskFromBacklog,
   moveTaskToBacklog,
+  reassociateSessionLogs,
   rejectTask,
   releaseTask,
+  updateTaskClaudeSessionId,
 } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import { AgentTaskSchema } from "@/types";
@@ -164,6 +167,23 @@ export const registerTaskActionTool = (server: McpServer) => {
                 message: `Task "${taskId}" was already claimed by another agent. Try a different task.`,
               };
             }
+
+            // Reassociate session logs from pool trigger's random UUID to real task ID
+            const sessions = getActiveSessions(agentId);
+            const activeSession = sessions.find((s) => s.runnerSessionId);
+            if (activeSession?.runnerSessionId) {
+              const count = reassociateSessionLogs(activeSession.runnerSessionId, taskId);
+              if (count > 0) {
+                console.log(
+                  `[task-action] Reassociated ${count} session logs for claimed task ${taskId.slice(0, 8)}`,
+                );
+              }
+              // Propagate provider session ID (e.g. claudeSessionId) to the task
+              if (activeSession.providerSessionId) {
+                updateTaskClaudeSessionId(taskId, activeSession.providerSessionId);
+              }
+            }
+
             return {
               success: true,
               message: `Claimed task "${taskId}".`,

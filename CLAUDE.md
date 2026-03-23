@@ -88,6 +88,12 @@ templates/       # Template data (official + community)
 templates-ui/    # Templates registry (Next.js app)
 ```
 
+## Architecture Invariants
+
+**Worker/API DB boundary**: The API server (`src/http.ts`, `src/server.ts`, `src/tools/`, `src/http/`) is the **sole owner** of the SQLite database. Worker-side code (`src/commands/`, `src/hooks/`, `src/providers/`, `src/prompts/`, `src/cli.tsx`, `src/claude.ts`) must **never** import from `src/be/db` or `bun:sqlite`. Workers communicate with the API exclusively via HTTP using `API_KEY` and `X-Agent-ID` headers.
+
+Enforced by `scripts/check-db-boundary.sh` (pre-push hook + CI merge gate). If you need to share pure logic between API and worker code, put it in a shared module (e.g., `src/prompts/`, `src/utils/`).
+
 ## Code Style
 
 - Run `bun run lint:fix` before committing (lint + format)
@@ -470,9 +476,10 @@ Before pushing a PR, run the checks that CI will enforce. Which checks to run de
 
 **Root project (src/, tools/, etc.):**
 ```bash
-bun run lint:fix        # Biome lint + format
-bun run tsc:check       # TypeScript type check
-bun test                # Unit tests
+bun run lint:fix             # Biome lint + format
+bun run tsc:check            # TypeScript type check
+bun test                     # Unit tests
+bash scripts/check-db-boundary.sh  # Worker/API DB boundary
 ```
 
 **If you changed `plugin/commands/*.md`:** Rebuild pi-mono skills and commit the result:
@@ -495,6 +502,10 @@ pnpm exec tsc --noEmit  # TypeScript type check
 All of these are enforced by the Merge Gate workflow (`.github/workflows/merge-gate.yml`). The gate job blocks merge if any check fails.
 
 ---
+
+## Architecture Invariants
+
+**Workers have NO local database.** Docker workers (lead and worker containers) communicate with the API server exclusively via HTTP using `API_KEY` + `X-Agent-ID` headers. All state lives in the API server's SQLite DB. Workers never import `db.ts` functions that write/query the DB directly — they call REST API endpoints instead. If worker-side code needs data that lives in the DB (e.g. template resolution, config lookup), it must fetch it from the API via HTTP, not query a local SQLite instance.
 
 ## Bun Rules
 

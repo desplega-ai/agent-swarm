@@ -6,19 +6,24 @@ import {
   createSessionCost,
   createTaskExtended,
   failTask,
+  getActiveSessions,
   getAgentById,
   getDb,
   getEpicWithProgress,
   getLeadAgent,
   getTaskById,
   markEpicsProgressNotified,
+  reassociateSessionLogs,
   updateAgentStatusFromCapacity,
   updateMemoryEmbedding,
   updateTaskProgress,
 } from "@/be/db";
 import { getEmbedding, serializeEmbedding } from "@/be/embedding";
+import { resolveTemplate } from "@/prompts/resolver";
 import { createToolRegistrar } from "@/tools/utils";
 import { AgentTaskSchema } from "@/types";
+// Side-effect import: registers task lifecycle templates in the in-memory registry
+import "./templates";
 import { validateJsonSchema } from "@/workflows/json-schema-validator";
 
 // Schema for optional cost data that agents can self-report
@@ -208,6 +213,19 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
       const result = txn();
 
+      // Reinforce session log reassociation for pool tasks (idempotent, no-op if already done)
+      if (result.success && requestInfo.agentId) {
+        try {
+          const sessions = getActiveSessions(requestInfo.agentId);
+          const activeSession = sessions.find((s) => s.runnerSessionId);
+          if (activeSession?.runnerSessionId) {
+            reassociateSessionLogs(activeSession.runnerSessionId, taskId);
+          }
+        } catch {
+          // Non-blocking — reassociation failure should not affect store-progress
+        }
+      }
+
       // Index completed and failed tasks as memory (async, non-blocking)
       if ((status === "completed" || status === "failed") && result.success && result.task) {
         (async () => {
@@ -280,11 +298,25 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
               let followUpDescription: string;
               if (status === "completed") {
-                const outputSummary = output ? output.slice(0, 500) : "(no output)";
-                followUpDescription = `Worker task completed — review needed.\n\nAgent: ${agentName}\nTask: "${taskDesc}"\n\nOutput:\n${outputSummary}${output && output.length > 500 ? "..." : ""}\n\nUse \`get-task-details\` with taskId "${taskId}" for full details.`;
+                const outputSummary = output
+                  ? `${output.slice(0, 500)}${output.length > 500 ? "..." : ""}`
+                  : "(no output)";
+                const completedResult = resolveTemplate("task.worker.completed", {
+                  agent_name: agentName,
+                  task_desc: taskDesc,
+                  output_summary: outputSummary,
+                  task_id: taskId,
+                });
+                followUpDescription = completedResult.text;
               } else {
                 const reason = failureReason || "(no reason given)";
-                followUpDescription = `Worker task failed — action needed.\n\nAgent: ${agentName}\nTask: "${taskDesc}"\n\nFailure reason: ${reason}\n\nDecide whether to reassign, retry, or handle the failure. Use \`get-task-details\` with taskId "${taskId}" for full details.`;
+                const failedResult = resolveTemplate("task.worker.failed", {
+                  agent_name: agentName,
+                  task_desc: taskDesc,
+                  failure_reason: reason,
+                  task_id: taskId,
+                });
+                followUpDescription = failedResult.text;
               }
 
               // Enrich follow-up with epic context if task belongs to an epic

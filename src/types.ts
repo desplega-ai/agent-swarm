@@ -543,6 +543,8 @@ export const ActiveSessionSchema = z.object({
   triggerType: z.string(),
   inboxMessageId: z.string().nullable(),
   taskDescription: z.string().nullable(),
+  runnerSessionId: z.string().nullable(),
+  providerSessionId: z.string().nullable(),
   startedAt: z.iso.datetime(),
   lastHeartbeatAt: z.iso.datetime(),
 });
@@ -608,10 +610,10 @@ export const WorkflowNodeSchema = z.object({
         "while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}).",
     ),
   next: z
-    .union([z.string(), z.record(z.string(), z.string())])
+    .union([z.string(), z.array(z.string()), z.record(z.string(), z.string())])
     .optional()
     .describe(
-      "Next node(s): string for simple chaining, or record for port-based routing ({pass: 'a', fail: 'b'})",
+      "Next node(s): string for simple chaining, string[] for fan-out to parallel nodes, or record for port-based routing ({pass: 'a', fail: 'b'})",
     ),
   validation: StepValidationConfigSchema.optional(),
   retry: RetryPolicySchema.optional(),
@@ -653,6 +655,15 @@ export type WorkflowEdge = z.infer<typeof WorkflowEdgeSchema>;
 
 export const WorkflowDefinitionSchema = z.object({
   nodes: z.array(WorkflowNodeSchema).min(1),
+  onNodeFailure: z
+    .enum(["fail", "continue"])
+    .default("fail")
+    .describe(
+      "Behavior when a node's task fails or is cancelled. " +
+        "'fail' (default): mark the entire run as failed. " +
+        "'continue': treat the failed node as completed with error output and proceed — " +
+        "downstream convergence nodes receive '[FAILED: reason]' and can handle partial results.",
+    ),
 });
 export type WorkflowDefinition = z.infer<typeof WorkflowDefinitionSchema>;
 
@@ -727,6 +738,8 @@ export const WorkflowSnapshotSchema = z.object({
   cooldown: CooldownConfigSchema.optional(),
   input: z.record(z.string(), InputValueSchema).optional(),
   triggerSchema: z.record(z.string(), z.unknown()).optional(),
+  dir: z.string().min(1).startsWith("/").optional(),
+  vcsRepo: z.string().min(1).optional(),
   enabled: z.boolean(),
 });
 export type WorkflowSnapshot = z.infer<typeof WorkflowSnapshotSchema>;
@@ -743,6 +756,8 @@ export const WorkflowSchema = z.object({
   cooldown: CooldownConfigSchema.optional(),
   input: z.record(z.string(), InputValueSchema).optional(),
   triggerSchema: z.record(z.string(), z.unknown()).optional(),
+  dir: z.string().min(1).startsWith("/").optional(),
+  vcsRepo: z.string().min(1).optional(),
   createdByAgentId: z.string().uuid().optional(),
   createdAt: z.string(),
   lastUpdatedAt: z.string(),
@@ -816,3 +831,41 @@ export const WorkflowRunStepSchema = z.object({
   nextPort: z.string().optional(),
 });
 export type WorkflowRunStep = z.infer<typeof WorkflowRunStepSchema>;
+
+// ============================================================================
+// Prompt Template Types
+// ============================================================================
+
+export const PromptTemplateScopeSchema = z.enum(["global", "agent", "repo"]);
+export const PromptTemplateStateSchema = z.enum([
+  "enabled",
+  "default_prompt_fallback",
+  "skip_event",
+]);
+
+export const PromptTemplateSchema = z.object({
+  id: z.string(),
+  eventType: z.string(),
+  scope: PromptTemplateScopeSchema,
+  scopeId: z.string().nullable(),
+  state: PromptTemplateStateSchema,
+  body: z.string(),
+  isDefault: z.boolean(),
+  version: z.number(),
+  createdBy: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type PromptTemplate = z.infer<typeof PromptTemplateSchema>;
+
+export const PromptTemplateHistorySchema = z.object({
+  id: z.string(),
+  templateId: z.string(),
+  version: z.number(),
+  body: z.string(),
+  state: z.string(),
+  changedBy: z.string().nullable(),
+  changedAt: z.string(),
+  changeReason: z.string().nullable(),
+});
+export type PromptTemplateHistory = z.infer<typeof PromptTemplateHistorySchema>;

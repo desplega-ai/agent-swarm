@@ -5,6 +5,7 @@ import {
   createSessionLogs,
   getAllSessionCosts,
   getDashboardCostSummary,
+  getDb,
   getSessionCostSummary,
   getSessionCostsByAgentId,
   getSessionCostsByTaskId,
@@ -137,8 +138,22 @@ export async function handleSessionData(
     if (!parsed) return true;
 
     try {
+      // For pool tasks: check if logs for this session were already reassociated
+      // to a real task ID. If so, use the real taskId instead of the random UUID.
+      let effectiveTaskId = parsed.body.taskId || undefined;
+      if (effectiveTaskId && parsed.body.sessionId) {
+        const existing = getDb()
+          .prepare<{ taskId: string }, [string, string]>(
+            "SELECT taskId FROM session_logs WHERE sessionId = ? AND taskId != ? LIMIT 1",
+          )
+          .get(parsed.body.sessionId, effectiveTaskId);
+        if (existing?.taskId) {
+          effectiveTaskId = existing.taskId;
+        }
+      }
+
       createSessionLogs({
-        taskId: parsed.body.taskId || undefined,
+        taskId: effectiveTaskId,
         sessionId: parsed.body.sessionId,
         iteration: parsed.body.iteration,
         cli: parsed.body.cli || "claude",
