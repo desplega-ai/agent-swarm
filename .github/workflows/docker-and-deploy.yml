@@ -18,8 +18,35 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  detect-version-change:
+    runs-on: self-hosted
+    outputs:
+      version_changed: ${{ steps.check.outputs.version_changed }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check for version change
+        id: check
+        run: |
+          NEW_VERSION=$(jq -r '.version' package.json)
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+          OLD_VERSION=$(git show HEAD~1:package.json 2>/dev/null | jq -r '.version' 2>/dev/null || echo "")
+          if [ "$OLD_VERSION" != "$NEW_VERSION" ] && [ -n "$OLD_VERSION" ]; then
+            echo "version_changed=true" >> $GITHUB_OUTPUT
+            echo "::notice::Version changed: $OLD_VERSION -> $NEW_VERSION"
+          else
+            echo "version_changed=false" >> $GITHUB_OUTPUT
+            echo "Version unchanged: $NEW_VERSION"
+          fi
+
   build-and-push-server:
     runs-on: self-hosted
+    needs: [detect-version-change]
     permissions:
       contents: read
       packages: write
@@ -27,10 +54,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Get version from package.json
-        id: version
-        run: echo "version=$(jq -r '.version' package.json)" >> $GITHUB_OUTPUT
 
       - name: Log in to Container Registry
         uses: docker/login-action@v3
@@ -46,7 +69,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest
-            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=${{ needs.detect-version-change.outputs.version }},enable=${{ needs.detect-version-change.outputs.version_changed == 'true' }}
             type=sha
 
       - name: Set up Docker Buildx
@@ -65,6 +88,7 @@ jobs:
 
   build-and-push-worker:
     runs-on: self-hosted
+    needs: [detect-version-change]
     permissions:
       contents: read
       packages: write
@@ -72,10 +96,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Get version from package.json
-        id: version
-        run: echo "version=$(jq -r '.version' package.json)" >> $GITHUB_OUTPUT
 
       - name: Log in to Container Registry
         uses: docker/login-action@v3
@@ -91,7 +111,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker
           tags: |
             type=raw,value=latest
-            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=${{ needs.detect-version-change.outputs.version }},enable=${{ needs.detect-version-change.outputs.version_changed == 'true' }}
             type=sha
 
       - name: Set up Docker Buildx
@@ -130,3 +150,68 @@ jobs:
           dokploy_url: https://app.dokploy.com
           auth_token: ${{ secrets.DOKPLOY_TOKEN }}
           wait_for_completion: true
+
+  create-git-tag:
+    runs-on: self-hosted
+    needs: [detect-version-change]
+    if: needs.detect-version-change.outputs.version_changed == 'true'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create and push tag
+        env:
+          VERSION: ${{ needs.detect-version-change.outputs.version }}
+        run: |
+          TAG="v${VERSION}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "::warning::Tag $TAG already exists, skipping"
+          else
+            git tag "$TAG"
+            git push origin "$TAG"
+            echo "::notice::Created tag $TAG"
+          fi
+
+  publish-npm:
+    runs-on: self-hosted
+    needs: [detect-version-change]
+    if: needs.detect-version-change.outputs.version_changed == 'true'
+    permissions:
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check if already published
+        id: check
+        env:
+          VERSION: ${{ needs.detect-version-change.outputs.version }}
+        run: |
+          if npm view "@desplega.ai/agent-swarm@${VERSION}" version 2>/dev/null; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::warning::Version ${VERSION} already on npm, skipping"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish to npm
+        if: steps.check.outputs.skip != 'true'
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

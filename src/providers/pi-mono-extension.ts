@@ -326,7 +326,11 @@ ${transcript}`;
     const tmpFile = `/tmp/session-summary-${Date.now()}.txt`;
     await Bun.write(tmpFile, summarizePrompt);
     const proc = Bun.spawn(
-      ["bash", "-c", `cat "${tmpFile}" | claude -p --model haiku --output-format json`],
+      [
+        "bash",
+        "-c",
+        `cat "${tmpFile}" | ${process.env.CLAUDE_BINARY || "claude"} -p --model haiku --output-format json`,
+      ],
       {
         stdout: "pipe",
         stderr: "pipe",

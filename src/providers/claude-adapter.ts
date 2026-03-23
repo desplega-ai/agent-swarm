@@ -93,6 +93,7 @@ class ClaudeSession implements ProviderSession {
     taskFilePath: string,
     taskFilePid: number,
     private sessionMcpConfig: string | null = null,
+    private claudeBinary: string = "claude",
   ) {
     this.taskFilePid = taskFilePid;
     const cmd = this.buildCommand();
@@ -116,7 +117,7 @@ class ClaudeSession implements ProviderSession {
 
   private buildCommand(): string[] {
     const cmd = [
-      "claude",
+      this.claudeBinary,
       "--model",
       this.model,
       "--verbose",
@@ -376,6 +377,8 @@ class ClaudeSession implements ProviderSession {
           this.model,
           taskFilePath,
           this.taskFilePid,
+          null,
+          this.claudeBinary,
         );
 
         // Forward events from retry to our listeners
@@ -404,6 +407,9 @@ export class ClaudeAdapter implements ProviderAdapter {
     const credType = validateClaudeCredentials(config.env || process.env);
     console.log(`\x1b[2m[claude]\x1b[0m Using credential: ${credType}`);
 
+    // Resolve claude binary: CLAUDE_BINARY env var > "claude" (PATH lookup)
+    const claudeBinary = process.env.CLAUDE_BINARY || "claude";
+
     const taskFilePid = process.pid;
     const taskFilePath = await writeTaskFile(taskFilePid, {
       taskId: config.taskId,
@@ -416,7 +422,14 @@ export class ClaudeAdapter implements ProviderAdapter {
     // Create per-session MCP config with X-Source-Task-Id header (no shared-file race condition)
     const sessionMcpConfig = await createSessionMcpConfig(config.cwd, config.taskId);
 
-    return new ClaudeSession(config, model, taskFilePath, taskFilePid, sessionMcpConfig);
+    return new ClaudeSession(
+      config,
+      model,
+      taskFilePath,
+      taskFilePid,
+      sessionMcpConfig,
+      claudeBinary,
+    );
   }
 
   async canResume(_sessionId: string): Promise<boolean> {

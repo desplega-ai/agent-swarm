@@ -23,6 +23,22 @@ if [ -z "$API_KEY" ]; then
     exit 1
 fi
 
+# ---- Verify claude binary is reachable ----
+if [ "$HARNESS_PROVIDER" != "pi" ]; then
+    CLAUDE_BIN="${CLAUDE_BINARY:-claude}"
+    if ! command -v "$CLAUDE_BIN" > /dev/null 2>&1; then
+        echo "FATAL: Claude CLI not found: '$CLAUDE_BIN'"
+        echo "  PATH=$PATH"
+        for loc in /usr/local/bin/claude /usr/bin/claude; do
+            if [ -f "$loc" ]; then
+                echo "  Found at $loc (not in PATH) — set CLAUDE_BINARY=$loc"
+            fi
+        done
+        exit 1
+    fi
+    echo "Claude CLI: $(command -v "$CLAUDE_BIN")"
+fi
+
 # ---- Archil disk mounts ----
 # Skipped when ARCHIL_MOUNT_TOKEN is not set (local dev / environments without Archil)
 if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then

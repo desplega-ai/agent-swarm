@@ -82,6 +82,8 @@ ENV PATH="/home/worker/.bun/bin:$PATH"
 # Install Claude CLI (pinned version — bump ARG to update)
 ARG CLAUDE_CODE_VERSION=2.1.80
 RUN sudo npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+# Verify claude binary is findable after install
+RUN which claude && claude --version
 ENV PATH="/home/worker/.local/bin:$PATH"
 
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
