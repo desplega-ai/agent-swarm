@@ -42,18 +42,15 @@ export function seedDefaultTemplates(): void {
     const globalRecord = allGlobal.find((t) => t.scopeId === null);
 
     if (!globalRecord) {
-      // No global record at all — seed one.
-      // upsertPromptTemplate inserts with isDefault=0, so we immediately
-      // resetPromptTemplateToDefault to flip isDefault=true.
-      const template = upsertPromptTemplate({
+      // No global record at all — seed one with isDefault=true directly.
+      upsertPromptTemplate({
         eventType: def.eventType,
         scope: "global",
         body: def.defaultBody,
         createdBy: "system",
         changeReason: "Seeded from code registry",
+        isDefault: true,
       });
-
-      resetPromptTemplateToDefault(template.id, def.defaultBody);
     } else if (globalRecord.isDefault && globalRecord.body !== def.defaultBody) {
       // Global default exists but body has drifted from code — update it.
       // Only update if the record is still marked as default (not user-customized).
