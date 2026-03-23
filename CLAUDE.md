@@ -501,6 +501,8 @@ pnpm exec tsc --noEmit  # TypeScript type check
 
 All of these are enforced by the Merge Gate workflow (`.github/workflows/merge-gate.yml`). The gate job blocks merge if any check fails.
 
+**Local E2E (when changes touch runtime behavior):** After implementing changes to the API, runner, polling, task lifecycle, session logs, Docker entrypoint, or worker/lead behavior, run a local E2E test using the `swarm-local-e2e` skill (`.claude/skills/swarm-local-e2e/SKILL.md`). This spins up an API server + Docker lead/worker, creates tasks, and verifies end-to-end correctness. The skill should also be used when running `/desplega:implement-plan` or after a Claude Plan mode implementation — include it as the final verification phase.
+
 ---
 
 ## Architecture Invariants
