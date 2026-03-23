@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { updateAgentName, updateAgentProfile } from "@/be/db";
+import { getAgentById, updateAgentName, updateAgentProfile } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 import { type Agent, AgentSchema } from "@/types";
 
@@ -10,10 +10,17 @@ export const registerUpdateProfileTool = (server: McpServer) => {
     {
       title: "Update Profile",
       description:
-        "Updates the calling agent's profile information (name, description, role, capabilities).",
+        "Updates an agent's profile information (name, description, role, capabilities). By default updates the calling agent. Lead agents can update any agent's profile by providing the agentId parameter.",
       annotations: { idempotentHint: true },
 
       inputSchema: z.object({
+        agentId: z
+          .string()
+          .uuid()
+          .optional()
+          .describe(
+            "Target agent ID to update. If omitted, updates the calling agent. Only lead agents can update other agents' profiles.",
+          ),
         name: z.string().min(1).optional().describe("Agent name."),
         description: z.string().optional().describe("Agent description."),
         role: z
@@ -69,7 +76,18 @@ export const registerUpdateProfileTool = (server: McpServer) => {
       }),
     },
     async (
-      { name, description, role, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd },
+      {
+        agentId,
+        name,
+        description,
+        role,
+        capabilities,
+        claudeMd,
+        soulMd,
+        identityMd,
+        setupScript,
+        toolsMd,
+      },
       requestInfo,
       _meta,
     ) => {
@@ -81,6 +99,54 @@ export const registerUpdateProfileTool = (server: McpServer) => {
             message: 'Agent ID not found. Set the "X-Agent-ID" header.',
           },
         };
+      }
+
+      // Determine target agent: if agentId is provided, check lead permissions
+      const isUpdatingSelf = !agentId || agentId === requestInfo.agentId;
+      const targetAgentId = isUpdatingSelf ? requestInfo.agentId : agentId;
+
+      if (!isUpdatingSelf) {
+        // Only lead agents can update other agents' profiles
+        const callingAgent = getAgentById(requestInfo.agentId);
+        if (!callingAgent) {
+          return {
+            content: [{ type: "text", text: "Calling agent not found." }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: "Calling agent not found.",
+            },
+          };
+        }
+        if (!callingAgent.isLead) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Only lead agents can update other agents' profiles. Provide no agentId to update your own profile.",
+              },
+            ],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message:
+                "Only lead agents can update other agents' profiles. Provide no agentId to update your own profile.",
+            },
+          };
+        }
+
+        // Validate target agent exists before proceeding
+        const targetAgent = getAgentById(targetAgentId);
+        if (!targetAgent) {
+          return {
+            content: [{ type: "text", text: `Target agent ${targetAgentId} not found.` }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message: `Target agent ${targetAgentId} not found.`,
+            },
+          };
+        }
       }
 
       // At least one field must be provided
@@ -116,14 +182,14 @@ export const registerUpdateProfileTool = (server: McpServer) => {
 
         // Update name if provided
         if (name !== undefined) {
-          agent = updateAgentName(requestInfo.agentId, name);
+          agent = updateAgentName(targetAgentId, name);
           if (!agent) {
             return {
-              content: [{ type: "text", text: "Agent not found." }],
+              content: [{ type: "text", text: "Target agent not found." }],
               structuredContent: {
                 yourAgentId: requestInfo.agentId,
                 success: false,
-                message: "Agent not found.",
+                message: "Target agent not found.",
               },
             };
           }
@@ -131,7 +197,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
 
         // Update profile fields if provided
         agent = updateAgentProfile(
-          requestInfo.agentId,
+          targetAgentId,
           {
             description,
             role,
@@ -143,38 +209,41 @@ export const registerUpdateProfileTool = (server: McpServer) => {
             toolsMd,
           },
           {
-            changeSource: "self_edit",
+            changeSource: isUpdatingSelf ? "self_edit" : "lead_coaching",
             changedByAgentId: requestInfo.agentId,
           },
         );
 
-        // Write updated files to workspace so changes are visible immediately
-        if (soulMd !== undefined) {
-          try {
-            await Bun.write("/workspace/SOUL.md", soulMd);
-          } catch {
-            /* ignore */
+        // Write updated files to workspace only when updating self
+        // (remote agent files live on their own container)
+        if (isUpdatingSelf) {
+          if (soulMd !== undefined) {
+            try {
+              await Bun.write("/workspace/SOUL.md", soulMd);
+            } catch {
+              /* ignore */
+            }
           }
-        }
-        if (identityMd !== undefined) {
-          try {
-            await Bun.write("/workspace/IDENTITY.md", identityMd);
-          } catch {
-            /* ignore */
+          if (identityMd !== undefined) {
+            try {
+              await Bun.write("/workspace/IDENTITY.md", identityMd);
+            } catch {
+              /* ignore */
+            }
           }
-        }
-        if (setupScript !== undefined) {
-          try {
-            await Bun.write("/workspace/start-up.sh", `#!/bin/bash\n${setupScript}\n`);
-          } catch {
-            /* ignore */
+          if (setupScript !== undefined) {
+            try {
+              await Bun.write("/workspace/start-up.sh", `#!/bin/bash\n${setupScript}\n`);
+            } catch {
+              /* ignore */
+            }
           }
-        }
-        if (toolsMd !== undefined) {
-          try {
-            await Bun.write("/workspace/TOOLS.md", toolsMd);
-          } catch {
-            /* ignore */
+          if (toolsMd !== undefined) {
+            try {
+              await Bun.write("/workspace/TOOLS.md", toolsMd);
+            } catch {
+              /* ignore */
+            }
           }
         }
 
@@ -200,12 +269,15 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         if (setupScript !== undefined) updatedFields.push("setupScript");
         if (toolsMd !== undefined) updatedFields.push("toolsMd");
 
+        const targetLabel = isUpdatingSelf ? "own" : `agent ${targetAgentId}`;
         return {
-          content: [{ type: "text", text: `Updated profile: ${updatedFields.join(", ")}.` }],
+          content: [
+            { type: "text", text: `Updated ${targetLabel} profile: ${updatedFields.join(", ")}.` },
+          ],
           structuredContent: {
             yourAgentId: requestInfo.agentId,
             success: true,
-            message: `Updated profile: ${updatedFields.join(", ")}.`,
+            message: `Updated ${targetLabel} profile: ${updatedFields.join(", ")}.`,
             agent,
           },
         };
