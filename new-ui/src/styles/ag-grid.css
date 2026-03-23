@@ -27,10 +27,15 @@
 .ag-theme-quartz .ag-cell {
   display: flex;
   align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ag-theme-quartz .ag-cell-value {
   display: flex;
   align-items: center;
   width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
