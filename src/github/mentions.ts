@@ -3,20 +3,32 @@ export const GITHUB_BOT_NAME = process.env.GITHUB_BOT_NAME || "agent-swarm-bot";
 
 // Additional aliases that also trigger the bot (comma-separated env var)
 // Example: GITHUB_BOT_ALIASES=heysidekick,sidekick,review-bot
-export const BOT_NAMES: string[] = (() => {
+function computeBotNames(): string[] {
   const primary = GITHUB_BOT_NAME.toLowerCase();
   const aliases = (process.env.GITHUB_BOT_ALIASES || "")
     .split(",")
     .map((a) => a.trim().toLowerCase())
     .filter(Boolean);
   return [...new Set([primary, ...aliases])];
-})();
+}
+
+function computeMentionPattern(names: string[]): RegExp {
+  return new RegExp(
+    `@(${names.map((a) => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\b`,
+    "i",
+  );
+}
+
+export let BOT_NAMES: string[] = computeBotNames();
 
 // Pattern to detect @<any-name> mentions (case-insensitive)
-const MENTION_PATTERN = new RegExp(
-  `@(${BOT_NAMES.map((a) => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\b`,
-  "i",
-);
+let MENTION_PATTERN = computeMentionPattern(BOT_NAMES);
+
+/** Recompute BOT_NAMES and MENTION_PATTERN from current env. For testing only. */
+export function _resetBotNamesForTesting(): void {
+  BOT_NAMES = computeBotNames();
+  MENTION_PATTERN = computeMentionPattern(BOT_NAMES);
+}
 
 /**
  * Check if text contains @<bot-name-or-alias> mention

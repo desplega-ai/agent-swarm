@@ -1,26 +1,33 @@
 /**
  * Alias tests for mentions.ts
  *
- * IMPORTANT: process.env.GITHUB_BOT_ALIASES must be set BEFORE importing
- * mentions.ts because BOT_NAMES is computed once at module load time via an IIFE.
- * ESM imports are hoisted, so we use dynamic import() to control evaluation order.
- * This is why these tests live in a separate file from mentions.test.ts.
+ * BOT_NAMES is computed once at module load time. In bun test, all test files
+ * share the same process, so mentions.test.ts loads the module first (without
+ * aliases). We use _resetBotNamesForTesting() to recompute from current env.
  */
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+  _resetBotNamesForTesting,
+  BOT_NAMES,
+  detectMention,
+  extractMentionContext,
+  isBotAssignee,
+} from "./mentions";
 
-import { beforeAll, describe, expect, test } from "bun:test";
+const originalAliases = process.env.GITHUB_BOT_ALIASES;
 
-let detectMention: typeof import("./mentions").detectMention;
-let extractMentionContext: typeof import("./mentions").extractMentionContext;
-let isBotAssignee: typeof import("./mentions").isBotAssignee;
-let BOT_NAMES: typeof import("./mentions").BOT_NAMES;
-
-beforeAll(async () => {
+beforeAll(() => {
   process.env.GITHUB_BOT_ALIASES = "alias1,alias2";
-  const mod = await import("./mentions");
-  detectMention = mod.detectMention;
-  extractMentionContext = mod.extractMentionContext;
-  isBotAssignee = mod.isBotAssignee;
-  BOT_NAMES = mod.BOT_NAMES;
+  _resetBotNamesForTesting();
+});
+
+afterAll(() => {
+  if (originalAliases === undefined) {
+    delete process.env.GITHUB_BOT_ALIASES;
+  } else {
+    process.env.GITHUB_BOT_ALIASES = originalAliases;
+  }
+  _resetBotNamesForTesting();
 });
 
 describe("GITHUB_BOT_ALIASES support", () => {
