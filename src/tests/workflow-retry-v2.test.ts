@@ -16,7 +16,7 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import type { RetryPolicy, Workflow, WorkflowDefinition } from "../types";
-import { findReadyNodes, startWorkflowExecution, walkGraph } from "../workflows/engine";
+import { startWorkflowExecution } from "../workflows/engine";
 import { workflowEventBus } from "../workflows/event-bus";
 import {
   BaseExecutor,

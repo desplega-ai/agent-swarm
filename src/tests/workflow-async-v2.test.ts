@@ -4,7 +4,6 @@ import { z } from "zod";
 import {
   closeDb,
   completeTask,
-  createTaskExtended,
   createWorkflow,
   deleteWorkflow,
   getTaskByWorkflowRunStepId,
@@ -13,7 +12,7 @@ import {
   initDb,
 } from "../be/db";
 import type { Workflow, WorkflowDefinition } from "../types";
-import { startWorkflowExecution, walkGraph } from "../workflows/engine";
+import { startWorkflowExecution } from "../workflows/engine";
 import { InProcessEventBus, workflowEventBus } from "../workflows/event-bus";
 import { AgentTaskExecutor } from "../workflows/executors/agent-task";
 import {

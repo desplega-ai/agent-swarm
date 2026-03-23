@@ -11,7 +11,6 @@ import {
 } from "../linear/sync";
 import {
   _clearRecentDeliveries,
-  _getRecentDeliveries,
   handleLinearWebhook,
   verifyLinearWebhook,
 } from "../linear/webhook";
@@ -63,7 +62,7 @@ describe("verifyLinearWebhook", () => {
   test("returns false for tampered body", () => {
     const body = '{"type":"Issue","action":"update"}';
     const sig = signPayload(body, TEST_SECRET);
-    expect(verifyLinearWebhook(body + "x", sig, TEST_SECRET)).toBe(false);
+    expect(verifyLinearWebhook(`${body}x`, sig, TEST_SECRET)).toBe(false);
   });
 
   test("returns false for mismatched length signature", () => {

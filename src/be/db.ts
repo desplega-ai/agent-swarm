@@ -6348,6 +6348,7 @@ export function upsertPromptTemplate(data: {
   createdBy?: string | null;
   changedBy?: string | null;
   changeReason?: string | null;
+  isDefault?: boolean;
 }): PromptTemplate {
   const now = new Date().toISOString();
   const scopeId = data.scope === "global" ? null : (data.scopeId ?? null);
@@ -6424,7 +6425,19 @@ export function upsertPromptTemplate(data: {
         `INSERT INTO prompt_templates (id, eventType, scope, scopeId, state, body, isDefault, version, createdBy, createdAt, updatedAt)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       )
-      .get(id, data.eventType, data.scope, scopeId, state, data.body, 0, 1, createdBy, now, now);
+      .get(
+        id,
+        data.eventType,
+        data.scope,
+        scopeId,
+        state,
+        data.body,
+        data.isDefault ? 1 : 0,
+        1,
+        createdBy,
+        now,
+        now,
+      );
 
     // Create history entry for the insert
     getDb()
