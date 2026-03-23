@@ -1,9 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { z } from "zod";
 import {
   claimMentions,
   claimOfferedTask,
   claimTask,
   getAgentById,
+  getAllChannelActivityCursors,
   getDb,
   getEpicsWithProgressUpdates,
   getInboxSummary,
@@ -15,7 +17,9 @@ import {
   hasCapacity,
   markEpicsProgressNotified,
   startTask,
+  upsertChannelActivityCursor,
 } from "../be/db";
+import { fetchChannelActivity } from "../slack/channel-activity";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -35,14 +39,56 @@ const pollTriggers = route({
   },
 });
 
+// ─── Channel Activity Throttle ──────────────────────────────────────────────
+
+const CHANNEL_ACTIVITY_INTERVAL_MS = 60_000; // Check at most once per 60s
+let lastChannelActivityCheckAt = 0;
+
+// ─── Cursor Commit Endpoint ─────────────────────────────────────────────────
+
+const commitCursorsRoute = route({
+  method: "post",
+  path: "/api/channel-activity/commit-cursors",
+  pattern: ["api", "channel-activity", "commit-cursors"],
+  summary: "Commit channel activity cursors after successful processing",
+  tags: ["Poll"],
+  auth: { apiKey: true },
+  body: z.object({
+    cursorUpdates: z.array(
+      z.object({
+        channelId: z.string(),
+        ts: z.string(),
+      }),
+    ),
+  }),
+  responses: {
+    200: { description: "Cursors committed" },
+    400: { description: "Invalid request" },
+  },
+});
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handlePoll(
   req: IncomingMessage,
   res: ServerResponse,
   pathSegments: string[],
+  queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
+  // Handle cursor commit endpoint
+  if (commitCursorsRoute.match(req.method, pathSegments)) {
+    const parsed = await commitCursorsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    for (const { channelId, ts } of parsed.body.cursorUpdates) {
+      if (channelId && ts) {
+        upsertChannelActivityCursor(channelId, ts);
+      }
+    }
+    json(res, { success: true, committed: parsed.body.cursorUpdates.length });
+    return true;
+  }
+
   if (pollTriggers.match(req.method, pathSegments)) {
     if (!myAgentId) {
       jsonError(res, "Missing X-Agent-ID header", 400);
@@ -178,6 +224,73 @@ export async function handlePoll(
     if ("error" in result) {
       jsonError(res, result.error, result.status ?? 500);
       return true;
+    }
+
+    // If no trigger found and agent is lead, check for Slack channel activity.
+    // This is the lowest-priority trigger, checked AFTER all others.
+    // Runs outside the transaction because it requires async Slack API calls.
+    // Throttled to avoid Slack API rate limits (~50 calls/min).
+    if (
+      result.trigger === null &&
+      process.env.LEAD_MONITOR_CHANNELS === "true" &&
+      Date.now() - lastChannelActivityCheckAt >= CHANNEL_ACTIVITY_INTERVAL_MS
+    ) {
+      const agent = getAgentById(myAgentId);
+      if (agent?.isLead) {
+        lastChannelActivityCheckAt = Date.now();
+        try {
+          const cursors = getAllChannelActivityCursors();
+          const cursorMap = new Map(cursors.map((c) => [c.channelId, c.lastSeenTs]));
+
+          // Parse optional channel allowlist from env
+          const allowedIds = process.env.LEAD_MONITOR_CHANNEL_IDS
+            ? process.env.LEAD_MONITOR_CHANNEL_IDS.split(",")
+                .map((s) => s.trim())
+                .filter(Boolean)
+            : undefined;
+
+          const { messages, seedCursors } = await fetchChannelActivity(cursorMap, allowedIds);
+
+          // Commit seed cursors immediately (cold-start initialization, no trigger)
+          for (const [channelId, ts] of seedCursors) {
+            upsertChannelActivityCursor(channelId, ts);
+          }
+
+          if (messages.length > 0) {
+            // Compute cursor updates but DON'T commit them yet.
+            // They're included in the trigger payload so the runner can commit
+            // them after the lead successfully processes the messages.
+            const latestPerChannel = new Map<string, string>();
+            for (const msg of messages) {
+              const existing = latestPerChannel.get(msg.channelId);
+              if (!existing || Number.parseFloat(msg.ts) > Number.parseFloat(existing)) {
+                latestPerChannel.set(msg.channelId, msg.ts);
+              }
+            }
+
+            result = {
+              trigger: {
+                type: "channel_activity",
+                count: messages.length,
+                messages: messages.map((m) => ({
+                  channelId: m.channelId,
+                  channelName: m.channelName,
+                  ts: m.ts,
+                  user: m.user,
+                  text: m.text.slice(0, 500),
+                })),
+                cursorUpdates: Array.from(latestPerChannel.entries()).map(([channelId, ts]) => ({
+                  channelId,
+                  ts,
+                })),
+              },
+            };
+          }
+        } catch (err) {
+          console.warn("[/api/poll] Channel activity check failed:", err);
+          // Don't fail the poll — just skip this trigger
+        }
+      }
     }
 
     json(res, result);

@@ -666,6 +666,8 @@ interface RunningTask {
   triggerType?: string;
   /** Set when the promise resolves, enabling non-blocking completion checks */
   result: ProviderResult | null;
+  /** Deferred cursor updates for channel_activity triggers — committed after success */
+  cursorUpdates?: Array<{ channelId: string; ts: string }>;
 }
 
 /** Runner state for tracking concurrent tasks */
@@ -881,7 +883,8 @@ interface Trigger {
     | "task_offered"
     | "unread_mentions"
     | "pool_tasks_available"
-    | "epic_progress_changed";
+    | "epic_progress_changed"
+    | "channel_activity";
   taskId?: string;
   task?: unknown;
   mentionsCount?: number;
@@ -898,8 +901,14 @@ interface Trigger {
   messages?: Array<{
     id: string;
     content: string;
+    channelId?: string;
+    channelName?: string;
+    ts?: string;
+    user?: string;
+    text?: string;
   }>;
   epics?: unknown; // Epic progress updates for lead
+  cursorUpdates?: Array<{ channelId: string; ts: string }>; // Deferred cursor commits for channel_activity
 }
 
 /** Options for polling */
@@ -1140,6 +1149,31 @@ async function buildPromptForTrigger(
       const result = await resolveTemplateAsync("task.trigger.epic_progress", {
         epic_count: trigger.count,
         epics_detail: epicsDetail,
+      });
+      return result.text;
+    }
+
+    case "channel_activity": {
+      const msgs = (trigger.messages || []) as Array<{
+        channelId?: string;
+        channelName?: string;
+        ts?: string;
+        user?: string;
+        text?: string;
+      }>;
+      if (msgs.length === 0) {
+        return "New Slack channel activity detected but no message details available. Use `slack-read` to check recent messages.";
+      }
+
+      let messagesDetail = "";
+      for (const msg of msgs) {
+        const channel = msg.channelName ? `#${msg.channelName}` : msg.channelId || "unknown";
+        messagesDetail += `- **${channel}** (user: ${msg.user || "unknown"}): ${msg.text?.slice(0, 200) || "(no text)"}\n`;
+      }
+
+      const result = await resolveTemplateAsync("task.trigger.channel_activity", {
+        message_count: trigger.count || msgs.length,
+        messages_detail: messagesDetail,
       });
       return result.text;
     }
@@ -1503,6 +1537,7 @@ async function checkCompletedProcesses(
     taskId: string;
     result: ProviderResult;
     triggerType?: string;
+    cursorUpdates?: Array<{ channelId: string; ts: string }>;
   }> = [];
 
   for (const [taskId, task] of state.activeTasks) {
@@ -1515,12 +1550,13 @@ async function checkCompletedProcesses(
         taskId,
         result: task.result,
         triggerType: task.triggerType,
+        cursorUpdates: task.cursorUpdates,
       });
     }
   }
 
   // Remove completed tasks from the map and ensure they're marked as finished
-  for (const { taskId, result } of completedTasks) {
+  for (const { taskId, result, cursorUpdates } of completedTasks) {
     state.activeTasks.delete(taskId);
 
     if (apiConfig) {
@@ -1536,6 +1572,25 @@ async function checkCompletedProcesses(
         console.log(`[${role}] Detected error for task ${taskId.slice(0, 8)}: ${failureReason}`);
       }
       await ensureTaskFinished(apiConfig, role, taskId, result.exitCode, failureReason);
+
+      // Commit channel activity cursors after successful processing
+      // If the task failed, cursors stay uncommitted so messages are re-seen on next poll
+      if (cursorUpdates && cursorUpdates.length > 0 && result.exitCode === 0) {
+        try {
+          const headers: Record<string, string> = { "Content-Type": "application/json" };
+          if (apiConfig.apiKey) headers.Authorization = `Bearer ${apiConfig.apiKey}`;
+          await fetch(`${apiConfig.apiUrl}/api/channel-activity/commit-cursors`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ cursorUpdates }),
+          });
+          console.log(
+            `[${role}] Committed ${cursorUpdates.length} channel activity cursor(s) for task ${taskId.slice(0, 8)}`,
+          );
+        } catch (err) {
+          console.warn(`[${role}] Failed to commit channel activity cursors: ${err}`);
+        }
+      }
     }
   }
 }
@@ -2376,6 +2431,14 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
           // Attach trigger metadata for logging
           runningTask.triggerType = trigger.type;
+
+          // Attach deferred cursor updates for channel_activity triggers
+          if (trigger.type === "channel_activity" && trigger.cursorUpdates) {
+            runningTask.cursorUpdates = trigger.cursorUpdates as Array<{
+              channelId: string;
+              ts: string;
+            }>;
+          }
 
           state.activeTasks.set(runningTask.taskId, runningTask);
 

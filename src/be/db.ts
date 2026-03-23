@@ -6661,3 +6661,51 @@ export function checkoutPromptTemplate(id: string, targetVersion: number): Promp
 
   return rowToPromptTemplate(row);
 }
+
+// ─── Channel Activity Cursors ─────────────────────────────────────────────────
+
+type ChannelActivityCursorRow = {
+  channelId: string;
+  lastSeenTs: string;
+  updatedAt: string;
+};
+
+export interface ChannelActivityCursor {
+  channelId: string;
+  lastSeenTs: string;
+  updatedAt: string;
+}
+
+function rowToChannelActivityCursor(row: ChannelActivityCursorRow): ChannelActivityCursor {
+  return {
+    channelId: row.channelId,
+    lastSeenTs: row.lastSeenTs,
+    updatedAt: row.updatedAt,
+  };
+}
+
+export function getAllChannelActivityCursors(): ChannelActivityCursor[] {
+  return getDb()
+    .prepare<ChannelActivityCursorRow, []>("SELECT * FROM channel_activity_cursors")
+    .all()
+    .map(rowToChannelActivityCursor);
+}
+
+export function getChannelActivityCursor(channelId: string): ChannelActivityCursor | null {
+  const row = getDb()
+    .prepare<ChannelActivityCursorRow, [string]>(
+      "SELECT * FROM channel_activity_cursors WHERE channelId = ?",
+    )
+    .get(channelId);
+  return row ? rowToChannelActivityCursor(row) : null;
+}
+
+export function upsertChannelActivityCursor(channelId: string, lastSeenTs: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO channel_activity_cursors (channelId, lastSeenTs, updatedAt)
+       VALUES (?, ?, datetime('now'))
+       ON CONFLICT(channelId) DO UPDATE SET lastSeenTs = excluded.lastSeenTs, updatedAt = excluded.updatedAt`,
+    )
+    .run(channelId, lastSeenTs);
+}
