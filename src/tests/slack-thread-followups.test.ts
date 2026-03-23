@@ -256,7 +256,7 @@ describe("watcher query scope — getCompletedSlackTasks / getInProgressSlackTas
     });
 
     // Worker task with no source but has Slack metadata (inherited via parentTaskId)
-    const workerTask = createTaskExtended("worker completed", {
+    const _workerTask = createTaskExtended("worker completed", {
       agentId: agent.id,
       slackChannelId: "C_WATCHER_NULL",
       slackThreadTs: "7100.0001",

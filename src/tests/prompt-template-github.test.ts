@@ -1,11 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, initDb, upsertPromptTemplate } from "../be/db";
-import {
-  clearTemplateDefinitions,
-  getAllTemplateDefinitions,
-  getTemplateDefinition,
-} from "../prompts/registry";
+import { getAllTemplateDefinitions, getTemplateDefinition } from "../prompts/registry";
 import { resolveTemplate } from "../prompts/resolver";
 // Side-effect import: registers all GitHub templates
 import "../github/templates";

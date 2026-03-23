@@ -271,7 +271,8 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
       // Create follow-up task for the lead when a worker task finishes.
       // This replaces the old poll-based tasks_finished trigger which was unreliable.
-      if (status && result.success && result.task) {
+      // Skip for workflow-managed tasks — the workflow engine handles sequencing via resume.ts.
+      if (status && result.success && result.task && !result.task.workflowRunId) {
         try {
           const taskAgent = getAgentById(result.task.agentId ?? "");
           // Only create follow-ups for worker tasks (not lead's own tasks)

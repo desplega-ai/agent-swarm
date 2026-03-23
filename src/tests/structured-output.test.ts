@@ -1,17 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { z } from "zod";
 import {
   closeDb,
-  completeTask,
   createTaskExtended,
   createWorkflow,
   createWorkflowRun,
   createWorkflowRunStep,
   getTaskById,
   initDb,
-  updateWorkflowRun,
-  updateWorkflowRunStep,
 } from "../be/db";
 import { validateJsonSchema } from "../workflows/json-schema-validator";
 
