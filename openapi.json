@@ -2051,6 +2051,38 @@
             "bearerAuth": []
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cursorUpdates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "channelId": {
+                          "type": "string"
+                        },
+                        "ts": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "channelId",
+                        "ts"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "cursorUpdates"
+                ]
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Cursors committed"
