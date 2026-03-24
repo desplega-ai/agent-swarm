@@ -4,6 +4,18 @@ All notable changes to Agent Swarm are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.51.0] - 2026-03-23
+
+### Added
+- Bot name aliases for GitHub @mentions via `GITHUB_BOT_ALIASES` env var — comma-separated list of alternative names that trigger the bot alongside `GITHUB_BOT_NAME` (#211)
+- Channel activity poll trigger — lead agent can poll for new Slack channel messages since last cursor, enabling event-driven workflows (#218)
+- Lead agents can now update any worker's profile via `update-profile` tool with the new `agentId` parameter (#225)
+- Dynamic docs sitemap generation and 20 new documentation pages (#224)
+
+### Fixed
+- Session logs stored under wrong task ID after auto-claim pool task changes — removed redundant reassociation logic in `store-progress` (#226)
+- Skip workflow-managed tasks from creating follow-up lead tasks — workflow engine handles sequencing via `resume.ts` (#226)
+
 ## [1.50.0] - 2026-03-23
 
 ### Added

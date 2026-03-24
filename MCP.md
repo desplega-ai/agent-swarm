@@ -425,7 +425,7 @@ Reads messages from a channel. If no channel is specified, returns unread messag
 
 **Update Profile**
 
-Updates the calling agent's profile information (name, description, role, capabilities).
+Updates an agent's profile information (name, description, role, capabilities). By default updates the calling agent. Lead agents can update any agent's profile by providing the agentId parameter.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
