@@ -592,10 +592,13 @@ class ApiClient {
     description?: string | null;
   }): Promise<SwarmConfig> {
     const url = `${this.getBaseUrl()}/api/config?includeSecrets=true`;
+    const cleaned = Object.fromEntries(
+      Object.entries(data).filter(([_, v]) => v !== null),
+    );
     const res = await fetch(url, {
       method: "PUT",
       headers: this.getHeaders(),
-      body: JSON.stringify(data),
+      body: JSON.stringify(cleaned),
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: "Failed to upsert config" }));
