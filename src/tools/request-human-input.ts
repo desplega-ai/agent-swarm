@@ -84,7 +84,7 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
       });
 
       const appUrl = process.env.APP_URL || "http://localhost:5274";
-      const url = `${appUrl}/requests/${request.id}`;
+      const url = `${appUrl}/approval-requests/${request.id}`;
 
       return {
         content: [
