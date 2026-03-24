@@ -593,6 +593,51 @@ export interface RenderResponse {
   scope?: string;
 }
 
+// Approval Requests
+
+export type ApprovalRequestStatus = "pending" | "approved" | "rejected" | "timeout";
+
+export interface ApprovalQuestion {
+  id: string;
+  type: "approval" | "text" | "single-select" | "multi-select" | "boolean";
+  label: string;
+  description?: string;
+  required?: boolean;
+  placeholder?: string;
+  multiline?: boolean;
+  options?: Array<{ value: string; label: string; description?: string }>;
+  minSelections?: number;
+  maxSelections?: number;
+  defaultValue?: boolean;
+}
+
+export interface ApprovalRequest {
+  id: string;
+  title: string;
+  questions: ApprovalQuestion[];
+  approvers: {
+    users?: string[];
+    roles?: string[];
+    policy: "any" | "all" | { min: number };
+  };
+  status: ApprovalRequestStatus;
+  responses: Record<string, unknown> | null;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+  workflowRunId: string | null;
+  workflowRunStepId: string | null;
+  sourceTaskId: string | null;
+  timeoutSeconds: number | null;
+  expiresAt: string | null;
+  notificationChannels: Array<{ channel: string; target: string }> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApprovalRequestsResponse {
+  approvalRequests: ApprovalRequest[];
+}
+
 // Debug / DB Explorer
 export interface DbQueryRequest {
   sql: string;

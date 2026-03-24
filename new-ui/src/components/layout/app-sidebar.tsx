@@ -1,6 +1,7 @@
 import {
   BarChart3,
   Bug,
+  ClipboardCheck,
   Clock,
   FileText,
   GitBranch,
@@ -53,6 +54,7 @@ const navGroups = [
       { title: "Services", path: "/services", icon: Server },
       { title: "Schedules", path: "/schedules", icon: Clock },
       { title: "Workflows", path: "/workflows", icon: Workflow },
+      { title: "Approvals", path: "/approval-requests", icon: ClipboardCheck },
       { title: "Usage", path: "/usage", icon: BarChart3 },
     ],
   },

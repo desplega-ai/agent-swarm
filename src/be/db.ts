@@ -6947,6 +6947,7 @@ export function getApprovalRequestByStepId(stepId: string): ApprovalRequest | nu
   return row ? rowToApprovalRequest(row) : null;
 }
 
+// TODO: Wire into a periodic cron/sweep to auto-timeout expired approval requests (Phase 2)
 export function getExpiredPendingApprovals(): ApprovalRequest[] {
   const rows = getDb()
     .prepare<ApprovalRequestRow, []>(
