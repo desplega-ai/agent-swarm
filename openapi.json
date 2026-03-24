@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.51.3",
+    "version": "1.52.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -602,6 +602,343 @@
           },
           "404": {
             "description": "Agent not found"
+          }
+        }
+      }
+    },
+    "/api/approval-requests": {
+      "post": {
+        "summary": "Create a new approval request",
+        "tags": [
+          "ApprovalRequests"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "questions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "approval",
+                            "text",
+                            "single-select",
+                            "multi-select",
+                            "boolean"
+                          ]
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "required": {
+                          "type": "boolean"
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "placeholder": {
+                          "type": "string"
+                        },
+                        "multiline": {
+                          "type": "boolean"
+                        },
+                        "options": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "label"
+                            ]
+                          }
+                        },
+                        "minSelections": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "maxSelections": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "defaultValue": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "type",
+                        "label"
+                      ]
+                    },
+                    "minItems": 1
+                  },
+                  "approvers": {
+                    "type": "object",
+                    "properties": {
+                      "users": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "policy": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "any"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              "all"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "min": {
+                                "type": "integer",
+                                "minimum": 1
+                              }
+                            },
+                            "required": [
+                              "min"
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "policy"
+                    ]
+                  },
+                  "workflowRunId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "workflowRunStepId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "sourceTaskId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "timeoutSeconds": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "notifications": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "channel": {
+                          "type": "string",
+                          "enum": [
+                            "slack",
+                            "email"
+                          ]
+                        },
+                        "target": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "channel",
+                        "target"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "title",
+                  "questions",
+                  "approvers"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Approval request created"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      },
+      "get": {
+        "summary": "List approval requests with optional filters",
+        "tags": [
+          "ApprovalRequests"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "workflowRunId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of approval requests"
+          }
+        }
+      }
+    },
+    "/api/approval-requests/{id}": {
+      "get": {
+        "summary": "Get approval request details",
+        "tags": [
+          "ApprovalRequests"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approval request details"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/approval-requests/{id}/respond": {
+      "post": {
+        "summary": "Submit a response to an approval request",
+        "tags": [
+          "ApprovalRequests"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "responses": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "respondedBy": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "responses"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response recorded"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Already resolved"
           }
         }
       }
