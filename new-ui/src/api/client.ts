@@ -2,6 +2,8 @@ import { getConfig } from "@/lib/config";
 import type {
   AgentsResponse,
   AgentWithTasks,
+  ApprovalRequest,
+  ApprovalRequestsResponse,
   ChannelMessage,
   ChannelsResponse,
   DashboardCostResponse,
@@ -927,6 +929,46 @@ class ApiClient {
       const error = await res.json().catch(() => ({ error: "Failed to delete prompt template" }));
       throw new Error(error.error || `Failed to delete prompt template: ${res.status}`);
     }
+    return res.json();
+  }
+
+  // Approval Requests
+
+  async fetchApprovalRequests(filters?: {
+    status?: string;
+    workflowRunId?: string;
+    limit?: number;
+  }): Promise<ApprovalRequestsResponse> {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.workflowRunId) params.set("workflowRunId", filters.workflowRunId);
+    if (filters?.limit != null) params.set("limit", String(filters.limit));
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/approval-requests${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch approval requests: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchApprovalRequest(id: string): Promise<{ approvalRequest: ApprovalRequest }> {
+    const url = `${this.getBaseUrl()}/api/approval-requests/${id}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch approval request: ${res.status}`);
+    return res.json();
+  }
+
+  async respondToApprovalRequest(
+    id: string,
+    responses: Record<string, unknown>,
+    respondedBy?: string,
+  ): Promise<{ approvalRequest: ApprovalRequest }> {
+    const url = `${this.getBaseUrl()}/api/approval-requests/${id}/respond`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ responses, respondedBy }),
+    });
+    if (!res.ok) throw new Error(`Failed to respond to approval request: ${res.status}`);
     return res.json();
   }
 }

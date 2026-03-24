@@ -146,7 +146,7 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
       workflowRunId: meta.runId,
       workflowRunStepId: meta.stepId,
       timeoutSeconds: config.timeout?.seconds,
-      notificationChannels: config.notifications,
+      notificationChannels: config.notifications, // TODO: Notifications are stored but not dispatched yet (Phase 2)
     });
 
     // 3. Return async result — engine will pause the workflow
