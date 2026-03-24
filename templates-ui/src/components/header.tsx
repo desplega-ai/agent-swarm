@@ -7,8 +7,17 @@ export function Header() {
     <header className="border-b border-border bg-card">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
         <Link href="/" className="flex items-center gap-2 sm:gap-3 min-w-0">
-          <Image src="/logo.png" alt="Agent Swarm" width={32} height={32} className="shrink-0" priority />
-          <span className="text-lg font-semibold truncate hidden sm:inline">Agent Swarm Templates</span>
+          <Image
+            src="/logo.png"
+            alt="Agent Swarm"
+            width={32}
+            height={32}
+            className="shrink-0"
+            priority
+          />
+          <span className="text-lg font-semibold truncate hidden sm:inline">
+            Agent Swarm Templates
+          </span>
           <span className="text-lg font-semibold sm:hidden">Templates</span>
         </Link>
         <nav className="flex items-center gap-2 sm:gap-4 shrink-0">

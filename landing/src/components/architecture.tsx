@@ -82,7 +82,14 @@ export function Architecture() {
                     </div>
                   </div>
                   <div className="mt-4 flex flex-wrap justify-center gap-2">
-                    {["send-task", "store-progress", "memory-search", "post-message", "register-service", "create-epic"].map((tool) => (
+                    {[
+                      "send-task",
+                      "store-progress",
+                      "memory-search",
+                      "post-message",
+                      "register-service",
+                      "create-epic",
+                    ].map((tool) => (
                       <span
                         key={tool}
                         className="inline-flex items-center rounded-md bg-amber-100 border border-amber-200/50 px-2 py-0.5 text-xs font-mono text-amber-700"

@@ -1,6 +1,14 @@
 import Image from "next/image";
 import Link from "next/link";
-import { Github, BookOpen, ExternalLink, LayoutDashboard, Sparkles, PenLine, Blocks } from "lucide-react";
+import {
+  Github,
+  BookOpen,
+  ExternalLink,
+  LayoutDashboard,
+  Sparkles,
+  PenLine,
+  Blocks,
+} from "lucide-react";
 
 export function Footer() {
   return (
@@ -8,11 +16,15 @@ export function Footer() {
       <div className="mx-auto max-w-6xl px-6 py-12">
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-3">
-            <Image src="/logo.png" alt="Agent Swarm" width={28} height={28} className="rounded-lg" />
+            <Image
+              src="/logo.png"
+              alt="Agent Swarm"
+              width={28}
+              height={28}
+              className="rounded-lg"
+            />
             <div>
-              <div className="text-sm font-semibold text-zinc-900">
-                Agent Swarm
-              </div>
+              <div className="text-sm font-semibold text-zinc-900">Agent Swarm</div>
               <div className="text-xs text-zinc-400">
                 Built by{" "}
                 <a

@@ -9,8 +9,7 @@ export const metadata: Metadata = {
     "See what AI agent swarms can do. Real session transcripts showing autonomous task execution, crypto payments, and more.",
   openGraph: {
     title: "Examples — Real Agent Swarm Sessions",
-    description:
-      "Real session transcripts showing autonomous AI agent coordination in action.",
+    description: "Real session transcripts showing autonomous AI agent coordination in action.",
     url: "https://agent-swarm.dev/examples",
     siteName: "Agent Swarm",
     type: "website",
@@ -26,8 +25,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "Examples — Real Agent Swarm Sessions",
-    description:
-      "Real session transcripts showing autonomous AI agent coordination in action.",
+    description: "Real session transcripts showing autonomous AI agent coordination in action.",
     images: ["https://agent-swarm.dev/og-image.png"],
   },
   alternates: {
@@ -52,8 +50,7 @@ const examples: Example[] = [
       "The agent swarm used x402 protocol to autonomously pay $0.05 USDC on Base mainnet and generate an anime-style image — no human wallet interaction.",
     tags: ["x402", "Crypto Payments", "Base", "Image Gen"],
     icon: <Zap className="w-5 h-5" />,
-    image:
-      "https://blob.imference.com/large/37f7ee3b-616b-402f-8cb3-d69896165e3f.webp",
+    image: "https://blob.imference.com/large/37f7ee3b-616b-402f-8cb3-d69896165e3f.webp",
   },
 ];
 
@@ -147,9 +144,7 @@ export default function ExamplesPage() {
             <span className="hidden sm:inline">Home</span>
           </Link>
           <div className="w-px h-4 bg-zinc-200" />
-          <span className="text-[13px] font-medium text-zinc-700">
-            Examples
-          </span>
+          <span className="text-[13px] font-medium text-zinc-700">Examples</span>
         </div>
       </nav>
 

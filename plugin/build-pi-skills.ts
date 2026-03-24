@@ -45,14 +45,11 @@ function convertToPiSkill(name: string, content: string): string {
   result = result.replace(/<!-- \/pi-only -->\n?/g, "");
 
   // 3. Convert frontmatter: extract description, drop argument-hint, add name
-  result = result.replace(
-    /^---\n([\s\S]*?)---\n/,
-    (_match, frontmatter: string) => {
-      const descMatch = frontmatter.match(/description:\s*(.+)/);
-      const description = descMatch ? descMatch[1].trim() : name;
-      return `---\nname: ${name}\ndescription: ${description}\n---\n`;
-    },
-  );
+  result = result.replace(/^---\n([\s\S]*?)---\n/, (_match, frontmatter: string) => {
+    const descMatch = frontmatter.match(/description:\s*(.+)/);
+    const description = descMatch ? descMatch[1].trim() : name;
+    return `---\nname: ${name}\ndescription: ${description}\n---\n`;
+  });
 
   // 4. Slash command syntax: /command-name → /skill:command-name
   //    Match ` /name` or `/name` at word boundary, but not /desplega: or /workspace
@@ -122,22 +119,10 @@ If the task is straightforward with clear instructions, proceed normally without
 
   // 8. Clean up "the `/skill:swarm-chat` command" → "`/skill:swarm-chat`"
   //    At this point step 4 already converted /swarm-chat → /skill:swarm-chat
-  result = result.replace(
-    /Use the (`\/skill:swarm-chat`)/g,
-    "Use $1",
-  );
-  result = result.replace(
-    /the (`\/skill:swarm-chat`) command/g,
-    "$1",
-  );
-  result = result.replace(
-    /the (`\/skill:swarm-chat`) channel/g,
-    "$1 channel",
-  );
-  result = result.replace(
-    /(`\/skill:swarm-chat`) command/g,
-    "$1",
-  );
+  result = result.replace(/Use the (`\/skill:swarm-chat`)/g, "Use $1");
+  result = result.replace(/the (`\/skill:swarm-chat`) command/g, "$1");
+  result = result.replace(/the (`\/skill:swarm-chat`) channel/g, "$1 channel");
+  result = result.replace(/(`\/skill:swarm-chat`) command/g, "$1");
 
   // 9. Setup message simplification
   result = result.replace(
@@ -152,14 +137,8 @@ If the task is straightforward with clear instructions, proceed normally without
   result = result.replace(/If this command/gi, "If this skill");
 
   // 11. Wording: "command" → "skill" for worker sections and general references
-  result = result.replace(
-    /#### Worker available commands/g,
-    "#### Worker available skills",
-  );
-  result = result.replace(
-    /the following commands to help/g,
-    "the following skills to help",
-  );
+  result = result.replace(/#### Worker available commands/g, "#### Worker available skills");
+  result = result.replace(/the following commands to help/g, "the following skills to help");
   // "use `/skill:swarm-chat` command" → "use `/skill:swarm-chat`"
   result = result.replace(/(`\/skill:[^`]+`) command/g, "$1");
   // "without using any commands" → "without extensive planning"

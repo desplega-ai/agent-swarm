@@ -80,7 +80,8 @@ async function runTests(): Promise<{ passed: number; failed: number }> {
   try {
     const res = await fetch(`${BASE_URL}/`);
     const body = await res.json();
-    if (res.status !== 200 || body.status !== "ok") throw new Error(`Expected 200 ok, got ${res.status}`);
+    if (res.status !== 200 || body.status !== "ok")
+      throw new Error(`Expected 200 ok, got ${res.status}`);
     pass("Free endpoint returns 200");
     passed++;
   } catch (e) {
@@ -93,7 +94,8 @@ async function runTests(): Promise<{ passed: number; failed: number }> {
     const res = await fetch(`${BASE_URL}/paid`);
     if (res.status !== 402) throw new Error(`Expected 402, got ${res.status}`);
     const body = await res.json();
-    if (!body.accepts || body.x402Version !== 2) throw new Error("Missing x402 payment requirements");
+    if (!body.accepts || body.x402Version !== 2)
+      throw new Error("Missing x402 payment requirements");
     pass("Paid endpoint returns 402 without payment");
     passed++;
   } catch (e) {
@@ -158,7 +160,11 @@ async function runTests(): Promise<{ passed: number; failed: number }> {
     failed++;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    if (msg.includes("exceeds per-request limit") || msg.includes("abort") || msg.includes("Failed to create payment")) {
+    if (
+      msg.includes("exceeds per-request limit") ||
+      msg.includes("abort") ||
+      msg.includes("Failed to create payment")
+    ) {
       pass("Expensive endpoint blocked by spending limit ($5 > $1 max)");
       passed++;
     } else {

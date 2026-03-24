@@ -37,18 +37,12 @@ export function FilePreview({ content, filename, isShell }: FilePreviewProps) {
   return (
     <div className="relative rounded-lg border border-border bg-muted/50">
       <div className="flex items-center justify-between border-b border-border px-4 py-2">
-        <span className="text-sm font-mono text-muted-foreground">
-          {filename}
-        </span>
+        <span className="text-sm font-mono text-muted-foreground">{filename}</span>
         <button
           onClick={handleCopy}
           className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         >
-          {copied ? (
-            <Check className="h-3.5 w-3.5" />
-          ) : (
-            <Copy className="h-3.5 w-3.5" />
-          )}
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
@@ -66,9 +60,7 @@ export function FilePreview({ content, filename, isShell }: FilePreviewProps) {
               ))}
             </code>
           ) : (
-            <code className="whitespace-pre-wrap">
-              {highlightPlaceholders(content)}
-            </code>
+            <code className="whitespace-pre-wrap">{highlightPlaceholders(content)}</code>
           )}
         </pre>
       </div>

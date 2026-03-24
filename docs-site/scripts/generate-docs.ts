@@ -7,14 +7,7 @@
  * - content/docs/api-reference/<tag>.mdx (one per tag group)
  * - content/docs/api-reference/meta.json (auto-generated sidebar)
  */
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,8 +19,7 @@ const outputDir = resolve(__dirname, "../content/docs/api-reference");
 const spec = JSON.parse(readFileSync(specPath, "utf-8"));
 
 const version: string = spec.info?.version ?? "unknown";
-const serverUrl: string =
-  spec.servers?.[0]?.url ?? "http://localhost:3013";
+const serverUrl: string = spec.servers?.[0]?.url ?? "http://localhost:3013";
 
 // --- Group operations by tag ---
 
@@ -40,9 +32,7 @@ interface Operation {
 const tagGroups = new Map<string, Operation[]>();
 
 for (const [path, methods] of Object.entries(spec.paths ?? {})) {
-  for (const [method, op] of Object.entries(
-    methods as Record<string, unknown>,
-  )) {
+  for (const [method, op] of Object.entries(methods as Record<string, unknown>)) {
     if (typeof op !== "object" || op === null) continue;
     const opObj = op as { tags?: string[]; summary?: string };
     const tags = opObj.tags?.length ? opObj.tags : ["Other"];
@@ -62,10 +52,7 @@ const sortedTags = [...tagGroups.keys()].sort();
 for (const tag of sortedTags) {
   tagGroups
     .get(tag)!
-    .sort(
-      (a, b) =>
-        a.path.localeCompare(b.path) || a.method.localeCompare(b.method),
-    );
+    .sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
 }
 
 // --- Slug helper ---
@@ -91,10 +78,7 @@ if (existsSync(outputDir)) {
 
 // --- Generate index page ---
 
-const totalOps = [...tagGroups.values()].reduce(
-  (sum, ops) => sum + ops.length,
-  0,
-);
+const totalOps = [...tagGroups.values()].reduce((sum, ops) => sum + ops.length, 0);
 
 const tagList = sortedTags
   .map((tag) => {
@@ -129,9 +113,7 @@ writeFileSync(resolve(outputDir, "index.mdx"), indexMdx);
 for (const tag of sortedTags) {
   const slug = slugify(tag);
   const ops = tagGroups.get(tag)!;
-  const opsJson = JSON.stringify(
-    ops.map((o) => ({ path: o.path, method: o.method })),
-  );
+  const opsJson = JSON.stringify(ops.map((o) => ({ path: o.path, method: o.method })));
 
   const tagMdx = `---
 title: "${tag}"
@@ -149,10 +131,7 @@ full: true
 
 // --- Generate meta.json ---
 
-const pages = [
-  "index",
-  ...sortedTags.map(slugify),
-];
+const pages = ["index", ...sortedTags.map(slugify)];
 
 const metaJson = {
   title: `API Reference v${version}`,
@@ -161,10 +140,7 @@ const metaJson = {
   pages,
 };
 
-writeFileSync(
-  resolve(outputDir, "meta.json"),
-  `${JSON.stringify(metaJson, null, 2)}\n`,
-);
+writeFileSync(resolve(outputDir, "meta.json"), `${JSON.stringify(metaJson, null, 2)}\n`);
 
 console.log(
   `Generated API reference: ${sortedTags.length} tag pages + index (${totalOps} operations, v${version})`,

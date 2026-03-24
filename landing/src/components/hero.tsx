@@ -14,8 +14,14 @@ function SwarmVisualization() {
   ];
 
   const connections = [
-    [0, 1], [0, 2], [0, 3], [0, 4], [0, 5],
-    [1, 2], [3, 4], [4, 5],
+    [0, 1],
+    [0, 2],
+    [0, 3],
+    [0, 4],
+    [0, 5],
+    [1, 2],
+    [3, 4],
+    [4, 5],
   ];
 
   return (
@@ -119,7 +125,10 @@ export function Hero() {
 
       {/* Gradient orbs */}
       <div className="absolute top-20 -left-40 w-96 h-96 rounded-full bg-amber-200/20 blur-[100px] animate-pulse-glow" />
-      <div className="absolute bottom-20 -right-40 w-96 h-96 rounded-full bg-amber-300/15 blur-[100px] animate-pulse-glow" style={{ animationDelay: "1.5s" }} />
+      <div
+        className="absolute bottom-20 -right-40 w-96 h-96 rounded-full bg-amber-300/15 blur-[100px] animate-pulse-glow"
+        style={{ animationDelay: "1.5s" }}
+      />
 
       <div className="relative mx-auto max-w-6xl px-6 pt-32 pb-20 w-full">
         <div className="grid lg:grid-cols-2 gap-16 items-center">
@@ -142,8 +151,7 @@ export function Hero() {
               transition={{ duration: 0.6, delay: 0.1 }}
               className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight leading-[1.05] mb-6"
             >
-              Intelligence that{" "}
-              <span className="gradient-text">compounds</span>
+              Intelligence that <span className="gradient-text">compounds</span>
             </motion.h1>
 
             <motion.p
@@ -152,9 +160,8 @@ export function Hero() {
               transition={{ duration: 0.6, delay: 0.2 }}
               className="text-lg sm:text-xl text-zinc-500 leading-relaxed mb-10 max-w-xl"
             >
-              Orchestrate autonomous AI agents that learn, remember, and get
-              smarter with every session. A lead coordinates workers. Memory
-              persists. Knowledge compounds.
+              Orchestrate autonomous AI agents that learn, remember, and get smarter with every
+              session. A lead coordinates workers. Memory persists. Knowledge compounds.
             </motion.p>
 
             <motion.div
@@ -192,11 +199,17 @@ export function Hero() {
                 TypeScript
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" style={{ animationDelay: "0.5s" }} />
+                <div
+                  className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"
+                  style={{ animationDelay: "0.5s" }}
+                />
                 MCP Protocol
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" style={{ animationDelay: "1s" }} />
+                <div
+                  className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"
+                  style={{ animationDelay: "1s" }}
+                />
                 Claude Code
               </div>
             </motion.div>

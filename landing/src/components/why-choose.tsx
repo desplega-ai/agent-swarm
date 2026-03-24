@@ -1,13 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import {
-  Shield,
-  Code2,
-  Brain,
-  Server,
-  Shuffle,
-} from "lucide-react";
+import { Shield, Code2, Brain, Server, Shuffle } from "lucide-react";
 
 const pillars = [
   {
@@ -102,10 +96,8 @@ export function WhyChoose() {
           transition={{ duration: 0.5, delay: 0.15 }}
           className="text-center text-lg text-zinc-400 max-w-3xl mx-auto mb-16"
         >
-          Platforms that run agents{" "}
-          <span className="text-zinc-200 font-medium">for</span> you learn from
-          your workflows — your logic becomes their training data. Agent Swarm is
-          different.
+          Platforms that run agents <span className="text-zinc-200 font-medium">for</span> you learn
+          from your workflows — your logic becomes their training data. Agent Swarm is different.
         </motion.p>
 
         <motion.div
@@ -126,9 +118,7 @@ export function WhyChoose() {
               >
                 <pillar.icon className="w-5 h-5 text-white" />
               </div>
-              <h3 className="text-lg font-semibold text-white mb-4">
-                {pillar.title}
-              </h3>
+              <h3 className="text-lg font-semibold text-white mb-4">{pillar.title}</h3>
               <ul className="space-y-3">
                 {pillar.points.map((point, i) => (
                   <li

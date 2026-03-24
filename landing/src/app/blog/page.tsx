@@ -6,12 +6,10 @@ import { Footer } from "@/components/footer";
 
 export const metadata: Metadata = {
   title: "Blog — Agent Swarm",
-  description:
-    "Updates, technical deep dives, and stories from the Agent Swarm team.",
+  description: "Updates, technical deep dives, and stories from the Agent Swarm team.",
   openGraph: {
     title: "Blog — Agent Swarm",
-    description:
-      "Updates, technical deep dives, and stories from the Agent Swarm team.",
+    description: "Updates, technical deep dives, and stories from the Agent Swarm team.",
     url: "https://agent-swarm.dev/blog",
     siteName: "Agent Swarm",
     type: "website",
@@ -27,8 +25,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "Blog — Agent Swarm",
-    description:
-      "Updates, technical deep dives, and stories from the Agent Swarm team.",
+    description: "Updates, technical deep dives, and stories from the Agent Swarm team.",
     images: ["https://agent-swarm.dev/og-image.png"],
   },
   alternates: {
@@ -71,8 +68,7 @@ export default function BlogIndex() {
     "@context": "https://schema.org",
     "@type": "CollectionPage",
     name: "Blog — Agent Swarm",
-    description:
-      "Updates, technical deep dives, and stories from the Agent Swarm team.",
+    description: "Updates, technical deep dives, and stories from the Agent Swarm team.",
     url: "https://agent-swarm.dev/blog",
     isPartOf: {
       "@type": "WebSite",
@@ -100,12 +96,9 @@ export default function BlogIndex() {
 
       <div className="mx-auto max-w-3xl px-6 pt-32 pb-20">
         <header className="mb-16">
-          <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-zinc-900">
-            Blog
-          </h1>
+          <h1 className="text-4xl sm:text-5xl font-bold tracking-tight text-zinc-900">Blog</h1>
           <p className="mt-4 text-lg text-zinc-500 max-w-xl">
-            Updates, technical deep dives, and stories from the Agent Swarm
-            team.
+            Updates, technical deep dives, and stories from the Agent Swarm team.
           </p>
         </header>
 
@@ -129,9 +122,7 @@ export default function BlogIndex() {
                   {post.title}
                 </h2>
 
-                <p className="text-[15px] text-zinc-500 leading-relaxed mb-4">
-                  {post.description}
-                </p>
+                <p className="text-[15px] text-zinc-500 leading-relaxed mb-4">{post.description}</p>
 
                 <div className="flex items-center justify-between">
                   <div className="flex gap-2 flex-wrap">

@@ -366,7 +366,9 @@ async function testBasic(provider: string, portOffset: number) {
   if (diagLines.length > 0) {
     log(`${testName}: Diagnostic log lines:\n${diagLines.join("\n")}`);
   } else {
-    log(`${testName}: DIAG: No diagnostic lines found. Total log lines: ${workerLogs.split("\n").length}`);
+    log(
+      `${testName}: DIAG: No diagnostic lines found. Total log lines: ${workerLogs.split("\n").length}`,
+    );
     // Show last 20 lines for debugging
     const lastLines = workerLogs.split("\n").slice(-20).join("\n");
     log(`${testName}: Last 20 lines:\n${lastLines}`);
@@ -374,21 +376,25 @@ async function testBasic(provider: string, portOffset: number) {
 
   // Poll for cost data (may take time if Stop hook runs summarization)
   let costEntries: Array<{ totalCostUsd: number }> = [];
-  const costFound = await pollUntil(async () => {
-    const costs = await apiSafe("GET", `/api/session-costs?agentId=${agentId}`);
-    costEntries = costs?.costs || [];
-    if (costEntries.length > 0) return true;
-    // Also check unfiltered
-    const allCosts = await apiSafe("GET", "/api/session-costs");
-    const allEntries = allCosts?.costs || [];
-    if (allEntries.length > 0) {
-      log(
-        `${testName}: DIAG: No costs for agentId=${agentId}, but ${allEntries.length} total. Sample: ${JSON.stringify(allEntries[0])}`,
-      );
-      return true; // Cost exists, just wrong agentId filter
-    }
-    return false;
-  }, 30000, 3000);
+  const costFound = await pollUntil(
+    async () => {
+      const costs = await apiSafe("GET", `/api/session-costs?agentId=${agentId}`);
+      costEntries = costs?.costs || [];
+      if (costEntries.length > 0) return true;
+      // Also check unfiltered
+      const allCosts = await apiSafe("GET", "/api/session-costs");
+      const allEntries = allCosts?.costs || [];
+      if (allEntries.length > 0) {
+        log(
+          `${testName}: DIAG: No costs for agentId=${agentId}, but ${allEntries.length} total. Sample: ${JSON.stringify(allEntries[0])}`,
+        );
+        return true; // Cost exists, just wrong agentId filter
+      }
+      return false;
+    },
+    30000,
+    3000,
+  );
 
   if (costEntries.length > 0) {
     const total = costEntries.reduce(

@@ -1,22 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import {
-  Crown,
-  Code,
-  Search,
-  Eye,
-  TestTube,
-  type LucideIcon,
-} from "lucide-react";
+import { Crown, Code, Search, Eye, TestTube, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { TemplateConfig } from "../../../templates/schema";
 
 const iconMap: Record<string, LucideIcon> = {
@@ -47,18 +34,12 @@ export function TemplateCard({ template }: TemplateCardProps) {
                 <Icon className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <CardTitle className="text-base">
-                  {template.displayName}
-                </CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  {template.agentDefaults.role}
-                </p>
+                <CardTitle className="text-base">{template.displayName}</CardTitle>
+                <p className="text-xs text-muted-foreground">{template.agentDefaults.role}</p>
               </div>
             </div>
             <Badge
-              variant={
-                template.category === "official" ? "default" : "secondary"
-              }
+              variant={template.category === "official" ? "default" : "secondary"}
               className="text-xs"
             >
               {template.category}
@@ -66,9 +47,7 @@ export function TemplateCard({ template }: TemplateCardProps) {
           </div>
         </CardHeader>
         <CardContent>
-          <CardDescription className="mb-3 line-clamp-2">
-            {template.description}
-          </CardDescription>
+          <CardDescription className="mb-3 line-clamp-2">{template.description}</CardDescription>
           <div className="flex flex-wrap gap-1.5">
             {template.agentDefaults.capabilities.map((cap) => (
               <Badge key={cap} variant="outline" className="text-xs">

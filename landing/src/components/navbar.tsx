@@ -29,10 +29,15 @@ export function Navbar() {
     >
       <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-3 group">
-          <Image src="/logo.png" alt="Agent Swarm" width={32} height={32} className="rounded-lg shadow-lg shadow-amber-500/20 group-hover:shadow-amber-500/40 transition-shadow" priority />
-          <span className="text-lg font-bold tracking-tight text-zinc-900">
-            Agent Swarm
-          </span>
+          <Image
+            src="/logo.png"
+            alt="Agent Swarm"
+            width={32}
+            height={32}
+            className="rounded-lg shadow-lg shadow-amber-500/20 group-hover:shadow-amber-500/40 transition-shadow"
+            priority
+          />
+          <span className="text-lg font-bold tracking-tight text-zinc-900">Agent Swarm</span>
         </Link>
 
         <div className="hidden md:flex items-center gap-6">
@@ -103,10 +108,7 @@ export function Navbar() {
           </a>
         </div>
 
-        <button
-          onClick={() => setMobileOpen(!mobileOpen)}
-          className="md:hidden p-2 text-zinc-600"
-        >
+        <button onClick={() => setMobileOpen(!mobileOpen)} className="md:hidden p-2 text-zinc-600">
           {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
       </div>
@@ -120,22 +122,71 @@ export function Navbar() {
             className="md:hidden overflow-hidden bg-white/95 backdrop-blur-xl border-b border-zinc-200"
           >
             <div className="px-6 py-4 flex flex-col gap-3">
-              <Link href="/#features" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Features</Link>
-              <Link href="/#how-it-works" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">How It Works</Link>
-              <Link href="/#architecture" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Architecture</Link>
-              <Link href="/blog" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Blog</Link>
-              <Link href="/examples" onClick={() => setMobileOpen(false)} className="text-sm font-medium text-zinc-600 py-2">Examples</Link>
-              <a href="https://templates.agent-swarm.dev" target="_blank" rel="noopener noreferrer" onClick={() => setMobileOpen(false)} className="flex items-center gap-2 text-sm font-medium text-zinc-600 py-2">
+              <Link
+                href="/#features"
+                onClick={() => setMobileOpen(false)}
+                className="text-sm font-medium text-zinc-600 py-2"
+              >
+                Features
+              </Link>
+              <Link
+                href="/#how-it-works"
+                onClick={() => setMobileOpen(false)}
+                className="text-sm font-medium text-zinc-600 py-2"
+              >
+                How It Works
+              </Link>
+              <Link
+                href="/#architecture"
+                onClick={() => setMobileOpen(false)}
+                className="text-sm font-medium text-zinc-600 py-2"
+              >
+                Architecture
+              </Link>
+              <Link
+                href="/blog"
+                onClick={() => setMobileOpen(false)}
+                className="text-sm font-medium text-zinc-600 py-2"
+              >
+                Blog
+              </Link>
+              <Link
+                href="/examples"
+                onClick={() => setMobileOpen(false)}
+                className="text-sm font-medium text-zinc-600 py-2"
+              >
+                Examples
+              </Link>
+              <a
+                href="https://templates.agent-swarm.dev"
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setMobileOpen(false)}
+                className="flex items-center gap-2 text-sm font-medium text-zinc-600 py-2"
+              >
                 <Blocks className="w-4 h-4" /> Templates
               </a>
               <div className="h-px bg-zinc-200" />
-              <a href="https://docs.agent-swarm.dev" className="flex items-center gap-2 text-sm font-medium text-zinc-600 py-2">
+              <a
+                href="https://docs.agent-swarm.dev"
+                className="flex items-center gap-2 text-sm font-medium text-zinc-600 py-2"
+              >
                 <BookOpen className="w-4 h-4" /> Docs
               </a>
-              <a href="https://app.agent-swarm.dev" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm font-medium text-amber-700 py-2">
+              <a
+                href="https://app.agent-swarm.dev"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-sm font-medium text-amber-700 py-2"
+              >
                 <LayoutDashboard className="w-4 h-4" /> Dashboard
               </a>
-              <a href="https://github.com/desplega-ai/agent-swarm" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white">
+              <a
+                href="https://github.com/desplega-ai/agent-swarm"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white"
+              >
                 <Github className="w-4 h-4" /> View on GitHub
               </a>
             </div>

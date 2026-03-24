@@ -112,8 +112,8 @@ export function Features() {
             Everything a swarm needs
           </h2>
           <p className="text-lg text-zinc-500 max-w-2xl mx-auto">
-            From task delegation to persistent memory, Agent Swarm provides the
-            full infrastructure for autonomous multi-agent coordination.
+            From task delegation to persistent memory, Agent Swarm provides the full infrastructure
+            for autonomous multi-agent coordination.
           </p>
         </motion.div>
 
@@ -130,10 +130,7 @@ export function Features() {
               ? { href: feature.link, target: "_blank" as const, rel: "noopener noreferrer" }
               : {};
             return (
-              <motion.div
-                key={feature.title}
-                variants={item}
-              >
+              <motion.div key={feature.title} variants={item}>
                 <Wrapper
                   {...linkProps}
                   className="group relative block rounded-2xl bg-white border border-zinc-100 p-6 hover:border-zinc-200 hover:shadow-xl hover:shadow-zinc-100/50 transition-all duration-300 h-full"
@@ -143,12 +140,8 @@ export function Features() {
                   >
                     <feature.icon className="w-5 h-5 text-white" />
                   </div>
-                  <h3 className="text-base font-semibold text-zinc-900 mb-2">
-                    {feature.title}
-                  </h3>
-                  <p className="text-sm text-zinc-500 leading-relaxed">
-                    {feature.description}
-                  </p>
+                  <h3 className="text-base font-semibold text-zinc-900 mb-2">{feature.title}</h3>
+                  <p className="text-sm text-zinc-500 leading-relaxed">{feature.description}</p>
                 </Wrapper>
               </motion.div>
             );

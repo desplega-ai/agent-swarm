@@ -23,8 +23,8 @@ export function CTA() {
             Ready to build your swarm?
           </h2>
           <p className="text-lg text-zinc-400 max-w-xl mx-auto mb-10">
-            Agent Swarm is open source and ready to deploy. Start with one lead
-            and one worker — scale as your ambitions grow.
+            Agent Swarm is open source and ready to deploy. Start with one lead and one worker —
+            scale as your ambitions grow.
           </p>
 
           <div className="flex flex-wrap justify-center gap-4">

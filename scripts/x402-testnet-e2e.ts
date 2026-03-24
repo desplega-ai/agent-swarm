@@ -14,7 +14,11 @@
  */
 
 import Openfort from "@openfort/openfort-node";
-import { x402ResourceServer, HTTPFacilitatorClient, x402HTTPResourceServer } from "@x402/core/server";
+import {
+  x402ResourceServer,
+  HTTPFacilitatorClient,
+  x402HTTPResourceServer,
+} from "@x402/core/server";
 import { registerExactEvmScheme as registerServerEvmScheme } from "@x402/evm/exact/server";
 import { createPublicClient, http, parseAbi, verifyTypedData, type Address, type Hex } from "viem";
 import { baseSepolia } from "viem/chains";
@@ -68,7 +72,11 @@ async function testOpenfortWalletCreation(): Promise<TestResult> {
   log("\n--- Test 1: Openfort Wallet Creation/Retrieval ---");
   try {
     if (!OPENFORT_API_KEY || !OPENFORT_WALLET_SECRET) {
-      return { name: "Openfort wallet creation", status: "SKIP", details: "Missing OPENFORT_API_KEY or OPENFORT_WALLET_SECRET" };
+      return {
+        name: "Openfort wallet creation",
+        status: "SKIP",
+        details: "Missing OPENFORT_API_KEY or OPENFORT_WALLET_SECRET",
+      };
     }
 
     const openfort = new Openfort(OPENFORT_API_KEY, { walletSecret: OPENFORT_WALLET_SECRET });
@@ -97,7 +105,12 @@ async function testOpenfortWalletCreation(): Promise<TestResult> {
       details: `Wallet ${wallet.address} (USDC: ${usdcBal}, ETH: ${ethBal})`,
     };
   } catch (error: any) {
-    return { name: "Openfort wallet creation", status: "FAIL", details: error.message, error: error.stack };
+    return {
+      name: "Openfort wallet creation",
+      status: "FAIL",
+      details: error.message,
+      error: error.stack,
+    };
   }
 }
 
@@ -151,7 +164,12 @@ async function testEip712Signing(): Promise<TestResult> {
     log(`    to: ${message.to}`);
     log(`    value: ${Number(message.value) / 1e6} USDC`);
 
-    const signature = await wallet.signTypedData({ domain, types, primaryType: "TransferWithAuthorization", message });
+    const signature = await wallet.signTypedData({
+      domain,
+      types,
+      primaryType: "TransferWithAuthorization",
+      message,
+    });
     log(`  Signature: ${signature.slice(0, 20)}...${signature.slice(-8)}`);
 
     // Verify the signature off-chain
@@ -193,11 +211,20 @@ async function testFacilitatorConnection(): Promise<TestResult> {
       details: `Facilitator at ${FACILITATOR_URL} supports ${NETWORK}. Signer: ${data.signers?.["eip155:*"]?.[0]}`,
     };
   } catch (error: any) {
-    return { name: "Facilitator connection", status: "FAIL", details: error.message, error: error.stack };
+    return {
+      name: "Facilitator connection",
+      status: "FAIL",
+      details: error.message,
+      error: error.stack,
+    };
   }
 }
 
-async function testX402ServerSetup(): Promise<{ result: TestResult; server?: any; payTo?: string }> {
+async function testX402ServerSetup(): Promise<{
+  result: TestResult;
+  server?: any;
+  payTo?: string;
+}> {
   log("\n--- Test 4: x402 Resource Server with Real Facilitator ---");
   try {
     // Create facilitator client pointing to real x402.org
@@ -262,7 +289,8 @@ async function testX402ServerSetup(): Promise<{ result: TestResult; server?: any
             adapter,
             path,
             method,
-            paymentHeader: req.headers.get("payment-signature") ?? req.headers.get("x-payment") ?? undefined,
+            paymentHeader:
+              req.headers.get("payment-signature") ?? req.headers.get("x-payment") ?? undefined,
           };
 
           const processResult = await httpServer.processHTTPRequest(context);
@@ -349,7 +377,12 @@ async function testX402ServerSetup(): Promise<{ result: TestResult; server?: any
     };
   } catch (error: any) {
     return {
-      result: { name: "x402 server setup", status: "FAIL", details: error.message, error: error.stack },
+      result: {
+        name: "x402 server setup",
+        status: "FAIL",
+        details: error.message,
+        error: error.stack,
+      },
     };
   }
 }
@@ -424,7 +457,9 @@ async function testX402PaymentFlow(payTo: string): Promise<TestResult> {
         const decoded = JSON.parse(atob(paymentRequiredHeader));
         if (decoded.error === "insufficient_funds") {
           log(`  Facilitator rejected: insufficient_funds (wallet has ${usdcBal} USDC)`);
-          log(`  The full x402 flow works: 402 → sign → retry → facilitator verify → insufficient_funds`);
+          log(
+            `  The full x402 flow works: 402 → sign → retry → facilitator verify → insufficient_funds`,
+          );
           return {
             name: "x402 payment flow",
             status: "PASS",
@@ -459,7 +494,11 @@ async function testDirectFacilitatorVerify(): Promise<TestResult> {
   log("\n--- Test 6: Direct Facilitator Verify API ---");
   try {
     if (!OPENFORT_API_KEY || !OPENFORT_WALLET_SECRET) {
-      return { name: "Facilitator verify", status: "SKIP", details: "Missing Openfort credentials" };
+      return {
+        name: "Facilitator verify",
+        status: "SKIP",
+        details: "Missing Openfort credentials",
+      };
     }
 
     const openfort = new Openfort(OPENFORT_API_KEY, { walletSecret: OPENFORT_WALLET_SECRET });
@@ -470,7 +509,11 @@ async function testDirectFacilitatorVerify(): Promise<TestResult> {
     }
 
     const now = Math.floor(Date.now() / 1000);
-    const nonce = `0x${Array.from({ length: 32 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, "0")).join("")}` as Hex;
+    const nonce = `0x${Array.from({ length: 32 }, () =>
+      Math.floor(Math.random() * 256)
+        .toString(16)
+        .padStart(2, "0"),
+    ).join("")}` as Hex;
 
     // Use a different payTo address (not self-transfer)
     const payTo = "0x000000000000000000000000000000000000dEaD";
@@ -520,12 +563,18 @@ async function testDirectFacilitatorVerify(): Promise<TestResult> {
       nonce,
     };
 
-    let signature = await wallet.signTypedData({ domain, types, primaryType: "TransferWithAuthorization", message });
+    let signature = await wallet.signTypedData({
+      domain,
+      types,
+      primaryType: "TransferWithAuthorization",
+      message,
+    });
     // Normalize v-value: Openfort produces v=0/1 but USDC expects v=27/28
     if (signature.length === 132) {
       const v = parseInt(signature.slice(130, 132), 16);
       if (v < 27) {
-        signature = (signature.slice(0, 130) + (v + 27).toString(16).padStart(2, "0")) as `0x${string}`;
+        signature = (signature.slice(0, 130) +
+          (v + 27).toString(16).padStart(2, "0")) as `0x${string}`;
       }
     }
 
@@ -605,7 +654,12 @@ async function testDirectFacilitatorVerify(): Promise<TestResult> {
       details: `Facilitator verify returned: ${JSON.stringify(verifyData)}`,
     };
   } catch (error: any) {
-    return { name: "Facilitator verify", status: "FAIL", details: error.message, error: error.stack };
+    return {
+      name: "Facilitator verify",
+      status: "FAIL",
+      details: error.message,
+      error: error.stack,
+    };
   }
 }
 

@@ -39,20 +39,17 @@ export function TemplateDetail({ template, category }: TemplateDetailProps) {
       <div>
         <div className="flex items-center gap-3 mb-2">
           <h1 className="text-3xl font-bold">{template.config.displayName}</h1>
-          <Badge variant={category === "official" ? "default" : "secondary"}>
-            {category}
-          </Badge>
+          <Badge variant={category === "official" ? "default" : "secondary"}>{category}</Badge>
           <Badge variant="outline">v{template.config.version}</Badge>
         </div>
-        <p className="text-lg text-muted-foreground mb-4">
-          {template.config.description}
-        </p>
+        <p className="text-lg text-muted-foreground mb-4">{template.config.description}</p>
         <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
           <span>
             Role: <strong className="text-foreground">{template.config.agentDefaults.role}</strong>
           </span>
           <span>
-            Max tasks: <strong className="text-foreground">{template.config.agentDefaults.maxTasks}</strong>
+            Max tasks:{" "}
+            <strong className="text-foreground">{template.config.agentDefaults.maxTasks}</strong>
           </span>
           <span>
             Author: <strong className="text-foreground">{template.config.author}</strong>
@@ -78,11 +75,7 @@ export function TemplateDetail({ template, category }: TemplateDetailProps) {
             onClick={handleCopyId}
             className="flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm hover:bg-accent transition-colors"
           >
-            {copied ? (
-              <Check className="h-4 w-4" />
-            ) : (
-              <Copy className="h-4 w-4" />
-            )}
+            {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
             {copied ? "Copied" : "Copy"}
           </button>
         </div>

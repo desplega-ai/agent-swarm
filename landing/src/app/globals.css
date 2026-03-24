@@ -77,19 +77,35 @@ body {
 }
 
 @keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-20px); }
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-20px);
+  }
 }
 
 @keyframes pulse-glow {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.8; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.8;
+  }
 }
 
 @keyframes gradient-shift {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
 }
 
 .animate-float {
@@ -113,7 +129,12 @@ body {
 }
 
 .gradient-text {
-  background: linear-gradient(135deg, oklch(0.555 0.163 48.998), oklch(0.769 0.188 70.08), oklch(0.555 0.163 48.998));
+  background: linear-gradient(
+    135deg,
+    oklch(0.555 0.163 48.998),
+    oklch(0.769 0.188 70.08),
+    oklch(0.555 0.163 48.998)
+  );
   background-size: 200% auto;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;

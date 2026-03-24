@@ -173,15 +173,11 @@ const server = Bun.serve({
       const amount = isExpensive ? "5000000" : "10000"; // $5.00 or $0.01 USDC (6 decimals)
 
       // Check for payment header
-      const paymentHeader =
-        req.headers.get("PAYMENT-SIGNATURE") || req.headers.get("X-PAYMENT");
+      const paymentHeader = req.headers.get("PAYMENT-SIGNATURE") || req.headers.get("X-PAYMENT");
 
       if (!paymentHeader) {
         // No payment — return 402 with payment requirements
-        const paymentRequired = buildPaymentRequired(
-          `${url.origin}${url.pathname}`,
-          amount,
-        );
+        const paymentRequired = buildPaymentRequired(`${url.origin}${url.pathname}`, amount);
 
         // x402 v2 requires the PAYMENT-REQUIRED header (base64-encoded PaymentRequired)
         const encoded = encodePaymentRequiredHeader(

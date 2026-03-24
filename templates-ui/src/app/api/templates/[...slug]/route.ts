@@ -12,10 +12,7 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: corsHeaders });
 }
 
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ slug: string[] }> }
-) {
+export async function GET(_request: Request, { params }: { params: Promise<{ slug: string[] }> }) {
   const { slug } = await params;
 
   // GET /api/templates -> list all templates
@@ -38,7 +35,7 @@ export async function GET(
         {
           error: `Version ${parsed.version} not found. Available: ${template.config.version}`,
         },
-        { status: 404, headers: corsHeaders }
+        { status: 404, headers: corsHeaders },
       );
     }
 
@@ -46,7 +43,7 @@ export async function GET(
   } catch {
     return NextResponse.json(
       { error: `Template "${templateId}" not found` },
-      { status: 404, headers: corsHeaders }
+      { status: 404, headers: corsHeaders },
     );
   }
 }

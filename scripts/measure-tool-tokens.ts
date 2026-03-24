@@ -85,10 +85,18 @@ async function main() {
   const reduction = ((allTokens - coreOnlyTokens) / allTokens) * 100;
 
   console.log("--- Token Estimates (JSON serialized, ~4 chars/token) ---\n");
-  console.log(`All tools:      ~${allTokens.toLocaleString()} tokens (${totalChars.toLocaleString()} chars)`);
-  console.log(`Core only:      ~${coreOnlyTokens.toLocaleString()} tokens (${coreChars.toLocaleString()} chars)`);
-  console.log(`Deferred only:  ~${deferredOnlyTokens.toLocaleString()} tokens (${deferredChars.toLocaleString()} chars)`);
-  console.log(`\nSavings:        ~${(allTokens - coreOnlyTokens).toLocaleString()} tokens (${reduction.toFixed(1)}% reduction)`);
+  console.log(
+    `All tools:      ~${allTokens.toLocaleString()} tokens (${totalChars.toLocaleString()} chars)`,
+  );
+  console.log(
+    `Core only:      ~${coreOnlyTokens.toLocaleString()} tokens (${coreChars.toLocaleString()} chars)`,
+  );
+  console.log(
+    `Deferred only:  ~${deferredOnlyTokens.toLocaleString()} tokens (${deferredChars.toLocaleString()} chars)`,
+  );
+  console.log(
+    `\nSavings:        ~${(allTokens - coreOnlyTokens).toLocaleString()} tokens (${reduction.toFixed(1)}% reduction)`,
+  );
 
   console.log("\n--- Per-Tool Breakdown (sorted by size) ---\n");
   console.log("  Tool Name".padEnd(35) + "Chars".padStart(8) + "Tokens".padStart(8) + "  Class");

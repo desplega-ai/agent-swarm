@@ -43,17 +43,15 @@ export function Waitlist() {
         >
           <div className="inline-flex items-center gap-2 rounded-full bg-amber-50 border border-amber-200/60 px-4 py-1.5 mb-6">
             <Mail className="w-4 h-4 text-amber-600" />
-            <span className="text-sm font-medium text-amber-800">
-              Coming Soon
-            </span>
+            <span className="text-sm font-medium text-amber-800">Coming Soon</span>
           </div>
 
           <h2 className="text-3xl sm:text-4xl font-bold tracking-tight text-zinc-900 mb-4">
             Interested in a hosted version?
           </h2>
           <p className="text-lg text-zinc-500 max-w-lg mx-auto mb-10">
-            Skip the self-hosting. Join the waitlist for managed Agent Swarm
-            — we&apos;ll handle the infrastructure so you can focus on your agents.
+            Skip the self-hosting. Join the waitlist for managed Agent Swarm — we&apos;ll handle the
+            infrastructure so you can focus on your agents.
           </p>
 
           {status === "success" ? (

@@ -22,9 +22,12 @@ await $`cd ${APP_DIR} && bun install --frozen-lockfile --production`;
 // Create .env if not exists
 const envFile = Bun.file(`${APP_DIR}/.env`);
 if (!(await envFile.exists())) {
-  await Bun.write(envFile, `PORT=3013
+  await Bun.write(
+    envFile,
+    `PORT=3013
 API_KEY=
-`);
+`,
+  );
   console.log("Created .env - set API_KEY for authentication");
 }
 

@@ -17,8 +17,7 @@ import { Navbar } from "@/components/navbar";
 import { Footer } from "@/components/footer";
 
 export const metadata: Metadata = {
-  title:
-    "Agent Swarm by the Numbers: 80 Days, 242 PRs, 6 Agents — Agent Swarm Blog",
+  title: "Agent Swarm by the Numbers: 80 Days, 242 PRs, 6 Agents — Agent Swarm Blog",
   description:
     "In 80 days, our swarm of 6 AI agents autonomously created 242 pull requests across 4 repositories, completed 7 epics, and built its own UI, marketing campaign, and CLI tools.",
   authors: [{ name: "Agent Swarm", url: "https://agent-swarm.dev" }],
@@ -59,32 +58,18 @@ function SectionIcon({
   color: string;
 }) {
   return (
-    <div
-      className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${color}`}
-    >
+    <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${color}`}>
       <Icon className="w-4.5 h-4.5" />
     </div>
   );
 }
 
-function StatCard({
-  value,
-  label,
-  sublabel,
-}: {
-  value: string;
-  label: string;
-  sublabel?: string;
-}) {
+function StatCard({ value, label, sublabel }: { value: string; label: string; sublabel?: string }) {
   return (
     <div className="rounded-xl bg-zinc-50 border border-zinc-200 p-5 text-center">
-      <div className="text-3xl sm:text-4xl font-bold text-zinc-900 mb-1">
-        {value}
-      </div>
+      <div className="text-3xl sm:text-4xl font-bold text-zinc-900 mb-1">{value}</div>
       <div className="text-[14px] font-medium text-zinc-600">{label}</div>
-      {sublabel && (
-        <div className="text-[12px] text-zinc-400 mt-0.5">{sublabel}</div>
-      )}
+      {sublabel && <div className="text-[12px] text-zinc-400 mt-0.5">{sublabel}</div>}
     </div>
   );
 }
@@ -92,9 +77,7 @@ function StatCard({
 function Callout({ children }: { children: React.ReactNode }) {
   return (
     <div className="my-6 rounded-xl bg-amber-50/80 border border-amber-200/60 px-5 py-4">
-      <div className="text-[14px] text-amber-900 leading-relaxed">
-        {children}
-      </div>
+      <div className="text-[14px] text-amber-900 leading-relaxed">{children}</div>
     </div>
   );
 }
@@ -108,8 +91,7 @@ export default function SwarmMetricsPost() {
           __html: JSON.stringify({
             "@context": "https://schema.org",
             "@type": "BlogPosting",
-            headline:
-              "Agent Swarm by the Numbers: 80 Days, 242 PRs, 6 Agents",
+            headline: "Agent Swarm by the Numbers: 80 Days, 242 PRs, 6 Agents",
             description:
               "In 80 days, our swarm of 6 AI agents autonomously created 242 pull requests across 4 repositories, completed 7 epics, and built its own UI, marketing campaign, and CLI tools.",
             datePublished: "2026-03-13T00:00:00Z",
@@ -157,36 +139,30 @@ export default function SwarmMetricsPost() {
             </span>
             <span className="text-zinc-300">&middot;</span>
             <span className="flex items-center gap-1.5 text-[13px] text-zinc-400">
-              <Clock className="w-3.5 h-3.5" />
-              6 min read
+              <Clock className="w-3.5 h-3.5" />6 min read
             </span>
           </div>
 
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-zinc-900 leading-tight mb-4">
             Agent Swarm by the Numbers:{" "}
-            <span className="gradient-text">
-              80 Days, 242 PRs, 6 Agents
-            </span>
+            <span className="gradient-text">80 Days, 242 PRs, 6 Agents</span>
           </h1>
 
           <p className="text-lg text-zinc-500 leading-relaxed max-w-2xl">
-            From December 23 to March 13, a swarm of 6 AI agents
-            autonomously shipped 242 pull requests across 4 repositories,
-            completing 7 epics. They built their own UI, fixed their own bugs,
-            and launched their own marketing campaign. Here are the numbers.
+            From December 23 to March 13, a swarm of 6 AI agents autonomously shipped 242 pull
+            requests across 4 repositories, completing 7 epics. They built their own UI, fixed their
+            own bugs, and launched their own marketing campaign. Here are the numbers.
           </p>
 
           <div className="flex gap-2 flex-wrap mt-6">
-            {["metrics", "AI agents", "automation", "open source"].map(
-              (tag) => (
-                <span
-                  key={tag}
-                  className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-zinc-100 text-zinc-500"
-                >
-                  {tag}
-                </span>
-              )
-            )}
+            {["metrics", "AI agents", "automation", "open source"].map((tag) => (
+              <span
+                key={tag}
+                className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-zinc-100 text-zinc-500"
+              >
+                {tag}
+              </span>
+            ))}
           </div>
         </header>
 
@@ -202,35 +178,28 @@ export default function SwarmMetricsPost() {
 
           {/* Intro */}
           <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">
-            Agent Swarm is an open-source framework for orchestrating teams of
-            AI agents. Each agent runs as a headless Claude Code process inside
-            a Docker container, connected through an MCP server that handles
-            task routing, messaging, and memory.
+            Agent Swarm is an open-source framework for orchestrating teams of AI agents. Each agent
+            runs as a headless Claude Code process inside a Docker container, connected through an
+            MCP server that handles task routing, messaging, and memory.
           </p>
           <p className="text-[15px] text-zinc-600 leading-relaxed mb-10">
-            We&apos;ve been running our own swarm in production since December
-            2025. One human (Taras) messages the swarm via Slack. The Lead agent
-            interprets the request, delegates to the right specialist, and the
-            work gets done. No manual task assignment. No copy-pasting between
-            tools. Just Slack messages in, pull requests out.
+            We&apos;ve been running our own swarm in production since December 2025. One human
+            (Taras) messages the swarm via Slack. The Lead agent interprets the request, delegates
+            to the right specialist, and the work gets done. No manual task assignment. No
+            copy-pasting between tools. Just Slack messages in, pull requests out.
           </p>
 
           {/* Section 1: The Team */}
           <section className="mb-14">
             <div className="flex items-center gap-3 mb-6">
-              <SectionIcon
-                icon={Users}
-                color="bg-amber-100 text-amber-700"
-              />
-              <h2 className="text-2xl font-bold text-zinc-900">
-                The Team: 6 Specialized Agents
-              </h2>
+              <SectionIcon icon={Users} color="bg-amber-100 text-amber-700" />
+              <h2 className="text-2xl font-bold text-zinc-900">The Team: 6 Specialized Agents</h2>
             </div>
 
             <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">
-              Each agent has a persistent identity, accumulated memory, and a
-              specialized role. They don&apos;t just execute — they learn,
-              develop preferences, and get better at their work over time.
+              Each agent has a persistent identity, accumulated memory, and a specialized role. They
+              don&apos;t just execute — they learn, develop preferences, and get better at their
+              work over time.
             </p>
 
             <div className="space-y-3 mb-6">
@@ -283,16 +252,12 @@ export default function SwarmMetricsPost() {
                   </div>
                   <div>
                     <div className="flex items-center gap-2 mb-0.5">
-                      <h3 className="text-[15px] font-semibold text-zinc-900">
-                        {agent.name}
-                      </h3>
+                      <h3 className="text-[15px] font-semibold text-zinc-900">{agent.name}</h3>
                       <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-zinc-200/60 text-zinc-500">
                         {agent.role}
                       </span>
                     </div>
-                    <p className="text-[13px] text-zinc-500 leading-relaxed">
-                      {agent.desc}
-                    </p>
+                    <p className="text-[13px] text-zinc-500 leading-relaxed">{agent.desc}</p>
                   </div>
                 </div>
               ))}
@@ -302,40 +267,24 @@ export default function SwarmMetricsPost() {
           {/* Section 2: PRs */}
           <section className="mb-14">
             <div className="flex items-center gap-3 mb-6">
-              <SectionIcon
-                icon={GitPullRequest}
-                color="bg-blue-100 text-blue-700"
-              />
-              <h2 className="text-2xl font-bold text-zinc-900">
-                242 Pull Requests
-              </h2>
+              <SectionIcon icon={GitPullRequest} color="bg-blue-100 text-blue-700" />
+              <h2 className="text-2xl font-bold text-zinc-900">242 Pull Requests</h2>
             </div>
 
             <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">
-              Every line of code goes through pull requests — created, reviewed,
-              and merged by the swarm. Here&apos;s the breakdown across
-              repositories:
+              Every line of code goes through pull requests — created, reviewed, and merged by the
+              swarm. Here&apos;s the breakdown across repositories:
             </p>
 
             <div className="rounded-xl border border-zinc-200 overflow-hidden mb-6">
               <table className="w-full text-[14px]">
                 <thead>
                   <tr className="bg-zinc-50 border-b border-zinc-200">
-                    <th className="text-left px-4 py-3 font-semibold text-zinc-700">
-                      Repository
-                    </th>
-                    <th className="text-center px-4 py-3 font-semibold text-zinc-700">
-                      Jan
-                    </th>
-                    <th className="text-center px-4 py-3 font-semibold text-zinc-700">
-                      Feb
-                    </th>
-                    <th className="text-center px-4 py-3 font-semibold text-zinc-700">
-                      Mar
-                    </th>
-                    <th className="text-center px-4 py-3 font-semibold text-zinc-700">
-                      Total
-                    </th>
+                    <th className="text-left px-4 py-3 font-semibold text-zinc-700">Repository</th>
+                    <th className="text-center px-4 py-3 font-semibold text-zinc-700">Jan</th>
+                    <th className="text-center px-4 py-3 font-semibold text-zinc-700">Feb</th>
+                    <th className="text-center px-4 py-3 font-semibold text-zinc-700">Mar</th>
+                    <th className="text-center px-4 py-3 font-semibold text-zinc-700">Total</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100">
@@ -373,15 +322,9 @@ export default function SwarmMetricsPost() {
                       <td className="px-4 py-3 text-zinc-800 font-medium font-mono text-[13px]">
                         {row.repo}
                       </td>
-                      <td className="px-4 py-3 text-center text-zinc-600">
-                        {row.jan}
-                      </td>
-                      <td className="px-4 py-3 text-center text-zinc-600">
-                        {row.feb}
-                      </td>
-                      <td className="px-4 py-3 text-center text-zinc-600">
-                        {row.mar}
-                      </td>
+                      <td className="px-4 py-3 text-center text-zinc-600">{row.jan}</td>
+                      <td className="px-4 py-3 text-center text-zinc-600">{row.feb}</td>
+                      <td className="px-4 py-3 text-center text-zinc-600">{row.mar}</td>
                       <td className="px-4 py-3 text-center font-semibold text-zinc-900">
                         {row.total}
                       </td>
@@ -399,28 +342,22 @@ export default function SwarmMetricsPost() {
             </div>
 
             <Callout>
-              <strong>Steady output:</strong> 79 PRs in January, 105 in
-              February, 54 in the first half of March. The swarm doesn&apos;t
-              slow down — it accelerates as agents accumulate codebase knowledge
-              and the tooling improves.
+              <strong>Steady output:</strong> 79 PRs in January, 105 in February, 54 in the first
+              half of March. The swarm doesn&apos;t slow down — it accelerates as agents accumulate
+              codebase knowledge and the tooling improves.
             </Callout>
           </section>
 
           {/* Section 3: Epics */}
           <section className="mb-14">
             <div className="flex items-center gap-3 mb-6">
-              <SectionIcon
-                icon={Target}
-                color="bg-emerald-100 text-emerald-700"
-              />
-              <h2 className="text-2xl font-bold text-zinc-900">
-                7 Epics Completed
-              </h2>
+              <SectionIcon icon={Target} color="bg-emerald-100 text-emerald-700" />
+              <h2 className="text-2xl font-bold text-zinc-900">7 Epics Completed</h2>
             </div>
 
             <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">
-              Epics are multi-task projects that span days or weeks. Here&apos;s
-              what the swarm shipped end-to-end:
+              Epics are multi-task projects that span days or weeks. Here&apos;s what the swarm
+              shipped end-to-end:
             </p>
 
             <div className="space-y-4 mb-6">
@@ -468,24 +405,15 @@ export default function SwarmMetricsPost() {
                   color: "bg-indigo-500",
                 },
               ].map((epic) => (
-                <div
-                  key={epic.name}
-                  className="rounded-xl bg-zinc-50 border border-zinc-200 p-5"
-                >
+                <div key={epic.name} className="rounded-xl bg-zinc-50 border border-zinc-200 p-5">
                   <div className="flex items-center gap-3 mb-2">
-                    <div
-                      className={`w-2 h-2 rounded-full shrink-0 ${epic.color}`}
-                    />
-                    <h3 className="text-[15px] font-semibold text-zinc-900">
-                      {epic.name}
-                    </h3>
+                    <div className={`w-2 h-2 rounded-full shrink-0 ${epic.color}`} />
+                    <h3 className="text-[15px] font-semibold text-zinc-900">{epic.name}</h3>
                     <span className="text-[11px] font-mono text-zinc-400 ml-auto">
                       {epic.tasks}
                     </span>
                   </div>
-                  <p className="text-[14px] text-zinc-600 leading-relaxed pl-5">
-                    {epic.desc}
-                  </p>
+                  <p className="text-[14px] text-zinc-600 leading-relaxed pl-5">{epic.desc}</p>
                 </div>
               ))}
             </div>
@@ -494,29 +422,20 @@ export default function SwarmMetricsPost() {
           {/* Section 4: Task Stats */}
           <section className="mb-14">
             <div className="flex items-center gap-3 mb-6">
-              <SectionIcon
-                icon={BarChart3}
-                color="bg-purple-100 text-purple-700"
-              />
-              <h2 className="text-2xl font-bold text-zinc-900">
-                Task Execution
-              </h2>
+              <SectionIcon icon={BarChart3} color="bg-purple-100 text-purple-700" />
+              <h2 className="text-2xl font-bold text-zinc-900">Task Execution</h2>
             </div>
 
             <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">
-              Every piece of work is tracked as a task — from single-file fixes
-              to multi-day epics. Tasks are routed by the Lead, executed by
-              workers, and the results are stored in searchable memory.
+              Every piece of work is tracked as a task — from single-file fixes to multi-day epics.
+              Tasks are routed by the Lead, executed by workers, and the results are stored in
+              searchable memory.
             </p>
 
             <div className="grid grid-cols-3 gap-3 mb-6">
               <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-center">
-                <div className="text-2xl font-bold text-emerald-800">
-                  3,010
-                </div>
-                <div className="text-[12px] text-emerald-600 mt-0.5">
-                  completed
-                </div>
+                <div className="text-2xl font-bold text-emerald-800">3,010</div>
+                <div className="text-[12px] text-emerald-600 mt-0.5">completed</div>
               </div>
               <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-center">
                 <div className="text-2xl font-bold text-red-800">78</div>
@@ -524,26 +443,21 @@ export default function SwarmMetricsPost() {
               </div>
               <div className="rounded-xl bg-zinc-50 border border-zinc-200 p-4 text-center">
                 <div className="text-2xl font-bold text-zinc-700">94</div>
-                <div className="text-[12px] text-zinc-500 mt-0.5">
-                  cancelled
-                </div>
+                <div className="text-[12px] text-zinc-500 mt-0.5">cancelled</div>
               </div>
             </div>
 
             <Callout>
-              <strong>~97% success rate</strong> — and failures are
-              informative. When a task fails, the agent reports what went wrong,
-              and those learnings are indexed into memory so the same mistake
-              isn&apos;t repeated.
+              <strong>~97% success rate</strong> — and failures are informative. When a task fails,
+              the agent reports what went wrong, and those learnings are indexed into memory so the
+              same mistake isn&apos;t repeated.
             </Callout>
 
             <p className="text-[15px] text-zinc-600 leading-relaxed">
-              The swarm operates across 5 active agents (Lead handles routing,
-              4 workers handle implementation), with tasks flowing through a
-              lifecycle:{" "}
+              The swarm operates across 5 active agents (Lead handles routing, 4 workers handle
+              implementation), with tasks flowing through a lifecycle:{" "}
               <span className="font-mono text-[13px] text-zinc-500">
-                unassigned &rarr; offered &rarr; pending &rarr; in_progress
-                &rarr; completed
+                unassigned &rarr; offered &rarr; pending &rarr; in_progress &rarr; completed
               </span>
               . Each transition is logged and visible in the dashboard.
             </p>
@@ -553,9 +467,7 @@ export default function SwarmMetricsPost() {
           <section className="mb-14">
             <div className="flex items-center gap-3 mb-6">
               <SectionIcon icon={Zap} color="bg-amber-100 text-amber-700" />
-              <h2 className="text-2xl font-bold text-zinc-900">
-                Highlights
-              </h2>
+              <h2 className="text-2xl font-bold text-zinc-900">Highlights</h2>
             </div>
 
             <div className="space-y-4 mb-6">
@@ -580,12 +492,8 @@ export default function SwarmMetricsPost() {
                 <div key={item.title} className="flex gap-4 items-start">
                   <div className="w-1.5 h-1.5 rounded-full bg-amber-500 mt-2 shrink-0" />
                   <div>
-                    <h3 className="text-[15px] font-semibold text-zinc-900 mb-1">
-                      {item.title}
-                    </h3>
-                    <p className="text-[14px] text-zinc-500 leading-relaxed">
-                      {item.body}
-                    </p>
+                    <h3 className="text-[15px] font-semibold text-zinc-900 mb-1">{item.title}</h3>
+                    <p className="text-[14px] text-zinc-500 leading-relaxed">{item.body}</p>
                   </div>
                 </div>
               ))}
@@ -594,14 +502,12 @@ export default function SwarmMetricsPost() {
 
           {/* What's Next */}
           <section className="mb-14">
-            <h2 className="text-2xl font-bold text-zinc-900 mb-6">
-              What&apos;s Next
-            </h2>
+            <h2 className="text-2xl font-bold text-zinc-900 mb-6">What&apos;s Next</h2>
 
             <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">
-              80 days in, the swarm is just getting started. The numbers tell
-              the story of a system that works — agents that ship real code,
-              review each other&apos;s work, and learn from their mistakes.
+              80 days in, the swarm is just getting started. The numbers tell the story of a system
+              that works — agents that ship real code, review each other&apos;s work, and learn from
+              their mistakes.
             </p>
 
             <p className="text-[15px] text-zinc-600 leading-relaxed">
@@ -614,8 +520,8 @@ export default function SwarmMetricsPost() {
               >
                 open source
               </a>
-              . If you want to run your own swarm — or join ours — the code,
-              docs, and dashboard are all public.
+              . If you want to run your own swarm — or join ours — the code, docs, and dashboard are
+              all public.
             </p>
           </section>
 
@@ -669,7 +575,8 @@ export default function SwarmMetricsPost() {
                     Openfort Hackathon: Teaching Agents to Pay
                   </p>
                   <p className="text-[12px] text-zinc-500 mt-0.5">
-                    We shipped x402 payment capability into Agent Swarm — agents can now pay for API services using crypto.
+                    We shipped x402 payment capability into Agent Swarm — agents can now pay for API
+                    services using crypto.
                   </p>
                 </div>
                 <ArrowRight className="w-4 h-4 text-zinc-400 group-hover:text-amber-600 shrink-0" />

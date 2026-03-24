@@ -21,15 +21,9 @@ const steps = [
         <div>
           <span className="text-amber-600">$</span> docker compose up -d
         </div>
-        <div className="mt-2 text-emerald-600">
-          ✓ API server running on :3013
-        </div>
-        <div className="text-emerald-600">
-          ✓ Lead agent online
-        </div>
-        <div className="text-emerald-600">
-          ✓ 2 workers connected
-        </div>
+        <div className="mt-2 text-emerald-600">✓ API server running on :3013</div>
+        <div className="text-emerald-600">✓ Lead agent online</div>
+        <div className="text-emerald-600">✓ 2 workers connected</div>
       </div>
     ),
   },
@@ -41,9 +35,24 @@ const steps = [
     visual: (
       <div className="space-y-2">
         {[
-          { task: "Implement auth flow", agent: "Picateclas", status: "in_progress", color: "bg-blue-100 text-blue-700" },
-          { task: "Write API tests", agent: "Codebot", status: "pending", color: "bg-amber-100 text-amber-700" },
-          { task: "Update docs", agent: "Pool", status: "unassigned", color: "bg-zinc-100 text-zinc-600" },
+          {
+            task: "Implement auth flow",
+            agent: "Picateclas",
+            status: "in_progress",
+            color: "bg-blue-100 text-blue-700",
+          },
+          {
+            task: "Write API tests",
+            agent: "Codebot",
+            status: "pending",
+            color: "bg-amber-100 text-amber-700",
+          },
+          {
+            task: "Update docs",
+            agent: "Pool",
+            status: "unassigned",
+            color: "bg-zinc-100 text-zinc-600",
+          },
         ].map((t) => (
           <div
             key={t.task}
@@ -71,22 +80,22 @@ const steps = [
         <div className="flex items-start gap-2">
           <div className="mt-1 w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
           <div className="text-xs text-zinc-600">
-            <span className="font-medium text-zinc-800">Memory saved:</span>{" "}
-            &ldquo;The API requires Bearer prefix on all auth headers&rdquo;
+            <span className="font-medium text-zinc-800">Memory saved:</span> &ldquo;The API requires
+            Bearer prefix on all auth headers&rdquo;
           </div>
         </div>
         <div className="flex items-start gap-2">
           <div className="mt-1 w-1.5 h-1.5 rounded-full bg-violet-500 shrink-0" />
           <div className="text-xs text-zinc-600">
-            <span className="font-medium text-zinc-800">Identity evolved:</span>{" "}
-            Added &ldquo;auth specialist&rdquo; to capabilities
+            <span className="font-medium text-zinc-800">Identity evolved:</span> Added &ldquo;auth
+            specialist&rdquo; to capabilities
           </div>
         </div>
         <div className="flex items-start gap-2">
           <div className="mt-1 w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
           <div className="text-xs text-zinc-600">
-            <span className="font-medium text-zinc-800">Pattern learned:</span>{" "}
-            Session continuity via parentTaskId
+            <span className="font-medium text-zinc-800">Pattern learned:</span> Session continuity
+            via parentTaskId
           </div>
         </div>
         <div className="mt-3 rounded-lg bg-gradient-to-r from-amber-50 to-amber-100/50 border border-amber-200/50 px-3 py-2">
@@ -94,7 +103,10 @@ const steps = [
             Session 47 — 3x faster than session 1
           </div>
           <div className="mt-1 w-full bg-amber-200/50 rounded-full h-1.5">
-            <div className="bg-gradient-to-r from-amber-500 to-amber-600 h-1.5 rounded-full" style={{ width: "78%" }} />
+            <div
+              className="bg-gradient-to-r from-amber-500 to-amber-600 h-1.5 rounded-full"
+              style={{ width: "78%" }}
+            />
           </div>
         </div>
       </div>
@@ -143,12 +155,8 @@ export function HowItWorks() {
                   </span>
                   <div className="h-px flex-1 bg-gradient-to-r from-amber-200 to-transparent" />
                 </div>
-                <h3 className="text-2xl sm:text-3xl font-bold text-zinc-900 mb-4">
-                  {step.title}
-                </h3>
-                <p className="text-base text-zinc-500 leading-relaxed">
-                  {step.description}
-                </p>
+                <h3 className="text-2xl sm:text-3xl font-bold text-zinc-900 mb-4">{step.title}</h3>
+                <p className="text-base text-zinc-500 leading-relaxed">{step.description}</p>
               </div>
 
               <div className={`${i % 2 === 1 ? "lg:order-1" : ""}`}>

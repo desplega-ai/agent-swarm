@@ -23,9 +23,7 @@ export default function Home() {
       <Header />
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-12">
         <div className="mb-10 text-center">
-          <h1 className="text-4xl font-bold tracking-tight">
-            Agent Swarm Templates
-          </h1>
+          <h1 className="text-4xl font-bold tracking-tight">Agent Swarm Templates</h1>
           <p className="mt-4 text-lg text-muted-foreground">
             Pre-configured worker templates for your swarm
           </p>

@@ -51,20 +51,12 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link
-          rel="preconnect"
-          href="https://fonts.gstatic.com"
-          crossOrigin="anonymous"
-        />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
           href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap"
           rel="stylesheet"
@@ -84,9 +76,7 @@ export default function RootLayout({
                     "@type": "ImageObject",
                     url: "https://agent-swarm.dev/logo.png",
                   },
-                  sameAs: [
-                    "https://github.com/desplega-ai/agent-swarm",
-                  ],
+                  sameAs: ["https://github.com/desplega-ai/agent-swarm"],
                 },
                 {
                   "@type": "WebSite",
@@ -111,17 +101,13 @@ export default function RootLayout({
                     priceCurrency: "USD",
                   },
                   license: "https://opensource.org/licenses/MIT",
-                  codeRepository:
-                    "https://github.com/desplega-ai/agent-swarm",
+                  codeRepository: "https://github.com/desplega-ai/agent-swarm",
                 },
               ],
             }),
           }}
         />
-        <script
-          async
-          src="https://plausible.io/js/pa-TeCPVGp2RFHbVWD8FlfFb.js"
-        />
+        <script async src="https://plausible.io/js/pa-TeCPVGp2RFHbVWD8FlfFb.js" />
         <script
           dangerouslySetInnerHTML={{
             __html: `window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init()`,

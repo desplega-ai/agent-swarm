@@ -27,7 +27,8 @@ rl.on("line", async (line) => {
   try {
     // Escape single quotes in query and wrap in single quotes for remote shell
     const escaped = query.replace(/'/g, "'\\''");
-    const result = await $`ssh ${SSH_HOST} sqlite3 -header -column ${DB_PATH} ${"'" + escaped + "'"}`.text();
+    const result =
+      await $`ssh ${SSH_HOST} sqlite3 -header -column ${DB_PATH} ${"'" + escaped + "'"}`.text();
     if (result) console.log(result);
   } catch (e: any) {
     console.error(e.stderr?.toString() || e.message);
