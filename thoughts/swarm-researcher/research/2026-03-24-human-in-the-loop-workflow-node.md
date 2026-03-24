@@ -1,3 +1,12 @@
+---
+date: 2026-03-24T00:00:00Z
+researcher: Researcher
+topic: "Human-in-the-Loop Workflow Node"
+tags: [research, hitl, workflows, human-in-the-loop]
+status: complete
+repository: desplega-ai/agent-swarm
+---
+
 # Human-in-the-Loop Node Type for Agent Swarm Workflows
 
 **Date:** 2026-03-24

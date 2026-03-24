@@ -18,6 +18,7 @@ export function ActionNode({ data }: NodeProps) {
   const Icon = iconMap[d.nodeType] || ListTodo;
   const borderColor = d.stepStatus ? statusBorderColor[d.stepStatus] : "border-blue-500/50";
   const isAsync = ASYNC_TYPES.includes(d.nodeType);
+  const ports = d.outputPorts.length > 0 ? d.outputPorts : ["default"];
 
   return (
     <div
@@ -47,7 +48,24 @@ export function ActionNode({ data }: NodeProps) {
           <div className="text-[10px] text-muted-foreground uppercase">{d.nodeType}</div>
         </div>
       </div>
-      <Handle type="source" position={Position.Bottom} id="default" className="!bg-blue-500" />
+      {ports.length > 1 ? (
+        <div className="flex justify-around mt-1">
+          {ports.map((port, i) => (
+            <div key={port} className="flex flex-col items-center">
+              <span className="text-[9px] text-muted-foreground">{port}</span>
+              <Handle
+                type="source"
+                position={Position.Bottom}
+                id={port}
+                className="!bg-blue-500"
+                style={{ left: `${((i + 1) / (ports.length + 1)) * 100}%` }}
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <Handle type="source" position={Position.Bottom} id="default" className="!bg-blue-500" />
+      )}
     </div>
   );
 }

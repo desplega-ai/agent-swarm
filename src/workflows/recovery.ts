@@ -1,9 +1,11 @@
 import {
   getCompletedStepNodeIds,
   getDb,
+  getStuckApprovalRuns,
   getStuckWorkflowRuns,
   getWorkflow,
   getWorkflowRun,
+  resolveApprovalRequest,
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
@@ -11,6 +13,7 @@ import { checkpointStep } from "./checkpoint";
 import { getSuccessors } from "./definition";
 import { findReadyNodes, walkGraph } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
+import { finalizeOrWait } from "./resume";
 
 /**
  * Recover incomplete workflow runs on server startup.
@@ -29,6 +32,9 @@ export async function recoverIncompleteRuns(registry: ExecutorRegistry): Promise
 
   // --- Case 2: Waiting runs whose tasks may have finished ---
   recovered += await recoverWaitingRuns(registry);
+
+  // --- Case 3: Waiting runs whose approval requests may have resolved ---
+  recovered += await recoverApprovalWaitingRuns(registry);
 
   if (recovered > 0) {
     console.log(`[workflows] Recovered ${recovered} incomplete run(s) on startup`);
@@ -122,6 +128,72 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
       recovered++;
     } catch (err) {
       console.error(`[workflows] Failed to recover waiting run ${stuck.runId}:`, err);
+    }
+  }
+
+  return recovered;
+}
+
+/**
+ * Recover waiting runs whose linked approval requests have resolved or expired
+ * while the server was down.
+ */
+async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<number> {
+  const stuckRuns = getStuckApprovalRuns();
+  let recovered = 0;
+
+  for (const stuck of stuckRuns) {
+    try {
+      const run = getWorkflowRun(stuck.runId);
+      const workflow = getWorkflow(stuck.workflowId);
+      if (!run || !workflow) continue;
+
+      let approvalStatus = stuck.approvalStatus;
+      let responses: unknown = stuck.approvalResponses ? JSON.parse(stuck.approvalResponses) : null;
+
+      // If still pending but expired, auto-reject
+      if (approvalStatus === "pending" && stuck.expiresAt) {
+        resolveApprovalRequest(stuck.approvalId, {
+          status: "timeout",
+        });
+        approvalStatus = "timeout";
+        responses = null;
+      }
+
+      const nextPort =
+        approvalStatus === "timeout"
+          ? "timeout"
+          : approvalStatus === "rejected"
+            ? "rejected"
+            : "approved";
+
+      const ctx = (run.context ?? {}) as Record<string, unknown>;
+      const stepOutput = {
+        requestId: stuck.approvalId,
+        status: approvalStatus,
+        responses,
+      };
+
+      checkpointStep(
+        stuck.runId,
+        stuck.stepId,
+        stuck.nodeId,
+        { output: stepOutput, nextPort },
+        ctx,
+      );
+      updateWorkflowRun(stuck.runId, { status: "running" });
+
+      const completedNodeIds = new Set(getCompletedStepNodeIds(stuck.runId));
+      const readyNodes = findReadyNodes(workflow.definition, completedNodeIds);
+
+      if (readyNodes.length > 0) {
+        await walkGraph(workflow.definition, stuck.runId, ctx, readyNodes, registry, workflow.id);
+      } else {
+        finalizeOrWait(stuck.runId);
+      }
+      recovered++;
+    } catch (err) {
+      console.error(`[workflows] Failed to recover approval-waiting run ${stuck.runId}:`, err);
     }
   }
 

@@ -2,6 +2,7 @@ import { generateOpenApiSpec } from "../src/http/openapi";
 // Import all handler files to trigger route() registrations
 import "../src/http/active-sessions";
 import "../src/http/agents";
+import "../src/http/approval-requests";
 import "../src/http/config";
 import "../src/http/db-query";
 import "../src/http/ecosystem";

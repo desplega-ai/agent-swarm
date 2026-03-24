@@ -21,6 +21,14 @@ interface TaskEvent {
   failureReason?: string;
 }
 
+interface ApprovalEvent {
+  requestId: string;
+  status: "approved" | "rejected" | "timeout";
+  responses: Record<string, unknown> | null;
+  workflowRunId?: string;
+  workflowRunStepId?: string;
+}
+
 /**
  * Wire up event bus listeners for workflow resume on task lifecycle events.
  */
@@ -55,6 +63,16 @@ export function setupWorkflowResumeListener(
       await handleTaskFailure(event, "Task was cancelled", registry);
     } catch (err) {
       console.error("[workflows] Handle task cancellation error:", err);
+    }
+  });
+
+  eventBus.on("approval.resolved", async (data: unknown) => {
+    const event = data as ApprovalEvent;
+    if (!event.workflowRunId || !event.workflowRunStepId) return;
+    try {
+      await resumeFromApprovalResolution(event, registry);
+    } catch (err) {
+      console.error("[workflows] Resume from approval resolution failed:", err);
     }
   });
 }
@@ -119,7 +137,7 @@ async function resumeFromTaskCompletion(
  * If no nodes are ready and no steps are still waiting, finalize the run.
  * Otherwise set it back to waiting for the next task completion.
  */
-function finalizeOrWait(runId: string): void {
+export function finalizeOrWait(runId: string): void {
   const steps = getWorkflowRunStepsByRunId(runId);
   const hasWaiting = steps.some((s) => s.status === "waiting");
   if (hasWaiting) {
@@ -226,4 +244,50 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
     ? readyNodes
     : [failedNode, ...readyNodes];
   await walkGraph(workflow.definition, runId, ctx, nodesToRun, registry, workflow.id);
+}
+
+/**
+ * Resume a workflow after a linked approval request is resolved.
+ *
+ * 1. Verify run and step are in "waiting" state
+ * 2. Checkpoint step completion with approval response data
+ * 3. Route to the appropriate port (approved/rejected/timeout)
+ * 4. Continue the graph walk
+ */
+async function resumeFromApprovalResolution(
+  event: ApprovalEvent,
+  registry: ExecutorRegistry,
+): Promise<void> {
+  const run = getWorkflowRun(event.workflowRunId!);
+  if (!run || (run.status !== "waiting" && run.status !== "running")) return;
+
+  const step = getWorkflowRunStep(event.workflowRunStepId!);
+  if (!step || step.status !== "waiting") return;
+
+  const workflow = getWorkflow(run.workflowId);
+  if (!workflow) return;
+
+  const ctx = (run.context ?? {}) as Record<string, unknown>;
+
+  // Determine output port based on approval status
+  const nextPort =
+    event.status === "timeout" ? "timeout" : event.status === "rejected" ? "rejected" : "approved";
+
+  const stepOutput = {
+    requestId: event.requestId,
+    status: event.status,
+    responses: event.responses,
+  };
+
+  checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput, nextPort }, ctx);
+  updateWorkflowRun(run.id, { status: "running" });
+
+  const completedNodeIds = new Set(getCompletedStepNodeIds(run.id));
+  const readyNodes = findReadyNodes(workflow.definition, completedNodeIds);
+
+  if (readyNodes.length > 0) {
+    await walkGraph(workflow.definition, run.id, ctx, readyNodes, registry, workflow.id);
+  } else {
+    finalizeOrWait(run.id);
+  }
 }

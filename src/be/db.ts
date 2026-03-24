@@ -6729,6 +6729,243 @@ export function upsertChannelActivityCursor(channelId: string, lastSeenTs: strin
 }
 
 // ============================================================================
+// Approval Requests
+// ============================================================================
+
+export interface ApprovalRequest {
+  id: string;
+  title: string;
+  questions: unknown[];
+  workflowRunId: string | null;
+  workflowRunStepId: string | null;
+  sourceTaskId: string | null;
+  approvers: unknown;
+  status: "pending" | "approved" | "rejected" | "timeout";
+  responses: unknown | null;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+  timeoutSeconds: number | null;
+  expiresAt: string | null;
+  notificationChannels: unknown[] | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ApprovalRequestRow {
+  id: string;
+  title: string;
+  questions: string;
+  workflowRunId: string | null;
+  workflowRunStepId: string | null;
+  sourceTaskId: string | null;
+  approvers: string;
+  status: string;
+  responses: string | null;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+  timeoutSeconds: number | null;
+  expiresAt: string | null;
+  notificationChannels: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function rowToApprovalRequest(row: ApprovalRequestRow): ApprovalRequest {
+  return {
+    id: row.id,
+    title: row.title,
+    questions: JSON.parse(row.questions),
+    workflowRunId: row.workflowRunId,
+    workflowRunStepId: row.workflowRunStepId,
+    sourceTaskId: row.sourceTaskId,
+    approvers: JSON.parse(row.approvers),
+    status: row.status as ApprovalRequest["status"],
+    responses: row.responses ? JSON.parse(row.responses) : null,
+    resolvedBy: row.resolvedBy,
+    resolvedAt: row.resolvedAt,
+    timeoutSeconds: row.timeoutSeconds,
+    expiresAt: row.expiresAt,
+    notificationChannels: row.notificationChannels ? JSON.parse(row.notificationChannels) : null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+export function createApprovalRequest(data: {
+  id: string;
+  title: string;
+  questions: unknown[];
+  approvers: unknown;
+  workflowRunId?: string;
+  workflowRunStepId?: string;
+  sourceTaskId?: string;
+  timeoutSeconds?: number;
+  notificationChannels?: unknown[];
+}): ApprovalRequest {
+  const now = new Date().toISOString();
+  const expiresAt = data.timeoutSeconds
+    ? new Date(Date.now() + data.timeoutSeconds * 1000).toISOString()
+    : null;
+
+  const row = getDb()
+    .prepare<
+      ApprovalRequestRow,
+      [
+        string,
+        string,
+        string,
+        string | null,
+        string | null,
+        string | null,
+        string,
+        number | null,
+        string | null,
+        string | null,
+        string,
+        string,
+      ]
+    >(
+      `INSERT INTO approval_requests (id, title, questions, workflowRunId, workflowRunStepId, sourceTaskId, approvers, timeoutSeconds, expiresAt, notificationChannels, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       RETURNING *`,
+    )
+    .get(
+      data.id,
+      data.title,
+      JSON.stringify(data.questions),
+      data.workflowRunId ?? null,
+      data.workflowRunStepId ?? null,
+      data.sourceTaskId ?? null,
+      JSON.stringify(data.approvers),
+      data.timeoutSeconds ?? null,
+      expiresAt,
+      data.notificationChannels ? JSON.stringify(data.notificationChannels) : null,
+      now,
+      now,
+    );
+
+  return rowToApprovalRequest(row!);
+}
+
+export function getApprovalRequestById(id: string): ApprovalRequest | null {
+  const row = getDb()
+    .prepare<ApprovalRequestRow, [string]>("SELECT * FROM approval_requests WHERE id = ?")
+    .get(id);
+  return row ? rowToApprovalRequest(row) : null;
+}
+
+export function resolveApprovalRequest(
+  id: string,
+  data: {
+    status: "approved" | "rejected" | "timeout";
+    responses?: unknown;
+    resolvedBy?: string;
+  },
+): ApprovalRequest | null {
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<ApprovalRequestRow, [string, string | null, string | null, string, string, string]>(
+      `UPDATE approval_requests
+       SET status = ?, responses = ?, resolvedBy = ?, resolvedAt = ?, updatedAt = ?
+       WHERE id = ? AND status = 'pending'
+       RETURNING *`,
+    )
+    .get(
+      data.status,
+      data.responses ? JSON.stringify(data.responses) : null,
+      data.resolvedBy ?? null,
+      now,
+      now,
+      id,
+    );
+  return row ? rowToApprovalRequest(row) : null;
+}
+
+export function listApprovalRequests(filters?: {
+  status?: string;
+  workflowRunId?: string;
+  limit?: number;
+}): ApprovalRequest[] {
+  const conditions: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (filters?.status) {
+    conditions.push("status = ?");
+    params.push(filters.status);
+  }
+  if (filters?.workflowRunId) {
+    conditions.push("workflowRunId = ?");
+    params.push(filters.workflowRunId);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const limit = filters?.limit ?? 100;
+  params.push(limit);
+
+  const stmt = getDb().prepare(
+    `SELECT * FROM approval_requests ${where} ORDER BY createdAt DESC LIMIT ?`,
+  );
+  const rows = stmt.all(...params) as ApprovalRequestRow[];
+
+  return rows.map(rowToApprovalRequest);
+}
+
+export interface StuckApprovalRun {
+  runId: string;
+  stepId: string;
+  nodeId: string;
+  workflowId: string;
+  approvalId: string;
+  approvalStatus: string;
+  approvalResponses: string | null;
+  expiresAt: string | null;
+}
+
+export function getStuckApprovalRuns(): StuckApprovalRun[] {
+  return getDb()
+    .prepare<StuckApprovalRun, []>(
+      `SELECT
+        wr.id as runId,
+        wrs.id as stepId,
+        wrs.nodeId,
+        wr.workflowId,
+        ar.id as approvalId,
+        ar.status as approvalStatus,
+        ar.responses as approvalResponses,
+        ar.expiresAt
+      FROM workflow_runs wr
+      JOIN workflow_run_steps wrs ON wrs.runId = wr.id AND wrs.status = 'waiting'
+      JOIN approval_requests ar ON ar.workflowRunStepId = wrs.id
+      WHERE wr.status = 'waiting'
+        AND (ar.status IN ('approved', 'rejected', 'timeout')
+             OR (ar.status = 'pending' AND ar.expiresAt IS NOT NULL AND ar.expiresAt < datetime('now')))`,
+    )
+    .all();
+}
+
+export function getApprovalRequestByStepId(stepId: string): ApprovalRequest | null {
+  const row = getDb()
+    .prepare<ApprovalRequestRow, [string]>(
+      "SELECT * FROM approval_requests WHERE workflowRunStepId = ?",
+    )
+    .get(stepId);
+  return row ? rowToApprovalRequest(row) : null;
+}
+
+// TODO: Wire into a periodic cron/sweep to auto-timeout expired approval requests (Phase 2)
+export function getExpiredPendingApprovals(): ApprovalRequest[] {
+  const rows = getDb()
+    .prepare<ApprovalRequestRow, []>(
+      `SELECT * FROM approval_requests
+       WHERE status = 'pending'
+         AND expiresAt IS NOT NULL
+         AND expiresAt < datetime('now')`,
+    )
+    .all();
+  return rows.map(rowToApprovalRequest);
+}
+
+// ============================================================================
 // Skills
 // ============================================================================
 

@@ -16,6 +16,7 @@ import { startSlackApp, stopSlackApp } from "../slack";
 import { initWorkflows } from "../workflows";
 import { handleActiveSessions } from "./active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
+import { handleApprovalRequests } from "./approval-requests";
 import { handleConfig } from "./config";
 import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
 import { handleDbQuery } from "./db-query";
@@ -105,6 +106,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleEpics(req, res, pathSegments, queryParams, myAgentId),
     () => handleSchedules(req, res, pathSegments, queryParams, myAgentId),
     () => handleWorkflows(req, res, pathSegments, queryParams, myAgentId),
+    () => handleApprovalRequests(req, res, pathSegments, queryParams),
     () => handleConfig(req, res, pathSegments, queryParams),
     () => handlePromptTemplates(req, res, pathSegments, queryParams),
     () => handleDbQuery(req, res, pathSegments, queryParams),
