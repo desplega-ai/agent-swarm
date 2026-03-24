@@ -54,5 +54,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 *.sqlite-shm
 
 
+# Production docker-compose (Dokploy)
+docker-compose.desplega.yaml
+
 # Riptide artifacts (cloud-synced)
 .humanlayer/tasks/
