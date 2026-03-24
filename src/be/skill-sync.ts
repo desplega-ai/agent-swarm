@@ -2,7 +2,7 @@
  * Filesystem sync for skills.
  *
  * Writes installed skills to ~/.claude/skills/<name>/SKILL.md (and optionally
- * ~/.cursor/skills/<name>/SKILL.md) so Claude Code and Cursor discover them
+ * ~/.pi/agent/skills/<name>/SKILL.md) so Claude Code and Pi discover them
  * natively.
  *
  * This runs on the API side — workers call it via POST /api/skills/sync-filesystem.
@@ -27,10 +27,11 @@ export interface SkillSyncResult {
  */
 export function syncSkillsToFilesystem(
   agentId: string,
-  harnessType: "claude" | "cursor" | "both" = "both",
+  harnessType: "claude" | "pi" | "both" = "both",
+  homeOverride?: string,
 ): SkillSyncResult {
   const skills = getAgentSkills(agentId);
-  const home = homedir();
+  const home = homeOverride ?? homedir();
   const errors: string[] = [];
   let synced = 0;
 
@@ -39,8 +40,8 @@ export function syncSkillsToFilesystem(
   if (harnessType === "claude" || harnessType === "both") {
     skillDirs.push(join(home, ".claude", "skills"));
   }
-  if (harnessType === "cursor" || harnessType === "both") {
-    skillDirs.push(join(home, ".cursor", "skills"));
+  if (harnessType === "pi" || harnessType === "both") {
+    skillDirs.push(join(home, ".pi", "agent", "skills"));
   }
 
   // Ensure base dirs exist
