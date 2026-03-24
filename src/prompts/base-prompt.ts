@@ -38,6 +38,8 @@ export type BasePromptArgs = {
     clonePath: string;
     warning?: string | null;
   };
+  /** Pre-fetched skill summaries for the installed skills section */
+  skillsSummary?: { name: string; description: string }[];
 };
 
 export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
@@ -66,6 +68,12 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     if (args.identityMd) {
       prompt += `${args.identityMd}\n`;
     }
+  }
+
+  // Installed skills section (progressive disclosure — name + description only)
+  if (args.skillsSummary && args.skillsSummary.length > 0) {
+    const summaries = args.skillsSummary.map((s) => `- /${s.name}: ${s.description}`).join("\n");
+    prompt += `\n\n## Installed Skills\n\nThe following skills are available. Use the Skill tool to invoke them by name.\n\n${summaries}\n`;
   }
 
   // Repo context (protected, never truncated)

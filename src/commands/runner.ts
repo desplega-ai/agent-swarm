@@ -92,6 +92,10 @@ async function ensureRepoForTask(
       } else {
         await Bun.$`git clone --branch ${defaultBranch} --single-branch ${url} ${clonePath}`.quiet();
       }
+      // Validate the clone actually created the directory
+      if (!existsSync(clonePath)) {
+        throw new Error(`Clone command succeeded but directory ${clonePath} does not exist`);
+      }
       console.log(`[${role}] Cloned ${name}`);
     } else {
       console.log(`[${role}] Repo ${name} already cloned at ${clonePath}`);
@@ -114,7 +118,9 @@ async function ensureRepoForTask(
     const errorMsg = (err as Error).message;
     console.warn(`[${role}] Error setting up repo ${name}: ${errorMsg}`);
     const warning = `Failed to clone/setup repo "${name}" at ${clonePath}: ${errorMsg}. The repo may not be available. You may need to clone it manually.`;
-    return { clonePath, claudeMd: null, warning };
+    // Only return clonePath if the directory actually exists (clone may have failed)
+    const cloneExists = existsSync(clonePath);
+    return { clonePath: cloneExists ? clonePath : "", claudeMd: null, warning };
   }
 }
 
@@ -1692,6 +1698,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let agentClaudeMd: string | undefined;
   let agentProfileName: string | undefined;
   let agentDescription: string | undefined;
+  let agentSkillsSummary: { name: string; description: string }[] | undefined;
 
   // Per-task repo context — set when processing a task with githubRepo
   let currentRepoContext: BasePromptArgs["repoContext"] | undefined;
@@ -1710,6 +1717,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       toolsMd: agentToolsMd,
       claudeMd: agentClaudeMd,
       repoContext: currentRepoContext,
+      skillsSummary: agentSkillsSummary,
     });
   };
 
@@ -1937,6 +1945,34 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
         }
 
+        // Fetch installed skills for system prompt
+        try {
+          const skillsResp = await fetch(`${apiUrl}/api/agents/${agentId}/skills`, {
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "X-Agent-ID": agentId,
+            },
+          });
+          if (skillsResp.ok) {
+            const skillsData = (await skillsResp.json()) as {
+              skills: {
+                name: string;
+                description: string;
+                isActive: boolean;
+                isEnabled: boolean;
+              }[];
+            };
+            agentSkillsSummary = skillsData.skills
+              .filter((s) => s.isActive && s.isEnabled)
+              .map((s) => ({ name: s.name, description: s.description }));
+            if (agentSkillsSummary.length > 0) {
+              console.log(`[${role}] Loaded ${agentSkillsSummary.length} skills for system prompt`);
+            }
+          }
+        } catch {
+          // Non-fatal — skills are optional
+        }
+
         // Rebuild system prompt with identity
         basePrompt = await buildSystemPrompt();
         resolvedSystemPrompt = additionalSystemPrompt
@@ -2003,6 +2039,37 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       } catch (err) {
         console.warn(`[${role}] Could not write CLAUDE.md: ${(err as Error).message}`);
       }
+    }
+
+    // ========== Sync skills to filesystem ==========
+    try {
+      console.log(`[${role}] Syncing skills to filesystem...`);
+      const syncHeaders: Record<string, string> = {
+        "Content-Type": "application/json",
+        "X-Agent-ID": agentId,
+      };
+      if (apiKey) syncHeaders.Authorization = `Bearer ${apiKey}`;
+      const syncRes = await fetch(`${swarmUrl}/api/skills/sync-filesystem`, {
+        method: "POST",
+        headers: syncHeaders,
+      });
+      if (syncRes.ok) {
+        const syncResult = (await syncRes.json()) as {
+          synced: number;
+          removed: number;
+          errors: string[];
+        };
+        console.log(
+          `[${role}] Skills synced: ${syncResult.synced} written, ${syncResult.removed} removed`,
+        );
+        if (syncResult.errors.length > 0) {
+          console.warn(`[${role}] Skill sync errors: ${syncResult.errors.join(", ")}`);
+        }
+      } else {
+        console.warn(`[${role}] Skill sync failed: HTTP ${syncRes.status}`);
+      }
+    } catch (err) {
+      console.warn(`[${role}] Skill sync failed: ${(err as Error).message}`);
     }
 
     // ========== Resume paused tasks with PRIORITY ==========
@@ -2128,26 +2195,36 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           // Per-task runner session ID so session logs are scoped to this task
           const resumeRunnerSessionId = crypto.randomUUID();
 
-          const runningTask = await spawnProviderProcess(
-            adapter,
-            {
-              prompt: resumePrompt,
-              logFile,
-              systemPrompt: resolvedSystemPrompt,
-              additionalArgs: resumeAdditionalArgs,
-              role,
-              apiUrl,
-              apiKey,
-              agentId,
-              runnerSessionId: resumeRunnerSessionId,
-              iteration,
-              taskId: task.id,
-              model: (task as { model?: string }).model,
-              cwd: resumeCwd,
-            },
-            logDir,
-            isYolo,
-          );
+          let runningTask: RunningTask;
+          try {
+            runningTask = await spawnProviderProcess(
+              adapter,
+              {
+                prompt: resumePrompt,
+                logFile,
+                systemPrompt: resolvedSystemPrompt,
+                additionalArgs: resumeAdditionalArgs,
+                role,
+                apiUrl,
+                apiKey,
+                agentId,
+                runnerSessionId: resumeRunnerSessionId,
+                iteration,
+                taskId: task.id,
+                model: (task as { model?: string }).model,
+                cwd: resumeCwd,
+              },
+              logDir,
+              isYolo,
+            );
+          } catch (spawnErr) {
+            const errMsg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
+            console.error(
+              `[${role}] Failed to spawn process for resumed task ${task.id.slice(0, 8)}: ${errMsg}`,
+            );
+            await ensureTaskFinished(apiConfig, role, task.id, 1, `Spawn failed: ${errMsg}`);
+            continue;
+          }
 
           state.activeTasks.set(task.id, runningTask);
           registerActiveSession(apiConfig, {
@@ -2408,26 +2485,44 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           const taskRunnerSessionId = crypto.randomUUID();
 
           // Spawn without blocking (await to set up session, but process runs async)
-          const runningTask = await spawnProviderProcess(
-            adapter,
-            {
-              prompt: triggerPrompt,
-              logFile,
-              systemPrompt: taskSystemPrompt,
-              additionalArgs: effectiveAdditionalArgs,
-              role,
-              apiUrl,
-              apiKey,
-              agentId,
-              runnerSessionId: taskRunnerSessionId,
-              iteration,
-              taskId: trigger.taskId,
-              model: taskModel,
-              cwd: effectiveCwd,
-            },
-            logDir,
-            isYolo,
-          );
+          let runningTask: RunningTask;
+          try {
+            runningTask = await spawnProviderProcess(
+              adapter,
+              {
+                prompt: triggerPrompt,
+                logFile,
+                systemPrompt: taskSystemPrompt,
+                additionalArgs: effectiveAdditionalArgs,
+                role,
+                apiUrl,
+                apiKey,
+                agentId,
+                runnerSessionId: taskRunnerSessionId,
+                iteration,
+                taskId: trigger.taskId,
+                model: taskModel,
+                cwd: effectiveCwd,
+              },
+              logDir,
+              isYolo,
+            );
+          } catch (spawnErr) {
+            const errMsg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
+            console.error(
+              `[${role}] Failed to spawn process for task ${trigger.taskId?.slice(0, 8) || "unknown"}: ${errMsg}`,
+            );
+            if (trigger.taskId) {
+              await ensureTaskFinished(
+                apiConfig,
+                role,
+                trigger.taskId,
+                1,
+                `Spawn failed: ${errMsg}`,
+              );
+            }
+            continue;
+          }
 
           // Attach trigger metadata for logging
           runningTask.triggerType = trigger.type;

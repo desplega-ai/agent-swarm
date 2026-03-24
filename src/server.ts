@@ -53,6 +53,20 @@ import {
   registerUpdateScheduleTool,
 } from "./tools/schedules";
 import { registerSendTaskTool } from "./tools/send-task";
+// Skills capability
+import {
+  registerSkillCreateTool,
+  registerSkillDeleteTool,
+  registerSkillGetTool,
+  registerSkillInstallRemoteTool,
+  registerSkillInstallTool,
+  registerSkillListTool,
+  registerSkillPublishTool,
+  registerSkillSearchTool,
+  registerSkillSyncRemoteTool,
+  registerSkillUninstallTool,
+  registerSkillUpdateTool,
+} from "./tools/skills";
 import { registerSlackDownloadFileTool } from "./tools/slack-download-file";
 import { registerSlackListChannelsTool } from "./tools/slack-list-channels";
 import { registerSlackPostTool } from "./tools/slack-post";
@@ -244,6 +258,19 @@ export function createServer() {
     registerRetryWorkflowRunTool(server);
     registerRequestHumanInputTool(server);
   }
+
+  // Skills - always registered (skill management is available to all agents)
+  registerSkillCreateTool(server);
+  registerSkillUpdateTool(server);
+  registerSkillDeleteTool(server);
+  registerSkillGetTool(server);
+  registerSkillListTool(server);
+  registerSkillSearchTool(server);
+  registerSkillInstallTool(server);
+  registerSkillUninstallTool(server);
+  registerSkillInstallRemoteTool(server);
+  registerSkillSyncRemoteTool(server);
+  registerSkillPublishTool(server);
 
   return server;
 }

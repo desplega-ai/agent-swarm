@@ -29,6 +29,7 @@ import { handlePromptTemplates } from "./prompt-templates";
 import { handleRepos } from "./repos";
 import { handleSchedules } from "./schedules";
 import { handleSessionData } from "./session-data";
+import { handleSkills } from "./skills";
 import { handleStats } from "./stats";
 import { handleTasks } from "./tasks";
 import { handleTrackers } from "./trackers";
@@ -110,6 +111,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handlePromptTemplates(req, res, pathSegments, queryParams),
     () => handleDbQuery(req, res, pathSegments, queryParams),
     () => handleRepos(req, res, pathSegments, queryParams),
+    () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
     () => handleMemory(req, res, pathSegments, myAgentId),
     () => handleMcp(req, res, transports),
   ];
