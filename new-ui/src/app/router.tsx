@@ -24,6 +24,8 @@ const TemplateDetailPage = lazy(() => import("@/pages/templates/[id]/page"));
 const TemplateVersionDetailPage = lazy(
   () => import("@/pages/templates/[id]/history/[version]/page"),
 );
+const ApprovalRequestsPage = lazy(() => import("@/pages/approval-requests/page"));
+const ApprovalRequestDetailPage = lazy(() => import("@/pages/approval-requests/[id]/page"));
 const SkillsPage = lazy(() => import("@/pages/skills/page"));
 const SkillDetailPage = lazy(() => import("@/pages/skills/[id]/page"));
 const DebugPage = lazy(() => import("@/pages/debug/page"));
@@ -49,6 +51,8 @@ export const router = createBrowserRouter([
       { path: "workflows", element: <WorkflowsPage /> },
       { path: "workflows/:id", element: <WorkflowDetailPage /> },
       { path: "workflow-runs/:id", element: <WorkflowRunDetailPage /> },
+      { path: "approval-requests", element: <ApprovalRequestsPage /> },
+      { path: "approval-requests/:id", element: <ApprovalRequestDetailPage /> },
       { path: "usage", element: <UsagePage /> },
       { path: "config", element: <ConfigPage /> },
       { path: "templates", element: <TemplatesPage /> },

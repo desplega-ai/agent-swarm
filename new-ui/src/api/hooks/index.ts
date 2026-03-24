@@ -1,4 +1,10 @@
 export { useAgent, useAgents, useUpdateAgentName, useUpdateAgentProfile } from "./use-agents";
+export type { ApprovalRequestFilters } from "./use-approval-requests";
+export {
+  useApprovalRequest,
+  useApprovalRequests,
+  useRespondToApprovalRequest,
+} from "./use-approval-requests";
 export type { MessageFilters } from "./use-channels";
 export {
   useChannels,
