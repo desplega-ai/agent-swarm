@@ -1,3 +1,12 @@
+---
+date: 2026-03-24T00:00:00Z
+author: Jackknife
+topic: "Skill System Implementation Plan"
+tags: [skill-system, implementation-plan, agent-swarm]
+status: complete
+repository: desplega-ai/agent-swarm
+---
+
 # Skill System Implementation Plan
 
 **Date:** 2026-03-24
