@@ -23,6 +23,14 @@ export const metadata: Metadata = {
     "developer tools",
   ],
   metadataBase: new URL("https://docs.agent-swarm.dev"),
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+    },
+  },
   openGraph: {
     title: "Agent Swarm Documentation",
     description:
