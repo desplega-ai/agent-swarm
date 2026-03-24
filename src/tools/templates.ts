@@ -32,6 +32,34 @@ Use \`get-task-details\` with taskId "{{task_id}}" for full details.`,
   category: "task_lifecycle",
 });
 
+// ============================================================================
+// HITL follow-up (created when a standalone approval request is resolved)
+// ============================================================================
+
+registerTemplate({
+  eventType: "hitl.follow_up",
+  header: "",
+  defaultBody: `Human responded to your approval request ({{request_id}}).
+
+Title: {{title}}
+Status: {{status}}
+
+Questions and responses:
+{{responses}}
+
+Continue your work based on the human's input.`,
+  variables: [
+    { name: "request_id", description: "The approval request ID" },
+    { name: "title", description: "Title of the approval request" },
+    { name: "status", description: "Resolution status: approved or rejected" },
+    {
+      name: "responses",
+      description: "Formatted questions and human responses",
+    },
+  ],
+  category: "task_lifecycle",
+});
+
 registerTemplate({
   eventType: "task.worker.failed",
   header: "",
