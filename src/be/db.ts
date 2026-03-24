@@ -6884,7 +6884,7 @@ export function createSkill(data: SkillInsert): Skill {
 
 export function updateSkill(
   id: string,
-  updates: Partial<SkillInsert> & { isEnabled?: boolean },
+  updates: Partial<SkillInsert> & { isEnabled?: boolean; lastFetchedAt?: string },
 ): Skill | null {
   const existing = getSkillById(id);
   if (!existing) return null;
@@ -6964,6 +6964,10 @@ export function updateSkill(
   if (updates.isComplex !== undefined) {
     sets.push("isComplex = ?");
     params.push(updates.isComplex ? 1 : 0);
+  }
+  if (updates.lastFetchedAt !== undefined) {
+    sets.push("lastFetchedAt = ?");
+    params.push(updates.lastFetchedAt);
   }
 
   // Bump version when content changes

@@ -81,7 +81,7 @@ export const registerSkillInstallRemoteTool = (server: McpServer) => {
             };
           }
           content = await response.text();
-          sourceHash = crypto.randomUUID(); // Simple hash placeholder
+          sourceHash = new Bun.CryptoHasher("sha256").update(content).digest("hex");
         }
 
         let name: string;

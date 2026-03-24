@@ -23,6 +23,7 @@ const listSkillsRoute = route({
   pattern: ["api", "skills"],
   summary: "List skills with optional filters",
   tags: ["Skills"],
+  auth: { apiKey: true },
   query: z.object({
     type: z.string().optional(),
     scope: z.string().optional(),
@@ -41,6 +42,7 @@ const getSkillRoute = route({
   pattern: ["api", "skills", null],
   summary: "Get skill by ID",
   tags: ["Skills"],
+  auth: { apiKey: true },
   params: z.object({ id: z.string() }),
   responses: {
     200: { description: "Skill details" },
@@ -54,6 +56,7 @@ const createSkillRoute = route({
   pattern: ["api", "skills"],
   summary: "Create a new skill",
   tags: ["Skills"],
+  auth: { apiKey: true },
   body: z.object({
     content: z.string().min(1),
     type: z.string().optional(),
@@ -72,6 +75,7 @@ const updateSkillRoute = route({
   pattern: ["api", "skills", null],
   summary: "Update a skill",
   tags: ["Skills"],
+  auth: { apiKey: true },
   params: z.object({ id: z.string() }),
   body: z.record(z.string(), z.unknown()),
   responses: {
@@ -86,6 +90,7 @@ const deleteSkillRoute = route({
   pattern: ["api", "skills", null],
   summary: "Delete a skill",
   tags: ["Skills"],
+  auth: { apiKey: true },
   params: z.object({ id: z.string() }),
   responses: {
     200: { description: "Skill deleted" },
@@ -99,6 +104,7 @@ const installSkillRoute = route({
   pattern: ["api", "skills", null, "install"],
   summary: "Install skill for an agent",
   tags: ["Skills"],
+  auth: { apiKey: true },
   params: z.object({ id: z.string() }),
   body: z.object({
     agentId: z.string(),
@@ -115,6 +121,7 @@ const uninstallSkillRoute = route({
   pattern: ["api", "skills", null, "install", null],
   summary: "Uninstall skill for an agent",
   tags: ["Skills"],
+  auth: { apiKey: true },
   params: z.object({ id: z.string(), agentId: z.string() }),
   responses: {
     200: { description: "Skill uninstalled" },
@@ -127,6 +134,7 @@ const installRemoteRoute = route({
   pattern: ["api", "skills", "install-remote"],
   summary: "Install a remote skill from GitHub",
   tags: ["Skills"],
+  auth: { apiKey: true },
   body: z.object({
     sourceRepo: z.string(),
     sourcePath: z.string().optional(),
@@ -145,6 +153,7 @@ const syncRemoteRoute = route({
   pattern: ["api", "skills", "sync-remote"],
   summary: "Trigger remote skill sync",
   tags: ["Skills"],
+  auth: { apiKey: true },
   body: z.object({
     skillId: z.string().optional(),
     force: z.boolean().optional(),
@@ -172,6 +181,7 @@ const getAgentSkillsRoute = route({
   pattern: ["api", "agents", null, "skills"],
   summary: "Get all skills installed for an agent",
   tags: ["Skills"],
+  auth: { apiKey: true },
   params: z.object({ id: z.string() }),
   responses: {
     200: { description: "Agent skills list" },

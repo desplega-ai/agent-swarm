@@ -4,6 +4,11 @@ import { getSkillById, listSkills, updateSkill } from "@/be/db";
 import { parseSkillContent } from "@/be/skill-parser";
 import { createToolRegistrar } from "@/tools/utils";
 
+function contentHash(content: string): string {
+  const hash = new Bun.CryptoHasher("sha256").update(content).digest("hex");
+  return hash;
+}
+
 export const registerSkillSyncRemoteTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "skill-sync-remote",
@@ -59,9 +64,10 @@ export const registerSkillSyncRemoteTool = (server: McpServer) => {
             }
 
             const newContent = await response.text();
+            const newHash = contentHash(newContent);
             const now = new Date().toISOString();
 
-            if (args.force || newContent !== skill.content) {
+            if (args.force || newHash !== skill.sourceHash) {
               const parsed = parseSkillContent(newContent);
               updateSkill(skill.id, {
                 content: newContent,
@@ -74,13 +80,14 @@ export const registerSkillSyncRemoteTool = (server: McpServer) => {
                 agent: parsed.agent,
                 disableModelInvocation: parsed.disableModelInvocation,
                 userInvocable: parsed.userInvocable,
-                sourceHash: crypto.randomUUID(),
+                sourceHash: newHash,
+                lastFetchedAt: now,
               });
               updated++;
+            } else {
+              // Content unchanged — still update lastFetchedAt
+              updateSkill(skill.id, { lastFetchedAt: now });
             }
-
-            // Update lastFetchedAt regardless
-            getDb().prepare("UPDATE skills SET lastFetchedAt = ? WHERE id = ?").run(now, skill.id);
           } catch (err) {
             errors.push(`${skill.name}: ${err instanceof Error ? err.message : "Unknown error"}`);
           }
@@ -119,6 +126,3 @@ export const registerSkillSyncRemoteTool = (server: McpServer) => {
     },
   );
 };
-
-// Import getDb for direct lastFetchedAt update
-import { getDb } from "@/be/db";

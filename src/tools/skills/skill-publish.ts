@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getAgentById, getSkillById } from "@/be/db";
+import { createTaskExtended, getAgentById, getLeadAgent, getSkillById } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerSkillPublishTool = (server: McpServer) => {
@@ -64,12 +64,9 @@ export const registerSkillPublishTool = (server: McpServer) => {
       }
 
       // Find the lead agent
-      const { getDb } = await import("@/be/db");
-      const leadRow = getDb()
-        .prepare<{ id: string }, []>("SELECT id FROM agents WHERE isLead = 1 LIMIT 1")
-        .get();
+      const leadAgent = getLeadAgent();
 
-      if (!leadRow) {
+      if (!leadAgent) {
         return {
           content: [{ type: "text", text: "No lead agent found to approve the skill." }],
           structuredContent: {
@@ -81,7 +78,6 @@ export const registerSkillPublishTool = (server: McpServer) => {
       }
 
       // Create an approval task for the lead
-      const { createTaskExtended } = await import("@/be/db");
       const agent = getAgentById(requestInfo.agentId);
       const taskDescription = `Skill Approval Request: "${skill.name}"
 
@@ -100,7 +96,7 @@ To approve: update the skill's scope to "swarm" using skill-update.
 To reject: close this task with a rejection reason.`;
 
       const task = createTaskExtended(taskDescription, {
-        agentId: leadRow.id,
+        agentId: leadAgent.id,
         creatorAgentId: requestInfo.agentId,
         source: "mcp",
         taskType: "skill-approval",
