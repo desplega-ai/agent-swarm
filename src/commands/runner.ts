@@ -92,6 +92,10 @@ async function ensureRepoForTask(
       } else {
         await Bun.$`git clone --branch ${defaultBranch} --single-branch ${url} ${clonePath}`.quiet();
       }
+      // Validate the clone actually created the directory
+      if (!existsSync(clonePath)) {
+        throw new Error(`Clone command succeeded but directory ${clonePath} does not exist`);
+      }
       console.log(`[${role}] Cloned ${name}`);
     } else {
       console.log(`[${role}] Repo ${name} already cloned at ${clonePath}`);
@@ -114,7 +118,9 @@ async function ensureRepoForTask(
     const errorMsg = (err as Error).message;
     console.warn(`[${role}] Error setting up repo ${name}: ${errorMsg}`);
     const warning = `Failed to clone/setup repo "${name}" at ${clonePath}: ${errorMsg}. The repo may not be available. You may need to clone it manually.`;
-    return { clonePath, claudeMd: null, warning };
+    // Only return clonePath if the directory actually exists (clone may have failed)
+    const cloneExists = existsSync(clonePath);
+    return { clonePath: cloneExists ? clonePath : "", claudeMd: null, warning };
   }
 }
 
@@ -2128,26 +2134,36 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           // Per-task runner session ID so session logs are scoped to this task
           const resumeRunnerSessionId = crypto.randomUUID();
 
-          const runningTask = await spawnProviderProcess(
-            adapter,
-            {
-              prompt: resumePrompt,
-              logFile,
-              systemPrompt: resolvedSystemPrompt,
-              additionalArgs: resumeAdditionalArgs,
-              role,
-              apiUrl,
-              apiKey,
-              agentId,
-              runnerSessionId: resumeRunnerSessionId,
-              iteration,
-              taskId: task.id,
-              model: (task as { model?: string }).model,
-              cwd: resumeCwd,
-            },
-            logDir,
-            isYolo,
-          );
+          let runningTask: RunningTask;
+          try {
+            runningTask = await spawnProviderProcess(
+              adapter,
+              {
+                prompt: resumePrompt,
+                logFile,
+                systemPrompt: resolvedSystemPrompt,
+                additionalArgs: resumeAdditionalArgs,
+                role,
+                apiUrl,
+                apiKey,
+                agentId,
+                runnerSessionId: resumeRunnerSessionId,
+                iteration,
+                taskId: task.id,
+                model: (task as { model?: string }).model,
+                cwd: resumeCwd,
+              },
+              logDir,
+              isYolo,
+            );
+          } catch (spawnErr) {
+            const errMsg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
+            console.error(
+              `[${role}] Failed to spawn process for resumed task ${task.id.slice(0, 8)}: ${errMsg}`,
+            );
+            await ensureTaskFinished(apiConfig, role, task.id, 1, `Spawn failed: ${errMsg}`);
+            continue;
+          }
 
           state.activeTasks.set(task.id, runningTask);
           registerActiveSession(apiConfig, {
@@ -2408,26 +2424,44 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           const taskRunnerSessionId = crypto.randomUUID();
 
           // Spawn without blocking (await to set up session, but process runs async)
-          const runningTask = await spawnProviderProcess(
-            adapter,
-            {
-              prompt: triggerPrompt,
-              logFile,
-              systemPrompt: taskSystemPrompt,
-              additionalArgs: effectiveAdditionalArgs,
-              role,
-              apiUrl,
-              apiKey,
-              agentId,
-              runnerSessionId: taskRunnerSessionId,
-              iteration,
-              taskId: trigger.taskId,
-              model: taskModel,
-              cwd: effectiveCwd,
-            },
-            logDir,
-            isYolo,
-          );
+          let runningTask: RunningTask;
+          try {
+            runningTask = await spawnProviderProcess(
+              adapter,
+              {
+                prompt: triggerPrompt,
+                logFile,
+                systemPrompt: taskSystemPrompt,
+                additionalArgs: effectiveAdditionalArgs,
+                role,
+                apiUrl,
+                apiKey,
+                agentId,
+                runnerSessionId: taskRunnerSessionId,
+                iteration,
+                taskId: trigger.taskId,
+                model: taskModel,
+                cwd: effectiveCwd,
+              },
+              logDir,
+              isYolo,
+            );
+          } catch (spawnErr) {
+            const errMsg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
+            console.error(
+              `[${role}] Failed to spawn process for task ${trigger.taskId?.slice(0, 8) || "unknown"}: ${errMsg}`,
+            );
+            if (trigger.taskId) {
+              await ensureTaskFinished(
+                apiConfig,
+                role,
+                trigger.taskId,
+                1,
+                `Spawn failed: ${errMsg}`,
+              );
+            }
+            continue;
+          }
 
           // Attach trigger metadata for logging
           runningTask.triggerType = trigger.type;
