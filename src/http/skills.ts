@@ -284,14 +284,29 @@ export async function handleSkills(
           continue;
         }
         const newContent = await resp.text();
-        if (parsed.body.force || newContent !== skill.content) {
+        const newHash = new Bun.CryptoHasher("sha256").update(newContent).digest("hex");
+        const now = new Date().toISOString();
+
+        if (parsed.body.force || newHash !== skill.sourceHash) {
           const pm = parseSkillContent(newContent);
           updateSkill(skill.id, {
             content: newContent,
             name: pm.name,
             description: pm.description,
+            allowedTools: pm.allowedTools,
+            model: pm.model,
+            effort: pm.effort,
+            context: pm.context,
+            agent: pm.agent,
+            disableModelInvocation: pm.disableModelInvocation,
+            userInvocable: pm.userInvocable,
+            sourceHash: newHash,
+            lastFetchedAt: now,
           });
           updated++;
+        } else {
+          // Content unchanged — still update lastFetchedAt
+          updateSkill(skill.id, { lastFetchedAt: now });
         }
       } catch (err) {
         errors.push(`${skill.name}: ${err instanceof Error ? err.message : "Unknown"}`);

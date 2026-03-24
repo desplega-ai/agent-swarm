@@ -56,10 +56,14 @@ export function syncSkillsToFilesystem(
     if (skill.isComplex) continue; // Complex skills handled by npx
     if (!skill.content) continue;
 
-    writtenNames.add(skill.name);
+    // Sanitize skill name to prevent path traversal (strip /, .., and non-safe chars)
+    const safeName = skill.name.replace(/[^a-zA-Z0-9_-]/g, "_");
+    if (!safeName) continue;
+
+    writtenNames.add(safeName);
 
     for (const baseDir of skillDirs) {
-      const skillDir = join(baseDir, skill.name);
+      const skillDir = join(baseDir, safeName);
       const skillFile = join(skillDir, "SKILL.md");
 
       try {
