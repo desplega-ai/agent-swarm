@@ -13,6 +13,7 @@ import { checkpointStep } from "./checkpoint";
 import { getSuccessors } from "./definition";
 import { findReadyNodes, walkGraph } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
+import { finalizeOrWait } from "./resume";
 
 /**
  * Recover incomplete workflow runs on server startup.
@@ -187,6 +188,8 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
 
       if (readyNodes.length > 0) {
         await walkGraph(workflow.definition, stuck.runId, ctx, readyNodes, registry, workflow.id);
+      } else {
+        finalizeOrWait(stuck.runId);
       }
       recovered++;
     } catch (err) {

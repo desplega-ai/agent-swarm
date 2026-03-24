@@ -137,7 +137,7 @@ async function resumeFromTaskCompletion(
  * If no nodes are ready and no steps are still waiting, finalize the run.
  * Otherwise set it back to waiting for the next task completion.
  */
-function finalizeOrWait(runId: string): void {
+export function finalizeOrWait(runId: string): void {
   const steps = getWorkflowRunStepsByRunId(runId);
   const hasWaiting = steps.some((s) => s.status === "waiting");
   if (hasWaiting) {
