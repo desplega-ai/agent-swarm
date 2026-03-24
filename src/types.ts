@@ -869,3 +869,57 @@ export const PromptTemplateHistorySchema = z.object({
   changeReason: z.string().nullable(),
 });
 export type PromptTemplateHistory = z.infer<typeof PromptTemplateHistorySchema>;
+
+// ============================================================================
+// Skill Types
+// ============================================================================
+
+export const SkillTypeSchema = z.enum(["remote", "personal"]);
+export type SkillType = z.infer<typeof SkillTypeSchema>;
+
+export const SkillScopeSchema = z.enum(["global", "swarm", "agent"]);
+export type SkillScope = z.infer<typeof SkillScopeSchema>;
+
+export const SkillSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  content: z.string(),
+  type: SkillTypeSchema,
+  scope: SkillScopeSchema,
+  ownerAgentId: z.string().nullable(),
+  sourceUrl: z.string().nullable(),
+  sourceRepo: z.string().nullable(),
+  sourcePath: z.string().nullable(),
+  sourceBranch: z.string(),
+  sourceHash: z.string().nullable(),
+  isComplex: z.boolean(),
+  allowedTools: z.string().nullable(),
+  model: z.string().nullable(),
+  effort: z.string().nullable(),
+  context: z.string().nullable(),
+  agent: z.string().nullable(),
+  disableModelInvocation: z.boolean(),
+  userInvocable: z.boolean(),
+  version: z.number(),
+  isEnabled: z.boolean(),
+  createdAt: z.string(),
+  lastUpdatedAt: z.string(),
+  lastFetchedAt: z.string().nullable(),
+});
+export type Skill = z.infer<typeof SkillSchema>;
+
+export const AgentSkillSchema = z.object({
+  id: z.string(),
+  agentId: z.string(),
+  skillId: z.string(),
+  isActive: z.boolean(),
+  installedAt: z.string(),
+});
+export type AgentSkill = z.infer<typeof AgentSkillSchema>;
+
+export const SkillWithInstallInfoSchema = SkillSchema.extend({
+  isActive: z.boolean(),
+  installedAt: z.string(),
+});
+export type SkillWithInstallInfo = z.infer<typeof SkillWithInstallInfoSchema>;

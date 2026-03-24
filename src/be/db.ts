@@ -8,6 +8,7 @@ import type {
   AgentMemory,
   AgentMemoryScope,
   AgentMemorySource,
+  AgentSkill,
   AgentStatus,
   AgentTask,
   AgentTaskSource,
@@ -32,6 +33,10 @@ import type {
   ServiceStatus,
   SessionCost,
   SessionLog,
+  Skill,
+  SkillScope,
+  SkillType,
+  SkillWithInstallInfo,
   SwarmConfig,
   SwarmRepo,
   TriggerConfig,
@@ -6721,4 +6726,400 @@ export function upsertChannelActivityCursor(channelId: string, lastSeenTs: strin
        ON CONFLICT(channelId) DO UPDATE SET lastSeenTs = excluded.lastSeenTs, updatedAt = excluded.updatedAt`,
     )
     .run(channelId, lastSeenTs);
+}
+
+// ============================================================================
+// Skills
+// ============================================================================
+
+type SkillRow = {
+  id: string;
+  name: string;
+  description: string;
+  content: string;
+  type: string;
+  scope: string;
+  ownerAgentId: string | null;
+  sourceUrl: string | null;
+  sourceRepo: string | null;
+  sourcePath: string | null;
+  sourceBranch: string;
+  sourceHash: string | null;
+  isComplex: number;
+  allowedTools: string | null;
+  model: string | null;
+  effort: string | null;
+  context: string | null;
+  agent: string | null;
+  disableModelInvocation: number;
+  userInvocable: number;
+  version: number;
+  isEnabled: number;
+  createdAt: string;
+  lastUpdatedAt: string;
+  lastFetchedAt: string | null;
+};
+
+function rowToSkill(row: SkillRow): Skill {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    content: row.content,
+    type: row.type as SkillType,
+    scope: row.scope as SkillScope,
+    ownerAgentId: row.ownerAgentId,
+    sourceUrl: row.sourceUrl,
+    sourceRepo: row.sourceRepo,
+    sourcePath: row.sourcePath,
+    sourceBranch: row.sourceBranch,
+    sourceHash: row.sourceHash,
+    isComplex: row.isComplex === 1,
+    allowedTools: row.allowedTools,
+    model: row.model,
+    effort: row.effort,
+    context: row.context,
+    agent: row.agent,
+    disableModelInvocation: row.disableModelInvocation === 1,
+    userInvocable: row.userInvocable === 1,
+    version: row.version,
+    isEnabled: row.isEnabled === 1,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+    lastFetchedAt: row.lastFetchedAt,
+  };
+}
+
+type AgentSkillRow = {
+  id: string;
+  agentId: string;
+  skillId: string;
+  isActive: number;
+  installedAt: string;
+};
+
+function rowToAgentSkill(row: AgentSkillRow): AgentSkill {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    skillId: row.skillId,
+    isActive: row.isActive === 1,
+    installedAt: row.installedAt,
+  };
+}
+
+type SkillWithInstallRow = SkillRow & { isActive: number; installedAt: string };
+
+function rowToSkillWithInstall(row: SkillWithInstallRow): SkillWithInstallInfo {
+  return {
+    ...rowToSkill(row),
+    isActive: row.isActive === 1,
+    installedAt: row.installedAt,
+  };
+}
+
+export interface SkillInsert {
+  name: string;
+  description: string;
+  content: string;
+  type?: SkillType;
+  scope?: SkillScope;
+  ownerAgentId?: string;
+  sourceUrl?: string;
+  sourceRepo?: string;
+  sourcePath?: string;
+  sourceBranch?: string;
+  sourceHash?: string;
+  isComplex?: boolean;
+  allowedTools?: string;
+  model?: string;
+  effort?: string;
+  context?: string;
+  agent?: string;
+  disableModelInvocation?: boolean;
+  userInvocable?: boolean;
+}
+
+export function createSkill(data: SkillInsert): Skill {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  const row = getDb()
+    .prepare<SkillRow, (string | number | null)[]>(
+      `INSERT INTO skills (
+        id, name, description, content, type, scope, ownerAgentId,
+        sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex,
+        allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable,
+        version, isEnabled, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      data.name,
+      data.description,
+      data.content,
+      data.type ?? "personal",
+      data.scope ?? "agent",
+      data.ownerAgentId ?? null,
+      data.sourceUrl ?? null,
+      data.sourceRepo ?? null,
+      data.sourcePath ?? null,
+      data.sourceBranch ?? "main",
+      data.sourceHash ?? null,
+      data.isComplex ? 1 : 0,
+      data.allowedTools ?? null,
+      data.model ?? null,
+      data.effort ?? null,
+      data.context ?? null,
+      data.agent ?? null,
+      data.disableModelInvocation ? 1 : 0,
+      data.userInvocable === false ? 0 : 1,
+      now,
+      now,
+    );
+
+  if (!row) throw new Error("Failed to create skill");
+  return rowToSkill(row);
+}
+
+export function updateSkill(
+  id: string,
+  updates: Partial<SkillInsert> & { isEnabled?: boolean },
+): Skill | null {
+  const existing = getSkillById(id);
+  if (!existing) return null;
+
+  const now = new Date().toISOString();
+  const sets: string[] = ["lastUpdatedAt = ?"];
+  const params: (string | number | null)[] = [now];
+
+  if (updates.name !== undefined) {
+    sets.push("name = ?");
+    params.push(updates.name);
+  }
+  if (updates.description !== undefined) {
+    sets.push("description = ?");
+    params.push(updates.description);
+  }
+  if (updates.content !== undefined) {
+    sets.push("content = ?");
+    params.push(updates.content);
+  }
+  if (updates.scope !== undefined) {
+    sets.push("scope = ?");
+    params.push(updates.scope);
+  }
+  if (updates.isEnabled !== undefined) {
+    sets.push("isEnabled = ?");
+    params.push(updates.isEnabled ? 1 : 0);
+  }
+  if (updates.allowedTools !== undefined) {
+    sets.push("allowedTools = ?");
+    params.push(updates.allowedTools ?? null);
+  }
+  if (updates.model !== undefined) {
+    sets.push("model = ?");
+    params.push(updates.model ?? null);
+  }
+  if (updates.effort !== undefined) {
+    sets.push("effort = ?");
+    params.push(updates.effort ?? null);
+  }
+  if (updates.context !== undefined) {
+    sets.push("context = ?");
+    params.push(updates.context ?? null);
+  }
+  if (updates.agent !== undefined) {
+    sets.push("agent = ?");
+    params.push(updates.agent ?? null);
+  }
+  if (updates.disableModelInvocation !== undefined) {
+    sets.push("disableModelInvocation = ?");
+    params.push(updates.disableModelInvocation ? 1 : 0);
+  }
+  if (updates.userInvocable !== undefined) {
+    sets.push("userInvocable = ?");
+    params.push(updates.userInvocable ? 1 : 0);
+  }
+  if (updates.sourceUrl !== undefined) {
+    sets.push("sourceUrl = ?");
+    params.push(updates.sourceUrl ?? null);
+  }
+  if (updates.sourceRepo !== undefined) {
+    sets.push("sourceRepo = ?");
+    params.push(updates.sourceRepo ?? null);
+  }
+  if (updates.sourcePath !== undefined) {
+    sets.push("sourcePath = ?");
+    params.push(updates.sourcePath ?? null);
+  }
+  if (updates.sourceBranch !== undefined) {
+    sets.push("sourceBranch = ?");
+    params.push(updates.sourceBranch ?? "main");
+  }
+  if (updates.sourceHash !== undefined) {
+    sets.push("sourceHash = ?");
+    params.push(updates.sourceHash ?? null);
+  }
+  if (updates.isComplex !== undefined) {
+    sets.push("isComplex = ?");
+    params.push(updates.isComplex ? 1 : 0);
+  }
+
+  // Bump version when content changes
+  if (updates.content !== undefined) {
+    sets.push("version = version + 1");
+  }
+
+  params.push(id);
+  const row = getDb()
+    .prepare<SkillRow, (string | number | null)[]>(
+      `UPDATE skills SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
+    )
+    .get(...params);
+
+  return row ? rowToSkill(row) : null;
+}
+
+export function deleteSkill(id: string): boolean {
+  const result = getDb().prepare("DELETE FROM skills WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
+export function getSkillById(id: string): Skill | null {
+  const row = getDb().prepare<SkillRow, [string]>("SELECT * FROM skills WHERE id = ?").get(id);
+  return row ? rowToSkill(row) : null;
+}
+
+export function getSkillByName(
+  name: string,
+  scope: SkillScope,
+  ownerAgentId?: string,
+): Skill | null {
+  const row = getDb()
+    .prepare<SkillRow, [string, string, string]>(
+      "SELECT * FROM skills WHERE name = ? AND scope = ? AND COALESCE(ownerAgentId, '') = ?",
+    )
+    .get(name, scope, ownerAgentId ?? "");
+  return row ? rowToSkill(row) : null;
+}
+
+export interface SkillFilters {
+  type?: SkillType;
+  scope?: SkillScope;
+  ownerAgentId?: string;
+  isEnabled?: boolean;
+  search?: string;
+  limit?: number;
+  includeContent?: boolean;
+}
+
+export function listSkills(filters?: SkillFilters): Skill[] {
+  const columns =
+    filters?.includeContent === false
+      ? "id, name, description, type, scope, ownerAgentId, sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex, allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable, version, isEnabled, createdAt, lastUpdatedAt, lastFetchedAt, '' as content"
+      : "*";
+  let query = `SELECT ${columns} FROM skills WHERE 1=1`;
+  const params: (string | number)[] = [];
+
+  if (filters?.type) {
+    query += " AND type = ?";
+    params.push(filters.type);
+  }
+  if (filters?.scope) {
+    query += " AND scope = ?";
+    params.push(filters.scope);
+  }
+  if (filters?.ownerAgentId) {
+    query += " AND ownerAgentId = ?";
+    params.push(filters.ownerAgentId);
+  }
+  if (filters?.isEnabled !== undefined) {
+    query += " AND isEnabled = ?";
+    params.push(filters.isEnabled ? 1 : 0);
+  }
+  if (filters?.search) {
+    query += " AND (name LIKE ? OR description LIKE ?)";
+    const term = `%${filters.search}%`;
+    params.push(term, term);
+  }
+
+  query += " ORDER BY name ASC";
+
+  if (filters?.limit) {
+    query += " LIMIT ?";
+    params.push(filters.limit);
+  }
+
+  return getDb()
+    .prepare<SkillRow, (string | number)[]>(query)
+    .all(...params)
+    .map(rowToSkill);
+}
+
+export function searchSkills(query: string, limit = 20): Skill[] {
+  const term = `%${query}%`;
+  return getDb()
+    .prepare<SkillRow, [string, string, number]>(
+      "SELECT * FROM skills WHERE (name LIKE ? OR description LIKE ?) AND isEnabled = 1 ORDER BY name ASC LIMIT ?",
+    )
+    .all(term, term, limit)
+    .map(rowToSkill);
+}
+
+export function installSkill(agentId: string, skillId: string): AgentSkill {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  const row = getDb()
+    .prepare<AgentSkillRow, [string, string, string, string]>(
+      `INSERT INTO agent_skills (id, agentId, skillId, isActive, installedAt)
+       VALUES (?, ?, ?, 1, ?)
+       ON CONFLICT(agentId, skillId) DO UPDATE SET isActive = 1
+       RETURNING *`,
+    )
+    .get(id, agentId, skillId, now);
+
+  if (!row) throw new Error("Failed to install skill");
+  return rowToAgentSkill(row);
+}
+
+export function uninstallSkill(agentId: string, skillId: string): boolean {
+  const result = getDb()
+    .prepare("DELETE FROM agent_skills WHERE agentId = ? AND skillId = ?")
+    .run(agentId, skillId);
+  return result.changes > 0;
+}
+
+export function getAgentSkills(agentId: string, activeOnly = true): SkillWithInstallInfo[] {
+  const query = `
+    SELECT s.*, as2.isActive, as2.installedAt
+    FROM skills s
+    JOIN agent_skills as2 ON s.id = as2.skillId
+    WHERE as2.agentId = ?
+      ${activeOnly ? "AND as2.isActive = 1" : ""}
+      AND s.isEnabled = 1
+    ORDER BY
+      CASE WHEN s.type = 'personal' THEN 0 ELSE 1 END,
+      s.name
+  `;
+
+  const rows = getDb().prepare<SkillWithInstallRow, [string]>(query).all(agentId);
+
+  // Deduplicate by name — personal skills take precedence (already sorted first)
+  const seen = new Set<string>();
+  return rows
+    .filter((r) => {
+      if (seen.has(r.name)) return false;
+      seen.add(r.name);
+      return true;
+    })
+    .map(rowToSkillWithInstall);
+}
+
+export function toggleAgentSkill(agentId: string, skillId: string, isActive: boolean): boolean {
+  const result = getDb()
+    .prepare("UPDATE agent_skills SET isActive = ? WHERE agentId = ? AND skillId = ?")
+    .run(isActive ? 1 : 0, agentId, skillId);
+  return result.changes > 0;
 }
