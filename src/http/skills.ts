@@ -12,6 +12,7 @@ import {
   updateSkill,
 } from "../be/db";
 import { parseSkillContent } from "../be/skill-parser";
+import { syncSkillsToFilesystem } from "../be/skill-sync";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -310,8 +311,13 @@ export async function handleSkills(
       return true;
     }
 
-    const skills = getAgentSkills(agentId);
-    json(res, { skills, total: skills.length, message: "Skills retrieved for filesystem sync" });
+    const result = syncSkillsToFilesystem(agentId);
+    json(res, {
+      synced: result.synced,
+      removed: result.removed,
+      errors: result.errors,
+      message: `Synced ${result.synced} skills, removed ${result.removed} stale entries`,
+    });
     return true;
   }
 

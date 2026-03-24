@@ -1692,6 +1692,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let agentClaudeMd: string | undefined;
   let agentProfileName: string | undefined;
   let agentDescription: string | undefined;
+  let agentSkillsSummary: { name: string; description: string }[] | undefined;
 
   // Per-task repo context — set when processing a task with githubRepo
   let currentRepoContext: BasePromptArgs["repoContext"] | undefined;
@@ -1710,6 +1711,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       toolsMd: agentToolsMd,
       claudeMd: agentClaudeMd,
       repoContext: currentRepoContext,
+      skillsSummary: agentSkillsSummary,
     });
   };
 
@@ -1937,6 +1939,34 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
         }
 
+        // Fetch installed skills for system prompt
+        try {
+          const skillsResp = await fetch(`${apiUrl}/api/agents/${agentId}/skills`, {
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "X-Agent-ID": agentId,
+            },
+          });
+          if (skillsResp.ok) {
+            const skillsData = (await skillsResp.json()) as {
+              skills: {
+                name: string;
+                description: string;
+                isActive: boolean;
+                isEnabled: boolean;
+              }[];
+            };
+            agentSkillsSummary = skillsData.skills
+              .filter((s) => s.isActive && s.isEnabled)
+              .map((s) => ({ name: s.name, description: s.description }));
+            if (agentSkillsSummary.length > 0) {
+              console.log(`[${role}] Loaded ${agentSkillsSummary.length} skills for system prompt`);
+            }
+          }
+        } catch {
+          // Non-fatal — skills are optional
+        }
+
         // Rebuild system prompt with identity
         basePrompt = await buildSystemPrompt();
         resolvedSystemPrompt = additionalSystemPrompt
@@ -2003,6 +2033,37 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       } catch (err) {
         console.warn(`[${role}] Could not write CLAUDE.md: ${(err as Error).message}`);
       }
+    }
+
+    // ========== Sync skills to filesystem ==========
+    try {
+      console.log(`[${role}] Syncing skills to filesystem...`);
+      const syncHeaders: Record<string, string> = {
+        "Content-Type": "application/json",
+        "X-Agent-ID": agentId,
+      };
+      if (apiKey) syncHeaders.Authorization = `Bearer ${apiKey}`;
+      const syncRes = await fetch(`${swarmUrl}/api/skills/sync-filesystem`, {
+        method: "POST",
+        headers: syncHeaders,
+      });
+      if (syncRes.ok) {
+        const syncResult = (await syncRes.json()) as {
+          synced: number;
+          removed: number;
+          errors: string[];
+        };
+        console.log(
+          `[${role}] Skills synced: ${syncResult.synced} written, ${syncResult.removed} removed`,
+        );
+        if (syncResult.errors.length > 0) {
+          console.warn(`[${role}] Skill sync errors: ${syncResult.errors.join(", ")}`);
+        }
+      } else {
+        console.warn(`[${role}] Skill sync failed: HTTP ${syncRes.status}`);
+      }
+    } catch (err) {
+      console.warn(`[${role}] Skill sync failed: ${(err as Error).message}`);
     }
 
     // ========== Resume paused tasks with PRIORITY ==========

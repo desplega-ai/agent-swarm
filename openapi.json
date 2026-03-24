@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.51.2",
+    "version": "1.51.3",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -32,7 +32,9 @@
     "/api/active-sessions": {
       "get": {
         "summary": "List active sessions",
-        "tags": ["Active Sessions"],
+        "tags": [
+          "Active Sessions"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -57,7 +59,9 @@
       },
       "post": {
         "summary": "Create a new active session",
-        "tags": ["Active Sessions"],
+        "tags": [
+          "Active Sessions"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -90,7 +94,10 @@
                     "type": "string"
                   }
                 },
-                "required": ["agentId", "triggerType"]
+                "required": [
+                  "agentId",
+                  "triggerType"
+                ]
               }
             }
           }
@@ -108,7 +115,9 @@
     "/api/active-sessions/by-task/{taskId}": {
       "delete": {
         "summary": "Delete active session by task ID",
-        "tags": ["Active Sessions"],
+        "tags": [
+          "Active Sessions"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -134,7 +143,9 @@
     "/api/active-sessions/{id}": {
       "delete": {
         "summary": "Delete active session by ID",
-        "tags": ["Active Sessions"],
+        "tags": [
+          "Active Sessions"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -160,7 +171,9 @@
     "/api/active-sessions/heartbeat/{taskId}": {
       "put": {
         "summary": "Update heartbeat for an active session",
-        "tags": ["Active Sessions"],
+        "tags": [
+          "Active Sessions"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -186,7 +199,9 @@
     "/api/active-sessions/provider-session/{taskId}": {
       "put": {
         "summary": "Update provider session ID on an active session",
-        "tags": ["Active Sessions"],
+        "tags": [
+          "Active Sessions"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -213,7 +228,9 @@
                     "minLength": 1
                   }
                 },
-                "required": ["providerSessionId"]
+                "required": [
+                  "providerSessionId"
+                ]
               }
             }
           }
@@ -228,7 +245,9 @@
     "/api/active-sessions/cleanup": {
       "post": {
         "summary": "Clean up stale sessions",
-        "tags": ["Active Sessions"],
+        "tags": [
+          "Active Sessions"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -261,7 +280,9 @@
     "/api/agents": {
       "post": {
         "summary": "Register or re-register an agent",
-        "tags": ["Agents"],
+        "tags": [
+          "Agents"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -296,7 +317,9 @@
                     "type": "integer"
                   }
                 },
-                "required": ["name"]
+                "required": [
+                  "name"
+                ]
               }
             }
           }
@@ -315,7 +338,9 @@
       },
       "get": {
         "summary": "List all agents",
-        "tags": ["Agents"],
+        "tags": [
+          "Agents"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -325,7 +350,9 @@
           {
             "schema": {
               "type": "string",
-              "enum": ["tasks"]
+              "enum": [
+                "tasks"
+              ]
             },
             "required": false,
             "name": "include",
@@ -342,7 +369,9 @@
     "/api/agents/{id}/name": {
       "put": {
         "summary": "Update agent name",
-        "tags": ["Agents"],
+        "tags": [
+          "Agents"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -369,7 +398,9 @@
                     "minLength": 1
                   }
                 },
-                "required": ["name"]
+                "required": [
+                  "name"
+                ]
               }
             }
           }
@@ -390,7 +421,9 @@
     "/api/agents/{id}/setup-script": {
       "get": {
         "summary": "Fetch agent + global setup scripts for Docker entrypoint",
-        "tags": ["Agents"],
+        "tags": [
+          "Agents"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -419,7 +452,9 @@
     "/api/agents/{id}/profile": {
       "put": {
         "summary": "Update agent profile (role, description, capabilities, etc.)",
-        "tags": ["Agents"],
+        "tags": [
+          "Agents"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -504,7 +539,9 @@
     "/api/agents/{id}/activity": {
       "put": {
         "summary": "Update agent last activity timestamp",
-        "tags": ["Agents"],
+        "tags": [
+          "Agents"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -530,7 +567,9 @@
     "/api/agents/{id}": {
       "get": {
         "summary": "Get a single agent",
-        "tags": ["Agents"],
+        "tags": [
+          "Agents"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -548,7 +587,9 @@
           {
             "schema": {
               "type": "string",
-              "enum": ["tasks"]
+              "enum": [
+                "tasks"
+              ]
             },
             "required": false,
             "name": "include",
@@ -568,7 +609,9 @@
     "/api/config/resolved": {
       "get": {
         "summary": "Get resolved config (merged global + agent + repo scopes)",
-        "tags": ["Config"],
+        "tags": [
+          "Config"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -594,7 +637,10 @@
           {
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": [
+                "true",
+                "false"
+              ]
             },
             "required": false,
             "name": "includeSecrets",
@@ -611,7 +657,9 @@
     "/api/config/{id}": {
       "get": {
         "summary": "Get a single config entry by ID",
-        "tags": ["Config"],
+        "tags": [
+          "Config"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -629,7 +677,10 @@
           {
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": [
+                "true",
+                "false"
+              ]
             },
             "required": false,
             "name": "includeSecrets",
@@ -647,7 +698,9 @@
       },
       "delete": {
         "summary": "Delete a config entry",
-        "tags": ["Config"],
+        "tags": [
+          "Config"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -676,7 +729,9 @@
     "/api/config": {
       "get": {
         "summary": "List config entries with optional filters",
-        "tags": ["Config"],
+        "tags": [
+          "Config"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -702,7 +757,10 @@
           {
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": [
+                "true",
+                "false"
+              ]
             },
             "required": false,
             "name": "includeSecrets",
@@ -717,7 +775,9 @@
       },
       "put": {
         "summary": "Create or update a config entry",
-        "tags": ["Config"],
+        "tags": [
+          "Config"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -731,10 +791,17 @@
                 "properties": {
                   "scope": {
                     "type": "string",
-                    "enum": ["global", "agent", "repo"]
+                    "enum": [
+                      "global",
+                      "agent",
+                      "repo"
+                    ]
                   },
                   "scopeId": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "key": {
                     "type": "string",
@@ -745,13 +812,22 @@
                     "type": "boolean"
                   },
                   "envPath": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "description": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
-                "required": ["scope", "key"]
+                "required": [
+                  "scope",
+                  "key"
+                ]
               }
             }
           }
@@ -769,7 +845,9 @@
     "/api/db-query": {
       "post": {
         "summary": "Execute a read-only SQL query",
-        "tags": ["Debug"],
+        "tags": [
+          "Debug"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -792,7 +870,9 @@
                     "default": []
                   }
                 },
-                "required": ["sql"]
+                "required": [
+                  "sql"
+                ]
               }
             }
           }
@@ -825,7 +905,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["columns", "rows", "elapsed", "total"]
+                  "required": [
+                    "columns",
+                    "rows",
+                    "elapsed",
+                    "total"
+                  ]
                 }
               }
             }
@@ -839,7 +924,9 @@
     "/ecosystem": {
       "get": {
         "summary": "Get PM2 ecosystem config for agent services",
-        "tags": ["Ecosystem"],
+        "tags": [
+          "Ecosystem"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -858,7 +945,9 @@
     "/api/epics": {
       "get": {
         "summary": "List epics with optional filters",
-        "tags": ["Epics"],
+        "tags": [
+          "Epics"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -898,7 +987,9 @@
       },
       "post": {
         "summary": "Create a new epic",
-        "tags": ["Epics"],
+        "tags": [
+          "Epics"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -937,7 +1028,10 @@
                     }
                   }
                 },
-                "required": ["name", "goal"]
+                "required": [
+                  "name",
+                  "goal"
+                ]
               }
             }
           }
@@ -955,7 +1049,9 @@
     "/api/epics/{id}": {
       "get": {
         "summary": "Get epic with progress and tasks",
-        "tags": ["Epics"],
+        "tags": [
+          "Epics"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -982,7 +1078,9 @@
       },
       "put": {
         "summary": "Update an epic",
-        "tags": ["Epics"],
+        "tags": [
+          "Epics"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1019,7 +1117,9 @@
       },
       "delete": {
         "summary": "Delete an epic",
-        "tags": ["Epics"],
+        "tags": [
+          "Epics"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1048,7 +1148,9 @@
     "/api/epics/{id}/tasks": {
       "post": {
         "summary": "Add task to epic (create new or assign existing)",
-        "tags": ["Epics"],
+        "tags": [
+          "Epics"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1118,7 +1220,9 @@
     "/api/channels": {
       "get": {
         "summary": "List all channels",
-        "tags": ["Channels"],
+        "tags": [
+          "Channels"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1132,7 +1236,9 @@
       },
       "post": {
         "summary": "Create a new channel",
-        "tags": ["Channels"],
+        "tags": [
+          "Channels"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1153,10 +1259,15 @@
                   },
                   "type": {
                     "type": "string",
-                    "enum": ["public", "dm"]
+                    "enum": [
+                      "public",
+                      "dm"
+                    ]
                   }
                 },
-                "required": ["name"]
+                "required": [
+                  "name"
+                ]
               }
             }
           }
@@ -1177,7 +1288,9 @@
     "/api/channels/{id}": {
       "delete": {
         "summary": "Delete a channel",
-        "tags": ["Channels"],
+        "tags": [
+          "Channels"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1209,7 +1322,9 @@
     "/api/channels/{id}/messages": {
       "get": {
         "summary": "Get messages in a channel",
-        "tags": ["Channels"],
+        "tags": [
+          "Channels"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1261,7 +1376,9 @@
       },
       "post": {
         "summary": "Post a message to a channel",
-        "tags": ["Channels"],
+        "tags": [
+          "Channels"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1300,7 +1417,9 @@
                     }
                   }
                 },
-                "required": ["content"]
+                "required": [
+                  "content"
+                ]
               }
             }
           }
@@ -1321,7 +1440,9 @@
     "/api/channels/{channelId}/messages/{messageId}/thread": {
       "get": {
         "summary": "Get thread messages for a message",
-        "tags": ["Channels"],
+        "tags": [
+          "Channels"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1358,7 +1479,9 @@
     "/api/memory/index": {
       "post": {
         "summary": "Ingest content into memory system (async embedding)",
-        "tags": ["Memory"],
+        "tags": [
+          "Memory"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1384,11 +1507,19 @@
                   },
                   "scope": {
                     "type": "string",
-                    "enum": ["agent", "swarm"]
+                    "enum": [
+                      "agent",
+                      "swarm"
+                    ]
                   },
                   "source": {
                     "type": "string",
-                    "enum": ["manual", "file_index", "session_summary", "task_completion"]
+                    "enum": [
+                      "manual",
+                      "file_index",
+                      "session_summary",
+                      "task_completion"
+                    ]
                   },
                   "sourceTaskId": {
                     "type": "string",
@@ -1404,7 +1535,12 @@
                     }
                   }
                 },
-                "required": ["content", "name", "scope", "source"]
+                "required": [
+                  "content",
+                  "name",
+                  "scope",
+                  "source"
+                ]
               }
             }
           }
@@ -1422,7 +1558,9 @@
     "/api/memory/search": {
       "post": {
         "summary": "Search memories by natural language query",
-        "tags": ["Memory"],
+        "tags": [
+          "Memory"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1445,7 +1583,9 @@
                     "default": 5
                   }
                 },
-                "required": ["query"]
+                "required": [
+                  "query"
+                ]
               }
             }
           }
@@ -1463,7 +1603,9 @@
     "/api/prompt-templates/resolved": {
       "get": {
         "summary": "Resolve a prompt template for a given event type and scope chain",
-        "tags": ["PromptTemplates"],
+        "tags": [
+          "PromptTemplates"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1508,7 +1650,9 @@
     "/api/prompt-templates/events": {
       "get": {
         "summary": "List all registered event types with their available variables",
-        "tags": ["PromptTemplates"],
+        "tags": [
+          "PromptTemplates"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1524,7 +1668,9 @@
     "/api/prompt-templates/preview": {
       "post": {
         "summary": "Dry-run render a template with provided variables",
-        "tags": ["PromptTemplates"],
+        "tags": [
+          "PromptTemplates"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1547,7 +1693,9 @@
                     "additionalProperties": {}
                   }
                 },
-                "required": ["eventType"]
+                "required": [
+                  "eventType"
+                ]
               }
             }
           }
@@ -1565,7 +1713,9 @@
     "/api/prompt-templates/render": {
       "post": {
         "summary": "Full scope-aware template resolution with interpolation (used by workers via HTTP)",
-        "tags": ["PromptTemplates"],
+        "tags": [
+          "PromptTemplates"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1591,7 +1741,9 @@
                     "type": "string"
                   }
                 },
-                "required": ["eventType"]
+                "required": [
+                  "eventType"
+                ]
               }
             }
           }
@@ -1609,7 +1761,9 @@
     "/api/prompt-templates/{id}/checkout": {
       "post": {
         "summary": "Checkout a specific version of a prompt template from history",
-        "tags": ["PromptTemplates"],
+        "tags": [
+          "PromptTemplates"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1635,7 +1789,9 @@
                     "type": "number"
                   }
                 },
-                "required": ["version"]
+                "required": [
+                  "version"
+                ]
               }
             }
           }
@@ -1656,7 +1812,9 @@
     "/api/prompt-templates/{id}/reset": {
       "post": {
         "summary": "Reset a prompt template to its code-defined default",
-        "tags": ["PromptTemplates"],
+        "tags": [
+          "PromptTemplates"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1685,7 +1843,9 @@
     "/api/prompt-templates/{id}": {
       "get": {
         "summary": "Get a single prompt template with its version history",
-        "tags": ["PromptTemplates"],
+        "tags": [
+          "PromptTemplates"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1712,7 +1872,9 @@
       },
       "delete": {
         "summary": "Delete a prompt template override",
-        "tags": ["PromptTemplates"],
+        "tags": [
+          "PromptTemplates"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1744,7 +1906,9 @@
     "/api/prompt-templates": {
       "get": {
         "summary": "List prompt templates with optional filters",
-        "tags": ["PromptTemplates"],
+        "tags": [
+          "PromptTemplates"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1778,7 +1942,10 @@
           {
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": [
+                "true",
+                "false"
+              ]
             },
             "required": false,
             "name": "isDefault",
@@ -1793,7 +1960,9 @@
       },
       "put": {
         "summary": "Create or update a prompt template override",
-        "tags": ["PromptTemplates"],
+        "tags": [
+          "PromptTemplates"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1811,14 +1980,22 @@
                   },
                   "scope": {
                     "type": "string",
-                    "enum": ["global", "agent", "repo"]
+                    "enum": [
+                      "global",
+                      "agent",
+                      "repo"
+                    ]
                   },
                   "scopeId": {
                     "type": "string"
                   },
                   "state": {
                     "type": "string",
-                    "enum": ["enabled", "default_prompt_fallback", "skip_event"]
+                    "enum": [
+                      "enabled",
+                      "default_prompt_fallback",
+                      "skip_event"
+                    ]
                   },
                   "body": {
                     "type": "string"
@@ -1830,7 +2007,10 @@
                     "type": "string"
                   }
                 },
-                "required": ["eventType", "body"]
+                "required": [
+                  "eventType",
+                  "body"
+                ]
               }
             }
           }
@@ -1848,7 +2028,9 @@
     "/api/poll": {
       "get": {
         "summary": "Poll for triggers (tasks, mentions, epic updates)",
-        "tags": ["Poll"],
+        "tags": [
+          "Poll"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1870,7 +2052,9 @@
     "/api/channel-activity/commit-cursors": {
       "post": {
         "summary": "Commit channel activity cursors after successful processing",
-        "tags": ["Poll"],
+        "tags": [
+          "Poll"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1894,11 +2078,16 @@
                           "type": "string"
                         }
                       },
-                      "required": ["channelId", "ts"]
+                      "required": [
+                        "channelId",
+                        "ts"
+                      ]
                     }
                   }
                 },
-                "required": ["cursorUpdates"]
+                "required": [
+                  "cursorUpdates"
+                ]
               }
             }
           }
@@ -1916,7 +2105,9 @@
     "/api/repos/{id}": {
       "get": {
         "summary": "Get a repo by ID",
-        "tags": ["Repos"],
+        "tags": [
+          "Repos"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -1973,7 +2164,14 @@
                       "type": "string"
                     }
                   },
-                  "required": ["id", "url", "name", "clonePath", "createdAt", "lastUpdatedAt"]
+                  "required": [
+                    "id",
+                    "url",
+                    "name",
+                    "clonePath",
+                    "createdAt",
+                    "lastUpdatedAt"
+                  ]
                 }
               }
             }
@@ -1989,7 +2187,9 @@
                       "type": "string"
                     }
                   },
-                  "required": ["error"]
+                  "required": [
+                    "error"
+                  ]
                 }
               }
             }
@@ -1998,7 +2198,9 @@
       },
       "put": {
         "summary": "Update a repo",
-        "tags": ["Repos"],
+        "tags": [
+          "Repos"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -2081,7 +2283,14 @@
                       "type": "string"
                     }
                   },
-                  "required": ["id", "url", "name", "clonePath", "createdAt", "lastUpdatedAt"]
+                  "required": [
+                    "id",
+                    "url",
+                    "name",
+                    "clonePath",
+                    "createdAt",
+                    "lastUpdatedAt"
+                  ]
                 }
               }
             }
@@ -2097,7 +2306,9 @@
                       "type": "string"
                     }
                   },
-                  "required": ["error"]
+                  "required": [
+                    "error"
+                  ]
                 }
               }
             }
@@ -2113,7 +2324,9 @@
                       "type": "string"
                     }
                   },
-                  "required": ["error"]
+                  "required": [
+                    "error"
+                  ]
                 }
               }
             }
@@ -2122,7 +2335,9 @@
       },
       "delete": {
         "summary": "Delete a repo",
-        "tags": ["Repos"],
+        "tags": [
+          "Repos"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -2151,7 +2366,9 @@
                       "type": "boolean"
                     }
                   },
-                  "required": ["success"]
+                  "required": [
+                    "success"
+                  ]
                 }
               }
             }
@@ -2167,7 +2384,9 @@
                       "type": "string"
                     }
                   },
-                  "required": ["error"]
+                  "required": [
+                    "error"
+                  ]
                 }
               }
             }
@@ -2178,7 +2397,9 @@
     "/api/repos": {
       "get": {
         "summary": "List repos with optional filters",
-        "tags": ["Repos"],
+        "tags": [
+          "Repos"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -2188,7 +2409,10 @@
           {
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": [
+                "true",
+                "false"
+              ]
             },
             "required": false,
             "name": "autoClone",
@@ -2248,11 +2472,20 @@
                             "type": "string"
                           }
                         },
-                        "required": ["id", "url", "name", "clonePath", "createdAt", "lastUpdatedAt"]
+                        "required": [
+                          "id",
+                          "url",
+                          "name",
+                          "clonePath",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
                       }
                     }
                   },
-                  "required": ["repos"]
+                  "required": [
+                    "repos"
+                  ]
                 }
               }
             }
@@ -2261,7 +2494,9 @@
       },
       "post": {
         "summary": "Create a new repo",
-        "tags": ["Repos"],
+        "tags": [
+          "Repos"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -2291,7 +2526,10 @@
                     "type": "boolean"
                   }
                 },
-                "required": ["url", "name"]
+                "required": [
+                  "url",
+                  "name"
+                ]
               }
             }
           }
@@ -2336,7 +2574,14 @@
                       "type": "string"
                     }
                   },
-                  "required": ["id", "url", "name", "clonePath", "createdAt", "lastUpdatedAt"]
+                  "required": [
+                    "id",
+                    "url",
+                    "name",
+                    "clonePath",
+                    "createdAt",
+                    "lastUpdatedAt"
+                  ]
                 }
               }
             }
@@ -2352,7 +2597,9 @@
                       "type": "string"
                     }
                   },
-                  "required": ["error"]
+                  "required": [
+                    "error"
+                  ]
                 }
               }
             }
@@ -2368,7 +2615,9 @@
                       "type": "string"
                     }
                   },
-                  "required": ["error"]
+                  "required": [
+                    "error"
+                  ]
                 }
               }
             }
@@ -2379,7 +2628,9 @@
     "/api/schedules": {
       "post": {
         "summary": "Create a new schedule",
-        "tags": ["Schedules"],
+        "tags": [
+          "Schedules"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -2435,7 +2686,10 @@
                   },
                   "scheduleType": {
                     "type": "string",
-                    "enum": ["recurring", "one_time"]
+                    "enum": [
+                      "recurring",
+                      "one_time"
+                    ]
                   },
                   "delayMs": {
                     "type": "integer"
@@ -2444,7 +2698,10 @@
                     "type": "string"
                   }
                 },
-                "required": ["name", "taskTemplate"]
+                "required": [
+                  "name",
+                  "taskTemplate"
+                ]
               }
             }
           }
@@ -2465,7 +2722,9 @@
     "/api/schedules/{id}/run": {
       "post": {
         "summary": "Run a schedule immediately",
-        "tags": ["Schedules"],
+        "tags": [
+          "Schedules"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -2497,7 +2756,9 @@
     "/api/schedules/{id}": {
       "get": {
         "summary": "Get a schedule by ID",
-        "tags": ["Schedules"],
+        "tags": [
+          "Schedules"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -2524,7 +2785,9 @@
       },
       "put": {
         "summary": "Update a schedule",
-        "tags": ["Schedules"],
+        "tags": [
+          "Schedules"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -2587,7 +2850,10 @@
                     "type": "string"
                   },
                   "nextRunAt": {
-                    "type": ["string", "null"]
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 }
               }
@@ -2611,7 +2877,9 @@
       },
       "delete": {
         "summary": "Delete a schedule",
-        "tags": ["Schedules"],
+        "tags": [
+          "Schedules"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -2640,7 +2908,9 @@
     "/api/session-logs": {
       "post": {
         "summary": "Store session logs",
-        "tags": ["Session Data"],
+        "tags": [
+          "Session Data"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -2674,7 +2944,11 @@
                     "type": "string"
                   }
                 },
-                "required": ["sessionId", "iteration", "lines"]
+                "required": [
+                  "sessionId",
+                  "iteration",
+                  "lines"
+                ]
               }
             }
           }
@@ -2692,7 +2966,9 @@
     "/api/tasks/{taskId}/session-logs": {
       "get": {
         "summary": "Get session logs for a task",
-        "tags": ["Session Data"],
+        "tags": [
+          "Session Data"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -2721,7 +2997,9 @@
     "/api/session-costs": {
       "post": {
         "summary": "Store session cost record",
-        "tags": ["Session Data"],
+        "tags": [
+          "Session Data"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -2772,7 +3050,11 @@
                     "type": "boolean"
                   }
                 },
-                "required": ["sessionId", "agentId", "totalCostUsd"]
+                "required": [
+                  "sessionId",
+                  "agentId",
+                  "totalCostUsd"
+                ]
               }
             }
           }
@@ -2788,7 +3070,9 @@
       },
       "get": {
         "summary": "Query session costs with filters",
-        "tags": ["Session Data"],
+        "tags": [
+          "Session Data"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -2847,7 +3131,9 @@
     "/api/session-costs/summary": {
       "get": {
         "summary": "Aggregated session cost summary",
-        "tags": ["Session Data"],
+        "tags": [
+          "Session Data"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -2857,7 +3143,11 @@
           {
             "schema": {
               "type": "string",
-              "enum": ["day", "agent", "both"]
+              "enum": [
+                "day",
+                "agent",
+                "both"
+              ]
             },
             "required": false,
             "name": "groupBy",
@@ -2901,7 +3191,9 @@
     "/api/session-costs/dashboard": {
       "get": {
         "summary": "Cost today and month-to-date for dashboard",
-        "tags": ["Session Data"],
+        "tags": [
+          "Session Data"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -2914,10 +3206,429 @@
         }
       }
     },
+    "/api/skills": {
+      "get": {
+        "summary": "List skills with optional filters",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "type",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scope",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "enabled",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "search",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill list"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a new skill",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "ownerAgentId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Skill created"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/skills/{id}": {
+      "get": {
+        "summary": "Get skill by ID",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill details"
+          },
+          "404": {
+            "description": "Skill not found"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update a skill",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Skill updated"
+          },
+          "404": {
+            "description": "Skill not found"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a skill",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill deleted"
+          },
+          "404": {
+            "description": "Skill not found"
+          }
+        }
+      }
+    },
+    "/api/skills/{id}/install": {
+      "post": {
+        "summary": "Install skill for an agent",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "agentId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "agentId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Skill installed"
+          },
+          "404": {
+            "description": "Skill not found"
+          }
+        }
+      }
+    },
+    "/api/skills/{id}/install/{agentId}": {
+      "delete": {
+        "summary": "Uninstall skill for an agent",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "agentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill uninstalled"
+          }
+        }
+      }
+    },
+    "/api/skills/install-remote": {
+      "post": {
+        "summary": "Install a remote skill from GitHub",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sourceRepo": {
+                    "type": "string"
+                  },
+                  "sourcePath": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "isComplex": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "sourceRepo"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Remote skill installed"
+          },
+          "400": {
+            "description": "Fetch failed"
+          }
+        }
+      }
+    },
+    "/api/skills/sync-remote": {
+      "post": {
+        "summary": "Trigger remote skill sync",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "skillId": {
+                    "type": "string"
+                  },
+                  "force": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sync results"
+          }
+        }
+      }
+    },
+    "/api/skills/sync-filesystem": {
+      "post": {
+        "summary": "Sync installed skills to agent filesystem",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Filesystem sync results"
+          }
+        }
+      }
+    },
+    "/api/agents/{id}/skills": {
+      "get": {
+        "summary": "Get all skills installed for an agent",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent skills list"
+          }
+        }
+      }
+    },
     "/api/logs": {
       "get": {
         "summary": "List agent logs",
-        "tags": ["Stats"],
+        "tags": [
+          "Stats"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -2953,7 +3664,9 @@
     "/api/stats": {
       "get": {
         "summary": "Dashboard summary stats",
-        "tags": ["Stats"],
+        "tags": [
+          "Stats"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -2969,7 +3682,9 @@
     "/api/services": {
       "get": {
         "summary": "List all registered services",
-        "tags": ["Stats"],
+        "tags": [
+          "Stats"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -3011,7 +3726,9 @@
     "/api/scheduled-tasks": {
       "get": {
         "summary": "List scheduled tasks",
-        "tags": ["Stats"],
+        "tags": [
+          "Stats"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -3021,7 +3738,10 @@
           {
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": [
+                "true",
+                "false"
+              ]
             },
             "required": false,
             "name": "enabled",
@@ -3038,7 +3758,10 @@
           {
             "schema": {
               "type": "string",
-              "enum": ["recurring", "one_time"]
+              "enum": [
+                "recurring",
+                "one_time"
+              ]
             },
             "required": false,
             "name": "scheduleType",
@@ -3047,7 +3770,10 @@
           {
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": [
+                "true",
+                "false"
+              ]
             },
             "required": false,
             "name": "hideCompleted",
@@ -3064,7 +3790,9 @@
     "/api/concurrent-context": {
       "get": {
         "summary": "Get concurrent session context for lead awareness",
-        "tags": ["Stats"],
+        "tags": [
+          "Stats"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -3080,7 +3808,9 @@
     "/api/tasks": {
       "get": {
         "summary": "List tasks with filters",
-        "tags": ["Tasks"],
+        "tags": [
+          "Tasks"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -3130,7 +3860,10 @@
           {
             "schema": {
               "type": "string",
-              "enum": ["true", "false"]
+              "enum": [
+                "true",
+                "false"
+              ]
             },
             "required": false,
             "name": "includeHeartbeat",
@@ -3138,7 +3871,10 @@
           },
           {
             "schema": {
-              "type": ["integer", "null"]
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "required": false,
             "name": "limit",
@@ -3146,7 +3882,10 @@
           },
           {
             "schema": {
-              "type": ["integer", "null"]
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "required": false,
             "name": "offset",
@@ -3161,7 +3900,9 @@
       },
       "post": {
         "summary": "Create a new task",
-        "tags": ["Tasks"],
+        "tags": [
+          "Tasks"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -3215,7 +3956,9 @@
                     "additionalProperties": {}
                   }
                 },
-                "required": ["task"]
+                "required": [
+                  "task"
+                ]
               }
             }
           }
@@ -3233,7 +3976,9 @@
     "/api/tasks/{id}/claude-session": {
       "put": {
         "summary": "Update Claude session ID for a task",
-        "tags": ["Tasks"],
+        "tags": [
+          "Tasks"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -3260,7 +4005,9 @@
                     "minLength": 1
                   }
                 },
-                "required": ["claudeSessionId"]
+                "required": [
+                  "claudeSessionId"
+                ]
               }
             }
           }
@@ -3278,7 +4025,9 @@
     "/api/tasks/{id}/cancel": {
       "post": {
         "summary": "Cancel a pending or in-progress task",
-        "tags": ["Tasks"],
+        "tags": [
+          "Tasks"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -3310,7 +4059,9 @@
     "/api/tasks/{id}": {
       "get": {
         "summary": "Get task details with logs",
-        "tags": ["Tasks"],
+        "tags": [
+          "Tasks"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -3339,7 +4090,9 @@
     "/api/tasks/{id}/progress": {
       "post": {
         "summary": "Update task progress text",
-        "tags": ["Tasks"],
+        "tags": [
+          "Tasks"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -3366,7 +4119,9 @@
                     "minLength": 1
                   }
                 },
-                "required": ["progress"]
+                "required": [
+                  "progress"
+                ]
               }
             }
           }
@@ -3384,7 +4139,9 @@
     "/api/tasks/{id}/finish": {
       "post": {
         "summary": "Mark task as completed or failed (runner endpoint)",
-        "tags": ["Tasks"],
+        "tags": [
+          "Tasks"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -3408,7 +4165,10 @@
                 "properties": {
                   "status": {
                     "type": "string",
-                    "enum": ["completed", "failed"]
+                    "enum": [
+                      "completed",
+                      "failed"
+                    ]
                   },
                   "output": {
                     "type": "string"
@@ -3417,7 +4177,9 @@
                     "type": "string"
                   }
                 },
-                "required": ["status"]
+                "required": [
+                  "status"
+                ]
               }
             }
           }
@@ -3441,7 +4203,9 @@
     "/api/paused-tasks": {
       "get": {
         "summary": "Get paused tasks for this agent",
-        "tags": ["Tasks"],
+        "tags": [
+          "Tasks"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -3457,7 +4221,9 @@
     "/api/tasks/{id}/pause": {
       "post": {
         "summary": "Pause an in-progress task",
-        "tags": ["Tasks"],
+        "tags": [
+          "Tasks"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -3492,7 +4258,9 @@
     "/api/tasks/{id}/resume": {
       "post": {
         "summary": "Resume a paused task",
-        "tags": ["Tasks"],
+        "tags": [
+          "Tasks"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -3527,7 +4295,9 @@
     "/api/trackers/linear/authorize": {
       "get": {
         "summary": "Redirect to Linear OAuth consent screen",
-        "tags": ["Trackers"],
+        "tags": [
+          "Trackers"
+        ],
         "responses": {
           "302": {
             "description": "Redirect to Linear OAuth"
@@ -3544,7 +4314,9 @@
     "/api/trackers/linear/callback": {
       "get": {
         "summary": "Handle Linear OAuth callback",
-        "tags": ["Trackers"],
+        "tags": [
+          "Trackers"
+        ],
         "parameters": [
           {
             "schema": {
@@ -3579,7 +4351,9 @@
     "/api/trackers/linear/status": {
       "get": {
         "summary": "Linear connection status, token expiry, workspace info, expected webhook URL",
-        "tags": ["Trackers"],
+        "tags": [
+          "Trackers"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -3598,7 +4372,9 @@
     "/api/trackers/linear/webhook": {
       "post": {
         "summary": "Handle Linear webhook events (signature-verified)",
-        "tags": ["Trackers"],
+        "tags": [
+          "Trackers"
+        ],
         "responses": {
           "200": {
             "description": "Event accepted"
@@ -3615,7 +4391,9 @@
     "/api/github/webhook": {
       "post": {
         "summary": "Handle GitHub webhook events",
-        "tags": ["Webhooks"],
+        "tags": [
+          "Webhooks"
+        ],
         "responses": {
           "200": {
             "description": "Event processed"
@@ -3632,7 +4410,9 @@
     "/api/gitlab/webhook": {
       "post": {
         "summary": "Handle GitLab webhook events",
-        "tags": ["Webhooks"],
+        "tags": [
+          "Webhooks"
+        ],
         "responses": {
           "200": {
             "description": "Event processed"
@@ -3649,7 +4429,9 @@
     "/api/agentmail/webhook": {
       "post": {
         "summary": "Handle AgentMail webhook events",
-        "tags": ["Webhooks"],
+        "tags": [
+          "Webhooks"
+        ],
         "responses": {
           "200": {
             "description": "Event received"
@@ -3666,7 +4448,9 @@
     "/api/workflows": {
       "get": {
         "summary": "List all workflows",
-        "tags": ["Workflows"],
+        "tags": [
+          "Workflows"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -3680,7 +4464,9 @@
       },
       "post": {
         "summary": "Create a new workflow",
-        "tags": ["Workflows"],
+        "tags": [
+          "Workflows"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -3769,7 +4555,11 @@
                                     },
                                     "strategy": {
                                       "type": "string",
-                                      "enum": ["exponential", "static", "linear"],
+                                      "enum": [
+                                        "exponential",
+                                        "static",
+                                        "linear"
+                                      ],
                                       "default": "exponential"
                                     },
                                     "baseDelayMs": {
@@ -3785,7 +4575,9 @@
                                   }
                                 }
                               },
-                              "required": ["config"]
+                              "required": [
+                                "config"
+                              ]
                             },
                             "retry": {
                               "type": "object",
@@ -3797,7 +4589,11 @@
                                 },
                                 "strategy": {
                                   "type": "string",
-                                  "enum": ["exponential", "static", "linear"],
+                                  "enum": [
+                                    "exponential",
+                                    "static",
+                                    "linear"
+                                  ],
                                   "default": "exponential"
                                 },
                                 "baseDelayMs": {
@@ -3830,18 +4626,27 @@
                               "description": "JSON Schema to validate the executor's output (e.g. {taskId, taskOutput} for agent-task). Different from config.outputSchema which validates the agent's raw output."
                             }
                           },
-                          "required": ["id", "type", "config"]
+                          "required": [
+                            "id",
+                            "type",
+                            "config"
+                          ]
                         },
                         "minItems": 1
                       },
                       "onNodeFailure": {
                         "type": "string",
-                        "enum": ["fail", "continue"],
+                        "enum": [
+                          "fail",
+                          "continue"
+                        ],
                         "default": "fail",
                         "description": "Behavior when a node's task fails or is cancelled. 'fail' (default): mark the entire run as failed. 'continue': treat the failed node as completed with error output and proceed — downstream convergence nodes receive '[FAILED: reason]' and can handle partial results."
                       }
                     },
-                    "required": ["nodes"]
+                    "required": [
+                      "nodes"
+                    ]
                   },
                   "triggers": {
                     "type": "array",
@@ -3852,7 +4657,9 @@
                           "properties": {
                             "type": {
                               "type": "string",
-                              "enum": ["webhook"]
+                              "enum": [
+                                "webhook"
+                              ]
                             },
                             "hmacSecret": {
                               "type": "string"
@@ -3862,21 +4669,28 @@
                               "default": "X-Hub-Signature-256"
                             }
                           },
-                          "required": ["type"]
+                          "required": [
+                            "type"
+                          ]
                         },
                         {
                           "type": "object",
                           "properties": {
                             "type": {
                               "type": "string",
-                              "enum": ["schedule"]
+                              "enum": [
+                                "schedule"
+                              ]
                             },
                             "scheduleId": {
                               "type": "string",
                               "format": "uuid"
                             }
                           },
-                          "required": ["type", "scheduleId"]
+                          "required": [
+                            "type",
+                            "scheduleId"
+                          ]
                         }
                       ]
                     }
@@ -3929,7 +4743,10 @@
                     "minLength": 1
                   }
                 },
-                "required": ["name", "definition"]
+                "required": [
+                  "name",
+                  "definition"
+                ]
               }
             }
           }
@@ -3947,7 +4764,9 @@
     "/api/workflows/{id}": {
       "get": {
         "summary": "Get a workflow by ID",
-        "tags": ["Workflows"],
+        "tags": [
+          "Workflows"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -3974,7 +4793,9 @@
       },
       "put": {
         "summary": "Update a workflow",
-        "tags": ["Workflows"],
+        "tags": [
+          "Workflows"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -4072,7 +4893,11 @@
                                     },
                                     "strategy": {
                                       "type": "string",
-                                      "enum": ["exponential", "static", "linear"],
+                                      "enum": [
+                                        "exponential",
+                                        "static",
+                                        "linear"
+                                      ],
                                       "default": "exponential"
                                     },
                                     "baseDelayMs": {
@@ -4088,7 +4913,9 @@
                                   }
                                 }
                               },
-                              "required": ["config"]
+                              "required": [
+                                "config"
+                              ]
                             },
                             "retry": {
                               "type": "object",
@@ -4100,7 +4927,11 @@
                                 },
                                 "strategy": {
                                   "type": "string",
-                                  "enum": ["exponential", "static", "linear"],
+                                  "enum": [
+                                    "exponential",
+                                    "static",
+                                    "linear"
+                                  ],
                                   "default": "exponential"
                                 },
                                 "baseDelayMs": {
@@ -4133,18 +4964,27 @@
                               "description": "JSON Schema to validate the executor's output (e.g. {taskId, taskOutput} for agent-task). Different from config.outputSchema which validates the agent's raw output."
                             }
                           },
-                          "required": ["id", "type", "config"]
+                          "required": [
+                            "id",
+                            "type",
+                            "config"
+                          ]
                         },
                         "minItems": 1
                       },
                       "onNodeFailure": {
                         "type": "string",
-                        "enum": ["fail", "continue"],
+                        "enum": [
+                          "fail",
+                          "continue"
+                        ],
                         "default": "fail",
                         "description": "Behavior when a node's task fails or is cancelled. 'fail' (default): mark the entire run as failed. 'continue': treat the failed node as completed with error output and proceed — downstream convergence nodes receive '[FAILED: reason]' and can handle partial results."
                       }
                     },
-                    "required": ["nodes"]
+                    "required": [
+                      "nodes"
+                    ]
                   },
                   "triggers": {
                     "type": "array",
@@ -4155,7 +4995,9 @@
                           "properties": {
                             "type": {
                               "type": "string",
-                              "enum": ["webhook"]
+                              "enum": [
+                                "webhook"
+                              ]
                             },
                             "hmacSecret": {
                               "type": "string"
@@ -4165,27 +5007,37 @@
                               "default": "X-Hub-Signature-256"
                             }
                           },
-                          "required": ["type"]
+                          "required": [
+                            "type"
+                          ]
                         },
                         {
                           "type": "object",
                           "properties": {
                             "type": {
                               "type": "string",
-                              "enum": ["schedule"]
+                              "enum": [
+                                "schedule"
+                              ]
                             },
                             "scheduleId": {
                               "type": "string",
                               "format": "uuid"
                             }
                           },
-                          "required": ["type", "scheduleId"]
+                          "required": [
+                            "type",
+                            "scheduleId"
+                          ]
                         }
                       ]
                     }
                   },
                   "cooldown": {
-                    "type": ["object", "null"],
+                    "type": [
+                      "object",
+                      "null"
+                    ],
                     "properties": {
                       "hours": {
                         "type": "number",
@@ -4202,7 +5054,10 @@
                     }
                   },
                   "input": {
-                    "type": ["object", "null"],
+                    "type": [
+                      "object",
+                      "null"
+                    ],
                     "additionalProperties": {
                       "anyOf": [
                         {
@@ -4220,15 +5075,24 @@
                     }
                   },
                   "triggerSchema": {
-                    "type": ["object", "null"],
+                    "type": [
+                      "object",
+                      "null"
+                    ],
                     "additionalProperties": {}
                   },
                   "dir": {
-                    "type": ["string", "null"],
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "minLength": 1
                   },
                   "vcsRepo": {
-                    "type": ["string", "null"],
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "minLength": 1
                   },
                   "enabled": {
@@ -4253,7 +5117,9 @@
       },
       "delete": {
         "summary": "Delete a workflow",
-        "tags": ["Workflows"],
+        "tags": [
+          "Workflows"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -4282,7 +5148,9 @@
     "/api/workflows/{id}/trigger": {
       "post": {
         "summary": "Trigger a workflow execution",
-        "tags": ["Workflows"],
+        "tags": [
+          "Workflows"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -4317,7 +5185,9 @@
     "/api/workflows/{id}/runs": {
       "get": {
         "summary": "List runs for a workflow",
-        "tags": ["Workflows"],
+        "tags": [
+          "Workflows"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -4335,7 +5205,13 @@
           {
             "schema": {
               "type": "string",
-              "enum": ["running", "waiting", "completed", "failed", "skipped"]
+              "enum": [
+                "running",
+                "waiting",
+                "completed",
+                "failed",
+                "skipped"
+              ]
             },
             "required": false,
             "name": "status",
@@ -4352,7 +5228,9 @@
     "/api/workflow-runs/{id}": {
       "get": {
         "summary": "Get a workflow run with steps (includes retry columns)",
-        "tags": ["Workflows"],
+        "tags": [
+          "Workflows"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -4381,7 +5259,9 @@
     "/api/workflow-runs/{id}/retry": {
       "post": {
         "summary": "Retry a failed workflow run",
-        "tags": ["Workflows"],
+        "tags": [
+          "Workflows"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -4410,7 +5290,9 @@
     "/api/executor-types": {
       "get": {
         "summary": "List all executor types with their config and output schemas",
-        "tags": ["Workflows"],
+        "tags": [
+          "Workflows"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -4426,7 +5308,9 @@
     "/api/executor-types/{type}": {
       "get": {
         "summary": "Get a specific executor type with its schemas",
-        "tags": ["Workflows"],
+        "tags": [
+          "Workflows"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -4455,7 +5339,9 @@
     "/api/webhooks/{workflowId}": {
       "post": {
         "summary": "Trigger workflow via webhook",
-        "tags": ["Webhooks"],
+        "tags": [
+          "Webhooks"
+        ],
         "parameters": [
           {
             "schema": {
@@ -4482,7 +5368,9 @@
     "/api/workflows/{id}/versions": {
       "get": {
         "summary": "List version history for a workflow",
-        "tags": ["Workflows"],
+        "tags": [
+          "Workflows"
+        ],
         "security": [
           {
             "bearerAuth": []
@@ -4511,7 +5399,9 @@
     "/api/workflows/{id}/versions/{version}": {
       "get": {
         "summary": "Get a specific version snapshot of a workflow",
-        "tags": ["Workflows"],
+        "tags": [
+          "Workflows"
+        ],
         "security": [
           {
             "bearerAuth": []

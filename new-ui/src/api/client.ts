@@ -1,5 +1,6 @@
 import { getConfig } from "@/lib/config";
 import type {
+  AgentSkillsResponse,
   AgentsResponse,
   AgentWithTasks,
   ChannelMessage,
@@ -20,6 +21,8 @@ import type {
   SessionCostsResponse,
   SessionLog,
   SessionLogsResponse,
+  Skill,
+  SkillsResponse,
   Stats,
   SwarmConfig,
   SwarmConfigsResponse,
@@ -927,6 +930,134 @@ class ApiClient {
       const error = await res.json().catch(() => ({ error: "Failed to delete prompt template" }));
       throw new Error(error.error || `Failed to delete prompt template: ${res.status}`);
     }
+    return res.json();
+  }
+  // Skills
+  async fetchSkills(filters?: {
+    type?: string;
+    scope?: string;
+    agentId?: string;
+    enabled?: string;
+    search?: string;
+  }): Promise<SkillsResponse> {
+    const params = new URLSearchParams();
+    if (filters?.type) params.set("type", filters.type);
+    if (filters?.scope) params.set("scope", filters.scope);
+    if (filters?.agentId) params.set("agentId", filters.agentId);
+    if (filters?.enabled) params.set("enabled", filters.enabled);
+    if (filters?.search) params.set("search", filters.search);
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/skills${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch skills: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchSkill(id: string): Promise<Skill> {
+    const url = `${this.getBaseUrl()}/api/skills/${id}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch skill: ${res.status}`);
+    return res.json();
+  }
+
+  async createSkill(data: {
+    content: string;
+    type?: string;
+    scope?: string;
+    ownerAgentId?: string;
+  }): Promise<{ skill: Skill }> {
+    const url = `${this.getBaseUrl()}/api/skills`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to create skill" }));
+      throw new Error(error.error || `Failed to create skill: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async updateSkill(id: string, data: Record<string, unknown>): Promise<{ skill: Skill }> {
+    const url = `${this.getBaseUrl()}/api/skills/${id}`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to update skill" }));
+      throw new Error(error.error || `Failed to update skill: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async deleteSkill(id: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/skills/${id}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to delete skill: ${res.status}`);
+    return res.json();
+  }
+
+  async installSkill(skillId: string, agentId: string): Promise<unknown> {
+    const url = `${this.getBaseUrl()}/api/skills/${skillId}/install`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ agentId }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to install skill" }));
+      throw new Error(error.error || `Failed to install skill: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async uninstallSkill(skillId: string, agentId: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/skills/${skillId}/install/${agentId}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to uninstall skill: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchAgentSkills(agentId: string): Promise<AgentSkillsResponse> {
+    const url = `${this.getBaseUrl()}/api/agents/${agentId}/skills`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch agent skills: ${res.status}`);
+    return res.json();
+  }
+
+  async installRemoteSkill(data: {
+    sourceRepo: string;
+    sourcePath?: string;
+    scope?: string;
+    isComplex?: boolean;
+  }): Promise<{ skill: Skill }> {
+    const url = `${this.getBaseUrl()}/api/skills/install-remote`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to install remote skill" }));
+      throw new Error(error.error || `Failed to install remote skill: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async syncRemoteSkills(options?: {
+    skillId?: string;
+    force?: boolean;
+  }): Promise<{ updated: number; checked: number; errors: string[] }> {
+    const url = `${this.getBaseUrl()}/api/skills/sync-remote`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(options || {}),
+    });
+    if (!res.ok) throw new Error(`Failed to sync remote skills: ${res.status}`);
     return res.json();
   }
 }

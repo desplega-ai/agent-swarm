@@ -1,5 +1,5 @@
 {
-  "title": "API Reference v1.51.2",
+  "title": "API Reference v1.51.3",
   "description": "REST API reference for Agent Swarm",
   "root": true,
   "pages": [
@@ -17,6 +17,7 @@
     "repos",
     "schedules",
     "session-data",
+    "skills",
     "stats",
     "tasks",
     "trackers",

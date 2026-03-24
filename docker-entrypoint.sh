@@ -643,6 +643,47 @@ fi
 echo "==============================="
 echo ""
 
+# --- Skill sync ---
+echo "=== Skill Sync ==="
+if [ -n "$AGENT_ID" ] && [ -n "$API_KEY" ] && [ -n "$MCP_BASE_URL" ]; then
+    echo "[entrypoint] Syncing skills to filesystem..."
+    SKILLS_RESPONSE=$(curl -s -f -H "Authorization: Bearer ${API_KEY}" \
+        -H "X-Agent-ID: ${AGENT_ID}" \
+        "${MCP_BASE_URL}/api/agents/${AGENT_ID}/skills" 2>/dev/null) || true
+
+    if [ -n "$SKILLS_RESPONSE" ]; then
+        # Write simple skills to ~/.claude/skills/ and ~/.cursor/skills/
+        echo "$SKILLS_RESPONSE" | jq -r '.skills[] | select(.isComplex == false) | select(.content != "") | @base64' 2>/dev/null | while read -r skill_b64; do
+            SKILL_NAME=$(echo "$skill_b64" | base64 -d | jq -r '.name')
+            SKILL_CONTENT=$(echo "$skill_b64" | base64 -d | jq -r '.content')
+
+            if [ -n "$SKILL_NAME" ] && [ "$SKILL_NAME" != "null" ]; then
+                mkdir -p "$HOME/.claude/skills/$SKILL_NAME"
+                echo "$SKILL_CONTENT" > "$HOME/.claude/skills/$SKILL_NAME/SKILL.md"
+
+                mkdir -p "$HOME/.cursor/skills/$SKILL_NAME"
+                cp "$HOME/.claude/skills/$SKILL_NAME/SKILL.md" "$HOME/.cursor/skills/$SKILL_NAME/SKILL.md"
+                echo "[entrypoint] Synced skill: $SKILL_NAME"
+            fi
+        done
+
+        # Install complex remote skills via npx
+        echo "$SKILLS_RESPONSE" | jq -r '.skills[] | select(.isComplex == true) | .sourceRepo // empty' 2>/dev/null | while read -r repo; do
+            if [ -n "$repo" ]; then
+                npx skills add "$repo" -a claude-code -a cursor -g -y 2>&1 || echo "[entrypoint] Warning: failed to install complex skill from $repo"
+            fi
+        done
+
+        echo "[entrypoint] Skill sync complete"
+    else
+        echo "[entrypoint] No skills response from API (server may still be booting)"
+    fi
+else
+    echo "[entrypoint] Skipping skill sync (missing AGENT_ID, API_KEY, or MCP_BASE_URL)"
+fi
+
+echo ""
+
 # Run the agent using compiled binary
 echo "Starting $ROLE..."
 exec gosu worker /usr/local/bin/agent-swarm "$ROLE" "$@"
