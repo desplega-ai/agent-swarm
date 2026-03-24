@@ -46,8 +46,13 @@ export const metadata: Metadata = {
     images: ["https://agent-swarm.dev/og-image.png"],
   },
   metadataBase: new URL("https://agent-swarm.dev"),
-  alternates: {
-    canonical: "/",
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+    },
   },
 };
 
