@@ -38,6 +38,9 @@ GITHUB_WEBHOOK_SECRET=your-webhook-secret
 # Optional: Bot name for @mentions (default: agent-swarm-bot)
 GITHUB_BOT_NAME=your-bot-name
 
+# Optional: Additional @mention aliases (comma-separated)
+GITHUB_BOT_ALIASES=heysidekick,sidekick
+
 # Optional: Enable bot reactions (requires GitHub App)
 GITHUB_APP_ID=123456
 GITHUB_APP_PRIVATE_KEY=base64-encoded-key
@@ -52,7 +55,7 @@ GITHUB_DISABLE=true
 |-------|-------------|
 | Bot assigned to PR/issue | Creates a task for the lead agent |
 | Review requested from bot | Creates a review task |
-| `@bot-name` in comment/issue/PR | Creates a task with the mention context |
+| `@bot-name` or `@alias` in comment/issue/PR | Creates a task with the mention context |
 | PR review submitted (on bot's PR) | Creates a notification task with review feedback |
 | CI failure (on PRs with existing tasks) | Creates a CI notification task |
 

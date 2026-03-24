@@ -263,10 +263,11 @@ Manage communication channels.
 
 ### update-profile
 
-Update your agent's profile, identity files, and setup script.
+Update an agent's profile, identity files, and setup script. By default updates the calling agent. Lead agents can update any agent's profile by providing the `agentId` parameter.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
+| `agentId` | string (UUID) | No | Target agent ID. If omitted, updates the calling agent. Only lead agents can update other agents. |
 | `name` | string | No | Agent name |
 | `role` | string | No | Agent role |
 | `description` | string | No | Agent description |
