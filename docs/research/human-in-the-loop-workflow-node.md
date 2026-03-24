@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-24
 **Author:** Researcher (agent-swarm)
-**Status:** Research / Design Proposal (Updated with Taras's review feedback)
+**Status:** Research / Design Proposal (Updated with Taras's review feedback + Reviewer's gap analysis)
 
 ---
 
@@ -27,7 +27,7 @@ Taras wants a new workflow node type that **pauses execution and waits for human
 After researching 7 major workflow systems and analyzing our existing engine architecture, I propose a **generic approval/request system** that serves dual purposes:
 
 1. **As a workflow executor** (`human-in-the-loop` node type) — pauses a workflow run and resumes on approval
-2. **As an agent tool** — any agent can send a question/request to a user, creating a follow-up task linked to the parent
+2. **As an agent tool** — any agent can send a question/request to a user via an MCP tool that calls the HTTP API (never direct DB access from worker code)
 
 The system:
 
@@ -37,8 +37,9 @@ The system:
 - Each request contains a **`questions` JSONB array** — extending the `AskUserQuestion` tool format to support multiple questions per request
 - Handles **timeouts** by treating them as **rejected** (no escalation chains in v1)
 - Supports **N-of-M approver policies**
-- Uses a new generic **`approval_requests`** table for state tracking
+- Uses a new generic **`approval_requests`** table for state tracking (migration `019_approval_requests.sql`)
 - Provides a **read-only history UI** to view all past/resolved requests
+- Includes **recovery handling** for approval requests that expire or resolve during server downtime
 
 ---
 
@@ -194,8 +195,9 @@ Our engine executes **DAG-based workflows** with parallel batch execution and co
 - **Port-based routing**: Executors return a `nextPort` string; the `next` field on nodes maps ports to successor node IDs (e.g., `{ "true": "nodeA", "false": "nodeB" }`)
 - **Convergence gating**: A node only executes when ALL its active-edge predecessors are complete
 - **State persistence**: All state in SQLite — `workflow_runs` (run-level), `workflow_run_steps` (step-level), context accumulation via checkpointing
-- **Event bus**: Internal `EventEmitter` for `task.completed`, `task.failed`, `task.cancelled`, `slack.message`
+- **Event bus**: Internal `EventEmitter` (`src/workflows/event-bus.ts`) — see section 3.3 for complete event list
 - **Existing notify executor**: Already supports `swarm`, `slack`, and `email` (stub) channels
+- **Recovery**: `src/workflows/recovery.ts` handles incomplete runs on server restart — currently recovers `running` runs (re-walks graph) and `waiting` runs (checks if the linked task completed/failed/cancelled during downtime)
 
 ### 3.2 What We Can Reuse
 
@@ -210,17 +212,100 @@ Additionally:
 
 - **Port-based routing** → `approved` / `rejected` / `timeout` output ports
 - **Notify executor** → reuse for sending notifications on Slack/email alongside the primary web UI
-- **Context system** → approval responses flow into workflow context for downstream nodes
-- **Event bus** → add `approval.resolved` event alongside existing task events
+- **Context system** → approval responses flow into workflow context for downstream nodes (via `inputs` mapping — see section 4.7)
+- **Event bus** → add `approval.resolved` event alongside existing events
+- **Recovery** → extend `recovery.ts` to handle approval-waiting runs (see section 3.5)
 
-### 3.3 What's New
+### 3.3 Event Bus: Complete Event List
+
+The workflow event bus (`src/workflows/event-bus.ts`) is an internal `EventEmitter` singleton. The complete list of events currently emitted:
+
+**Task events** (from `src/be/db.ts`):
+| Event | Description |
+|-------|-------------|
+| `task.created` | New task inserted into the DB |
+| `task.completed` | Task marked as completed (with output) |
+| `task.failed` | Task marked as failed (with failure reason) |
+| `task.cancelled` | Task cancelled |
+| `task.progress` | Task progress update stored |
+
+**GitHub webhook events** (from `src/http/webhooks.ts`):
+| Event | Description |
+|-------|-------------|
+| `github.pull_request.{action}` | PR opened, closed, merged, etc. |
+| `github.issue.{action}` | Issue opened, closed, etc. |
+| `github.issue_comment.created` | Comment added to issue/PR |
+| `github.pull_request_review.submitted` | PR review submitted |
+
+**GitLab webhook events** (from `src/http/webhooks.ts`):
+| Event | Description |
+|-------|-------------|
+| `gitlab.merge_request.{action}` | MR opened, merged, etc. |
+| `gitlab.issue.{action}` | Issue opened, closed, etc. |
+| `gitlab.note.created` | Note (comment) created |
+| `gitlab.pipeline.{status}` | Pipeline status change |
+
+**AgentMail events** (from `src/agentmail/handlers.ts`):
+| Event | Description |
+|-------|-------------|
+| `agentmail.message.received` | Inbound email received |
+
+**Slack events** (from `src/slack/handlers.ts`):
+| Event | Description |
+|-------|-------------|
+| `slack.message` | Message received in a monitored channel |
+
+**New event to add for HITL:**
+| Event | Description |
+|-------|-------------|
+| `approval.resolved` | Approval request resolved (approved/rejected/timeout) |
+
+### 3.4 What's New
 
 - New **`human-in-the-loop` executor type** registered in the executor registry
-- New **`approval_requests` table** for tracking requests and responses
+- New **`approval_requests` table** (migration `019_approval_requests.sql`)
 - New **web UI pages**: `APP_URL/requests/<id>` (respond) and `APP_URL/requests` (history)
-- New **API endpoints** for resolving approval requests
+- New **API endpoints** using the `route()` factory from `src/http/route-def.ts` (see section 8.1)
 - New **resume handler** for `approval.resolved` events
-- **Dual-purpose system**: works as workflow executor AND as a standalone agent tool
+- New **recovery handler** for approval-waiting runs in `recovery.ts`
+- **Dual-purpose system**: works as workflow executor AND as a standalone agent MCP tool (following the MCP tool → HTTP API → DB boundary)
+
+### 3.5 Recovery Handling for Approval-Waiting Runs
+
+**Current state:** `recovery.ts` handles two categories of incomplete workflow runs on server restart:
+1. **`running` runs** — re-walks the graph to continue execution
+2. **`waiting` runs** — checks if the linked *task* completed/failed/cancelled during downtime
+
+**Gap:** Currently, recovery only handles task-based waiting runs (correlation via `task.id`). It does not handle approval-based waiting runs.
+
+**Required addition (Phase 1):** Extend `recoverIncompleteRuns()` in `recovery.ts` to also recover approval-waiting runs:
+
+```typescript
+// New: recover approval-waiting runs
+async function recoverApprovalWaitingRuns(): Promise<number> {
+  // Query workflow_run_steps with status "waiting" where the
+  // correlationId maps to an approval_request (not a task)
+  // For each:
+  //   1. Check approval_requests table for current status
+  //   2. If status is "approved" or "rejected":
+  //      - Checkpoint step with response data
+  //      - Set run back to "running"
+  //      - Find successors and walkGraph()
+  //   3. If status is "timeout" (expired while server was down):
+  //      - Check if expires_at < now
+  //      - Auto-reject the request
+  //      - Checkpoint step with timeout response
+  //      - Set run back to "running" and continue via "timeout" port
+  //   4. If status is still "pending" but expires_at < now:
+  //      - Resolve as timeout/rejected
+  //      - Continue workflow via "timeout" port
+  //   5. If status is still "pending" and not expired:
+  //      - Leave as-is (still waiting for human input)
+  //      - The normal event-driven resume path will handle it
+}
+```
+
+**Integration point:** Call `recoverApprovalWaitingRuns()` from `recoverIncompleteRuns()` alongside the existing task-based recovery. The existing pattern of `getStuckWorkflowRuns()` should be extended (or a parallel query added) to also find approval-waiting steps by checking if the `correlationId` exists in the `approval_requests` table.
 
 ---
 
@@ -256,7 +341,7 @@ notifications?: NotificationConfig[];
 }
 
 // Question types
-type Question = 
+type Question =
 | ApprovalQuestion     // yes/no approval
 | TextQuestion         // free-text input
 | SingleSelectQuestion // pick one from options
@@ -458,10 +543,51 @@ The `responses` field stores the answers keyed by question ID:
 The executor determines the output port based on the responses:
 
 1. If any `type: "approval"` question has `approved: false` → port `"rejected"`
-2. If timeout occurs → port `"timeout"` 
+2. If timeout occurs → port `"timeout"`
 3. Otherwise → port `"approved"`
 
 The full response object is merged into the workflow context under `steps.<nodeId>.responses` for downstream nodes to consume.
+
+### 4.7 Downstream Node `inputs` Mapping
+
+Per the workflow authoring guide in CLAUDE.md, **upstream step outputs are NOT available for interpolation by default**. Only `trigger` (trigger data) and `input` (workflow-level resolved inputs) are in scope. To access the HITL node's response data, downstream nodes **MUST declare an `inputs` mapping**.
+
+**Example: Downstream node accessing HITL responses**
+
+```json
+{
+  "nodes": [
+    {
+      "id": "review-pr-approval",
+      "type": "human-in-the-loop",
+      "config": {
+        "title": "Review PR #{{trigger.pr_number}}",
+        "questions": [
+          { "id": "approval", "type": "approval", "label": "Approve merge?" },
+          { "id": "merge_strategy", "type": "single-select", "label": "Merge method?", "options": [...] }
+        ],
+        "approvers": { "policy": "any" },
+        "timeout": { "seconds": 86400, "action": "reject" }
+      },
+      "next": { "approved": "merge-pr", "rejected": "notify-rejection", "timeout": "notify-timeout" }
+    },
+    {
+      "id": "merge-pr",
+      "type": "agent-task",
+      "inputs": { "review": "review-pr-approval" },
+      "config": {
+        "template": "Merge the PR using {{review.responses.merge_strategy.value}} strategy. Reviewer comment: {{review.responses.comments.value}}"
+      }
+    }
+  ]
+}
+```
+
+**Key points:**
+- The `inputs` key `"review"` is a local name — it maps to the HITL node ID `"review-pr-approval"`
+- HITL node output shape: `{ requestId: string, status: string, responses: { ... } }`
+- Access response fields via `review.responses.<questionId>.<field>`
+- Without the `inputs` mapping, templates referencing the HITL node will silently resolve to empty strings (check `diagnostics.unresolvedTokens` on the step)
 
 ---
 
@@ -488,6 +614,8 @@ A Slack message is sent with a summary of the request and a **link to the web UI
 
 For multi-question requests, Slack shows a preview of the questions and a "Respond in UI →" button linking to `APP_URL/requests/<id>`.
 
+**Slack action handlers** for inline approval buttons should be registered in `src/slack/actions.ts` (not `app.ts` directly), following the existing pattern where `actions.ts` handles Slack interactive component callbacks.
+
 **Slack message updates:** After resolution, the original Slack message is updated with the outcome — but **only in threads** (no random channel messages, per Taras's feedback).
 
 **Auth:** Slack presence (being in the channel/DM).
@@ -504,10 +632,13 @@ Email notification with a link to the web UI. Simple approval-only requests coul
 
 ## 6. Database Schema Changes
 
-### 6.1 `approval_requests` Table
+### 6.1 Migration: `019_approval_requests.sql`
+
+The next migration number is `019` (current highest is `018_fix_seed_double_version.sql`).
 
 ```sql
-CREATE TABLE approval_requests (
+-- 019_approval_requests.sql
+CREATE TABLE IF NOT EXISTS approval_requests (
 id TEXT PRIMARY KEY,                    -- UUID
 
 -- Generic fields (always present)
@@ -541,10 +672,12 @@ updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- For the history UI
-CREATE INDEX idx_approval_requests_status ON approval_requests(status);
-CREATE INDEX idx_approval_requests_created ON approval_requests(created_at DESC);
-CREATE INDEX idx_approval_requests_workflow ON approval_requests(workflow_run_id);
-CREATE INDEX idx_approval_requests_task ON approval_requests(source_task_id);
+CREATE INDEX IF NOT EXISTS idx_approval_requests_status ON approval_requests(status);
+CREATE INDEX IF NOT EXISTS idx_approval_requests_created ON approval_requests(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_approval_requests_workflow ON approval_requests(workflow_run_id);
+CREATE INDEX IF NOT EXISTS idx_approval_requests_task ON approval_requests(source_task_id);
+-- For recovery: find pending requests that may have expired during downtime
+CREATE INDEX IF NOT EXISTS idx_approval_requests_expires ON approval_requests(expires_at) WHERE status = 'pending';
 ```
 
 **Key design decisions:**
@@ -554,6 +687,7 @@ CREATE INDEX idx_approval_requests_task ON approval_requests(source_task_id);
 - **On timeout → treated as rejected** (no escalation in v1)
 - **No delegation** (removed from v1 scope)
 - **No revocation** (removed from v1 scope)
+- **Recovery index** on `expires_at` for efficient expired-request lookups during server restart
 
 ### 6.2 Dual-Purpose Behavior
 
@@ -563,6 +697,22 @@ When an approval request is resolved:
 |--------|----------|
 | **Workflow run** (`workflow_run_id` set) | Emit `approval.resolved` event → `resume.ts` picks it up → workflow continues via the appropriate port |
 | **Agent tool** (`source_task_id` set) | Create a follow-up task with the response data, linked to `source_task_id` as parent. The agent picks up the response in the next task. |
+
+### 6.3 Worker/API Boundary for Agent Tool Usage
+
+**Architecture invariant:** Workers have NO local database access. The agent tool for creating HITL approval requests must follow the established MCP tool → HTTP API → DB path:
+
+```
+Agent (worker container)
+  → MCP tool: "request-human-input"
+    → HTTP POST /api/approval-requests (with API_KEY + X-Agent-ID headers)
+      → API server creates record in approval_requests table
+        → Returns request ID + web UI URL to agent
+```
+
+The MCP tool definition lives in `src/tools/` and calls the HTTP API. The HTTP endpoint (defined using `route()` factory) handles DB operations. Workers **never** import from `src/be/db` or `bun:sqlite` — this is enforced by `scripts/check-db-boundary.sh` (pre-push hook + CI merge gate).
+
+This is the same pattern used by all other worker-facing MCP tools (e.g., `store-progress`, `send-task`, etc.).
 
 ---
 
@@ -594,18 +744,87 @@ Each approval request ID serves as a bearer token for that specific request. The
 
 ### 8.1 Phase 1 — Core (MVP)
 
-1. **DB migration**: Create `approval_requests` table with JSONB questions/responses
+1. **DB migration**: Create `019_approval_requests.sql` with the schema from section 6.1 (includes recovery index on `expires_at`)
+
 2. **Executor**: `human-in-the-loop` executor that creates a request and returns async
-3. **Resume handler**: Listen for `approval.resolved`, resume workflow with response data
-4. **API endpoints**: `POST /api/requests/:id/respond` — validate and store response
-5. **Web UI**: `APP_URL/requests/:id` — render questions dynamically, submit responses
-6. **Slack notification**: Post message with link to web UI (inline buttons for approval-only)
+
+3. **Resume handler**: Listen for `approval.resolved` in `resume.ts`, resume workflow with response data and route to appropriate port
+
+4. **Recovery handler** (BLOCKING): Extend `recovery.ts` `recoverIncompleteRuns()` to handle approval-waiting runs (see section 3.5). Must handle:
+   - Requests resolved during downtime → checkpoint and resume
+   - Requests expired during downtime → auto-reject and resume via "timeout" port
+   - Requests still pending and not expired → leave as-is
+
+5. **API endpoints** — all using `route()` factory from `src/http/route-def.ts`:
+   ```typescript
+   // src/http/approval-requests.ts
+
+   // Create a new approval request (used by both executor and MCP tool)
+   const createApprovalRoute = route({
+     method: "post",
+     path: "/api/approval-requests",
+     pattern: ["api", "approval-requests"],
+     summary: "Create a new approval request",
+     tags: ["ApprovalRequests"],
+     body: z.object({ title: z.string(), questions: z.array(...), ... }),
+     responses: { 201: { description: "Request created" }, 400: { description: "Validation error" } },
+     auth: { apiKey: true },
+   });
+
+   // Get approval request details
+   const getApprovalRoute = route({
+     method: "get",
+     path: "/api/approval-requests/{id}",
+     pattern: ["api", "approval-requests", null],
+     summary: "Get approval request details",
+     tags: ["ApprovalRequests"],
+     params: z.object({ id: z.string().uuid() }),
+     responses: { 200: { description: "Request details" }, 404: { description: "Not found" } },
+     auth: { apiKey: true },
+   });
+
+   // Respond to an approval request
+   const respondApprovalRoute = route({
+     method: "post",
+     path: "/api/approval-requests/{id}/respond",
+     pattern: ["api", "approval-requests", null, "respond"],
+     summary: "Submit a response to an approval request",
+     tags: ["ApprovalRequests"],
+     params: z.object({ id: z.string().uuid() }),
+     body: z.object({ responses: z.record(z.unknown()), respondedBy: z.string().optional() }),
+     responses: { 200: { description: "Response recorded" }, 400: { description: "Validation error" }, 404: { description: "Not found" }, 409: { description: "Already resolved" } },
+     auth: { apiKey: true },
+   });
+
+   // List approval requests (for history UI)
+   const listApprovalsRoute = route({
+     method: "get",
+     path: "/api/approval-requests",
+     pattern: ["api", "approval-requests"],
+     summary: "List approval requests with filters",
+     tags: ["ApprovalRequests"],
+     query: z.object({ status: z.string().optional(), workflowRunId: z.string().optional(), limit: z.coerce.number().optional() }),
+     responses: { 200: { description: "List of approval requests" } },
+     auth: { apiKey: true },
+   });
+   ```
+
+   After creating the handler file:
+   - Import and add to handler chain in `src/http/index.ts`
+   - Add the import to `scripts/generate-openapi.ts`
+   - Run `bun run docs:openapi` to regenerate `openapi.json`
+
+6. **MCP tool**: `request-human-input` tool in `src/tools/` — calls the HTTP API endpoints above (respects worker/API boundary). Worker code never touches `src/be/db`.
+
+7. **Web UI**: `APP_URL/requests/:id` — render questions dynamically, submit responses
+
+8. **Slack notification**: Post message with link to web UI (inline buttons for approval-only). Slack action handlers for inline approval buttons registered in `src/slack/actions.ts`.
 
 ### 8.2 Phase 2 — Polish
 
 1. **History UI**: `APP_URL/requests` — read-only list of all past requests
 2. **Slack thread updates**: Update original Slack message with outcome (threads only)
-3. **Agent tool integration**: Allow agents to create approval requests via MCP tool
+3. **Agent tool integration**: Allow agents to create approval requests via MCP tool (uses HTTP API, not direct DB)
 4. **Timeout worker**: Background job that checks `expires_at` and auto-rejects expired requests
 5. **N-of-M approval**: Track multiple responders, resolve when policy is met
 
@@ -632,3 +851,18 @@ All open questions from the initial draft have been resolved per Taras's review:
 | Multi-question support? | **Yes** — `questions` JSONB array replaces single `question TEXT` |
 | Multi-select support? | **Yes** — `multi-select` question type with options and min/max constraints |
 
+---
+
+## Appendix: Review Gap Tracking
+
+This document has been updated to address all gaps identified by the Reviewer agent:
+
+| # | Gap | Status | Section |
+|---|-----|--------|---------|
+| 1 | Recovery handling for approval-waiting runs (BLOCKING) | **Addressed** | §3.2, §3.5, §8.1 item 4 |
+| 2 | `route()` factory required for API endpoints (BLOCKING) | **Addressed** | §3.4, §8.1 item 5 |
+| 3 | Migration numbering (`019`) | **Addressed** | §1, §6.1 |
+| 4 | Slack action handlers in `src/slack/actions.ts` | **Addressed** | §5.2, §8.1 item 8 |
+| 5 | Downstream nodes need `inputs` mapping | **Addressed** | §4.7 (new section) |
+| 6 | Worker/API boundary for agent tool | **Addressed** | §1, §3.4, §6.3 (new section), §8.1 items 5-6 |
+| 7 | Event bus event list incomplete | **Addressed** | §3.3 (new section with complete list) |
