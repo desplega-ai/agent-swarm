@@ -115,6 +115,9 @@ export const DEFERRED_TOOLS = new Set([
   // Debug (1)
   "db-query",
 
+  // Approval Requests (1)
+  "request-human-input",
+
   // Other (3)
   "cancel-task",
   "inject-learning",

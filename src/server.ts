@@ -43,6 +43,7 @@ import { registerReadMessagesTool } from "./tools/read-messages";
 import { registerRegisterAgentMailInboxTool } from "./tools/register-agentmail-inbox";
 // Services capability
 import { registerRegisterServiceTool } from "./tools/register-service";
+import { registerRequestHumanInputTool } from "./tools/request-human-input";
 // Scheduling capability
 import {
   registerCreateScheduleTool,
@@ -241,6 +242,7 @@ export function createServer() {
     registerListWorkflowRunsTool(server);
     registerGetWorkflowRunTool(server);
     registerRetryWorkflowRunTool(server);
+    registerRequestHumanInputTool(server);
   }
 
   return server;
