@@ -19,7 +19,7 @@ env:
 
 jobs:
   detect-version-change:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     outputs:
       version_changed: ${{ steps.check.outputs.version_changed }}
       version: ${{ steps.check.outputs.version }}
@@ -45,7 +45,7 @@ jobs:
           fi
 
   build-and-push-server:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: [detect-version-change]
     permissions:
       contents: read
@@ -130,7 +130,7 @@ jobs:
 
   deploy:
     name: Deploy
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
 
     needs:
       - build-and-push-server
@@ -152,7 +152,7 @@ jobs:
           wait_for_completion: true
 
   create-git-tag:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: [detect-version-change]
     if: needs.detect-version-change.outputs.version_changed == 'true'
     permissions:
@@ -175,7 +175,7 @@ jobs:
           fi
 
   publish-npm:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: [detect-version-change]
     if: needs.detect-version-change.outputs.version_changed == 'true'
     permissions:
