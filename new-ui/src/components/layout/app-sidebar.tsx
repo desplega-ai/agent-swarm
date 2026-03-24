@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  BookOpen,
   Bug,
   Clock,
   FileText,
@@ -38,6 +39,7 @@ const navGroups = [
       { title: "Agents", path: "/agents", icon: Users },
       { title: "Tasks", path: "/tasks", icon: ListTodo },
       { title: "Epics", path: "/epics", icon: Milestone },
+      { title: "Skills", path: "/skills", icon: BookOpen },
     ],
   },
   {

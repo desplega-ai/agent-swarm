@@ -593,6 +593,53 @@ export interface RenderResponse {
   scope?: string;
 }
 
+// Skills
+export type SkillType = "remote" | "personal";
+export type SkillScope = "global" | "swarm" | "agent";
+
+export interface Skill {
+  id: string;
+  name: string;
+  description: string;
+  content: string;
+  type: SkillType;
+  scope: SkillScope;
+  ownerAgentId: string | null;
+  sourceUrl: string | null;
+  sourceRepo: string | null;
+  sourcePath: string | null;
+  sourceBranch: string;
+  sourceHash: string | null;
+  isComplex: boolean;
+  allowedTools: string | null;
+  model: string | null;
+  effort: string | null;
+  context: string | null;
+  agent: string | null;
+  disableModelInvocation: boolean;
+  userInvocable: boolean;
+  version: number;
+  isEnabled: boolean;
+  createdAt: string;
+  lastUpdatedAt: string;
+  lastFetchedAt: string | null;
+}
+
+export interface AgentSkill extends Skill {
+  isActive: boolean;
+  installedAt: string;
+}
+
+export interface SkillsResponse {
+  skills: Skill[];
+  total: number;
+}
+
+export interface AgentSkillsResponse {
+  skills: AgentSkill[];
+  total: number;
+}
+
 // Debug / DB Explorer
 export interface DbQueryRequest {
   sql: string;

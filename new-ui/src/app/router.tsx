@@ -24,6 +24,8 @@ const TemplateDetailPage = lazy(() => import("@/pages/templates/[id]/page"));
 const TemplateVersionDetailPage = lazy(
   () => import("@/pages/templates/[id]/history/[version]/page"),
 );
+const SkillsPage = lazy(() => import("@/pages/skills/page"));
+const SkillDetailPage = lazy(() => import("@/pages/skills/[id]/page"));
 const DebugPage = lazy(() => import("@/pages/debug/page"));
 const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
 
@@ -52,6 +54,8 @@ export const router = createBrowserRouter([
       { path: "templates", element: <TemplatesPage /> },
       { path: "templates/:id", element: <TemplateDetailPage /> },
       { path: "templates/:id/history/:version", element: <TemplateVersionDetailPage /> },
+      { path: "skills", element: <SkillsPage /> },
+      { path: "skills/:id", element: <SkillDetailPage /> },
       { path: "repos", element: <ReposPage /> },
       { path: "debug", element: <DebugPage /> },
       { path: "*", element: <NotFoundPage /> },

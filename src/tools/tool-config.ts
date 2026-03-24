@@ -115,6 +115,19 @@ export const DEFERRED_TOOLS = new Set([
   // Debug (1)
   "db-query",
 
+  // Skills (11)
+  "skill-create",
+  "skill-update",
+  "skill-delete",
+  "skill-get",
+  "skill-list",
+  "skill-search",
+  "skill-install",
+  "skill-uninstall",
+  "skill-install-remote",
+  "skill-sync-remote",
+  "skill-publish",
+
   // Other (3)
   "cancel-task",
   "inject-learning",

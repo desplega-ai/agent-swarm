@@ -338,8 +338,9 @@ describe("Tool Annotations & Classification", () => {
   test("registered tool count matches expected total", () => {
     const count = Object.keys(tools).length;
     // We expect all tools to be registered when all capabilities are enabled (default)
+    // Includes 11 skill tools added in the skill system feature
     expect(count).toBeGreaterThanOrEqual(45);
-    expect(count).toBeLessThanOrEqual(70);
+    expect(count).toBeLessThanOrEqual(85);
   });
 
   test("core tools are fewer than deferred tools", () => {

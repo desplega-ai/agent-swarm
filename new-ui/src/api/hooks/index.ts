@@ -52,6 +52,19 @@ export {
 } from "./use-schedules";
 export type { ServiceFilters } from "./use-services";
 export { useServices } from "./use-services";
+export type { SkillFilters } from "./use-skills";
+export {
+  useAgentSkills,
+  useCreateSkill,
+  useDeleteSkill,
+  useInstallRemoteSkill,
+  useInstallSkill,
+  useSkill,
+  useSkills,
+  useSyncRemoteSkills,
+  useUninstallSkill,
+  useUpdateSkill,
+} from "./use-skills";
 export { useHealth, useLogs, useStats } from "./use-stats";
 export type { TaskFilters } from "./use-tasks";
 export {
