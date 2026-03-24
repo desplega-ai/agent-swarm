@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-24
 **Status:** Plan (not yet implemented)
-**Based on:** Skill System v2 Research (DB-Based Design), approved by Taras
+**Based on:** Skill System v3 Research (DB-Based Design), approved by Taras
 **Tag:** `autopilot-plan`
 
 ---
@@ -110,7 +110,7 @@ Add the following query functions:
 | `searchSkills` | `(query: string) => Skill[]` | FTS or LIKE search on name + description |
 | `installSkill` | `(agentId: string, skillId: string) => AgentSkill` | Add to agent_skills junction |
 | `uninstallSkill` | `(agentId: string, skillId: string) => void` | Remove from agent_skills |
-| `getAgentSkills` | `(agentId: string, activeOnly?: boolean) => SkillWithInstallInfo[]` | Get all skills for an agent (joins skills + agent_skills) |
+| `getAgentSkills` | `(agentId: string, activeOnly?: boolean) => SkillWithInstallInfo[]` | Get all skills for an agent (joins skills + agent_skills), **ordered by precedence** (personal first) with deduplication by name |
 | `toggleAgentSkill` | `(agentId: string, skillId: string, isActive: boolean) => void` | Toggle skill active/inactive for agent |
 
 ### Types (`src/types.ts` additions)
@@ -316,6 +316,7 @@ params: {
 - For complex skills: stores metadata only (sourceRepo, sourcePath, isComplex=true), content empty
 - Sets `type: "remote"`, `sourceUrl`, `sourceHash` from GitHub tree SHA
 - Uses `gh api` or raw fetch to retrieve content
+- **Permissions:** Only lead agents or `skill-install-remote` MCP tool callers can create global-scope skills. Swarm-scope skills require lead approval (same as `skill-publish`)
 
 #### `skill-sync-remote`
 
@@ -360,6 +361,7 @@ params: {
 | `DELETE` | `/api/skills/:id/install/:agentId` | Uninstall skill for an agent |
 | `POST` | `/api/skills/install-remote` | Install a remote skill from GitHub |
 | `POST` | `/api/skills/sync-remote` | Trigger remote skill sync |
+| `POST` | `/api/skills/sync-filesystem` | Sync installed skills to agent's filesystem (called by runner.ts via HTTP) |
 | `GET` | `/api/agents/:id/skills` | Get all skills installed for an agent |
 
 All endpoints use `route()` factory from `src/http/route-def.ts` and are registered in `src/http/index.ts`.
@@ -393,20 +395,47 @@ export async function syncSkillsToFilesystem(
 2. If cursor: also add `-a cursor`
 3. `npx skills` handles the full directory structure
 
-### Name Conflict Resolution
+### Name Conflict Resolution & Precedence
 
 When an agent has both a personal skill and a remote skill with the same name:
 - **Personal wins** (per Taras's decision #1)
 - The filesystem gets the personal skill's content
 - The remote skill still exists in DB but is shadowed for that agent
 
-Implementation: `getAgentSkills` returns skills ordered by precedence (personal first). The sync function writes the first match per name and skips duplicates.
+**SQL ordering in `getAgentSkills`:** The query uses precedence ordering to ensure personal skills come first:
+
+```sql
+SELECT s.*, as2.isActive, as2.installedAt
+FROM skills s
+JOIN agent_skills as2 ON s.id = as2.skillId
+WHERE as2.agentId = ?
+  AND (? IS NULL OR as2.isActive = ?)
+  AND s.isEnabled = 1
+ORDER BY
+  CASE WHEN s.type = 'personal' THEN 0 ELSE 1 END,
+  s.name
+```
+
+**Deduplication in application layer:** After the query, `getAgentSkills` deduplicates by name — keeping only the first occurrence (highest precedence). This means callers always get at most one skill per name:
+
+```typescript
+function deduplicateByName(skills: SkillWithInstallInfo[]): SkillWithInstallInfo[] {
+  const seen = new Set<string>();
+  return skills.filter(s => {
+    if (seen.has(s.name)) return false;
+    seen.add(s.name);
+    return true;
+  });
+}
+```
+
+**Filesystem sync deduplication:** The sync function iterates the already-deduplicated list, so it writes only the highest-precedence skill per name to `~/.claude/skills/<name>/SKILL.md`. No filesystem-level dedup is needed.
 
 ### Integration Points
 
 #### Docker Entrypoint (`docker-entrypoint.sh`)
 
-Add a skill sync step after agent registration, before starting the runner:
+Add a skill sync step after agent registration and repo clone (~line 389 in current entrypoint), before startup scripts (~line 392) and before starting the runner:
 
 ```bash
 # --- Skill sync ---
@@ -440,14 +469,17 @@ echo "[entrypoint] Skill sync complete"
 
 #### Runner (`src/commands/runner.ts`)
 
-Re-sync skills before each new session (in case skills were added/removed via MCP tools while the agent was running):
+Re-sync skills before each new session (in case skills were added/removed via MCP tools while the agent was running). **This runs in worker context, so it must use an HTTP call** (not a direct import from `src/be/`) to respect the Worker/API DB boundary:
 
 ```typescript
-// Before starting a new Claude session
-await syncSkillsToFilesystem(agentId, "both");
+// Before starting a new Claude session — uses existing mcpBaseUrl + apiKey pattern from runner.ts
+await fetch(`${mcpBaseUrl}/api/skills/sync-filesystem`, {
+  method: "POST",
+  headers: { "Authorization": `Bearer ${apiKey}`, "X-Agent-ID": agentId }
+});
 ```
 
-This is a lightweight operation — it only writes files, no network calls for simple skills.
+The API endpoint handles the actual filesystem sync server-side and returns the result.
 
 ---
 
@@ -460,9 +492,12 @@ This is a lightweight operation — it only writes files, no network calls for s
 Add a skill section to the system prompt that lists installed skills with name + description only (~100 tokens per skill):
 
 ```typescript
-// In the prompt building function
-async function buildSkillSection(agentId: string): Promise<string> {
-  const skills = await fetchAgentSkills(agentId); // HTTP call to API
+// In the prompt building function — follows existing mcpBaseUrl + apiKey pattern from runner.ts
+async function buildSkillSection(agentId: string, mcpBaseUrl: string, apiKey: string): Promise<string> {
+  const res = await fetch(`${mcpBaseUrl}/api/agents/${agentId}/skills`, {
+    headers: { "Authorization": `Bearer ${apiKey}`, "X-Agent-ID": agentId }
+  });
+  const { skills } = await res.json() as { skills: SkillWithInstallInfo[] };
   if (skills.length === 0) return "";
 
   const summaries = skills
@@ -490,7 +525,9 @@ For skills that aren't on the filesystem (e.g., if sync hasn't run), the system 
 
 #### Skills List Page (`/skills`)
 
-**File:** `new-ui/app/skills/page.tsx`
+**File:** `new-ui/src/pages/skills/page.tsx`
+
+**Router registration:** Add route in `new-ui/src/router.tsx` for `/skills`.
 
 - Table component listing all skills
 - Columns: Name, Type (badge), Scope (badge), Description, Owner, Status (toggle), Installed count, Last Updated
@@ -501,7 +538,9 @@ For skills that aren't on the filesystem (e.g., if sync hasn't run), the system 
 
 #### Skill Detail Page (`/skills/[id]`)
 
-**File:** `new-ui/app/skills/[id]/page.tsx`
+**File:** `new-ui/src/pages/skills/[id]/page.tsx`
+
+**Router registration:** Add route in `new-ui/src/router.tsx` for `/skills/:id`.
 
 - Header: Name, type badge, scope badge, enabled toggle
 - Three tabs:
@@ -512,7 +551,9 @@ For skills that aren't on the filesystem (e.g., if sync hasn't run), the system 
 
 #### Agent Skills Tab
 
-**File:** Modify `new-ui/app/agents/[id]/page.tsx`
+**File:** Modify `new-ui/src/pages/agents/[id]/page.tsx`
+
+**Router registration:** Ensure `/agents/:id` route in `new-ui/src/router.tsx` supports the new Skills tab (no new route needed — the tab is within the existing agent detail page).
 
 - Add "Skills" tab to agent detail page
 - Shows installed skills for that agent with active/inactive toggle
@@ -602,20 +643,21 @@ After implementing all REST endpoints:
 | 7. Filesystem sync | `src/be/skill-sync.ts` | Step 4 |
 | 8. Docker entrypoint | `docker-entrypoint.sh` | Step 6 |
 | 9. System prompt | `src/prompts/base-prompt.ts` | Step 6 |
-| 10. UI - Skills pages | `new-ui/app/skills/**` | Step 6 |
-| 11. UI - Agent skills tab | `new-ui/app/agents/[id]/page.tsx` | Step 6 |
+| 10. UI - Skills pages | `new-ui/src/pages/skills/**`, `new-ui/src/router.tsx` | Step 6 |
+| 11. UI - Agent skills tab | `new-ui/src/pages/agents/[id]/page.tsx` | Step 6 |
 | 12. OpenAPI spec | `openapi.json`, `scripts/generate-openapi.ts` | Step 6 |
 | 13. Tests | `src/tests/skills.test.ts` | Steps 4-6 |
 | 14. Remote sync schedule | Uses existing schedule system | Step 5 |
 
 ### PR Strategy
 
-Split into 3-4 PRs for reviewability:
+Split into 4-5 PRs for reviewability:
 
-1. **PR 1 — Backend core** (Steps 1-6): Migration, types, parser, DB functions, MCP tools, HTTP endpoints
-2. **PR 2 — Filesystem bridge + integration** (Steps 7-9): Sync logic, entrypoint, system prompt
-3. **PR 3 — UI** (Steps 10-12): Skills pages, agent skills tab, OpenAPI
-4. **PR 4 — Tests + advanced** (Steps 13-14): Unit tests, remote sync schedule
+1. **PR 1a — Data layer** (Steps 1-4): Migration, types, frontmatter parser, DB functions
+2. **PR 1b — API layer** (Steps 5-6): MCP tools, HTTP endpoints (depends on PR 1a)
+3. **PR 2 — Filesystem bridge + integration** (Steps 7-9): Sync logic, entrypoint, system prompt
+4. **PR 3 — UI** (Steps 10-12): Skills pages, agent skills tab, router.tsx registration, OpenAPI
+5. **PR 4 — Tests + advanced** (Steps 13-14): Unit tests, remote sync schedule
 
 ---
 
@@ -697,3 +739,4 @@ The new skill system is additive — it doesn't replace these built-in skills. B
 | Name collisions between agents | Unique index on (name, scope, ownerAgentId) prevents duplicates |
 | Breaking existing skills | New system is additive; existing plugin/pi-skills/ untouched |
 | Worker importing DB code | `check-db-boundary.sh` enforced in CI |
+| Mid-session skill updates | **Known v1 limitation:** Skills are synced to filesystem before session start. If a skill is installed/updated mid-session, the running Claude session won't see the change until the next session. Mitigation: the `skill-get` MCP tool provides real-time access to skill content as a fallback. |
