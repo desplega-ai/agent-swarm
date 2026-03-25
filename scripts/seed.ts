@@ -782,9 +782,8 @@ function seedMcpServers(
     const scope = seed.scope ?? "agent";
     const ownerAgent = scope === "agent" ? pick(agents) : null;
     const serverId = seedId("mcp_server", i);
-    serverIds.push(serverId);
 
-    serverStmt.run(
+    const result = serverStmt.run(
       serverId,
       seed.name,
       seed.description ?? null,
@@ -800,6 +799,10 @@ function seedMcpServers(
       daysAgo(3),
       now(),
     );
+    // Only track if actually inserted (INSERT OR IGNORE may skip duplicates)
+    if (result.changes > 0) {
+      serverIds.push(serverId);
+    }
   }
 
   // Install 2-3 servers per agent
@@ -810,7 +813,6 @@ function seedMcpServers(
         seedId("agent_mcp_server", `${agent.id}:${serverId}`),
         agent.id,
         serverId,
-        1,
         daysAgo(2),
       );
     }
