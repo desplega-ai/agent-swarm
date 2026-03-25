@@ -1,5 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { ensure, initialize } from "@desplega.ai/business-use";
 import type { TemplateResponse } from "../../templates/schema.ts";
 import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt.ts";
 import {
@@ -1579,6 +1580,22 @@ async function checkCompletedProcesses(
       }
       await ensureTaskFinished(apiConfig, role, taskId, result.exitCode, failureReason);
 
+      ensure({
+        id: "worker_process_finished",
+        flow: "task",
+        runId: taskId,
+        depIds: ["worker_process_spawned"],
+        data: {
+          taskId,
+          agentId: apiConfig.agentId,
+          role,
+          exitCode: result.exitCode,
+          success: result.exitCode === 0,
+          failureReason,
+        },
+        validator: (data) => data.exitCode === 0,
+      });
+
       // Commit channel activity cursors after successful processing
       // If the task failed, cursors stay uncommitted so messages are re-seen on next poll
       if (cursorUpdates && cursorUpdates.length > 0 && result.exitCode === 0) {
@@ -1664,6 +1681,9 @@ async function fetchTemplate(
 export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   const { defaultPrompt, metadataType } = config;
   let role = config.role;
+
+  // Initialize Business-Use SDK for worker-side instrumentation
+  initialize();
 
   // Create provider adapter based on HARNESS_PROVIDER env var (default: claude)
   const adapter = createProviderAdapter(process.env.HARNESS_PROVIDER || "claude");
@@ -2308,6 +2328,24 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         if (trigger) {
           console.log(`[${role}] Trigger received: ${trigger.type}`);
 
+          if (
+            trigger.taskId &&
+            (trigger.type === "task_assigned" || trigger.type === "task_offered")
+          ) {
+            ensure({
+              id: "worker_received",
+              flow: "task",
+              runId: trigger.taskId,
+              depIds: ["started"],
+              data: {
+                taskId: trigger.taskId,
+                agentId,
+                triggerType: trigger.type,
+                role,
+              },
+            });
+          }
+
           // Build prompt based on trigger
           let triggerPrompt = await buildPromptForTrigger(
             trigger,
@@ -2523,6 +2561,19 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             }
             continue;
           }
+
+          ensure({
+            id: "worker_process_spawned",
+            flow: "task",
+            runId: runningTask.taskId,
+            depIds: ["worker_received"],
+            data: {
+              taskId: runningTask.taskId,
+              agentId,
+              role,
+              model: taskModel,
+            },
+          });
 
           // Attach trigger metadata for logging
           runningTask.triggerType = trigger.type;

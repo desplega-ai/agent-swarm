@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { ensure } from "@desplega.ai/business-use";
 import { z } from "zod";
 import {
   cancelTask,
@@ -232,6 +233,24 @@ export async function handleTasks(
         source: (parsed.body.source as import("../types").AgentTaskSource) || "api",
         outputSchema: parsed.body.outputSchema || undefined,
       });
+
+      ensure({
+        id: "created",
+        flow: "task",
+        runId: task.id,
+        data: {
+          taskId: task.id,
+          agentId: task.agentId,
+          source: parsed.body.source || "api",
+          status: task.status,
+          task: task.task.slice(0, 200),
+          priority: task.priority,
+          tags: task.tags,
+          parentTaskId: task.parentTaskId,
+          epicId: task.epicId,
+        },
+      });
+
       json(res, task, 201);
     } catch (error) {
       console.error("[HTTP] Failed to create task:", error);
@@ -289,6 +308,36 @@ export async function handleTasks(
     if (!cancelledTask) {
       jsonError(res, "Failed to cancel task", 500);
       return true;
+    }
+
+    if (task.status === "pending") {
+      ensure({
+        id: "cancelled_pending",
+        flow: "task",
+        runId: parsed.params.id,
+        depIds: ["created"],
+        data: {
+          taskId: parsed.params.id,
+          agentId: task.agentId,
+          previousStatus: task.status,
+          reason,
+        },
+        validator: (data) => data.previousStatus === "pending",
+      });
+    } else {
+      ensure({
+        id: "cancelled_in_progress",
+        flow: "task",
+        runId: parsed.params.id,
+        depIds: ["started"],
+        data: {
+          taskId: parsed.params.id,
+          agentId: task.agentId,
+          previousStatus: task.status,
+          reason,
+        },
+        validator: (data) => data.previousStatus === "in_progress",
+      });
     }
 
     if (task.agentId) {
@@ -386,6 +435,25 @@ export async function handleTasks(
       return true;
     }
 
+    if (result.task && !("alreadyFinished" in result && result.alreadyFinished)) {
+      const finishEventId = parsed.body.status === "completed" ? "completed" : "failed";
+      ensure({
+        id: finishEventId,
+        flow: "task",
+        runId: parsed.params.id,
+        depIds: ["started"],
+        data: {
+          taskId: parsed.params.id,
+          agentId: myAgentId,
+          previousStatus: "in_progress",
+          ...(finishEventId === "completed"
+            ? { hasOutput: !!parsed.body.output }
+            : { failureReason: parsed.body.failureReason }),
+        },
+        validator: (data) => data.previousStatus === "in_progress",
+      });
+    }
+
     json(res, {
       success: true,
       alreadyFinished: "alreadyFinished" in result ? result.alreadyFinished : false,
@@ -430,6 +498,19 @@ export async function handleTasks(
       return true;
     }
 
+    ensure({
+      id: "paused",
+      flow: "task",
+      runId: parsed.params.id,
+      depIds: ["started"],
+      data: {
+        taskId: parsed.params.id,
+        agentId: task.agentId,
+        previousStatus: task.status,
+      },
+      validator: (data) => data.previousStatus === "in_progress",
+    });
+
     json(res, { success: true, task: pausedTask });
     return true;
   }
@@ -459,6 +540,19 @@ export async function handleTasks(
       jsonError(res, "Failed to resume task", 500);
       return true;
     }
+
+    ensure({
+      id: "resumed",
+      flow: "task",
+      runId: parsed.params.id,
+      depIds: ["paused"],
+      data: {
+        taskId: parsed.params.id,
+        agentId: task.agentId,
+        previousStatus: task.status,
+      },
+      validator: (data) => data.previousStatus === "paused",
+    });
 
     json(res, { success: true, task: resumedTask });
     return true;

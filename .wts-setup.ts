@@ -146,6 +146,15 @@ if (await exists(mainClaude)) {
   }
 }
 
+// --- Copy .business-use directory (BU config + DB) ---
+const mainBu = join(gitRoot, ".business-use");
+const targetBu = join(worktreePath, ".business-use");
+
+if (await exists(mainBu)) {
+  console.log("Copying .business-use directory...");
+  await Bun.$`cp -r ${mainBu} ${targetBu}`;
+}
+
 // --- Copy docker env files if they exist ---
 const dockerEnvFiles = [".env.docker", ".env.docker-lead"];
 for (const envFile of dockerEnvFiles) {

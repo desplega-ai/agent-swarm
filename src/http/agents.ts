@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { ensure } from "@desplega.ai/business-use";
 import { z } from "zod";
 import {
   createAgent,
@@ -178,6 +179,34 @@ export async function handleAgentRegister(
 
       return { agent, created: true };
     })();
+
+    if (result.created) {
+      ensure({
+        id: "registered",
+        flow: "agent",
+        runId: agentId,
+        data: {
+          agentId,
+          name: parsed.body.name,
+          isLead: parsed.body.isLead ?? false,
+        },
+      });
+    } else {
+      ensure({
+        id: "reconnected",
+        flow: "agent",
+        runId: agentId,
+        depIds: ["registered"],
+        data: {
+          agentId,
+          name: parsed.body.name,
+        },
+        validator: (_data, ctx) => {
+          // Validates that registered happened before reconnected
+          return ctx.deps.length > 0;
+        },
+      });
+    }
 
     json(res, result.agent, result.created ? 201 : 200);
     return true;

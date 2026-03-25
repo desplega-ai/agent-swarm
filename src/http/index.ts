@@ -4,8 +4,9 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import { assert, initialize } from "@desplega.ai/business-use";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { hasCapability } from "@/server";
+import { getEnabledCapabilities, hasCapability } from "@/server";
 import { initAgentMail } from "../agentmail";
 import { closeDb } from "../be/db";
 import { initGitHub } from "../github";
@@ -45,6 +46,7 @@ const globalState = globalThis as typeof globalThis & {
   __httpServer?: Server<typeof IncomingMessage, typeof ServerResponse>;
   __transports?: Record<string, StreamableHTTPServerTransport>;
   __sigintRegistered?: boolean;
+  __runId?: string;
 };
 
 // Clean up previous server on hot reload
@@ -167,9 +169,25 @@ if (!globalState.__sigintRegistered) {
   process.on("SIGTERM", shutdown);
 }
 
+if (!globalState.__runId) {
+  globalState.__runId = `run_${Date.now()}`;
+}
+
+// business-use initialization (no-op if envs not set)
+initialize();
+
 httpServer
   .listen(port, async () => {
     console.log(`MCP HTTP server running on http://localhost:${port}/mcp`);
+
+    assert({
+      id: "listen",
+      flow: "api",
+      runId: globalState.__runId!,
+      data: {
+        capabilities: getEnabledCapabilities(),
+      },
+    });
 
     // Load global swarm configs into process.env (so integrations can read them)
     // Infrastructure-level env vars take precedence — only missing keys are filled.
@@ -205,7 +223,9 @@ httpServer
       const { startScheduler } = await import("../scheduler");
       const { getExecutorRegistry } = await import("../workflows");
       const intervalMs = Number(process.env.SCHEDULER_INTERVAL_MS) || 10000;
-      startScheduler(getExecutorRegistry(), intervalMs);
+      startScheduler(getExecutorRegistry(), intervalMs, {
+        runId: globalState.__runId!,
+      });
     }
 
     // Start heartbeat triage (unless disabled)

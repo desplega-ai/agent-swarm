@@ -29,6 +29,10 @@ services:
       - MCP_BASE_URL=${MCP_BASE_URL}
       - APP_URL=${APP_URL}
 
+      # Optional: Business-Use instrumentation
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
+
       # Optional: Enable Slack integration
       - SLACK_DISABLE=${SLACK_DISABLE:-false}
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-}
@@ -74,6 +78,9 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
 
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
+
       - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
@@ -112,6 +119,9 @@ services:
       # - MCP_BASE_URL=${MCP_BASE_URL:-http://api:3013}
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
+
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
 
       - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
@@ -152,6 +162,9 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
 
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
+
       - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
@@ -191,6 +204,9 @@ services:
 
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
+
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
 
       - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
@@ -235,6 +251,9 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
 
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
+
       - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
@@ -274,6 +293,9 @@ services:
 
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
+
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
 
       - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}

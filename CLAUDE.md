@@ -207,8 +207,37 @@ model          (optional) — Model override for the agent
 parentTaskId   (optional) — Link to parent task
 ```
 
+## Business-Use Instrumentation
+
+Agent Swarm uses [`@desplega.ai/business-use`](https://github.com/desplega-ai/business-use) to track core system invariants across the distributed API + worker architecture. Events are emitted from both the API server and Docker workers to a shared business-use backend, enabling end-to-end flow validation.
+
+**Why:** Tasks pass through multiple processes (API creates → worker polls → provider executes → API completes). Business-use ensures state transitions happen in the correct order and from valid previous states — catching invariant violations that unit tests can't.
+
+**Flows:** See [BUSINESS_USE.md](./BUSINESS_USE.md) for the full Mermaid diagrams and node tables.
+- `task` (runId = taskId) — lifecycle from created → started → completed/failed/cancelled, including pause/resume and worker-side process events
+- `agent` (runId = agentId) — registration and reconnection
+- `api` (runId = per-boot ID) — server boot and subsystem init
+
+**Guidelines for adding new events:**
+- Use `ensure()` (auto-determines act vs assert based on validator presence)
+- Place calls AFTER successful state mutations, OUTSIDE transactions where possible
+- Validators must be self-contained — only reference `data` and `ctx` params, never closure variables (they get serialized to the backend)
+- Use the `task` flow for task-related events, with `runId: taskId`
+- Worker-side events use `depIds` pointing to server-side events in the same flow
+
+**Commands:**
+```bash
+bun run docs:business-use              # Regenerate BUSINESS_USE.md (requires BU backend running)
+uvx business-use-core@latest server dev  # Start BU backend on :13370
+uvx business-use-core@latest flow eval <runId> <flow> -g -v  # Evaluate a run
+uvx business-use-core@latest flow graph <flow>               # Show flow graph
+```
+
+**Env vars:** `BUSINESS_USE_API_KEY` and `BUSINESS_USE_URL` in `.env` (API server) and `.env.docker*` (workers). SDK enters no-op mode if key is missing — safe to omit in environments without a BU backend.
+
 ## Related
 
+- [BUSINESS_USE.md](./BUSINESS_USE.md) - Flow diagrams and instrumentation reference
 - [UI Dashboard](./new-ui/) - Next.js monitoring dashboard
 - [Templates Registry](./templates-ui/) - Template gallery and compose builder
 - [MCP.md](./MCP.md) - MCP tools reference

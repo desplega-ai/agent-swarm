@@ -1,3 +1,4 @@
+import { ensure } from "@desplega.ai/business-use";
 import { CronExpressionParser } from "cron-parser";
 import {
   createTaskExtended,
@@ -239,7 +240,11 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
  * @param registry ExecutorRegistry for triggering workflows linked to schedules
  * @param intervalMs Polling interval in milliseconds (default: 10000)
  */
-export function startScheduler(registry: ExecutorRegistry, intervalMs = 10000): void {
+export function startScheduler(
+  registry: ExecutorRegistry,
+  intervalMs = 10000,
+  opts?: { runId?: string },
+): void {
   if (schedulerInterval) {
     console.log("[Scheduler] Already running");
     return;
@@ -254,6 +259,24 @@ export function startScheduler(registry: ExecutorRegistry, intervalMs = 10000): 
   schedulerInterval = setInterval(async () => {
     await processSchedules();
   }, intervalMs);
+
+  ensure({
+    id: "scheduler_started",
+    flow: "api",
+    runId: opts?.runId ?? "",
+    depIds: ["listen"],
+    data: {},
+    // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+    filter: ({}, ctx) => {
+      const start = ctx.deps.find((d) => d.id === "listen");
+      return !!start && start.data?.capabilities?.includes("scheduling");
+    },
+    // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+    validator: ({}, ctx) => {
+      const start = ctx.deps.find((d) => d.id === "listen");
+      return !!start && start.data?.capabilities?.includes("scheduling");
+    },
+  });
 }
 
 /**

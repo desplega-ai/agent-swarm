@@ -97,7 +97,7 @@ describe("syncSkillsToFilesystem", () => {
   });
 
   test("skips complex skills", () => {
-    const result = syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
+    const _result = syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
 
     const complexDir = join(FAKE_HOME, ".claude", "skills", "complex-skill");
     expect(existsSync(complexDir)).toBe(false);
