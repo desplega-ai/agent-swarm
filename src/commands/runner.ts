@@ -17,6 +17,7 @@ import {
   type ProviderSession,
   type ProviderSessionConfig,
 } from "../providers/index.ts";
+import { getContextWindowSize } from "../utils/context-window.ts";
 import { resolveCredentialPools } from "../utils/credentials.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
@@ -1443,6 +1444,10 @@ async function spawnProviderProcess(
   let lastProgressTime = 0;
   const PROGRESS_THROTTLE_MS = 3000;
 
+  // Context usage throttle: max 1 snapshot per 30 seconds
+  let lastContextPostTime = 0;
+  const CONTEXT_THROTTLE_MS = 30_000;
+
   session.onEvent((event) => {
     switch (event.type) {
       case "session_init":
@@ -1482,6 +1487,47 @@ async function spawnProviderProcess(
         // it completes before the process exits (fire-and-forget here
         // races with container shutdown).
         break;
+      case "context_usage": {
+        const now2 = Date.now();
+        if (now2 - lastContextPostTime >= CONTEXT_THROTTLE_MS) {
+          lastContextPostTime = now2;
+          fetch(`${opts.apiUrl}/api/tasks/${realTaskId}/context`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Agent-ID": opts.agentId,
+              Authorization: `Bearer ${opts.apiKey}`,
+            },
+            body: JSON.stringify({
+              eventType: "progress",
+              sessionId: opts.runnerSessionId,
+              contextUsedTokens: event.contextUsedTokens,
+              contextTotalTokens: event.contextTotalTokens,
+              contextPercent: event.contextPercent,
+            }),
+          }).catch(() => {});
+        }
+        break;
+      }
+      case "compaction": {
+        // Always record compaction events (no throttle)
+        fetch(`${opts.apiUrl}/api/tasks/${realTaskId}/context`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Agent-ID": opts.agentId,
+            Authorization: `Bearer ${opts.apiKey}`,
+          },
+          body: JSON.stringify({
+            eventType: "compaction",
+            sessionId: opts.runnerSessionId,
+            preCompactTokens: event.preCompactTokens,
+            compactTrigger: event.compactTrigger,
+            contextTotalTokens: event.contextTotalTokens,
+          }),
+        }).catch(() => {});
+        break;
+      }
       case "raw_log":
         prettyPrintLine(event.content, opts.role);
         if (shouldStream) {
@@ -1560,6 +1606,25 @@ async function spawnProviderProcess(
       } catch (err) {
         console.warn(`[runner] Failed to save cost: ${err}`);
       }
+    }
+
+    // Post completion context usage snapshot
+    if (result.cost && realTaskId) {
+      fetch(`${opts.apiUrl}/api/tasks/${realTaskId}/context`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Agent-ID": opts.agentId,
+          Authorization: `Bearer ${opts.apiKey}`,
+        },
+        body: JSON.stringify({
+          eventType: "completion",
+          sessionId: opts.runnerSessionId,
+          cumulativeInputTokens: result.cost.inputTokens ?? 0,
+          cumulativeOutputTokens: result.cost.outputTokens ?? 0,
+          contextTotalTokens: getContextWindowSize(result.cost.model || "default"),
+        }),
+      }).catch(() => {});
     }
 
     return result;
