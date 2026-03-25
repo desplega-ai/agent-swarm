@@ -936,6 +936,25 @@ export function updateTaskClaudeSessionId(
   return row ? rowToAgentTask(row) : null;
 }
 
+export function updateTaskVcs(
+  taskId: string,
+  vcs: {
+    vcsProvider: "github" | "gitlab";
+    vcsRepo: string;
+    vcsNumber: number;
+    vcsUrl: string;
+  },
+): AgentTask | null {
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string, number, string, string, string]>(
+      `UPDATE agent_tasks
+       SET vcsProvider = ?, vcsRepo = ?, vcsNumber = ?, vcsUrl = ?, lastUpdatedAt = ?
+       WHERE id = ? RETURNING *`,
+    )
+    .get(vcs.vcsProvider, vcs.vcsRepo, vcs.vcsNumber, vcs.vcsUrl, new Date().toISOString(), taskId);
+  return row ? rowToAgentTask(row) : null;
+}
+
 export function getTasksByAgentId(agentId: string): AgentTask[] {
   return taskQueries.getByAgentId().all(agentId).map(rowToAgentTask);
 }
