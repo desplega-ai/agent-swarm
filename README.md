@@ -56,6 +56,8 @@ Agent Swarm lets you run a team of AI coding agents that coordinate autonomously
 - **Linear integration** — Bidirectional ticket tracker sync via OAuth + webhooks with AgentSession lifecycle and generic tracker abstraction
 - **Portless local dev** — Friendly URLs for local development (`api.swarm.localhost:1355`) via portless proxy
 - **Onboarding wizard** — Interactive CLI wizard (`agent-swarm onboard`) to set up a new swarm from scratch with presets, credential collection, and docker-compose generation
+- **Skill system** — Reusable procedural knowledge: create, install, publish, and sync skills from GitHub with scope resolution (agent → swarm → global)
+- **Human-in-the-Loop** — Workflow nodes that pause for human approval or input, with a dashboard UI for reviewing and responding to requests
 
 ## Quick Start
 

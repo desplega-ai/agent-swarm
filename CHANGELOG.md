@@ -4,6 +4,28 @@ All notable changes to Agent Swarm are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.52.0] - 2026-03-25
+
+### Added
+- Skill system — full lifecycle for reusable procedural knowledge: create, install, publish, search, sync remote skills from GitHub repositories (#229)
+  - Phases 1-6: data layer, API, filesystem bridge, system prompt injection, UI, and OpenAPI spec
+  - 12 new MCP tools: `skill-create`, `skill-get`, `skill-list`, `skill-search`, `skill-install`, `skill-uninstall`, `skill-update`, `skill-publish`, `skill-delete`, `skill-install-remote`, `skill-sync-remote`
+  - Scope resolution: agent → swarm → global
+- Human-in-the-Loop (HITL) workflow executor — pause workflows for human approval or input via the dashboard (#228)
+  - `request-human-input` MCP tool with support for approval, text, single-select, multi-select, and boolean question types
+  - Approval requests UI at `/approval-requests/{id}`
+  - Follow-up task auto-creation when approval requests are resolved (#234)
+- Business-use instrumentation — track core system invariants across API + worker architecture via `@desplega.ai/business-use` (#237)
+  - Task lifecycle, agent registration, and API boot flows
+  - Optional: enters no-op mode when `BUSINESS_USE_API_KEY` is not set
+
+### Fixed
+- Server-side fallback for `sourceTaskId` on HITL approval requests (#238)
+- Walk up directory tree to find `.mcp.json` for `X-Source-Task-Id` injection (#236)
+- Explicit Slack metadata on HITL follow-up tasks (#235)
+- Correct approval request URL path from `/requests/` to `/approval-requests/` (#233)
+- Prevent runner crash when repo clone fails (#232)
+
 ## [1.51.0] - 2026-03-23
 
 ### Added

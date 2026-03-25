@@ -77,6 +77,7 @@
   - [list-workflow-runs](#list-workflow-runs)
   - [get-workflow-run](#get-workflow-run)
   - [retry-workflow-run](#retry-workflow-run)
+  - [request-human-input](#request-human-input)
 
 ---
 
@@ -815,6 +816,17 @@ Retry a failed workflow run from the beginning. The run must be in 'failed' stat
 |-----------|------|----------|---------|-------------|
 | `runId` | `string` | Yes | - | Workflow run ID to retry |
 
+### request-human-input
+
+**Request human input**
+
+Create an approval request that pauses until a human responds. " + "Supports multiple question types: approval (yes/no), text, single-select, " + "multi-select, and boolean. Returns the request ID and URL for the human to respond.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `title` | `string` | Yes | - | Title of the approval request |
+| `questions` | `array` | Yes | - | Questions to ask the human |
+
 ## Other Tools
 
 *Tools not assigned to a capability group*
@@ -894,4 +906,118 @@ Remove a tracker sync mapping by ID.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `syncId` | `string` | Yes | - | The tracker sync mapping ID to remove |
+
+### skill-install-remote
+
+**Install Remote Skill**
+
+Fetch and install a remote skill from a GitHub repository. Fetches SKILL.md via GitHub raw content API.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `sourceRepo` | `string` | Yes | - | GitHub repo (e.g. "vercel-labs/skills |
+| `sourcePath` | `string` | No | - | Path within repo (e.g. "skills/nextjs |
+
+### skill-update
+
+**Update Skill**
+
+Update a skill's content or settings. Re-parses frontmatter if content changes.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | No | - | Skill ID to update |
+| `content` | `string` | No | - | New SKILL.md content (re-parses frontmatter) |
+| `isEnabled` | `boolean` | No | - | Toggle enabled/disabled |
+
+### skill-create
+
+**Create Skill**
+
+Create a personal skill from SKILL.md content. Parses frontmatter for name, description, and metadata.
+
+*No parameters*
+
+### skill-get
+
+**Get Skill**
+
+Get full skill content by ID or name. Name resolution checks agent scope first, then swarm, then global.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | No | - | Skill ID |
+| `name` | `string` | No | - | Skill name (resolved with precedence) |
+
+### skill-search
+
+**Search Skills**
+
+Search skills by keyword (name and description).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | `string` | Yes | - | Search query |
+| `limit` | `number` | No | 20 | - |
+
+### skill-sync-remote
+
+**Sync Remote Skills**
+
+Check and update remote skills from their GitHub sources. Compares content and updates if changed.
+
+*No parameters*
+
+### skill-install
+
+**Install Skill**
+
+Install/assign a skill to an agent. Leads can install for other agents.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | Yes | - | ID of the skill to install |
+
+### skill-publish
+
+**Publish Skill**
+
+Publish a personal skill to swarm scope. Creates an approval task for the lead agent.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | Yes | - | ID of the personal skill to publish |
+
+### skill-uninstall
+
+**Uninstall Skill**
+
+Remove a skill from an agent.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | Yes | - | ID of the skill to uninstall |
+| `agentId` | `string` | No | - | Target agent (default: calling agent) |
+
+### skill-delete
+
+**Delete Skill**
+
+Delete a skill. Only the owning agent or lead can delete.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | Yes | - | ID of the skill to delete |
+
+### skill-list
+
+**List Skills**
+
+List available skills with optional filters.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `type` | `remote \| personal` | No | - | Filter by type |
+| `scope` | `global \| swarm \| agent` | No | - | Filter by scope |
+| `agentId` | `string` | No | - | Filter by owning agent |
 
