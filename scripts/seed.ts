@@ -89,6 +89,20 @@ interface SeedConfig {
   memories: { count: number };
   services: { count: number; data?: ServiceSeed[] };
   sessionLogs: { perTask: number };
+  mcpServers: { count: number; data?: McpServerSeed[] };
+}
+
+interface McpServerSeed {
+  name: string;
+  description?: string;
+  transport: "stdio" | "http" | "sse";
+  scope?: "global" | "swarm" | "agent";
+  command?: string;
+  args?: string[];
+  url?: string;
+  headers?: Record<string, string>;
+  envConfigKeys?: Record<string, string>;
+  headerConfigKeys?: Record<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -700,6 +714,112 @@ function seedServices(
 }
 
 // ---------------------------------------------------------------------------
+// MCP Servers
+// ---------------------------------------------------------------------------
+
+const DEFAULT_MCP_SERVERS: McpServerSeed[] = [
+  {
+    name: "github",
+    description: "GitHub API access via MCP",
+    transport: "stdio",
+    scope: "global",
+    command: "npx",
+    args: ["-y", "@modelcontextprotocol/server-github"],
+    envConfigKeys: { GITHUB_TOKEN: "github-token" },
+  },
+  {
+    name: "filesystem",
+    description: "Local filesystem access",
+    transport: "stdio",
+    scope: "global",
+    command: "npx",
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+  },
+  {
+    name: "brave-search",
+    description: "Web search via Brave Search API",
+    transport: "http",
+    scope: "swarm",
+    url: "https://mcp.brave.com/v1",
+    headerConfigKeys: { Authorization: "brave-api-key" },
+  },
+  {
+    name: "custom-api",
+    description: "Internal API integration",
+    transport: "http",
+    scope: "agent",
+    url: "http://localhost:8090/mcp",
+    headers: { "X-Source": "agent-swarm" },
+  },
+];
+
+function seedMcpServers(
+  db: Database,
+  config: SeedConfig,
+  agents: { id: string }[],
+): void {
+  const count = config.mcpServers.count;
+  const explicit = config.mcpServers.data ?? [];
+
+  const serverStmt = db.prepare(`
+    INSERT OR IGNORE INTO mcp_servers (
+      id, name, description, scope, ownerAgentId, transport,
+      command, args, url, headers,
+      envConfigKeys, headerConfigKeys,
+      isEnabled, version, createdAt, lastUpdatedAt
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?)
+  `);
+
+  const installStmt = db.prepare(`
+    INSERT OR IGNORE INTO agent_mcp_servers (id, agentId, mcpServerId, isActive, installedAt)
+    VALUES (?, ?, ?, 1, ?)
+  `);
+
+  const serverIds: string[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const seed = i < explicit.length ? explicit[i] : DEFAULT_MCP_SERVERS[i % DEFAULT_MCP_SERVERS.length];
+    const scope = seed.scope ?? "agent";
+    const ownerAgent = scope === "agent" ? pick(agents) : null;
+    const serverId = seedId("mcp_server", i);
+    serverIds.push(serverId);
+
+    serverStmt.run(
+      serverId,
+      seed.name,
+      seed.description ?? null,
+      scope,
+      ownerAgent?.id ?? null,
+      seed.transport,
+      seed.command ?? null,
+      seed.args ? JSON.stringify(seed.args) : null,
+      seed.url ?? null,
+      seed.headers ? JSON.stringify(seed.headers) : null,
+      seed.envConfigKeys ? JSON.stringify(seed.envConfigKeys) : null,
+      seed.headerConfigKeys ? JSON.stringify(seed.headerConfigKeys) : null,
+      daysAgo(3),
+      now(),
+    );
+  }
+
+  // Install 2-3 servers per agent
+  for (const agent of agents) {
+    const toInstall = serverIds.slice(0, Math.min(3, serverIds.length));
+    for (const serverId of toInstall) {
+      installStmt.run(
+        seedId("agent_mcp_server", `${agent.id}:${serverId}`),
+        agent.id,
+        serverId,
+        1,
+        daysAgo(2),
+      );
+    }
+  }
+
+  console.log(`  ✓ Seeded ${count} MCP servers (installed on ${agents.length} agents)`);
+}
+
+// ---------------------------------------------------------------------------
 // Session log content generators — realistic Claude conversation fragments
 // ---------------------------------------------------------------------------
 
@@ -1079,6 +1199,8 @@ const TABLES_IN_DELETE_ORDER = [
   "channels",
   "swarm_config",
   "swarm_repos",
+  "agent_mcp_servers",
+  "mcp_servers",
   "agentmail_inbox_mappings",
   "agents",
 ];
@@ -1234,6 +1356,10 @@ async function loadConfig(
     sessionLogs: {
       perTask: raw.sessionLogs?.perTask ?? 8,
     },
+    mcpServers: {
+      count: raw.mcpServers?.count ?? 4,
+      data: raw.mcpServers?.data,
+    },
   };
 
   return config;
@@ -1277,6 +1403,7 @@ async function main(): Promise<void> {
   seedSchedules(db, config, agents);
   seedMemories(db, config, agents);
   seedServices(db, config, agents);
+  seedMcpServers(db, config, agents);
 
   db.close();
 

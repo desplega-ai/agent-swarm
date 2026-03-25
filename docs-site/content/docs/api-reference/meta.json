@@ -12,6 +12,7 @@
     "debug",
     "ecosystem",
     "epics",
+    "mcp-servers",
     "memory",
     "poll",
     "prompttemplates",

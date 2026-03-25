@@ -25,6 +25,16 @@ import { registerJoinSwarmTool } from "./tools/join-swarm";
 // Messaging capability
 import { registerListChannelsTool } from "./tools/list-channels";
 import { registerListServicesTool } from "./tools/list-services";
+// MCP Servers capability
+import {
+  registerMcpServerCreateTool,
+  registerMcpServerDeleteTool,
+  registerMcpServerGetTool,
+  registerMcpServerInstallTool,
+  registerMcpServerListTool,
+  registerMcpServerUninstallTool,
+  registerMcpServerUpdateTool,
+} from "./tools/mcp-servers";
 // Memory capability
 import { registerMemoryGetTool } from "./tools/memory-get";
 import { registerMemorySearchTool } from "./tools/memory-search";
@@ -271,6 +281,15 @@ export function createServer() {
   registerSkillInstallRemoteTool(server);
   registerSkillSyncRemoteTool(server);
   registerSkillPublishTool(server);
+
+  // MCP Servers - always registered
+  registerMcpServerCreateTool(server);
+  registerMcpServerUpdateTool(server);
+  registerMcpServerDeleteTool(server);
+  registerMcpServerGetTool(server);
+  registerMcpServerListTool(server);
+  registerMcpServerInstallTool(server);
+  registerMcpServerUninstallTool(server);
 
   return server;
 }

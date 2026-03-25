@@ -923,3 +923,46 @@ export const SkillWithInstallInfoSchema = SkillSchema.extend({
   installedAt: z.string(),
 });
 export type SkillWithInstallInfo = z.infer<typeof SkillWithInstallInfoSchema>;
+
+// ── MCP Servers ──────────────────────────────────────────────────────────
+
+export const McpServerTransportSchema = z.enum(["stdio", "http", "sse"]);
+export type McpServerTransport = z.infer<typeof McpServerTransportSchema>;
+
+export const McpServerScopeSchema = z.enum(["global", "swarm", "agent"]);
+export type McpServerScope = z.infer<typeof McpServerScopeSchema>;
+
+export const McpServerSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  scope: McpServerScopeSchema,
+  ownerAgentId: z.string().nullable(),
+  transport: McpServerTransportSchema,
+  command: z.string().nullable(),
+  args: z.string().nullable(),
+  url: z.string().nullable(),
+  headers: z.string().nullable(),
+  envConfigKeys: z.string().nullable(),
+  headerConfigKeys: z.string().nullable(),
+  isEnabled: z.boolean(),
+  version: z.number(),
+  createdAt: z.string(),
+  lastUpdatedAt: z.string(),
+});
+export type McpServer = z.infer<typeof McpServerSchema>;
+
+export const AgentMcpServerSchema = z.object({
+  id: z.string(),
+  agentId: z.string(),
+  mcpServerId: z.string(),
+  isActive: z.boolean(),
+  installedAt: z.string(),
+});
+export type AgentMcpServer = z.infer<typeof AgentMcpServerSchema>;
+
+export const McpServerWithInstallInfoSchema = McpServerSchema.extend({
+  isActive: z.boolean(),
+  installedAt: z.string(),
+});
+export type McpServerWithInstallInfo = z.infer<typeof McpServerWithInstallInfoSchema>;

@@ -1820,6 +1820,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let agentProfileName: string | undefined;
   let agentDescription: string | undefined;
   let agentSkillsSummary: { name: string; description: string }[] | undefined;
+  let agentMcpServersSummary: string | undefined;
 
   // Per-task repo context — set when processing a task with githubRepo
   let currentRepoContext: BasePromptArgs["repoContext"] | undefined;
@@ -1839,6 +1840,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       claudeMd: agentClaudeMd,
       repoContext: currentRepoContext,
       skillsSummary: agentSkillsSummary,
+      mcpServersSummary: agentMcpServersSummary,
     });
   };
 
@@ -2092,6 +2094,42 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
         } catch {
           // Non-fatal — skills are optional
+        }
+
+        // Fetch installed MCP servers for system prompt
+        try {
+          const mcpServersResp = await fetch(`${apiUrl}/api/agents/${agentId}/mcp-servers`, {
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "X-Agent-ID": agentId,
+            },
+          });
+          if (mcpServersResp.ok) {
+            const mcpServersData = (await mcpServersResp.json()) as {
+              servers: {
+                name: string;
+                transport: string;
+                description: string | null;
+                isActive: boolean;
+                isEnabled: boolean;
+              }[];
+            };
+            const activeMcpServers = mcpServersData.servers.filter(
+              (s) => s.isActive && s.isEnabled,
+            );
+            if (activeMcpServers.length > 0) {
+              agentMcpServersSummary = activeMcpServers
+                .map(
+                  (s) => `- **${s.name}** (${s.transport}): ${s.description || "No description"}`,
+                )
+                .join("\n");
+              console.log(
+                `[${role}] Loaded ${activeMcpServers.length} MCP servers for system prompt`,
+              );
+            }
+          }
+        } catch {
+          // Non-fatal — MCP servers are optional
         }
 
         // Rebuild system prompt with identity

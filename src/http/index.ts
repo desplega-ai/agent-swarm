@@ -24,6 +24,7 @@ import { handleDbQuery } from "./db-query";
 import { handleEcosystem } from "./ecosystem";
 import { handleEpics } from "./epics";
 import { handleMcp } from "./mcp";
+import { handleMcpServers } from "./mcp-servers";
 import { handleMemory } from "./memory";
 import { handlePoll } from "./poll";
 import { handlePromptTemplates } from "./prompt-templates";
@@ -114,6 +115,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleDbQuery(req, res, pathSegments, queryParams),
     () => handleRepos(req, res, pathSegments, queryParams),
     () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
+    () => handleMcpServers(req, res, pathSegments, queryParams),
     () => handleMemory(req, res, pathSegments, myAgentId),
     () => handleMcp(req, res, transports),
   ];

@@ -26,6 +26,8 @@ const TemplateVersionDetailPage = lazy(
 );
 const ApprovalRequestsPage = lazy(() => import("@/pages/approval-requests/page"));
 const ApprovalRequestDetailPage = lazy(() => import("@/pages/approval-requests/[id]/page"));
+const McpServersPage = lazy(() => import("@/pages/mcp-servers/page"));
+const McpServerDetailPage = lazy(() => import("@/pages/mcp-servers/[id]/page"));
 const SkillsPage = lazy(() => import("@/pages/skills/page"));
 const SkillDetailPage = lazy(() => import("@/pages/skills/[id]/page"));
 const DebugPage = lazy(() => import("@/pages/debug/page"));
@@ -58,6 +60,8 @@ export const router = createBrowserRouter([
       { path: "templates", element: <TemplatesPage /> },
       { path: "templates/:id", element: <TemplateDetailPage /> },
       { path: "templates/:id/history/:version", element: <TemplateVersionDetailPage /> },
+      { path: "mcp-servers", element: <McpServersPage /> },
+      { path: "mcp-servers/:id", element: <McpServerDetailPage /> },
       { path: "skills", element: <SkillsPage /> },
       { path: "skills/:id", element: <SkillDetailPage /> },
       { path: "repos", element: <ReposPage /> },

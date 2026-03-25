@@ -1,5 +1,6 @@
 import { getConfig } from "@/lib/config";
 import type {
+  AgentMcpServersResponse,
   AgentSkillsResponse,
   AgentsResponse,
   AgentWithTasks,
@@ -13,6 +14,8 @@ import type {
   EpicWithTasks,
   EventDefinition,
   LogsResponse,
+  McpServer,
+  McpServersResponse,
   MessagesResponse,
   PreviewResponse,
   PromptTemplate,
@@ -1101,6 +1104,110 @@ class ApiClient {
       body: JSON.stringify(options || {}),
     });
     if (!res.ok) throw new Error(`Failed to sync remote skills: ${res.status}`);
+    return res.json();
+  }
+
+  // ─── MCP Servers ──────────────────────────────────────────────────────────
+
+  async fetchMcpServers(filters?: {
+    scope?: string;
+    transport?: string;
+    ownerAgentId?: string;
+    enabled?: string;
+    search?: string;
+  }): Promise<McpServersResponse> {
+    const params = new URLSearchParams();
+    if (filters?.scope) params.set("scope", filters.scope);
+    if (filters?.transport) params.set("transport", filters.transport);
+    if (filters?.ownerAgentId) params.set("ownerAgentId", filters.ownerAgentId);
+    if (filters?.enabled) params.set("enabled", filters.enabled);
+    if (filters?.search) params.set("search", filters.search);
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/mcp-servers${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch MCP servers: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchMcpServer(id: string): Promise<McpServer> {
+    const url = `${this.getBaseUrl()}/api/mcp-servers/${id}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch MCP server: ${res.status}`);
+    return res.json();
+  }
+
+  async createMcpServer(data: {
+    name: string;
+    transport: string;
+    description?: string;
+    scope?: string;
+    ownerAgentId?: string;
+    command?: string;
+    args?: string;
+    url?: string;
+    headers?: string;
+    envConfigKeys?: string;
+    headerConfigKeys?: string;
+  }): Promise<{ server: McpServer }> {
+    const url = `${this.getBaseUrl()}/api/mcp-servers`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to create MCP server" }));
+      throw new Error(error.error || `Failed to create MCP server: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async updateMcpServer(id: string, data: Record<string, unknown>): Promise<{ server: McpServer }> {
+    const url = `${this.getBaseUrl()}/api/mcp-servers/${id}`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to update MCP server" }));
+      throw new Error(error.error || `Failed to update MCP server: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async deleteMcpServer(id: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/mcp-servers/${id}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to delete MCP server: ${res.status}`);
+    return res.json();
+  }
+
+  async installMcpServer(serverId: string, agentId: string): Promise<unknown> {
+    const url = `${this.getBaseUrl()}/api/mcp-servers/${serverId}/install`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ agentId }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to install MCP server" }));
+      throw new Error(error.error || `Failed to install MCP server: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async uninstallMcpServer(serverId: string, agentId: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/mcp-servers/${serverId}/install/${agentId}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to uninstall MCP server: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchAgentMcpServers(agentId: string): Promise<AgentMcpServersResponse> {
+    const url = `${this.getBaseUrl()}/api/agents/${agentId}/mcp-servers`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch agent MCP servers: ${res.status}`);
     return res.json();
   }
 }

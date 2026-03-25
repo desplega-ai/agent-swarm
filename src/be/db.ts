@@ -5,6 +5,7 @@ import type {
   Agent,
   AgentLog,
   AgentLogEventType,
+  AgentMcpServer,
   AgentMemory,
   AgentMemoryScope,
   AgentMemorySource,
@@ -26,6 +27,10 @@ import type {
   InboxMessage,
   InboxMessageStatus,
   InputValue,
+  McpServer,
+  McpServerScope,
+  McpServerTransport,
+  McpServerWithInstallInfo,
   PromptTemplate,
   PromptTemplateHistory,
   ScheduledTask,
@@ -7390,4 +7395,314 @@ export function toggleAgentSkill(agentId: string, skillId: string, isActive: boo
     .prepare("UPDATE agent_skills SET isActive = ? WHERE agentId = ? AND skillId = ?")
     .run(isActive ? 1 : 0, agentId, skillId);
   return result.changes > 0;
+}
+
+// ── MCP Servers ──────────────────────────────────────────────────────────
+
+type McpServerRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  scope: string;
+  ownerAgentId: string | null;
+  transport: string;
+  command: string | null;
+  args: string | null;
+  url: string | null;
+  headers: string | null;
+  envConfigKeys: string | null;
+  headerConfigKeys: string | null;
+  isEnabled: number;
+  version: number;
+  createdAt: string;
+  lastUpdatedAt: string;
+};
+
+type AgentMcpServerRow = {
+  id: string;
+  agentId: string;
+  mcpServerId: string;
+  isActive: number;
+  installedAt: string;
+};
+
+type McpServerWithInstallRow = McpServerRow & { isActive: number; installedAt: string };
+
+function rowToMcpServer(row: McpServerRow): McpServer {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    scope: row.scope as McpServerScope,
+    ownerAgentId: row.ownerAgentId,
+    transport: row.transport as McpServerTransport,
+    command: row.command,
+    args: row.args,
+    url: row.url,
+    headers: row.headers,
+    envConfigKeys: row.envConfigKeys,
+    headerConfigKeys: row.headerConfigKeys,
+    isEnabled: row.isEnabled === 1,
+    version: row.version,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+function rowToAgentMcpServer(row: AgentMcpServerRow): AgentMcpServer {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    mcpServerId: row.mcpServerId,
+    isActive: row.isActive === 1,
+    installedAt: row.installedAt,
+  };
+}
+
+function rowToMcpServerWithInstall(row: McpServerWithInstallRow): McpServerWithInstallInfo {
+  return {
+    ...rowToMcpServer(row),
+    isActive: row.isActive === 1,
+    installedAt: row.installedAt,
+  };
+}
+
+export interface McpServerInsert {
+  name: string;
+  transport: McpServerTransport;
+  description?: string;
+  scope?: McpServerScope;
+  ownerAgentId?: string;
+  command?: string;
+  args?: string;
+  url?: string;
+  headers?: string;
+  envConfigKeys?: string;
+  headerConfigKeys?: string;
+}
+
+export function createMcpServer(data: McpServerInsert): McpServer {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  const row = getDb()
+    .prepare<McpServerRow, (string | number | null)[]>(
+      `INSERT INTO mcp_servers (
+        id, name, description, scope, ownerAgentId, transport,
+        command, args, url, headers,
+        envConfigKeys, headerConfigKeys,
+        isEnabled, version, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      data.name,
+      data.description ?? null,
+      data.scope ?? "agent",
+      data.ownerAgentId ?? null,
+      data.transport,
+      data.command ?? null,
+      data.args ?? null,
+      data.url ?? null,
+      data.headers ?? null,
+      data.envConfigKeys ?? null,
+      data.headerConfigKeys ?? null,
+      now,
+      now,
+    );
+
+  if (!row) throw new Error("Failed to create MCP server");
+  return rowToMcpServer(row);
+}
+
+export function updateMcpServer(
+  id: string,
+  updates: Partial<McpServerInsert> & { isEnabled?: boolean },
+): McpServer | null {
+  const existing = getMcpServerById(id);
+  if (!existing) return null;
+
+  const now = new Date().toISOString();
+  const sets: string[] = ["lastUpdatedAt = ?"];
+  const params: (string | number | null)[] = [now];
+
+  if (updates.name !== undefined) {
+    sets.push("name = ?");
+    params.push(updates.name);
+  }
+  if (updates.description !== undefined) {
+    sets.push("description = ?");
+    params.push(updates.description ?? null);
+  }
+  if (updates.scope !== undefined) {
+    sets.push("scope = ?");
+    params.push(updates.scope);
+  }
+  if (updates.transport !== undefined) {
+    sets.push("transport = ?");
+    params.push(updates.transport);
+  }
+  if (updates.command !== undefined) {
+    sets.push("command = ?");
+    params.push(updates.command ?? null);
+  }
+  if (updates.args !== undefined) {
+    sets.push("args = ?");
+    params.push(updates.args ?? null);
+  }
+  if (updates.url !== undefined) {
+    sets.push("url = ?");
+    params.push(updates.url ?? null);
+  }
+  if (updates.headers !== undefined) {
+    sets.push("headers = ?");
+    params.push(updates.headers ?? null);
+  }
+  if (updates.envConfigKeys !== undefined) {
+    sets.push("envConfigKeys = ?");
+    params.push(updates.envConfigKeys ?? null);
+  }
+  if (updates.headerConfigKeys !== undefined) {
+    sets.push("headerConfigKeys = ?");
+    params.push(updates.headerConfigKeys ?? null);
+  }
+  if (updates.isEnabled !== undefined) {
+    sets.push("isEnabled = ?");
+    params.push(updates.isEnabled ? 1 : 0);
+  }
+  if (updates.ownerAgentId !== undefined) {
+    sets.push("ownerAgentId = ?");
+    params.push(updates.ownerAgentId ?? null);
+  }
+
+  // Bump version on config changes
+  const configFields = [
+    "command",
+    "args",
+    "url",
+    "headers",
+    "envConfigKeys",
+    "headerConfigKeys",
+    "transport",
+  ];
+  if (configFields.some((f) => (updates as Record<string, unknown>)[f] !== undefined)) {
+    sets.push("version = version + 1");
+  }
+
+  params.push(id);
+  const row = getDb()
+    .prepare<McpServerRow, (string | number | null)[]>(
+      `UPDATE mcp_servers SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
+    )
+    .get(...params);
+
+  return row ? rowToMcpServer(row) : null;
+}
+
+export function deleteMcpServer(id: string): boolean {
+  const result = getDb().prepare("DELETE FROM mcp_servers WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
+export function getMcpServerById(id: string): McpServer | null {
+  const row = getDb()
+    .prepare<McpServerRow, [string]>("SELECT * FROM mcp_servers WHERE id = ?")
+    .get(id);
+  return row ? rowToMcpServer(row) : null;
+}
+
+export function getMcpServerByName(
+  name: string,
+  scope: McpServerScope,
+  ownerAgentId: string | null,
+): McpServer | null {
+  const row = getDb()
+    .prepare<McpServerRow, [string, string, string]>(
+      "SELECT * FROM mcp_servers WHERE name = ? AND scope = ? AND COALESCE(ownerAgentId, '') = ?",
+    )
+    .get(name, scope, ownerAgentId ?? "");
+  return row ? rowToMcpServer(row) : null;
+}
+
+export interface McpServerFilters {
+  scope?: McpServerScope;
+  ownerAgentId?: string;
+  transport?: McpServerTransport;
+  isEnabled?: boolean;
+  search?: string;
+}
+
+export function listMcpServers(filters?: McpServerFilters): McpServer[] {
+  let query = "SELECT * FROM mcp_servers WHERE 1=1";
+  const params: (string | number)[] = [];
+
+  if (filters?.scope) {
+    query += " AND scope = ?";
+    params.push(filters.scope);
+  }
+  if (filters?.ownerAgentId) {
+    query += " AND ownerAgentId = ?";
+    params.push(filters.ownerAgentId);
+  }
+  if (filters?.transport) {
+    query += " AND transport = ?";
+    params.push(filters.transport);
+  }
+  if (filters?.isEnabled !== undefined) {
+    query += " AND isEnabled = ?";
+    params.push(filters.isEnabled ? 1 : 0);
+  }
+  if (filters?.search) {
+    query += " AND (name LIKE ? OR description LIKE ?)";
+    const term = `%${filters.search}%`;
+    params.push(term, term);
+  }
+
+  query += " ORDER BY name ASC";
+
+  return getDb()
+    .prepare<McpServerRow, (string | number)[]>(query)
+    .all(...params)
+    .map(rowToMcpServer);
+}
+
+export function installMcpServer(agentId: string, mcpServerId: string): AgentMcpServer {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  const row = getDb()
+    .prepare<AgentMcpServerRow, [string, string, string, string]>(
+      `INSERT INTO agent_mcp_servers (id, agentId, mcpServerId, isActive, installedAt)
+       VALUES (?, ?, ?, 1, ?)
+       ON CONFLICT(agentId, mcpServerId) DO UPDATE SET isActive = 1
+       RETURNING *`,
+    )
+    .get(id, agentId, mcpServerId, now);
+
+  if (!row) throw new Error("Failed to install MCP server");
+  return rowToAgentMcpServer(row);
+}
+
+export function uninstallMcpServer(agentId: string, mcpServerId: string): boolean {
+  const result = getDb()
+    .prepare("DELETE FROM agent_mcp_servers WHERE agentId = ? AND mcpServerId = ?")
+    .run(agentId, mcpServerId);
+  return result.changes > 0;
+}
+
+export function getAgentMcpServers(agentId: string, activeOnly = true): McpServerWithInstallInfo[] {
+  const query = `
+    SELECT ms.*, ams.isActive, ams.installedAt
+    FROM mcp_servers ms
+    JOIN agent_mcp_servers ams ON ms.id = ams.mcpServerId
+    WHERE ams.agentId = ?
+      ${activeOnly ? "AND ams.isActive = 1" : ""}
+      AND ms.isEnabled = 1
+    ORDER BY ms.name ASC
+  `;
+
+  return getDb()
+    .prepare<McpServerWithInstallRow, [string]>(query)
+    .all(agentId)
+    .map(rowToMcpServerWithInstall);
 }

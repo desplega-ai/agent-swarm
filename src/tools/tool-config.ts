@@ -131,6 +131,15 @@ export const DEFERRED_TOOLS = new Set([
   "skill-sync-remote",
   "skill-publish",
 
+  // MCP Servers (7)
+  "mcp-server-create",
+  "mcp-server-delete",
+  "mcp-server-get",
+  "mcp-server-install",
+  "mcp-server-list",
+  "mcp-server-uninstall",
+  "mcp-server-update",
+
   // Other (3)
   "cancel-task",
   "inject-learning",
