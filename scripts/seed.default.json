@@ -1,0 +1,146 @@
+{
+  "$schema": "./seed.schema.json",
+  "db": "./agent-swarm-db.sqlite",
+  "clean": false,
+  "agents": {
+    "count": 4,
+    "data": [
+      {
+        "name": "Atlas",
+        "role": "Lead Coordinator",
+        "description": "Orchestrates the swarm, assigns tasks, and monitors progress across all agents.",
+        "isLead": true,
+        "status": "idle",
+        "capabilities": ["coordination", "planning", "task-management"]
+      },
+      {
+        "name": "Forge",
+        "role": "Implementation Engineer",
+        "description": "Expert coder who turns plans into working PRs. Writes clean, tested TypeScript.",
+        "isLead": false,
+        "status": "busy",
+        "capabilities": ["typescript", "react", "testing", "git"]
+      },
+      {
+        "name": "Scout",
+        "role": "Researcher",
+        "description": "Investigates codebases, APIs, and documentation to gather context for implementation tasks.",
+        "isLead": false,
+        "status": "idle",
+        "capabilities": ["research", "documentation", "analysis"]
+      },
+      {
+        "name": "Sentinel",
+        "role": "Code Reviewer",
+        "description": "Reviews PRs for correctness, security, and adherence to project conventions.",
+        "isLead": false,
+        "status": "offline",
+        "capabilities": ["code-review", "security", "testing"]
+      }
+    ]
+  },
+  "channels": {
+    "count": 3,
+    "data": [
+      {
+        "name": "engineering",
+        "description": "Engineering discussions and technical decisions",
+        "type": "public"
+      },
+      {
+        "name": "deployments",
+        "description": "Deployment coordination and status updates",
+        "type": "public"
+      },
+      {
+        "name": "standup",
+        "description": "Daily standup updates from all agents",
+        "type": "public"
+      }
+    ]
+  },
+  "messages": {
+    "perChannel": 5
+  },
+  "tasks": {
+    "count": 12
+  },
+  "epics": {
+    "count": 2,
+    "data": [
+      {
+        "name": "Auth System Overhaul",
+        "goal": "Replace legacy session-based auth with JWT tokens and OAuth2 support",
+        "description": "Complete rewrite of the authentication system to support modern auth flows",
+        "status": "active",
+        "priority": 80,
+        "tags": ["security", "auth", "backend"]
+      },
+      {
+        "name": "Dashboard v2",
+        "goal": "Rebuild the monitoring dashboard with real-time updates and improved UX",
+        "description": "Next-gen dashboard with WebSocket updates, better charts, and mobile support",
+        "status": "draft",
+        "priority": 60,
+        "tags": ["frontend", "dashboard", "ux"]
+      }
+    ]
+  },
+  "workflows": {
+    "count": 1,
+    "data": [
+      {
+        "name": "PR Review Pipeline",
+        "description": "Automated pipeline that reviews PRs, runs tests, and posts feedback",
+        "definition": {
+          "nodes": [
+            {
+              "id": "review",
+              "type": "agent-task",
+              "config": {
+                "template": "Review the PR and check for code quality issues"
+              },
+              "next": ["test"]
+            },
+            {
+              "id": "test",
+              "type": "agent-task",
+              "config": {
+                "template": "Run the test suite and report results"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "schedules": {
+    "count": 1,
+    "data": [
+      {
+        "name": "Daily Standup Summary",
+        "description": "Collects status from all agents and posts a daily summary",
+        "cronExpression": "0 9 * * 1-5",
+        "taskTemplate": "Collect status updates from all agents and post a summary to the standup channel",
+        "tags": ["standup", "daily"],
+        "priority": 40
+      }
+    ]
+  },
+  "memories": {
+    "count": 4
+  },
+  "services": {
+    "count": 1,
+    "data": [
+      {
+        "name": "dashboard-api",
+        "description": "Dashboard backend API serving real-time agent metrics",
+        "port": 8080,
+        "healthCheckPath": "/health",
+        "status": "healthy",
+        "script": "bun run src/dashboard/server.ts"
+      }
+    ]
+  }
+}
