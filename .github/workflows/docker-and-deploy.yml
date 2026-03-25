@@ -4,9 +4,20 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - "docs-site/**"
-      - "landing/**"
+    paths:
+      - "src/**"
+      - "Dockerfile"
+      - "Dockerfile.worker"
+      - "docker-entrypoint.sh"
+      - "api-entrypoint.sh"
+      - "package.json"
+      - "bun.lock*"
+      - "tsconfig.json"
+      - "scripts/**"
+      - "templates/**"
+      - "plugin/**"
+      - "deploy/**"
+      - ".github/workflows/docker-and-deploy.yml"
   workflow_dispatch:
 
 concurrency:
