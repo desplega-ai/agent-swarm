@@ -2,7 +2,7 @@
 date: 2026-03-25T18:00:00Z
 topic: "Context Window Usage Tracking"
 type: plan
-status: draft
+status: in-progress
 research: thoughts/taras/research/2026-03-25-context-usage-tracking.md
 ---
 
