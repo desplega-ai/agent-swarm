@@ -264,6 +264,135 @@ GITHUB_APP_PRIVATE_KEY=base64-encoded-key
 | PR review submitted (on bot's PR) | Creates a notification task with review feedback |
 | CI failure (on PRs with existing tasks) | Creates a CI notification task |
 
+<details>
+<summary><strong>Flow Diagrams</strong> (click to expand)</summary>
+
+#### Task Creation Flow
+
+How GitHub events become tasks in the swarm:
+
+```mermaid
+%%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '13px', 'nodeSpacing': 30, 'rankSpacing': 40}}}%%
+flowchart TB
+    subgraph ENTRY["1. GitHub Webhook Entry Points"]
+        direction LR
+        E1["Issue<br/>opened/edited"]
+        E2["PR<br/>opened/edited"]
+        E3["Comment<br/>created"]
+        E4["Bot Assigned<br/>to Issue/PR"]
+        E5["Review Requested<br/>from Bot"]
+    end
+
+    subgraph GATE["2. Trigger Gate"]
+        M{"@agent-swarm<br/>mention?"}
+        A{"Bot is<br/>assignee?"}
+        D{"Duplicate?<br/>60s TTL"}
+    end
+
+    subgraph CREATE["3. Task Creation"]
+        LEAD["Find Lead Agent<br/>(online > offline > none)"]
+        TPL["resolveTemplate()"]
+        TASK["createTaskExtended()"]
+    end
+
+    subgraph OUT["4. Output"]
+        ASSIGN["Task assigned<br/>to Lead"]
+        POOL["Task in pool<br/>(no lead)"]
+        REACT["eyes reaction<br/>on GitHub"]
+    end
+
+    E1 & E2 & E3 --> M
+    E4 & E5 --> A
+
+    M -->|Yes| D
+    A -->|Yes| D
+    M & A -->|No| DROP1(("skip"))
+
+    D -->|New| LEAD
+    D -->|Dup| DROP2(("skip"))
+
+    LEAD --> TPL --> TASK
+
+    TASK -->|lead found| ASSIGN
+    TASK -.->|no lead| POOL
+    TASK --> REACT
+```
+
+[PNG fallback](assets/github-task-creation-flow.png)
+
+#### Follow-up Flows
+
+Events that create secondary tasks when an active task already exists for a PR:
+
+```mermaid
+%%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '13px'}}}%%
+flowchart TB
+    subgraph EVENTS["GitHub Follow-up Events (require existing active task)"]
+        direction LR
+        F1["PR Closed<br/>(merged/closed)"]
+        F2["PR Synchronize<br/>(new commits)"]
+        F3["Review Submitted<br/>(approved/changes_requested)"]
+        F4["Check Run Failed"]
+        F5["Check Suite Failed"]
+        F6["Workflow Run Failed"]
+    end
+
+    FIND{"findTaskByVcs()<br/>Active task for<br/>repo + PR number?"}
+
+    EVENTS --> FIND
+
+    FIND -->|No task| SKIP(("skip"))
+
+    subgraph FOLLOWUP["Follow-up Task Created (assigned to Lead)"]
+        direction LR
+        T1["github-pr-status<br/>PR merged/closed"]
+        T2["github-pr-update<br/>New commits pushed"]
+        T3["github-review<br/>Review feedback"]
+        T4["github-ci<br/>CI failure alert"]
+    end
+
+    F1 --> FIND -->|task found| T1
+    F2 --> FIND -->|task found| T2
+    F3 --> FIND -->|task found| T3
+    F4 & F5 & F6 --> FIND -->|task found| T4
+
+    NOTE["All follow-up tasks reference<br/>the original task ID for routing"]
+
+    FOLLOWUP --> NOTE
+```
+
+[PNG fallback](assets/github-followup-flows.png)
+
+#### Cancellation Flows
+
+How unassigning the bot cancels active tasks:
+
+```mermaid
+%%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '13px'}}}%%
+flowchart TB
+    subgraph EVENTS["Cancellation Events"]
+        direction LR
+        C1["Bot Unassigned<br/>from Issue"]
+        C2["Bot Unassigned<br/>from PR"]
+        C3["Review Request<br/>Removed from Bot"]
+    end
+
+    BOT{"isBotAssignee()"}
+    FIND{"findTaskByVcs()<br/>Active task?"}
+    CANCEL["failTask()<br/>Cancel with reason"]
+    NOOP(("no-op"))
+
+    EVENTS --> BOT
+    BOT -->|Not bot| NOOP
+    BOT -->|Is bot| FIND
+    FIND -->|No task| NOOP
+    FIND -->|Task found| CANCEL
+```
+
+[PNG fallback](assets/github-cancellation-flows.png)
+
+</details>
+
 ### GitLab
 
 Set up a GitLab webhook to receive events when the bot is @mentioned or assigned to issues/MRs.

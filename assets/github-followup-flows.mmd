@@ -1,0 +1,39 @@
+%%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '13px'}}}%%
+flowchart TB
+    subgraph EVENTS["GitHub Follow-up Events (require existing active task)"]
+        direction LR
+        F1["PR Closed<br/>(merged/closed)"]
+        F2["PR Synchronize<br/>(new commits)"]
+        F3["Review Submitted<br/>(approved/changes_requested)"]
+        F4["Check Run Failed"]
+        F5["Check Suite Failed"]
+        F6["Workflow Run Failed"]
+    end
+
+    FIND{"findTaskByVcs()<br/>Active task for<br/>repo + PR number?"}
+
+    EVENTS --> FIND
+
+    FIND -->|No task| SKIP(("skip"))
+
+    subgraph FOLLOWUP["Follow-up Task Created (assigned to Lead)"]
+        direction LR
+        T1["github-pr-status<br/>PR merged/closed"]
+        T2["github-pr-update<br/>New commits pushed"]
+        T3["github-review<br/>Review feedback"]
+        T4["github-ci<br/>CI failure alert"]
+    end
+
+    F1 --> FIND -->|task found| T1
+    F2 --> FIND -->|task found| T2
+    F3 --> FIND -->|task found| T3
+    F4 & F5 & F6 --> FIND -->|task found| T4
+
+    NOTE["All follow-up tasks reference<br/>the original task ID for routing"]
+
+    FOLLOWUP --> NOTE
+
+    style EVENTS fill:#1a1a2e,stroke:#e94560,color:#fff
+    style FOLLOWUP fill:#0f3460,stroke:#48c9b0,color:#fff
+    style SKIP fill:#e74c3c,color:#fff
+    style NOTE fill:#16213e,stroke:#533483,color:#fff
