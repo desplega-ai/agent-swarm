@@ -263,15 +263,17 @@ export function startScheduler(
   ensure({
     id: "scheduler_started",
     flow: "api",
-    runId: opts?.runId!,
+    runId: opts?.runId ?? "",
     depIds: ["listen"],
     data: {},
+    // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
     filter: ({}, ctx) => {
-      const start = ctx.deps.find((d) => d.id == "listen");
+      const start = ctx.deps.find((d) => d.id === "listen");
       return !!start && start.data?.capabilities?.includes("scheduling");
     },
+    // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
     validator: ({}, ctx) => {
-      const start = ctx.deps.find((d) => d.id == "listen");
+      const start = ctx.deps.find((d) => d.id === "listen");
       return !!start && start.data?.capabilities?.includes("scheduling");
     },
   });
