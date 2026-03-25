@@ -28,7 +28,7 @@ function SwarmVisualization() {
     <div className="relative w-full aspect-square max-w-lg mx-auto">
       <div className="absolute inset-0 rounded-full bg-gradient-to-br from-amber-100/50 to-amber-50/20 blur-3xl" />
 
-      <svg viewBox="0 0 100 100" className="relative w-full h-full">
+      <svg viewBox="0 0 100 100" className="relative w-full h-full" role="img" aria-label="Agent Swarm network visualization showing interconnected AI agents">
         {connections.map(([from, to], i) => (
           <motion.line
             key={i}
