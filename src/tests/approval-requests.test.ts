@@ -14,6 +14,7 @@ import {
   listApprovalRequests,
   resolveApprovalRequest,
   startTask,
+  updateApprovalRequestNotifications,
 } from "../be/db";
 import type { ExecutorMeta } from "../types";
 import type { ExecutorDependencies, ExecutorInput } from "../workflows/executors/base";
@@ -919,10 +920,29 @@ describe("Approval Requests", () => {
         }
       }
 
-      const approval = createApprovalRequest(
-        makeApprovalData({ sourceTaskId }),
-      );
+      const approval = createApprovalRequest(makeApprovalData({ sourceTaskId }));
       expect(approval.sourceTaskId).toBe(task.id);
+    });
+  });
+
+  describe("updateApprovalRequestNotifications", () => {
+    test("stores messageTs back in notification channels", () => {
+      const channels = [
+        { channel: "slack", target: "C12345" },
+        { channel: "email", target: "user@example.com" },
+      ];
+      const approval = createApprovalRequest(makeApprovalData({ notificationChannels: channels }));
+      expect(approval.notificationChannels).toEqual(channels);
+
+      const updatedChannels = [
+        { channel: "slack", target: "C12345", messageTs: "1234567890.123456" },
+        { channel: "email", target: "user@example.com" },
+      ];
+      updateApprovalRequestNotifications(approval.id, updatedChannels);
+
+      const fetched = getApprovalRequestById(approval.id);
+      expect(fetched).not.toBeNull();
+      expect(fetched!.notificationChannels).toEqual(updatedChannels);
     });
   });
 });
