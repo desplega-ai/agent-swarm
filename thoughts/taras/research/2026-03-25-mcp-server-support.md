@@ -37,7 +37,7 @@ Three MCP transport types exist: **stdio** (local subprocess), **Streamable HTTP
 
 The skills system provides the architectural template that MCP server support would follow. The full lifecycle:
 
-**Data model** (`src/types.ts:883-925`): Skills have a `SkillSchema` (core definition with type/scope/ownership), an `AgentSkillSchema` (junction table for installation), and `SkillWithInstallInfoSchema` (joined view). Key fields: `type` (remote/personal), `scope` (global/swarm/agent), `ownerAgentId`, source provenance fields for remote skills.
+**Data model** (`src/types.ts:874-925`): Skills have a `SkillSchema` (core definition with type/scope/ownership), an `AgentSkillSchema` (junction table for installation), and `SkillWithInstallInfoSchema` (joined view). Key fields: `type` (remote/personal), `scope` (global/swarm/agent), `ownerAgentId`, source provenance fields for remote skills.
 
 **Storage** (`src/be/db.ts:6996-7393`): Full CRUD via `createSkill()`, `updateSkill()`, `deleteSkill()`, `getSkillById()`, `getSkillByName()`, `listSkills()`, `searchSkills()`. Installation via `installSkill()` (upsert with reactivation), `uninstallSkill()` (hard delete from junction), `getAgentSkills()` (joined query with deduplication — personal skills win over same-named remote skills), `toggleAgentSkill()` (soft toggle).
 
@@ -46,8 +46,8 @@ The skills system provides the architectural template that MCP server support wo
 **MCP tools** (`src/tools/skills/`): 11 agent-facing tools registered unconditionally in `src/server.ts:262-273`. Permission model: workers can create personal skills, only leads can create swarm-scope or install remote skills. Workers can publish personal -> swarm via an approval task flow.
 
 **Injection — three paths**:
-1. **System prompt** (`src/commands/runner.ts:1968-1994`): Fetches skills from API, renders `## Installed Skills` section with `- /{name}: {description}` entries.
-2. **Filesystem sync** (`src/commands/runner.ts:2064-2093`): Calls `POST /api/skills/sync-filesystem` which writes `SKILL.md` files to `~/.claude/skills/` and `~/.pi/agent/skills/`.
+1. **System prompt** (`src/prompts/base-prompt.ts:74-77`): Renders `## Installed Skills` section with `- /{name}: {description}` entries from fetched skills data.
+2. **Skill fetch** (`src/commands/runner.ts:2069-2093`): Fetches installed skills via `GET /api/agents/${agentId}/skills`, filters active+enabled, builds summary for prompt injection.
 3. **Docker entrypoint** (`docker-entrypoint.sh:646-683`): Fetches skills via curl, writes simple skills to filesystem, runs `npx skills add` for complex skills.
 
 ### 2. Claude Provider — .mcp.json Management
@@ -149,7 +149,7 @@ Supports `${VAR_NAME}` syntax for environment variable expansion. Claude Code CL
 
 | File | Lines | Description |
 |------|-------|-------------|
-| `src/types.ts` | 883-925 | Skill Zod schemas (blueprint for MCP server schemas) |
+| `src/types.ts` | 874-925 | Skill Zod schemas (blueprint for MCP server schemas) |
 | `src/be/migrations/019_skills.sql` | 1-65 | Skills + agent_skills DDL (blueprint for MCP tables) |
 | `src/be/db.ts` | 6996-7393 | Skill DB functions (CRUD, install, query) |
 | `src/be/skill-parser.ts` | 22-70 | YAML frontmatter parser |
@@ -157,7 +157,7 @@ Supports `${VAR_NAME}` syntax for environment variable expansion. Claude Code CL
 | `src/http/skills.ts` | 1-476 | Skills HTTP API (11 endpoints) |
 | `src/tools/skills/` | - | 11 MCP tools for skill management |
 | `src/server.ts` | 262-273 | MCP tool registration |
-| `src/commands/runner.ts` | 1968-2093 | Skill fetch, prompt injection, filesystem sync |
+| `src/commands/runner.ts` | 2069-2093 | Skill fetch (agent skills from API, filtering active+enabled) |
 | `src/prompts/base-prompt.ts` | 74-77 | System prompt skill section rendering |
 | `docker-entrypoint.sh` | 275-295 | .mcp.json generation |
 | `docker-entrypoint.sh` | 646-683 | Skill filesystem sync |
@@ -329,5 +329,5 @@ _Reviewed: 2026-03-25 by Claude (automated review, Critical autonomy)_
 
 - [x] **Missing "Open Questions" section** — Added 5 open questions covering UI dashboard, runtime sync, future providers, health checks, and OAuth flows.
 - [x] **UI dashboard not investigated** — `new-ui/` has existing skills pages that would blueprint MCP server views. Added "UI Dashboard (new-ui/)" section to Architecture Documentation.
-- [x] **Line reference drift** — `src/types.ts:874-925` corrected to `883-925` (SkillSchema starts at line 883).
+- [x] **Inaccurate runner.ts reference** — `src/commands/runner.ts:1968-2093` was overstated. Lines 1968-2067 are agent profile/template bootstrap, not skills. Skill fetch is only at lines 2069-2093. Description corrected from "skill fetch, prompt injection, filesystem sync" to just "skill fetch." Inline reference in Section 1 also corrected (filesystem sync reference removed; system prompt rendering attributed to `base-prompt.ts:74-77`).
 - [x] **"Related Research" duplicated "Historical Context"** — Added cross-references to clarify overlap.

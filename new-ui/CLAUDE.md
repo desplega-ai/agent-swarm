@@ -2,6 +2,8 @@
 
 New dashboard UI built with Vite 6 + React 19 + react-router v7 + shadcn/ui + Tailwind CSS v4 + AG Grid.
 
+**Thoughts directory**: All research, plans, and brainstorm documents go in the **root** `thoughts/` directory (`/thoughts/taras/plans/`, `/thoughts/shared/research/`, etc.), NOT inside `new-ui/thoughts/`. The `new-ui/` project does not have its own thoughts directory.
+
 ## Quick Start
 
 ```bash

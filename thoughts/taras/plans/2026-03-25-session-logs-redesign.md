@@ -1,7 +1,8 @@
 ---
 date: 2026-03-25T14:30:00Z
 topic: "Session Log Viewer Redesign"
-status: draft
+planner: claude
+status: ready
 ---
 
 # Session Log Viewer Redesign — Implementation Plan
@@ -140,53 +141,69 @@ Replace raw `<pre>` JSON in tool blocks with the existing `JsonTree` component f
 - Replace the raw `<pre>` in `ToolUseBubble` (lines 173-176) with `JsonTree` when input is an object/array:
   ```tsx
   {open && (
-    <div className="mt-2 max-h-48 overflow-auto">
-      {typeof input === "object" && input !== null ? (
-        <JsonTree data={input} defaultExpandDepth={2} />
-      ) : (
-        <pre className="text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
-          {inputStr}
-        </pre>
-      )}
-    </div>
+    typeof input === "object" && input !== null ? (
+      <JsonTree data={input} defaultExpandDepth={2} maxHeight="192px" className="mt-2" />
+    ) : (
+      <pre className="mt-2 text-[11px] text-muted-foreground whitespace-pre-wrap break-all overflow-auto max-h-48">
+        {inputStr}
+      </pre>
+    )
   )}
   ```
+- `JsonTree` has built-in `maxHeight` prop (default `"300px"`) and `className` — use them instead of wrapping in a div
 - This gives color-coded keys/values and expandable nested objects
 
 #### 2. ToolResultBubble — Content-Aware Formatting
 **File**: `src/components/shared/session-log-viewer.tsx`
 **Changes**:
 - Detect content type and render accordingly:
-  - JSON results → `JsonTree` with `defaultExpandDepth={1}`
-  - Text results → `ReactMarkdown` with `prose-chat prose-session-log` (tool results often contain file contents, code, explanations)
-- Keep the collapsible behavior but improve the preview logic
+  - JSON object/array results → `JsonTree` with `defaultExpandDepth={1}` and `maxHeight="256px"`
+  - Non-JSON text results → keep as `<pre>` with improved styling (do NOT use ReactMarkdown — tool results often contain line-numbered source code like `1→import { verifyToken }...` that markdown would mangle)
+- Keep the collapsible behavior with improved preview:
+  - **Collapsed**: show first 3 lines (not 200 chars) for text, or key count summary for JSON (e.g., "{ 3 keys }")
+  - **Expanded**: full content with appropriate renderer
 - Implementation approach:
   ```tsx
-  const isJson = useMemo(() => {
-    try { JSON.parse(content); return true; } catch { return false; }
+  const parsedJson = useMemo(() => {
+    try {
+      const parsed = JSON.parse(content);
+      // Only use JsonTree for objects/arrays, not primitive JSON values
+      return typeof parsed === "object" && parsed !== null ? parsed : null;
+    } catch { return null; }
   }, [content]);
   ```
+- Note: `useMemo` is already imported (line 2), and `useExhaustiveDependencies` lint rule is active for non-ui components
 
 #### 3. Copy Button for Tool Blocks
 **File**: `src/components/shared/session-log-viewer.tsx`
 **Changes**:
 - Add a small copy-to-clipboard button to the header row of `ToolUseBubble` and `ToolResultBubble`
 - Use `navigator.clipboard.writeText()` with a brief "Copied" state (1.5s timeout)
-- Icons: `Copy` / `Check` from lucide-react
+- Icons: `Copy` / `Check` from lucide-react (both already used in `pages/chat/page.tsx`)
 - Position: right side of the collapsible header, visible on hover
+- **Important**: Clean up the `setTimeout` on unmount to avoid React state-update warnings
 - Implementation pattern:
   ```tsx
   function CopyButton({ text }: { text: string }) {
     const [copied, setCopied] = useState(false);
+    const timeoutRef = useRef<ReturnType<typeof setTimeout>>(null);
+
+    const handleCopy = useCallback((e: React.MouseEvent) => {
+      e.stopPropagation();
+      navigator.clipboard.writeText(text);
+      setCopied(true);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      timeoutRef.current = setTimeout(() => setCopied(false), 1500);
+    }, [text]);
+
+    useEffect(() => {
+      return () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); };
+    }, []);
+
     return (
       <button
         type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          navigator.clipboard.writeText(text);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
-        }}
+        onClick={handleCopy}
         className="ml-auto text-muted-foreground/50 hover:text-muted-foreground transition-colors"
       >
         {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
@@ -194,13 +211,14 @@ Replace raw `<pre>` JSON in tool blocks with the existing `JsonTree` component f
     );
   }
   ```
+- Note: `useRef`, `useCallback`, and `useEffect` will need to be added to the React import (line 2)
 
 #### 4. JsonTree Compatibility Check
 **File**: `src/components/workflows/json-tree.tsx`
-**Changes** (if needed):
-- Verify `JsonTree` accepts arbitrary `unknown` data (it currently types `data` as `unknown`)
-- Ensure the color scheme works in both light and dark themes (uses `dark:` variants)
-- No changes expected — just verification
+**Changes**: None needed — verified:
+- Props: `data: unknown`, `defaultExpandDepth?: number` (default `1`), `maxHeight?: string` (default `"300px"`), `className?: string`
+- Returns `null` for `undefined`/`null` data (line 18)
+- Uses CSS variable classes for chrome (`bg-muted`, `text-muted-foreground`) and hardcoded `dark:` variants for leaf values (`text-emerald-600 dark:text-emerald-400` for strings, `text-amber-600 dark:text-amber-400` for numbers, `text-sky-600 dark:text-sky-400` for booleans) — works in both themes
 
 ### Success Criteria:
 
@@ -258,8 +276,8 @@ Refine the overall visual treatment of the session log viewer — better thinkin
   - Assistant messages: `border-l-2 border-l-primary/30`
   - User/tool messages: `border-l-2 border-l-muted-foreground/20`
   - System messages: no border, muted background
-- Move role label and timestamp into a single compact header line
-- Remove model badge from header (shown in task detail sidebar already)
+- Move role label, model, and timestamp into a single compact header line
+- Keep model badge but make it less prominent (smaller, lower opacity) — model per-message is useful debugging info not shown elsewhere
 
 #### 4. Iteration Divider Refinement
 **File**: `src/components/shared/session-log-viewer.tsx`
@@ -327,30 +345,50 @@ Refine the overall visual treatment of the session log viewer — better thinkin
 
 ## Manual E2E Verification
 
-After all phases complete:
+After all phases complete, use the seeding script to populate the DB with realistic session log data:
 
 ```bash
-# Start the API server (if not running)
-cd /Users/taras/Documents/code/agent-swarm && bun run start:http &
+# 1. Seed the database with demo data (includes session logs with markdown, tool calls, thinking)
+cd /Users/taras/Documents/code/agent-swarm && bun run seed --clean
 
-# Start the UI dev server
-cd /Users/taras/Documents/code/agent-swarm/new-ui && pnpm dev
+# 2. Start the API server
+bun run start:http &
 
-# Open the dashboard and navigate to a task with session logs
+# 3. Start the UI dev server
+cd new-ui && pnpm dev
+
+# 4. Open the dashboard and navigate to any task with session logs
 # Verify:
-# 1. Text blocks render markdown (headers, bold, code, lists)
-# 2. Tool inputs show color-coded JsonTree
-# 3. Tool results show JsonTree (JSON) or markdown (text)
-# 4. Copy buttons work on tool blocks
-# 5. Thinking blocks have amber accent and Brain icon
-# 6. Messages use left-border indicators
-# 7. Iteration dividers are left-aligned
-# 8. Auto-scroll works with Follow button
-# 9. Both dark and light themes work
+#   - Text blocks render markdown (numbered lists, `backtick code`, **bold**)
+#   - Tool inputs show color-coded JsonTree (expand/collapse nodes)
+#   - Tool results show JsonTree (JSON) or markdown (text like file contents)
+#   - Copy buttons work on tool blocks
+#   - Thinking blocks have amber accent and Brain icon
+#   - Messages use left-border indicators instead of avatar circles
+#   - Iteration dividers are left-aligned with background tint
+#   - Auto-scroll works with Follow button
+#   - Both dark and light themes work
 ```
+
+The seed script (`scripts/seed.ts`) generates realistic multi-turn conversations with tool calls (Read, Edit, Grep, Bash), thinking blocks, and markdown-rich assistant responses — ideal for testing all the rendering improvements.
 
 ## References
 
 - Research document: `/tmp/2026-03-25-1400-session-logs-redesign.md`
 - AI Elements investigation: Web research completed — decision was to defer AI Elements in favor of existing project dependencies
 - Existing patterns: `JsonTree` at `components/workflows/json-tree.tsx`, `ReactMarkdown` usage at `pages/chat/page.tsx:343`
+
+---
+
+## Review Errata
+
+_Reviewed: 2026-03-25 by Claude_
+
+### Resolved
+- [x] **Tool result markdown mangling** — Original plan used ReactMarkdown for non-JSON tool results, but tool results often contain line-numbered source code (`1→import...`) that markdown would mangle. Fixed: keep `<pre>` for non-JSON text results.
+- [x] **CopyButton setTimeout cleanup** — Original had no cleanup on unmount. Fixed: added `useRef` + `useEffect` cleanup pattern.
+- [x] **Collapsed preview behavior** — Original didn't address how collapsed state works with JsonTree. Fixed: specified 3-line preview for text, key count summary for JSON.
+- [x] **Model badge removal** — Original removed model badge entirely, but model-per-message is debugging info not shown elsewhere. Fixed: keep badge with reduced prominence.
+- [x] **JsonTree props** — Original didn't mention `maxHeight` and `className` props. Fixed: use built-in props instead of wrapping div.
+- [x] **Missing `planner` frontmatter** — Added.
+- [x] **React import additions** — Noted that `useCallback` and `useEffect` need to be added to the React import line for CopyButton.
