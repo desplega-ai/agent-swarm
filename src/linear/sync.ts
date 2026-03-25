@@ -7,6 +7,7 @@ import {
   updateTrackerSync,
 } from "../be/db-queries/tracker";
 import { resolveTemplate } from "../prompts/resolver";
+import { ensureValidLinearToken } from "./client";
 // Side-effect import: registers all Linear event templates in the in-memory registry
 import "./templates";
 
@@ -46,6 +47,7 @@ async function postAgentActivity(
     | { type: "thought" | "response" | "error"; body: string }
     | { type: "action"; action: string; parameter?: string; result?: string },
 ): Promise<boolean> {
+  await ensureValidLinearToken();
   const tokens = getOAuthTokens("linear");
   if (!tokens) {
     console.log("[Linear Sync] No OAuth tokens, cannot post AgentSession activity");
@@ -96,6 +98,7 @@ async function updateAgentSession(
   sessionId: string,
   input: Record<string, unknown>,
 ): Promise<boolean> {
+  await ensureValidLinearToken();
   const tokens = getOAuthTokens("linear");
   if (!tokens) {
     console.log("[Linear Sync] No OAuth tokens, cannot update AgentSession");
