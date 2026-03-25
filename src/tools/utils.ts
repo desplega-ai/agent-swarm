@@ -101,17 +101,19 @@ export const createToolRegistrar = (server: McpServer) => {
     config: ToolConfig<InputArgs, OutputArgs>,
     cb: ToolCallbackWithInfo<InputArgs>,
   ) => {
-    return server.registerTool(name, config, ((args: InferInput<InputArgs>, meta: Meta) => {
-      const requestInfo = getRequestInfo(meta);
-
-      // Handle zero-argument case
-      if (config.inputSchema === undefined) {
+    // When inputSchema is undefined, the MCP SDK calls handler(extra) with a single arg.
+    // When inputSchema is defined, it calls handler(args, extra) with two args.
+    if (config.inputSchema === undefined) {
+      return server.registerTool(name, config, ((meta: Meta) => {
+        const requestInfo = getRequestInfo(meta);
         return (
           cb as (requestInfo: RequestInfo, meta: Meta) => CallToolResult | Promise<CallToolResult>
         )(requestInfo, meta);
-      }
+      }) as Parameters<typeof server.registerTool>[2]);
+    }
 
-      // Handle with-arguments case
+    return server.registerTool(name, config, ((args: InferInput<InputArgs>, meta: Meta) => {
+      const requestInfo = getRequestInfo(meta);
       return (
         cb as (
           args: InferInput<InputArgs>,
