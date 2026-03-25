@@ -4,6 +4,17 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
+const CHUNK_RELOAD_KEY = "chunk-reload";
+
+function isChunkLoadError(error: Error): boolean {
+  const msg = error.message;
+  return (
+    msg.includes("Failed to fetch dynamically imported module") ||
+    msg.includes("Failed to load module script") ||
+    (msg.includes("Loading chunk") && msg.includes("failed"))
+  );
+}
+
 interface ErrorBoundaryProps {
   children: ReactNode;
   fallback?: ReactNode;
@@ -25,11 +36,22 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    if (isChunkLoadError(error)) {
+      const key = `${CHUNK_RELOAD_KEY}:${window.location.pathname}`;
+      const alreadyReloaded = sessionStorage.getItem(key);
+      if (!alreadyReloaded) {
+        sessionStorage.setItem(key, Date.now().toString());
+        window.location.reload();
+        return;
+      }
+    }
     console.error("ErrorBoundary caught:", error, errorInfo);
   }
 
   handleReset = () => {
     this.setState({ hasError: false, error: null });
+    // Clear any chunk-reload flag so a future deploy can retry
+    sessionStorage.removeItem(`${CHUNK_RELOAD_KEY}:${window.location.pathname}`);
   };
 
   render() {
