@@ -145,9 +145,10 @@ describe("buildProgressBlocks", () => {
     });
 
     expect(blocks.length).toBe(2);
-    // Single line: ⏳ *Gamma* (`aabbccdd`): Analyzing codebase...
+    // Single line: *Gamma* (`aabbccdd`): Analyzing codebase...
+    // (no ⏳ prefix — progress strings now carry their own emoji)
     expect(blocks[0].type).toBe("section");
-    expect(blocks[0].text.text).toContain("⏳");
+    expect(blocks[0].text.text).not.toContain("⏳");
     expect(blocks[0].text.text).toContain("Gamma");
     expect(blocks[0].text.text).toContain("aabbccdd");
     expect(blocks[0].text.text).toContain("Analyzing codebase...");

@@ -129,7 +129,7 @@ export function runMigrations(db: Database): void {
     const initialMigration = migrations.find((m) => m.version === 1);
     if (initialMigration) {
       if (shouldBootstrapInitialMigration(db)) {
-        console.log("[migrations] Existing database detected — bootstrapping migration tracking");
+        console.debug("[migrations] Existing database detected — bootstrapping migration tracking");
         db.run(
           "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
           [
@@ -145,7 +145,7 @@ export function runMigrations(db: Database): void {
           checksum: initialMigration.checksum,
         });
       } else {
-        console.log(
+        console.warn(
           "[migrations] Existing database appears incomplete — applying 001_initial migration",
         );
       }
@@ -169,7 +169,7 @@ export function runMigrations(db: Database): void {
     }
 
     // Apply migration in a transaction
-    console.log(`[migrations] Applying: ${migration.name}`);
+    console.debug(`[migrations] Applying: ${migration.name}`);
     const start = performance.now();
 
     db.transaction(() => {
@@ -183,6 +183,6 @@ export function runMigrations(db: Database): void {
     })();
 
     const elapsed = (performance.now() - start).toFixed(1);
-    console.log(`[migrations] Applied: ${migration.name} (${elapsed}ms)`);
+    console.debug(`[migrations] Applied: ${migration.name} (${elapsed}ms)`);
   }
 }
