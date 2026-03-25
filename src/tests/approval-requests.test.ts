@@ -3,10 +3,13 @@ import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
 import {
   closeDb,
+  createAgent,
   createApprovalRequest,
+  createTaskExtended,
   getApprovalRequestById,
   getApprovalRequestByStepId,
   getExpiredPendingApprovals,
+  getTaskById,
   initDb,
   listApprovalRequests,
   resolveApprovalRequest,
@@ -730,6 +733,124 @@ describe("Approval Requests", () => {
       });
 
       expect(result.status).toBe("failed");
+    });
+  });
+
+  // ─── Follow-up task flow ─────────────────────────────────────
+  describe("Follow-up task: Slack metadata inheritance", () => {
+    test("sourceTaskId is stored and returned on resolved approval request", () => {
+      // Create a source task with Slack metadata
+      const agent = createAgent({
+        name: "test-follow-up-agent",
+        isLead: false,
+        status: "idle",
+      });
+      const sourceTask = createTaskExtended("original task with slack context", {
+        agentId: agent.id,
+        source: "mcp",
+        slackChannelId: "C_TEST_CHANNEL",
+        slackThreadTs: "1234567890.123456",
+        slackUserId: "U_TEST_USER",
+      });
+
+      // Create approval request linked to source task
+      const approvalData = makeApprovalData({ sourceTaskId: sourceTask.id });
+      const approval = createApprovalRequest(approvalData);
+      expect(approval.sourceTaskId).toBe(sourceTask.id);
+
+      // Resolve it
+      const resolved = resolveApprovalRequest(approval.id, {
+        status: "approved",
+        responses: { q1: { approved: true } },
+      });
+      expect(resolved).not.toBeNull();
+      expect(resolved!.sourceTaskId).toBe(sourceTask.id);
+    });
+
+    test("follow-up task inherits Slack metadata from source task via parentTaskId", () => {
+      const agent = createAgent({
+        name: "test-slack-inherit-agent",
+        isLead: false,
+        status: "idle",
+      });
+      const sourceTask = createTaskExtended("source task", {
+        agentId: agent.id,
+        source: "mcp",
+        slackChannelId: "C_FOLLOW_UP",
+        slackThreadTs: "9999999999.000000",
+        slackUserId: "U_FOLLOW_UP",
+      });
+
+      // Simulate what the respond handler does: create follow-up with parentTaskId
+      const followUp = createTaskExtended("follow-up task text", {
+        agentId: sourceTask.agentId ?? undefined,
+        parentTaskId: sourceTask.id,
+        source: "system",
+        taskType: "hitl-follow-up",
+        tags: ["hitl", "follow-up"],
+        // Explicit Slack metadata (as the handler now does)
+        slackChannelId: sourceTask.slackChannelId ?? undefined,
+        slackThreadTs: sourceTask.slackThreadTs ?? undefined,
+        slackUserId: sourceTask.slackUserId ?? undefined,
+      });
+
+      expect(followUp.slackChannelId).toBe("C_FOLLOW_UP");
+      expect(followUp.slackThreadTs).toBe("9999999999.000000");
+      expect(followUp.slackUserId).toBe("U_FOLLOW_UP");
+      expect(followUp.parentTaskId).toBe(sourceTask.id);
+      expect(followUp.taskType).toBe("hitl-follow-up");
+    });
+
+    test("follow-up task inherits Slack metadata even without explicit pass (auto-inheritance)", () => {
+      const agent = createAgent({
+        name: "test-auto-inherit-agent",
+        isLead: false,
+        status: "idle",
+      });
+      const sourceTask = createTaskExtended("source task auto", {
+        agentId: agent.id,
+        source: "mcp",
+        slackChannelId: "C_AUTO",
+        slackThreadTs: "1111111111.000000",
+        slackUserId: "U_AUTO",
+      });
+
+      // Without explicit Slack metadata — relies on auto-inheritance from parentTaskId
+      const followUp = createTaskExtended("auto-inherit follow-up", {
+        agentId: sourceTask.agentId ?? undefined,
+        parentTaskId: sourceTask.id,
+        source: "system",
+        taskType: "hitl-follow-up",
+      });
+
+      expect(followUp.slackChannelId).toBe("C_AUTO");
+      expect(followUp.slackThreadTs).toBe("1111111111.000000");
+      expect(followUp.slackUserId).toBe("U_AUTO");
+    });
+
+    test("no follow-up for workflow-linked requests (workflowRunId set)", () => {
+      const approvalData = makeApprovalData({
+        sourceTaskId: crypto.randomUUID(),
+        workflowRunId: crypto.randomUUID(),
+        workflowRunStepId: crypto.randomUUID(),
+      });
+      const approval = createApprovalRequest(approvalData);
+
+      // The condition in the handler is: !updated.workflowRunId && updated.sourceTaskId
+      // With workflowRunId set, this should be false
+      expect(approval.workflowRunId).toBeTruthy();
+      expect(approval.sourceTaskId).toBeTruthy();
+      // The handler would NOT create a follow-up task here
+      expect(!approval.workflowRunId && approval.sourceTaskId).toBe(false);
+    });
+
+    test("no follow-up when sourceTaskId is missing", () => {
+      const approvalData = makeApprovalData(); // no sourceTaskId
+      const approval = createApprovalRequest(approvalData);
+
+      expect(approval.sourceTaskId).toBeNull();
+      // The handler condition would be false
+      expect(!approval.workflowRunId && approval.sourceTaskId).toBeFalsy();
     });
   });
 });

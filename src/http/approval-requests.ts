@@ -213,6 +213,12 @@ export async function handleApprovalRequests(
           source: "system",
           taskType: "hitl-follow-up",
           tags: ["hitl", "follow-up"],
+          // Explicit Slack metadata — parentTaskId auto-inherits too,
+          // but being explicit ensures the follow-up task always gets
+          // the right thread context even if inheritance logic changes.
+          slackChannelId: sourceTask.slackChannelId ?? undefined,
+          slackThreadTs: sourceTask.slackThreadTs ?? undefined,
+          slackUserId: sourceTask.slackUserId ?? undefined,
         });
       }
     }
