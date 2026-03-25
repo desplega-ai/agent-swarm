@@ -1813,6 +1813,485 @@
         }
       }
     },
+    "/api/events": {
+      "post": {
+        "summary": "Store a single event",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "tool",
+                      "skill",
+                      "session",
+                      "api",
+                      "task",
+                      "workflow",
+                      "system"
+                    ]
+                  },
+                  "event": {
+                    "type": "string",
+                    "enum": [
+                      "tool.start",
+                      "tool.end",
+                      "skill.invoke",
+                      "skill.complete",
+                      "session.start",
+                      "session.end",
+                      "session.resume",
+                      "session.cost",
+                      "api.request",
+                      "api.error",
+                      "task.poll",
+                      "task.assign",
+                      "task.timeout",
+                      "workflow.step.start",
+                      "workflow.step.end",
+                      "workflow.run.start",
+                      "workflow.run.end",
+                      "system.boot",
+                      "system.migration",
+                      "system.error"
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ok",
+                      "error",
+                      "timeout",
+                      "skipped"
+                    ]
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "worker",
+                      "api",
+                      "hook",
+                      "scheduler",
+                      "cli"
+                    ]
+                  },
+                  "agentId": {
+                    "type": "string"
+                  },
+                  "taskId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "parentEventId": {
+                    "type": "string"
+                  },
+                  "numericValue": {
+                    "type": "number"
+                  },
+                  "durationMs": {
+                    "type": "integer"
+                  },
+                  "data": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "category",
+                  "event",
+                  "source"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Event stored"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      },
+      "get": {
+        "summary": "Query events with filters",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "tool",
+                "skill",
+                "session",
+                "api",
+                "task",
+                "workflow",
+                "system"
+              ]
+            },
+            "required": false,
+            "name": "category",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "tool.start",
+                "tool.end",
+                "skill.invoke",
+                "skill.complete",
+                "session.start",
+                "session.end",
+                "session.resume",
+                "session.cost",
+                "api.request",
+                "api.error",
+                "task.poll",
+                "task.assign",
+                "task.timeout",
+                "workflow.step.start",
+                "workflow.step.end",
+                "workflow.run.start",
+                "workflow.run.end",
+                "system.boot",
+                "system.migration",
+                "system.error"
+              ]
+            },
+            "required": false,
+            "name": "event",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ok",
+                "error",
+                "timeout",
+                "skipped"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "worker",
+                "api",
+                "hook",
+                "scheduler",
+                "cli"
+              ]
+            },
+            "required": false,
+            "name": "source",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "taskId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "sessionId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "since",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "until",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of events"
+          }
+        }
+      }
+    },
+    "/api/events/batch": {
+      "post": {
+        "summary": "Store multiple events in a batch",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "category": {
+                          "type": "string",
+                          "enum": [
+                            "tool",
+                            "skill",
+                            "session",
+                            "api",
+                            "task",
+                            "workflow",
+                            "system"
+                          ]
+                        },
+                        "event": {
+                          "type": "string",
+                          "enum": [
+                            "tool.start",
+                            "tool.end",
+                            "skill.invoke",
+                            "skill.complete",
+                            "session.start",
+                            "session.end",
+                            "session.resume",
+                            "session.cost",
+                            "api.request",
+                            "api.error",
+                            "task.poll",
+                            "task.assign",
+                            "task.timeout",
+                            "workflow.step.start",
+                            "workflow.step.end",
+                            "workflow.run.start",
+                            "workflow.run.end",
+                            "system.boot",
+                            "system.migration",
+                            "system.error"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "ok",
+                            "error",
+                            "timeout",
+                            "skipped"
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "worker",
+                            "api",
+                            "hook",
+                            "scheduler",
+                            "cli"
+                          ]
+                        },
+                        "agentId": {
+                          "type": "string"
+                        },
+                        "taskId": {
+                          "type": "string"
+                        },
+                        "sessionId": {
+                          "type": "string"
+                        },
+                        "parentEventId": {
+                          "type": "string"
+                        },
+                        "numericValue": {
+                          "type": "number"
+                        },
+                        "durationMs": {
+                          "type": "integer"
+                        },
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "category",
+                        "event",
+                        "source"
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 500
+                  }
+                },
+                "required": [
+                  "events"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Events stored"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/events/counts": {
+      "get": {
+        "summary": "Get event counts grouped by event name",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "tool",
+                "skill",
+                "session",
+                "api",
+                "task",
+                "workflow",
+                "system"
+              ]
+            },
+            "required": false,
+            "name": "category",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "worker",
+                "api",
+                "hook",
+                "scheduler",
+                "cli"
+              ]
+            },
+            "required": false,
+            "name": "source",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "taskId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "sessionId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "since",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "until",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event counts"
+          }
+        }
+      }
+    },
     "/api/memory/index": {
       "post": {
         "summary": "Ingest content into memory system (async embedding)",

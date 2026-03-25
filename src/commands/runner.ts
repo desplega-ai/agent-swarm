@@ -1381,6 +1381,32 @@ async function fetchEpicTaskContext(
 }
 
 /** Spawn a provider session without blocking - returns immediately with tracking info */
+/**
+ * Extract a key field from tool arguments for event tracking.
+ * Returns a single-entry record with the most identifying arg for the tool.
+ */
+function extractToolKey(toolName: string, args: unknown): Record<string, string | undefined> {
+  const a = args as Record<string, unknown>;
+  switch (toolName) {
+    case "Read":
+    case "Edit":
+    case "Write":
+      return { filePath: a.file_path as string | undefined };
+    case "Bash":
+      return { description: a.description as string | undefined };
+    case "Grep":
+      return { pattern: a.pattern as string | undefined };
+    case "Glob":
+      return { pattern: a.pattern as string | undefined };
+    case "Skill":
+      return { skillName: a.skill as string | undefined };
+    case "Agent":
+      return { description: a.description as string | undefined };
+    default:
+      return {};
+  }
+}
+
 async function spawnProviderProcess(
   adapter: ReturnType<typeof createProviderAdapter>,
   opts: {
@@ -1439,6 +1465,53 @@ async function spawnProviderProcess(
   const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now(), partialLine: "" };
   const shouldStream = opts.apiUrl && opts.runnerSessionId && opts.iteration;
 
+  // Event buffer (flushes to API periodically)
+  interface BufferedEvent {
+    category: string;
+    event: string;
+    status?: string;
+    source: string;
+    agentId?: string;
+    taskId?: string;
+    sessionId?: string;
+    parentEventId?: string;
+    numericValue?: number;
+    durationMs?: number;
+    data?: Record<string, unknown>;
+  }
+
+  const eventBuffer: BufferedEvent[] = [];
+  const EVENT_FLUSH_INTERVAL_MS = 5000;
+  const EVENT_BUFFER_MAX = 50;
+
+  function bufferEvent(evt: BufferedEvent) {
+    eventBuffer.push(evt);
+    if (eventBuffer.length >= EVENT_BUFFER_MAX) {
+      flushEvents();
+    }
+  }
+
+  async function flushEvents() {
+    if (eventBuffer.length === 0) return;
+    const batch = eventBuffer.splice(0);
+    try {
+      await fetch(`${opts.apiUrl}/api/events/batch`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${opts.apiKey}`,
+          "X-Agent-ID": opts.agentId,
+        },
+        body: JSON.stringify({ events: batch }),
+      });
+    } catch {
+      // Non-blocking — event loss is acceptable
+    }
+  }
+
+  const eventFlushTimer = setInterval(flushEvents, EVENT_FLUSH_INTERVAL_MS);
+  const sessionStartTime = Date.now();
+
   // Auto-progress throttle: don't update more than once per 3 seconds
   let lastProgressTime = 0;
   const PROGRESS_THROTTLE_MS = 3000;
@@ -1462,6 +1535,16 @@ async function spawnProviderProcess(
             console.warn(`[runner] Failed to save provider session on active session: ${err}`),
           );
         }
+
+        // Buffer session start event
+        bufferEvent({
+          category: "session",
+          event: "session.start",
+          source: "worker",
+          agentId: opts.agentId,
+          taskId: effectiveTaskId,
+          sessionId: event.sessionId,
+        });
         break;
       case "tool_start": {
         // Auto-progress: report tool activity as task progress (throttled)
@@ -1475,12 +1558,63 @@ async function spawnProviderProcess(
             );
           }
         }
+
+        // Buffer tool event
+        bufferEvent({
+          category: "tool",
+          event: "tool.start",
+          source: "worker",
+          agentId: opts.agentId,
+          taskId: effectiveTaskId,
+          sessionId: opts.runnerSessionId,
+          data: {
+            toolName: event.toolName,
+            toolCallId: event.toolCallId,
+            ...extractToolKey(event.toolName, event.args),
+            clientTimestamp: new Date().toISOString(),
+          },
+        });
+
+        // Also emit skill event when tool is Skill
+        if (event.toolName === "Skill") {
+          const args = event.args as Record<string, unknown>;
+          bufferEvent({
+            category: "skill",
+            event: "skill.invoke",
+            source: "worker",
+            agentId: opts.agentId,
+            taskId: effectiveTaskId,
+            sessionId: opts.runnerSessionId,
+            data: {
+              skillName: args.skill as string,
+              clientTimestamp: new Date().toISOString(),
+            },
+          });
+        }
         break;
       }
       case "result":
         // Cost save is handled in waitForCompletion().then() to ensure
         // it completes before the process exits (fire-and-forget here
         // races with container shutdown).
+
+        // Buffer session end event
+        bufferEvent({
+          category: "session",
+          event: "session.end",
+          source: "worker",
+          agentId: opts.agentId,
+          taskId: effectiveTaskId,
+          sessionId: opts.runnerSessionId,
+          status: event.isError ? "error" : "ok",
+          durationMs: Date.now() - sessionStartTime,
+          data: {
+            model: event.cost.model,
+            totalCostUsd: event.cost.totalCostUsd,
+            inputTokens: event.cost.inputTokens,
+            outputTokens: event.cost.outputTokens,
+          },
+        });
         break;
       case "raw_log":
         prettyPrintLine(event.content, opts.role);
@@ -1510,6 +1644,10 @@ async function spawnProviderProcess(
 
   // Create promise that handles completion
   const promise: Promise<ProviderResult> = session.waitForCompletion().then(async (result) => {
+    // Stop event flush timer and do a final flush
+    clearInterval(eventFlushTimer);
+    await flushEvents();
+
     // Final log flush
     if (shouldStream && logBuffer.lines.length > 0) {
       await flushLogBuffer(logBuffer, {

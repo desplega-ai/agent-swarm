@@ -1,7 +1,7 @@
 ---
 date: 2026-03-25T20:00:00Z
 topic: "Generic Events Table"
-status: reviewed
+status: completed
 autonomy: autopilot
 ---
 
