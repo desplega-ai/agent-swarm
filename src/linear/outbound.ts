@@ -1,12 +1,7 @@
 import { getTrackerSync, updateTrackerSync } from "../be/db-queries/tracker";
 import { workflowEventBus } from "../workflows/event-bus";
 import { getLinearClient } from "./client";
-import {
-  endAgentSession,
-  postAgentSessionAction,
-  postAgentSessionThought,
-  taskSessionMap,
-} from "./sync";
+import { endAgentSession, postAgentSessionAction, taskSessionMap } from "./sync";
 
 let subscribed = false;
 
@@ -60,8 +55,9 @@ async function handleTaskProgress(data: unknown): Promise<void> {
   const sessionId = taskSessionMap.get(taskId);
   if (!sessionId) return;
 
-  postAgentSessionThought(sessionId, progress).catch((err) => {
-    console.error(`[Linear Outbound] Failed to post progress thought for task ${taskId}:`, err);
+  // Use 'action' activity type — Linear renders it as a structured tool invocation card
+  postAgentSessionAction(sessionId, progress).catch((err) => {
+    console.error(`[Linear Outbound] Failed to post progress action for task ${taskId}:`, err);
   });
 }
 
@@ -75,7 +71,9 @@ async function handleTaskCompleted(data: unknown): Promise<void> {
   if (shouldSkipForLoopPrevention(sync)) return;
 
   const sessionId = taskSessionMap.get(taskId);
-  const body = output ? `Task completed.\n\n${output.slice(0, 2000)}` : "Task completed.";
+  const body = output
+    ? `Task completed.\n\n+++ Output\n${output.slice(0, 2000)}\n+++`
+    : "Task completed.";
 
   // Prefer AgentSession activity (shows in the agent panel) over issue comment (avoids duplication)
   if (sessionId) {
@@ -93,7 +91,7 @@ async function handleTaskCompleted(data: unknown): Promise<void> {
         return;
       }
       const comment = output
-        ? `Task completed by swarm agent.\n\nOutput:\n${output.slice(0, 2000)}`
+        ? `Task completed by swarm agent.\n\n+++ Output\n${output.slice(0, 2000)}\n+++`
         : "Task completed by swarm agent.";
       await client.createComment({ issueId: sync.externalId, body: comment });
       console.log(`[Linear Outbound] Posted completion comment for task ${taskId}`);
@@ -121,7 +119,9 @@ async function handleTaskFailed(data: unknown): Promise<void> {
   if (shouldSkipForLoopPrevention(sync)) return;
 
   const sessionId = taskSessionMap.get(taskId);
-  const body = failureReason ? `Task failed.\n\n${failureReason.slice(0, 2000)}` : "Task failed.";
+  const body = failureReason
+    ? `Task failed.\n\n+++ Error Details\n${failureReason.slice(0, 2000)}\n+++`
+    : "Task failed.";
 
   // Prefer AgentSession error activity over issue comment (avoids duplication)
   if (sessionId) {
@@ -139,7 +139,7 @@ async function handleTaskFailed(data: unknown): Promise<void> {
         return;
       }
       const comment = failureReason
-        ? `Task failed.\n\nReason:\n${failureReason.slice(0, 2000)}`
+        ? `Task failed.\n\n+++ Error Details\n${failureReason.slice(0, 2000)}\n+++`
         : "Task failed.";
       await client.createComment({ issueId: sync.externalId, body: comment });
       console.log(`[Linear Outbound] Posted failure comment for task ${taskId}`);

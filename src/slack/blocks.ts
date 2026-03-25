@@ -179,7 +179,7 @@ export function buildProgressBlocks(opts: {
 }): SlackBlock[] {
   const shortId = opts.taskId.slice(0, 8);
   return [
-    sectionBlock(`⏳ *${opts.agentName}* (\`${shortId}\`): ${opts.progress}`),
+    sectionBlock(`*${opts.agentName}* (\`${shortId}\`): ${opts.progress}`),
     cancelActionBlock(opts.taskId),
   ];
 }

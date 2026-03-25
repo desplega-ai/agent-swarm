@@ -216,10 +216,94 @@ async function fetchResolvedEnv(
   return env;
 }
 
+/** Tools that produce noise — skip auto-progress for these */
+const SKIP_PROGRESS_TOOLS = new Set(["ToolSearch", "TodoRead", "TodoWrite"]);
+
+/** Pretty labels for agent-swarm MCP tools. null = skip (meta/noise). */
+const SWARM_TOOL_LABELS: Record<string, string | null> = {
+  "store-progress": null,
+  "get-task-details": "📋 Reviewing task details",
+  "get-tasks": "📋 Checking task list",
+  "poll-task": "📡 Polling for tasks",
+  "send-task": "📤 Delegating task",
+  "task-action": "⚡ Performing task action",
+  "join-swarm": "🔗 Joining swarm",
+  "my-agent-info": "🪪 Checking agent info",
+  "get-swarm": "👥 Checking swarm status",
+  "post-message": "💬 Sending message",
+  "read-messages": "💬 Reading messages",
+  "request-human-input": "🙋 Requesting human input",
+  "cancel-task": "🚫 Cancelling task",
+  "db-query": "🗃️ Querying database",
+  "inject-learning": "🧠 Storing learning",
+  "memory-search": "🧠 Searching memory",
+  "memory-get": "🧠 Retrieving memory",
+  "update-profile": "🪪 Updating profile",
+  // Slack
+  "slack-post": "💬 Posting to Slack",
+  "slack-reply": "💬 Replying in Slack",
+  "slack-read": "💬 Reading Slack",
+  "slack-list-channels": "💬 Listing Slack channels",
+  "slack-download-file": "📥 Downloading from Slack",
+  "slack-upload-file": "📤 Uploading to Slack",
+  // Tracker
+  "tracker-status": "📊 Checking tracker status",
+  "tracker-sync-status": "📊 Syncing tracker status",
+  "tracker-link-task": "🔗 Linking task to tracker",
+  "tracker-link-epic": "🔗 Linking epic to tracker",
+  "tracker-unlink": "🔗 Unlinking from tracker",
+  "tracker-map-agent": "🔗 Mapping agent to tracker",
+  // Epics
+  "create-epic": "📦 Creating epic",
+  "get-epic-details": "📦 Reviewing epic",
+  "list-epics": "📦 Listing epics",
+  "update-epic": "📦 Updating epic",
+  // Workflows
+  "trigger-workflow": "⚙️ Triggering workflow",
+  "get-workflow": "⚙️ Checking workflow",
+  "list-workflows": "⚙️ Listing workflows",
+  "create-workflow": "⚙️ Creating workflow",
+  // Skills
+  "skill-search": "🔎 Searching skills",
+  "skill-install": "📦 Installing skill",
+  "skill-install-remote": "📦 Installing remote skill",
+  "skill-get": "📦 Getting skill details",
+  "skill-list": "📦 Listing skills",
+  // Config
+  "get-config": "⚙️ Reading config",
+  "set-config": "⚙️ Setting config",
+  "list-config": "⚙️ Listing config",
+  // Schedules
+  "create-schedule": "📅 Creating schedule",
+  "list-schedules": "📅 Listing schedules",
+  "run-schedule-now": "📅 Running schedule",
+  // Context
+  "context-diff": "📜 Viewing context diff",
+  "context-history": "📜 Viewing context history",
+  // Channels
+  "create-channel": "📢 Creating channel",
+  "list-channels": "📢 Listing channels",
+  "delete-channel": "📢 Deleting channel",
+  // Services
+  "register-service": "🔌 Registering service",
+  "list-services": "🔌 Listing services",
+  "unregister-service": "🔌 Unregistering service",
+  "update-service-status": "🔌 Updating service status",
+};
+
+/** Convert kebab-case to sentence case: "get-task-details" → "Get task details" */
+export function humanizeToolName(name: string): string {
+  if (!name) return name;
+  return name.charAt(0).toUpperCase() + name.slice(1).replaceAll("-", " ");
+}
+
 /**
  * Convert a tool call into a human-readable progress description.
+ * Returns null for noisy/meta tools that should be skipped.
  */
-function toolCallToProgress(toolName: string, args: unknown): string {
+export function toolCallToProgress(toolName: string, args: unknown): string | null {
+  if (SKIP_PROGRESS_TOOLS.has(toolName)) return null;
+
   const a = args as Record<string, unknown>;
   const shortPath = (p: unknown) => {
     if (typeof p !== "string") return "";
@@ -230,30 +314,43 @@ function toolCallToProgress(toolName: string, args: unknown): string {
 
   switch (toolName) {
     case "Read":
-      return `Reading ${shortPath(a.file_path)}`;
+      return `📖 Reading ${shortPath(a.file_path)}`;
     case "Edit":
     case "MultiEdit":
-      return `Editing ${shortPath(a.file_path)}`;
+      return `✏️ Editing ${shortPath(a.file_path)}`;
     case "Write":
-      return `Writing ${shortPath(a.file_path)}`;
+      return `📝 Writing ${shortPath(a.file_path)}`;
     case "Bash":
-      return a.description ? `${a.description}` : "Running shell command";
+      return a.description ? `⚡ ${a.description}` : "⚡ Running shell command";
     case "Grep":
-      return `Searching for "${a.pattern}"`;
+      return `🔍 Searching for "${a.pattern}"`;
     case "Glob":
-      return `Finding files matching ${a.pattern}`;
+      return `📁 Finding files matching ${a.pattern}`;
     case "Agent":
     case "Task":
-      return a.description ? `${a.description}` : "Delegating sub-task";
+      return a.description ? `🤖 ${a.description}` : "🤖 Delegating sub-task";
     case "Skill":
-      return `Running /${a.skill}`;
+      return `⚙️ Running /${a.skill}`;
     default: {
-      // MCP tools: mcp__server__tool → "server:tool"
+      // MCP tools: mcp__server__tool
       if (toolName.startsWith("mcp__")) {
         const parts = toolName.split("__");
-        return parts.length >= 3 ? `Using ${parts[1]}:${parts[2]}` : `Using ${toolName}`;
+        if (parts.length >= 3) {
+          const server = parts[1];
+          const tool = parts.slice(2).join("__");
+          // Agent-swarm tools get pretty labels
+          if (server === "agent-swarm") {
+            const label = SWARM_TOOL_LABELS[tool];
+            if (label === null) return null; // skip
+            if (label) return label;
+            return `🔌 ${humanizeToolName(tool)}`;
+          }
+          // Other MCP servers: "🔌 server: Humanized tool"
+          return `🔌 ${server}: ${humanizeToolName(tool)}`;
+        }
+        return `🔌 ${toolName}`;
       }
-      return `Using ${toolName}`;
+      return `🔧 ${toolName}`;
     }
   }
 }
@@ -1370,9 +1467,13 @@ async function spawnProviderProcess(
         // Auto-progress: report tool activity as task progress (throttled)
         const now = Date.now();
         if (effectiveTaskId && opts.apiUrl && now - lastProgressTime >= PROGRESS_THROTTLE_MS) {
-          lastProgressTime = now;
           const progress = toolCallToProgress(event.toolName, event.args);
-          updateProgressViaAPI(opts.apiUrl, opts.apiKey, effectiveTaskId, progress).catch(() => {});
+          if (progress) {
+            lastProgressTime = now;
+            updateProgressViaAPI(opts.apiUrl, opts.apiKey, effectiveTaskId, progress).catch(
+              () => {},
+            );
+          }
         }
         break;
       }
