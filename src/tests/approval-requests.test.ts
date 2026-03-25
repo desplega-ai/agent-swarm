@@ -6,12 +6,14 @@ import {
   createAgent,
   createApprovalRequest,
   createTaskExtended,
+  getAgentCurrentTask,
   getApprovalRequestById,
   getApprovalRequestByStepId,
   getExpiredPendingApprovals,
   initDb,
   listApprovalRequests,
   resolveApprovalRequest,
+  startTask,
 } from "../be/db";
 import type { ExecutorMeta } from "../types";
 import type { ExecutorDependencies, ExecutorInput } from "../workflows/executors/base";
@@ -856,6 +858,71 @@ describe("Approval Requests", () => {
       expect(approval.sourceTaskId).toBeNull();
       // The handler condition would be false
       expect(!approval.workflowRunId && approval.sourceTaskId).toBeFalsy();
+    });
+  });
+
+  // ─── Server-side sourceTaskId fallback ───────────────────────
+  describe("getAgentCurrentTask fallback for sourceTaskId", () => {
+    test("returns the most recent in-progress task for an agent", () => {
+      const agent = createAgent({
+        name: "test-current-task-agent",
+        isLead: true,
+        status: "idle",
+      });
+
+      // Create a task and set it to in_progress
+      const task = createTaskExtended("lead agent task", {
+        agentId: agent.id,
+        source: "mcp",
+      });
+      startTask(task.id);
+
+      const currentTask = getAgentCurrentTask(agent.id);
+      expect(currentTask).not.toBeNull();
+      expect(currentTask!.id).toBe(task.id);
+    });
+
+    test("returns null when agent has no in-progress tasks", () => {
+      const agent = createAgent({
+        name: "test-no-task-agent",
+        isLead: true,
+        status: "idle",
+      });
+
+      const currentTask = getAgentCurrentTask(agent.id);
+      expect(currentTask).toBeNull();
+    });
+
+    test("fallback sourceTaskId resolves correctly for approval request", () => {
+      const agent = createAgent({
+        name: "test-fallback-agent",
+        isLead: true,
+        status: "idle",
+      });
+      const task = createTaskExtended("lead task calling request-human-input", {
+        agentId: agent.id,
+        source: "mcp",
+        slackChannelId: "C_LEAD_CHANNEL",
+        slackThreadTs: "1111111111.000000",
+        slackUserId: "U_LEAD_USER",
+      });
+      startTask(task.id);
+
+      // Simulate what the fixed request-human-input tool does:
+      // sourceTaskId from header is missing, so fall back to agent's current task
+      const headerSourceTaskId: string | undefined = undefined;
+      let sourceTaskId = headerSourceTaskId;
+      if (!sourceTaskId) {
+        const currentTask = getAgentCurrentTask(agent.id);
+        if (currentTask) {
+          sourceTaskId = currentTask.id;
+        }
+      }
+
+      const approval = createApprovalRequest(
+        makeApprovalData({ sourceTaskId }),
+      );
+      expect(approval.sourceTaskId).toBe(task.id);
     });
   });
 });

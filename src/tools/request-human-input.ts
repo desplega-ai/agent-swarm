@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { createApprovalRequest } from "@/be/db";
+import { createApprovalRequest, getAgentCurrentTask } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 
 const QuestionSchema = z.object({
@@ -73,13 +73,24 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
         };
       }
 
+      // Resolve sourceTaskId: prefer header, fall back to agent's current in-progress task.
+      // The X-Source-Task-Id header may be missing when the per-session MCP config wasn't
+      // created (e.g. .mcp.json not found, session resumed, or lead agent on a non-task trigger).
+      let sourceTaskId = requestInfo.sourceTaskId;
+      if (!sourceTaskId && requestInfo.agentId) {
+        const currentTask = getAgentCurrentTask(requestInfo.agentId);
+        if (currentTask) {
+          sourceTaskId = currentTask.id;
+        }
+      }
+
       const id = crypto.randomUUID();
       const request = createApprovalRequest({
         id,
         title,
         questions,
         approvers: { policy: "any" },
-        sourceTaskId: requestInfo.sourceTaskId ?? undefined,
+        sourceTaskId: sourceTaskId ?? undefined,
         timeoutSeconds,
       });
 
