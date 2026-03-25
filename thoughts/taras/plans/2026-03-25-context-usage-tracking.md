@@ -2,7 +2,7 @@
 date: 2026-03-25T18:00:00Z
 topic: "Context Window Usage Tracking"
 type: plan
-status: in-progress
+status: completed
 research: thoughts/taras/research/2026-03-25-context-usage-tracking.md
 ---
 
@@ -174,11 +174,11 @@ export function computeContextUsed(usage: {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] DB boundary check: `bash scripts/check-db-boundary.sh`
-- [ ] Fresh DB works: `rm -f agent-swarm-db.sqlite* && bun run src/http.ts` (starts without errors, Ctrl+C)
-- [ ] Existing DB migrates: `bun run src/http.ts` against a pre-existing DB (starts without errors)
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] DB boundary check: `bash scripts/check-db-boundary.sh`
+- [x] Fresh DB works: `rm -f agent-swarm-db.sqlite* && bun run src/http.ts` (starts without errors, Ctrl+C)
+- [x] Existing DB migrates: `bun run src/http.ts` against a pre-existing DB (starts without errors)
 
 #### Manual Verification:
 - [ ] Inspect the created DB: `sqlite3 agent-swarm-db.sqlite ".schema task_context_snapshots"` — table exists with correct columns
@@ -274,10 +274,10 @@ Handler logic:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] OpenAPI spec regenerates: `bun run docs:openapi` (no errors)
-- [ ] DB boundary check: `bash scripts/check-db-boundary.sh`
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] OpenAPI spec regenerates: `bun run docs:openapi` (no errors)
+- [x] DB boundary check: `bash scripts/check-db-boundary.sh`
 
 #### Manual Verification:
 - [ ] POST a test snapshot: `curl -s -X POST -H "Authorization: Bearer 123123" -H "X-Agent-ID: <test-uuid>" -H "Content-Type: application/json" http://localhost:3013/api/tasks/<task-id>/context -d '{"eventType":"progress","sessionId":"test-123","contextUsedTokens":50000,"contextTotalTokens":200000,"contextPercent":25.0}'` — returns `{ ok: true }`
@@ -387,10 +387,10 @@ if (json.model) {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] DB boundary check: `bash scripts/check-db-boundary.sh`
-- [ ] Unit tests pass: `bun test`
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] DB boundary check: `bash scripts/check-db-boundary.sh`
+- [x] Unit tests pass: `bun test`
 
 #### Manual Verification:
 - [ ] Verify new event types are emitted: temporarily add a `console.log` in the runner's `onEvent` handler for `context_usage` and `compaction` events, run a short task, confirm events appear in worker logs
@@ -485,9 +485,9 @@ if (config.taskId && usage) {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] DB boundary check: `bash scripts/check-db-boundary.sh`
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] DB boundary check: `bash scripts/check-db-boundary.sh`
 
 #### Manual Verification:
 - [ ] If a Pi-mono worker is available: run a task and verify snapshots appear in `GET /api/tasks/:id/context`
@@ -587,10 +587,10 @@ if (result.cost && realTaskId) {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] DB boundary check: `bash scripts/check-db-boundary.sh`
-- [ ] Unit tests pass: `bun test`
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] DB boundary check: `bash scripts/check-db-boundary.sh`
+- [x] Unit tests pass: `bun test`
 
 #### Manual Verification:
 - [ ] Run a short Claude task via Docker worker against local API
@@ -614,8 +614,8 @@ No new code — this phase is verification only.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] All checks pass: `bun run tsc:check && bun run lint:fix && bun test && bash scripts/check-db-boundary.sh`
-- [ ] OpenAPI spec is fresh: `bun run docs:openapi` (no uncommitted changes to `openapi.json`)
+- [x] All checks pass: `bun run tsc:check && bun run lint:fix && bun test && bash scripts/check-db-boundary.sh`
+- [x] OpenAPI spec is fresh: `bun run docs:openapi` (no uncommitted changes to `openapi.json`)
 
 #### Manual Verification:
 
