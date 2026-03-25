@@ -1,5 +1,5 @@
 import { unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { validateClaudeCredentials } from "../utils/credentials";
 import {
   parseStderrForErrors,
@@ -48,10 +48,26 @@ async function cleanupTaskFile(pid: number): Promise<void> {
  * Returns the path to the per-session config, or null if no config exists.
  */
 async function createSessionMcpConfig(cwd: string, taskId: string): Promise<string | null> {
-  const mcpJsonPath = join(cwd, ".mcp.json");
+  // Walk up from cwd to find .mcp.json (mirrors Claude CLI's project-level config discovery).
+  // In Docker, .mcp.json lives at /workspace/.mcp.json but tasks often run with cwd set to
+  // a subdirectory like /workspace/repos/<repo>, so a single-directory check misses it.
+  let searchDir = cwd;
+  let mcpJsonPath: string | null = null;
+  while (true) {
+    const candidate = join(searchDir, ".mcp.json");
+    if (await Bun.file(candidate).exists()) {
+      mcpJsonPath = candidate;
+      break;
+    }
+    const parent = dirname(searchDir);
+    if (parent === searchDir) break; // reached filesystem root
+    searchDir = parent;
+  }
+
+  if (!mcpJsonPath) return null;
+
   try {
     const file = Bun.file(mcpJsonPath);
-    if (!(await file.exists())) return null;
 
     const config = await file.json();
     const servers = config?.mcpServers;
