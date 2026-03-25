@@ -88,6 +88,7 @@ interface SeedConfig {
   schedules: { count: number; data?: ScheduleSeed[] };
   memories: { count: number };
   services: { count: number; data?: ServiceSeed[] };
+  sessionLogs: { perTask: number };
 }
 
 // ---------------------------------------------------------------------------
@@ -494,7 +495,7 @@ function seedTasks(
   config: SeedConfig,
   agents: { id: string }[],
   epics: { id: string }[],
-): void {
+): { id: string; agentId: string | null }[] {
   const count = config.tasks.count;
 
   const stmt = db.prepare(`
@@ -510,6 +511,8 @@ function seedTasks(
     INSERT OR IGNORE INTO agent_log (id, eventType, agentId, taskId, newValue, createdAt)
     VALUES (?, ?, ?, ?, ?, ?)
   `);
+
+  const seededTasks: { id: string; agentId: string | null }[] = [];
 
   for (let i = 0; i < count; i++) {
     const template = generateTaskDescription();
@@ -557,9 +560,11 @@ function seedTasks(
     );
 
     logStmt.run(seedId("log", `task:${i}`), "task_created", creator.id, id, statusInfo.status, createdAt);
+    seededTasks.push({ id, agentId: agent?.id ?? null });
   }
 
   console.log(`  ✓ Seeded ${count} tasks`);
+  return seededTasks;
 }
 
 function seedWorkflows(db: Database, config: SeedConfig): void {
@@ -692,6 +697,352 @@ function seedServices(
   }
 
   console.log(`  ✓ Seeded ${count} services`);
+}
+
+// ---------------------------------------------------------------------------
+// Session log content generators — realistic Claude conversation fragments
+// ---------------------------------------------------------------------------
+
+/** Build a JSON session log line in the format the UI expects. */
+function logLine(
+  type: "assistant" | "user" | "system",
+  content: string | Array<Record<string, unknown>>,
+  model?: string,
+): string {
+  const msg: Record<string, unknown> = {
+    type,
+    message: {
+      role: type === "system" ? "system" : type,
+      content,
+      ...(model ? { model } : {}),
+    },
+  };
+  return JSON.stringify(msg);
+}
+
+/** A set of realistic multi-turn Claude session conversations with tool calls. */
+function generateSessionConversation(taskIndex: number): string[] {
+  const conversations: string[][] = [
+    // 0: Read + Edit workflow (typical code fix)
+    [
+      logLine("user", "Fix the broken import in src/utils/auth.ts — it references a module that was renamed."),
+      logLine("assistant", [
+        { type: "thinking", thinking: "Let me read the file first to understand the current import structure." },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        {
+          type: "tool_use",
+          id: "toolu_01A",
+          name: "Read",
+          input: { file_path: "/workspace/repos/agent-swarm/src/utils/auth.ts" },
+        },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        {
+          type: "tool_result",
+          tool_use_id: "toolu_01A",
+          content: '1→import { verifyToken } from "./jwt-utils";\n2→import { getUserById } from "../be/db";\n3→\n4→export async function authenticate(token: string) {\n5→  const payload = verifyToken(token);\n6→  return getUserById(payload.sub);\n7→}',
+        },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        { type: "text", text: "Found the issue — `jwt-utils` was renamed to `token-utils`. Let me fix the import." },
+        {
+          type: "tool_use",
+          id: "toolu_01B",
+          name: "Edit",
+          input: {
+            file_path: "/workspace/repos/agent-swarm/src/utils/auth.ts",
+            old_string: 'import { verifyToken } from "./jwt-utils";',
+            new_string: 'import { verifyToken } from "./token-utils";',
+          },
+        },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        { type: "text", text: "Fixed the import. The file now correctly references `token-utils` instead of the old `jwt-utils` module." },
+      ], "claude-opus-4-6"),
+    ],
+
+    // 1: Bash + Grep workflow (investigation)
+    [
+      logLine("user", "Find all usages of the deprecated `fetchData` function and tell me which files need updating."),
+      logLine("assistant", [
+        {
+          type: "tool_use",
+          id: "toolu_02A",
+          name: "Grep",
+          input: { pattern: "fetchData", output_mode: "files_with_matches" },
+        },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        {
+          type: "tool_result",
+          tool_use_id: "toolu_02A",
+          content: "src/api/client.ts\nsrc/hooks/useData.ts\nsrc/services/sync.ts\nsrc/tests/api.test.ts",
+        },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        {
+          type: "text",
+          text: "Found `fetchData` in 4 files:\n\n1. `src/api/client.ts` — likely the definition\n2. `src/hooks/useData.ts` — React hook consumer\n3. `src/services/sync.ts` — background sync service\n4. `src/tests/api.test.ts` — test file\n\nAll four need to be migrated to `queryData`. Want me to do the replacement?",
+        },
+      ], "claude-opus-4-6"),
+    ],
+
+    // 2: Write + Bash (new file + test run)
+    [
+      logLine("user", "Create a health check endpoint at /api/health that returns the server uptime."),
+      logLine("assistant", [
+        { type: "thinking", thinking: "I need to create a new route handler following the existing pattern with the route() factory." },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        {
+          type: "tool_use",
+          id: "toolu_03A",
+          name: "Write",
+          input: {
+            file_path: "/workspace/repos/agent-swarm/src/http/health.ts",
+            content: 'import { route } from "./route-def";\nimport { json } from "./utils";\n\nconst healthRoute = route({\n  method: "get",\n  path: "/api/health",\n  pattern: ["api", "health"],\n  summary: "Health check with uptime",\n  tags: ["System"],\n  responses: { 200: { description: "OK" } },\n  auth: {},\n});\n\nconst startTime = Date.now();\n\nexport async function handleHealth(req, res, pathSegments) {\n  if (!healthRoute.match(req.method, pathSegments)) return false;\n  json(res, { status: "ok", uptimeMs: Date.now() - startTime });\n  return true;\n}\n',
+          },
+        },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        {
+          type: "tool_use",
+          id: "toolu_03B",
+          name: "Bash",
+          input: { command: "bun run tsc:check" },
+        },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        {
+          type: "tool_result",
+          tool_use_id: "toolu_03B",
+          content: "No errors found.",
+        },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        { type: "text", text: "Health check endpoint created at `src/http/health.ts`. Type check passes." },
+      ], "claude-opus-4-6"),
+    ],
+
+    // 3: Glob + Read (exploration)
+    [
+      logLine("user", "How are database migrations structured in this project?"),
+      logLine("assistant", [
+        {
+          type: "tool_use",
+          id: "toolu_04A",
+          name: "Glob",
+          input: { pattern: "src/be/migrations/**/*" },
+        },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        {
+          type: "tool_result",
+          tool_use_id: "toolu_04A",
+          content: "src/be/migrations/001_initial.sql\nsrc/be/migrations/runner.ts",
+        },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        {
+          type: "tool_use",
+          id: "toolu_04B",
+          name: "Read",
+          input: { file_path: "/workspace/repos/agent-swarm/src/be/migrations/runner.ts", limit: 40 },
+        },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        {
+          type: "text",
+          text: "The migration system uses numbered SQL files in `src/be/migrations/`:\n\n- **`001_initial.sql`** — Baseline schema with all tables\n- **`runner.ts`** — Migration runner that tracks applied versions via a `_migrations` table\n\nOn startup, the runner compares SQL files against `_migrations` and applies pending ones in a transaction. Checksums detect accidental edits to already-applied migrations.",
+        },
+      ], "claude-opus-4-6"),
+    ],
+
+    // 4: MCP tool calls (store-progress + memory-search)
+    [
+      logLine("user", "Check your memory for anything related to the auth middleware rewrite, then update task progress."),
+      logLine("assistant", [
+        {
+          type: "tool_use",
+          id: "toolu_05A",
+          name: "mcp__agent-swarm__memory-search",
+          input: { query: "auth middleware rewrite", limit: 5 },
+        },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        {
+          type: "tool_result",
+          tool_use_id: "toolu_05A",
+          content: '{"success":true,"results":[{"id":"mem-001","name":"auth-middleware-compliance","summary":"Legal flagged session token storage...","similarity":0.82}]}',
+        },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        {
+          type: "tool_use",
+          id: "toolu_05B",
+          name: "mcp__agent-swarm__store-progress",
+          input: { taskId: "task-placeholder", progress: "Investigated auth middleware — found prior context in memory. Starting implementation." },
+        },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        { type: "text", text: "Found a relevant memory about the auth middleware rewrite being driven by compliance requirements. Updated task progress." },
+      ], "claude-opus-4-6"),
+    ],
+
+    // 5: Multi-tool parallel (Grep + Glob)
+    [
+      logLine("user", "Find all React components that use the useAuth hook and list the test files for them."),
+      logLine("assistant", [
+        {
+          type: "tool_use",
+          id: "toolu_06A",
+          name: "Grep",
+          input: { pattern: "useAuth\\(\\)", type: "tsx", output_mode: "files_with_matches" },
+        },
+        {
+          type: "tool_use",
+          id: "toolu_06B",
+          name: "Glob",
+          input: { pattern: "src/**/*.test.tsx" },
+        },
+      ], "claude-sonnet-4-6"),
+      logLine("assistant", [
+        {
+          type: "tool_result",
+          tool_use_id: "toolu_06A",
+          content: "src/components/LoginForm.tsx\nsrc/components/UserProfile.tsx\nsrc/pages/Settings.tsx",
+        },
+        {
+          type: "tool_result",
+          tool_use_id: "toolu_06B",
+          content: "src/components/LoginForm.test.tsx\nsrc/components/UserProfile.test.tsx\nsrc/pages/Settings.test.tsx\nsrc/pages/Dashboard.test.tsx",
+        },
+      ], "claude-sonnet-4-6"),
+      logLine("assistant", [
+        {
+          type: "text",
+          text: "Three components use `useAuth()`:\n\n| Component | Test File |\n|---|---|\n| `LoginForm.tsx` | `LoginForm.test.tsx` |\n| `UserProfile.tsx` | `UserProfile.test.tsx` |\n| `Settings.tsx` | `Settings.test.tsx` |\n\nAll three have corresponding test files.",
+        },
+      ], "claude-sonnet-4-6"),
+    ],
+
+    // 6: WebSearch + analysis
+    [
+      logLine("user", "Research the best approach for implementing rate limiting in Bun.serve()."),
+      logLine("assistant", [
+        { type: "thinking", thinking: "Let me search for Bun-specific rate limiting patterns since Bun.serve() has a different API than Express." },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        {
+          type: "tool_use",
+          id: "toolu_07A",
+          name: "WebSearch",
+          input: { query: "Bun.serve rate limiting middleware pattern 2026" },
+        },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        {
+          type: "tool_result",
+          tool_use_id: "toolu_07A",
+          content: "Results: 1. Bun docs: Rate limiting with Map-based token bucket... 2. GitHub issue #4521: Native rate limiter support...",
+        },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        {
+          type: "text",
+          text: "For `Bun.serve()`, the recommended approach is a **token bucket** algorithm using a `Map<string, { tokens: number, lastRefill: number }>`. Since Bun doesn't have Express-style middleware, you implement it directly in the `fetch` handler.\n\nKey points:\n- Use client IP from `server.requestIP(req)` as the bucket key\n- Refill tokens based on elapsed time since last request\n- Return 429 with `Retry-After` header when bucket is empty",
+        },
+      ], "claude-opus-4-6"),
+    ],
+
+    // 7: Agent + delegation
+    [
+      logLine("user", "Refactor the error handling across all API endpoints to use a consistent error response format."),
+      logLine("assistant", [
+        { type: "thinking", thinking: "This is a large refactoring task. Let me first explore the codebase to understand the current error handling patterns before making changes." },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        {
+          type: "tool_use",
+          id: "toolu_08A",
+          name: "Agent",
+          input: {
+            description: "Find error handling patterns",
+            subagent_type: "Explore",
+            prompt: "Find all error handling patterns in src/http/ — look for try/catch blocks, error response helpers, and status code usage.",
+          },
+        },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        {
+          type: "tool_result",
+          tool_use_id: "toolu_08A",
+          content: "Found 3 patterns: 1) jsonError(res, msg, code) — used in 12 places, 2) raw res.end() with status — 4 places, 3) unhandled throws — 2 places in webhook handlers.",
+        },
+      ], "claude-opus-4-6"),
+      logLine("assistant", [
+        {
+          type: "text",
+          text: "Found inconsistent error handling across the API:\n\n- **12 endpoints** use `jsonError()` correctly\n- **4 endpoints** use raw `res.end()` — need migration\n- **2 webhook handlers** have unhandled throws — need try/catch\n\nI'll standardize all 6 inconsistent cases to use `jsonError()`. Starting with the webhook handlers since unhandled throws are the highest risk.",
+        },
+      ], "claude-opus-4-6"),
+    ],
+  ];
+
+  return conversations[taskIndex % conversations.length];
+}
+
+// ---------------------------------------------------------------------------
+// Session logs seeding
+// ---------------------------------------------------------------------------
+
+function seedSessionLogs(
+  db: Database,
+  config: SeedConfig,
+  tasks: { id: string; agentId: string | null }[],
+): void {
+  const perTask = config.sessionLogs.perTask;
+  if (perTask <= 0) {
+    console.log("  ⏭ Skipping session logs (perTask = 0)");
+    return;
+  }
+
+  const stmt = db.prepare(`
+    INSERT OR IGNORE INTO session_logs (id, taskId, sessionId, iteration, cli, content, lineNumber, createdAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  let total = 0;
+  const tasksWithAgents = tasks.filter((t) => t.agentId);
+
+  for (let ti = 0; ti < tasksWithAgents.length && ti < perTask; ti++) {
+    const task = tasksWithAgents[ti];
+    const sessionId = seedId("session", ti);
+    const lines = generateSessionConversation(ti);
+    const createdBase = new Date(daysAgo(faker.number.int({ min: 0, max: 7 })));
+    const cli = faker.helpers.weightedArrayElement([
+      { value: "claude" as const, weight: 8 },
+      { value: "claude-code" as const, weight: 2 },
+    ]);
+
+    for (let li = 0; li < lines.length; li++) {
+      const lineCreatedAt = new Date(createdBase.getTime() + li * 2000).toISOString();
+      stmt.run(
+        seedId("session_log", `${ti}:${li}`),
+        task.id,
+        sessionId,
+        1,
+        cli,
+        lines[li],
+        li + 1,
+        lineCreatedAt,
+      );
+      total++;
+    }
+  }
+
+  console.log(`  ✓ Seeded ${total} session log entries across ${Math.min(tasksWithAgents.length, perTask)} tasks`);
 }
 
 // ---------------------------------------------------------------------------
@@ -880,6 +1231,9 @@ async function loadConfig(
       count: raw.services?.count ?? 1,
       data: raw.services?.data,
     },
+    sessionLogs: {
+      perTask: raw.sessionLogs?.perTask ?? 8,
+    },
   };
 
   return config;
@@ -917,7 +1271,8 @@ async function main(): Promise<void> {
   const channels = seedChannels(db, config, agents);
   seedMessages(db, config, agents, channels);
   const epics = seedEpics(db, config, agents, channels);
-  seedTasks(db, config, agents, epics);
+  const tasks = seedTasks(db, config, agents, epics);
+  seedSessionLogs(db, config, tasks);
   seedWorkflows(db, config);
   seedSchedules(db, config, agents);
   seedMemories(db, config, agents);

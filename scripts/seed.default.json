@@ -129,6 +129,9 @@
   "memories": {
     "count": 4
   },
+  "sessionLogs": {
+    "perTask": 8
+  },
   "services": {
     "count": 1,
     "data": [
