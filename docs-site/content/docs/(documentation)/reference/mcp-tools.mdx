@@ -12,7 +12,7 @@ Agent Swarm exposes its functionality through MCP (Model Context Protocol) tools
 All MCP tools have structured annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) to improve Claude Code's Tool Search discoverability. Tools are split into two tiers:
 
 - **Core tools** (16) — Always available in context: task lifecycle, basic communication, memory recall, debug, and swarm awareness
-- **Deferred tools** (34) — Discovered on demand via Claude Code's Tool Search when the agent needs them (scheduling, epics, config, file operations, etc.)
+- **Deferred tools** (65) — Discovered on demand via Claude Code's Tool Search when the agent needs them (scheduling, epics, config, skills, workflows, file operations, etc.)
 
 This reduces context window overhead by ~85% compared to loading all tools upfront.
 
@@ -406,6 +406,111 @@ Retry a failed workflow run from the point of failure.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `runId` | uuid | Yes | Run ID to retry |
+
+## Human-in-the-Loop Tools
+
+### request-human-input
+
+Create an approval request that pauses until a human responds. Supports multiple question types: approval (yes/no), text, single-select, multi-select, and boolean. Returns the request ID and URL for the human to respond.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `title` | string | Yes | Title of the approval request |
+| `questions` | array | Yes | Questions to ask the human |
+
+Approval requests are accessible via the dashboard at `/approval-requests/{id}`. When resolved, a follow-up task is automatically created for the requesting agent with the human's responses.
+
+## Skill Tools
+
+Manage reusable procedural knowledge (skills) that agents can create, share, and install.
+
+### skill-create
+
+Create a personal skill from SKILL.md content. Parses frontmatter for name, description, and metadata.
+
+### skill-get
+
+Get full skill content by ID or name. Name resolution checks agent scope first, then swarm, then global.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `skillId` | string | No | Skill ID |
+| `name` | string | No | Skill name (resolved with precedence) |
+
+### skill-list
+
+List available skills with optional filters.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `type` | string | No | Filter by type: `remote` or `personal` |
+| `scope` | string | No | Filter by scope: `global`, `swarm`, or `agent` |
+| `agentId` | string | No | Filter by owning agent |
+
+### skill-search
+
+Search skills by keyword (name and description).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | Yes | Search query |
+| `limit` | number | No | Max results (default: 20) |
+
+### skill-install
+
+Install/assign a skill to an agent. Leads can install for other agents.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `skillId` | string | Yes | ID of the skill to install |
+
+### skill-uninstall
+
+Remove a skill from an agent.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `skillId` | string | Yes | ID of the skill to uninstall |
+| `agentId` | string | No | Target agent (default: calling agent) |
+
+### skill-update
+
+Update a skill's content or settings. Re-parses frontmatter if content changes.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `skillId` | string | No | Skill ID to update |
+| `content` | string | No | New SKILL.md content |
+| `isEnabled` | boolean | No | Toggle enabled/disabled |
+
+### skill-publish
+
+Publish a personal skill to swarm scope. Creates an approval task for the lead agent.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `skillId` | string | Yes | ID of the personal skill to publish |
+
+### skill-delete
+
+Delete a skill. Only the owning agent or lead can delete.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `skillId` | string | Yes | ID of the skill to delete |
+
+### skill-install-remote
+
+Fetch and install a remote skill from a GitHub repository.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sourceRepo` | string | Yes | GitHub repo (e.g. `vercel-labs/skills`) |
+| `sourcePath` | string | No | Path within repo (e.g. `skills/nextjs`) |
+
+### skill-sync-remote
+
+Check and update remote skills from their GitHub sources. Compares content and updates if changed.
 
 ## Debug Tools
 

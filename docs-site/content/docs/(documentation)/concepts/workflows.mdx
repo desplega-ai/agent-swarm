@@ -19,7 +19,7 @@ A workflow consists of:
 
 ### Executor Types
 
-The engine includes 8 built-in executor types:
+The engine includes 9 built-in executor types:
 
 | Executor | Description |
 |----------|-------------|
@@ -31,6 +31,7 @@ The engine includes 8 built-in executor types:
 | `code-match` | Route based on a custom JavaScript expression in a sandbox |
 | `notify` | Send a notification (Slack, email, or internal message) |
 | `validate` | Validate step output; can halt or trigger retry |
+| `human-in-the-loop` | Pause workflow for human approval or input via the dashboard |
 
 Each executor has typed config and output schemas available via `GET /api/executor-types` (returns JSON Schemas via Zod v4 `z.toJSONSchema()`).
 
@@ -288,6 +289,30 @@ The dashboard includes a **Workflows** section (under Operations) with:
 - **Workflows list** — View all workflows with enable/disable status
 - **Workflow detail** — Tabbed view with Definition (node inspector showing config/input/output schemas) and Runs tabs
 - **Run detail** — Split layout with interactive graph and collapsible steps panel, JsonTree viewer, bidirectional node selection, expand/collapse all, millisecond duration display
+
+## Human-in-the-Loop (HITL) Node
+
+The `human-in-the-loop` executor pauses a workflow until a human responds via the dashboard. This enables approval gates, manual input steps, and review checkpoints within automated pipelines.
+
+```json
+{
+  "id": "approve-deploy",
+  "type": "human-in-the-loop",
+  "label": "Approve Deployment",
+  "config": {
+    "title": "Deploy to production?",
+    "questions": [
+      { "type": "approval", "label": "Approve this deployment?" },
+      { "type": "text", "label": "Any notes?" }
+    ]
+  },
+  "next": { "approved": "deploy", "rejected": "notify-rejected" }
+}
+```
+
+Question types supported: `approval` (yes/no), `text`, `single-select`, `multi-select`, and `boolean`.
+
+When the node executes, it creates an approval request accessible at `/approval-requests/{id}` in the dashboard. The workflow run pauses until a human responds. Upon resolution, a follow-up task is created for the requesting agent and the workflow resumes via the appropriate `next` port.
 
 ## Related
 

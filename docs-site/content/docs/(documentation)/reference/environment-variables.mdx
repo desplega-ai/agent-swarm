@@ -198,6 +198,17 @@ ANTHROPIC_API_KEY=sk-key1,sk-key2
 
 When a session is spawned, the runner splits the credential value by commas and randomly selects one. Each session gets a single credential, distributing load across subscriptions. A log line indicates which credential index was selected (never the credential itself). Single values (no commas) work unchanged — fully backward compatible.
 
+## Business-Use Instrumentation
+
+Optional integration with [`@desplega.ai/business-use`](https://github.com/desplega-ai/business-use) for tracking system invariants across the distributed API + worker architecture.
+
+| Variable | Description |
+|----------|-------------|
+| `BUSINESS_USE_API_KEY` | API key from `uvx business-use-core@latest init` |
+| `BUSINESS_USE_URL` | BU backend URL (default: `http://localhost:13370`) |
+
+SDK enters no-op mode if the API key is missing — safe to omit in environments without a BU backend.
+
 ## Priority
 
 When both CLI flags and environment variables are set:
