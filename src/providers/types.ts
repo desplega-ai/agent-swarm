@@ -24,7 +24,20 @@ export type ProviderEvent =
   | { type: "error"; message: string; category?: string }
   | { type: "raw_log"; content: string }
   | { type: "raw_stderr"; content: string }
-  | { type: "custom"; name: string; data: unknown };
+  | { type: "custom"; name: string; data: unknown }
+  | {
+      type: "context_usage";
+      contextUsedTokens: number;
+      contextTotalTokens: number;
+      contextPercent: number;
+      outputTokens: number;
+    }
+  | {
+      type: "compaction";
+      preCompactTokens: number;
+      compactTrigger: "auto" | "manual";
+      contextTotalTokens: number;
+    };
 
 /** Configuration passed to a provider adapter to create a session. */
 export interface ProviderSessionConfig {

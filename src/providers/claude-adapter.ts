@@ -1,5 +1,6 @@
 import { unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { computeContextUsed, getContextWindowSize } from "../utils/context-window";
 import { validateClaudeCredentials } from "../utils/credentials";
 import {
   parseStderrForErrors,
@@ -102,6 +103,7 @@ class ClaudeSession implements ProviderSession {
   private completionPromise: Promise<ProviderResult>;
   private errorTracker = new SessionErrorTracker();
   private taskFilePid: number;
+  private contextWindowSize: number;
 
   constructor(
     private config: ProviderSessionConfig,
@@ -112,6 +114,7 @@ class ClaudeSession implements ProviderSession {
     private claudeBinary: string = "claude",
   ) {
     this.taskFilePid = taskFilePid;
+    this.contextWindowSize = getContextWindowSize(model);
     const cmd = this.buildCommand();
 
     console.log(
@@ -279,6 +282,19 @@ class ClaudeSession implements ProviderSession {
       if (json.type === "system" && json.subtype === "init" && json.session_id) {
         this._sessionId = json.session_id;
         this.emit({ type: "session_init", sessionId: json.session_id });
+        if (json.model) {
+          this.contextWindowSize = getContextWindowSize(json.model);
+        }
+      }
+
+      // Compaction detection
+      if (json.type === "system" && json.subtype === "compact_boundary" && json.compact_metadata) {
+        this.emit({
+          type: "compaction",
+          preCompactTokens: json.compact_metadata.pre_tokens ?? 0,
+          compactTrigger: json.compact_metadata.trigger ?? "auto",
+          contextTotalTokens: this.contextWindowSize,
+        });
       }
 
       // Cost data from result
@@ -312,6 +328,14 @@ class ClaudeSession implements ProviderSession {
           cost,
           isError: json.is_error || false,
         });
+
+        // Update context window size from modelUsage if available
+        if (json.modelUsage) {
+          const modelKey = Object.keys(json.modelUsage)[0];
+          if (modelKey && json.modelUsage[modelKey]?.contextWindow) {
+            this.contextWindowSize = json.modelUsage[modelKey].contextWindow;
+          }
+        }
       }
 
       // Tool use from assistant messages — emit tool_start for auto-progress
@@ -330,6 +354,21 @@ class ClaudeSession implements ProviderSession {
               });
             }
           }
+        }
+
+        // Context usage extraction from assistant message usage
+        if (json.message.usage) {
+          const usage = json.message.usage;
+          const contextUsed = computeContextUsed(usage);
+          const contextTotal = this.contextWindowSize;
+
+          this.emit({
+            type: "context_usage",
+            contextUsedTokens: contextUsed,
+            contextTotalTokens: contextTotal,
+            contextPercent: contextTotal > 0 ? (contextUsed / contextTotal) * 100 : 0,
+            outputTokens: usage.output_tokens ?? 0,
+          });
         }
       }
 
