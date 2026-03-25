@@ -6900,7 +6900,7 @@ export function resolveApprovalRequest(
 
 export function updateApprovalRequestNotifications(
   id: string,
-  notificationChannels: unknown[],
+  notificationChannels: Array<{ channel: string; target: string; messageTs?: string }>,
 ): void {
   const now = new Date().toISOString();
   getDb()

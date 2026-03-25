@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { getSlackApp } from "../../slack/app";
 import type { ExecutorMeta } from "../../types";
 import type { ExecutorResult } from "./base";
 import { BaseExecutor } from "./base";
@@ -175,7 +174,9 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
     if (!config.notifications?.length) return;
 
     const approvalUrl = `https://app.agent-swarm.dev/approval-requests/${requestId}`;
-    const updatedChannels: unknown[] = [...config.notifications];
+    const updatedChannels = [...config.notifications] as Array<
+      z.infer<typeof NotificationConfigSchema> & { messageTs?: string }
+    >;
     let updated = false;
 
     for (let i = 0; i < config.notifications.length; i++) {
@@ -190,6 +191,7 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
 
       if (notification.channel === "slack") {
         try {
+          const { getSlackApp } = await import("../../slack/app");
           const slackApp = getSlackApp();
           if (!slackApp) {
             console.warn("[HITL] Slack not initialized — cannot send notification");
