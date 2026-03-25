@@ -28,6 +28,7 @@ async function callUpdateProfile(
   callerAgentId: string | undefined,
   args: Record<string, unknown>,
 ): Promise<{ structuredContent: StructuredContent }> {
+  // biome-ignore lint/complexity/noBannedTypes: accessing internal MCP SDK type for test
   const tools = (server as unknown as { _registeredTools: Record<string, { handler: Function }> })
     ._registeredTools;
   const handler = tools["update-profile"].handler;
