@@ -943,6 +943,10 @@ export function getTasksByAgentId(agentId: string): AgentTask[] {
 /**
  * Get the most recently updated in-progress task for an agent.
  * Used as a fallback when X-Source-Task-Id header is missing (e.g. lead agent HITL requests).
+ *
+ * Note: if agent has multiple in-progress tasks, returns the most recently
+ * updated one. This is a best-effort fallback — the X-Source-Task-Id header
+ * is the authoritative source when available.
  */
 export function getAgentCurrentTask(agentId: string): AgentTask | null {
   const row = getDb()
