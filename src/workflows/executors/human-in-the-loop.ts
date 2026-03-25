@@ -146,10 +146,17 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
       workflowRunId: meta.runId,
       workflowRunStepId: meta.stepId,
       timeoutSeconds: config.timeout?.seconds,
-      notificationChannels: config.notifications, // TODO: Notifications are stored but not dispatched yet (Phase 2)
+      notificationChannels: config.notifications,
     });
 
-    // 3. Return async result — engine will pause the workflow
+    // 3. Dispatch notifications (fire-and-forget — failures must not block the workflow)
+    if (config.notifications?.length) {
+      this.dispatchNotifications(requestId, config, db).catch((err) => {
+        console.error("[HITL] Unexpected error dispatching notifications:", err);
+      });
+    }
+
+    // 4. Return async result — engine will pause the workflow
     return {
       status: "success",
       async: true,
@@ -157,4 +164,110 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
       correlationId: requestId,
     } as unknown as ExecutorResult<HITLOutput>;
   }
+
+  /** Dispatch notifications for each configured channel. Updates DB with messageTs on success. */
+  private async dispatchNotifications(
+    requestId: string,
+    config: z.infer<typeof HITLConfigSchema>,
+    db: typeof import("../../be/db"),
+  ): Promise<void> {
+    if (!config.notifications?.length) return;
+
+    const approvalUrl = `https://app.agent-swarm.dev/approval-requests/${requestId}`;
+    const updatedChannels = [...config.notifications] as Array<
+      z.infer<typeof NotificationConfigSchema> & { messageTs?: string }
+    >;
+    let updated = false;
+
+    for (let i = 0; i < config.notifications.length; i++) {
+      const notification = config.notifications[i]!;
+
+      if (notification.channel === "email") {
+        console.warn(
+          `[HITL] Email notifications not yet supported (target: ${notification.target})`,
+        );
+        continue;
+      }
+
+      if (notification.channel === "slack") {
+        try {
+          const { getSlackApp } = await import("../../slack/app");
+          const slackApp = getSlackApp();
+          if (!slackApp) {
+            console.warn("[HITL] Slack not initialized — cannot send notification");
+            continue;
+          }
+
+          const questionsSummary = config.questions.map((q) => `• ${q.label}`).join("\n");
+
+          const timeoutText = config.timeout
+            ? `\n⏱ _Timeout: ${formatTimeout(config.timeout.seconds)} — auto-rejects if not responded_`
+            : "";
+
+          const blocks = [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `🔔 *Approval Required: ${config.title}*`,
+              },
+            },
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `*Questions:*\n${questionsSummary}${timeoutText}`,
+              },
+            },
+            {
+              type: "actions",
+              elements: [
+                {
+                  type: "button",
+                  text: { type: "plain_text", text: "Review & Respond" },
+                  url: approvalUrl,
+                  style: "primary",
+                },
+              ],
+            },
+          ];
+
+          const result = await slackApp.client.chat.postMessage({
+            channel: notification.target,
+            text: `Approval Required: ${config.title} — ${approvalUrl}`,
+            // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
+            blocks: blocks as any,
+          });
+
+          if (result.ts) {
+            updatedChannels[i] = { ...notification, messageTs: result.ts };
+            updated = true;
+          }
+
+          console.log(
+            `[HITL] Slack notification sent to ${notification.target} for request ${requestId}`,
+          );
+        } catch (err) {
+          console.error(`[HITL] Failed to send Slack notification to ${notification.target}:`, err);
+        }
+      }
+    }
+
+    // Persist messageTs values back to DB
+    if (updated) {
+      try {
+        db.updateApprovalRequestNotifications(requestId, updatedChannels);
+      } catch (err) {
+        console.error("[HITL] Failed to update notification channels in DB:", err);
+      }
+    }
+  }
+}
+
+function formatTimeout(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.round((seconds % 3600) / 60);
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
 }
