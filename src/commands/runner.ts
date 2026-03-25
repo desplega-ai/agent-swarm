@@ -772,6 +772,8 @@ interface RunningTask {
   result: ProviderResult | null;
   /** Deferred cursor updates for channel_activity triggers — committed after success */
   cursorUpdates?: Array<{ channelId: string; ts: string }>;
+  /** Resolved working directory for VCS detection */
+  workingDir?: string;
 }
 
 /** Runner state for tracking concurrent tasks */
@@ -880,6 +882,90 @@ async function saveProviderSessionId(
     headers,
     body: JSON.stringify({ claudeSessionId }),
   });
+}
+
+/** Cache of tasks that already have VCS linked — prevents repeated gh pr list calls */
+const vcsDetectedTasks = new Set<string>();
+
+/** Throttle timestamps for periodic VCS checks per task */
+const vcsCheckTimestamps = new Map<string, number>();
+const VCS_CHECK_INTERVAL = 60_000; // 60 seconds
+
+/**
+ * Detect if the task's working directory has an open PR for the current branch.
+ * If found, report VCS info to the API so webhook events can link back to this task.
+ */
+async function detectVcsForTask(
+  apiUrl: string,
+  apiKey: string,
+  taskId: string,
+  workingDir: string,
+): Promise<void> {
+  try {
+    // 1. Check if inside a git repo
+    const isGit = await Bun.$`git -C ${workingDir} rev-parse --is-inside-work-tree`.quiet().text();
+    if (isGit.trim() !== "true") return;
+
+    // 2. Get current branch
+    const branch = (await Bun.$`git -C ${workingDir} branch --show-current`.quiet().text()).trim();
+    if (!branch || branch === "main" || branch === "master") return;
+
+    // 3. Get remote URL to determine provider and repo
+    const remoteUrl = (
+      await Bun.$`git -C ${workingDir} remote get-url origin`.quiet().text()
+    ).trim();
+
+    // 4. Detect provider and check for PR/MR
+    let vcsProvider: "github" | "gitlab";
+    let prJson: string;
+
+    if (remoteUrl.includes("github.com") || remoteUrl.includes("github")) {
+      vcsProvider = "github";
+      prJson = (
+        await Bun.$`gh pr list --head ${branch} --json number,url --limit 1`.quiet().text()
+      ).trim();
+    } else if (remoteUrl.includes("gitlab")) {
+      vcsProvider = "gitlab";
+      prJson = (
+        await Bun.$`glab mr list --source-branch ${branch} --json iid,web_url --per-page 1`
+          .quiet()
+          .text()
+      ).trim();
+    } else {
+      return; // Unknown provider
+    }
+
+    // 5. Parse result
+    const prs = JSON.parse(prJson);
+    if (!Array.isArray(prs) || prs.length === 0) return;
+
+    const pr = prs[0];
+    const vcsNumber = pr.number ?? pr.iid;
+    const vcsUrl = pr.url ?? pr.web_url;
+    if (!vcsNumber || !vcsUrl) return;
+
+    // 6. Extract repo from remote URL
+    const repoMatch = remoteUrl.match(/[:/]([^/]+\/[^/.]+?)(?:\.git)?$/);
+    if (!repoMatch) return;
+    const vcsRepo = repoMatch[1];
+
+    // 7. Report to API
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+    await fetch(`${apiUrl}/api/tasks/${taskId}/vcs`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ vcsProvider, vcsRepo, vcsNumber, vcsUrl }),
+    });
+
+    vcsDetectedTasks.add(taskId);
+    console.log(
+      `[VCS] Linked task ${taskId.slice(0, 8)} to ${vcsProvider} ${vcsRepo}#${vcsNumber}`,
+    );
+  } catch {
+    // Fire-and-forget — detection failure should never block task execution
+  }
 }
 
 /** Save provider session ID on the active session (for pool tasks where realTaskId is unknown) */
@@ -1646,6 +1732,7 @@ async function checkCompletedProcesses(
     result: ProviderResult;
     triggerType?: string;
     cursorUpdates?: Array<{ channelId: string; ts: string }>;
+    workingDir?: string;
   }> = [];
 
   for (const [taskId, task] of state.activeTasks) {
@@ -1659,16 +1746,22 @@ async function checkCompletedProcesses(
         result: task.result,
         triggerType: task.triggerType,
         cursorUpdates: task.cursorUpdates,
+        workingDir: task.workingDir,
       });
     }
   }
 
   // Remove completed tasks from the map and ensure they're marked as finished
-  for (const { taskId, result, cursorUpdates } of completedTasks) {
+  for (const { taskId, result, cursorUpdates, workingDir } of completedTasks) {
     state.activeTasks.delete(taskId);
 
     if (apiConfig) {
       removeActiveSession(apiConfig, taskId);
+    }
+
+    // Detect VCS before finishing — last chance to link a PR
+    if (apiConfig && workingDir && !vcsDetectedTasks.has(taskId)) {
+      await detectVcsForTask(apiConfig.apiUrl, apiConfig.apiKey, taskId, workingDir);
     }
 
     // Call the finish API to ensure task status is updated
@@ -2377,6 +2470,18 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       // Check for completed processes first and ensure tasks are marked as finished
       await checkCompletedProcesses(state, role, apiConfig);
 
+      // Periodic VCS detection for running tasks (fire-and-forget, throttled per task)
+      const now = Date.now();
+      for (const [taskId, task] of state.activeTasks) {
+        if (vcsDetectedTasks.has(taskId)) continue;
+        const lastCheck = vcsCheckTimestamps.get(taskId) ?? 0;
+        if (now - lastCheck < VCS_CHECK_INTERVAL) continue;
+        if (!task.workingDir) continue;
+
+        vcsCheckTimestamps.set(taskId, now);
+        detectVcsForTask(apiUrl, apiKey, taskId, task.workingDir);
+      }
+
       // Check for cancelled tasks and signal their subprocesses
       if (state.activeTasks.size > 0) {
         for (const [taskId, task] of state.activeTasks) {
@@ -2678,6 +2783,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
           // Attach trigger metadata for logging
           runningTask.triggerType = trigger.type;
+          runningTask.workingDir = effectiveCwd;
 
           // Attach deferred cursor updates for channel_activity triggers
           if (trigger.type === "channel_activity" && trigger.cursorUpdates) {

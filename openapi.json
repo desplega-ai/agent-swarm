@@ -4629,6 +4629,72 @@
         }
       }
     },
+    "/api/tasks/{id}/vcs": {
+      "patch": {
+        "summary": "Update VCS (PR/MR) info for a task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "vcsProvider": {
+                    "type": "string",
+                    "enum": [
+                      "github",
+                      "gitlab"
+                    ]
+                  },
+                  "vcsRepo": {
+                    "type": "string"
+                  },
+                  "vcsNumber": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "vcsUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "vcsProvider",
+                  "vcsRepo",
+                  "vcsNumber",
+                  "vcsUrl"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "VCS info updated"
+          },
+          "404": {
+            "description": "Task not found"
+          }
+        }
+      }
+    },
     "/api/trackers/linear/authorize": {
       "get": {
         "summary": "Redirect to Linear OAuth consent screen",
