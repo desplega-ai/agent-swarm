@@ -1,6 +1,7 @@
 import { getTrackerSync, updateTrackerSync } from "../be/db-queries/tracker";
+import { ensureToken } from "../oauth/ensure-token";
 import { workflowEventBus } from "../workflows/event-bus";
-import { ensureValidLinearToken, getLinearClient } from "./client";
+import { getLinearClient, resetLinearClient } from "./client";
 import { endAgentSession, postAgentSessionAction, taskSessionMap } from "./sync";
 
 let subscribed = false;
@@ -85,7 +86,8 @@ async function handleTaskCompleted(data: unknown): Promise<void> {
   } else {
     // No session — fall back to issue comment
     try {
-      await ensureValidLinearToken();
+      await ensureToken("linear");
+      resetLinearClient(); // Clear cached client so it picks up refreshed token
       const client = getLinearClient();
       if (!client) {
         console.log("[Linear Outbound] No Linear client available, skipping sync for", taskId);
@@ -134,7 +136,8 @@ async function handleTaskFailed(data: unknown): Promise<void> {
   } else {
     // No session — fall back to issue comment
     try {
-      await ensureValidLinearToken();
+      await ensureToken("linear");
+      resetLinearClient(); // Clear cached client so it picks up refreshed token
       const client = getLinearClient();
       if (!client) {
         console.log("[Linear Outbound] No Linear client available, skipping sync for", taskId);
@@ -182,7 +185,8 @@ async function handleTaskCancelled(data: unknown): Promise<void> {
     console.log(`[Linear Outbound] Posted cancellation to AgentSession for task ${taskId}`);
   } else {
     try {
-      await ensureValidLinearToken();
+      await ensureToken("linear");
+      resetLinearClient(); // Clear cached client so it picks up refreshed token
       const client = getLinearClient();
       if (!client) {
         console.log("[Linear Outbound] No Linear client available, skipping sync for", taskId);
