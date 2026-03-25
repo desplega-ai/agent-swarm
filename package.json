@@ -85,6 +85,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.10",
+    "@faker-js/faker": "^10.4.0",
     "@types/bun": "latest"
   },
   "peerDependencies": {

@@ -5,6 +5,8 @@
  * Seeds a local SQLite database with realistic demo data for development,
  * E2E testing, and showcasing. Configurable via CLI flags or a JSON config file.
  *
+ * Uses faker.js for realistic data generation with a fixed seed for reproducibility.
+ *
  * Usage:
  *   bun run scripts/seed.ts                    # Use defaults from seed.default.json
  *   bun run scripts/seed.ts --clean            # Wipe DB before seeding
@@ -15,9 +17,12 @@
  */
 
 import { Database } from "bun:sqlite";
-import { readFileSync, existsSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { faker } from "@faker-js/faker";
+import { dirname, resolve } from "node:path";
 import { runMigrations } from "../src/be/migrations/runner";
+
+// Deterministic seed for reproducible output
+faker.seed(42);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -89,8 +94,15 @@ interface SeedConfig {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function uuid(): string {
-  return crypto.randomUUID();
+/** Deterministic UUID derived from a namespace + key for idempotent seeding. */
+function seedId(namespace: string, key: string | number): string {
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(`seed:${namespace}:${key}`);
+  const hex = hasher.digest("hex");
+  // Format as UUID v4 shape: 8-4-4-4-12
+  return [hex.slice(0, 8), hex.slice(8, 12), `4${hex.slice(13, 16)}`, `a${hex.slice(17, 20)}`, hex.slice(20, 32)].join(
+    "-",
+  );
 }
 
 function now(): string {
@@ -104,167 +116,220 @@ function daysAgo(n: number): string {
 }
 
 function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
-function pickN<T>(arr: T[], n: number): T[] {
-  const shuffled = [...arr].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, Math.min(n, arr.length));
+  return faker.helpers.arrayElement(arr);
 }
 
 // ---------------------------------------------------------------------------
-// Default agent pool (used when config doesn't provide enough explicit data)
+// Faker-based data generators
 // ---------------------------------------------------------------------------
 
-const DEFAULT_AGENTS: AgentSeed[] = [
-  {
-    name: "Atlas",
-    role: "Lead Coordinator",
-    description: "Orchestrates the swarm, assigns tasks, and monitors progress.",
-    isLead: true,
-    status: "idle",
-    capabilities: ["coordination", "planning", "task-management"],
-  },
-  {
-    name: "Forge",
-    role: "Implementation Engineer",
-    description: "Expert coder who turns plans into working PRs.",
-    isLead: false,
-    status: "busy",
-    capabilities: ["typescript", "react", "testing", "git"],
-  },
-  {
-    name: "Scout",
-    role: "Researcher",
-    description: "Investigates codebases and gathers context for tasks.",
-    isLead: false,
-    status: "idle",
-    capabilities: ["research", "documentation", "analysis"],
-  },
-  {
-    name: "Sentinel",
-    role: "Code Reviewer",
-    description: "Reviews PRs for correctness and security.",
-    isLead: false,
-    status: "offline",
-    capabilities: ["code-review", "security", "testing"],
-  },
-  {
-    name: "Blaze",
-    role: "DevOps Engineer",
-    description: "Manages deployments, CI/CD pipelines, and infrastructure.",
-    isLead: false,
-    status: "idle",
-    capabilities: ["docker", "ci-cd", "monitoring", "bash"],
-  },
-  {
-    name: "Pixel",
-    role: "Frontend Developer",
-    description: "Builds and polishes user interfaces with React and CSS.",
-    isLead: false,
-    status: "busy",
-    capabilities: ["react", "css", "accessibility", "design"],
-  },
-  {
-    name: "Cipher",
-    role: "Security Analyst",
-    description: "Audits code for vulnerabilities and enforces security practices.",
-    isLead: false,
-    status: "idle",
-    capabilities: ["security", "penetration-testing", "compliance"],
-  },
-  {
-    name: "Quill",
-    role: "Technical Writer",
-    description: "Writes documentation, API guides, and onboarding materials.",
-    isLead: false,
-    status: "offline",
-    capabilities: ["documentation", "markdown", "api-docs"],
-  },
+const AGENT_ROLES = [
+  "Lead Coordinator",
+  "Implementation Engineer",
+  "Researcher",
+  "Code Reviewer",
+  "DevOps Engineer",
+  "Frontend Developer",
+  "Security Analyst",
+  "Technical Writer",
+  "QA Engineer",
+  "Data Engineer",
 ];
 
-const TASK_TEMPLATES = [
-  {
-    task: "Implement user authentication middleware with JWT validation",
-    tags: ["backend", "auth", "security"],
-    taskType: "implementation",
-  },
-  {
-    task: "Fix race condition in WebSocket connection handler",
-    tags: ["backend", "bugfix", "websocket"],
-    taskType: "bugfix",
-  },
-  {
-    task: "Add pagination to the /api/tasks endpoint",
-    tags: ["backend", "api", "performance"],
-    taskType: "implementation",
-  },
-  {
-    task: "Write unit tests for the workflow engine executor",
-    tags: ["testing", "workflows"],
-    taskType: "testing",
-  },
-  {
-    task: "Research best practices for SQLite WAL mode in production",
-    tags: ["research", "database"],
-    taskType: "research",
-  },
-  {
-    task: "Review PR #142: Add rate limiting to API endpoints",
-    tags: ["review", "security", "api"],
-    taskType: "review",
-  },
-  {
-    task: "Migrate dashboard charts from Chart.js to Recharts",
-    tags: ["frontend", "dashboard", "migration"],
-    taskType: "implementation",
-  },
-  {
-    task: "Set up GitHub Actions workflow for automated releases",
-    tags: ["devops", "ci-cd", "github"],
-    taskType: "implementation",
-  },
-  {
-    task: "Investigate memory leak in long-running agent sessions",
-    tags: ["debugging", "performance"],
-    taskType: "investigation",
-  },
-  {
-    task: "Add Slack notification for failed workflow runs",
-    tags: ["slack", "workflows", "notifications"],
-    taskType: "implementation",
-  },
-  {
-    task: "Update API documentation for new MCP tool endpoints",
-    tags: ["documentation", "api"],
-    taskType: "documentation",
-  },
-  {
-    task: "Optimize database queries for the agent dashboard",
-    tags: ["performance", "database", "dashboard"],
-    taskType: "optimization",
-  },
-  {
-    task: "Implement configurable retry logic for webhook deliveries",
-    tags: ["backend", "webhooks", "reliability"],
-    taskType: "implementation",
-  },
-  {
-    task: "Add end-to-end tests for the task lifecycle flow",
-    tags: ["testing", "e2e", "tasks"],
-    taskType: "testing",
-  },
-  {
-    task: "Create onboarding guide for new agent templates",
-    tags: ["documentation", "templates"],
-    taskType: "documentation",
-  },
-  {
-    task: "Fix timezone handling in scheduled task cron execution",
-    tags: ["bugfix", "scheduling"],
-    taskType: "bugfix",
-  },
+const CAPABILITY_POOL = [
+  "typescript",
+  "react",
+  "testing",
+  "git",
+  "docker",
+  "ci-cd",
+  "monitoring",
+  "security",
+  "documentation",
+  "research",
+  "code-review",
+  "bash",
+  "css",
+  "accessibility",
+  "api-docs",
+  "analysis",
+  "planning",
+  "coordination",
+  "task-management",
+  "markdown",
 ];
+
+function generateAgent(index: number): AgentSeed {
+  const isLead = index === 0;
+  const role = isLead ? "Lead Coordinator" : faker.helpers.arrayElement(AGENT_ROLES.slice(1));
+  return {
+    name: faker.person.firstName(),
+    role,
+    description: `${faker.person.jobTitle()} — ${faker.lorem.sentence()}`,
+    isLead,
+    status: faker.helpers.arrayElement(["idle", "busy", "offline"]),
+    capabilities: faker.helpers.arrayElements(CAPABILITY_POOL, { min: 2, max: 5 }),
+  };
+}
+
+const TASK_TYPES = [
+  "implementation",
+  "bugfix",
+  "testing",
+  "research",
+  "review",
+  "documentation",
+  "investigation",
+  "optimization",
+];
+
+const TAG_POOL = [
+  "backend",
+  "frontend",
+  "api",
+  "auth",
+  "security",
+  "performance",
+  "database",
+  "testing",
+  "e2e",
+  "workflows",
+  "dashboard",
+  "devops",
+  "ci-cd",
+  "slack",
+  "documentation",
+  "templates",
+  "scheduling",
+  "webhooks",
+  "websocket",
+  "debugging",
+];
+
+function generateTaskDescription(): { task: string; tags: string[]; taskType: string } {
+  const taskType = faker.helpers.arrayElement(TASK_TYPES);
+  const verbs: Record<string, string> = {
+    implementation: "Implement",
+    bugfix: "Fix",
+    testing: "Write tests for",
+    research: "Research",
+    review: "Review",
+    documentation: "Document",
+    investigation: "Investigate",
+    optimization: "Optimize",
+  };
+
+  return {
+    task: `${verbs[taskType] ?? "Implement"} ${faker.hacker.phrase().toLowerCase()}`,
+    tags: faker.helpers.arrayElements(TAG_POOL, { min: 1, max: 3 }),
+    taskType,
+  };
+}
+
+function generateChannelName(): ChannelSeed {
+  const prefix = faker.helpers.arrayElement([
+    "engineering",
+    "deployments",
+    "standup",
+    "incidents",
+    "design",
+    "security",
+    "product",
+    "random",
+    "releases",
+    "oncall",
+  ]);
+  return {
+    name: `${prefix}-${faker.string.alphanumeric(4)}`,
+    description: faker.company.buzzPhrase(),
+    type: faker.helpers.weightedArrayElement([
+      { value: "public" as const, weight: 4 },
+      { value: "dm" as const, weight: 1 },
+    ]),
+  };
+}
+
+function generateEpic(): EpicSeed {
+  return {
+    name: faker.company.catchPhrase(),
+    goal: faker.lorem.sentence({ min: 8, max: 15 }),
+    description: faker.lorem.paragraph(),
+    status: faker.helpers.arrayElement(["draft", "active", "paused", "completed", "cancelled"]),
+    priority: faker.number.int({ min: 20, max: 90 }),
+    tags: faker.helpers.arrayElements(TAG_POOL, { min: 1, max: 3 }),
+  };
+}
+
+function generateWorkflow(): WorkflowSeed {
+  const action1 = faker.hacker.verb();
+  const action2 = faker.hacker.verb();
+  return {
+    name: `${faker.helpers.arrayElement(["PR", "Deploy", "Release", "Review", "Test", "Build"])} ${faker.helpers.arrayElement(["Pipeline", "Workflow", "Automation", "Process"])}`,
+    description: faker.lorem.sentence(),
+    definition: {
+      nodes: [
+        {
+          id: action1,
+          type: "agent-task",
+          config: { template: faker.hacker.phrase() },
+          next: [action2],
+        },
+        {
+          id: action2,
+          type: "agent-task",
+          config: { template: faker.hacker.phrase() },
+        },
+      ],
+    },
+  };
+}
+
+function generateSchedule(): ScheduleSeed {
+  const cronPresets = ["0 9 * * 1-5", "0 0 * * *", "*/30 * * * *", "0 12 * * 1", "0 18 * * 5"];
+  return {
+    name: faker.company.buzzPhrase(),
+    description: faker.lorem.sentence(),
+    cronExpression: faker.helpers.arrayElement(cronPresets),
+    taskTemplate: faker.hacker.phrase(),
+    tags: faker.helpers.arrayElements(TAG_POOL, { min: 1, max: 2 }),
+    priority: faker.number.int({ min: 20, max: 80 }),
+  };
+}
+
+function generateService(index: number): ServiceSeed {
+  const names = [
+    "dashboard-api",
+    "metrics-collector",
+    "webhook-relay",
+    "auth-proxy",
+    "log-aggregator",
+  ];
+  return {
+    name: names[index % names.length],
+    description: faker.lorem.sentence(),
+    port: 8080 + index,
+    healthCheckPath: "/health",
+    status: faker.helpers.arrayElement(["starting", "healthy", "unhealthy", "stopped"]),
+    script: `bun run src/services/${names[index % names.length]}.ts`,
+  };
+}
+
+function generateMemory(): {
+  name: string;
+  content: string;
+  source: "manual" | "task_completion" | "session_summary" | "file_index";
+} {
+  return {
+    name: faker.helpers.slugify(faker.hacker.phrase()).toLowerCase(),
+    content: faker.lorem.paragraph(),
+    source: faker.helpers.arrayElement([
+      "manual",
+      "task_completion",
+      "session_summary",
+      "file_index",
+    ]),
+  };
+}
 
 const TASK_STATUSES: Array<{
   status: string;
@@ -276,76 +341,7 @@ const TASK_STATUSES: Array<{
   { status: "completed", needsAgent: true, needsFinish: true },
   { status: "failed", needsAgent: true, needsFinish: true },
   { status: "unassigned", needsAgent: false, needsFinish: false },
-  { status: "cancelled", needsAgent: true, needsFinish: true },
-];
-
-const MESSAGE_TEMPLATES = [
-  "Just finished the implementation. PR is up for review.",
-  "I'm seeing some flaky tests in CI. Investigating now.",
-  "Can someone review the changes to the auth middleware?",
-  "Deployed v1.51 to staging. All health checks passing.",
-  "The database migration ran smoothly. No issues found.",
-  "I've updated the API docs to reflect the new endpoints.",
-  "Found the root cause of the memory leak — it's in the WebSocket handler.",
-  "Good morning! Starting work on the dashboard charts migration.",
-  "The E2E tests are all green. Ready to merge.",
-  "Blocked on the auth PR. Need security review before proceeding.",
-  "Created a new epic for the API v2 migration. Please review the PRD.",
-  "The cron scheduler is now handling timezone offsets correctly.",
-  "I'll pick up the Slack notification task next.",
-  "Just submitted my code review. A few suggestions in the comments.",
-  "The worktree setup is working well for parallel development.",
-];
-
-const MEMORY_TEMPLATES = [
-  {
-    name: "auth-middleware-patterns",
-    content:
-      "The API uses Bearer token auth via the Authorization header. API_KEY from .env is the master key. Agent-specific requests also require X-Agent-ID header.",
-    source: "manual" as const,
-  },
-  {
-    name: "sqlite-wal-gotcha",
-    content:
-      "SQLite WAL mode requires that the -wal and -shm files are NOT deleted while the DB is open. Always close connections before removing DB files in tests.",
-    source: "manual" as const,
-  },
-  {
-    name: "workflow-interpolation",
-    content:
-      'Workflow template interpolation uses {{path.to.value}} syntax. Upstream node outputs are NOT available by default — you must declare an inputs mapping to access them.',
-    source: "task_completion" as const,
-  },
-  {
-    name: "docker-entrypoint-idempotency",
-    content:
-      "Docker entrypoint must be idempotent. On second boot with same AGENT_ID, registration should be skipped. Use config checks to detect previous registration.",
-    source: "session_summary" as const,
-  },
-  {
-    name: "biome-formatting-rules",
-    content:
-      "Codebase uses Biome with 2-space indent, double quotes, 100 char line width. Run bun run lint:fix before every commit.",
-    source: "manual" as const,
-  },
-  {
-    name: "test-db-isolation",
-    content:
-      "Tests must use isolated SQLite DBs (e.g. ./test-<name>.sqlite) with initDb()/closeDb() in beforeAll/afterAll. Clean up -wal and -shm files too.",
-    source: "file_index" as const,
-  },
-  {
-    name: "mcp-session-handshake",
-    content:
-      'MCP tool testing requires a session handshake: initialize → extract session ID → send initialized notification → call tools. Accept header must include both application/json and text/event-stream.',
-    source: "session_summary" as const,
-  },
-  {
-    name: "worker-api-boundary",
-    content:
-      "Worker-side code must NEVER import from src/be/db or bun:sqlite. Workers communicate with the API exclusively via HTTP. Enforced by scripts/check-db-boundary.sh.",
-    source: "manual" as const,
-  },
+  { status: "cancelled", needsAgent: false, needsFinish: true },
 ];
 
 // ---------------------------------------------------------------------------
@@ -358,26 +354,17 @@ function seedAgents(
 ): { id: string; name: string; isLead: boolean }[] {
   const count = config.agents.count;
   const explicit = config.agents.data ?? [];
-  const pool = [...explicit];
-
-  // Fill remaining from defaults if needed
-  for (const def of DEFAULT_AGENTS) {
-    if (pool.length >= count) break;
-    if (!pool.find((a) => a.name === def.name)) {
-      pool.push(def);
-    }
-  }
 
   const agents: { id: string; name: string; isLead: boolean }[] = [];
   const stmt = db.prepare(`
-    INSERT INTO agents (id, name, isLead, status, description, role, capabilities, maxTasks, createdAt, lastUpdatedAt, lastActivityAt)
+    INSERT OR IGNORE INTO agents (id, name, isLead, status, description, role, capabilities, maxTasks, createdAt, lastUpdatedAt, lastActivityAt)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (let i = 0; i < count; i++) {
-    const seed = pool[i % pool.length];
-    const id = uuid();
-    const ts = daysAgo(Math.floor(Math.random() * 30));
+    const seed = i < explicit.length ? explicit[i] : generateAgent(i);
+    const id = seedId("agent", i);
+    const ts = daysAgo(faker.number.int({ min: 1, max: 30 }));
     stmt.run(
       id,
       seed.name,
@@ -389,7 +376,7 @@ function seedAgents(
       seed.isLead ? 5 : 1,
       ts,
       now(),
-      daysAgo(Math.floor(Math.random() * 3)),
+      daysAgo(faker.number.int({ min: 0, max: 3 })),
     );
     agents.push({ id, name: seed.name, isLead: seed.isLead });
   }
@@ -407,40 +394,14 @@ function seedChannels(
   const explicit = config.channels.data ?? [];
   const channels: { id: string; name: string }[] = [];
 
-  const defaults: ChannelSeed[] = [
-    {
-      name: "engineering",
-      description: "Engineering discussions",
-      type: "public",
-    },
-    {
-      name: "deployments",
-      description: "Deployment coordination",
-      type: "public",
-    },
-    {
-      name: "standup",
-      description: "Daily standup updates",
-      type: "public",
-    },
-    { name: "random", description: "Off-topic chat", type: "public" },
-    { name: "incidents", description: "Incident response", type: "public" },
-  ];
-
-  const pool = [...explicit];
-  for (const def of defaults) {
-    if (pool.length >= count) break;
-    if (!pool.find((c) => c.name === def.name)) pool.push(def);
-  }
-
   const stmt = db.prepare(`
-    INSERT INTO channels (id, name, description, type, createdBy, participants, createdAt)
+    INSERT OR IGNORE INTO channels (id, name, description, type, createdBy, participants, createdAt)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (let i = 0; i < count; i++) {
-    const seed = pool[i % pool.length];
-    const id = uuid();
+    const seed = i < explicit.length ? explicit[i] : generateChannelName();
+    const id = seedId("channel", i);
     const createdBy = pick(agents).id;
     const participants = JSON.stringify(agents.map((a) => a.id));
     stmt.run(id, seed.name, seed.description, seed.type, createdBy, participants, daysAgo(14));
@@ -461,22 +422,24 @@ function seedMessages(
   let total = 0;
 
   const stmt = db.prepare(`
-    INSERT INTO channel_messages (id, channelId, agentId, content, mentions, createdAt)
+    INSERT OR IGNORE INTO channel_messages (id, channelId, agentId, content, mentions, createdAt)
     VALUES (?, ?, ?, ?, ?, ?)
   `);
 
   for (const channel of channels) {
     for (let i = 0; i < perChannel; i++) {
       const agent = pick(agents);
-      const content = pick(MESSAGE_TEMPLATES);
-      const mentioned = Math.random() > 0.7 ? pickN(agents, 1).map((a) => a.id) : [];
+      const content = faker.lorem.sentences({ min: 1, max: 3 });
+      const mentioned = faker.datatype.boolean(0.3)
+        ? [faker.helpers.arrayElement(agents).id]
+        : [];
       stmt.run(
-        uuid(),
+        seedId("message", `${channel.id}:${i}`),
         channel.id,
         agent.id,
         content,
         JSON.stringify(mentioned),
-        daysAgo(Math.floor(Math.random() * 7)),
+        daysAgo(faker.number.int({ min: 0, max: 7 })),
       );
       total++;
     }
@@ -495,48 +458,15 @@ function seedEpics(
   const explicit = config.epics.data ?? [];
   const epics: { id: string; name: string }[] = [];
 
-  const defaults: EpicSeed[] = [
-    {
-      name: "Auth System Overhaul",
-      goal: "Replace legacy session-based auth with JWT tokens and OAuth2 support",
-      description: "Complete rewrite of the authentication system",
-      status: "active",
-      priority: 80,
-      tags: ["security", "auth"],
-    },
-    {
-      name: "Dashboard v2",
-      goal: "Rebuild the monitoring dashboard with real-time updates",
-      description: "Next-gen dashboard with WebSocket updates",
-      status: "draft",
-      priority: 60,
-      tags: ["frontend", "dashboard"],
-    },
-    {
-      name: "API v2 Migration",
-      goal: "Migrate all REST endpoints to v2 with improved pagination and filtering",
-      description: "Standardize API responses and add cursor-based pagination",
-      status: "active",
-      priority: 70,
-      tags: ["api", "backend"],
-    },
-  ];
-
-  const pool = [...explicit];
-  for (const def of defaults) {
-    if (pool.length >= count) break;
-    if (!pool.find((e) => e.name === def.name)) pool.push(def);
-  }
-
   const lead = agents.find((a) => a.isLead) ?? agents[0];
   const stmt = db.prepare(`
-    INSERT INTO epics (id, name, description, goal, status, priority, tags, createdByAgentId, leadAgentId, channelId, createdAt, lastUpdatedAt)
+    INSERT OR IGNORE INTO epics (id, name, description, goal, status, priority, tags, createdByAgentId, leadAgentId, channelId, createdAt, lastUpdatedAt)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (let i = 0; i < count; i++) {
-    const seed = pool[i % pool.length];
-    const id = uuid();
+    const seed = i < explicit.length ? explicit[i] : generateEpic();
+    const id = seedId("epic", i);
     const channel = channels.length > 0 ? pick(channels).id : null;
     stmt.run(
       id,
@@ -568,7 +498,7 @@ function seedTasks(
   const count = config.tasks.count;
 
   const stmt = db.prepare(`
-    INSERT INTO agent_tasks (
+    INSERT OR IGNORE INTO agent_tasks (
       id, agentId, creatorAgentId, task, status, source, taskType, tags,
       priority, dependsOn, epicId, createdAt, lastUpdatedAt, finishedAt,
       failureReason, output, progress
@@ -577,31 +507,33 @@ function seedTasks(
   `);
 
   const logStmt = db.prepare(`
-    INSERT INTO agent_log (id, eventType, agentId, taskId, newValue, createdAt)
+    INSERT OR IGNORE INTO agent_log (id, eventType, agentId, taskId, newValue, createdAt)
     VALUES (?, ?, ?, ?, ?, ?)
   `);
 
   for (let i = 0; i < count; i++) {
-    const template = TASK_TEMPLATES[i % TASK_TEMPLATES.length];
+    const template = generateTaskDescription();
     const statusInfo = TASK_STATUSES[i % TASK_STATUSES.length];
-    const id = uuid();
+    const id = seedId("task", i);
     const agent = statusInfo.needsAgent ? pick(agents) : null;
     const creator = pick(agents);
-    const epic = Math.random() > 0.5 && epics.length > 0 ? pick(epics) : null;
-    const priority = 20 + Math.floor(Math.random() * 60);
-    const createdAt = daysAgo(Math.floor(Math.random() * 14));
-    const finishedAt = statusInfo.needsFinish ? daysAgo(Math.floor(Math.random() * 3)) : null;
+    const epic = faker.datatype.boolean(0.5) && epics.length > 0 ? pick(epics) : null;
+    const priority = faker.number.int({ min: 20, max: 80 });
+    const createdAt = daysAgo(faker.number.int({ min: 0, max: 14 }));
+    const finishedAt = statusInfo.needsFinish
+      ? daysAgo(faker.number.int({ min: 0, max: 3 }))
+      : null;
 
     let failureReason: string | null = null;
     let output: string | null = null;
     let progress: string | null = null;
 
     if (statusInfo.status === "failed") {
-      failureReason = "Test suite failed: 3 assertions did not pass";
+      failureReason = faker.lorem.sentence();
     } else if (statusInfo.status === "completed") {
-      output = "Task completed successfully. PR #" + (100 + i) + " merged.";
+      output = `Task completed successfully. ${faker.lorem.sentence()}`;
     } else if (statusInfo.status === "in_progress") {
-      progress = "Working on implementation, ~60% done";
+      progress = `Working on ${faker.hacker.ingverb()} — ~${faker.number.int({ min: 10, max: 90 })}% done`;
     }
 
     stmt.run(
@@ -610,7 +542,7 @@ function seedTasks(
       creator.id,
       template.task,
       statusInfo.status,
-      pick(["mcp", "slack", "api"]),
+      faker.helpers.arrayElement(["mcp", "slack", "api"]),
       template.taskType,
       JSON.stringify(template.tags),
       priority,
@@ -624,8 +556,7 @@ function seedTasks(
       progress,
     );
 
-    // Add a log entry for each task
-    logStmt.run(uuid(), "task_created", creator.id, id, statusInfo.status, createdAt);
+    logStmt.run(seedId("log", `task:${i}`), "task_created", creator.id, id, statusInfo.status, createdAt);
   }
 
   console.log(`  ✓ Seeded ${count} tasks`);
@@ -635,43 +566,15 @@ function seedWorkflows(db: Database, config: SeedConfig): void {
   const count = config.workflows.count;
   const explicit = config.workflows.data ?? [];
 
-  const defaults: WorkflowSeed[] = [
-    {
-      name: "PR Review Pipeline",
-      description: "Automated PR review, testing, and feedback",
-      definition: {
-        nodes: [
-          {
-            id: "review",
-            type: "agent-task",
-            config: { template: "Review the PR for code quality issues" },
-            next: ["test"],
-          },
-          {
-            id: "test",
-            type: "agent-task",
-            config: { template: "Run the test suite and report results" },
-          },
-        ],
-      },
-    },
-  ];
-
-  const pool = [...explicit];
-  for (const def of defaults) {
-    if (pool.length >= count) break;
-    if (!pool.find((w) => w.name === def.name)) pool.push(def);
-  }
-
   const stmt = db.prepare(`
-    INSERT INTO workflows (id, name, description, enabled, definition, triggers, createdAt, lastUpdatedAt)
+    INSERT OR IGNORE INTO workflows (id, name, description, enabled, definition, triggers, createdAt, lastUpdatedAt)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (let i = 0; i < count; i++) {
-    const seed = pool[i % pool.length];
+    const seed = i < explicit.length ? explicit[i] : generateWorkflow();
     stmt.run(
-      uuid(),
+      seedId("workflow", i),
       seed.name,
       seed.description,
       1,
@@ -693,25 +596,8 @@ function seedSchedules(
   const count = config.schedules.count;
   const explicit = config.schedules.data ?? [];
 
-  const defaults: ScheduleSeed[] = [
-    {
-      name: "Daily Standup Summary",
-      description: "Collects status from all agents and posts a daily summary",
-      cronExpression: "0 9 * * 1-5",
-      taskTemplate: "Collect status updates from all agents and post a summary",
-      tags: ["standup", "daily"],
-      priority: 40,
-    },
-  ];
-
-  const pool = [...explicit];
-  for (const def of defaults) {
-    if (pool.length >= count) break;
-    if (!pool.find((s) => s.name === def.name)) pool.push(def);
-  }
-
   const stmt = db.prepare(`
-    INSERT INTO scheduled_tasks (
+    INSERT OR IGNORE INTO scheduled_tasks (
       id, name, description, cronExpression, taskTemplate, taskType, tags,
       priority, targetAgentId, enabled, timezone, scheduleType, createdAt, lastUpdatedAt
     )
@@ -719,10 +605,10 @@ function seedSchedules(
   `);
 
   for (let i = 0; i < count; i++) {
-    const seed = pool[i % pool.length];
+    const seed = i < explicit.length ? explicit[i] : generateSchedule();
     const target = pick(agents);
     stmt.run(
-      uuid(),
+      seedId("schedule", i),
       seed.name,
       seed.description,
       seed.cronExpression,
@@ -748,27 +634,26 @@ function seedMemories(
   agents: { id: string }[],
 ): void {
   const count = config.memories.count;
-  const pool = MEMORY_TEMPLATES.slice(0, count);
 
   const stmt = db.prepare(`
-    INSERT INTO agent_memory (id, agentId, scope, name, content, source, tags, createdAt, accessedAt)
+    INSERT OR IGNORE INTO agent_memory (id, agentId, scope, name, content, source, tags, createdAt, accessedAt)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (let i = 0; i < count; i++) {
-    const template = pool[i % pool.length];
+    const mem = generateMemory();
     const agent = pick(agents);
-    const scope = Math.random() > 0.5 ? "swarm" : "agent";
+    const scope = faker.helpers.arrayElement(["swarm", "agent"]);
     stmt.run(
-      uuid(),
+      seedId("memory", i),
       agent.id,
       scope,
-      template.name,
-      template.content,
-      template.source,
+      mem.name,
+      mem.content,
+      mem.source,
       "[]",
-      daysAgo(Math.floor(Math.random() * 14)),
-      daysAgo(Math.floor(Math.random() * 3)),
+      daysAgo(faker.number.int({ min: 0, max: 14 })),
+      daysAgo(faker.number.int({ min: 0, max: 3 })),
     );
   }
 
@@ -783,33 +668,16 @@ function seedServices(
   const count = config.services.count;
   const explicit = config.services.data ?? [];
 
-  const defaults: ServiceSeed[] = [
-    {
-      name: "dashboard-api",
-      description: "Dashboard backend API",
-      port: 8080,
-      healthCheckPath: "/health",
-      status: "healthy",
-      script: "bun run src/dashboard/server.ts",
-    },
-  ];
-
-  const pool = [...explicit];
-  for (const def of defaults) {
-    if (pool.length >= count) break;
-    if (!pool.find((s) => s.name === def.name)) pool.push(def);
-  }
-
   const stmt = db.prepare(`
-    INSERT INTO services (id, agentId, name, port, description, healthCheckPath, status, script, metadata, createdAt, lastUpdatedAt)
+    INSERT OR IGNORE INTO services (id, agentId, name, port, description, healthCheckPath, status, script, metadata, createdAt, lastUpdatedAt)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (let i = 0; i < count; i++) {
-    const seed = pool[i % pool.length];
+    const seed = i < explicit.length ? explicit[i] : generateService(i);
     const agent = pick(agents);
     stmt.run(
-      uuid(),
+      seedId("service", i),
       agent.id,
       seed.name,
       seed.port,
@@ -830,6 +698,8 @@ function seedServices(
 // Table cleanup
 // ---------------------------------------------------------------------------
 
+// Tables listed in FK-safe delete order (children before parents).
+// Keep this list in sync with src/be/migrations/ when tables are added or removed.
 const TABLES_IN_DELETE_ORDER = [
   "channel_read_state",
   "channel_messages",
@@ -838,9 +708,6 @@ const TABLES_IN_DELETE_ORDER = [
   "session_logs",
   "session_costs",
   "active_sessions",
-  "agent_skills",
-  "skills",
-  "approval_requests",
   "workflow_run_steps",
   "workflow_runs",
   "workflow_versions",
@@ -867,7 +734,6 @@ const TABLES_IN_DELETE_ORDER = [
 
 function cleanDatabase(db: Database): void {
   console.log("  Cleaning existing data...");
-  db.run("PRAGMA foreign_keys = OFF;");
 
   for (const table of TABLES_IN_DELETE_ORDER) {
     try {
@@ -877,7 +743,6 @@ function cleanDatabase(db: Database): void {
     }
   }
 
-  db.run("PRAGMA foreign_keys = ON;");
   console.log("  ✓ Database cleaned");
 }
 
@@ -914,7 +779,13 @@ Examples:
 
 function parseArgs(argv: string[]): {
   configPath: string;
-  overrides: Partial<SeedConfig> & { agentCount?: number; taskCount?: number; channelCount?: number; epicCount?: number; messagesPerChannel?: number };
+  overrides: Partial<SeedConfig> & {
+    agentCount?: number;
+    taskCount?: number;
+    channelCount?: number;
+    epicCount?: number;
+    messagesPerChannel?: number;
+  };
 } {
   const scriptDir = dirname(new URL(import.meta.url).pathname);
   let configPath = resolve(scriptDir, "seed.default.json");
@@ -962,13 +833,17 @@ function parseArgs(argv: string[]): {
   return { configPath, overrides: overrides as ReturnType<typeof parseArgs>["overrides"] };
 }
 
-function loadConfig(configPath: string, overrides: ReturnType<typeof parseArgs>["overrides"]): SeedConfig {
-  if (!existsSync(configPath)) {
+async function loadConfig(
+  configPath: string,
+  overrides: ReturnType<typeof parseArgs>["overrides"],
+): Promise<SeedConfig> {
+  const file = Bun.file(configPath);
+  if (!(await file.exists())) {
     console.error(`Config file not found: ${configPath}`);
     process.exit(1);
   }
 
-  const raw = JSON.parse(readFileSync(configPath, "utf-8"));
+  const raw = JSON.parse(await file.text());
   const config: SeedConfig = {
     db: overrides.db ?? raw.db ?? "./agent-swarm-db.sqlite",
     clean: overrides.clean ?? raw.clean ?? false,
@@ -1014,11 +889,11 @@ function loadConfig(configPath: string, overrides: ReturnType<typeof parseArgs>[
 // Main
 // ---------------------------------------------------------------------------
 
-function main(): void {
+async function main(): Promise<void> {
   const { configPath, overrides } = parseArgs(process.argv);
-  const config = loadConfig(configPath, overrides);
+  const config = await loadConfig(configPath, overrides);
 
-  console.log(`\n🌱 Agent Swarm Database Seeder`);
+  console.log("\n🌱 Agent Swarm Database Seeder");
   console.log(`  Config: ${configPath}`);
   console.log(`  Database: ${config.db}`);
   console.log("");

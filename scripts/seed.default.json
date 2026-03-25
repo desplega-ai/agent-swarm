@@ -1,5 +1,4 @@
 {
-  "$schema": "./seed.schema.json",
   "db": "./agent-swarm-db.sqlite",
   "clean": false,
   "agents": {
