@@ -383,6 +383,8 @@ ${transcript}`;
  */
 export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFactory {
   return (pi) => {
+    let lastContextPostTime = 0;
+
     // === session_start → SessionStart ===
     pi.on("session_start", async (_event, _ctx) => {
       // Ping server
@@ -479,7 +481,7 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
     });
 
     // === tool_result → PostToolUse ===
-    pi.on("tool_result", async (event, _ctx) => {
+    pi.on("tool_result", async (event, ctx) => {
       // Heartbeat (workers only, fire-and-forget)
       if (!config.isLead && config.taskId) {
         fireAndForget(`${config.apiUrl}/api/active-sessions/heartbeat/${config.taskId}`, {
@@ -493,6 +495,26 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
         method: "PUT",
         headers: apiHeaders(config),
       });
+
+      // Throttled context usage reporting (every 30s)
+      const usage = ctx.getContextUsage?.();
+      if (config.taskId && usage?.tokens != null) {
+        const now = Date.now();
+        if (now - lastContextPostTime >= 30_000) {
+          lastContextPostTime = now;
+          fireAndForget(`${config.apiUrl}/api/tasks/${config.taskId}/context`, {
+            method: "POST",
+            headers: apiHeaders(config),
+            body: JSON.stringify({
+              eventType: "progress",
+              sessionId: `pi-${config.taskId}`,
+              contextUsedTokens: usage.tokens,
+              contextTotalTokens: usage.contextWindow,
+              contextPercent: usage.percent,
+            }),
+          });
+        }
+      }
 
       // Shared disk write failure detection (Archil only — safety net)
       if (process.env.ARCHIL_MOUNT_TOKEN) {
@@ -562,7 +584,7 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
     // === context → PreCompact ===
     // The context event allows injecting messages before compaction.
     // We log the goal reminder to console (it gets captured in context).
-    pi.on("context", async (_event, _ctx) => {
+    pi.on("context", async (_event, ctx) => {
       if (!config.taskId) return undefined;
 
       try {
@@ -581,6 +603,22 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
         }
       } catch {
         /* don't block compaction */
+      }
+
+      // Report context usage as a compaction event
+      const usage = ctx.getContextUsage?.();
+      if (usage) {
+        fireAndForget(`${config.apiUrl}/api/tasks/${config.taskId}/context`, {
+          method: "POST",
+          headers: apiHeaders(config),
+          body: JSON.stringify({
+            eventType: "compaction",
+            sessionId: `pi-${config.taskId}`,
+            contextUsedTokens: usage.tokens ?? undefined,
+            contextTotalTokens: usage.contextWindow,
+            contextPercent: usage.percent ?? undefined,
+          }),
+        });
       }
 
       return undefined;
@@ -604,6 +642,22 @@ export function createSwarmHooksExtension(config: SwarmHooksConfig): ExtensionFa
 
     // === session_shutdown → Stop ===
     pi.on("session_shutdown", async (_event, ctx) => {
+      // Post final context usage before shutdown
+      const usage = ctx.getContextUsage?.();
+      if (config.taskId && usage) {
+        await fetch(`${config.apiUrl}/api/tasks/${config.taskId}/context`, {
+          method: "POST",
+          headers: apiHeaders(config),
+          body: JSON.stringify({
+            eventType: "completion",
+            sessionId: `pi-${config.taskId}`,
+            contextTotalTokens: usage.contextWindow,
+            contextPercent: usage.percent ?? undefined,
+            contextUsedTokens: usage.tokens ?? undefined,
+          }),
+        }).catch(() => {});
+      }
+
       // Sync identity files and setup script
       await syncIdentityFilesToServer(config);
       await syncSetupScriptToServer(config);
