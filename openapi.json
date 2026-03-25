@@ -1179,6 +1179,138 @@
         }
       }
     },
+    "/api/tasks/{id}/context": {
+      "post": {
+        "summary": "Record a context usage snapshot for a task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "eventType": {
+                    "type": "string",
+                    "enum": [
+                      "progress",
+                      "compaction",
+                      "completion"
+                    ]
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "contextUsedTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "contextTotalTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "contextPercent": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "compactTrigger": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "manual"
+                    ]
+                  },
+                  "preCompactTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "cumulativeInputTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "cumulativeOutputTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "eventType",
+                  "sessionId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Snapshot recorded"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "404": {
+            "description": "Task not found"
+          }
+        }
+      },
+      "get": {
+        "summary": "Get context usage history for a task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Context snapshot history"
+          },
+          "404": {
+            "description": "Task not found"
+          }
+        }
+      }
+    },
     "/api/db-query": {
       "post": {
         "summary": "Execute a read-only SQL query",
