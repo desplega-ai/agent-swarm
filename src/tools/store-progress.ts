@@ -1,3 +1,4 @@
+import { ensure } from "@desplega.ai/business-use";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import {
@@ -161,6 +162,21 @@ export const registerStoreProgressTool = (server: McpServer) => {
           const result = completeTask(taskId, output);
           if (result) {
             updatedTask = result;
+
+            ensure({
+              id: "completed",
+              flow: "task",
+              runId: taskId,
+              depIds: ["started"],
+              data: {
+                taskId,
+                agentId: existingTask.agentId,
+                previousStatus: existingTask.status,
+                hasOutput: !!output,
+              },
+              validator: (data) => data.previousStatus === "in_progress",
+            });
+
             if (existingTask.agentId) {
               // Derive status from capacity instead of always setting idle
               updateAgentStatusFromCapacity(existingTask.agentId);
@@ -170,6 +186,21 @@ export const registerStoreProgressTool = (server: McpServer) => {
           const result = failTask(taskId, failureReason ?? "Unknown failure");
           if (result) {
             updatedTask = result;
+
+            ensure({
+              id: "failed",
+              flow: "task",
+              runId: taskId,
+              depIds: ["started"],
+              data: {
+                taskId,
+                agentId: existingTask.agentId,
+                previousStatus: existingTask.status,
+                failureReason: failureReason ?? "Unknown failure",
+              },
+              validator: (data) => data.previousStatus === "in_progress",
+            });
+
             if (existingTask.agentId) {
               // Derive status from capacity instead of always setting idle
               updateAgentStatusFromCapacity(existingTask.agentId);

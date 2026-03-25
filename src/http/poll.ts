@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { ensure } from "@desplega.ai/business-use";
 import { z } from "zod";
 import {
   claimMentions,
@@ -128,6 +129,20 @@ export async function handlePoll(
           if (pendingTask) {
             // Mark task as in_progress immediately to prevent duplicate polling
             startTask(pendingTask.id);
+
+            ensure({
+              id: "started",
+              flow: "task",
+              runId: pendingTask.id,
+              depIds: ["created"],
+              data: {
+                taskId: pendingTask.id,
+                agentId: myAgentId,
+                previousStatus: pendingTask.status,
+              },
+              validator: (data) => data.previousStatus === "pending",
+            });
+
             return {
               trigger: {
                 type: "task_assigned",

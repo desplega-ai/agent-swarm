@@ -1,6 +1,14 @@
 module.exports = {
   apps: [
     {
+      name: "business-use",
+      script: "uvx",
+      args: ["business-use-core@latest", "server", "dev"],
+      cwd: __dirname,
+      autorestart: true,
+      restart_delay: 5000,
+    },
+    {
       name: "swarm-api",
       script: "portless",
       args: ["api.swarm", "bun", "src/http.ts"],
