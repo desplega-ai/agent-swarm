@@ -6898,6 +6898,16 @@ export function resolveApprovalRequest(
   return row ? rowToApprovalRequest(row) : null;
 }
 
+export function updateApprovalRequestNotifications(
+  id: string,
+  notificationChannels: Array<{ channel: string; target: string; messageTs?: string }>,
+): void {
+  const now = new Date().toISOString();
+  getDb()
+    .prepare("UPDATE approval_requests SET notificationChannels = ?, updatedAt = ? WHERE id = ?")
+    .run(JSON.stringify(notificationChannels), now, id);
+}
+
 export function listApprovalRequests(filters?: {
   status?: string;
   workflowRunId?: string;
