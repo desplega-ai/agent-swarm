@@ -6222,6 +6222,24 @@ export function getStepByIdempotencyKey(key: string): WorkflowRunStep | null {
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
+export function getStepCountForNode(runId: string, nodeId: string): number {
+  const row = getDb()
+    .prepare<{ cnt: number }, [string, string]>(
+      "SELECT COUNT(*) as cnt FROM workflow_run_steps WHERE runId = ? AND nodeId = ?",
+    )
+    .get(runId, nodeId);
+  return row?.cnt ?? 0;
+}
+
+export function getLatestStepForNode(runId: string, nodeId: string): WorkflowRunStep | null {
+  const row = getDb()
+    .prepare<WorkflowRunStepRow, [string, string]>(
+      "SELECT * FROM workflow_run_steps WHERE runId = ? AND nodeId = ? ORDER BY startedAt DESC LIMIT 1",
+    )
+    .get(runId, nodeId);
+  return row ? rowToWorkflowRunStep(row) : null;
+}
+
 // --- Workflow Version History ---
 
 type WorkflowVersionRow = {

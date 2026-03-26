@@ -281,4 +281,107 @@ describe("HITL port-based routing", () => {
     expect(stepNodeIds).not.toContain("deploy");
     expect(stepNodeIds).not.toContain("generate-question");
   });
+
+  test("loop: rejected → loops back to generate-question → review again → approved → deploy", async () => {
+    const eventBus = new InProcessEventBus();
+    const registry = new ExecutorRegistry();
+    const hitlExecutor = new MockHITLExecutor({ ...mockDeps, eventBus });
+    registry.register(hitlExecutor);
+    registry.register(new EchoExecutor({ ...mockDeps, eventBus }));
+    setupWorkflowResumeListener(eventBus, registry);
+
+    // Workflow with a loop: start → generate → review → (rejected) → generate → review → (approved) → deploy
+    // Note: generate-question needs a separate entry point (start) because it's
+    // also a back-edge target from review-question, so findEntryNodes won't pick it up.
+    const def: WorkflowDefinition = {
+      nodes: [
+        { id: "start", type: "echo", config: { message: "begin" }, next: "generate-question" },
+        {
+          id: "generate-question",
+          type: "echo",
+          config: { message: "generating" },
+          next: "review-question",
+        },
+        {
+          id: "review-question",
+          type: "mock-hitl",
+          config: { title: "Review the question" },
+          next: {
+            approved: "success",
+            rejected: "generate-question",
+          },
+        },
+        { id: "success", type: "echo", config: { message: "done" } },
+      ],
+    };
+
+    const workflow = makeWorkflow(def);
+    const runId = await startWorkflowExecution(workflow, {}, registry);
+
+    // After start: generate-question completed, review-question is waiting
+    let run = getWorkflowRun(runId);
+    expect(run!.status).toBe("waiting");
+
+    let steps = getWorkflowRunStepsByRunId(runId);
+    expect(steps).toHaveLength(3); // start + generate-question + review-question
+    const reviewStep1 = steps.find((s) => s.nodeId === "review-question");
+    expect(reviewStep1!.status).toBe("waiting");
+
+    const requestId1 = hitlExecutor.lastRequestId!;
+
+    // REJECT — should loop back to generate-question
+    const reject1Promise = new Promise<void>((resolve) => setTimeout(resolve, 200));
+    eventBus.emit("approval.resolved", {
+      requestId: requestId1,
+      status: "rejected",
+      responses: null,
+      workflowRunId: runId,
+      workflowRunStepId: reviewStep1!.id,
+    });
+    await reject1Promise;
+
+    // After rejection: generate-question should have re-executed (2nd time),
+    // and review-question should be waiting again (2nd time)
+    run = getWorkflowRun(runId);
+    expect(run!.status).toBe("waiting");
+
+    steps = getWorkflowRunStepsByRunId(runId);
+    // Should have: start, generate-question(1), review-question(1), generate-question(2), review-question(2)
+    expect(steps).toHaveLength(5);
+
+    const generateSteps = steps.filter((s) => s.nodeId === "generate-question");
+    expect(generateSteps).toHaveLength(2); // Two iterations
+
+    const reviewSteps = steps.filter((s) => s.nodeId === "review-question");
+    expect(reviewSteps).toHaveLength(2); // Two iterations
+
+    const reviewStep2 = reviewSteps.find((s) => s.status === "waiting");
+    expect(reviewStep2).toBeDefined();
+
+    const requestId2 = hitlExecutor.lastRequestId!;
+    expect(requestId2).not.toBe(requestId1); // Different request
+
+    // APPROVE — should go to success
+    const approve2Promise = new Promise<void>((resolve) => setTimeout(resolve, 200));
+    eventBus.emit("approval.resolved", {
+      requestId: requestId2,
+      status: "approved",
+      responses: { q1: true },
+      workflowRunId: runId,
+      workflowRunStepId: reviewStep2!.id,
+    });
+    await approve2Promise;
+
+    // Final state: completed with all steps
+    run = getWorkflowRun(runId);
+    expect(run!.status).toBe("completed");
+
+    steps = getWorkflowRunStepsByRunId(runId);
+    // start + generate(1) + review(1) + generate(2) + review(2) + success = 6 steps
+    expect(steps).toHaveLength(6);
+
+    const successSteps = steps.filter((s) => s.nodeId === "success");
+    expect(successSteps).toHaveLength(1);
+    expect(successSteps[0]!.status).toBe("completed");
+  });
 });
