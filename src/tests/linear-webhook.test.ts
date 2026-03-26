@@ -207,7 +207,7 @@ describe("handleAgentSessionEvent", () => {
     expect(task!.task).toContain("Fix login bug");
   });
 
-  test("skips duplicate issue (already tracked)", async () => {
+  test("skips when already-tracked issue has an active task", async () => {
     const event = {
       type: "AgentSession",
       action: "create",
@@ -221,11 +221,112 @@ describe("handleAgentSessionEvent", () => {
       },
     };
 
-    // Should not throw or create a second tracker_sync
+    // The task from the previous test is still pending (active)
+    const syncBefore = getTrackerSyncByExternalId("linear", "task", "issue-agent-session-001");
+    expect(syncBefore).not.toBeNull();
+    const originalSwarmId = syncBefore!.swarmId;
+
     await handleAgentSessionEvent(event);
-    // Just verify it didn't throw — the existing sync is still there
-    const sync = getTrackerSyncByExternalId("linear", "task", "issue-agent-session-001");
+
+    // Sync should still point to the same task (no follow-up created)
+    const syncAfter = getTrackerSyncByExternalId("linear", "task", "issue-agent-session-001");
+    expect(syncAfter).not.toBeNull();
+    expect(syncAfter!.swarmId).toBe(originalSwarmId);
+  });
+
+  test("creates follow-up task when already-tracked issue has a completed task", async () => {
+    // Create a task and tracker_sync, then mark the task as completed
+    const originalTask = createTaskExtended("Original linear task", {
+      source: "linear",
+      taskType: "linear-issue",
+    });
+    const { getDb } = await import("../be/db");
+    getDb().query("UPDATE agent_tasks SET status = 'completed' WHERE id = ?").run(originalTask.id);
+
+    createTrackerSync({
+      provider: "linear",
+      entityType: "task",
+      providerEntityType: "Issue",
+      swarmId: originalTask.id,
+      externalId: "issue-followup-completed-001",
+      externalIdentifier: "ENG-150",
+      externalUrl: "https://linear.app/team/issue/ENG-150",
+      lastSyncOrigin: "external",
+      syncDirection: "inbound",
+    });
+
+    const event = {
+      type: "AgentSession",
+      action: "create",
+      data: {
+        issue: {
+          id: "issue-followup-completed-001",
+          identifier: "ENG-150",
+          title: "Fix login bug again",
+          url: "https://linear.app/team/issue/ENG-150",
+          description: "Still broken",
+        },
+      },
+    };
+
+    await handleAgentSessionEvent(event);
+
+    // tracker_sync should now point to a NEW task
+    const sync = getTrackerSyncByExternalId("linear", "task", "issue-followup-completed-001");
     expect(sync).not.toBeNull();
+    expect(sync!.swarmId).not.toBe(originalTask.id);
+
+    // New task should exist and use the reassigned template
+    const followupTask = getTaskById(sync!.swarmId);
+    expect(followupTask).not.toBeNull();
+    expect(followupTask!.source).toBe("linear");
+    expect(followupTask!.taskType).toBe("linear-issue");
+    expect(followupTask!.task).toContain("[Linear ENG-150]");
+    expect(followupTask!.task).toContain("Re-assigned");
+  });
+
+  test("creates follow-up task when already-tracked issue has a failed task", async () => {
+    const originalTask = createTaskExtended("Failed linear task", {
+      source: "linear",
+      taskType: "linear-issue",
+    });
+    const { getDb } = await import("../be/db");
+    getDb().query("UPDATE agent_tasks SET status = 'failed' WHERE id = ?").run(originalTask.id);
+
+    createTrackerSync({
+      provider: "linear",
+      entityType: "task",
+      providerEntityType: "Issue",
+      swarmId: originalTask.id,
+      externalId: "issue-followup-failed-001",
+      externalIdentifier: "ENG-151",
+      externalUrl: "https://linear.app/team/issue/ENG-151",
+      lastSyncOrigin: "external",
+      syncDirection: "inbound",
+    });
+
+    const event = {
+      type: "AgentSession",
+      action: "create",
+      data: {
+        issue: {
+          id: "issue-followup-failed-001",
+          identifier: "ENG-151",
+          title: "Deploy pipeline fix",
+          url: "https://linear.app/team/issue/ENG-151",
+        },
+      },
+    };
+
+    await handleAgentSessionEvent(event);
+
+    const sync = getTrackerSyncByExternalId("linear", "task", "issue-followup-failed-001");
+    expect(sync).not.toBeNull();
+    expect(sync!.swarmId).not.toBe(originalTask.id);
+
+    const followupTask = getTaskById(sync!.swarmId);
+    expect(followupTask).not.toBeNull();
+    expect(followupTask!.source).toBe("linear");
   });
 
   test("skips event with no issue data", async () => {

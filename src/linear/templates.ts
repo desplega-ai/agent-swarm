@@ -28,6 +28,23 @@ URL: {{issue_url}}{{session_section}}
 });
 
 registerTemplate({
+  eventType: "linear.issue.reassigned",
+  header: "[Linear {{issue_identifier}}] Re-assigned: {{issue_title}}",
+  defaultBody: `Source: Linear (Agent Session re-assignment)
+URL: {{issue_url}}{{session_section}}
+{{description_section}}
+This issue was previously tracked but the original task has completed. A new task has been created to handle the re-assignment.`,
+  variables: [
+    { name: "issue_identifier", description: "Linear issue identifier (e.g. ENG-123)" },
+    { name: "issue_title", description: "Issue title" },
+    { name: "issue_url", description: "Issue URL on Linear" },
+    { name: "session_section", description: "Session URL line or empty string" },
+    { name: "description_section", description: "Description section or empty string" },
+  ],
+  category: "event",
+});
+
+registerTemplate({
   eventType: "linear.issue.followup",
   header: "[Linear {{issue_identifier}}] Follow-up: {{issue_title}}",
   defaultBody: `Source: Linear (Agent Session follow-up)
