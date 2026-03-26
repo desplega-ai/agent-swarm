@@ -7855,6 +7855,13 @@ export function createContextSnapshot(input: CreateContextSnapshotInput): Contex
       .run(input.contextPercent, input.taskId);
   }
 
+  // Keep totalContextTokensUsed up to date with the latest known value
+  if (input.contextUsedTokens != null) {
+    getDb()
+      .prepare("UPDATE agent_tasks SET totalContextTokensUsed = ? WHERE id = ?")
+      .run(input.contextUsedTokens, input.taskId);
+  }
+
   if (input.eventType === "compaction") {
     getDb()
       .prepare(
@@ -7863,13 +7870,10 @@ export function createContextSnapshot(input: CreateContextSnapshotInput): Contex
       .run(input.taskId);
   }
 
-  if (input.eventType === "completion") {
+  if (input.eventType === "completion" && input.contextTotalTokens != null) {
     getDb()
-      .prepare(
-        `UPDATE agent_tasks SET totalContextTokensUsed = ?, contextWindowSize = ?
-         WHERE id = ?`,
-      )
-      .run(input.contextUsedTokens ?? null, input.contextTotalTokens ?? null, input.taskId);
+      .prepare("UPDATE agent_tasks SET contextWindowSize = ? WHERE id = ?")
+      .run(input.contextTotalTokens, input.taskId);
   }
 
   return {
