@@ -17,6 +17,7 @@ import {
   updateAgentStatusFromCapacity,
   updateTaskClaudeSessionId,
   updateTaskProgress,
+  updateTaskVcs,
 } from "../be/db";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -185,6 +186,26 @@ const resumeTaskRoute = route({
     403: { description: "Task belongs to another agent" },
     404: { description: "Task not found" },
   },
+});
+
+const updateTaskVcsRoute = route({
+  method: "patch",
+  path: "/api/tasks/{id}/vcs",
+  pattern: ["api", "tasks", null, "vcs"],
+  summary: "Update VCS (PR/MR) info for a task",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  body: z.object({
+    vcsProvider: z.enum(["github", "gitlab"]),
+    vcsRepo: z.string(),
+    vcsNumber: z.number().int().positive(),
+    vcsUrl: z.string().url(),
+  }),
+  responses: {
+    200: { description: "VCS info updated" },
+    404: { description: "Task not found" },
+  },
+  auth: { apiKey: true },
 });
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
@@ -512,6 +533,18 @@ export async function handleTasks(
     });
 
     json(res, { success: true, task: pausedTask });
+    return true;
+  }
+
+  if (updateTaskVcsRoute.match(req.method, pathSegments)) {
+    const parsed = await updateTaskVcsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = updateTaskVcs(parsed.params.id, parsed.body);
+    if (!task) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+    json(res, task);
     return true;
   }
 

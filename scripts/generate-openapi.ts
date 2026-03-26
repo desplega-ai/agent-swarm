@@ -8,6 +8,7 @@ import "../src/http/context";
 import "../src/http/db-query";
 import "../src/http/ecosystem";
 import "../src/http/epics";
+import "../src/http/events";
 import "../src/http/memory";
 import "../src/http/prompt-templates";
 import "../src/http/poll";
