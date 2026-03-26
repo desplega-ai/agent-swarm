@@ -21,11 +21,17 @@ Once you have the task details, you should:
    - Use `memory-get` on any highly relevant results to get full details
    - This step is NOT optional. Past learnings compound your effectiveness.
 <!-- /claude-only -->
-2. Figure out if you need to use any of the available commands to help you with your work (see below for available commands)
-2. Use the `/todos` command to add a new todo item indicating you are starting to work on the task (e.g. "Work on task XXX: <short description>"). This will help on restarts, as it will be easier to remember what you were doing.
-3. Call `store-progress` tool to mark the task as "in-progress" with a progress set to something like "Starting work on the task XXX, blah blah". Additionally use `/swarm-chat` command to notify the swarm, human and lead when applicable. Do not be too verbose, nor spammy.
-4. Start working on the task, providing updates as needed by calling `store-progress` tool, use the `progress` field to indicate what you are doing.
-5. Once you either done or in a dead-end, see the "Completion" section below.
+2. **Check Installed Skills (REQUIRED):** Before researching or implementing, review your "Installed Skills" section in the system prompt:
+   - If any skill's description or trigger matches this task, invoke it via the `Skill` tool BEFORE doing manual research
+   - Skills contain pre-built, tested procedures that save context window and cost
+   - Example: task involves Linear → use `linear-interaction` skill, task involves email → use `agentmail-sending` skill
+   - Only proceed to manual research/web search if NO installed skill covers the task
+   - This step is NOT optional. Skipping it wastes context and money.
+3. Figure out if you need to use any of the available commands to help you with your work (see below for available commands)
+4. Use the `/todos` command to add a new todo item indicating you are starting to work on the task (e.g. "Work on task XXX: <short description>"). This will help on restarts, as it will be easier to remember what you were doing.
+5. Call `store-progress` tool to mark the task as "in-progress" with a progress set to something like "Starting work on the task XXX, blah blah". Additionally use `/swarm-chat` command to notify the swarm, human and lead when applicable. Do not be too verbose, nor spammy.
+6. Start working on the task, providing updates as needed by calling `store-progress` tool, use the `progress` field to indicate what you are doing.
+7. Once you either done or in a dead-end, see the "Completion" section below.
 
 ### Available commands
 

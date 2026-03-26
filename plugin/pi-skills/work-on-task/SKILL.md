@@ -13,11 +13,17 @@ Once you get a task assigned, you need to immediately start working on it. To do
 
 Once you have the task details, you should:
 
-1. Figure out if you need to perform any research or planning before starting (see below)
-2. Use the `/skill:todos` to add a new todo item indicating you are starting to work on the task (e.g. "Work on task XXX: <short description>"). This will help on restarts, as it will be easier to remember what you were doing.
-3. Call `store-progress` tool to mark the task as "in-progress" with a progress set to something like "Starting work on the task XXX, blah blah". Additionally use `/skill:swarm-chat` to notify the swarm, human and lead when applicable. Do not be too verbose, nor spammy.
-4. Start working on the task, providing updates as needed by calling `store-progress` tool, use the `progress` field to indicate what you are doing.
-5. Once you either done or in a dead-end, see the "Completion" section below.
+1. **Check Installed Skills (REQUIRED):** Before researching or implementing, review your "Installed Skills" section in the system prompt:
+   - If any skill's description or trigger matches this task, invoke it via the `Skill` tool BEFORE doing manual research
+   - Skills contain pre-built, tested procedures that save context window and cost
+   - Example: task involves Linear → use `linear-interaction` skill, task involves email → use `agentmail-sending` skill
+   - Only proceed to manual research/web search if NO installed skill covers the task
+   - This step is NOT optional. Skipping it wastes context and money.
+2. Figure out if you need to perform any research or planning before starting (see below)
+3. Use the `/skill:todos` to add a new todo item indicating you are starting to work on the task (e.g. "Work on task XXX: <short description>"). This will help on restarts, as it will be easier to remember what you were doing.
+4. Call `store-progress` tool to mark the task as "in-progress" with a progress set to something like "Starting work on the task XXX, blah blah". Additionally use `/skill:swarm-chat` to notify the swarm, human and lead when applicable. Do not be too verbose, nor spammy.
+5. Start working on the task, providing updates as needed by calling `store-progress` tool, use the `progress` field to indicate what you are doing.
+6. Once you either done or in a dead-end, see the "Completion" section below.
 
 ### Research and Planning
 
