@@ -143,6 +143,12 @@ export const AgentTaskSchema = z.object({
 
   // Structured output schema (optional — JSON Schema that task output must conform to)
   outputSchema: z.record(z.string(), z.unknown()).optional(),
+
+  // Context usage aggregates
+  compactionCount: z.number().int().min(0).optional(),
+  peakContextPercent: z.number().min(0).max(100).optional(),
+  totalContextTokensUsed: z.number().int().min(0).optional(),
+  contextWindowSize: z.number().int().min(0).optional(),
 });
 
 export const AgentStatusSchema = z.enum(["idle", "busy", "offline"]);
@@ -993,3 +999,37 @@ export const SkillWithInstallInfoSchema = SkillSchema.extend({
   installedAt: z.string(),
 });
 export type SkillWithInstallInfo = z.infer<typeof SkillWithInstallInfoSchema>;
+
+// ============================================================================
+// Context Usage Tracking Types
+// ============================================================================
+
+export const ContextSnapshotEventTypeSchema = z.enum(["progress", "compaction", "completion"]);
+export type ContextSnapshotEventType = z.infer<typeof ContextSnapshotEventTypeSchema>;
+
+export const ContextSnapshotSchema = z.object({
+  id: z.uuid(),
+  taskId: z.uuid(),
+  agentId: z.uuid(),
+  sessionId: z.string(),
+
+  // Context window state
+  contextUsedTokens: z.number().int().min(0).optional(),
+  contextTotalTokens: z.number().int().min(0).optional(),
+  contextPercent: z.number().min(0).max(100).optional(),
+
+  // Event metadata
+  eventType: ContextSnapshotEventTypeSchema,
+
+  // Compaction-specific (null for non-compaction)
+  compactTrigger: z.enum(["auto", "manual"]).optional(),
+  preCompactTokens: z.number().int().min(0).optional(),
+
+  // Cumulative counters at this point
+  cumulativeInputTokens: z.number().int().min(0).default(0),
+  cumulativeOutputTokens: z.number().int().min(0).default(0),
+
+  createdAt: z.iso.datetime(),
+});
+
+export type ContextSnapshot = z.infer<typeof ContextSnapshotSchema>;

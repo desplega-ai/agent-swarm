@@ -19,6 +19,7 @@ import { handleActiveSessions } from "./active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
 import { handleApprovalRequests } from "./approval-requests";
 import { handleConfig } from "./config";
+import { handleContext } from "./context";
 import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
 import { handleDbQuery } from "./db-query";
 import { handleEcosystem } from "./ecosystem";
@@ -103,6 +104,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleTrackers(req, res, pathSegments),
     () => handleWebhooks(req, res, pathSegments),
     () => handleAgentsRest(req, res, pathSegments, queryParams, myAgentId),
+    () => handleContext(req, res, pathSegments, queryParams, myAgentId),
     () => handleTasks(req, res, pathSegments, queryParams, myAgentId),
     () => handleStats(req, res, pathSegments, queryParams),
     () => handleActiveSessions(req, res, pathSegments, queryParams, myAgentId),

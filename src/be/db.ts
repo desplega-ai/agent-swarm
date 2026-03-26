@@ -18,6 +18,8 @@ import type {
   Channel,
   ChannelMessage,
   ChannelType,
+  ContextSnapshot,
+  ContextSnapshotEventType,
   ContextVersion,
   CooldownConfig,
   Epic,
@@ -717,6 +719,10 @@ type AgentTaskRow = {
   failureReason: string | null;
   output: string | null;
   progress: string | null;
+  compactionCount: number | null;
+  peakContextPercent: number | null;
+  totalContextTokensUsed: number | null;
+  contextWindowSize: number | null;
 };
 
 function rowToAgentTask(row: AgentTaskRow): AgentTask {
@@ -759,6 +765,10 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     workflowRunId: row.workflowRunId ?? undefined,
     workflowRunStepId: row.workflowRunStepId ?? undefined,
     outputSchema: row.outputSchema ? JSON.parse(row.outputSchema) : undefined,
+    compactionCount: row.compactionCount ?? undefined,
+    peakContextPercent: row.peakContextPercent ?? undefined,
+    totalContextTokensUsed: row.totalContextTokensUsed ?? undefined,
+    contextWindowSize: row.contextWindowSize ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     finishedAt: row.finishedAt ?? undefined,
@@ -7409,4 +7419,190 @@ export function toggleAgentSkill(agentId: string, skillId: string, isActive: boo
     .prepare("UPDATE agent_skills SET isActive = ? WHERE agentId = ? AND skillId = ?")
     .run(isActive ? 1 : 0, agentId, skillId);
   return result.changes > 0;
+}
+
+// ============================================================================
+// Context Usage Snapshots
+// ============================================================================
+
+type ContextSnapshotRow = {
+  id: string;
+  taskId: string;
+  agentId: string;
+  sessionId: string;
+  contextUsedTokens: number | null;
+  contextTotalTokens: number | null;
+  contextPercent: number | null;
+  eventType: ContextSnapshotEventType;
+  compactTrigger: string | null;
+  preCompactTokens: number | null;
+  cumulativeInputTokens: number;
+  cumulativeOutputTokens: number;
+  createdAt: string;
+};
+
+function rowToContextSnapshot(row: ContextSnapshotRow): ContextSnapshot {
+  return {
+    id: row.id,
+    taskId: row.taskId,
+    agentId: row.agentId,
+    sessionId: row.sessionId,
+    contextUsedTokens: row.contextUsedTokens ?? undefined,
+    contextTotalTokens: row.contextTotalTokens ?? undefined,
+    contextPercent: row.contextPercent ?? undefined,
+    eventType: row.eventType,
+    compactTrigger: (row.compactTrigger as "auto" | "manual" | null) ?? undefined,
+    preCompactTokens: row.preCompactTokens ?? undefined,
+    cumulativeInputTokens: row.cumulativeInputTokens,
+    cumulativeOutputTokens: row.cumulativeOutputTokens,
+    createdAt: row.createdAt,
+  };
+}
+
+const contextSnapshotQueries = {
+  insert: () =>
+    getDb().prepare<
+      ContextSnapshotRow,
+      [
+        string,
+        string,
+        string,
+        string,
+        number | null,
+        number | null,
+        number | null,
+        string,
+        string | null,
+        number | null,
+        number,
+        number,
+        string,
+      ]
+    >(
+      `INSERT INTO task_context_snapshots (id, taskId, agentId, sessionId, contextUsedTokens, contextTotalTokens, contextPercent, eventType, compactTrigger, preCompactTokens, cumulativeInputTokens, cumulativeOutputTokens, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ),
+
+  getByTaskId: () =>
+    getDb().prepare<ContextSnapshotRow, [string, number]>(
+      "SELECT * FROM task_context_snapshots WHERE taskId = ? ORDER BY createdAt ASC LIMIT ?",
+    ),
+
+  getBySessionId: () =>
+    getDb().prepare<ContextSnapshotRow, [string, number]>(
+      "SELECT * FROM task_context_snapshots WHERE sessionId = ? ORDER BY createdAt ASC LIMIT ?",
+    ),
+};
+
+export interface CreateContextSnapshotInput {
+  taskId: string;
+  agentId: string;
+  sessionId: string;
+  contextUsedTokens?: number;
+  contextTotalTokens?: number;
+  contextPercent?: number;
+  eventType: ContextSnapshotEventType;
+  compactTrigger?: "auto" | "manual";
+  preCompactTokens?: number;
+  cumulativeInputTokens?: number;
+  cumulativeOutputTokens?: number;
+}
+
+export function createContextSnapshot(input: CreateContextSnapshotInput): ContextSnapshot {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  contextSnapshotQueries
+    .insert()
+    .run(
+      id,
+      input.taskId,
+      input.agentId,
+      input.sessionId,
+      input.contextUsedTokens ?? null,
+      input.contextTotalTokens ?? null,
+      input.contextPercent ?? null,
+      input.eventType,
+      input.compactTrigger ?? null,
+      input.preCompactTokens ?? null,
+      input.cumulativeInputTokens ?? 0,
+      input.cumulativeOutputTokens ?? 0,
+      now,
+    );
+
+  // Update aggregate columns on agent_tasks
+  if (input.contextPercent != null) {
+    getDb()
+      .prepare(
+        `UPDATE agent_tasks SET peakContextPercent = MAX(COALESCE(peakContextPercent, 0), ?)
+         WHERE id = ?`,
+      )
+      .run(input.contextPercent, input.taskId);
+  }
+
+  if (input.eventType === "compaction") {
+    getDb()
+      .prepare(
+        "UPDATE agent_tasks SET compactionCount = COALESCE(compactionCount, 0) + 1 WHERE id = ?",
+      )
+      .run(input.taskId);
+  }
+
+  if (input.eventType === "completion") {
+    getDb()
+      .prepare(
+        `UPDATE agent_tasks SET totalContextTokensUsed = ?, contextWindowSize = ?
+         WHERE id = ?`,
+      )
+      .run(input.contextUsedTokens ?? null, input.contextTotalTokens ?? null, input.taskId);
+  }
+
+  return {
+    id,
+    taskId: input.taskId,
+    agentId: input.agentId,
+    sessionId: input.sessionId,
+    contextUsedTokens: input.contextUsedTokens,
+    contextTotalTokens: input.contextTotalTokens,
+    contextPercent: input.contextPercent,
+    eventType: input.eventType,
+    compactTrigger: input.compactTrigger,
+    preCompactTokens: input.preCompactTokens,
+    cumulativeInputTokens: input.cumulativeInputTokens ?? 0,
+    cumulativeOutputTokens: input.cumulativeOutputTokens ?? 0,
+    createdAt: now,
+  };
+}
+
+export function getContextSnapshotsByTaskId(taskId: string, limit = 500): ContextSnapshot[] {
+  return contextSnapshotQueries.getByTaskId().all(taskId, limit).map(rowToContextSnapshot);
+}
+
+export function getContextSnapshotsBySessionId(sessionId: string, limit = 500): ContextSnapshot[] {
+  return contextSnapshotQueries.getBySessionId().all(sessionId, limit).map(rowToContextSnapshot);
+}
+
+export interface ContextSummary {
+  compactionCount: number;
+  peakContextPercent: number | null;
+  totalContextTokensUsed: number | null;
+  contextWindowSize: number | null;
+  snapshotCount: number;
+}
+
+export function getContextSummaryByTaskId(taskId: string): ContextSummary {
+  const task = getTaskById(taskId);
+  const countRow = getDb()
+    .prepare<{ cnt: number }, [string]>(
+      "SELECT COUNT(*) as cnt FROM task_context_snapshots WHERE taskId = ?",
+    )
+    .get(taskId);
+
+  return {
+    compactionCount: task?.compactionCount ?? 0,
+    peakContextPercent: task?.peakContextPercent ?? null,
+    totalContextTokensUsed: task?.totalContextTokensUsed ?? null,
+    contextWindowSize: task?.contextWindowSize ?? null,
+    snapshotCount: countRow?.cnt ?? 0,
+  };
 }
