@@ -26,9 +26,16 @@ export async function handleHeartbeat(
   pathSegments: string[],
 ): Promise<boolean> {
   if (triggerSweep.match(req.method, pathSegments)) {
-    await triggerSweep.parse(req, res, pathSegments, new URLSearchParams());
-    await runHeartbeatSweep();
-    json(res, { success: true, message: "Heartbeat sweep completed" });
+    const parsed = await triggerSweep.parse(req, res, pathSegments, new URLSearchParams());
+    if (!parsed) return true;
+
+    try {
+      await runHeartbeatSweep();
+      json(res, { success: true, message: "Heartbeat sweep completed" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error during heartbeat sweep";
+      json(res, { success: false, error: message }, 500);
+    }
     return true;
   }
 
