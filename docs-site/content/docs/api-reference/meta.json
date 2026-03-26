@@ -12,6 +12,7 @@
     "debug",
     "ecosystem",
     "epics",
+    "events",
     "memory",
     "poll",
     "prompttemplates",
