@@ -2,6 +2,7 @@ import {
   BarChart3,
   BookOpen,
   Bug,
+  Cable,
   ClipboardCheck,
   Clock,
   FileText,
@@ -41,6 +42,7 @@ const navGroups = [
       { title: "Tasks", path: "/tasks", icon: ListTodo },
       { title: "Epics", path: "/epics", icon: Milestone },
       { title: "Skills", path: "/skills", icon: BookOpen },
+      { title: "MCP Servers", path: "/mcp-servers", icon: Cable },
     ],
   },
   {

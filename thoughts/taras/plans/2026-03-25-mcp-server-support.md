@@ -1,7 +1,7 @@
 ---
 date: 2026-03-25
 author: Claude
-status: draft
+status: implemented
 autonomy: critical
 tags: [plan, mcp, servers, skills-parallel, providers, docker]
 research: thoughts/taras/research/2026-03-25-mcp-server-support.md

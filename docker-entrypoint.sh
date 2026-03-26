@@ -292,7 +292,56 @@ if [ -n "$AGENTMAIL_API_KEY" ]; then
       '.mcpServers.agentmail = {command: "npx", args: ["-y", "agentmail-mcp"], env: {AGENTMAIL_API_KEY: $key}}')
 fi
 
+# === Installed MCP servers (from API) ===
+MCP_SERVERS_RESPONSE=""
+SERVER_COUNT=0
+if [ -n "$AGENT_ID" ] && [ -n "$API_KEY" ]; then
+  echo "Fetching installed MCP servers..."
+  MCP_SERVERS_RESPONSE=$(curl -sf -H "Authorization: Bearer $API_KEY" \
+    "${MCP_URL}/api/agents/${AGENT_ID}/mcp-servers?resolveSecrets=true" 2>/dev/null) || true
+
+  if [ -n "$MCP_SERVERS_RESPONSE" ]; then
+    SERVER_COUNT=$(echo "$MCP_SERVERS_RESPONSE" | jq '.servers | length' 2>/dev/null || echo "0")
+    if [ "$SERVER_COUNT" -gt 0 ]; then
+      echo "Merging $SERVER_COUNT installed MCP server(s) into .mcp.json"
+      MCP_JSON=$(echo "$MCP_SERVERS_RESPONSE" | jq --argjson base "$MCP_JSON" '
+        reduce .servers[] as $srv ($base;
+          if $srv.transport == "stdio" then
+            .mcpServers[$srv.name] = {
+              command: $srv.command,
+              args: ($srv.args | fromjson // []),
+              env: ($srv.resolvedEnv // {})
+            }
+          elif ($srv.transport == "http" or $srv.transport == "sse") then
+            .mcpServers[$srv.name] = {
+              type: $srv.transport,
+              url: $srv.url,
+              headers: (($srv.headers | fromjson // {}) * ($srv.resolvedHeaders // {}))
+            }
+          else . end
+        )
+      ')
+    fi
+  fi
+fi
+
 echo "$MCP_JSON" > /workspace/.mcp.json
+
+# === Update settings.json with MCP server permissions ===
+if [ -n "$MCP_SERVERS_RESPONSE" ] && [ "$SERVER_COUNT" -gt 0 ]; then
+  SETTINGS_FILE="$HOME/.claude/settings.json"
+  if [ -f "$SETTINGS_FILE" ]; then
+    echo "Adding MCP server permission patterns to settings.json"
+    UPDATED_SETTINGS=$(echo "$MCP_SERVERS_RESPONSE" | jq --slurpfile settings "$SETTINGS_FILE" '
+      [.servers[].name] |
+      map("mcp__" + . + "__*") |
+      . as $new_perms |
+      $settings[0] |
+      .permissions.allow = (.permissions.allow + $new_perms | unique)
+    ')
+    echo "$UPDATED_SETTINGS" > "$SETTINGS_FILE"
+  fi
+fi
 
 # Configure GitHub authentication if token is provided
 echo ""

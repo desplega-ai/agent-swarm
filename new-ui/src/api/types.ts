@@ -685,6 +685,44 @@ export interface AgentSkillsResponse {
   total: number;
 }
 
+// MCP Servers
+export type McpServerTransport = "stdio" | "http" | "sse";
+export type McpServerScope = "global" | "swarm" | "agent";
+
+export interface McpServer {
+  id: string;
+  name: string;
+  description: string | null;
+  scope: McpServerScope;
+  ownerAgentId: string | null;
+  transport: McpServerTransport;
+  command: string | null;
+  args: string | null;
+  url: string | null;
+  headers: string | null;
+  envConfigKeys: string | null;
+  headerConfigKeys: string | null;
+  isEnabled: boolean;
+  version: number;
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+
+export interface McpServerWithInstallInfo extends McpServer {
+  isActive: boolean;
+  installedAt: string;
+}
+
+export interface McpServersResponse {
+  servers: McpServer[];
+  total: number;
+}
+
+export interface AgentMcpServersResponse {
+  servers: McpServerWithInstallInfo[];
+  total: number;
+}
+
 // Debug / DB Explorer
 export interface DbQueryRequest {
   sql: string;

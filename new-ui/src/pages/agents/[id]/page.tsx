@@ -13,9 +13,16 @@ import { useCallback, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAgent, useUpdateAgentName, useUpdateAgentProfile } from "@/api/hooks/use-agents";
 import { useSessionCosts } from "@/api/hooks/use-costs";
+import { useAgentMcpServers, useUninstallMcpServer } from "@/api/hooks/use-mcp-servers";
 import { useAgentSkills, useUninstallSkill } from "@/api/hooks/use-skills";
 import { useTasks } from "@/api/hooks/use-tasks";
-import type { Agent, AgentSkill, AgentTask, AgentTaskStatus } from "@/api/types";
+import type {
+  Agent,
+  AgentSkill,
+  AgentTask,
+  AgentTaskStatus,
+  McpServerWithInstallInfo,
+} from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { UsageSummary } from "@/components/shared/usage-summary";
@@ -165,6 +172,9 @@ export default function AgentDetailPage() {
   const { data: agentSkillsData } = useAgentSkills(id!, activeTab === "skills");
   const uninstallSkill = useUninstallSkill();
   const agentSkillsList = agentSkillsData?.skills ?? [];
+  const { data: agentMcpServersData } = useAgentMcpServers(id!, activeTab === "mcp-servers");
+  const uninstallMcpServer = useUninstallMcpServer();
+  const agentMcpServersList = agentMcpServersData?.servers ?? [];
 
   const taskTotal = tasksData?.total ?? 0;
   const taskTotalPages = Math.max(1, Math.ceil(taskTotal / PAGE_SIZE));
@@ -328,6 +338,7 @@ export default function AgentDetailPage() {
           <TabsTrigger value="profile">Profile</TabsTrigger>
           <TabsTrigger value="tasks">Tasks ({taskTotal})</TabsTrigger>
           <TabsTrigger value="skills">Skills ({agentSkillsList.length})</TabsTrigger>
+          <TabsTrigger value="mcp-servers">MCP Servers ({agentMcpServersList.length})</TabsTrigger>
           <TabsTrigger value="usage">Usage</TabsTrigger>
         </TabsList>
 
@@ -523,6 +534,63 @@ export default function AgentDetailPage() {
                       size="sm"
                       className="border-red-500/30 text-red-400 hover:bg-red-500/10"
                       onClick={() => uninstallSkill.mutate({ skillId: skill.id, agentId: id! })}
+                    >
+                      Uninstall
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="mcp-servers" className="mt-4 overflow-y-auto">
+          {agentMcpServersList.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No MCP servers installed for this agent.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {agentMcpServersList.map((server: McpServerWithInstallInfo) => (
+                <Card key={server.id}>
+                  <CardContent className="p-3 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div>
+                        <p className="font-medium text-sm">{server.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {server.description || server.transport}
+                        </p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${
+                          server.transport === "stdio"
+                            ? "border-blue-500/30 text-blue-400"
+                            : server.transport === "http"
+                              ? "border-purple-500/30 text-purple-400"
+                              : "border-cyan-500/30 text-cyan-400"
+                        }`}
+                      >
+                        {server.transport}
+                      </Badge>
+                      <Badge
+                        variant="outline"
+                        className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${
+                          server.isActive
+                            ? "border-emerald-500/30 text-emerald-400"
+                            : "border-zinc-500/30 text-zinc-400"
+                        }`}
+                      >
+                        {server.isActive ? "Active" : "Inactive"}
+                      </Badge>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-red-500/30 text-red-400 hover:bg-red-500/10"
+                      onClick={() =>
+                        uninstallMcpServer.mutate({ serverId: server.id, agentId: id! })
+                      }
                     >
                       Uninstall
                     </Button>

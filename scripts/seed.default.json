@@ -132,6 +132,28 @@
   "sessionLogs": {
     "perTask": 8
   },
+  "mcpServers": {
+    "count": 4,
+    "data": [
+      {
+        "name": "github",
+        "description": "GitHub API access via MCP",
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "scope": "global",
+        "envConfigKeys": { "GITHUB_TOKEN": "github-token" }
+      },
+      {
+        "name": "brave-search",
+        "description": "Web search via Brave Search API",
+        "transport": "http",
+        "url": "https://mcp.brave.com/v1",
+        "scope": "swarm",
+        "headerConfigKeys": { "Authorization": "brave-api-key" }
+      }
+    ]
+  },
   "services": {
     "count": 1,
     "data": [

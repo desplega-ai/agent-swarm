@@ -20,6 +20,13 @@ interface McpToolCallResult {
 export class McpHttpClient {
   private sessionId: string | null = null;
   private nextId = 1;
+  /** Additional headers merged into every request (e.g. for installed MCP servers) */
+  public customHeaders: Record<string, string> = {};
+  /**
+   * When true, baseUrl is used as-is for requests (external MCP servers).
+   * When false (default), /mcp is appended (swarm convention).
+   */
+  public useRawUrl = false;
 
   constructor(
     private baseUrl: string,
@@ -34,6 +41,7 @@ export class McpHttpClient {
       Accept: "application/json, text/event-stream",
       Authorization: `Bearer ${this.apiKey}`,
       "X-Agent-ID": this.agentId,
+      ...this.customHeaders,
     };
     if (this.taskId) {
       headers["X-Source-Task-Id"] = this.taskId;
@@ -42,7 +50,8 @@ export class McpHttpClient {
       headers["mcp-session-id"] = this.sessionId;
     }
 
-    const res = await fetch(`${this.baseUrl}/mcp`, {
+    const url = this.useRawUrl ? this.baseUrl : `${this.baseUrl}/mcp`;
+    const res = await fetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify(body),

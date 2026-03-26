@@ -40,6 +40,8 @@ export type BasePromptArgs = {
   };
   /** Pre-fetched skill summaries for the installed skills section */
   skillsSummary?: { name: string; description: string }[];
+  /** Pre-fetched MCP server summaries for the installed MCP servers section */
+  mcpServersSummary?: string;
 };
 
 export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
@@ -74,6 +76,11 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   if (args.skillsSummary && args.skillsSummary.length > 0) {
     const summaries = args.skillsSummary.map((s) => `- /${s.name}: ${s.description}`).join("\n");
     prompt += `\n\n## Installed Skills\n\nThe following skills are available. Use the Skill tool to invoke them by name.\n\n${summaries}\n`;
+  }
+
+  // Installed MCP servers section
+  if (args.mcpServersSummary) {
+    prompt += `\n\n## Installed MCP Servers\n\nThe following MCP servers are configured for your use:\n${args.mcpServersSummary}\n`;
   }
 
   // Repo context (protected, never truncated)

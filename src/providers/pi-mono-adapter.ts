@@ -389,6 +389,74 @@ export class PiMonoAdapter implements ProviderAdapter {
       } catch (err) {
         console.warn(`\x1b[33m[${config.role}] Failed to discover MCP tools: ${err}\x1b[0m`);
       }
+
+      // 2b. Discover tools from installed MCP servers (HTTP/SSE transport only)
+      try {
+        const mcpServersRes = await fetch(
+          `${config.apiUrl}/api/agents/${config.agentId}/mcp-servers?resolveSecrets=true`,
+          {
+            headers: {
+              Authorization: `Bearer ${config.apiKey}`,
+              "X-Agent-ID": config.agentId,
+            },
+          },
+        );
+        if (mcpServersRes.ok) {
+          const mcpServersData = (await mcpServersRes.json()) as {
+            servers: Array<{
+              name: string;
+              transport: string;
+              url?: string;
+              headers?: string;
+              isActive: boolean;
+              isEnabled: boolean;
+              resolvedHeaders?: Record<string, string>;
+            }>;
+          };
+          const httpServers = mcpServersData.servers.filter(
+            (s) =>
+              s.isActive &&
+              s.isEnabled &&
+              (s.transport === "http" || s.transport === "sse") &&
+              s.url,
+          );
+
+          for (const srv of httpServers) {
+            try {
+              const srvClient = new McpHttpClient(srv.url!, "", "");
+              srvClient.useRawUrl = true;
+              // Build custom headers from static headers + resolved secret headers
+              let parsedHeaders: Record<string, string> = {};
+              try {
+                parsedHeaders = srv.headers ? JSON.parse(srv.headers) : {};
+              } catch {
+                // invalid JSON
+              }
+              srvClient.customHeaders = {
+                ...parsedHeaders,
+                ...(srv.resolvedHeaders || {}),
+              };
+              await srvClient.initialize();
+              const srvTools = await srvClient.listTools();
+              // Prefix tool names with mcp__<server-name>__ to avoid conflicts
+              const prefixed = mcpToolsToDefinitions(srvClient, srvTools).map((t) => ({
+                ...t,
+                name: `mcp__${srv.name}__${t.name}`,
+              }));
+              customTools.push(...prefixed);
+              console.log(
+                `\x1b[2m[${config.role}]\x1b[0m Discovered ${srvTools.length} tools from MCP server "${srv.name}"`,
+              );
+            } catch (srvErr) {
+              console.warn(
+                `\x1b[33m[${config.role}] Failed to discover tools from MCP server "${srv.name}": ${srvErr}\x1b[0m`,
+              );
+            }
+          }
+        }
+      } catch {
+        // Non-fatal — installed MCP server tool discovery is optional
+      }
     }
 
     // 3. Resolve model

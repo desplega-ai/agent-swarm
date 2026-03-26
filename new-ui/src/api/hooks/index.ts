@@ -34,6 +34,17 @@ export {
   useEpics,
   useUpdateEpic,
 } from "./use-epics";
+export type { McpServerFilters } from "./use-mcp-servers";
+export {
+  useAgentMcpServers,
+  useCreateMcpServer,
+  useDeleteMcpServer,
+  useInstallMcpServer,
+  useMcpServer,
+  useMcpServers,
+  useUninstallMcpServer,
+  useUpdateMcpServer,
+} from "./use-mcp-servers";
 export type { PromptTemplateFilters } from "./use-prompt-templates";
 export {
   useCheckoutTemplate,
