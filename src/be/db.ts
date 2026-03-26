@@ -5600,6 +5600,18 @@ export function updateActiveSessionProviderSessionId(
 }
 
 /**
+ * Get the active session for a specific task.
+ * Used by the heartbeat to cross-reference stalled tasks with worker sessions.
+ */
+export function getActiveSessionForTask(taskId: string): ActiveSession | null {
+  return (
+    getDb()
+      .prepare<ActiveSession, [string]>("SELECT * FROM active_sessions WHERE taskId = ? LIMIT 1")
+      .get(taskId) ?? null
+  );
+}
+
+/**
  * Reassociate session logs from a runner session to a real task ID.
  * Used when a pool task is claimed — logs were stored under a random UUID,
  * this updates them to use the real task ID.

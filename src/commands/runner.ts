@@ -1067,6 +1067,25 @@ async function cleanupActiveSessions(config: ApiConfig): Promise<void> {
   }
 }
 
+/** Trigger a heartbeat sweep via the API (lead startup self-check) */
+async function triggerHeartbeatSweep(config: ApiConfig): Promise<boolean> {
+  try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "X-Agent-ID": config.agentId,
+    };
+    if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
+    const resp = await fetch(`${config.apiUrl}/api/heartbeat/sweep`, {
+      method: "POST",
+      headers,
+    });
+    return resp.ok;
+  } catch (err) {
+    console.warn(`[runner] Failed to trigger heartbeat sweep: ${(err as Error).message}`);
+    return false;
+  }
+}
+
 /** Trigger types returned by the poll API */
 interface Trigger {
   type:
@@ -2702,6 +2721,17 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       // Continue to normal polling even if resume fails
     }
     // ========== END: Resume paused tasks ==========
+
+    // ========== Lead startup self-check ==========
+    if (isLead) {
+      console.log(`[${role}] Running startup heartbeat sweep...`);
+      const swept = await triggerHeartbeatSweep(apiConfig);
+      if (swept) {
+        console.log(`[${role}] Startup heartbeat sweep completed`);
+      } else {
+        console.warn(`[${role}] Startup heartbeat sweep failed (non-fatal)`);
+      }
+    }
 
     // Track last finished task check for leads (to avoid re-processing)
     while (true) {

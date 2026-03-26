@@ -2424,6 +2424,27 @@
         }
       }
     },
+    "/api/heartbeat/sweep": {
+      "post": {
+        "summary": "Trigger an immediate heartbeat sweep",
+        "tags": [
+          "Heartbeat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sweep completed successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
     "/api/memory/index": {
       "post": {
         "summary": "Ingest content into memory system (async embedding)",
