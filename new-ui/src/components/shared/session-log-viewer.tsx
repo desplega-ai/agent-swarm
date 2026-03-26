@@ -489,7 +489,7 @@ export function SessionLogViewer({ logs, compactionSnapshots, className }: Sessi
           </div>
         ) : (
           <div className="divide-y divide-border/50">
-            {timeline.map((item, idx) => {
+            {timeline.map((item) => {
               if (item.kind === "compaction") {
                 return (
                   <CompactionDivider key={`compact-${item.snapshot.id}`} snapshot={item.snapshot} />
