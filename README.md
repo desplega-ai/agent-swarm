@@ -58,6 +58,8 @@ Agent Swarm lets you run a team of AI coding agents that coordinate autonomously
 - **Onboarding wizard** — Interactive CLI wizard (`agent-swarm onboard`) to set up a new swarm from scratch with presets, credential collection, and docker-compose generation
 - **Skill system** — Reusable procedural knowledge: create, install, publish, and sync skills from GitHub with scope resolution (agent → swarm → global)
 - **Human-in-the-Loop** — Workflow nodes that pause for human approval or input, with a dashboard UI for reviewing and responding to requests
+- **MCP server management** — Register, install, and manage MCP servers for agents with scope cascade (agent → swarm → global) and auto-injection into worker containers
+- **Context usage tracking** — Monitor context window utilization and compaction events per task with visual indicators in the dashboard
 
 ## Quick Start
 
