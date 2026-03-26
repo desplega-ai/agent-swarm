@@ -4,6 +4,28 @@ All notable changes to Agent Swarm are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.53.0] - 2026-03-26
+
+### Added
+- MCP server management for agents — 7 new tools (`mcp-server-create`, `mcp-server-get`, `mcp-server-list`, `mcp-server-update`, `mcp-server-install`, `mcp-server-uninstall`, `mcp-server-delete`) with scope cascade (agent → swarm → global) and auto-injection into worker Docker containers (#248)
+- Context usage tracking — monitor context window utilization and compaction events per task with `POST/GET /api/tasks/:id/context` endpoints, context extraction from Claude adapter and pi-mono, and visual indicators in task details (#247)
+- Generic events table for tool/skill/session tracking (#246)
+- Configurable DB seeding script with faker.js for realistic test data (DES-11, #245)
+- Slack notifications dispatched when HITL approval requests are created (#241)
+- Auto VCS PR number tracking for tasks
+- Session log viewer UI redesign with markdown rendering, JSON tree, and visual polish
+- Skill-check step added to `work-on-task` command (#249)
+
+### Fixed
+- `tracker-status` tool crash with undefined `req.requestInfo` (#243)
+- Linear OAuth token auto-refresh (#244)
+- Flaky CI test failures from shared mutable state race conditions
+- Mock `slack/app` in workflow executor tests to prevent CI flake
+- Use `tsc -b` for new-ui typecheck in CI and pre-push hook
+
+### Changed
+- Opus/Sonnet context window updated to 1M tokens
+
 ## [1.52.0] - 2026-03-25
 
 ### Added

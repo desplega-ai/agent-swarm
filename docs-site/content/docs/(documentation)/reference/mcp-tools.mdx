@@ -10,7 +10,7 @@ Agent Swarm exposes its functionality through MCP (Model Context Protocol) tools
 All MCP tools have structured annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) to improve Claude Code's Tool Search discoverability. Tools are split into two tiers:
 
 - **Core tools** (16) — Always available in context: task lifecycle, basic communication, memory recall, debug, and swarm awareness
-- **Deferred tools** (65) — Discovered on demand via Claude Code's Tool Search when the agent needs them (scheduling, epics, config, skills, workflows, file operations, etc.)
+- **Deferred tools** (72) — Discovered on demand via Claude Code's Tool Search when the agent needs them (scheduling, epics, config, skills, workflows, MCP servers, file operations, etc.)
 
 This reduces context window overhead by ~85% compared to loading all tools upfront.
 
@@ -509,6 +509,85 @@ Fetch and install a remote skill from a GitHub repository.
 ### skill-sync-remote
 
 Check and update remote skills from their GitHub sources. Compares content and updates if changed.
+
+## MCP Server Tools
+
+Manage MCP server definitions and installations. Servers are scoped (agent → swarm → global) and can be installed per-agent.
+
+### mcp-server-create
+
+Create a new MCP server definition. Agent-scope servers are auto-installed for the creating agent. Swarm/global scope requires lead.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | Yes | Server name |
+| `description` | string | No | Server description |
+| `transport` | string | Yes | `stdio`, `http`, or `sse` |
+| `command` | string | No | Command to run (required for stdio) |
+| `args` | string | No | JSON array of arguments (stdio only) |
+| `url` | string | No | Server URL (required for http/sse) |
+
+### mcp-server-get
+
+Get MCP server details by ID or name. Name resolution uses scope cascade: agent > swarm > global.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | No | MCP server ID |
+| `name` | string | No | MCP server name (resolved with scope cascade) |
+
+### mcp-server-list
+
+List MCP servers with optional filters.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scope` | string | No | Filter by scope: `global`, `swarm`, or `agent` |
+| `transport` | string | No | Filter by transport: `stdio`, `http`, or `sse` |
+| `search` | string | No | Search by name or description |
+
+### mcp-server-update
+
+Update an MCP server's configuration. Only the owner or lead can update.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | Yes | MCP server ID |
+| `name` | string | No | New name |
+| `description` | string | No | New description |
+| `transport` | string | No | New transport type |
+| `command` | string | No | New command (stdio) |
+| `args` | string | No | New JSON array of arguments |
+| `url` | string | No | New URL (http/sse) |
+| `headers` | string | No | New JSON object of non-secret headers |
+| `envConfigKeys` | string | No | New env config key mappings |
+| `headerConfigKeys` | string | No | New header config key mappings |
+| `isEnabled` | boolean | No | Toggle enabled/disabled |
+
+### mcp-server-install
+
+Install an MCP server for an agent. Self-install is always allowed; cross-agent requires lead.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `mcpServerId` | string | Yes | ID of the MCP server to install |
+
+### mcp-server-uninstall
+
+Uninstall an MCP server from an agent.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `mcpServerId` | string | Yes | ID of the MCP server to uninstall |
+| `agentId` | string | No | Target agent (default: calling agent) |
+
+### mcp-server-delete
+
+Delete an MCP server definition. Only the owning agent or lead can delete.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | Yes | MCP server ID |
 
 ## Debug Tools
 

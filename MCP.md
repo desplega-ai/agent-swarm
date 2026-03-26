@@ -839,6 +839,95 @@ Register an AgentMail inbox ID to route incoming emails to this agent. When emai
 
 *No parameters*
 
+### mcp-server-update
+
+**Update MCP Server**
+
+Update an MCP server's configuration. Only the owner or lead can update.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | ID of the MCP server to update |
+| `name` | `string` | No | - | New name |
+| `description` | `string` | No | - | New description |
+| `transport` | `stdio \| http \| sse` | No | - | New transport type |
+| `command` | `string` | No | - | New command (stdio) |
+| `args` | `string` | No | - | New JSON array of arguments (stdio) |
+| `url` | `string` | No | - | New URL (http/sse) |
+| `headers` | `string` | No | - | New JSON object of non-secret headers |
+| `envConfigKeys` | `string` | No | - | New env config key mappings |
+| `headerConfigKeys` | `string` | No | - | New header config key mappings |
+| `isEnabled` | `boolean` | No | - | Toggle enabled/disabled |
+
+### mcp-server-create
+
+**Create MCP Server**
+
+Create a new MCP server definition. Agent-scope servers are auto-installed for the creating agent. Swarm/global scope requires lead.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | Yes | - | Server name |
+| `description` | `string` | No | - | Server description |
+| `transport` | `stdio \| http \| sse` | Yes | - | Transport type |
+| `command` | `string` | No | - | Command to run (required for stdio transport) |
+| `args` | `string` | No | - | JSON array of command arguments (stdio only) |
+| `url` | `string` | No | - | Server URL (required for http/sse transport) |
+
+### mcp-server-install
+
+**Install MCP Server**
+
+Install an MCP server for an agent. Self-install is always allowed; cross-agent install requires lead.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `mcpServerId` | `string` | Yes | - | ID of the MCP server to install |
+
+### mcp-server-list
+
+**List MCP Servers**
+
+List MCP servers with optional filters. Use installedOnly to see servers installed for the calling agent.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `scope` | `global \| swarm \| agent` | No | - | Filter by scope |
+| `transport` | `stdio \| http \| sse` | No | - | Filter by transport type |
+| `search` | `string` | No | - | Search by name or description |
+
+### mcp-server-uninstall
+
+**Uninstall MCP Server**
+
+Uninstall an MCP server from an agent. Self-uninstall is always allowed; cross-agent requires lead.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `mcpServerId` | `string` | Yes | - | ID of the MCP server to uninstall |
+| `agentId` | `string` | No | - | Target agent (default: calling agent) |
+
+### mcp-server-get
+
+**Get MCP Server**
+
+Get MCP server details by ID or name. Name resolution uses scope cascade: agent > swarm > global.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | No | - | MCP server ID |
+| `name` | `string` | No | - | MCP server name (resolved with scope cascade) |
+
+### mcp-server-delete
+
+**Delete MCP Server**
+
+Delete an MCP server definition. Only the owning agent or lead can delete.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | ID of the MCP server to delete |
+
 ### tracker-link-epic
 
 **Link Epic to Tracker**
