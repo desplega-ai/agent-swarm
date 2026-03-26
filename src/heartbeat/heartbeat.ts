@@ -2,6 +2,9 @@ import {
   claimTask,
   cleanupStaleSessions,
   createTaskExtended,
+  deleteActiveSession,
+  failTask,
+  getActiveSessionForTask,
   getActiveTaskCount,
   getAllAgents,
   getDb,
@@ -29,14 +32,24 @@ import "./templates";
 /** Default heartbeat interval: 90 seconds */
 const DEFAULT_INTERVAL_MS = Number(process.env.HEARTBEAT_INTERVAL_MS) || 90_000;
 
-/** Stall threshold: tasks in_progress with no update for this many minutes */
+/** Stall threshold: tasks with fresh worker heartbeat but no task update for this many minutes */
 const STALL_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALL_THRESHOLD_MIN) || 30;
+
+/** Stall threshold: tasks with no active session (worker clearly dead) */
+const STALL_THRESHOLD_NO_SESSION_MIN = Number(process.env.HEARTBEAT_STALL_NO_SESSION_MIN) || 5;
+
+/** Stall threshold: tasks with stale worker heartbeat */
+const STALL_THRESHOLD_STALE_HEARTBEAT_MIN = Number(process.env.HEARTBEAT_STALL_STALE_HB_MIN) || 15;
 
 /** Stale resource cleanup threshold (minutes) */
 const STALE_CLEANUP_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALE_CLEANUP_MIN) || 30;
 
 /** Max pool tasks to auto-assign per sweep */
 const MAX_AUTO_ASSIGN_PER_SWEEP = Number(process.env.HEARTBEAT_MAX_AUTO_ASSIGN) || 5;
+
+/** Escalation cooldown: minimum time between escalations for the same task set (ms) */
+const ESCALATION_COOLDOWN_MS =
+  Number(process.env.HEARTBEAT_ESCALATION_COOLDOWN_MS) || 15 * 60 * 1000;
 
 const HEARTBEAT_ESCALATION_MARKER = "[heartbeat-escalation]";
 
@@ -46,6 +59,7 @@ const HEARTBEAT_ESCALATION_MARKER = "[heartbeat-escalation]";
 
 export interface HeartbeatFindings {
   stalledTasks: AgentTask[];
+  autoFailedTasks: Array<{ taskId: string; agentId: string; reason: string }>;
   workerHealthFixes: Array<{ agentId: string; oldStatus: string; newStatus: string }>;
   autoAssigned: Array<{ taskId: string; agentId: string }>;
   staleCleanup: {
@@ -65,6 +79,9 @@ export interface HeartbeatFindings {
 
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 let isSweeping = false;
+
+/** Tracks last escalation time per escalation key to prevent spam */
+const lastEscalationTime: Map<string, number> = new Map();
 
 // ============================================================================
 // Tier 1: Preflight Gate
@@ -106,6 +123,7 @@ export function preflightGate(): boolean {
 export async function codeLevelTriage(): Promise<HeartbeatFindings> {
   const findings: HeartbeatFindings = {
     stalledTasks: [],
+    autoFailedTasks: [],
     workerHealthFixes: [],
     autoAssigned: [],
     staleCleanup: {
@@ -118,8 +136,8 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
     escalationNeeded: false,
   };
 
-  // 1. Detect stalled tasks
-  detectStalledTasks(findings);
+  // 1. Detect and remediate stalled tasks (tiered: auto-fail dead workers, escalate ambiguous)
+  detectAndRemediateStalledTasks(findings);
 
   // 2. Check and fix worker health
   checkWorkerHealth(findings);
@@ -137,11 +155,72 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
 }
 
 /**
- * Detect in_progress tasks that haven't been updated in a while.
+ * Tiered stall detection and auto-remediation.
+ *
+ * Cross-checks stalled tasks with active_sessions to determine severity:
+ * - No active session → worker is dead → auto-fail (5 min threshold)
+ * - Stale session heartbeat → worker likely crashed → auto-fail (15 min threshold)
+ * - Fresh session heartbeat → worker alive but task stale → escalate to lead (30 min threshold)
  */
-function detectStalledTasks(findings: HeartbeatFindings): void {
-  const stalled = getStalledInProgressTasks(STALL_THRESHOLD_MINUTES);
-  findings.stalledTasks = stalled;
+function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
+  // Use the shortest threshold to catch all potentially stalled tasks
+  const candidates = getStalledInProgressTasks(STALL_THRESHOLD_NO_SESSION_MIN);
+
+  for (const task of candidates) {
+    if (!task.agentId) continue; // Unassigned tasks can't be stalled
+
+    const session = getActiveSessionForTask(task.id);
+    const taskAgeMs = Date.now() - new Date(task.lastUpdatedAt).getTime();
+
+    if (!session) {
+      // Case A: No active session — worker is dead
+      if (taskAgeMs >= STALL_THRESHOLD_NO_SESSION_MIN * 60 * 1000) {
+        const reason =
+          "Auto-failed by heartbeat: worker session not found (no active session for task)";
+        const failed = failTask(task.id, reason);
+        if (failed) {
+          findings.autoFailedTasks.push({ taskId: task.id, agentId: task.agentId, reason });
+          console.log(`[Heartbeat] Auto-failed task ${task.id.slice(0, 8)} — no active session`);
+
+          // Fix agent status if no other active tasks
+          const remaining = getActiveTaskCount(task.agentId);
+          if (remaining === 0) {
+            updateAgentStatus(task.agentId, "idle");
+          }
+        }
+      }
+    } else {
+      const sessionHeartbeatAgeMs = Date.now() - new Date(session.lastHeartbeatAt).getTime();
+      const isStaleHeartbeat =
+        sessionHeartbeatAgeMs >= STALL_THRESHOLD_STALE_HEARTBEAT_MIN * 60 * 1000;
+
+      if (isStaleHeartbeat) {
+        // Case B: Session exists but heartbeat is stale — worker likely crashed
+        if (taskAgeMs >= STALL_THRESHOLD_STALE_HEARTBEAT_MIN * 60 * 1000) {
+          const reason =
+            "Auto-failed by heartbeat: worker session heartbeat is stale (likely crashed)";
+          const failed = failTask(task.id, reason);
+          if (failed) {
+            findings.autoFailedTasks.push({ taskId: task.id, agentId: task.agentId, reason });
+            deleteActiveSession(task.id);
+            console.log(
+              `[Heartbeat] Auto-failed task ${task.id.slice(0, 8)} — stale session heartbeat`,
+            );
+
+            const remaining = getActiveTaskCount(task.agentId);
+            if (remaining === 0) {
+              updateAgentStatus(task.agentId, "idle");
+            }
+          }
+        }
+      } else {
+        // Case C: Session exists and heartbeat is fresh — ambiguous
+        if (taskAgeMs >= STALL_THRESHOLD_MINUTES * 60 * 1000) {
+          findings.stalledTasks.push(task);
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -232,15 +311,13 @@ async function cleanupStaleResources(findings: HeartbeatFindings): Promise<void>
 
 /**
  * Evaluate whether findings require escalation to a Claude session (lead agent).
- * Only escalate for truly ambiguous situations that need human-level reasoning.
+ * Only escalate for ambiguous stalls (worker alive but task not updating).
  */
 function evaluateEscalation(findings: HeartbeatFindings): void {
-  // Stalled tasks are ambiguous — the task might be actively worked on
-  // but the worker just hasn't called store-progress recently
   if (findings.stalledTasks.length > 0) {
     findings.escalationNeeded = true;
     const taskIds = findings.stalledTasks.map((t) => t.id.slice(0, 8)).join(", ");
-    findings.escalationReason = `${findings.stalledTasks.length} task(s) stalled (no update for ${STALL_THRESHOLD_MINUTES}+ min): ${taskIds}`;
+    findings.escalationReason = `${findings.stalledTasks.length} task(s) stalled with active worker (no task update for ${STALL_THRESHOLD_MINUTES}+ min): ${taskIds}`;
   }
 }
 
@@ -255,6 +332,13 @@ function escalateToLead(findings: HeartbeatFindings): void {
   }
 
   const escalationKey = buildEscalationKey(findings);
+
+  // Cooldown check — prevent repeated escalations for the same task set
+  const lastTime = lastEscalationTime.get(escalationKey);
+  if (lastTime && Date.now() - lastTime < ESCALATION_COOLDOWN_MS) {
+    return;
+  }
+
   if (hasActiveEscalationTask(lead.id, escalationKey)) {
     return;
   }
@@ -294,6 +378,7 @@ function escalateToLead(findings: HeartbeatFindings): void {
     priority: 70,
   });
 
+  lastEscalationTime.set(escalationKey, Date.now());
   console.log(`[Heartbeat] Created triage task for lead ${lead.name}`);
 }
 
@@ -337,6 +422,7 @@ export async function runHeartbeatSweep(): Promise<void> {
     if (!preflightGate()) {
       const cleanupOnlyFindings: HeartbeatFindings = {
         stalledTasks: [],
+        autoFailedTasks: [],
         workerHealthFixes: [],
         autoAssigned: [],
         staleCleanup: {
@@ -374,6 +460,9 @@ export async function runHeartbeatSweep(): Promise<void> {
 function logFindings(findings: HeartbeatFindings): void {
   const parts: string[] = [];
 
+  if (findings.autoFailedTasks.length > 0) {
+    parts.push(`auto_failed=${findings.autoFailedTasks.length}`);
+  }
   if (findings.stalledTasks.length > 0) {
     parts.push(`stalled=${findings.stalledTasks.length}`);
   }
@@ -431,4 +520,11 @@ export function stopHeartbeat(): void {
     isSweeping = false;
     console.log("[Heartbeat] Stopped");
   }
+}
+
+/**
+ * Reset escalation cooldown state. Exported for testing only.
+ */
+export function resetEscalationCooldowns(): void {
+  lastEscalationTime.clear();
 }

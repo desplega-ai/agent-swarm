@@ -4,18 +4,21 @@ import {
   closeDb,
   createAgent,
   createTaskExtended,
+  getActiveSessionForTask,
   getDb,
   getIdleWorkersWithCapacity,
   getStalledInProgressTasks,
   getTaskById,
   getUnassignedPoolTasks,
   initDb,
+  insertActiveSession,
   startTask,
   updateAgentStatus,
 } from "../be/db";
 import {
   codeLevelTriage,
   preflightGate,
+  resetEscalationCooldowns,
   runHeartbeatSweep,
   startHeartbeat,
   stopHeartbeat,
@@ -49,6 +52,8 @@ describe("Heartbeat Triage", () => {
   beforeEach(() => {
     getDb().run("DELETE FROM agent_tasks");
     getDb().run("DELETE FROM agents");
+    getDb().run("DELETE FROM active_sessions");
+    resetEscalationCooldowns();
   });
 
   // ==========================================================================
@@ -129,6 +134,29 @@ describe("Heartbeat Triage", () => {
     });
   });
 
+  describe("getActiveSessionForTask", () => {
+    test("returns active session for task", () => {
+      const agent = createAgent({ name: "worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Task", { agentId: agent.id });
+      startTask(task.id);
+
+      insertActiveSession({
+        agentId: agent.id,
+        taskId: task.id,
+        triggerType: "task_assigned",
+      });
+
+      const session = getActiveSessionForTask(task.id);
+      expect(session).not.toBeNull();
+      expect(session!.taskId).toBe(task.id);
+    });
+
+    test("returns null when no session exists", () => {
+      const session = getActiveSessionForTask("non-existent-task-id");
+      expect(session).toBeNull();
+    });
+  });
+
   describe("getIdleWorkersWithCapacity", () => {
     test("returns idle non-lead agents", () => {
       createAgent({ name: "idle-worker", isLead: false, status: "idle" });
@@ -180,18 +208,88 @@ describe("Heartbeat Triage", () => {
   // ==========================================================================
 
   describe("Code-Level Triage", () => {
-    test("detects stalled tasks", async () => {
-      const agent = createAgent({ name: "stall-worker", isLead: false, status: "busy" });
+    test("auto-fails stalled task with no active session", async () => {
+      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
       const task = createTaskExtended("Stalled task", { agentId: agent.id });
       startTask(task.id);
 
-      // Make task stale
-      const oldTime = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+      // Make task stale (10 min — past the 5 min no-session threshold)
+      const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
       getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
 
       const findings = await codeLevelTriage();
+
+      expect(findings.autoFailedTasks.length).toBe(1);
+      expect(findings.autoFailedTasks[0]!.taskId).toBe(task.id);
+      expect(findings.stalledTasks.length).toBe(0);
+
+      // Verify task is actually failed in DB
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("failed");
+      expect(updated?.failureReason).toContain("no active session");
+    });
+
+    test("auto-fails stalled task with stale session heartbeat", async () => {
+      const agent = createAgent({ name: "crashed-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Stalled task", { agentId: agent.id });
+      startTask(task.id);
+
+      // Create an active session with stale heartbeat
+      insertActiveSession({
+        agentId: agent.id,
+        taskId: task.id,
+        triggerType: "task_assigned",
+      });
+      // Make both task and session heartbeat stale (20 min — past the 15 min threshold)
+      const oldTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
+      getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+        oldTime,
+        task.id,
+      ]);
+
+      const findings = await codeLevelTriage();
+
+      expect(findings.autoFailedTasks.length).toBe(1);
+      expect(findings.autoFailedTasks[0]!.taskId).toBe(task.id);
+      expect(findings.stalledTasks.length).toBe(0);
+
+      // Verify task is failed and session is deleted
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("failed");
+      expect(updated?.failureReason).toContain("stale");
+
+      const session = getActiveSessionForTask(task.id);
+      expect(session).toBeNull();
+    });
+
+    test("escalates stalled task with fresh session heartbeat (ambiguous)", async () => {
+      const agent = createAgent({ name: "alive-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Stalled task", { agentId: agent.id });
+      startTask(task.id);
+
+      // Create an active session with fresh heartbeat
+      insertActiveSession({
+        agentId: agent.id,
+        taskId: task.id,
+        triggerType: "task_assigned",
+      });
+
+      // Make task stale (45 min — past the 30 min threshold) but keep session fresh
+      const oldTime = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
+      // Session lastHeartbeatAt stays current (just created)
+
+      const findings = await codeLevelTriage();
+
+      expect(findings.autoFailedTasks.length).toBe(0);
       expect(findings.stalledTasks.length).toBe(1);
+      expect(findings.stalledTasks[0]!.id).toBe(task.id);
       expect(findings.escalationNeeded).toBe(true);
+
+      // Task should NOT be failed
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("in_progress");
     });
 
     test("auto-assigns pool tasks to idle workers", async () => {
@@ -264,6 +362,23 @@ describe("Heartbeat Triage", () => {
       const findings = await codeLevelTriage();
       expect(findings.escalationNeeded).toBe(false);
     });
+
+    test("sets agent to idle after auto-failing its only task", async () => {
+      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Stalled task", { agentId: agent.id });
+      startTask(task.id);
+
+      const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
+
+      await codeLevelTriage();
+
+      // Agent should be set to idle since it has no more active tasks
+      const agents = getDb().query("SELECT status FROM agents WHERE id = ?").get(agent.id) as {
+        status: string;
+      };
+      expect(agents.status).toBe("idle");
+    });
   });
 
   // ==========================================================================
@@ -291,13 +406,20 @@ describe("Heartbeat Triage", () => {
       expect(tasks.length).toBe(1);
     });
 
-    test("creates triage task for lead when stalled tasks found", async () => {
+    test("creates triage task for lead when stalled tasks found with fresh session", async () => {
       const lead = createAgent({ name: "triage-lead", isLead: true, status: "idle" });
       const worker = createAgent({ name: "stall-worker", isLead: false, status: "busy" });
       const task = createTaskExtended("Stalled task", { agentId: worker.id });
       startTask(task.id);
 
-      // Make task stale
+      // Create fresh active session (worker alive but task stale)
+      insertActiveSession({
+        agentId: worker.id,
+        taskId: task.id,
+        triggerType: "task_assigned",
+      });
+
+      // Make task stale (45 min)
       const oldTime = new Date(Date.now() - 45 * 60 * 1000).toISOString();
       getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
 
@@ -311,11 +433,17 @@ describe("Heartbeat Triage", () => {
       expect(triageTasks[0]!.task).toContain("Stalled Tasks");
     });
 
-    test("does not create duplicate triage tasks for same stalled set", async () => {
+    test("does not create duplicate triage tasks due to escalation cooldown", async () => {
       const lead = createAgent({ name: "triage-lead", isLead: true, status: "idle" });
       const worker = createAgent({ name: "stall-worker", isLead: false, status: "busy" });
       const task = createTaskExtended("Stalled task", { agentId: worker.id });
       startTask(task.id);
+
+      insertActiveSession({
+        agentId: worker.id,
+        taskId: task.id,
+        triggerType: "task_assigned",
+      });
 
       const oldTime = new Date(Date.now() - 45 * 60 * 1000).toISOString();
       getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
@@ -327,6 +455,20 @@ describe("Heartbeat Triage", () => {
         .query("SELECT id FROM agent_tasks WHERE taskType = 'heartbeat' AND agentId = ?")
         .all(lead.id) as Array<{ id: string }>;
       expect(triageTasks.length).toBe(1);
+    });
+
+    test("auto-fails stalled task with no session during sweep", async () => {
+      const worker = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Stalled no-session", { agentId: worker.id });
+      startTask(task.id);
+
+      const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
+
+      await runHeartbeatSweep();
+
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("failed");
     });
 
     test("cleans stale sessions even when preflight gate bails", async () => {
