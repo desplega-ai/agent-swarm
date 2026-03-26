@@ -33,6 +33,7 @@ import type {
   SwarmConfigsResponse,
   SwarmRepo,
   SwarmReposResponse,
+  TaskContextResponse,
   TasksResponse,
   TaskWithLogs,
   UpsertPromptTemplateInput,
@@ -219,6 +220,13 @@ class ApiClient {
     if (!res.ok) throw new Error(`Failed to fetch session logs: ${res.status}`);
     const data = (await res.json()) as SessionLogsResponse;
     return data.logs;
+  }
+
+  async fetchTaskContext(taskId: string): Promise<TaskContextResponse> {
+    const url = `${this.getBaseUrl()}/api/tasks/${taskId}/context`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch task context: ${res.status}`);
+    return res.json();
   }
 
   async fetchLogs(limit = 100, agentId?: string): Promise<LogsResponse> {

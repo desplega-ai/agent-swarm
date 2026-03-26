@@ -1168,6 +1168,175 @@ function seedSessionLogs(
 }
 
 // ---------------------------------------------------------------------------
+// Context snapshots
+// ---------------------------------------------------------------------------
+
+function seedContextSnapshots(
+  db: Database,
+  _config: SeedConfig,
+  tasks: { id: string; agentId: string | null }[],
+): void {
+  const insertStmt = db.prepare(`
+    INSERT OR IGNORE INTO task_context_snapshots
+      (id, taskId, agentId, sessionId, contextUsedTokens, contextTotalTokens, contextPercent,
+       eventType, compactTrigger, preCompactTokens, cumulativeInputTokens, cumulativeOutputTokens, createdAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const updateTaskStmt = db.prepare(`
+    UPDATE agent_tasks
+    SET compactionCount = ?, peakContextPercent = ?, totalContextTokensUsed = ?, contextWindowSize = ?
+    WHERE id = ?
+  `);
+
+  const tasksWithAgents = tasks.filter((t) => t.agentId);
+  const CONTEXT_WINDOW = 1_000_000; // 1M tokens (Opus/Sonnet)
+  let total = 0;
+
+  for (let ti = 0; ti < tasksWithAgents.length; ti++) {
+    const task = tasksWithAgents[ti];
+    const sessionId = seedId("session", ti);
+    const createdBase = new Date(daysAgo(faker.number.int({ min: 0, max: 7 })));
+    const hasCompaction = ti % 2 === 0; // half of tasks get a compaction event
+
+    // Build a realistic growth trajectory
+    const progressSteps = [
+      { pct: faker.number.int({ min: 5, max: 15 }) },
+      { pct: faker.number.int({ min: 20, max: 35 }) },
+      { pct: faker.number.int({ min: 40, max: 55 }) },
+      { pct: faker.number.int({ min: 60, max: 75 }) },
+      { pct: faker.number.int({ min: 78, max: 88 }) },
+    ];
+
+    let snapIdx = 0;
+    let peakPct = 0;
+    let cumulativeInput = 0;
+    let cumulativeOutput = 0;
+    let lastUsedTokens = 0;
+
+    // Progress events (pre-compaction)
+    const preCompactionSteps = hasCompaction ? progressSteps.slice(0, 4) : progressSteps;
+
+    for (const step of preCompactionSteps) {
+      const usedTokens = Math.round((step.pct / 100) * CONTEXT_WINDOW);
+      cumulativeInput += faker.number.int({ min: 5000, max: 20000 });
+      cumulativeOutput += faker.number.int({ min: 2000, max: 8000 });
+      peakPct = Math.max(peakPct, step.pct);
+      lastUsedTokens = usedTokens;
+
+      const ts = new Date(createdBase.getTime() + snapIdx * 30000).toISOString();
+      insertStmt.run(
+        seedId("ctx_snap", `${ti}:${snapIdx}`),
+        task.id,
+        task.agentId,
+        sessionId,
+        usedTokens,
+        CONTEXT_WINDOW,
+        step.pct,
+        "progress",
+        null, // compactTrigger
+        null, // preCompactTokens
+        cumulativeInput,
+        cumulativeOutput,
+        ts,
+      );
+      snapIdx++;
+      total++;
+    }
+
+    // Compaction event
+    if (hasCompaction) {
+      const preCompactTokens = lastUsedTokens;
+      const dropRatio = faker.number.float({ min: 0.3, max: 0.45 });
+      const postCompactTokens = Math.round(preCompactTokens * dropRatio);
+      const postCompactPct = (postCompactTokens / CONTEXT_WINDOW) * 100;
+      const trigger = ti % 4 === 0 ? "manual" : "auto";
+
+      const ts = new Date(createdBase.getTime() + snapIdx * 30000).toISOString();
+      insertStmt.run(
+        seedId("ctx_snap", `${ti}:${snapIdx}`),
+        task.id,
+        task.agentId,
+        sessionId,
+        postCompactTokens,
+        CONTEXT_WINDOW,
+        postCompactPct,
+        "compaction",
+        trigger,
+        preCompactTokens,
+        cumulativeInput,
+        cumulativeOutput,
+        ts,
+      );
+      snapIdx++;
+      total++;
+      lastUsedTokens = postCompactTokens;
+
+      // Post-compaction growth (2 progress events)
+      const postSteps = [
+        { pct: faker.number.int({ min: 35, max: 50 }) },
+        { pct: faker.number.int({ min: 55, max: 72 }) },
+      ];
+
+      for (const step of postSteps) {
+        const usedTokens = Math.round((step.pct / 100) * CONTEXT_WINDOW);
+        cumulativeInput += faker.number.int({ min: 5000, max: 20000 });
+        cumulativeOutput += faker.number.int({ min: 2000, max: 8000 });
+        peakPct = Math.max(peakPct, step.pct);
+        lastUsedTokens = usedTokens;
+
+        const ts2 = new Date(createdBase.getTime() + snapIdx * 30000).toISOString();
+        insertStmt.run(
+          seedId("ctx_snap", `${ti}:${snapIdx}`),
+          task.id,
+          task.agentId,
+          sessionId,
+          usedTokens,
+          CONTEXT_WINDOW,
+          step.pct,
+          "progress",
+          null,
+          null,
+          cumulativeInput,
+          cumulativeOutput,
+          ts2,
+        );
+        snapIdx++;
+        total++;
+      }
+    }
+
+    // Completion event
+    cumulativeInput += faker.number.int({ min: 1000, max: 5000 });
+    cumulativeOutput += faker.number.int({ min: 500, max: 2000 });
+    const finalPct = (lastUsedTokens / CONTEXT_WINDOW) * 100;
+    const ts = new Date(createdBase.getTime() + snapIdx * 30000).toISOString();
+    insertStmt.run(
+      seedId("ctx_snap", `${ti}:${snapIdx}`),
+      task.id,
+      task.agentId,
+      sessionId,
+      lastUsedTokens,
+      CONTEXT_WINDOW,
+      finalPct,
+      "completion",
+      null,
+      null,
+      cumulativeInput,
+      cumulativeOutput,
+      ts,
+    );
+    total++;
+
+    // Update task aggregates
+    const compactionCount = hasCompaction ? 1 : 0;
+    updateTaskStmt.run(compactionCount, peakPct, lastUsedTokens, CONTEXT_WINDOW, task.id);
+  }
+
+  console.log(`  ✓ Seeded ${total} context snapshots across ${tasksWithAgents.length} tasks`);
+}
+
+// ---------------------------------------------------------------------------
 // Table cleanup
 // ---------------------------------------------------------------------------
 
@@ -1180,6 +1349,7 @@ const TABLES_IN_DELETE_ORDER = [
   "inbox_messages",
   "session_logs",
   "session_costs",
+  "task_context_snapshots",
   "active_sessions",
   "workflow_run_steps",
   "workflow_runs",
@@ -1401,6 +1571,7 @@ async function main(): Promise<void> {
   const epics = seedEpics(db, config, agents, channels);
   const tasks = seedTasks(db, config, agents, epics);
   seedSessionLogs(db, config, tasks);
+  seedContextSnapshots(db, config, tasks);
   seedWorkflows(db, config);
   seedSchedules(db, config, agents);
   seedMemories(db, config, agents);

@@ -90,6 +90,7 @@ export {
   usePauseTask,
   useResumeTask,
   useTask,
+  useTaskContext,
   useTaskSessionLogs,
   useTasks,
 } from "./use-tasks";

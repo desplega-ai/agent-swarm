@@ -1,4 +1,5 @@
 import {
+  Activity,
   AlertTriangle,
   ArrowLeft,
   Ban,
@@ -13,6 +14,7 @@ import {
   Hash,
   Pause,
   Play,
+  Scissors,
   Terminal,
   Timer,
   User,
@@ -27,9 +29,10 @@ import {
   usePauseTask,
   useResumeTask,
   useTask,
+  useTaskContext,
   useTaskSessionLogs,
 } from "@/api/hooks/use-tasks";
-import type { AgentLog, SessionCost } from "@/api/types";
+import type { AgentLog, SessionCost, TaskContextResponse } from "@/api/types";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
@@ -45,6 +48,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -325,6 +329,81 @@ function TaskCostSection({
   );
 }
 
+function contextBarColor(percent: number): string {
+  if (percent > 80) return "[&_[data-slot=progress-indicator]]:bg-red-500";
+  if (percent > 50) return "[&_[data-slot=progress-indicator]]:bg-amber-500";
+  return "[&_[data-slot=progress-indicator]]:bg-emerald-500";
+}
+
+function TaskContextSection({
+  context,
+  isLoading,
+}: {
+  context: TaskContextResponse | undefined;
+  isLoading: boolean;
+}) {
+  if (isLoading) {
+    return (
+      <>
+        <Separator className="my-2" />
+        <div className="space-y-1.5">
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+            Context Usage
+          </span>
+          <div className="space-y-2">
+            <Skeleton className="h-2 w-full rounded-full" />
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-3 w-20" />
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  if (!context || context.summary.snapshotCount === 0) return null;
+
+  const { summary } = context;
+  const latestSnapshot = context.snapshots[context.snapshots.length - 1];
+  const currentPercent = latestSnapshot?.contextPercent ?? summary.peakContextPercent ?? 0;
+  const usedTokens = latestSnapshot?.contextUsedTokens ?? summary.totalContextTokensUsed ?? 0;
+  const totalTokens = latestSnapshot?.contextTotalTokens ?? summary.contextWindowSize ?? 0;
+
+  return (
+    <>
+      <Separator className="my-2" />
+      <div className="space-y-1">
+        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+          Context Usage
+        </span>
+        <div className="flex items-center gap-2 py-1">
+          <Progress
+            value={currentPercent}
+            className={cn("h-1.5 flex-1", contextBarColor(currentPercent))}
+          />
+          <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+            {currentPercent.toFixed(0)}%
+          </span>
+        </div>
+        <MetaRow icon={Cpu} label="Used">
+          <span className="text-xs font-mono">
+            {formatTokens(usedTokens)} / {formatTokens(totalTokens)}
+          </span>
+        </MetaRow>
+        {summary.peakContextPercent != null && (
+          <MetaRow icon={Activity} label="Peak">
+            <span className="text-xs font-mono">{summary.peakContextPercent.toFixed(0)}%</span>
+          </MetaRow>
+        )}
+        {summary.compactionCount > 0 && (
+          <MetaRow icon={Scissors} label="Compactions">
+            <span className="text-xs font-mono">{summary.compactionCount}</span>
+          </MetaRow>
+        )}
+      </div>
+    </>
+  );
+}
+
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -332,6 +411,7 @@ export default function TaskDetailPage() {
   const { data: sessionLogs } = useTaskSessionLogs(id!);
   const { data: agents } = useAgents();
   const { data: costs, isLoading: costsLoading } = useSessionCosts({ taskId: id });
+  const { data: contextData, isLoading: contextLoading } = useTaskContext(id!);
   const cancelTask = useCancelTask();
   const pauseTask = usePauseTask();
   const resumeTask = useResumeTask();
@@ -420,6 +500,8 @@ export default function TaskDetailPage() {
         </>
       )}
 
+      <TaskContextSection context={contextData} isLoading={contextLoading} />
+
       <TaskCostSection costs={costs} isLoading={costsLoading} />
 
       {hasEvents && (
@@ -477,7 +559,11 @@ export default function TaskDetailPage() {
   );
 
   const sessionLogsContent = hasSessionLogs ? (
-    <SessionLogViewer logs={sessionLogs} className="flex-1 min-h-0" />
+    <SessionLogViewer
+      logs={sessionLogs}
+      compactionSnapshots={contextData?.snapshots}
+      className="flex-1 min-h-0"
+    />
   ) : (
     <div className="flex-1 flex items-center justify-center min-h-0">
       <div className="text-center text-muted-foreground">
@@ -654,7 +740,11 @@ export default function TaskDetailPage() {
           )}
 
           {hasSessionLogs ? (
-            <SessionLogViewer logs={sessionLogs} className="flex-1 min-h-0" />
+            <SessionLogViewer
+              logs={sessionLogs}
+              compactionSnapshots={contextData?.snapshots}
+              className="flex-1 min-h-0"
+            />
           ) : (
             <div className="flex-1 flex items-center justify-center min-h-0">
               <div className="text-center text-muted-foreground">

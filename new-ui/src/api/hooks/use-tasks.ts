@@ -37,6 +37,15 @@ export function useTaskSessionLogs(taskId: string) {
   });
 }
 
+export function useTaskContext(taskId: string) {
+  return useQuery({
+    queryKey: ["task", taskId, "context"],
+    queryFn: () => api.fetchTaskContext(taskId),
+    enabled: !!taskId,
+    refetchInterval: 10000,
+  });
+}
+
 export function useCreateTask() {
   const queryClient = useQueryClient();
   return useMutation({

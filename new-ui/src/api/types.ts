@@ -723,6 +723,38 @@ export interface AgentMcpServersResponse {
   total: number;
 }
 
+// Context Usage
+export type ContextSnapshotEventType = "progress" | "compaction" | "completion";
+
+export interface ContextSnapshot {
+  id: string;
+  taskId: string;
+  agentId: string;
+  sessionId: string;
+  contextUsedTokens?: number;
+  contextTotalTokens?: number;
+  contextPercent?: number;
+  eventType: ContextSnapshotEventType;
+  compactTrigger?: "auto" | "manual";
+  preCompactTokens?: number;
+  cumulativeInputTokens: number;
+  cumulativeOutputTokens: number;
+  createdAt: string;
+}
+
+export interface ContextSummary {
+  compactionCount: number;
+  peakContextPercent: number | null;
+  totalContextTokensUsed: number | null;
+  contextWindowSize: number | null;
+  snapshotCount: number;
+}
+
+export interface TaskContextResponse {
+  snapshots: ContextSnapshot[];
+  summary: ContextSummary;
+}
+
 // Debug / DB Explorer
 export interface DbQueryRequest {
   sql: string;

@@ -5,13 +5,14 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  Scissors,
   Terminal,
   Wrench,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { SessionLog } from "@/api/types";
+import type { ContextSnapshot, SessionLog } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { JsonTree } from "@/components/workflows/json-tree";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
@@ -366,32 +367,91 @@ function IterationDivider({ iteration }: { iteration: number }) {
   );
 }
 
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString();
+}
+
+function CompactionDivider({ snapshot }: { snapshot: ContextSnapshot }) {
+  const isAuto = snapshot.compactTrigger === "auto";
+  const preTokens = snapshot.preCompactTokens;
+  const postTokens = snapshot.contextUsedTokens;
+  const percent = snapshot.contextPercent;
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-2 bg-amber-500/5 border-y border-amber-500/20">
+      <Scissors className="h-3 w-3 text-amber-500 shrink-0" />
+      <span className="text-[10px] font-semibold text-amber-500 font-mono uppercase tracking-wider whitespace-nowrap">
+        {isAuto ? "Auto" : "Manual"} Compaction
+      </span>
+      {preTokens != null && postTokens != null && (
+        <span className="text-[10px] text-muted-foreground font-mono">
+          {formatTokens(preTokens)} → {formatTokens(postTokens)}
+        </span>
+      )}
+      {percent != null && (
+        <span className="text-[10px] text-muted-foreground font-mono">({percent.toFixed(0)}%)</span>
+      )}
+      <div className="h-px flex-1 bg-amber-500/20" />
+    </div>
+  );
+}
+
+// --- Timeline types ---
+
+type TimelineItem =
+  | { kind: "message"; message: ParsedMessage }
+  | { kind: "compaction"; snapshot: ContextSnapshot };
+
 // --- Main component ---
 
 interface SessionLogViewerProps {
   logs: SessionLog[];
+  compactionSnapshots?: ContextSnapshot[];
   className?: string;
 }
 
-export function SessionLogViewer({ logs, className }: SessionLogViewerProps) {
+export function SessionLogViewer({ logs, compactionSnapshots, className }: SessionLogViewerProps) {
   const messages = useMemo(() => parseSessionLogs(logs), [logs]);
 
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const { isFollowing, scrollToBottom } = useAutoScroll(scrollEl, [logs]);
 
+  // Merge messages and compaction snapshots into a single sorted timeline
+  const timeline = useMemo(() => {
+    const items: TimelineItem[] = messages.map((m) => ({ kind: "message" as const, message: m }));
+
+    if (compactionSnapshots) {
+      for (const snap of compactionSnapshots) {
+        if (snap.eventType === "compaction") {
+          items.push({ kind: "compaction" as const, snapshot: snap });
+        }
+      }
+    }
+
+    items.sort((a, b) => {
+      const tA = a.kind === "message" ? a.message.timestamp : a.snapshot.createdAt;
+      const tB = b.kind === "message" ? b.message.timestamp : b.snapshot.createdAt;
+      return new Date(tA).getTime() - new Date(tB).getTime();
+    });
+
+    return items;
+  }, [messages, compactionSnapshots]);
+
   // Pre-compute which messages start a new iteration
   const iterationStarts = useMemo(() => {
     const starts = new Set<string>();
     let prev = -1;
-    for (const msg of messages) {
-      if (msg.iteration !== prev) {
-        starts.add(msg.id);
-        prev = msg.iteration;
+    for (const item of timeline) {
+      if (item.kind === "message" && item.message.iteration !== prev) {
+        starts.add(item.message.id);
+        prev = item.message.iteration;
       }
     }
     return starts;
-  }, [messages]);
+  }, [timeline]);
 
   return (
     <div
@@ -423,13 +483,19 @@ export function SessionLogViewer({ logs, className }: SessionLogViewerProps) {
         }}
         className="flex-1 min-h-0 overflow-auto"
       >
-        {messages.length === 0 ? (
+        {timeline.length === 0 ? (
           <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
             No session data
           </div>
         ) : (
           <div className="divide-y divide-border/50">
-            {messages.map((msg) => {
+            {timeline.map((item, idx) => {
+              if (item.kind === "compaction") {
+                return (
+                  <CompactionDivider key={`compact-${item.snapshot.id}`} snapshot={item.snapshot} />
+                );
+              }
+              const msg = item.message;
               return (
                 <div key={msg.id}>
                   {iterationStarts.has(msg.id) && <IterationDivider iteration={msg.iteration} />}
