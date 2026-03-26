@@ -17,6 +17,7 @@ import {
   type ProviderSession,
   type ProviderSessionConfig,
 } from "../providers/index.ts";
+import { getContextWindowSize } from "../utils/context-window.ts";
 import { resolveCredentialPools } from "../utils/credentials.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
@@ -772,6 +773,8 @@ interface RunningTask {
   result: ProviderResult | null;
   /** Deferred cursor updates for channel_activity triggers — committed after success */
   cursorUpdates?: Array<{ channelId: string; ts: string }>;
+  /** Resolved working directory for VCS detection */
+  workingDir?: string;
 }
 
 /** Runner state for tracking concurrent tasks */
@@ -880,6 +883,90 @@ async function saveProviderSessionId(
     headers,
     body: JSON.stringify({ claudeSessionId }),
   });
+}
+
+/** Cache of tasks that already have VCS linked — prevents repeated gh pr list calls */
+const vcsDetectedTasks = new Set<string>();
+
+/** Throttle timestamps for periodic VCS checks per task */
+const vcsCheckTimestamps = new Map<string, number>();
+const VCS_CHECK_INTERVAL = 60_000; // 60 seconds
+
+/**
+ * Detect if the task's working directory has an open PR for the current branch.
+ * If found, report VCS info to the API so webhook events can link back to this task.
+ */
+async function detectVcsForTask(
+  apiUrl: string,
+  apiKey: string,
+  taskId: string,
+  workingDir: string,
+): Promise<void> {
+  try {
+    // 1. Check if inside a git repo
+    const isGit = await Bun.$`git -C ${workingDir} rev-parse --is-inside-work-tree`.quiet().text();
+    if (isGit.trim() !== "true") return;
+
+    // 2. Get current branch
+    const branch = (await Bun.$`git -C ${workingDir} branch --show-current`.quiet().text()).trim();
+    if (!branch || branch === "main" || branch === "master") return;
+
+    // 3. Get remote URL to determine provider and repo
+    const remoteUrl = (
+      await Bun.$`git -C ${workingDir} remote get-url origin`.quiet().text()
+    ).trim();
+
+    // 4. Detect provider and check for PR/MR
+    let vcsProvider: "github" | "gitlab";
+    let prJson: string;
+
+    if (remoteUrl.includes("github.com") || remoteUrl.includes("github")) {
+      vcsProvider = "github";
+      prJson = (
+        await Bun.$`gh pr list --head ${branch} --json number,url --limit 1`.quiet().text()
+      ).trim();
+    } else if (remoteUrl.includes("gitlab")) {
+      vcsProvider = "gitlab";
+      prJson = (
+        await Bun.$`glab mr list --source-branch ${branch} --json iid,web_url --per-page 1`
+          .quiet()
+          .text()
+      ).trim();
+    } else {
+      return; // Unknown provider
+    }
+
+    // 5. Parse result
+    const prs = JSON.parse(prJson);
+    if (!Array.isArray(prs) || prs.length === 0) return;
+
+    const pr = prs[0];
+    const vcsNumber = pr.number ?? pr.iid;
+    const vcsUrl = pr.url ?? pr.web_url;
+    if (!vcsNumber || !vcsUrl) return;
+
+    // 6. Extract repo from remote URL
+    const repoMatch = remoteUrl.match(/[:/]([^/]+\/[^/.]+?)(?:\.git)?$/);
+    if (!repoMatch) return;
+    const vcsRepo = repoMatch[1];
+
+    // 7. Report to API
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+    await fetch(`${apiUrl}/api/tasks/${taskId}/vcs`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ vcsProvider, vcsRepo, vcsNumber, vcsUrl }),
+    });
+
+    vcsDetectedTasks.add(taskId);
+    console.log(
+      `[VCS] Linked task ${taskId.slice(0, 8)} to ${vcsProvider} ${vcsRepo}#${vcsNumber}`,
+    );
+  } catch {
+    // Fire-and-forget — detection failure should never block task execution
+  }
 }
 
 /** Save provider session ID on the active session (for pool tasks where realTaskId is unknown) */
@@ -1381,6 +1468,32 @@ async function fetchEpicTaskContext(
 }
 
 /** Spawn a provider session without blocking - returns immediately with tracking info */
+/**
+ * Extract a key field from tool arguments for event tracking.
+ * Returns a single-entry record with the most identifying arg for the tool.
+ */
+function extractToolKey(toolName: string, args: unknown): Record<string, string | undefined> {
+  const a = args as Record<string, unknown>;
+  switch (toolName) {
+    case "Read":
+    case "Edit":
+    case "Write":
+      return { filePath: a.file_path as string | undefined };
+    case "Bash":
+      return { description: a.description as string | undefined };
+    case "Grep":
+      return { pattern: a.pattern as string | undefined };
+    case "Glob":
+      return { pattern: a.pattern as string | undefined };
+    case "Skill":
+      return { skillName: a.skill as string | undefined };
+    case "Agent":
+      return { description: a.description as string | undefined };
+    default:
+      return {};
+  }
+}
+
 async function spawnProviderProcess(
   adapter: ReturnType<typeof createProviderAdapter>,
   opts: {
@@ -1439,9 +1552,60 @@ async function spawnProviderProcess(
   const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now(), partialLine: "" };
   const shouldStream = opts.apiUrl && opts.runnerSessionId && opts.iteration;
 
+  // Event buffer (flushes to API periodically)
+  interface BufferedEvent {
+    category: string;
+    event: string;
+    status?: string;
+    source: string;
+    agentId?: string;
+    taskId?: string;
+    sessionId?: string;
+    parentEventId?: string;
+    numericValue?: number;
+    durationMs?: number;
+    data?: Record<string, unknown>;
+  }
+
+  const eventBuffer: BufferedEvent[] = [];
+  const EVENT_FLUSH_INTERVAL_MS = 5000;
+  const EVENT_BUFFER_MAX = 50;
+
+  function bufferEvent(evt: BufferedEvent) {
+    eventBuffer.push(evt);
+    if (eventBuffer.length >= EVENT_BUFFER_MAX) {
+      flushEvents();
+    }
+  }
+
+  async function flushEvents() {
+    if (eventBuffer.length === 0) return;
+    const batch = eventBuffer.splice(0);
+    try {
+      await fetch(`${opts.apiUrl}/api/events/batch`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${opts.apiKey}`,
+          "X-Agent-ID": opts.agentId,
+        },
+        body: JSON.stringify({ events: batch }),
+      });
+    } catch {
+      // Non-blocking — event loss is acceptable
+    }
+  }
+
+  const eventFlushTimer = setInterval(flushEvents, EVENT_FLUSH_INTERVAL_MS);
+  const sessionStartTime = Date.now();
+
   // Auto-progress throttle: don't update more than once per 3 seconds
   let lastProgressTime = 0;
   const PROGRESS_THROTTLE_MS = 3000;
+
+  // Context usage throttle: max 1 snapshot per 30 seconds
+  let lastContextPostTime = 0;
+  const CONTEXT_THROTTLE_MS = 30_000;
 
   session.onEvent((event) => {
     switch (event.type) {
@@ -1462,6 +1626,16 @@ async function spawnProviderProcess(
             console.warn(`[runner] Failed to save provider session on active session: ${err}`),
           );
         }
+
+        // Buffer session start event
+        bufferEvent({
+          category: "session",
+          event: "session.start",
+          source: "worker",
+          agentId: opts.agentId,
+          taskId: effectiveTaskId,
+          sessionId: event.sessionId,
+        });
         break;
       case "tool_start": {
         // Auto-progress: report tool activity as task progress (throttled)
@@ -1475,13 +1649,105 @@ async function spawnProviderProcess(
             );
           }
         }
+
+        // Buffer tool event
+        bufferEvent({
+          category: "tool",
+          event: "tool.start",
+          source: "worker",
+          agentId: opts.agentId,
+          taskId: effectiveTaskId,
+          sessionId: opts.runnerSessionId,
+          data: {
+            toolName: event.toolName,
+            toolCallId: event.toolCallId,
+            ...extractToolKey(event.toolName, event.args),
+            clientTimestamp: new Date().toISOString(),
+          },
+        });
+
+        // Also emit skill event when tool is Skill
+        if (event.toolName === "Skill") {
+          const args = event.args as Record<string, unknown>;
+          bufferEvent({
+            category: "skill",
+            event: "skill.invoke",
+            source: "worker",
+            agentId: opts.agentId,
+            taskId: effectiveTaskId,
+            sessionId: opts.runnerSessionId,
+            data: {
+              skillName: args.skill as string,
+              clientTimestamp: new Date().toISOString(),
+            },
+          });
+        }
         break;
       }
       case "result":
         // Cost save is handled in waitForCompletion().then() to ensure
         // it completes before the process exits (fire-and-forget here
         // races with container shutdown).
+
+        // Buffer session end event
+        bufferEvent({
+          category: "session",
+          event: "session.end",
+          source: "worker",
+          agentId: opts.agentId,
+          taskId: effectiveTaskId,
+          sessionId: opts.runnerSessionId,
+          status: event.isError ? "error" : "ok",
+          durationMs: Date.now() - sessionStartTime,
+          data: {
+            model: event.cost.model,
+            totalCostUsd: event.cost.totalCostUsd,
+            inputTokens: event.cost.inputTokens,
+            outputTokens: event.cost.outputTokens,
+          },
+        });
         break;
+      case "context_usage": {
+        const now2 = Date.now();
+        if (now2 - lastContextPostTime >= CONTEXT_THROTTLE_MS) {
+          lastContextPostTime = now2;
+          fetch(`${opts.apiUrl}/api/tasks/${realTaskId}/context`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Agent-ID": opts.agentId,
+              Authorization: `Bearer ${opts.apiKey}`,
+            },
+            body: JSON.stringify({
+              eventType: "progress",
+              sessionId: opts.runnerSessionId,
+              contextUsedTokens: event.contextUsedTokens,
+              contextTotalTokens: event.contextTotalTokens,
+              contextPercent: event.contextPercent,
+            }),
+          }).catch(() => {});
+        }
+        break;
+      }
+      case "compaction": {
+        // Always record compaction events (no throttle)
+        fetch(`${opts.apiUrl}/api/tasks/${realTaskId}/context`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Agent-ID": opts.agentId,
+            Authorization: `Bearer ${opts.apiKey}`,
+          },
+          body: JSON.stringify({
+            eventType: "compaction",
+            sessionId: opts.runnerSessionId,
+            preCompactTokens: event.preCompactTokens,
+            compactTrigger: event.compactTrigger,
+            contextTotalTokens: event.contextTotalTokens,
+          }),
+        }).catch(() => {});
+        break;
+      }
       case "raw_log":
         prettyPrintLine(event.content, opts.role);
         if (shouldStream) {
@@ -1510,6 +1776,10 @@ async function spawnProviderProcess(
 
   // Create promise that handles completion
   const promise: Promise<ProviderResult> = session.waitForCompletion().then(async (result) => {
+    // Stop event flush timer and do a final flush
+    clearInterval(eventFlushTimer);
+    await flushEvents();
+
     // Final log flush
     if (shouldStream && logBuffer.lines.length > 0) {
       await flushLogBuffer(logBuffer, {
@@ -1560,6 +1830,25 @@ async function spawnProviderProcess(
       } catch (err) {
         console.warn(`[runner] Failed to save cost: ${err}`);
       }
+    }
+
+    // Post completion context usage snapshot
+    if (result.cost && realTaskId) {
+      fetch(`${opts.apiUrl}/api/tasks/${realTaskId}/context`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Agent-ID": opts.agentId,
+          Authorization: `Bearer ${opts.apiKey}`,
+        },
+        body: JSON.stringify({
+          eventType: "completion",
+          sessionId: opts.runnerSessionId,
+          cumulativeInputTokens: result.cost.inputTokens ?? 0,
+          cumulativeOutputTokens: result.cost.outputTokens ?? 0,
+          contextTotalTokens: getContextWindowSize(result.cost.model || "default"),
+        }),
+      }).catch(() => {});
     }
 
     return result;
@@ -1646,6 +1935,7 @@ async function checkCompletedProcesses(
     result: ProviderResult;
     triggerType?: string;
     cursorUpdates?: Array<{ channelId: string; ts: string }>;
+    workingDir?: string;
   }> = [];
 
   for (const [taskId, task] of state.activeTasks) {
@@ -1659,16 +1949,22 @@ async function checkCompletedProcesses(
         result: task.result,
         triggerType: task.triggerType,
         cursorUpdates: task.cursorUpdates,
+        workingDir: task.workingDir,
       });
     }
   }
 
   // Remove completed tasks from the map and ensure they're marked as finished
-  for (const { taskId, result, cursorUpdates } of completedTasks) {
+  for (const { taskId, result, cursorUpdates, workingDir } of completedTasks) {
     state.activeTasks.delete(taskId);
 
     if (apiConfig) {
       removeActiveSession(apiConfig, taskId);
+    }
+
+    // Detect VCS before finishing — last chance to link a PR
+    if (apiConfig && workingDir && !vcsDetectedTasks.has(taskId)) {
+      await detectVcsForTask(apiConfig.apiUrl, apiConfig.apiKey, taskId, workingDir);
     }
 
     // Call the finish API to ensure task status is updated
@@ -2415,6 +2711,18 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       // Check for completed processes first and ensure tasks are marked as finished
       await checkCompletedProcesses(state, role, apiConfig);
 
+      // Periodic VCS detection for running tasks (fire-and-forget, throttled per task)
+      const now = Date.now();
+      for (const [taskId, task] of state.activeTasks) {
+        if (vcsDetectedTasks.has(taskId)) continue;
+        const lastCheck = vcsCheckTimestamps.get(taskId) ?? 0;
+        if (now - lastCheck < VCS_CHECK_INTERVAL) continue;
+        if (!task.workingDir) continue;
+
+        vcsCheckTimestamps.set(taskId, now);
+        detectVcsForTask(apiUrl, apiKey, taskId, task.workingDir);
+      }
+
       // Check for cancelled tasks and signal their subprocesses
       if (state.activeTasks.size > 0) {
         for (const [taskId, task] of state.activeTasks) {
@@ -2716,6 +3024,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
           // Attach trigger metadata for logging
           runningTask.triggerType = trigger.type;
+          runningTask.workingDir = effectiveCwd;
 
           // Attach deferred cursor updates for channel_activity triggers
           if (trigger.type === "channel_activity" && trigger.cursorUpdates) {

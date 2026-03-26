@@ -143,6 +143,12 @@ export const AgentTaskSchema = z.object({
 
   // Structured output schema (optional — JSON Schema that task output must conform to)
   outputSchema: z.record(z.string(), z.unknown()).optional(),
+
+  // Context usage aggregates
+  compactionCount: z.number().int().min(0).optional(),
+  peakContextPercent: z.number().min(0).max(100).optional(),
+  totalContextTokensUsed: z.number().int().min(0).optional(),
+  contextWindowSize: z.number().int().min(0).optional(),
 });
 
 export const AgentStatusSchema = z.enum(["idle", "busy", "offline"]);
@@ -362,6 +368,76 @@ export const SessionCostSchema = z.object({
 });
 
 export type SessionCost = z.infer<typeof SessionCostSchema>;
+
+// ============================================================================
+// Events
+// ============================================================================
+
+export const EventCategorySchema = z.enum([
+  "tool",
+  "skill",
+  "session",
+  "api",
+  "task",
+  "workflow",
+  "system",
+]);
+
+export const EventStatusSchema = z.enum(["ok", "error", "timeout", "skipped"]);
+
+export const EventSourceSchema = z.enum(["worker", "api", "hook", "scheduler", "cli"]);
+
+export const EventNameSchema = z.enum([
+  // Tool events
+  "tool.start",
+  "tool.end",
+  // Skill events
+  "skill.invoke",
+  "skill.complete",
+  // Session events
+  "session.start",
+  "session.end",
+  "session.resume",
+  "session.cost",
+  // API events
+  "api.request",
+  "api.error",
+  // Task events
+  "task.poll",
+  "task.assign",
+  "task.timeout",
+  // Workflow events
+  "workflow.step.start",
+  "workflow.step.end",
+  "workflow.run.start",
+  "workflow.run.end",
+  // System events
+  "system.boot",
+  "system.migration",
+  "system.error",
+]);
+
+export const SwarmEventSchema = z.object({
+  id: z.uuid(),
+  category: EventCategorySchema,
+  event: EventNameSchema,
+  status: EventStatusSchema,
+  source: EventSourceSchema,
+  agentId: z.string().optional(),
+  taskId: z.string().optional(),
+  sessionId: z.string().optional(),
+  parentEventId: z.string().optional(),
+  numericValue: z.number().optional(),
+  durationMs: z.number().int().optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
+  createdAt: z.iso.datetime(),
+});
+
+export type EventCategory = z.infer<typeof EventCategorySchema>;
+export type EventStatus = z.infer<typeof EventStatusSchema>;
+export type EventSource = z.infer<typeof EventSourceSchema>;
+export type EventName = z.infer<typeof EventNameSchema>;
+export type SwarmEvent = z.infer<typeof SwarmEventSchema>;
 
 // ============================================================================
 // Scheduled Task Types
@@ -966,3 +1042,37 @@ export const McpServerWithInstallInfoSchema = McpServerSchema.extend({
   installedAt: z.string(),
 });
 export type McpServerWithInstallInfo = z.infer<typeof McpServerWithInstallInfoSchema>;
+
+// ============================================================================
+// Context Usage Tracking Types
+// ============================================================================
+
+export const ContextSnapshotEventTypeSchema = z.enum(["progress", "compaction", "completion"]);
+export type ContextSnapshotEventType = z.infer<typeof ContextSnapshotEventTypeSchema>;
+
+export const ContextSnapshotSchema = z.object({
+  id: z.uuid(),
+  taskId: z.uuid(),
+  agentId: z.uuid(),
+  sessionId: z.string(),
+
+  // Context window state
+  contextUsedTokens: z.number().int().min(0).optional(),
+  contextTotalTokens: z.number().int().min(0).optional(),
+  contextPercent: z.number().min(0).max(100).optional(),
+
+  // Event metadata
+  eventType: ContextSnapshotEventTypeSchema,
+
+  // Compaction-specific (null for non-compaction)
+  compactTrigger: z.enum(["auto", "manual"]).optional(),
+  preCompactTokens: z.number().int().min(0).optional(),
+
+  // Cumulative counters at this point
+  cumulativeInputTokens: z.number().int().min(0).default(0),
+  cumulativeOutputTokens: z.number().int().min(0).default(0),
+
+  createdAt: z.iso.datetime(),
+});
+
+export type ContextSnapshot = z.infer<typeof ContextSnapshotSchema>;

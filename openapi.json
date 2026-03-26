@@ -1179,6 +1179,138 @@
         }
       }
     },
+    "/api/tasks/{id}/context": {
+      "post": {
+        "summary": "Record a context usage snapshot for a task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "eventType": {
+                    "type": "string",
+                    "enum": [
+                      "progress",
+                      "compaction",
+                      "completion"
+                    ]
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "contextUsedTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "contextTotalTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "contextPercent": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "compactTrigger": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "manual"
+                    ]
+                  },
+                  "preCompactTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "cumulativeInputTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "cumulativeOutputTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "eventType",
+                  "sessionId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Snapshot recorded"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "404": {
+            "description": "Task not found"
+          }
+        }
+      },
+      "get": {
+        "summary": "Get context usage history for a task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Context snapshot history"
+          },
+          "404": {
+            "description": "Task not found"
+          }
+        }
+      }
+    },
     "/api/db-query": {
       "post": {
         "summary": "Execute a read-only SQL query",
@@ -1809,6 +1941,485 @@
           },
           "404": {
             "description": "Channel not found"
+          }
+        }
+      }
+    },
+    "/api/events": {
+      "post": {
+        "summary": "Store a single event",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "tool",
+                      "skill",
+                      "session",
+                      "api",
+                      "task",
+                      "workflow",
+                      "system"
+                    ]
+                  },
+                  "event": {
+                    "type": "string",
+                    "enum": [
+                      "tool.start",
+                      "tool.end",
+                      "skill.invoke",
+                      "skill.complete",
+                      "session.start",
+                      "session.end",
+                      "session.resume",
+                      "session.cost",
+                      "api.request",
+                      "api.error",
+                      "task.poll",
+                      "task.assign",
+                      "task.timeout",
+                      "workflow.step.start",
+                      "workflow.step.end",
+                      "workflow.run.start",
+                      "workflow.run.end",
+                      "system.boot",
+                      "system.migration",
+                      "system.error"
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ok",
+                      "error",
+                      "timeout",
+                      "skipped"
+                    ]
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "worker",
+                      "api",
+                      "hook",
+                      "scheduler",
+                      "cli"
+                    ]
+                  },
+                  "agentId": {
+                    "type": "string"
+                  },
+                  "taskId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "parentEventId": {
+                    "type": "string"
+                  },
+                  "numericValue": {
+                    "type": "number"
+                  },
+                  "durationMs": {
+                    "type": "integer"
+                  },
+                  "data": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "category",
+                  "event",
+                  "source"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Event stored"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      },
+      "get": {
+        "summary": "Query events with filters",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "tool",
+                "skill",
+                "session",
+                "api",
+                "task",
+                "workflow",
+                "system"
+              ]
+            },
+            "required": false,
+            "name": "category",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "tool.start",
+                "tool.end",
+                "skill.invoke",
+                "skill.complete",
+                "session.start",
+                "session.end",
+                "session.resume",
+                "session.cost",
+                "api.request",
+                "api.error",
+                "task.poll",
+                "task.assign",
+                "task.timeout",
+                "workflow.step.start",
+                "workflow.step.end",
+                "workflow.run.start",
+                "workflow.run.end",
+                "system.boot",
+                "system.migration",
+                "system.error"
+              ]
+            },
+            "required": false,
+            "name": "event",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ok",
+                "error",
+                "timeout",
+                "skipped"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "worker",
+                "api",
+                "hook",
+                "scheduler",
+                "cli"
+              ]
+            },
+            "required": false,
+            "name": "source",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "taskId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "sessionId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "since",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "until",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of events"
+          }
+        }
+      }
+    },
+    "/api/events/batch": {
+      "post": {
+        "summary": "Store multiple events in a batch",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "category": {
+                          "type": "string",
+                          "enum": [
+                            "tool",
+                            "skill",
+                            "session",
+                            "api",
+                            "task",
+                            "workflow",
+                            "system"
+                          ]
+                        },
+                        "event": {
+                          "type": "string",
+                          "enum": [
+                            "tool.start",
+                            "tool.end",
+                            "skill.invoke",
+                            "skill.complete",
+                            "session.start",
+                            "session.end",
+                            "session.resume",
+                            "session.cost",
+                            "api.request",
+                            "api.error",
+                            "task.poll",
+                            "task.assign",
+                            "task.timeout",
+                            "workflow.step.start",
+                            "workflow.step.end",
+                            "workflow.run.start",
+                            "workflow.run.end",
+                            "system.boot",
+                            "system.migration",
+                            "system.error"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "ok",
+                            "error",
+                            "timeout",
+                            "skipped"
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "worker",
+                            "api",
+                            "hook",
+                            "scheduler",
+                            "cli"
+                          ]
+                        },
+                        "agentId": {
+                          "type": "string"
+                        },
+                        "taskId": {
+                          "type": "string"
+                        },
+                        "sessionId": {
+                          "type": "string"
+                        },
+                        "parentEventId": {
+                          "type": "string"
+                        },
+                        "numericValue": {
+                          "type": "number"
+                        },
+                        "durationMs": {
+                          "type": "integer"
+                        },
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "category",
+                        "event",
+                        "source"
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 500
+                  }
+                },
+                "required": [
+                  "events"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Events stored"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/events/counts": {
+      "get": {
+        "summary": "Get event counts grouped by event name",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "tool",
+                "skill",
+                "session",
+                "api",
+                "task",
+                "workflow",
+                "system"
+              ]
+            },
+            "required": false,
+            "name": "category",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "worker",
+                "api",
+                "hook",
+                "scheduler",
+                "cli"
+              ]
+            },
+            "required": false,
+            "name": "source",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "taskId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "sessionId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "since",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "until",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event counts"
           }
         }
       }
@@ -4974,6 +5585,72 @@
           },
           "403": {
             "description": "Task belongs to another agent"
+          },
+          "404": {
+            "description": "Task not found"
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/vcs": {
+      "patch": {
+        "summary": "Update VCS (PR/MR) info for a task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "vcsProvider": {
+                    "type": "string",
+                    "enum": [
+                      "github",
+                      "gitlab"
+                    ]
+                  },
+                  "vcsRepo": {
+                    "type": "string"
+                  },
+                  "vcsNumber": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "vcsUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "vcsProvider",
+                  "vcsRepo",
+                  "vcsNumber",
+                  "vcsUrl"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "VCS info updated"
           },
           "404": {
             "description": "Task not found"

@@ -12,6 +12,7 @@
     "debug",
     "ecosystem",
     "epics",
+    "events",
     "mcp-servers",
     "memory",
     "poll",

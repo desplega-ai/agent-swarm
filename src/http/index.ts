@@ -19,10 +19,12 @@ import { handleActiveSessions } from "./active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
 import { handleApprovalRequests } from "./approval-requests";
 import { handleConfig } from "./config";
+import { handleContext } from "./context";
 import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
 import { handleDbQuery } from "./db-query";
 import { handleEcosystem } from "./ecosystem";
 import { handleEpics } from "./epics";
+import { handleEvents } from "./events";
 import { handleMcp } from "./mcp";
 import { handleMcpServers } from "./mcp-servers";
 import { handleMemory } from "./memory";
@@ -103,6 +105,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleTrackers(req, res, pathSegments),
     () => handleWebhooks(req, res, pathSegments),
     () => handleAgentsRest(req, res, pathSegments, queryParams, myAgentId),
+    () => handleContext(req, res, pathSegments, queryParams, myAgentId),
     () => handleTasks(req, res, pathSegments, queryParams, myAgentId),
     () => handleStats(req, res, pathSegments, queryParams),
     () => handleActiveSessions(req, res, pathSegments, queryParams, myAgentId),
@@ -117,6 +120,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
     () => handleMcpServers(req, res, pathSegments, queryParams),
     () => handleMemory(req, res, pathSegments, myAgentId),
+    () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
     () => handleMcp(req, res, transports),
   ];
 

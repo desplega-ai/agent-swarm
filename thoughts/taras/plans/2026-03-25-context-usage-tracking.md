@@ -2,7 +2,7 @@
 date: 2026-03-25T18:00:00Z
 topic: "Context Window Usage Tracking"
 type: plan
-status: draft
+status: completed
 research: thoughts/taras/research/2026-03-25-context-usage-tracking.md
 ---
 
@@ -174,11 +174,11 @@ export function computeContextUsed(usage: {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] DB boundary check: `bash scripts/check-db-boundary.sh`
-- [ ] Fresh DB works: `rm -f agent-swarm-db.sqlite* && bun run src/http.ts` (starts without errors, Ctrl+C)
-- [ ] Existing DB migrates: `bun run src/http.ts` against a pre-existing DB (starts without errors)
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] DB boundary check: `bash scripts/check-db-boundary.sh`
+- [x] Fresh DB works: `rm -f agent-swarm-db.sqlite* && bun run src/http.ts` (starts without errors, Ctrl+C)
+- [x] Existing DB migrates: `bun run src/http.ts` against a pre-existing DB (starts without errors)
 
 #### Manual Verification:
 - [ ] Inspect the created DB: `sqlite3 agent-swarm-db.sqlite ".schema task_context_snapshots"` — table exists with correct columns
@@ -274,10 +274,10 @@ Handler logic:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] OpenAPI spec regenerates: `bun run docs:openapi` (no errors)
-- [ ] DB boundary check: `bash scripts/check-db-boundary.sh`
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] OpenAPI spec regenerates: `bun run docs:openapi` (no errors)
+- [x] DB boundary check: `bash scripts/check-db-boundary.sh`
 
 #### Manual Verification:
 - [ ] POST a test snapshot: `curl -s -X POST -H "Authorization: Bearer 123123" -H "X-Agent-ID: <test-uuid>" -H "Content-Type: application/json" http://localhost:3013/api/tasks/<task-id>/context -d '{"eventType":"progress","sessionId":"test-123","contextUsedTokens":50000,"contextTotalTokens":200000,"contextPercent":25.0}'` — returns `{ ok: true }`
@@ -387,10 +387,10 @@ if (json.model) {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] DB boundary check: `bash scripts/check-db-boundary.sh`
-- [ ] Unit tests pass: `bun test`
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] DB boundary check: `bash scripts/check-db-boundary.sh`
+- [x] Unit tests pass: `bun test`
 
 #### Manual Verification:
 - [ ] Verify new event types are emitted: temporarily add a `console.log` in the runner's `onEvent` handler for `context_usage` and `compaction` events, run a short task, confirm events appear in worker logs
@@ -485,9 +485,9 @@ if (config.taskId && usage) {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] DB boundary check: `bash scripts/check-db-boundary.sh`
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] DB boundary check: `bash scripts/check-db-boundary.sh`
 
 #### Manual Verification:
 - [ ] If a Pi-mono worker is available: run a task and verify snapshots appear in `GET /api/tasks/:id/context`
@@ -587,10 +587,10 @@ if (result.cost && realTaskId) {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] DB boundary check: `bash scripts/check-db-boundary.sh`
-- [ ] Unit tests pass: `bun test`
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] DB boundary check: `bash scripts/check-db-boundary.sh`
+- [x] Unit tests pass: `bun test`
 
 #### Manual Verification:
 - [ ] Run a short Claude task via Docker worker against local API
@@ -614,8 +614,8 @@ No new code — this phase is verification only.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] All checks pass: `bun run tsc:check && bun run lint:fix && bun test && bash scripts/check-db-boundary.sh`
-- [ ] OpenAPI spec is fresh: `bun run docs:openapi` (no uncommitted changes to `openapi.json`)
+- [x] All checks pass: `bun run tsc:check && bun run lint:fix && bun test && bash scripts/check-db-boundary.sh`
+- [x] OpenAPI spec is fresh: `bun run docs:openapi` (no uncommitted changes to `openapi.json`)
 
 #### Manual Verification:
 
@@ -667,17 +667,17 @@ _Verified against codebase via 4 parallel code-analysis agents checking: claude-
 
 ### Critical
 
-- [ ] **`contextTotalTokens` DB/API schema mismatch** — The migration defines `contextTotalTokens INTEGER NOT NULL` (line 100) but the POST endpoint body schema makes it optional: `contextTotalTokens: z.number().int().min(0).optional()` (line 218). Any event posted without `contextTotalTokens` will cause a runtime SQL INSERT failure. **Fix:** Either make `contextTotalTokens` required in the Zod body schema (recommended — all three event producers always provide it), or make the DB column nullable.
+- [x] **`contextTotalTokens` DB/API schema mismatch** — _QA 2026-03-26: RESOLVED. DB column is nullable (`INTEGER` without `NOT NULL`), Zod schema is `.optional()`, `ContextSnapshotRow` has `number | null`. Consistent across all layers._
 
 ### Important
 
-- [ ] **ProviderEvent union description is incomplete** — Phase 3, Step 1 states the union "currently has `session_init`, `result`, `tool_start`, `raw_log`, `raw_stderr`" (5 types). The actual union in `src/providers/types.ts:18-27` has **9 members**: `session_init`, `message`, `tool_start`, `tool_end`, `result`, `error`, `raw_log`, `raw_stderr`, `custom`. The 4 omitted types (`message`, `tool_end`, `error`, `custom`) won't break anything, but the incomplete description could confuse the implementer about the union's shape.
+- [x] **ProviderEvent union description is incomplete** — _QA 2026-03-26: RESOLVED. Implementation correctly extends the full union (now 11 members including `context_usage` and `compaction`). Plan description was inaccurate but implementation was correct._
 
-- [ ] **`ctx.sessionManager?.getSessionId?.()` likely doesn't exist in pi-mono** — Phase 4 uses this call in 3 places (context, tool_result, session_shutdown handlers) with fallback `?? 'pi-${config.taskId}'`. However, the pi-mono extension only ever calls `ctx.sessionManager.getSessionFile?.()` (line 612) — there's no evidence `getSessionId()` exists on the session manager. The optional chaining prevents crashes (fallback always triggers), but the code is misleading dead code. **Fix:** Either verify `getSessionId()` exists in the pi-mono type definitions, or simplify to just use `pi-${config.taskId}` directly and drop the dead call.
+- [x] **`ctx.sessionManager?.getSessionId?.()` likely doesn't exist in pi-mono** — _QA 2026-03-26: RESOLVED. Implementation uses `pi-${config.taskId}` directly in all 3 locations. Dead `getSessionId` call was not included._
 
-- [ ] **Snapshot `id` generation unspecified** — The `task_context_snapshots` table has `id TEXT PRIMARY KEY` but neither the migration, the DB function spec (`createContextSnapshot`), nor the API handler specifies how IDs are generated (UUID, nanoid, `crypto.randomUUID()`). The implementer needs to know which ID strategy to use. Recommend `crypto.randomUUID()` to match the pattern used elsewhere in `db.ts`.
+- [x] **Snapshot `id` generation unspecified** — _QA 2026-03-26: RESOLVED. Uses `crypto.randomUUID()` in `createContextSnapshot()` at db.ts:7493, matching existing codebase pattern._
 
-- [ ] **`.then()` handler line number significantly off** — Phase 5, Step 2 references "the `.then()` handler on `waitForCompletion()` (around line 1552)". Actual location is **line 1512** (40 lines earlier). Similarly, "after `saveCostData` (line ~1563)" is actually line 1555. Could misdirect the implementer. Update line references or add code-context anchors instead.
+- [x] **`.then()` handler line number significantly off** — _QA 2026-03-26: RESOLVED. Implementation found correct locations regardless of line number drift. Completion post is at runner.ts:1611-1628, after saveCostData._
 
 ### Resolved
 
@@ -689,3 +689,57 @@ _Verified against codebase via 4 parallel code-analysis agents checking: claude-
 - [x] Claude adapter line numbers for assistant handler (317-334), result handler (285), and class structure all verified accurate
 - [x] Runner `onEvent` handler at line 1446 and `PROGRESS_THROTTLE_MS` at line 1444 verified
 - [x] `SessionCostRow`/`rowToSessionCost` at db.ts:3251-3285, `AgentTaskRow` at line 674, `SessionCostSchema` at types.ts:347 — all verified
+
+---
+
+## QA Report
+
+_QA: 2026-03-26 by Claude (Critical autonomy mode)_
+
+_Verified via 5 parallel agents: Phase 1 (schema/types), Phase 2 (API endpoints), Phase 3 (Claude adapter), Phase 4-5 (Pi-mono + runner), Automated checks._
+
+### Automated Checks: ALL PASS
+
+| Check | Result |
+|-------|--------|
+| `bun run tsc:check` | PASS — no type errors |
+| `bun run lint:fix` | PASS — 387 files, no fixes needed |
+| `bun test` | PASS — 2024 pass, 0 fail |
+| `bash scripts/check-db-boundary.sh` | PASS |
+| `bun run docs:openapi` | PASS — spec up to date |
+
+### Phase Verification: ALL PASS
+
+- **Phase 1**: Migration, Zod schemas, DB functions, context window utility — all correct
+- **Phase 2**: POST/GET routes, handler registration, OpenAPI, task enrichment — all correct
+- **Phase 3**: ProviderEvent types, context extraction, compaction detection, window tracking — all correct
+- **Phase 4**: Pi-mono context/tool_result/shutdown handlers, throttling, session ID — all correct
+- **Phase 5**: Runner context_usage/compaction/completion cases, throttling, headers — all correct
+- **Phase 6**: Manual E2E — **PASS** (see below)
+
+### Review Errata: ALL RESOLVED
+
+All 5 errata items (1 critical, 4 important) were addressed in the implementation.
+
+### E2E Test Results (2026-03-26)
+
+**Setup**: Clean DB → API on port 3173 → Docker worker (`agent-swarm-worker:latest`) → trivial task ("Say hello and list 3 fun facts about cats")
+
+**Task**: `d71b8153-0533-4844-8410-bb1f226363c1` — completed in ~20s
+
+| Check | Result |
+|-------|--------|
+| Task has `compactionCount` | PASS — `0` (short task, no compaction expected) |
+| Task has `peakContextPercent` | PASS — `11.73%` |
+| Task has `contextWindowSize` | PASS — `200000` |
+| Context snapshots exist | PASS — 2 snapshots |
+| At least one `progress` snapshot with `contextPercent > 0` | PASS — `11.73%`, `23469` tokens used |
+| A `completion` snapshot exists | PASS |
+| `peakContextPercent` is reasonable (> 0, < 100) | PASS — `11.73%` |
+
+**Minor observation**: The `completion` snapshot has `contextUsedTokens: null` and `contextPercent: null`. This is because the runner's completion post (runner.ts:1611-1628) only sends `cumulativeInputTokens`, `cumulativeOutputTokens`, and `contextTotalTokens` — it does not include the final context used/percent. Not a bug (the values are optional), but a possible enhancement to capture final usage from the last `context_usage` event.
+
+### Outstanding
+
+- [x] **Manual E2E performed** — Phase 6 Docker E2E completed successfully
+- [ ] **Completion snapshot enhancement** — Consider populating `contextUsedTokens`/`contextPercent` on completion events (low priority, tracked as follow-up)
