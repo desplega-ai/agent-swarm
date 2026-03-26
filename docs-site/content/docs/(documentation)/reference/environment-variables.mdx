@@ -27,10 +27,39 @@ Complete reference for all environment variables used by Agent Swarm.
 
 ## Docker Worker Variables
 
+### Harness Provider
+
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `CLAUDE_CODE_OAUTH_TOKEN` | Yes | — | OAuth token for Claude CLI. Supports comma-separated values for [multi-credential load balancing](#multi-credential-support) |
-| `ANTHROPIC_API_KEY` | Alt | — | Alternative to `CLAUDE_CODE_OAUTH_TOKEN`. Also supports comma-separated values |
+| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code) or `pi` (pi-mono). See [Harness Configuration](/docs/guides/harness-configuration) |
+
+### Credentials
+
+Which credentials you need depends on your selected harness provider:
+
+**Claude Code** (`HARNESS_PROVIDER=claude`, default):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `CLAUDE_CODE_OAUTH_TOKEN` | Yes* | — | OAuth token for Claude CLI. Supports comma-separated values for [multi-credential load balancing](#multi-credential-support) |
+| `ANTHROPIC_API_KEY` | Alt* | — | Alternative to `CLAUDE_CODE_OAUTH_TOKEN`. Also supports comma-separated values |
+| `CLAUDE_BINARY` | No | `claude` | Path to Claude CLI binary (if not in `$PATH`) |
+
+\* One of `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` is required.
+
+**pi-mono** (`HARNESS_PROVIDER=pi`):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models via pi-mono |
+| `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key for multi-provider model access |
+
+\* At least one credential source is required (API key or `~/.pi/agent/auth.json`).
+
+### General Worker Settings
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
 | `API_KEY` | Yes | — | API key for MCP server |
 | `AGENT_ID` | No | Auto-generated | Agent UUID. Keep stable for task resume |
 | `AGENT_ROLE` | No | `worker` | Role: `worker` or `lead` |
@@ -48,7 +77,6 @@ Complete reference for all environment variables used by Agent Swarm.
 | `WORKER1_PORT` | No | `3021` | Host port for worker-1 service. Example — see `LEAD_PORT`. |
 | `WORKER2_PORT` | No | `3022` | Host port for worker-2 service. Example — see `LEAD_PORT`. |
 | `PM2_HOME` | No | `/workspace/.pm2` | PM2 state directory |
-| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code) or `pi` (pi-mono) |
 | `TEMPLATE_ID` | No | — | Template for initial profile on first boot (e.g., `official/coder`) |
 | `TEMPLATE_REGISTRY_URL` | No | `https://templates.agent-swarm.dev` | URL of the templates registry |
 

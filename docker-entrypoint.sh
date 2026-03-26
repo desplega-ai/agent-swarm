@@ -309,14 +309,14 @@ if [ -n "$AGENT_ID" ] && [ -n "$API_KEY" ]; then
           if $srv.transport == "stdio" then
             .mcpServers[$srv.name] = {
               command: $srv.command,
-              args: ($srv.args | fromjson // []),
+              args: (if $srv.args then ($srv.args | fromjson) else [] end),
               env: ($srv.resolvedEnv // {})
             }
           elif ($srv.transport == "http" or $srv.transport == "sse") then
             .mcpServers[$srv.name] = {
               type: $srv.transport,
               url: $srv.url,
-              headers: (($srv.headers | fromjson // {}) * ($srv.resolvedHeaders // {}))
+              headers: ((if $srv.headers then ($srv.headers | fromjson) else {} end) * ($srv.resolvedHeaders // {}))
             }
           else . end
         )
