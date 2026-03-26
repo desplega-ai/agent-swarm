@@ -207,6 +207,17 @@ class PiMonoSession implements ProviderSession {
             this.lastEmittedMessage = text;
           }
         }
+        // Emit context_usage for dashboard tracking
+        const usage = this.agentSession.getContextUsage();
+        if (usage && usage.tokens != null) {
+          this.emit({
+            type: "context_usage",
+            contextUsedTokens: usage.tokens,
+            contextTotalTokens: usage.contextWindow,
+            contextPercent: usage.percent ?? 0,
+            outputTokens: 0,
+          });
+        }
         break;
       }
       case "tool_execution_start": {
@@ -223,6 +234,13 @@ class PiMonoSession implements ProviderSession {
               model,
             },
           }),
+        });
+        // Emit normalized tool_start for runner auto-progress
+        this.emit({
+          type: "tool_start",
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          args: event.args,
         });
         break;
       }
@@ -243,6 +261,13 @@ class PiMonoSession implements ProviderSession {
               ],
             },
           }),
+        });
+        // Emit normalized tool_end
+        this.emit({
+          type: "tool_end",
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          result: event.result,
         });
         break;
       case "auto_retry_start":

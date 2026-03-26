@@ -305,6 +305,12 @@ export function humanizeToolName(name: string): string {
 export function toolCallToProgress(toolName: string, args: unknown): string | null {
   if (SKIP_PROGRESS_TOOLS.has(toolName)) return null;
 
+  // Normalize: pi-mono uses lowercase ("read"), Claude uses PascalCase ("Read")
+  const normalized =
+    toolName.startsWith("mcp__") || toolName.includes("_")
+      ? toolName
+      : toolName.charAt(0).toUpperCase() + toolName.slice(1);
+
   const a = args as Record<string, unknown>;
   const shortPath = (p: unknown) => {
     if (typeof p !== "string") return "";
@@ -313,7 +319,7 @@ export function toolCallToProgress(toolName: string, args: unknown): string | nu
     return parts.length > 2 ? parts.slice(-2).join("/") : p;
   };
 
-  switch (toolName) {
+  switch (normalized) {
     case "Read":
       return `📖 Reading ${shortPath(a.file_path)}`;
     case "Edit":
