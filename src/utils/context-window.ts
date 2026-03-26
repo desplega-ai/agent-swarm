@@ -5,11 +5,11 @@
  */
 
 const CONTEXT_WINDOW_DEFAULTS: Record<string, number> = {
-  "claude-opus-4-6": 200_000,
-  "claude-sonnet-4-6": 200_000,
+  "claude-opus-4-6": 1_000_000,
+  "claude-sonnet-4-6": 1_000_000,
   "claude-haiku-4-5": 200_000,
-  opus: 200_000,
-  sonnet: 200_000,
+  opus: 1_000_000,
+  sonnet: 1_000_000,
   haiku: 200_000,
   default: 200_000,
 };
