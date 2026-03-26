@@ -2,7 +2,9 @@ import {
   createWorkflowRun,
   createWorkflowRunStep,
   getCompletedStepNodeIds,
+  getLatestStepForNode,
   getStepByIdempotencyKey,
+  getStepCountForNode,
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
   updateWorkflowRun,
@@ -132,10 +134,11 @@ export async function walkGraph(
 
   // For memoized re-walks, inject stored outputs into context and
   // reconstruct active edges from completed steps' stored nextPort.
+  // Use the LATEST step per node to support loops (a node may have
+  // multiple completed steps from different iterations).
   if (completedNodeIds.size > 0) {
     for (const nodeId of completedNodeIds) {
-      const key = `${runId}:${nodeId}`;
-      const step = getStepByIdempotencyKey(key);
+      const step = getLatestStepForNode(runId, nodeId);
       if (step?.output !== undefined) {
         // Bug 5 fix: Validate stored output against executor schema on recovery
         const node = def.nodes.find((n) => n.id === nodeId);
@@ -163,20 +166,28 @@ export async function walkGraph(
     }
   }
 
-  // Seed with start nodes that haven't been completed yet AND whose
-  // predecessors are all completed (convergence gate). This prevents callers
-  // like resumeFromTaskCompletion() and retryFailedRun() from executing a
-  // convergence node before all its fan-out predecessors are done.
+  // Seed with start nodes whose predecessors are all completed (convergence gate).
+  // For entry nodes (no predecessors), skip if already completed — these are
+  // re-walk/recovery scenarios where memoization should apply.
+  // For non-entry nodes, allow re-execution even if completed — these are loop
+  // targets from port-based routing that need new iterations.
   let pendingNodes = startNodes.filter((n) => {
-    if (completedNodeIds.has(n.id)) return false;
     const preds = getAllPredecessors(def, n.id);
-    if (preds.length === 0) return true; // Entry node — always ready
-    // Check all predecessors with active edges are completed
+    if (preds.length === 0) {
+      // True entry node — skip if already completed (memoization on re-walk)
+      return !completedNodeIds.has(n.id);
+    }
+    // Non-entry node — allow through even if completed (loop target).
+    // Check predecessors are ready.
     const activePreds = preds.filter((predId) => activeEdges.has(`${predId}→${n.id}`));
     // If no active edges yet (first walk), check ALL structural predecessors
     const predsToCheck = activePreds.length > 0 ? activePreds : preds;
     return predsToCheck.every((p) => completedNodeIds.has(p));
   });
+
+  // Track nodes executed in THIS walk to prevent re-execution within the same
+  // walkGraph call, while still allowing loop targets from prior walks.
+  const executedInThisWalk = new Set<string>();
 
   while (pendingNodes.length > 0) {
     nodeExecutionCount += pendingNodes.length;
@@ -219,6 +230,7 @@ export async function walkGraph(
       // Mark this node as completed
       const sourceNodeId = pendingNodes[i]!.id;
       completedNodeIds.add(sourceNodeId);
+      executedInThisWalk.add(sourceNodeId);
       // Record active edges and queue successors
       for (const succ of result.successors) {
         activeEdges.add(`${sourceNodeId}→${succ.id}`);
@@ -232,9 +244,12 @@ export async function walkGraph(
     // Convergence check — only wait for predecessors with active edges to
     // this node, not all structural predecessors. This prevents deadlocks
     // when conditional branches skip nodes.
+    // Use executedInThisWalk (not completedNodeIds) to gate dedup — this
+    // allows loop targets from prior walks to re-execute while preventing
+    // double execution within the same walk.
     const readyNext: WorkflowNode[] = [];
     for (const [nodeId, node] of nextBatch) {
-      if (completedNodeIds.has(nodeId)) continue; // Already done
+      if (executedInThisWalk.has(nodeId)) continue; // Already done in this walk
 
       const allPreds = getAllPredecessors(def, nodeId);
       const activePreds = allPreds.filter((predId) => activeEdges.has(`${predId}→${nodeId}`));
@@ -301,9 +316,12 @@ async function executeStep(
   registry: ExecutorRegistry,
   workflowId?: string,
 ): Promise<StepResult> {
-  const idempotencyKey = `${runId}:${node.id}`;
+  // Use iteration-aware idempotency key to support loops.
+  // Count existing steps for this node to determine the current iteration.
+  const iteration = getStepCountForNode(runId, node.id);
+  const idempotencyKey = `${runId}:${node.id}:${iteration}`;
 
-  // 1. Memoization / deduplication check
+  // 1. Memoization / deduplication check (within same iteration)
   const existingStep = getStepByIdempotencyKey(idempotencyKey);
   if (existingStep) {
     if (existingStep.status === "completed") {
@@ -548,8 +566,10 @@ export function findReadyNodes(
   }
 
   // A node is ready if:
-  // 1. It hasn't been completed yet
+  // 1. It hasn't been completed yet (for non-loop discovery)
   // 2. All its relevant predecessors are completed
+  // Note: Loop targets bypass findReadyNodes — they are passed directly
+  // as startNodes to walkGraph via port-based routing.
   return def.nodes.filter((node) => {
     if (completedNodeIds.has(node.id)) return false;
     const preds = predecessors.get(node.id);
