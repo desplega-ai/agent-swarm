@@ -22,24 +22,65 @@ This guide covers all deployment options for Agent Swarm.
 
 The easiest way to deploy a full swarm with API, workers, and lead agent.
 
+### Prerequisites
+
+- Docker & Docker Compose installed
+- A Claude Code OAuth token (run `claude setup-token` to get one)
+- An API key (any secret string you choose — all services share this key)
+
 ### Quick Start
 
+**Step 1:** Copy the example compose file.
+
 ```bash
-# Copy example files
 cp docker-compose.example.yml docker-compose.yml
-
-# Create a combined .env for docker-compose (combines API + worker settings)
-# You can merge .env.example (API) and .env.docker.example (worker) settings
-cp .env.docker.example .env
-
-# Edit .env with your values
-vim .env
-
-# Start the swarm
-docker-compose up -d
 ```
 
-> **Note:** `.env.example` contains API server settings, `.env.docker.example` contains Docker worker settings. For docker-compose, you need both sets of variables in a single `.env` file.
+**Step 2:** Create your `.env` file with the required variables.
+
+```bash
+# ---- Required ----
+API_KEY=your-secret-api-key
+CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token   # Run `claude setup-token` to get this
+
+# ---- Optional ----
+GITHUB_TOKEN=your-github-token             # For git operations inside agents
+GITHUB_EMAIL=you@example.com
+GITHUB_NAME=Your Name
+SWARM_URL=localhost                         # Base domain for service discovery
+```
+
+> **Tip:** You can pass multiple OAuth tokens for load balancing: `CLAUDE_CODE_OAUTH_TOKEN=token1,token2,token3`
+
+**Step 3:** Generate stable UUIDs for each agent. The example compose file has placeholder UUIDs — replace them with your own so that agent identity persists across restarts.
+
+```bash
+# Generate UUIDs (run once per agent)
+uuidgen  # lead
+uuidgen  # worker-1
+uuidgen  # worker-2
+```
+
+Edit `docker-compose.yml` and replace the `AGENT_ID` values for each service with your generated UUIDs.
+
+**Step 4:** Start the swarm.
+
+```bash
+docker compose up -d
+```
+
+**Step 5:** Verify everything is running.
+
+```bash
+# Check all services are up
+docker compose ps
+
+# Check API health
+curl http://localhost:3013/health
+
+# List registered agents
+curl -s -H "Authorization: Bearer YOUR_API_KEY" http://localhost:3013/api/agents | jq '.agents[] | {name, status, isLead}'
+```
 
 ### ARM Compatibility (Apple Silicon)
 
@@ -49,41 +90,53 @@ All services in the docker-compose files include `platform: linux/amd64` to avoi
 
 The example `docker-compose.yml` sets up:
 
-- **API service** (port 3013) - MCP HTTP server
-- **2 Worker agents** - Containerized Claude workers
-- **1 Lead agent** - Coordinator agent
-- **3 Content agents** (optional) - Content writer, reviewer, and strategist using `TEMPLATE_ID` for profile bootstrapping
+- **API service** (port 3013) — MCP HTTP server with SQLite database
+- **1 Lead agent** — Coordinator that delegates tasks to workers
+- **2 Worker agents** — Claude-powered agents that execute tasks
+- **3 Content agents** (optional) — Specialized workers for content writing, reviewing, and strategy, each bootstrapped from a template via `TEMPLATE_ID`
 
-### Configuration
+### Volumes & Persistence
 
-Edit your `.env` file:
+The swarm uses Docker named volumes to persist data across restarts and upgrades.
 
-```bash
-# Required
-API_KEY=your-secret-api-key
-CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token  # Run `claude setup-token` to get this
-# Multiple tokens for load balancing: CLAUDE_CODE_OAUTH_TOKEN=token1,token2,token3
-
-# Agent IDs (optional, auto-generated if not set)
-AGENT_ID=worker-1-uuid
-AGENT_ID_2=worker-2-uuid
-AGENT_ID_LEAD=lead-agent-uuid
-
-# GitHub integration (optional)
-GITHUB_TOKEN=your-github-token
-GITHUB_EMAIL=your@email.com
-GITHUB_NAME=Your Name
+```
+Docker Volume            → Container Path        → What It Stores
+─────────────────────────────────────────────────────────────────────
+swarm_api                → /app                  → SQLite DB (agent-swarm-db.sqlite)
+swarm_logs               → /logs                 → Session logs (all agents share this)
+swarm_shared             → /workspace/shared     → Shared workspace (all agents read/write)
+swarm_lead               → /workspace/personal   → Lead agent's private workspace
+swarm_worker_1           → /workspace/personal   → Worker 1's private workspace
+swarm_worker_2           → /workspace/personal   → Worker 2's private workspace
+swarm_content_writer     → /workspace/personal   → Content writer's private workspace
+swarm_content_reviewer   → /workspace/personal   → Content reviewer's private workspace
+swarm_content_strategist → /workspace/personal   → Content strategist's private workspace
 ```
 
-### Volumes
+**How it works:**
 
-| Volume | Purpose |
-|--------|---------|
-| `swarm_api` | SQLite database persistence |
-| `swarm_logs` | Session logs |
-| `swarm_shared` | Shared workspace between agents (`/workspace/shared`) |
-| `swarm_lead` | Lead agent's personal workspace (`/workspace/personal`) |
-| `swarm_worker_*` | Personal workspace per worker (`/workspace/personal`) |
+- **`swarm_api`** — The most critical volume. Contains the SQLite database with all tasks, agents, epics, and configuration. **Back this up regularly.** Losing this volume means losing all swarm state.
+- **`swarm_logs`** — Shared by all agent containers. Each agent writes session logs here. Useful for debugging but not critical — can be recreated.
+- **`swarm_shared`** — A workspace visible to all agents. Each agent creates subdirectories under `/workspace/shared/{thoughts,memory,downloads,misc}/$AGENT_ID`. Agents can read each other's files but conventionally only write to their own subdirectory.
+- **`swarm_<agent>`** (personal volumes) — Each agent gets an isolated workspace at `/workspace/personal` for its own files. Not visible to other agents.
+
+**Backup:**
+
+```bash
+# Back up the API database
+docker run --rm -v swarm_api:/app -v $(pwd):/backup alpine \
+  cp /app/agent-swarm-db.sqlite /backup/agent-swarm-db-backup.sqlite
+```
+
+### Adding More Workers
+
+To add a worker, copy an existing worker block in `docker-compose.yml`:
+
+1. Give it a new service name (e.g., `worker-3`)
+2. Generate a new `AGENT_ID` UUID
+3. Add a new personal volume (e.g., `swarm_worker_3:/workspace/personal`)
+4. Declare the volume at the bottom of the file
+5. Pick a new host port (e.g., `3023:3000`)
 
 ### Graceful Shutdown
 

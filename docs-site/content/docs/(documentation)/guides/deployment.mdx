@@ -1,46 +1,258 @@
 ---
 title: Deployment Guide
-description: Deploy Agent Swarm to production with Docker Compose, configure networking, secrets, and persistent storage
+description: Deploy Agent Swarm to production with Docker Compose — volumes, networking, secrets, and persistent storage
 ---
-
-Agent Swarm supports multiple deployment options, from Docker Compose to systemd services.
 
 ## Docker Compose (Recommended)
 
-The easiest way to deploy a full swarm with API, workers, and lead agent.
+The easiest way to deploy a full swarm with API, workers, and lead agent. You can go from zero to a running swarm in under 5 minutes.
 
-### Quick Start
+### Prerequisites
+
+Before you start, make sure you have:
+
+- **Docker & Docker Compose** installed ([install guide](https://docs.docker.com/get-docker/))
+- **A Claude Code OAuth token** — run `claude setup-token` in your terminal to get one
+- **An API key** — any secret string you choose (all services share this key for authentication)
+
+### Step 1: Download the Compose File
+
+```bash
+curl -O https://raw.githubusercontent.com/desplega-ai/agent-swarm/main/docker-compose.example.yml
+mv docker-compose.example.yml docker-compose.yml
+```
+
+Or if you have the repo cloned:
 
 ```bash
 cp docker-compose.example.yml docker-compose.yml
-cp .env.docker.example .env
-# Edit .env with your values
-docker-compose up -d
 ```
 
-### ARM Compatibility (Apple Silicon)
+### Step 2: Create Your `.env` File
 
-All services in the docker-compose files include `platform: linux/amd64` to avoid `no matching manifest for linux/arm64/v8` errors on Apple Silicon Macs. The Docker images are built for `linux/amd64` and run via Rosetta emulation.
+Create a `.env` file in the same directory as `docker-compose.yml`:
 
-### What's Included
+```bash title=".env"
+# ---- Required ----
+API_KEY=your-secret-api-key
+CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token   # Run `claude setup-token` to get this
+
+# ---- Optional ----
+GITHUB_TOKEN=ghp_xxxx                      # For git operations inside agents
+GITHUB_EMAIL=you@example.com
+GITHUB_NAME=Your Name
+SWARM_URL=localhost                         # Base domain for service discovery
+```
+
+<Callout type="info">
+You can pass multiple OAuth tokens for load balancing: `CLAUDE_CODE_OAUTH_TOKEN=token1,token2,token3`
+</Callout>
+
+### Step 3: Generate Stable Agent IDs
+
+Each agent needs a stable UUID that persists across restarts. This is critical for task resume — if an agent restarts, it uses its `AGENT_ID` to pick up paused tasks.
+
+The example compose file has placeholder UUIDs. Replace them with your own:
+
+```bash
+# Generate one UUID per agent
+uuidgen  # → paste into lead AGENT_ID
+uuidgen  # → paste into worker-1 AGENT_ID
+uuidgen  # → paste into worker-2 AGENT_ID
+```
+
+Edit `docker-compose.yml` and replace each service's `AGENT_ID` value.
+
+### Step 4: Start the Swarm
+
+```bash
+docker compose up -d
+```
+
+The API service starts first. Workers and lead wait until the API health check passes before starting (via `depends_on: condition: service_healthy`).
+
+### Step 5: Verify It's Running
+
+```bash
+# Check all services are up
+docker compose ps
+
+# Check API health
+curl http://localhost:3013/health
+
+# List registered agents (replace YOUR_API_KEY with your actual key)
+curl -s -H "Authorization: Bearer YOUR_API_KEY" \
+  http://localhost:3013/api/agents | jq '.agents[] | {name, status, isLead}'
+```
+
+You should see the lead and workers listed with `status: "idle"`.
+
+---
+
+## What's Included
 
 The example `docker-compose.yml` sets up:
 
-- **API service** (port 3013) — MCP HTTP server
-- **2 Worker agents** — Containerized Claude workers
-- **1 Lead agent** — Coordinator agent
+| Service | Role | Port | Template |
+|---------|------|------|----------|
+| **api** | MCP HTTP server + SQLite DB | `3013` | — |
+| **lead** | Coordinator agent | `3020` | `official/lead` |
+| **worker-1** | Task executor | `3021` | `official/coder` |
+| **worker-2** | Task executor | `3022` | `official/coder` |
+| **worker-content-writer** | Content specialist | `3026` | `official/content-writer` |
+| **worker-content-reviewer** | Content reviewer | `3027` | `official/content-reviewer` |
+| **worker-content-strategist** | Content strategist | `3028` | `official/content-strategist` |
 
-### Volumes
+The content agents are optional — remove them from `docker-compose.yml` if you don't need content workflows.
 
-| Volume | Purpose |
-|--------|---------|
-| `swarm_api` | SQLite database persistence |
-| `swarm_logs` | Session logs |
-| `swarm_shared` | Shared workspace between agents |
-| `swarm_lead` | Lead agent's personal workspace |
-| `swarm_worker_*` | Personal workspace per worker |
+---
 
-### Graceful Shutdown
+## Volumes & Persistence
+
+The swarm uses Docker named volumes to persist data across restarts and upgrades. Getting volumes right is essential — without them, you lose your database and agent workspaces on every restart.
+
+### Volume Architecture
+
+```
+Docker Volume            → Container Path        → What It Stores
+─────────────────────────────────────────────────────────────────────
+swarm_api                → /app                  → SQLite DB (all swarm state)
+swarm_logs               → /logs                 → Session logs (all agents)
+swarm_shared             → /workspace/shared     → Shared workspace (all agents)
+swarm_lead               → /workspace/personal   → Lead's private workspace
+swarm_worker_1           → /workspace/personal   → Worker 1's private workspace
+swarm_worker_2           → /workspace/personal   → Worker 2's private workspace
+```
+
+### What Each Volume Stores
+
+| Volume | Critical? | Backup? | Description |
+|--------|-----------|---------|-------------|
+| `swarm_api` | **Yes** | **Yes** | Contains the SQLite database (`agent-swarm-db.sqlite`) with all tasks, agents, epics, schedules, and configuration. Losing this = losing all swarm state. |
+| `swarm_logs` | No | Optional | Session logs from all agents. Useful for debugging. Can be recreated. |
+| `swarm_shared` | Moderate | Recommended | Shared workspace. Agents store research, plans, and memory under `/workspace/shared/{thoughts,memory,downloads,misc}/$AGENT_ID`. All agents can read each other's files. |
+| `swarm_<agent>` | Low | No | Personal workspace per agent (`/workspace/personal`). Isolated — only that agent can see it. Contains cloned repos, working files, and agent-specific state. |
+
+### How Workspaces Work
+
+Each agent container has two workspace directories:
+
+- **`/workspace/shared`** — Mounted from `swarm_shared`. All agents share this volume. By convention, each agent writes only to its own subdirectory (e.g., `/workspace/shared/thoughts/<agent-id>/`) but can read from any agent's directory. This is how agents share research, plans, and context.
+
+- **`/workspace/personal`** — Mounted from a per-agent volume (e.g., `swarm_worker_1`). Only that agent can see this. Used for cloned git repos, working files, and private state.
+
+### Backing Up the Database
+
+<Callout type="warn">
+The `swarm_api` volume contains your SQLite database — the single source of truth for all swarm state. Back it up regularly.
+</Callout>
+
+```bash
+# Back up the database
+docker run --rm -v swarm_api:/app -v $(pwd):/backup alpine \
+  cp /app/agent-swarm-db.sqlite /backup/agent-swarm-db-backup.sqlite
+
+# Restore from backup
+docker compose down
+docker run --rm -v swarm_api:/app -v $(pwd):/backup alpine \
+  cp /backup/agent-swarm-db-backup.sqlite /app/agent-swarm-db.sqlite
+docker compose up -d
+```
+
+---
+
+## Environment Variables
+
+These are the key variables for Docker Compose deployment. For the complete reference, see [Environment Variables](/docs/reference/environment-variables).
+
+### Required (in `.env`)
+
+| Variable | Description |
+|----------|-------------|
+| `API_KEY` | Shared authentication key between API and agents |
+| `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token from `claude setup-token`. Supports comma-separated values for load balancing. |
+
+### Per-Agent (in `docker-compose.yml`)
+
+| Variable | Description |
+|----------|-------------|
+| `AGENT_ID` | Stable UUID. **Keep the same across restarts** for task resume. |
+| `AGENT_ROLE` | `lead` or `worker` |
+| `TEMPLATE_ID` | Template for initial profile (e.g., `official/coder`, `official/lead`). Applied on first boot only. |
+| `MCP_BASE_URL` | API server URL. Use `http://api:3013` when in the same Docker network. |
+
+### Optional (in `.env`)
+
+| Variable | Description |
+|----------|-------------|
+| `GITHUB_TOKEN` | Personal access token for git operations |
+| `GITHUB_EMAIL` | Git commit email |
+| `GITHUB_NAME` | Git commit name |
+| `SWARM_URL` | Base domain for service discovery (default: `localhost`) |
+| `SLACK_BOT_TOKEN` | Enable Slack integration (also needs `SLACK_APP_TOKEN`) |
+| `SLACK_DISABLE` | Set to `true` to disable Slack (default: `false`) |
+
+---
+
+## Adding More Workers
+
+To scale the swarm, copy an existing worker block in `docker-compose.yml`:
+
+1. Give it a new service name (e.g., `worker-3`)
+2. Generate a new `AGENT_ID` UUID: `uuidgen`
+3. Pick a new host port (e.g., `3023:3000`)
+4. Add a new personal volume (e.g., `swarm_worker_3:/workspace/personal`)
+5. Declare the new volume at the bottom of the file under `volumes:`
+
+```yaml title="docker-compose.yml (add a new worker)"
+  worker-3:
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    platform: linux/amd64
+    pull_policy: always
+    stop_grace_period: 60s
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - API_KEY=${API_KEY}
+      - AGENT_ID=YOUR-NEW-UUID-HERE
+      - AGENT_ROLE=worker
+      - TEMPLATE_ID=official/coder
+      - MCP_BASE_URL=http://api:3013
+      - YOLO=true
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_EMAIL=${GITHUB_EMAIL:-}
+      - GITHUB_NAME=${GITHUB_NAME:-}
+      - SWARM_URL=${SWARM_URL:-localhost}
+    ports:
+      - "3023:3000"
+    volumes:
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_worker_3:/workspace/personal
+    restart: unless-stopped
+
+volumes:
+  # ... existing volumes ...
+  swarm_worker_3:
+```
+
+Then:
+
+```bash
+docker compose up -d worker-3
+```
+
+---
+
+## ARM Compatibility (Apple Silicon)
+
+All services include `platform: linux/amd64` to avoid `no matching manifest for linux/arm64/v8` errors on Apple Silicon Macs. The Docker images are built for `linux/amd64` and run via Rosetta emulation.
+
+---
+
+## Graceful Shutdown & Task Resume
 
 The docker-compose example uses `stop_grace_period: 60s` to allow graceful task pause during deployments. When a container receives SIGTERM:
 
@@ -48,26 +260,34 @@ The docker-compose example uses `stop_grace_period: 60s` to allow graceful task 
 2. Task state and progress are preserved
 3. After restart, paused tasks are automatically **resumed** with context
 
-Use stable `AGENT_ID` values for each worker to enable task resume after restarts.
+### Configuration
 
-### Pre-installed Agent Tools
+```bash
+# Grace period before force-pausing tasks (milliseconds)
+SHUTDOWN_TIMEOUT=30000
 
-Worker containers include several tools pre-installed:
+# Docker compose stop grace period (should be >= SHUTDOWN_TIMEOUT + buffer)
+stop_grace_period: 60s
+```
 
-- **`wts`** — Git worktree manager for isolated branch work
-- **`agent-fs`** — Persistent, searchable filesystem shared across the swarm (auto-configured on first boot when `AGENT_FS_API_URL` is set). Also available as a Claude plugin.
-- **`qa-use`** — Browser-based UI testing tool
-- **`context-mode`** — Context window compression for data-heavy operations
+### Resume Behavior
 
-### Claude Code Version
+When a worker starts, it:
+1. Registers with the MCP server
+2. Checks for paused tasks assigned to its `AGENT_ID`
+3. Resumes each paused task with original context and progress
 
-Claude Code is installed via `npm install -g @anthropic-ai/claude-code@VERSION` with a pinned version (build arg `CLAUDE_CODE_VERSION`). To update the version, change the `CLAUDE_CODE_VERSION` ARG in `Dockerfile.worker` and rebuild.
+### Best Practices
 
-### Corepack
+- **Use stable Agent IDs** — Set explicit `AGENT_ID` for each worker
+- **Save progress regularly** — Workers should call `store-progress` during long tasks
+- **Test deployments** — Verify tasks resume correctly in staging first
 
-The worker image sets `COREPACK_HOME=/home/worker/.corepack` to avoid permission errors when running npm/pnpm/yarn as the non-root worker user.
+---
 
-## Docker Worker
+## Docker Worker (Standalone)
+
+Run individual Claude workers in containers without Compose.
 
 ### Pull from Registry
 
@@ -97,6 +317,8 @@ docker run --rm -it \
   -v ./work:/workspace \
   ghcr.io/desplega-ai/agent-swarm-worker
 ```
+
+---
 
 ## Server Deployment (systemd)
 
@@ -137,28 +359,7 @@ git pull
 sudo bun deploy/update.ts
 ```
 
-## Graceful Shutdown Configuration
-
-```bash
-# Grace period before force-pausing tasks (milliseconds)
-SHUTDOWN_TIMEOUT=30000
-
-# Docker compose stop grace period (should be >= SHUTDOWN_TIMEOUT + buffer)
-stop_grace_period: 60s
-```
-
-### Resume Behavior
-
-When a worker starts, it:
-1. Registers with the MCP server
-2. Checks for paused tasks assigned to its `AGENT_ID`
-3. Resumes each paused task with original context and progress
-
-### Best Practices
-
-- **Use stable Agent IDs** — Set explicit `AGENT_ID` for each worker
-- **Save progress regularly** — Workers should call `store-progress` during long tasks
-- **Test deployments** — Verify tasks resume correctly in staging first
+---
 
 ## Related
 
@@ -166,4 +367,3 @@ When a worker starts, it:
 - [Environment Variables](/docs/reference/environment-variables) — All configuration options
 - [Architecture Overview](/docs/architecture/overview) — How the system components fit together
 - [Task Lifecycle](/docs/concepts/task-lifecycle) — Graceful shutdown and task resume behavior
-- [x402 Payments](/docs/guides/x402-payments) — Enable agents to make USDC micropayments
