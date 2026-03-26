@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, initDb } from "../be/db";
-import { getAllTemplateDefinitions, getTemplateDefinition } from "../prompts/registry";
+import { getAllTemplateDefinitions } from "../prompts/registry";
 import { resolveTemplate } from "../prompts/resolver";
 
 // Side-effect imports: register all templates from each source

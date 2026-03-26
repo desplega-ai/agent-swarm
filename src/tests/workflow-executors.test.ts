@@ -1,6 +1,12 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, initDb } from "../be/db";
+
+// Mock slack/app to avoid dynamic import issues in parallel test execution
+mock.module("../slack/app", () => ({
+  getSlackApp: () => null,
+}));
+
 import type { ExecutorMeta } from "../types";
 import type { ExecutorDependencies, ExecutorInput } from "../workflows/executors/base";
 import { CodeMatchExecutor, CodeMatchOutputSchema } from "../workflows/executors/code-match";
