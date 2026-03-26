@@ -364,6 +364,76 @@ export const SessionCostSchema = z.object({
 export type SessionCost = z.infer<typeof SessionCostSchema>;
 
 // ============================================================================
+// Events
+// ============================================================================
+
+export const EventCategorySchema = z.enum([
+  "tool",
+  "skill",
+  "session",
+  "api",
+  "task",
+  "workflow",
+  "system",
+]);
+
+export const EventStatusSchema = z.enum(["ok", "error", "timeout", "skipped"]);
+
+export const EventSourceSchema = z.enum(["worker", "api", "hook", "scheduler", "cli"]);
+
+export const EventNameSchema = z.enum([
+  // Tool events
+  "tool.start",
+  "tool.end",
+  // Skill events
+  "skill.invoke",
+  "skill.complete",
+  // Session events
+  "session.start",
+  "session.end",
+  "session.resume",
+  "session.cost",
+  // API events
+  "api.request",
+  "api.error",
+  // Task events
+  "task.poll",
+  "task.assign",
+  "task.timeout",
+  // Workflow events
+  "workflow.step.start",
+  "workflow.step.end",
+  "workflow.run.start",
+  "workflow.run.end",
+  // System events
+  "system.boot",
+  "system.migration",
+  "system.error",
+]);
+
+export const SwarmEventSchema = z.object({
+  id: z.uuid(),
+  category: EventCategorySchema,
+  event: EventNameSchema,
+  status: EventStatusSchema,
+  source: EventSourceSchema,
+  agentId: z.string().optional(),
+  taskId: z.string().optional(),
+  sessionId: z.string().optional(),
+  parentEventId: z.string().optional(),
+  numericValue: z.number().optional(),
+  durationMs: z.number().int().optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
+  createdAt: z.iso.datetime(),
+});
+
+export type EventCategory = z.infer<typeof EventCategorySchema>;
+export type EventStatus = z.infer<typeof EventStatusSchema>;
+export type EventSource = z.infer<typeof EventSourceSchema>;
+export type EventName = z.infer<typeof EventNameSchema>;
+export type SwarmEvent = z.infer<typeof SwarmEventSchema>;
+
+// ============================================================================
 // Scheduled Task Types
 // ============================================================================
 
