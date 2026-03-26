@@ -363,6 +363,7 @@ describe("NotifyExecutor", () => {
     const result = await executor.run(
       input({ channel: "slack", target: "#general", template: "hi" }, {}),
     );
+    expect(result.status).toBe("success");
     const out = result.output as { sent: boolean };
     expect(out.sent).toBe(false);
   });

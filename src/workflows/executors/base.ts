@@ -61,7 +61,15 @@ export abstract class BaseExecutor<
       };
     }
 
-    const result = await this.execute(configResult.data, input.context, input.meta);
+    let result: ExecutorResult<z.infer<TOutput>>;
+    try {
+      result = await this.execute(configResult.data, input.context, input.meta);
+    } catch (err) {
+      return {
+        status: "failed",
+        error: `Executor threw: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
 
     // Validate output for successful results
     if (result.status === "success" && result.output !== undefined) {

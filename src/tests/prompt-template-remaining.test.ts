@@ -21,10 +21,10 @@ const TEST_DB_PATH = "./test-prompt-remaining.sqlite";
  * Needed because other test files may call clearTemplateDefinitions() in parallel.
  */
 async function ensureTemplatesRegistered(): Promise<void> {
-  // Check if templates are still registered (another test may have cleared them)
-  if (getTemplateDefinition("gitlab.merge_request.opened")) return;
-
-  // Force re-evaluation by importing with cache-busting query param
+  // Always re-import all template modules unconditionally.
+  // Other test files (prompt-template-resolver, prompt-template-session) call
+  // clearTemplateDefinitions() in beforeEach/beforeAll, and since Bun shares
+  // module state across parallel test files, a single-template check is racy.
   const ts = Date.now();
   await import(`../gitlab/templates?t=${ts}`);
   await import(`../agentmail/templates?t=${ts}`);
