@@ -8,6 +8,7 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import { checkpointStep } from "./checkpoint";
+import { getSuccessors } from "./definition";
 import { findReadyNodes, walkGraph } from "./engine";
 import type { WorkflowEventBus } from "./event-bus";
 import type { ExecutorRegistry } from "./executors/registry";
@@ -282,11 +283,15 @@ async function resumeFromApprovalResolution(
   checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput, nextPort }, ctx);
   updateWorkflowRun(run.id, { status: "running" });
 
-  const completedNodeIds = new Set(getCompletedStepNodeIds(run.id));
-  const readyNodes = findReadyNodes(workflow.definition, completedNodeIds);
+  // Use port-based routing to determine the correct successors.
+  // findReadyNodes without activeEdges would return ALL structural successors
+  // (e.g. both "success" and "generate-question"), ignoring the port selection.
+  // Instead, compute the port-specific successors and let walkGraph handle
+  // convergence checks via its internal activeEdges reconstruction.
+  const successors = getSuccessors(workflow.definition, step.nodeId, nextPort);
 
-  if (readyNodes.length > 0) {
-    await walkGraph(workflow.definition, run.id, ctx, readyNodes, registry, workflow.id);
+  if (successors.length > 0) {
+    await walkGraph(workflow.definition, run.id, ctx, successors, registry, workflow.id);
   } else {
     finalizeOrWait(run.id);
   }

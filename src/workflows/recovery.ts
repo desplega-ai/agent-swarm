@@ -183,11 +183,11 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
       );
       updateWorkflowRun(stuck.runId, { status: "running" });
 
-      const completedNodeIds = new Set(getCompletedStepNodeIds(stuck.runId));
-      const readyNodes = findReadyNodes(workflow.definition, completedNodeIds);
+      // Use port-based routing to determine correct successors
+      const successors = getSuccessors(workflow.definition, stuck.nodeId, nextPort);
 
-      if (readyNodes.length > 0) {
-        await walkGraph(workflow.definition, stuck.runId, ctx, readyNodes, registry, workflow.id);
+      if (successors.length > 0) {
+        await walkGraph(workflow.definition, stuck.runId, ctx, successors, registry, workflow.id);
       } else {
         finalizeOrWait(stuck.runId);
       }
