@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { ArrowRight, Github } from "lucide-react";
+import Link from "next/link";
 
 export function CTA() {
   return (
@@ -45,6 +46,17 @@ export function CTA() {
               Star on GitHub
             </a>
           </div>
+
+          <p className="mt-8 text-sm text-zinc-500">
+            See it in action:{" "}
+            <Link href="/examples" className="text-amber-400 hover:text-amber-300 underline underline-offset-2">
+              examples
+            </Link>
+            {" · "}
+            <Link href="/blog" className="text-amber-400 hover:text-amber-300 underline underline-offset-2">
+              blog
+            </Link>
+          </p>
         </motion.div>
       </div>
     </section>
