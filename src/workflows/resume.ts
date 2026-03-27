@@ -121,14 +121,14 @@ async function resumeFromTaskCompletion(
   // Set run back to running
   updateWorkflowRun(run.id, { status: "running" });
 
-  // Use convergence-aware node detection instead of blindly passing successors.
-  // This prevents duplicate step creation for convergence nodes (e.g., fan-out → merge).
-  // findReadyNodes checks ALL predecessors are completed before marking a node ready.
-  const completedNodeIds = new Set(getCompletedStepNodeIds(run.id));
-  const readyNodes = findReadyNodes(workflow.definition, completedNodeIds);
+  // Use direct successor-based routing (same as resumeFromApprovalResolution).
+  // findReadyNodes is NOT loop-aware — it excludes nodes with any completed step,
+  // which breaks loop workflows where a node needs re-execution on a new iteration.
+  // walkGraph handles convergence internally via activeEdges reconstruction.
+  const successors = getSuccessors(workflow.definition, step.nodeId);
 
-  if (readyNodes.length > 0) {
-    await walkGraph(workflow.definition, run.id, ctx, readyNodes, registry, workflow.id);
+  if (successors.length > 0) {
+    await walkGraph(workflow.definition, run.id, ctx, successors, registry, workflow.id);
   } else {
     finalizeOrWait(run.id);
   }
@@ -187,11 +187,12 @@ async function handleTaskFailure(
   checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput }, ctx);
 
   updateWorkflowRun(run.id, { status: "running" });
-  const completedNodeIds = new Set(getCompletedStepNodeIds(run.id));
-  const readyNodes = findReadyNodes(workflow.definition, completedNodeIds);
 
-  if (readyNodes.length > 0) {
-    await walkGraph(workflow.definition, run.id, ctx, readyNodes, registry, workflow.id);
+  // Use direct successor-based routing (loop-aware).
+  const successors = getSuccessors(workflow.definition, step.nodeId);
+
+  if (successors.length > 0) {
+    await walkGraph(workflow.definition, run.id, ctx, successors, registry, workflow.id);
   } else {
     finalizeOrWait(run.id);
   }
