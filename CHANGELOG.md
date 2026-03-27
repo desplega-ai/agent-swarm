@@ -4,6 +4,26 @@ All notable changes to Agent Swarm are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.54.1] - 2026-03-27
+
+### Added
+- Stalled task auto-remediation and lead startup self-check — lead agent now triggers a heartbeat sweep on startup to detect and recover stalled tasks (DES-19, #256)
+- `jq` added to API server Docker image for script node JSON parsing (#254)
+
+### Fixed
+- HITL loop resume — use successor routing instead of `findReadyNodes` for correct workflow loop re-entry (#257)
+- Workflow engine loop support — iteration-aware idempotency keys allow workflows with cycles to re-execute nodes correctly (#255)
+- HITL port-based routing for workflow resume — use port routing instead of direct node targeting (#253)
+- Task details prompt expansion overflow — prevent large task descriptions from exceeding prompt limits (#258)
+- Create follow-up tasks for already-tracked Linear issues (#252)
+- Preserve context usage value on task completion (#251)
+- Tool call progress normalization — handle case-insensitive tool names from different providers (pi-mono vs Claude)
+- Store-progress dependency tracking for paused/resumed tasks
+
+### Changed
+- Deployment guide rewritten with step-by-step quick start, expanded volume architecture, and adding-workers instructions
+- OpenAPI spec updated with HITL port-routing unit tests
+
 ## [1.53.0] - 2026-03-26
 
 ### Added
