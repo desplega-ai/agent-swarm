@@ -1,0 +1,380 @@
+---
+date: 2026-03-27T20:00:00Z
+topic: "Deprecate & Remove Epics Feature"
+status: draft
+autonomy: autopilot
+---
+
+# Plan: Deprecate & Remove Epics Feature
+
+**Date:** 2026-03-27
+**Status:** Draft
+**Autonomy:** Autopilot
+
+## Summary
+
+Complete removal of the epics feature from agent-swarm. Epics are an unused project-management abstraction layered on top of tasks. Removing them simplifies the codebase, reduces MCP tool surface, and eliminates dead UI pages.
+
+## Scope of Removal
+
+### Files to DELETE entirely
+| # | File | Description |
+|---|------|-------------|
+| 1 | `src/tools/epics/assign-task-to-epic.ts` | MCP tool |
+| 2 | `src/tools/epics/create-epic.ts` | MCP tool |
+| 3 | `src/tools/epics/delete-epic.ts` | MCP tool |
+| 4 | `src/tools/epics/get-epic-details.ts` | MCP tool |
+| 5 | `src/tools/epics/index.ts` | MCP tool barrel |
+| 6 | `src/tools/epics/list-epics.ts` | MCP tool |
+| 7 | `src/tools/epics/unassign-task-from-epic.ts` | MCP tool |
+| 8 | `src/tools/epics/update-epic.ts` | MCP tool |
+| 9 | `src/tools/tracker/tracker-link-epic.ts` | Tracker MCP tool |
+| 10 | `src/http/epics.ts` | HTTP endpoint handler |
+| 11 | `new-ui/src/pages/epics/page.tsx` | UI list page |
+| 12 | `new-ui/src/pages/epics/[id]/page.tsx` | UI detail page |
+| 13 | `new-ui/src/api/hooks/use-epics.ts` | UI data hook |
+| 14 | `src/tests/epics.test.ts` | Unit tests |
+| 15 | `docs-site/content/docs/api-reference/epics.mdx` | API docs page |
+| 16 | `docs-site/content/docs/(documentation)/concepts/epics.mdx` | Concepts doc |
+| 17 | `thoughts/shared/research/2026-01-16-epics-feature-research.md` | Old research |
+| 18 | `thoughts/shared/plans/2026-01-16-epics-feature-implementation.md` | Old plan |
+
+### Files to EDIT (remove epic references)
+
+#### Backend Core
+| # | File | What to change |
+|---|------|---------------|
+| 1 | `src/types.ts` | Remove `epicId` from task schema (~L125), remove `EpicStatusSchema`, `EpicSchema`, `EpicWithProgressSchema` and their types (~L487-540) |
+| 2 | `src/be/db.ts` | Remove: `epicId` from task row types/mappings, epic filter from `getTasks`/`getTasksForAgent`, `epicId` from `createTaskExtended`. Remove all epic functions (~L4234-4734): `rowToEpic`, `getEpics`, `getEpicById`, `getEpicByName`, `createEpic`, `updateEpic`, `deleteEpic`, `getEpicTaskStats`, `getEpicWithProgress`, `getTasksByEpicId`, `assignTaskToEpic`, `unassignTaskFromEpic`, `getEpicsWithProgressUpdates`, `markEpicProgressNotified`, `markEpicsProgressNotified`. Remove `Epic`/`EpicStatus`/`EpicWithProgress` imports |
+| 3 | `src/be/db.ts` (initDb) | Remove `idx_agent_tasks_epicId` index creation (~L182). Remove `epicId` from inline task table creation (~L137, L157, L168) |
+
+#### MCP Tools & Server
+| # | File | What to change |
+|---|------|---------------|
+| 4 | `src/server.ts` | Remove epic imports (~L12-19), remove `epics` from default capabilities string (~L125), remove epic tool registration block (~L232-240), remove `registerTrackerLinkEpicTool` call (~L253) |
+| 5 | `src/tools/tool-config.ts` | Remove 7 epic tool names from array (~L60-67), remove `tracker-link-epic` (~L103) |
+| 6 | `src/tools/send-task.ts` | Remove `epicId` parameter, remove epic validation/lookup logic (~L51, L114, L159-174), remove epic tag building (~L208-209), remove `epicId` from task creation calls (~L220, L272, L298) |
+| 7 | `src/tools/store-progress.ts` | Remove epic imports (~L12, L15), remove epic-linked promotion logic (~L277-283), remove epic context enrichment in follow-up (~L345-382) |
+| 8 | `src/tools/tracker/index.ts` | Remove `registerTrackerLinkEpicTool` export |
+
+#### HTTP & Polling
+| # | File | What to change |
+|---|------|---------------|
+| 9 | `src/http/index.ts` | Remove `handleEpics` import (~L26) and handler call (~L113) |
+| 10 | `src/http/tasks.ts` | Remove `epicId` from query params (~L36), filter logic (~L226), and response mapping (~L271) |
+| 11 | `src/http/poll.ts` | Remove epic imports (~L11, L17), remove `epic_progress_changed` trigger block (~L184-196) |
+
+#### Worker / Runner
+| # | File | What to change |
+|---|------|---------------|
+| 12 | `src/commands/runner.ts` | Remove `epic_progress_changed` from trigger type union (~L1102), remove `epics` from trigger interface (~L1126), remove entire `case "epic_progress_changed"` handler (~L1283-1365), remove `fetchEpicNameAndGoal` function (~L1442-1458), remove `fetchEpicTaskContext` function (~L1461-1490), remove epic context enrichment in task_assigned (~L2849-2897) |
+| 13 | `src/commands/templates.ts` | Remove `task.trigger.epic_progress` template definition (~L75-97) |
+
+#### Prompt Templates
+| # | File | What to change |
+|---|------|---------------|
+| 14 | `src/prompts/session-templates.ts` | Remove epic reference (~L110) |
+
+#### Tracker
+| # | File | What to change |
+|---|------|---------------|
+| 15 | `src/tracker/types.ts` | Change `entityType: "task" \| "epic"` to `entityType: "task"` (~L31) |
+| 16 | `src/be/db-queries/tracker.ts` | Change all `"task" \| "epic"` types to `"task"` (~L8, L18, L28, L113) |
+| 17 | `src/tools/tracker/tracker-sync-status.ts` | Remove `"epic"` from entityType enum (~L16) |
+
+#### Dashboard UI
+| # | File | What to change |
+|---|------|---------------|
+| 18 | `new-ui/src/app/router.tsx` | Remove epic route entries |
+| 19 | `new-ui/src/components/layout/app-sidebar.tsx` | Remove Epics nav item |
+| 20 | `new-ui/src/components/layout/breadcrumbs.tsx` | Remove epic breadcrumb entries |
+| 21 | `new-ui/src/api/types.ts` | Remove Epic types |
+| 22 | `new-ui/src/api/client.ts` | Remove epic API methods |
+| 23 | `new-ui/src/api/hooks/index.ts` | Remove epic hook re-exports |
+| 24 | `new-ui/src/api/hooks/use-tasks.ts` | Remove epicId from task query params if present |
+| 25 | `new-ui/src/components/shared/status-badge.tsx` | Remove epic status variants |
+| 26 | `new-ui/src/components/shared/stats-bar.tsx` | Remove epic stats if present |
+| 27 | `new-ui/src/components/shared/command-menu.tsx` | Remove epic commands |
+| 28 | `new-ui/src/hooks/use-keyboard-shortcuts.ts` | Remove epic keyboard shortcut |
+
+#### Scripts & Seed
+| # | File | What to change |
+|---|------|---------------|
+| 29 | `scripts/seed.ts` | Remove `EpicSeed`, `generateEpic()`, `seedEpics()`, `--epics` flag, epic in `seedTasks()` |
+| 30 | `scripts/seed.default.json` | Remove `"epics"` section |
+| 31 | `scripts/generate-openapi.ts` | Remove epic import |
+
+#### Templates (official)
+| # | File | What to change |
+|---|------|---------------|
+| 32 | `templates/official/*/CLAUDE.md` (8 files) | Remove `- epics` from capabilities list |
+| 33 | `templates/official/lead/IDENTITY.md` | Remove "epics" from capabilities description |
+| 34 | `templates/official/lead/config.json` | Remove "epics" from description string |
+
+#### Documentation
+| # | File | What to change |
+|---|------|---------------|
+| 35 | `MCP.md` | Remove entire Epics Tools section, remove `epicId` param from send-task, remove TOC entries |
+| 36 | `plugin/commands/work-on-task.md` | Remove epic reference (~L19) |
+| 37 | `docs-site/content/docs/api-reference/meta.json` | Remove epics entry |
+| 38 | `docs-site/content/docs/(documentation)/concepts/meta.json` | Remove epics entry |
+| 39 | Various docs-site files | Remove epic references from getting-started, deployment, architecture, agents, memory, linear-integration |
+
+#### Tests to EDIT
+| # | File | What to change |
+|---|------|---------------|
+| 40 | `src/tests/tool-annotations.test.ts` | Remove epic tool entries |
+| 41 | `src/tests/prompt-template-remaining.test.ts` | Remove `epic_progress` template test |
+| 42 | `src/tests/tracker-tools.test.ts` | Remove epic entity type references |
+| 43 | `src/tests/db-queries-tracker.test.ts` | Remove epic entity type references |
+| 44 | `src/tests/runner-polling-api.test.ts` | Remove epic trigger references |
+| 45 | `src/tests/http-api-integration.test.ts` | Remove epic endpoint tests |
+| 46 | `src/tests/gitlab-vcs-db.test.ts` | Remove epicId references |
+| 47 | `src/tests/self-improvement.test.ts` | Remove epic references if any |
+| 48 | `src/tests/artifact-sdk.test.ts` | Remove epic references if any |
+
+#### Landing page (cosmetic)
+| # | File | What to change |
+|---|------|---------------|
+| 49 | `landing/src/components/features.tsx` | Remove/replace epic mentions |
+| 50 | `landing/src/components/architecture.tsx` | Remove/replace epic mentions |
+| 51 | `landing/src/app/blog/swarm-metrics/page.tsx` | Remove/replace epic mentions |
+| 52 | `landing/src/app/blog/page.tsx` | Remove/replace epic mentions |
+
+---
+
+## Phases
+
+### Phase 1: Database Migration
+
+**Goal:** Drop the `epics` table and remove `epicId` FK from `agent_tasks`.
+
+Create `src/be/migrations/NNN_drop_epics.sql` (next number after highest existing):
+
+```sql
+-- Remove epic feature entirely
+
+-- 1. Null out epicId on tasks (FK will be dropped with column)
+UPDATE agent_tasks SET epicId = NULL WHERE epicId IS NOT NULL;
+
+-- 2. Drop epicId column from agent_tasks
+ALTER TABLE agent_tasks DROP COLUMN epicId;
+
+-- 3. Remove tracker links for epics
+DELETE FROM tracker_links WHERE entityType = 'epic';
+
+-- 4. Drop the epics table (cascades indexes)
+DROP TABLE IF EXISTS epics;
+```
+
+Also update `src/be/db.ts` `initDb()` to remove the inline epic table creation and index.
+
+**Note on migration 005:** Leave `005_epic_next_steps.sql` in place. It runs before the drop migration on fresh DBs, and the drop migration then removes the table. This is correct behavior — never modify applied migrations.
+
+**Verification:**
+```bash
+rm -f agent-swarm-db.sqlite agent-swarm-db.sqlite-wal agent-swarm-db.sqlite-shm
+bun run start:http &
+sleep 3
+sqlite3 agent-swarm-db.sqlite ".tables" | grep -v epic
+sqlite3 agent-swarm-db.sqlite ".schema agent_tasks" | grep -v epic
+kill $(lsof -ti :3013)
+```
+
+### Phase 2: Backend — Types, DB Queries, and Core Logic
+
+**Goal:** Remove all epic types, DB query functions, and core references.
+
+1. **`src/types.ts`**: Remove `epicId` from `AgentTaskSourceSchema`, remove `EpicStatusSchema`, `EpicSchema`, `EpicWithProgressSchema` and type exports
+2. **`src/be/db.ts`**: Remove all epic functions (~500 lines), remove `epicId` from task row types/creation/filters, remove epic imports
+3. **`src/be/db-queries/tracker.ts`**: Change `"task" | "epic"` to `"task"` everywhere
+4. **`src/tracker/types.ts`**: Change `entityType` union to just `"task"`
+
+**Verification:**
+```bash
+bun run tsc:check
+```
+
+### Phase 3: MCP Tools & HTTP Endpoints
+
+**Goal:** Remove all epic MCP tools, the HTTP handler, and update server registration.
+
+1. **Delete** entire `src/tools/epics/` directory (8 files)
+2. **Delete** `src/tools/tracker/tracker-link-epic.ts`
+3. **Delete** `src/http/epics.ts`
+4. **Edit** `src/server.ts`: Remove epic imports, capability, and registration
+5. **Edit** `src/tools/tool-config.ts`: Remove 7 epic tool names + `tracker-link-epic`
+6. **Edit** `src/tools/tracker/index.ts`: Remove tracker-link-epic export
+7. **Edit** `src/http/index.ts`: Remove epic handler import + call
+8. **Edit** `src/http/tasks.ts`: Remove `epicId` from query/filter/response
+9. **Edit** `src/http/poll.ts`: Remove epic progress trigger
+10. **Edit** `src/tools/send-task.ts`: Remove `epicId` param, validation, tag logic
+11. **Edit** `src/tools/store-progress.ts`: Remove epic enrichment and follow-up logic
+12. **Edit** `src/tools/tracker/tracker-sync-status.ts`: Remove `"epic"` from entity type enum
+
+**Verification:**
+```bash
+bun run tsc:check
+bun run lint:fix
+```
+
+### Phase 4: Worker / Runner / Prompts
+
+**Goal:** Remove epic trigger handling and prompt templates from the runner.
+
+1. **Edit** `src/commands/runner.ts`: Remove `epic_progress_changed` type, handler, `fetchEpicNameAndGoal`, `fetchEpicTaskContext`, epic context enrichment in `task_assigned`
+2. **Edit** `src/commands/templates.ts`: Remove `task.trigger.epic_progress` template
+3. **Edit** `src/prompts/session-templates.ts`: Remove epic reference
+
+**Verification:**
+```bash
+bun run tsc:check
+```
+
+### Phase 5: Dashboard UI
+
+**Goal:** Remove all epic pages, hooks, types, and navigation from the UI.
+
+1. **Delete** `new-ui/src/pages/epics/` directory
+2. **Delete** `new-ui/src/api/hooks/use-epics.ts`
+3. **Edit** router, sidebar, breadcrumbs, types, client, hooks/index, use-tasks, status-badge, stats-bar, command-menu, keyboard-shortcuts
+
+**Verification:**
+```bash
+cd new-ui && pnpm lint && pnpm exec tsc --noEmit && cd ..
+```
+
+### Phase 6: Scripts, Seeds, Templates
+
+**Goal:** Remove epic from seed data, official templates, and OpenAPI generation.
+
+1. **Edit** `scripts/seed.ts`: Remove all epic-related code
+2. **Edit** `scripts/seed.default.json`: Remove `"epics"` section
+3. **Edit** `scripts/generate-openapi.ts`: Remove epic import
+4. **Edit** 8 template CLAUDE.md files: Remove `- epics` from capabilities
+5. **Edit** `templates/official/lead/IDENTITY.md` and `config.json`
+
+**Verification:**
+```bash
+bun run tsc:check
+bun run docs:openapi
+```
+
+### Phase 7: Tests
+
+**Goal:** Remove/update all test files that reference epics.
+
+1. **Delete** `src/tests/epics.test.ts`
+2. **Edit** remaining test files to remove epic references
+
+**Verification:**
+```bash
+bun test
+```
+
+### Phase 8: Documentation
+
+**Goal:** Update all docs to remove epic references.
+
+1. **Edit** `MCP.md`: Remove Epics Tools section, epicId from send-task, TOC entries
+2. **Edit** `plugin/commands/work-on-task.md`: Remove epic line
+3. **Delete** docs-site epic pages
+4. **Edit** docs-site meta.json files
+5. **Edit** other docs-site pages referencing epics
+6. **Edit** landing page files to remove epic mentions
+7. **Regenerate** `openapi.json` — this is a generated artifact that must be committed with the changes
+
+**Verification:**
+```bash
+bun run docs:openapi
+# Confirm openapi.json has no epic references
+grep -i epic openapi.json | wc -l
+# Expected: 0
+```
+
+### Phase 9: Final Validation
+
+**Goal:** Full project check to ensure nothing is broken.
+
+```bash
+# Root project
+bun run lint:fix
+bun run tsc:check
+bun test
+bash scripts/check-db-boundary.sh
+
+# UI
+cd new-ui && pnpm lint && pnpm exec tsc --noEmit && cd ..
+
+# Verify no remaining epic references in source (excluding historical)
+grep -ri "epic" --include="*.ts" --include="*.tsx" --include="*.sql" --include="*.json" \
+  --exclude-dir=thoughts --exclude-dir=.git --exclude-dir=node_modules --exclude=CHANGELOG.md \
+  --exclude-dir=landing \
+  src/ new-ui/src/ scripts/ templates/ plugin/
+
+# Fresh DB test
+rm -f agent-swarm-db.sqlite*
+bun run start:http &
+sleep 3
+curl -s -H "Authorization: Bearer 123123" http://localhost:3013/api/tasks | head -5
+kill $(lsof -ti :3013)
+```
+
+### Manual E2E Verification
+
+```bash
+# 1. Clean slate
+rm -f agent-swarm-db.sqlite agent-swarm-db.sqlite-wal agent-swarm-db.sqlite-shm
+
+# 2. Start API
+bun run start:http &
+sleep 3
+
+# 3. Verify epic endpoints are gone (should 404)
+curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer 123123" http://localhost:3013/api/epics
+# Expected: 404
+
+# 4. Verify tasks work without epicId
+curl -s -X POST -H "Authorization: Bearer 123123" -H "Content-Type: application/json" \
+  http://localhost:3013/api/tasks \
+  -d '{"task": "Test task", "source": "api"}' | jq .id
+# Expected: valid task ID
+
+# 5. Verify OpenAPI spec has no epic references
+grep -i epic openapi.json | wc -l
+# Expected: 0
+
+# 6. Cleanup
+kill $(lsof -ti :3013)
+```
+
+### Phase 10: Version Bump
+
+**Goal:** Bump the package version to mark this breaking change.
+
+1. Update `version` in `package.json` from `1.54.1` to `1.55.0` (minor bump — feature removal)
+2. Update `CHANGELOG.md` with a new entry documenting the epic removal
+
+**Verification:**
+```bash
+grep '"version"' package.json
+# Expected: "version": "1.55.0"
+```
+
+---
+
+## Risks & Mitigations
+
+| Risk | Mitigation |
+|------|-----------|
+| Existing tasks in production have `epicId` set | Migration NULLs them before dropping column |
+| Tracker links reference epics | Migration deletes epic tracker links |
+| Agents mid-flight reference epic tools | Tools disappear on restart — agents get clean tool list on reconnect |
+| Migration 005 references epics table | Left in place — runs before drop migration, then drop cleans up |
+| Landing page mentions epics | Replace with generic task/project references |
+
+## Out of Scope
+
+- **CHANGELOG.md**: Historical entries mentioning epics are left as-is (they're history)
+- **thoughts/ directory**: Old research/plans mentioning epics are left (historical context), except the two epic-specific docs which are deleted
+- **Git history**: No rewriting
