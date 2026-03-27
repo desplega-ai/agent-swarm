@@ -4,8 +4,8 @@ import {
   Github,
   BookOpen,
   ExternalLink,
-  LayoutDashboard,
-  Sparkles,
+  Cloud,
+  DollarSign,
   PenLine,
   Blocks,
 } from "lucide-react";
@@ -58,18 +58,18 @@ export function Footer() {
               Docs
             </a>
             <Link
+              href="/pricing"
+              className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
+            >
+              <DollarSign className="w-4 h-4" />
+              Pricing
+            </Link>
+            <Link
               href="/blog"
               className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
             >
               <PenLine className="w-4 h-4" />
               Blog
-            </Link>
-            <Link
-              href="/examples"
-              className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
-            >
-              <Sparkles className="w-4 h-4" />
-              Examples
             </Link>
             <a
               href="https://templates.agent-swarm.dev"
@@ -81,13 +81,13 @@ export function Footer() {
               Templates
             </a>
             <a
-              href="https://app.agent-swarm.dev"
+              href="https://cloud.agent-swarm.dev"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
             >
-              <LayoutDashboard className="w-4 h-4" />
-              Dashboard
+              <Cloud className="w-4 h-4" />
+              Cloud
             </a>
             <a
               href="https://desplega.sh"

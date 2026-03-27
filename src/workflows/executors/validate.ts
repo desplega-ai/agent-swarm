@@ -130,6 +130,9 @@ export class ValidateExecutor extends BaseExecutor<
           },
           required: ["pass", "reasoning", "confidence"],
         }),
+        providerOptions: {
+          openai: { strictJsonSchema: false },
+        },
         prompt: `Evaluate the following output against the validation criteria.
 
 Criteria: ${interpolatedPrompt}

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, initDb } from "../be/db";
 import { upsertOAuthApp } from "../be/db-queries/oauth";
@@ -112,12 +112,14 @@ describe("exchangeCode", () => {
   test("rejects already-consumed state", async () => {
     const result = await buildAuthorizationUrl(testConfig);
 
-    // First exchange attempt will fail because there's no real token server,
-    // but it should consume the state
+    // Mock fetch to fail immediately (avoids real network call to example.com)
+    const fetchSpy = spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network error"));
     try {
       await exchangeCode(testConfig, "some-code", result.state);
     } catch {
-      // Expected: fetch to token URL fails
+      // Expected: fetch fails, but state is consumed
+    } finally {
+      fetchSpy.mockRestore();
     }
 
     // Second attempt with the same state should fail with "Invalid or expired"
