@@ -1,4 +1,4 @@
-import { getLastSuccessfulRun } from "../be/db";
+import { getLastRunStart, getLastSuccessfulRun } from "../be/db";
 import type { CooldownConfig } from "../types";
 
 /**
@@ -14,15 +14,32 @@ function cooldownToMs(cooldown: CooldownConfig): number {
 
 /**
  * Check if a workflow should be skipped due to cooldown.
- * Returns true if the last successful run completed within the cooldown window.
+ * Returns true if:
+ * - the last successful run finished within the cooldown window, OR
+ * - any run (including failed ones) started within the cooldown window.
+ *
+ * The second condition prevents runaway re-triggering when all runs fail
+ * (e.g. due to rate limits): without it, a failed run would never satisfy
+ * the "last completed run" check, so the cooldown would never engage.
  */
 export function shouldSkipCooldown(workflowId: string, cooldown: CooldownConfig): boolean {
-  const lastRun = getLastSuccessfulRun(workflowId);
-  if (!lastRun?.finishedAt) return false;
-
   const cooldownMs = cooldownToMs(cooldown);
-  const lastFinished = new Date(lastRun.finishedAt).getTime();
   const now = Date.now();
 
-  return now - lastFinished < cooldownMs;
+  // Skip if last successful run finished within the cooldown window
+  const lastSuccess = getLastSuccessfulRun(workflowId);
+  if (lastSuccess?.finishedAt) {
+    const lastFinished = new Date(lastSuccess.finishedAt).getTime();
+    if (now - lastFinished < cooldownMs) return true;
+  }
+
+  // Skip if any run (failed or running) started within the cooldown window.
+  // Prevents unlimited re-triggering when every run fails before completing.
+  const lastAttempt = getLastRunStart(workflowId);
+  if (lastAttempt?.startedAt) {
+    const lastStarted = new Date(lastAttempt.startedAt).getTime();
+    if (now - lastStarted < cooldownMs) return true;
+  }
+
+  return false;
 }

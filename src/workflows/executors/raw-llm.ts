@@ -69,6 +69,20 @@ export class RawLlmExecutor extends BaseExecutor<
         output: { result: text, model: modelName },
       };
     } catch (err) {
+      // Re-throw rate-limit errors so executeStep's retry policy handles them
+      // via the retry poller (scheduled backoff). Using the fallbackPort for
+      // rate limits would trigger the semantic loop-back path instead, causing
+      // runaway retries without any backoff.
+      const httpStatus =
+        (err as { status?: number; statusCode?: number })?.status ??
+        (err as { status?: number; statusCode?: number })?.statusCode;
+      const isRateLimited =
+        httpStatus === 429 ||
+        httpStatus === 529 ||
+        (err instanceof Error && /rate.?limit|too many requests|529/i.test(err.message));
+      if (isRateLimited) {
+        throw err;
+      }
       if (config.fallbackPort) {
         return {
           status: "success",
