@@ -8,6 +8,7 @@ const steps = [
     title: "Deploy the Swarm",
     description:
       "Clone the repo, configure your environment, and run docker compose up. The API server, lead agent, and workers start in isolated containers — each with their own identity, capabilities, and workspace.",
+    badge: "Docker-isolated \u00b7 Runs anywhere \u00b7 Self-hosted or cloud",
     visual: (
       <div className="font-mono text-xs leading-relaxed text-zinc-600">
         <div className="text-zinc-400"># Clone and configure</div>
@@ -32,6 +33,7 @@ const steps = [
     title: "Delegate Tasks",
     description:
       "The lead agent breaks down work and assigns tasks to specialized workers. Tasks can be sent directly, offered for acceptance, or pooled for anyone to claim.",
+    badge: "Any LLM \u00b7 No vendor lock-in",
     visual: (
       <div className="space-y-2">
         {[
@@ -75,6 +77,7 @@ const steps = [
     title: "Knowledge Compounds",
     description:
       "Every completed task generates memories. Every session enriches the agent's identity. The swarm doesn't just work — it learns. Each session builds on all that came before.",
+    badge: "Open source \u00b7 Your agents are your IP",
     visual: (
       <div className="space-y-3">
         <div className="flex items-start gap-2">
@@ -157,6 +160,11 @@ export function HowItWorks() {
                 </div>
                 <h3 className="text-2xl sm:text-3xl font-bold text-zinc-900 mb-4">{step.title}</h3>
                 <p className="text-base text-zinc-500 leading-relaxed">{step.description}</p>
+                {step.badge && (
+                  <span className="inline-block mt-4 text-xs font-medium text-amber-600 bg-amber-50 rounded-full px-3 py-1">
+                    {step.badge}
+                  </span>
+                )}
               </div>
 
               <div className={`${i % 2 === 1 ? "lg:order-1" : ""}`}>

@@ -3,7 +3,7 @@ title: "Landing Page Cloud Integration & Redesign"
 date: 2026-03-27
 type: plan
 autonomy: verbose
-status: ready
+status: completed
 research: thoughts/taras/research/2026-03-27-landing-page-cloud-redesign.md
 ---
 

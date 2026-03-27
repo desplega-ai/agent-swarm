@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Github, BookOpen, LayoutDashboard, Menu, X, Newspaper, Play, Blocks } from "lucide-react";
+import { Github, BookOpen, Menu, X, Blocks, ArrowRight, DollarSign } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 export function Navbar() {
@@ -41,35 +41,25 @@ export function Navbar() {
         </Link>
 
         <div className="hidden md:flex items-center gap-6">
-          <Link
-            href="/#features"
-            className="text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
+          <a
+            href="https://docs.agent-swarm.dev"
+            className="flex items-center gap-1.5 text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
           >
-            Features
-          </Link>
+            <BookOpen className="w-4 h-4" />
+            Docs
+          </a>
           <Link
-            href="/#how-it-works"
-            className="text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
+            href="/pricing"
+            className="flex items-center gap-1.5 text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
           >
-            How It Works
-          </Link>
-          <Link
-            href="/#architecture"
-            className="text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
-          >
-            Architecture
+            <DollarSign className="w-4 h-4" />
+            Pricing
           </Link>
           <Link
             href="/blog"
             className="text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
           >
             Blog
-          </Link>
-          <Link
-            href="/examples"
-            className="text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
-          >
-            Examples
           </Link>
           <a
             href="https://templates.agent-swarm.dev"
@@ -80,31 +70,21 @@ export function Navbar() {
             <Blocks className="w-4 h-4" />
             Templates
           </a>
-          <div className="w-px h-5 bg-zinc-200" />
-          <a
-            href="https://docs.agent-swarm.dev"
-            className="flex items-center gap-1.5 text-sm font-medium text-zinc-600 hover:text-zinc-900 transition-colors"
-          >
-            <BookOpen className="w-4 h-4" />
-            Docs
-          </a>
-          <a
-            href="https://app.agent-swarm.dev"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-sm font-medium text-amber-700 hover:text-amber-900 transition-colors"
-          >
-            <LayoutDashboard className="w-4 h-4" />
-            Dashboard
-          </a>
           <a
             href="https://github.com/desplega-ai/agent-swarm"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1.5 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 transition-colors shadow-lg shadow-zinc-900/10"
+            className="text-zinc-600 hover:text-zinc-900 transition-colors"
+            aria-label="GitHub"
           >
-            <Github className="w-4 h-4" />
-            GitHub
+            <Github className="w-5 h-5" />
+          </a>
+          <a
+            href="https://cloud.agent-swarm.dev"
+            className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-500 transition-colors shadow-lg shadow-amber-600/20"
+          >
+            Start Free Trial
+            <ArrowRight className="w-4 h-4" />
           </a>
         </div>
 
@@ -122,26 +102,19 @@ export function Navbar() {
             className="md:hidden overflow-hidden bg-white/95 backdrop-blur-xl border-b border-zinc-200"
           >
             <div className="px-6 py-4 flex flex-col gap-3">
-              <Link
-                href="/#features"
+              <a
+                href="https://docs.agent-swarm.dev"
                 onClick={() => setMobileOpen(false)}
-                className="text-sm font-medium text-zinc-600 py-2"
+                className="flex items-center gap-2 text-sm font-medium text-zinc-600 py-2"
               >
-                Features
-              </Link>
+                <BookOpen className="w-4 h-4" /> Docs
+              </a>
               <Link
-                href="/#how-it-works"
+                href="/pricing"
                 onClick={() => setMobileOpen(false)}
-                className="text-sm font-medium text-zinc-600 py-2"
+                className="flex items-center gap-2 text-sm font-medium text-zinc-600 py-2"
               >
-                How It Works
-              </Link>
-              <Link
-                href="/#architecture"
-                onClick={() => setMobileOpen(false)}
-                className="text-sm font-medium text-zinc-600 py-2"
-              >
-                Architecture
+                <DollarSign className="w-4 h-4" /> Pricing
               </Link>
               <Link
                 href="/blog"
@@ -149,13 +122,6 @@ export function Navbar() {
                 className="text-sm font-medium text-zinc-600 py-2"
               >
                 Blog
-              </Link>
-              <Link
-                href="/examples"
-                onClick={() => setMobileOpen(false)}
-                className="text-sm font-medium text-zinc-600 py-2"
-              >
-                Examples
               </Link>
               <a
                 href="https://templates.agent-swarm.dev"
@@ -166,28 +132,23 @@ export function Navbar() {
               >
                 <Blocks className="w-4 h-4" /> Templates
               </a>
-              <div className="h-px bg-zinc-200" />
-              <a
-                href="https://docs.agent-swarm.dev"
-                className="flex items-center gap-2 text-sm font-medium text-zinc-600 py-2"
-              >
-                <BookOpen className="w-4 h-4" /> Docs
-              </a>
-              <a
-                href="https://app.agent-swarm.dev"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 text-sm font-medium text-amber-700 py-2"
-              >
-                <LayoutDashboard className="w-4 h-4" /> Dashboard
-              </a>
               <a
                 href="https://github.com/desplega-ai/agent-swarm"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-2 justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white"
+                onClick={() => setMobileOpen(false)}
+                className="flex items-center gap-2 text-sm font-medium text-zinc-600 py-2"
               >
-                <Github className="w-4 h-4" /> View on GitHub
+                <Github className="w-4 h-4" /> GitHub
+              </a>
+              <div className="h-px bg-zinc-200" />
+              <a
+                href="https://cloud.agent-swarm.dev"
+                onClick={() => setMobileOpen(false)}
+                className="flex items-center gap-2 justify-center rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white"
+              >
+                Start Free Trial
+                <ArrowRight className="w-4 h-4" />
               </a>
             </div>
           </motion.div>

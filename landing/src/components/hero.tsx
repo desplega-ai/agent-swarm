@@ -161,7 +161,8 @@ export function Hero() {
               className="text-lg sm:text-xl text-zinc-500 leading-relaxed mb-10 max-w-xl"
             >
               Orchestrate autonomous AI agents that learn, remember, and get smarter with every
-              session. A lead coordinates workers. Memory persists. Knowledge compounds.
+              session. A lead coordinates workers. Memory persists. Knowledge compounds.{" "}
+              <strong className="text-zinc-700">Deploy in minutes with Agent Swarm Cloud, or self-host for free.</strong>
             </motion.p>
 
             <motion.div
@@ -171,10 +172,10 @@ export function Hero() {
               className="flex flex-wrap gap-4"
             >
               <a
-                href="https://docs.agent-swarm.dev/docs/getting-started"
-                className="group inline-flex items-center gap-2 rounded-xl bg-zinc-900 px-6 py-3 text-sm font-semibold text-white hover:bg-zinc-800 transition-all shadow-xl shadow-zinc-900/20 hover:shadow-zinc-900/30"
+                href="https://cloud.agent-swarm.dev"
+                className="group inline-flex items-center gap-2 rounded-xl bg-amber-600 px-6 py-3 text-sm font-semibold text-white hover:bg-amber-500 transition-all shadow-xl shadow-amber-600/20 hover:shadow-amber-600/30"
               >
-                Get Started
+                Start Free Trial
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
               </a>
               <a
