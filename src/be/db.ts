@@ -6196,6 +6196,17 @@ export function getLastSuccessfulRun(workflowId: string): WorkflowRun | null {
   return row ? rowToWorkflowRun(row) : null;
 }
 
+export function getLastRunStart(workflowId: string): WorkflowRun | null {
+  const row = getDb()
+    .prepare<WorkflowRunRow, [string]>(
+      `SELECT * FROM workflow_runs
+       WHERE workflowId = ? AND status NOT IN ('skipped')
+       ORDER BY startedAt DESC LIMIT 1`,
+    )
+    .get(workflowId);
+  return row ? rowToWorkflowRun(row) : null;
+}
+
 export function getRetryableSteps(): WorkflowRunStep[] {
   const now = new Date().toISOString();
   return getDb()

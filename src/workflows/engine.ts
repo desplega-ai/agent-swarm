@@ -23,6 +23,7 @@ import { runStepValidation } from "./validation";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_ITERATIONS = Number(process.env.WORKFLOW_MAX_ITERATIONS) || 100;
+const MAX_STEPS_PER_RUN = Number(process.env.WORKFLOW_MAX_STEPS_PER_RUN) || 500;
 
 /**
  * Error thrown when trigger data fails validation against a workflow's triggerSchema.
@@ -166,13 +167,26 @@ export async function walkGraph(
     }
   }
 
+  // Circuit breaker: fail the run if total steps exceed the per-run limit.
+  // This prevents runaway workflows (e.g. infinite loop-backs) from consuming
+  // unbounded resources. Checked here so it covers initial walks AND async
+  // resumes (resumeFromTaskCompletion, handleTaskFailure, retry-poller).
+  const allSteps = getWorkflowRunStepsByRunId(runId);
+  if (allSteps.length >= MAX_STEPS_PER_RUN) {
+    updateWorkflowRun(runId, {
+      status: "failed",
+      error: `Circuit breaker: run exceeded ${MAX_STEPS_PER_RUN} total steps (WORKFLOW_MAX_STEPS_PER_RUN)`,
+      finishedAt: new Date().toISOString(),
+    });
+    return;
+  }
+
   // Also reconstruct active edges from "waiting" steps. A waiting step
   // means the node was reached (its predecessor completed and routed to it),
   // so its structural outgoing edges are active paths that convergence
   // nodes must wait for. Without this, fan-out convergence gates fire
   // prematurely — e.g. if 1-of-3 parallel tasks completes, the merge node
   // would see only 1 active predecessor and trigger immediately.
-  const allSteps = getWorkflowRunStepsByRunId(runId);
   for (const step of allSteps) {
     if (step.status !== "waiting") continue;
     const successors = getSuccessors(def, step.nodeId);

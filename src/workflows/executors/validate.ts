@@ -150,6 +150,20 @@ Respond with pass (boolean), reasoning (string), and confidence (0-1).`,
         nextPort: result.pass ? "pass" : "fail",
       };
     } catch (err) {
+      // Re-throw rate-limit errors so executeStep's retry policy handles them
+      // via the retry poller (scheduled backoff). Returning nextPort:"fail" for
+      // rate limits would trigger the semantic loop-back path instead, causing
+      // runaway retries without any backoff.
+      const httpStatus =
+        (err as { status?: number; statusCode?: number })?.status ??
+        (err as { status?: number; statusCode?: number })?.statusCode;
+      const isRateLimited =
+        httpStatus === 429 ||
+        httpStatus === 529 ||
+        (err instanceof Error && /rate.?limit|too many requests|529/i.test(err.message));
+      if (isRateLimited) {
+        throw err;
+      }
       return {
         status: "success",
         output: {
