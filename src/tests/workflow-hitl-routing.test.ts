@@ -72,6 +72,37 @@ class MockHITLExecutor extends BaseExecutor<
   }
 }
 
+/** A mock async executor that simulates agent-task behavior — returns async, then completes via event */
+class MockAsyncTaskExecutor extends BaseExecutor<
+  typeof MockAsyncTaskExecutor.schema,
+  typeof MockAsyncTaskExecutor.outSchema
+> {
+  static readonly schema = z.object({ template: z.string() });
+  static readonly outSchema = z.object({ taskId: z.string(), taskOutput: z.unknown() });
+
+  readonly type = "mock-async-task";
+  readonly mode = "async" as const;
+  readonly configSchema = MockAsyncTaskExecutor.schema;
+  readonly outputSchema = MockAsyncTaskExecutor.outSchema;
+
+  /** Store run/step info so the test can simulate task completion */
+  lastMeta: { runId: string; stepId: string; nodeId: string } | null = null;
+
+  protected async execute(
+    _config: z.infer<typeof MockAsyncTaskExecutor.schema>,
+    _context: Readonly<Record<string, unknown>>,
+    meta: import("../types").ExecutorMeta,
+  ): Promise<ExecutorResult<z.infer<typeof MockAsyncTaskExecutor.outSchema>>> {
+    this.lastMeta = { runId: meta.runId, stepId: meta.stepId, nodeId: meta.nodeId };
+    return {
+      status: "success",
+      async: true,
+      waitFor: "task.completed",
+      correlationId: meta.stepId,
+    } as unknown as ExecutorResult<z.infer<typeof MockAsyncTaskExecutor.outSchema>>;
+  }
+}
+
 class EchoExecutor extends BaseExecutor<typeof EchoExecutor.schema, typeof EchoExecutor.outSchema> {
   static readonly schema = z.object({ message: z.string() });
   static readonly outSchema = z.object({ echo: z.string() });
@@ -383,5 +414,133 @@ describe("HITL port-based routing", () => {
     const successSteps = steps.filter((s) => s.nodeId === "success");
     expect(successSteps).toHaveLength(1);
     expect(successSteps[0]!.status).toBe("completed");
+  });
+
+  test("loop with async generate: rejected → async generate → HITL pauses again on 2nd iteration", async () => {
+    const eventBus = new InProcessEventBus();
+    const registry = new ExecutorRegistry();
+    const hitlExecutor = new MockHITLExecutor({ ...mockDeps, eventBus });
+    const asyncTaskExecutor = new MockAsyncTaskExecutor({ ...mockDeps, eventBus });
+    registry.register(hitlExecutor);
+    registry.register(asyncTaskExecutor);
+    registry.register(new EchoExecutor({ ...mockDeps, eventBus }));
+    setupWorkflowResumeListener(eventBus, registry);
+
+    // Workflow: start → generate(async) → review(HITL) → success
+    //                     ↑_______rejected_________|
+    const def: WorkflowDefinition = {
+      nodes: [
+        { id: "start", type: "echo", config: { message: "begin" }, next: "generate-question" },
+        {
+          id: "generate-question",
+          type: "mock-async-task",
+          config: { template: "Generate a question" },
+          next: "review-question",
+        },
+        {
+          id: "review-question",
+          type: "mock-hitl",
+          config: { title: "Review the question" },
+          next: {
+            approved: "success",
+            rejected: "generate-question",
+          },
+        },
+        { id: "success", type: "echo", config: { message: "done" } },
+      ],
+    };
+
+    const workflow = makeWorkflow(def);
+    const runId = await startWorkflowExecution(workflow, {}, registry);
+
+    // After start: generate-question should be waiting (async task)
+    let run = getWorkflowRun(runId);
+    expect(run!.status).toBe("waiting");
+
+    // Simulate async task completion for generate-question (1st iteration)
+    const genMeta1 = asyncTaskExecutor.lastMeta!;
+    const taskComplete1Promise = new Promise<void>((resolve) => setTimeout(resolve, 200));
+    eventBus.emit("task.completed", {
+      taskId: "fake-task-1",
+      output: JSON.stringify({ question: "What is 2+2?" }),
+      workflowRunId: runId,
+      workflowRunStepId: genMeta1.stepId,
+    });
+    await taskComplete1Promise;
+
+    // Now review-question should be waiting for HITL approval
+    run = getWorkflowRun(runId);
+    expect(run!.status).toBe("waiting");
+
+    let steps = getWorkflowRunStepsByRunId(runId);
+    const reviewStep1 = steps.find((s) => s.nodeId === "review-question" && s.status === "waiting");
+    expect(reviewStep1).toBeDefined();
+
+    const requestId1 = hitlExecutor.lastRequestId!;
+
+    // REJECT — should loop back to generate-question (async)
+    const reject1Promise = new Promise<void>((resolve) => setTimeout(resolve, 200));
+    eventBus.emit("approval.resolved", {
+      requestId: requestId1,
+      status: "rejected",
+      responses: null,
+      workflowRunId: runId,
+      workflowRunStepId: reviewStep1!.id,
+    });
+    await reject1Promise;
+
+    // After rejection: generate-question should be waiting again (2nd async task)
+    run = getWorkflowRun(runId);
+    expect(run!.status).toBe("waiting");
+
+    const genMeta2 = asyncTaskExecutor.lastMeta!;
+    expect(genMeta2.stepId).not.toBe(genMeta1.stepId); // Different step
+
+    // Simulate async task completion for generate-question (2nd iteration)
+    const taskComplete2Promise = new Promise<void>((resolve) => setTimeout(resolve, 200));
+    eventBus.emit("task.completed", {
+      taskId: "fake-task-2",
+      output: JSON.stringify({ question: "What is 3+3?" }),
+      workflowRunId: runId,
+      workflowRunStepId: genMeta2.stepId,
+    });
+    await taskComplete2Promise;
+
+    // KEY ASSERTION: review-question should be WAITING again (not auto-completed)
+    // This is the bug: without the fix, findReadyNodes would skip review-question
+    // because it was already completed in iteration 1, causing the run to complete
+    // without ever pausing for HITL approval on the 2nd iteration.
+    run = getWorkflowRun(runId);
+    expect(run!.status).toBe("waiting");
+
+    steps = getWorkflowRunStepsByRunId(runId);
+    const reviewSteps = steps.filter((s) => s.nodeId === "review-question");
+    expect(reviewSteps).toHaveLength(2); // Two iterations of review-question
+
+    const reviewStep2 = reviewSteps.find((s) => s.status === "waiting");
+    expect(reviewStep2).toBeDefined();
+
+    const requestId2 = hitlExecutor.lastRequestId!;
+    expect(requestId2).not.toBe(requestId1);
+
+    // APPROVE — should go to success
+    const approve2Promise = new Promise<void>((resolve) => setTimeout(resolve, 200));
+    eventBus.emit("approval.resolved", {
+      requestId: requestId2,
+      status: "approved",
+      responses: { q1: true },
+      workflowRunId: runId,
+      workflowRunStepId: reviewStep2!.id,
+    });
+    await approve2Promise;
+
+    // Final state: completed
+    run = getWorkflowRun(runId);
+    expect(run!.status).toBe("completed");
+
+    steps = getWorkflowRunStepsByRunId(runId);
+    const successSteps2 = steps.filter((s) => s.nodeId === "success");
+    expect(successSteps2).toHaveLength(1);
+    expect(successSteps2[0]!.status).toBe("completed");
   });
 });
