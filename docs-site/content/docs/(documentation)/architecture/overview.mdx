@@ -37,7 +37,7 @@ The server runs on port `3013` by default and is implemented in `src/http/` (mod
 It also runs three background subsystems:
 - **Scheduler** — Polls for scheduled tasks and creates them at the configured interval
 - **Workflow Engine** — Redesigned DAG executor with executor registry (8 types), checkpoint durability, webhook/schedule/manual triggers, per-step retry, and version history (see [Workflows](/docs/concepts/workflows))
-- **Heartbeat** — A lightweight triage module that sweeps the swarm every 90 seconds (configurable via `HEARTBEAT_INTERVAL_MS`). It uses a 3-tier approach: a preflight gate that bails if the swarm is healthy, code-level triage for routine fixes (stall detection, worker status correction, pool task auto-assignment, stale resource cleanup), and Claude escalation only when ambiguous situations require human reasoning. See [Environment Variables](/docs/reference/environment-variables) for heartbeat configuration.
+- **Heartbeat** — A lightweight triage module that sweeps the swarm every 90 seconds (configurable via `HEARTBEAT_INTERVAL_MS`). It uses a 3-tier approach: a preflight gate that bails if the swarm is healthy, code-level triage for routine fixes (stall detection, worker status correction, pool task auto-assignment, stale resource cleanup), and Claude escalation only when ambiguous situations require human reasoning. The lead agent also triggers a heartbeat sweep on startup to immediately detect and recover any stalled tasks from before restart. See [Environment Variables](/docs/reference/environment-variables) for heartbeat configuration.
 
 ### Lead Agent
 

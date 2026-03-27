@@ -138,6 +138,12 @@ When a worker container receives SIGTERM:
 
 This enables zero-downtime deployments.
 
+## Stalled Task Auto-Remediation
+
+The heartbeat system automatically detects and recovers stalled tasks — tasks that remain `in_progress` but whose worker has become unresponsive. When the lead agent starts up, it triggers an immediate heartbeat sweep to catch any tasks that stalled while the swarm was down.
+
+Stalled task detection uses the heartbeat's code-level triage: if a task has been `in_progress` for longer than expected without progress updates and its assigned worker is offline, the heartbeat can reassign or fail the task as appropriate.
+
 ## Related
 
 - [Epics](/docs/concepts/epics) — Organizing related tasks into larger projects
