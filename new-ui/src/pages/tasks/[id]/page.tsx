@@ -212,7 +212,7 @@ function TaskPrompt({ text }: { text: string }) {
   return (
     <div className="space-y-1">
       {expanded ? (
-        <div className="text-sm leading-relaxed">
+        <div className="text-sm leading-relaxed max-h-[60vh] overflow-y-auto">
           <Streamdown>{normalizeNewlines(text)}</Streamdown>
         </div>
       ) : (
