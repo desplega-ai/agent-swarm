@@ -1,5 +1,5 @@
 {
-  "title": "API Reference v1.53.1",
+  "title": "API Reference v1.54.1",
   "description": "REST API reference for Agent Swarm",
   "root": true,
   "pages": [
@@ -13,6 +13,7 @@
     "ecosystem",
     "epics",
     "events",
+    "heartbeat",
     "mcp-servers",
     "memory",
     "poll",
