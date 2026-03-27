@@ -1,17 +1,14 @@
 import {
-  AlertCircle,
   ArrowLeft,
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
   RefreshCw,
-  Timer,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useRetryWorkflowRun, useWorkflow, useWorkflowRun } from "@/api/hooks/use-workflows";
-import type { WorkflowRunStep } from "@/api/types";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { JsonTree } from "@/components/workflows/json-tree";
+import { StepCard } from "@/components/workflows/step-card";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
 import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
@@ -31,6 +29,7 @@ export default function WorkflowRunDetailPage() {
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [expandedStepIds, setExpandedStepIds] = useState<Set<string>>(new Set());
+  const [triggerExpanded, setTriggerExpanded] = useState(false);
   const stepRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   const duration =
@@ -68,6 +67,16 @@ export default function WorkflowRunDetailPage() {
     setSelectedNodeId(nodeId);
   }, []);
 
+  const steps = run?.steps ?? [];
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const s of steps) {
+      counts[s.status] = (counts[s.status] || 0) + 1;
+    }
+    return counts;
+  }, [steps]);
+
   // Clear selection when clicking graph background (deselect)
   useEffect(() => {
     // If selectedNodeId doesn't match any step, clear it
@@ -89,22 +98,25 @@ export default function WorkflowRunDetailPage() {
     return <p className="text-muted-foreground">Workflow run not found.</p>;
   }
 
-  const steps = run.steps ?? [];
-
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       {/* Header */}
       <div className="shrink-0 space-y-3">
         <button
           type="button"
-          onClick={() => navigate("/workflows?tab=runs")}
+          onClick={() => navigate(`/workflows/${run.workflowId}?tab=runs`)}
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft className="h-4 w-4" /> Back to Runs
         </button>
 
         <div className="flex items-center gap-3 flex-wrap">
-          <h1 className="text-xl font-semibold">Run of {workflow?.name ?? "..."}</h1>
+          <h1 className="text-xl font-semibold">
+            Run of{" "}
+            <Link to={`/workflows/${run.workflowId}`} className="text-primary hover:underline">
+              {workflow?.name ?? "..."}
+            </Link>
+          </h1>
           <StatusBadge status={run.status} size="md" />
           <Badge
             variant="outline"
@@ -136,12 +148,61 @@ export default function WorkflowRunDetailPage() {
 
         {run.error && (
           <Alert variant="destructive">
-            <AlertDescription className="text-xs font-mono whitespace-pre-wrap">
+            <AlertDescription className="text-xs font-mono whitespace-pre-wrap max-h-[200px] overflow-y-auto">
               {run.error}
             </AlertDescription>
           </Alert>
         )}
       </div>
+
+      {/* Trigger Data (collapsible) */}
+      {run.triggerData != null && (
+        <div className="shrink-0 rounded-md border border-border/50">
+          <button
+            type="button"
+            onClick={() => setTriggerExpanded(!triggerExpanded)}
+            className="w-full flex items-center gap-1.5 px-3 py-2 text-left"
+          >
+            {triggerExpanded ? (
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+            )}
+            <span className="text-xs text-muted-foreground">Trigger Data</span>
+          </button>
+          {triggerExpanded && (
+            <div className="px-3 pb-2.5">
+              <JsonTree data={run.triggerData} defaultExpandDepth={1} maxHeight="200px" />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Step Summary Bar */}
+      {steps.length > 0 && (
+        <div className="shrink-0 flex items-center gap-3 text-xs text-muted-foreground">
+          {Object.entries(statusCounts).map(([status, count]) => (
+            <span key={status} className="flex items-center gap-1.5">
+              <span
+                className={cn(
+                  "inline-block h-2 w-2 rounded-full",
+                  status === "completed" && "bg-emerald-500",
+                  status === "running" && "bg-amber-500",
+                  status === "waiting" && "bg-yellow-500",
+                  status === "failed" && "bg-red-500",
+                  status === "pending" && "bg-zinc-500",
+                  status === "skipped" && "bg-zinc-400/40",
+                )}
+              />
+              {count} {status}
+            </span>
+          ))}
+          <span className="text-muted-foreground/60">·</span>
+          <span>
+            {steps.length} step{steps.length !== 1 ? "s" : ""} total
+          </span>
+        </div>
+      )}
 
       {/* Split layout: graph + steps panel */}
       <div className="flex flex-col md:flex-row flex-1 min-h-0 gap-4">
@@ -214,150 +275,6 @@ export default function WorkflowRunDetailPage() {
           </ScrollArea>
         </div>
       </div>
-    </div>
-  );
-}
-
-// --- Step Card ---
-
-import { forwardRef } from "react";
-import type { WorkflowNode } from "@/api/types";
-
-interface StepCardProps {
-  step: WorkflowRunStep;
-  workflowNodes?: WorkflowNode[];
-  isSelected: boolean;
-  isExpanded: boolean;
-  onClick: () => void;
-  onToggleExpand: () => void;
-}
-
-const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
-  ({ step, workflowNodes, isSelected, isExpanded, onClick, onToggleExpand }, ref) => {
-    const node = workflowNodes?.find((n) => n.id === step.nodeId);
-    const label = node?.label || step.nodeId;
-    const duration =
-      step.startedAt && step.finishedAt ? formatElapsed(step.startedAt, step.finishedAt) : null;
-
-    return (
-      <div
-        ref={ref}
-        onClick={onClick}
-        className={cn(
-          "rounded-md border bg-background transition-colors cursor-pointer",
-          isSelected && "border-l-2 border-l-amber-500",
-        )}
-      >
-        {/* Header row - always visible */}
-        <div className="w-full flex items-center gap-2 px-3 py-2">
-          <span className="text-sm font-medium truncate">{label}</span>
-
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase shrink-0"
-          >
-            {step.nodeType}
-          </Badge>
-
-          <StatusBadge status={step.status} className="shrink-0" />
-
-          <div className="ml-auto flex items-center gap-1.5 shrink-0">
-            {duration && (
-              <span className="text-xs text-muted-foreground font-mono flex items-center gap-1">
-                <Timer className="h-3 w-3" />
-                {duration}
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleExpand();
-              }}
-              className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-              title={isExpanded ? "Collapse" : "Expand"}
-            >
-              {isExpanded ? (
-                <ChevronDown className="h-3.5 w-3.5" />
-              ) : (
-                <ChevronRight className="h-3.5 w-3.5" />
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Expanded details */}
-        {isExpanded && (
-          <div className="px-3 pb-3 pt-1 space-y-3 border-t">
-            {/* Metadata grid */}
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-              <MetaField label="Started" value={formatSmartTime(step.startedAt)} />
-              {step.finishedAt && (
-                <MetaField label="Finished" value={formatSmartTime(step.finishedAt)} />
-              )}
-              {duration && <MetaField label="Duration" value={duration} mono />}
-            </div>
-
-            {/* Retry info */}
-            {step.retryCount != null && step.retryCount > 0 && (
-              <div className="flex items-center gap-2 text-xs">
-                <Badge
-                  variant="outline"
-                  className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase text-amber-600 dark:text-amber-400"
-                >
-                  Retry {step.retryCount}
-                  {step.maxRetries != null ? `/${step.maxRetries}` : ""}
-                </Badge>
-                {step.nextRetryAt && (
-                  <span className="text-muted-foreground">
-                    next: {formatSmartTime(step.nextRetryAt)}
-                  </span>
-                )}
-              </div>
-            )}
-
-            {/* Error */}
-            {step.error && (
-              <Alert variant="destructive" className="py-2">
-                <AlertCircle className="h-3.5 w-3.5" />
-                <AlertDescription className="text-xs font-mono whitespace-pre-wrap">
-                  {step.error}
-                </AlertDescription>
-              </Alert>
-            )}
-
-            {/* Input */}
-            {step.input != null && (
-              <div className="space-y-1">
-                <span className="text-xs text-muted-foreground uppercase tracking-wide">Input</span>
-                <JsonTree data={step.input} defaultExpandDepth={1} maxHeight="200px" />
-              </div>
-            )}
-
-            {/* Output */}
-            {step.output != null && (
-              <div className="space-y-1">
-                <span className="text-xs text-muted-foreground uppercase tracking-wide">
-                  Output
-                </span>
-                <JsonTree data={step.output} defaultExpandDepth={1} maxHeight="200px" />
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  },
-);
-StepCard.displayName = "StepCard";
-
-// --- Small helpers ---
-
-function MetaField({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div>
-      <span className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</span>
-      <p className={cn("text-xs", mono && "font-mono")}>{value}</p>
     </div>
   );
 }

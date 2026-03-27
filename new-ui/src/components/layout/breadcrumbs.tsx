@@ -8,11 +8,22 @@ const routeLabels: Record<string, string> = {
   chat: "Chat",
   services: "Services",
   schedules: "Schedules",
+  workflows: "Workflows",
+  "workflow-runs": "Workflow Runs",
+  "approval-requests": "Approvals",
+  skills: "Skills",
+  "mcp-servers": "MCP Servers",
   usage: "Usage",
   config: "Config",
   repos: "Repos",
   templates: "Templates",
   history: "History",
+  debug: "Debug",
+};
+
+/** Routes that don't have their own list page — redirect breadcrumb to a parent. */
+const routeRedirects: Record<string, string> = {
+  "workflow-runs": "/workflows",
 };
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -30,7 +41,8 @@ export function Breadcrumbs() {
   if (segments.length === 0) return null;
 
   const crumbs = segments.map((segment, index) => {
-    const path = `/${segments.slice(0, index + 1).join("/")}`;
+    const defaultPath = `/${segments.slice(0, index + 1).join("/")}`;
+    const path = routeRedirects[segment] ?? defaultPath;
     const label = formatSegment(segment);
     const isLast = index === segments.length - 1;
 

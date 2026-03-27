@@ -344,20 +344,32 @@ export async function handleTasks(
           reason,
         },
         validator: (data) => data.previousStatus === "pending",
+        // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+        filter: ({}, ctx) => ctx.deps.length > 0,
+        conditions: [{ timeout_ms: 86_400_000 }], // 1 day: task may sit pending for a long time
       });
     } else {
       ensure({
         id: "cancelled_in_progress",
         flow: "task",
         runId: parsed.params.id,
-        depIds: ["started"],
+        depIds:
+          task.status === "paused"
+            ? ["started", "paused"]
+            : task.wasPaused
+              ? ["started", "resumed"]
+              : ["started"],
         data: {
           taskId: parsed.params.id,
           agentId: task.agentId,
           previousStatus: task.status,
           reason,
         },
-        validator: (data) => data.previousStatus === "in_progress",
+        validator: (data) =>
+          data.previousStatus === "in_progress" || data.previousStatus === "paused",
+        // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+        filter: ({}, ctx) => ctx.deps.length > 0,
+        conditions: [{ timeout_ms: 3_600_000 }], // 1 hour: task running time
       });
     }
 
@@ -423,6 +435,8 @@ export async function handleTasks(
         return { task, alreadyFinished: true };
       }
 
+      const wasPaused = task.wasPaused;
+
       let updatedTask: typeof task;
       if (parsed.body.status === "completed") {
         const result = completeTask(
@@ -448,7 +462,7 @@ export async function handleTasks(
         updateAgentStatusFromCapacity(task.agentId);
       }
 
-      return { task: updatedTask };
+      return { task: updatedTask, wasPaused };
     })();
 
     if ("error" in result && result.error) {
@@ -462,7 +476,7 @@ export async function handleTasks(
         id: finishEventId,
         flow: "task",
         runId: parsed.params.id,
-        depIds: ["started"],
+        depIds: result.wasPaused ? ["started", "resumed"] : ["started"],
         data: {
           taskId: parsed.params.id,
           agentId: myAgentId,
@@ -472,6 +486,9 @@ export async function handleTasks(
             : { failureReason: parsed.body.failureReason }),
         },
         validator: (data) => data.previousStatus === "in_progress",
+        // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+        filter: ({}, ctx) => ctx.deps.length > 0,
+        conditions: [{ timeout_ms: 3_600_000 }], // 1 hour: task running time
       });
     }
 
@@ -530,6 +547,9 @@ export async function handleTasks(
         previousStatus: task.status,
       },
       validator: (data) => data.previousStatus === "in_progress",
+      // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+      filter: ({}, ctx) => ctx.deps.length > 0,
+      conditions: [{ timeout_ms: 3_600_000 }], // 1 hour
     });
 
     json(res, { success: true, task: pausedTask });
@@ -585,6 +605,9 @@ export async function handleTasks(
         previousStatus: task.status,
       },
       validator: (data) => data.previousStatus === "paused",
+      // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+      filter: ({}, ctx) => ctx.deps.length > 0,
+      conditions: [{ timeout_ms: 86_400_000 }], // 1 day: tasks may stay paused for extended periods
     });
 
     json(res, { success: true, task: resumedTask });

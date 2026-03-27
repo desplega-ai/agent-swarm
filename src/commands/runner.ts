@@ -2016,6 +2016,9 @@ async function checkCompletedProcesses(
           failureReason,
         },
         validator: (data) => data.exitCode === 0,
+        // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+        filter: ({}, ctx) => ctx.deps.length > 0,
+        conditions: [{ timeout_ms: 3_600_000 }], // 1 hour: process runtime
       });
 
       // Commit channel activity cursors after successful processing
@@ -2826,6 +2829,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
                 triggerType: trigger.type,
                 role,
               },
+              // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+              filter: ({}, ctx) => ctx.deps.length > 0,
+              conditions: [{ timeout_ms: 60_000 }], // 1 min: immediate after poll
             });
           }
 
@@ -3056,6 +3062,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               role,
               model: taskModel,
             },
+            // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+            filter: ({}, ctx) => ctx.deps.length > 0,
+            conditions: [{ timeout_ms: 60_000 }], // 1 min: process startup
           });
 
           // Attach trigger metadata for logging

@@ -22,6 +22,7 @@ pnpm preview      # Preview production build
 - **Data Fetching**: @tanstack/react-query (5s auto-polling)
 - **Data Grid**: AG Grid Community (Quartz theme)
 - **Charts**: Recharts
+- **Markdown**: Streamdown (`streamdown`) — use `<Streamdown>{text}</Streamdown>` for all markdown rendering. Do NOT use `react-markdown` (removed).
 - **Icons**: Lucide React
 
 ## Project Structure

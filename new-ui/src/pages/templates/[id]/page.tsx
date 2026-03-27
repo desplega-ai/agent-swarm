@@ -2,9 +2,9 @@ import Editor from "@monaco-editor/react";
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { ArrowLeft, ChevronDown, ChevronRight, Info } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import ReactMarkdown from "react-markdown";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import remarkGfm from "remark-gfm";
+import { Streamdown } from "streamdown";
+import "streamdown/styles.css";
 import { toast } from "sonner";
 import {
   useCheckoutTemplate,
@@ -518,9 +518,7 @@ export default function TemplateDetailPage() {
                     </div>
                   )}
                   <div className="prose-chat text-sm text-foreground/90 rounded-md border border-border p-4 overflow-auto">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {hasContent ? rendered : body}
-                    </ReactMarkdown>
+                    <Streamdown>{hasContent ? rendered : body}</Streamdown>
                   </div>
                 </>
               );

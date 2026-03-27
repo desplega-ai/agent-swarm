@@ -728,6 +728,7 @@ type AgentTaskRow = {
   peakContextPercent: number | null;
   totalContextTokensUsed: number | null;
   contextWindowSize: number | null;
+  was_paused: number;
 };
 
 function rowToAgentTask(row: AgentTaskRow): AgentTask {
@@ -781,6 +782,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     failureReason: row.failureReason ?? undefined,
     output: row.output ?? undefined,
     progress: row.progress ?? undefined,
+    wasPaused: !!row.was_paused,
   };
 }
 
@@ -1509,6 +1511,7 @@ export function pauseTask(id: string): AgentTask | null {
     .prepare<AgentTaskRow, [string]>(
       `UPDATE agent_tasks
        SET status = 'paused',
+           was_paused = 1,
            lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status = 'in_progress'
        RETURNING *`,
@@ -1543,6 +1546,7 @@ export function resumeTask(taskId: string): AgentTask | null {
     .prepare<AgentTaskRow, [string]>(
       `UPDATE agent_tasks
        SET status = 'in_progress',
+           was_paused = 1,
            lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status = 'paused'
        RETURNING *`,

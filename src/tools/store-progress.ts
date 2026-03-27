@@ -167,7 +167,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
               id: "completed",
               flow: "task",
               runId: taskId,
-              depIds: ["started"],
+              depIds: existingTask.wasPaused ? ["started", "resumed"] : ["started"],
               data: {
                 taskId,
                 agentId: existingTask.agentId,
@@ -175,6 +175,9 @@ export const registerStoreProgressTool = (server: McpServer) => {
                 hasOutput: !!output,
               },
               validator: (data) => data.previousStatus === "in_progress",
+              // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+              filter: ({}, ctx) => ctx.deps.length > 0,
+              conditions: [{ timeout_ms: 3_600_000 }], // 1 hour
             });
 
             if (existingTask.agentId) {
@@ -191,7 +194,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
               id: "failed",
               flow: "task",
               runId: taskId,
-              depIds: ["started"],
+              depIds: existingTask.wasPaused ? ["started", "resumed"] : ["started"],
               data: {
                 taskId,
                 agentId: existingTask.agentId,
@@ -199,6 +202,9 @@ export const registerStoreProgressTool = (server: McpServer) => {
                 failureReason: failureReason ?? "Unknown failure",
               },
               validator: (data) => data.previousStatus === "in_progress",
+              // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+              filter: ({}, ctx) => ctx.deps.length > 0,
+              conditions: [{ timeout_ms: 3_600_000 }], // 1 hour
             });
 
             if (existingTask.agentId) {

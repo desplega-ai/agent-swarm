@@ -516,9 +516,11 @@ function seedTasks(
     INSERT OR IGNORE INTO agent_tasks (
       id, agentId, creatorAgentId, task, status, source, taskType, tags,
       priority, dependsOn, epicId, createdAt, lastUpdatedAt, finishedAt,
-      failureReason, output, progress
+      failureReason, output, progress,
+      model, dir, parentTaskId, claudeSessionId,
+      vcsProvider, vcsRepo, vcsNumber, vcsEventType, vcsUrl, vcsAuthor
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const logStmt = db.prepare(`
@@ -553,13 +555,72 @@ function seedTasks(
       progress = `Working on ${faker.hacker.ingverb()} — ~${faker.number.int({ min: 10, max: 90 })}% done`;
     }
 
+    const source = faker.helpers.arrayElement(["mcp", "slack", "api"]);
+
+    // ~60% of tasks get a model
+    const model = faker.datatype.boolean(0.6)
+      ? faker.helpers.arrayElement(["sonnet", "opus", "haiku"])
+      : null;
+
+    // ~30% get a working directory
+    const dir = faker.datatype.boolean(0.3)
+      ? faker.helpers.arrayElement([
+          "/workspace/agent-swarm/src",
+          "/workspace/api",
+          "/workspace/frontend",
+          "/workspace/agent-swarm",
+          "/workspace/docs",
+        ])
+      : null;
+
+    // ~15% get a parentTaskId (only if we have previous tasks)
+    const parentTaskId =
+      seededTasks.length >= 3 && faker.datatype.boolean(0.15)
+        ? seededTasks[faker.number.int({ min: 0, max: seededTasks.length - 1 })].id
+        : null;
+
+    // ~25% of in_progress/completed tasks get a claudeSessionId
+    const claudeSessionId =
+      (statusInfo.status === "in_progress" || statusInfo.status === "completed") &&
+      faker.datatype.boolean(0.25)
+        ? seedId("session", i)
+        : null;
+
+    // ~20% get VCS fields; slack-sourced tasks are more likely (~50%)
+    const hasVcs = source === "slack" ? faker.datatype.boolean(0.5) : faker.datatype.boolean(0.2);
+    let vcsProvider: string | null = null;
+    let vcsRepo: string | null = null;
+    let vcsNumber: number | null = null;
+    let vcsEventType: string | null = null;
+    let vcsUrl: string | null = null;
+    let vcsAuthor: string | null = null;
+
+    if (hasVcs) {
+      const isGithub = faker.datatype.boolean(0.7);
+      vcsProvider = isGithub ? "github" : "gitlab";
+      const org = faker.helpers.arrayElement(["acme-corp", "desplega-ai", "cool-startup", "mega-inc"]);
+      const repo = faker.helpers.arrayElement(["api", "frontend", "core", "platform", "infra", "docs"]);
+      vcsRepo = `${org}/${repo}`;
+      vcsNumber = faker.number.int({ min: 1, max: 999 });
+      vcsEventType = faker.helpers.arrayElement([
+        "pull_request",
+        "pull_request_review",
+        "issue_comment",
+        "push",
+      ]);
+      vcsUrl = isGithub
+        ? `https://github.com/${vcsRepo}/pull/${vcsNumber}`
+        : `https://gitlab.com/${vcsRepo}/-/merge_requests/${vcsNumber}`;
+      vcsAuthor = faker.internet.username();
+    }
+
     stmt.run(
       id,
       agent?.id ?? null,
       creator.id,
       template.task,
       statusInfo.status,
-      faker.helpers.arrayElement(["mcp", "slack", "api"]),
+      source,
       template.taskType,
       JSON.stringify(template.tags),
       priority,
@@ -571,6 +632,16 @@ function seedTasks(
       failureReason,
       output,
       progress,
+      model,
+      dir,
+      parentTaskId,
+      claudeSessionId,
+      vcsProvider,
+      vcsRepo,
+      vcsNumber,
+      vcsEventType,
+      vcsUrl,
+      vcsAuthor,
     );
 
     logStmt.run(seedId("log", `task:${i}`), "task_created", creator.id, id, statusInfo.status, createdAt);

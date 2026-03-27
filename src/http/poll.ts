@@ -141,6 +141,9 @@ export async function handlePoll(
                 previousStatus: pendingTask.status,
               },
               validator: (data) => data.previousStatus === "pending",
+              // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+              filter: ({}, ctx) => ctx.deps.length > 0,
+              conditions: [{ timeout_ms: 300_000 }], // 5 min: polling interval + queue wait
             });
 
             return {

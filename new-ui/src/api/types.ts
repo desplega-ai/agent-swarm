@@ -63,6 +63,17 @@ export interface AgentTask {
   progress?: string;
   model?: string;
   scheduleId?: string;
+  parentTaskId?: string;
+  dir?: string;
+  claudeSessionId?: string;
+  workflowRunId?: string;
+  workflowRunStepId?: string;
+  vcsProvider?: string;
+  vcsRepo?: string;
+  vcsUrl?: string;
+  vcsNumber?: number;
+  vcsEventType?: string;
+  vcsAuthor?: string;
 }
 
 export interface AgentWithTasks extends Agent {
@@ -421,9 +432,12 @@ export interface WorkflowNode {
   type: WorkflowNodeType;
   label?: string;
   config: Record<string, unknown>;
-  next?: string | Record<string, string>;
+  next?: string | string[] | Record<string, string>;
   validation?: StepValidationConfig;
   retry?: RetryPolicy;
+  inputs?: Record<string, string>;
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
 }
 
 export interface WorkflowEdge {
@@ -438,6 +452,7 @@ export interface WorkflowDefinition {
   nodes: WorkflowNode[];
   /** Auto-generated edges returned by GET /api/workflows/:id */
   edges: WorkflowEdge[];
+  onNodeFailure?: "fail" | "continue";
 }
 
 export interface TriggerConfig {
@@ -462,6 +477,9 @@ export interface Workflow {
   triggers: TriggerConfig[];
   cooldown?: CooldownConfig;
   input?: Record<string, string>;
+  triggerSchema?: Record<string, unknown>;
+  dir?: string;
+  vcsRepo?: string;
   createdByAgentId?: string;
   createdAt: string;
   lastUpdatedAt: string;
@@ -502,6 +520,8 @@ export interface WorkflowRunStep {
   maxRetries?: number;
   nextRetryAt?: string;
   idempotencyKey?: string;
+  diagnostics?: string;
+  nextPort?: string;
   startedAt: string;
   finishedAt?: string;
 }
@@ -521,6 +541,9 @@ export interface WorkflowVersion {
     triggers: TriggerConfig[];
     cooldown?: CooldownConfig;
     input?: Record<string, string>;
+    triggerSchema?: Record<string, unknown>;
+    dir?: string;
+    vcsRepo?: string;
     enabled: boolean;
   };
   changedByAgentId?: string;

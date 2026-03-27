@@ -4,7 +4,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { assert, initialize } from "@desplega.ai/business-use";
+import { ensure, initialize } from "@desplega.ai/business-use";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { getEnabledCapabilities, hasCapability } from "@/server";
 import { initAgentMail } from "../agentmail";
@@ -188,7 +188,7 @@ httpServer
   .listen(port, async () => {
     console.log(`MCP HTTP server running on http://localhost:${port}/mcp`);
 
-    assert({
+    ensure({
       id: "listen",
       flow: "api",
       runId: globalState.__runId!,

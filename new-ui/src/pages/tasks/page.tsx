@@ -359,6 +359,46 @@ export default function TasksPage() {
         cellRenderer: (params: { value: AgentTaskStatus }) => <StatusBadge status={params.value} />,
       },
       {
+        field: "source",
+        headerName: "Source",
+        width: 95,
+        cellRenderer: (params: { value: string | undefined }) =>
+          params.value ? (
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+            >
+              {params.value}
+            </Badge>
+          ) : null,
+      },
+      {
+        field: "priority",
+        headerName: "Priority",
+        width: 70,
+        cellRenderer: (params: { value: number | undefined }) => {
+          const v = params.value;
+          if (!v) return null;
+          const color =
+            v >= 80 ? "text-amber-500" : v >= 60 ? "text-foreground" : "text-muted-foreground";
+          return <span className={`text-xs font-medium ${color}`}>{v}</span>;
+        },
+      },
+      {
+        field: "model",
+        headerName: "Model",
+        width: 80,
+        cellRenderer: (params: { value: string | undefined }) =>
+          params.value ? (
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+            >
+              {params.value}
+            </Badge>
+          ) : null,
+      },
+      {
         field: "taskType",
         headerName: "Type",
         width: 110,

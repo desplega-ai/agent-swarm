@@ -3,7 +3,7 @@ date: 2026-03-26T14:00:00Z
 topic: "Workflow & Run Detail Pages — UI Improvements"
 type: plan
 planner: claude
-status: draft
+status: completed
 scope: new-ui workflow and run detail pages
 research: thoughts/taras/research/2026-03-26-workflow-run-ui-improvements.md
 ---
@@ -141,8 +141,8 @@ onNodeFailure?: "fail" | "continue";
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Lint passes: `cd new-ui && pnpm lint`
+- [x] TypeScript compiles: `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Lint passes: `cd new-ui && pnpm lint`
 
 #### Manual Verification:
 - [ ] Existing pages still render correctly (no regressions from type additions — all new fields are optional)
@@ -205,8 +205,8 @@ const statusCounts = useMemo(() => {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Lint passes: `cd new-ui && pnpm lint`
+- [x] TypeScript compiles: `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Lint passes: `cd new-ui && pnpm lint`
 
 #### Manual Verification:
 - [ ] Back button on a run detail page navigates to the parent workflow's runs tab (not global)
@@ -281,10 +281,10 @@ Extract the inline `StepCard` component to its own file, then add smart output r
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Lint passes: `cd new-ui && pnpm lint`
-- [ ] No imports of deleted file: `grep -r "step-detail-sheet" new-ui/src/`
-- [ ] StepCard is exported from new location: `grep "export" new-ui/src/components/workflows/step-card.tsx`
+- [x] TypeScript compiles: `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Lint passes: `cd new-ui && pnpm lint`
+- [x] No imports of deleted file: `grep -r "step-detail-sheet" new-ui/src/`
+- [x] StepCard is exported from new location: `grep "export" new-ui/src/components/workflows/step-card.tsx`
 
 #### Manual Verification:
 - [ ] Completed agent-task step cards show a clickable task link badge (navigates to `/tasks/:id`)
@@ -358,8 +358,8 @@ Enhance the `NodeInspector` on the workflow detail page to show structured confi
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Lint passes: `cd new-ui && pnpm lint`
+- [x] TypeScript compiles: `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Lint passes: `cd new-ui && pnpm lint`
 
 #### Manual Verification:
 - [ ] Agent-task node inspector shows template as styled text block (not JSON)
@@ -419,8 +419,8 @@ Add created-by agent link, workspace info, and version history tab to the workfl
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Lint passes: `cd new-ui && pnpm lint`
+- [x] TypeScript compiles: `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Lint passes: `cd new-ui && pnpm lint`
 
 #### Manual Verification:
 - [ ] Created-by agent link appears in workflow header; clicking navigates to agent page
@@ -499,8 +499,8 @@ Follow the same pattern as task links in agent-task steps (Phase 3).
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Lint passes: `cd new-ui && pnpm lint`
+- [x] TypeScript compiles: `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Lint passes: `cd new-ui && pnpm lint`
 
 #### Manual Verification:
 - [ ] Resolved HITL step cards show an approval request link badge (from `step.output.requestId`)

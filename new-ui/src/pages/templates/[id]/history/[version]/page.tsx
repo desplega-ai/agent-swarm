@@ -1,9 +1,9 @@
 import Editor from "@monaco-editor/react";
 import { ArrowLeft } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import remarkGfm from "remark-gfm";
+import { Streamdown } from "streamdown";
+import "streamdown/styles.css";
 import { usePreviewTemplate, usePromptTemplate, usePromptTemplateEvents } from "@/api/hooks";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -164,9 +164,7 @@ export default function TemplateVersionDetailPage() {
             )}
 
             <div className="prose-chat text-sm text-foreground/90 rounded-md border border-border p-4 overflow-auto">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {rendered || versionEntry.body}
-              </ReactMarkdown>
+              <Streamdown>{rendered || versionEntry.body}</Streamdown>
             </div>
           </div>
         </TabsContent>

@@ -13,9 +13,9 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
 import { useParams } from "react-router-dom";
-import remarkGfm from "remark-gfm";
+import { Streamdown } from "streamdown";
+import "streamdown/styles.css";
 import { useAgents } from "@/api/hooks/use-agents";
 import {
   useChannels,
@@ -340,7 +340,7 @@ function MessageBubble({
           </pre>
         ) : (
           <div className="mt-0.5 text-sm text-foreground/90 prose-chat overflow-hidden break-words">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+            <Streamdown>{message.content}</Streamdown>
           </div>
         )}
 

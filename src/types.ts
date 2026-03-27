@@ -144,6 +144,9 @@ export const AgentTaskSchema = z.object({
   // Structured output schema (optional — JSON Schema that task output must conform to)
   outputSchema: z.record(z.string(), z.unknown()).optional(),
 
+  // Pause tracking
+  wasPaused: z.boolean().default(false),
+
   // Context usage aggregates
   compactionCount: z.number().int().min(0).optional(),
   peakContextPercent: z.number().min(0).max(100).optional(),

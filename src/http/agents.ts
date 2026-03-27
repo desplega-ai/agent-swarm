@@ -205,6 +205,9 @@ export async function handleAgentRegister(
           // Validates that registered happened before reconnected
           return ctx.deps.length > 0;
         },
+        // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+        filter: ({}, ctx) => ctx.deps.length > 0,
+        conditions: [{ timeout_ms: 86_400_000 }], // 1 day: agents may be offline for extended periods
       });
     }
 

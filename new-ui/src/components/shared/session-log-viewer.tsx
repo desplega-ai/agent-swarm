@@ -10,8 +10,14 @@ import {
   Wrench,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Streamdown } from "streamdown";
+import "streamdown/styles.css";
+
+/** Normalize single newlines to double for markdown paragraph breaks, preserving list/heading markers. */
+function normalizeNewlines(text: string): string {
+  return text.replace(/(?<!\n)\n(?!\n|[-*#>|]|\d+\.)/g, "\n\n");
+}
+
 import type { ContextSnapshot, SessionLog } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { JsonTree } from "@/components/workflows/json-tree";
@@ -192,7 +198,7 @@ function ThinkingBubble({ text }: { text: string }) {
       </button>
       {open ? (
         <div className="mt-1 text-xs text-muted-foreground prose-chat prose-session-log">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+          <Streamdown>{normalizeNewlines(text)}</Streamdown>
         </div>
       ) : (
         <p className="mt-1 text-xs text-muted-foreground whitespace-pre-wrap">{preview}</p>
@@ -338,7 +344,7 @@ function MessageBubble({ message }: { message: ParsedMessage }) {
                   key={key}
                   className="text-sm text-foreground prose-chat prose-session-log overflow-hidden break-words"
                 >
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.text}</ReactMarkdown>
+                  <Streamdown>{normalizeNewlines(block.text)}</Streamdown>
                 </div>
               );
             case "thinking":

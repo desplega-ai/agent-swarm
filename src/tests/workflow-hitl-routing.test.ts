@@ -3,7 +3,6 @@ import { unlink } from "node:fs/promises";
 import { z } from "zod";
 import {
   closeDb,
-  createApprovalRequest,
   createWorkflow,
   deleteWorkflow,
   getWorkflowRun,

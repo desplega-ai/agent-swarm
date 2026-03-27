@@ -15,7 +15,6 @@ import {
   getEventsByTaskId,
   getEventsFiltered,
 } from "../be/events";
-import type { SwarmEvent } from "../types";
 
 const TEST_DB_PATH = "./test-events-db.sqlite";
 

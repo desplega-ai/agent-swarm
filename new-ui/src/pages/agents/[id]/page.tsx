@@ -361,6 +361,25 @@ export default function AgentDetailPage() {
                   <p className="text-sm">{agent.description}</p>
                 </div>
               )}
+              {(agent.capacity || agent.maxTasks != null) && (
+                <div>
+                  <span className="text-xs text-muted-foreground uppercase tracking-wide">
+                    Capacity
+                  </span>
+                  <p className="text-sm">
+                    {agent.capacity ? (
+                      <span className={agent.capacity.available === 0 ? "text-red-400" : ""}>
+                        {agent.capacity.current} / {agent.capacity.max} tasks{" "}
+                        <span className="text-muted-foreground">
+                          ({agent.capacity.available} available)
+                        </span>
+                      </span>
+                    ) : (
+                      <span>Max {agent.maxTasks} tasks</span>
+                    )}
+                  </p>
+                </div>
+              )}
               {agent.capabilities && agent.capabilities.length > 0 && (
                 <div>
                   <span className="text-xs text-muted-foreground uppercase tracking-wide">

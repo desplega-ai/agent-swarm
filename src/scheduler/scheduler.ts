@@ -276,6 +276,7 @@ export function startScheduler(
       const start = ctx.deps.find((d) => d.id === "listen");
       return !!start && start.data?.capabilities?.includes("scheduling");
     },
+    conditions: [{ timeout_ms: 10_000 }], // 10s: scheduler starts immediately after listen
   });
 }
 
