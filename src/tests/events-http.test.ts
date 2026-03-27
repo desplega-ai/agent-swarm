@@ -12,14 +12,14 @@ async function api(
   method: string,
   path: string,
   opts: { body?: unknown } = {},
-): Promise<{ status: number; body: any }> {
+): Promise<{ status: number; body: Record<string, unknown> }> {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: { "Content-Type": "application/json" },
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });
   const text = await res.text();
-  let body: any;
+  let body: Record<string, unknown>;
   try {
     body = JSON.parse(text);
   } catch {
@@ -260,8 +260,14 @@ describe("GET /api/events/counts", () => {
     const { body: all } = await get("/api/events/counts");
     const { body: filtered } = await get("/api/events/counts?agentId=agent-1");
     // Filtered should be a subset
-    const filteredTotal = filtered.counts.reduce((s: number, c: any) => s + c.count, 0);
-    const allTotal = all.counts.reduce((s: number, c: any) => s + c.count, 0);
+    const filteredTotal = (filtered as { counts: { count: number }[] }).counts.reduce(
+      (s: number, c: { count: number }) => s + c.count,
+      0,
+    );
+    const allTotal = (all as { counts: { count: number }[] }).counts.reduce(
+      (s: number, c: { count: number }) => s + c.count,
+      0,
+    );
     expect(filteredTotal).toBeLessThanOrEqual(allTotal);
   });
 });

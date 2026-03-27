@@ -166,6 +166,21 @@ export async function walkGraph(
     }
   }
 
+  // Also reconstruct active edges from "waiting" steps. A waiting step
+  // means the node was reached (its predecessor completed and routed to it),
+  // so its structural outgoing edges are active paths that convergence
+  // nodes must wait for. Without this, fan-out convergence gates fire
+  // prematurely — e.g. if 1-of-3 parallel tasks completes, the merge node
+  // would see only 1 active predecessor and trigger immediately.
+  const allSteps = getWorkflowRunStepsByRunId(runId);
+  for (const step of allSteps) {
+    if (step.status !== "waiting") continue;
+    const successors = getSuccessors(def, step.nodeId);
+    for (const succ of successors) {
+      activeEdges.add(`${step.nodeId}→${succ.id}`);
+    }
+  }
+
   // Seed with start nodes whose predecessors are all completed (convergence gate).
   // For entry nodes (no predecessors), skip if already completed — these are
   // re-walk/recovery scenarios where memoization should apply.
@@ -264,14 +279,20 @@ export async function walkGraph(
   }
 
   // No more nodes to execute — check if the run should be completed.
-  // If any step has a pending retry (failed with nextRetryAt), the run
-  // should stay in "running" state for the retry poller to pick up.
+  // Stay in current state if any steps are still waiting (async tasks
+  // pending) or have pending retries.
   const run = getWorkflowRun(runId);
   if (run && run.status === "running") {
-    const allSteps = getWorkflowRunStepsByRunId(runId);
-    const hasPendingRetries = allSteps.some((s) => s.status === "failed" && s.nextRetryAt != null);
+    const finalSteps = getWorkflowRunStepsByRunId(runId);
+    const hasWaitingSteps = finalSteps.some((s) => s.status === "waiting");
+    const hasPendingRetries = finalSteps.some(
+      (s) => s.status === "failed" && s.nextRetryAt != null,
+    );
 
-    if (!hasPendingRetries) {
+    if (hasWaitingSteps) {
+      // Async tasks still in progress — set back to waiting for next event
+      updateWorkflowRun(runId, { status: "waiting" });
+    } else if (!hasPendingRetries) {
       updateWorkflowRun(runId, {
         status: "completed",
         context: ctx,
