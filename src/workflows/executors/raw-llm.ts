@@ -49,6 +49,9 @@ export class RawLlmExecutor extends BaseExecutor<
           model,
           schema: jsonSchema(config.schema),
           prompt,
+          providerOptions: {
+            openai: { strictJsonSchema: false },
+          },
         });
         return {
           status: "success",
