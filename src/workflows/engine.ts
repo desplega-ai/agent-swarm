@@ -440,7 +440,8 @@ async function executeStep(
     dryRun: false,
   };
 
-  const timeoutMs = DEFAULT_TIMEOUT_MS;
+  const timeoutMs =
+    typeof node.config?.timeoutMs === "number" ? node.config.timeoutMs : DEFAULT_TIMEOUT_MS;
 
   let result: Awaited<ReturnType<typeof executor.run>>;
   try {
