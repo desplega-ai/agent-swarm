@@ -4,9 +4,10 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Agent Swarm — Multi-Agent Orchestration for AI Coding Assistants",
   description:
-    "Run a team of AI coding agents that coordinate autonomously. A lead agent delegates tasks to Docker-isolated workers with persistent memory. Open source, MCP-powered.",
+    "Run a team of AI coding agents that coordinate autonomously. Start your 7-day free trial on Agent Swarm Cloud, or self-host for free. Open source, MCP-powered.",
   keywords: [
     "agent swarm",
+    "agent swarm cloud",
     "multi-agent",
     "AI coding assistants",
     "claude code",
@@ -16,6 +17,9 @@ export const metadata: Metadata = {
     "AI agents",
     "open source",
     "developer tools",
+    "free trial",
+    "pricing",
+    "managed agents",
   ],
   icons: {
     icon: "/favicon.ico",
@@ -24,7 +28,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Agent Swarm — Multi-Agent Orchestration for AI Coding Assistants",
     description:
-      "Run a team of AI coding agents that coordinate autonomously. A lead agent delegates tasks to Docker-isolated workers with persistent memory.",
+      "Run a team of AI coding agents that coordinate autonomously. Start your 7-day free trial on Agent Swarm Cloud, or self-host for free. Open source, MCP-powered.",
     url: "https://agent-swarm.dev",
     siteName: "Agent Swarm",
     type: "website",
@@ -42,7 +46,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Agent Swarm — Multi-Agent Orchestration for AI Coding Assistants",
     description:
-      "Run a team of AI coding agents that coordinate autonomously. A lead agent delegates tasks to Docker-isolated workers with persistent memory.",
+      "Run a team of AI coding agents that coordinate autonomously. Start your 7-day free trial on Agent Swarm Cloud, or self-host for free. Open source, MCP-powered.",
     images: ["https://agent-swarm.dev/og-image.png"],
   },
   metadataBase: new URL("https://agent-swarm.dev"),
@@ -99,12 +103,31 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   operatingSystem: "Linux, macOS",
                   description:
                     "Open-source multi-agent orchestration for AI coding assistants. A lead agent delegates tasks to Docker-isolated workers with persistent memory.",
-                  url: "https://agent-swarm.dev",
-                  offers: {
-                    "@type": "Offer",
-                    price: "0",
-                    priceCurrency: "USD",
-                  },
+                  url: "https://cloud.agent-swarm.dev",
+                  offers: [
+                    {
+                      "@type": "Offer",
+                      name: "Open Source (Self-Hosted)",
+                      price: "0",
+                      priceCurrency: "EUR",
+                    },
+                    {
+                      "@type": "Offer",
+                      name: "Agent Swarm Cloud - Platform",
+                      price: "9",
+                      priceCurrency: "EUR",
+                      priceValidUntil: "2027-12-31",
+                      availability: "https://schema.org/InStock",
+                    },
+                    {
+                      "@type": "Offer",
+                      name: "Agent Swarm Cloud - Worker",
+                      price: "29",
+                      priceCurrency: "EUR",
+                      priceValidUntil: "2027-12-31",
+                      availability: "https://schema.org/InStock",
+                    },
+                  ],
                   license: "https://opensource.org/licenses/MIT",
                   codeRepository: "https://github.com/desplega-ai/agent-swarm",
                 },
