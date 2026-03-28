@@ -77,6 +77,7 @@
   - [list-workflow-runs](#list-workflow-runs)
   - [get-workflow-run](#get-workflow-run)
   - [retry-workflow-run](#retry-workflow-run)
+  - [cancel-workflow-run](#cancel-workflow-run)
   - [request-human-input](#request-human-input)
 
 ---
@@ -815,6 +816,17 @@ Retry a failed workflow run from the beginning. The run must be in 'failed' stat
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `runId` | `string` | Yes | - | Workflow run ID to retry |
+
+### cancel-workflow-run
+
+**Cancel Workflow Run**
+
+Cancel a running or waiting workflow run. Cancels all non-terminal steps and their associated tasks.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `runId` | `string` | Yes | - | Workflow run ID to cancel |
+| `reason` | `string` | No | - | Optional reason for cancellation |
 
 ### request-human-input
 
