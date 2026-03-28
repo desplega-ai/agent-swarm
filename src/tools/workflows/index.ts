@@ -1,3 +1,4 @@
+export { registerCancelWorkflowRunTool } from "./cancel-workflow-run";
 export { registerCreateWorkflowTool } from "./create-workflow";
 export { registerDeleteWorkflowTool } from "./delete-workflow";
 export { registerGetWorkflowTool } from "./get-workflow";
