@@ -56,6 +56,7 @@ export const DEFERRED_TOOLS = new Set([
   "list-workflow-runs",
   "get-workflow-run",
   "retry-workflow-run",
+  "cancel-workflow-run",
 
   // Epics (7)
   "create-epic",

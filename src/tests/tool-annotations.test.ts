@@ -292,13 +292,14 @@ describe("Tool Annotations & Classification", () => {
       "list-workflow-runs",
       "get-workflow-run",
       "retry-workflow-run",
+      "cancel-workflow-run",
     ];
     for (const tool of workflowTools) {
       expect(DEFERRED_TOOLS.has(tool)).toBe(true);
     }
   });
 
-  test("all 9 workflow tools are registered in the server", () => {
+  test("all 10 workflow tools are registered in the server", () => {
     const workflowTools = [
       "create-workflow",
       "list-workflows",
@@ -309,6 +310,7 @@ describe("Tool Annotations & Classification", () => {
       "list-workflow-runs",
       "get-workflow-run",
       "retry-workflow-run",
+      "cancel-workflow-run",
     ];
     const missing = workflowTools.filter((t) => !tools[t]);
     expect(missing).toEqual([]);

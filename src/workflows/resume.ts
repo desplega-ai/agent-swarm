@@ -1,5 +1,7 @@
 import {
+  cancelTask,
   getCompletedStepNodeIds,
+  getTaskByWorkflowRunStepId,
   getWorkflow,
   getWorkflowRun,
   getWorkflowRunStep,
@@ -246,6 +248,48 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
     ? readyNodes
     : [failedNode, ...readyNodes];
   await walkGraph(workflow.definition, runId, ctx, nodesToRun, registry, workflow.id);
+}
+
+/**
+ * Cancel a workflow run and all its non-terminal steps.
+ * Also cancels any in-progress tasks spawned by waiting/running steps.
+ */
+export function cancelWorkflowRun(runId: string, reason?: string): void {
+  const run = getWorkflowRun(runId);
+  if (!run) throw new Error("Workflow run not found");
+
+  const terminalStatuses = ["completed", "failed", "cancelled", "skipped"];
+  if (terminalStatuses.includes(run.status)) {
+    throw new Error(`Cannot cancel run in '${run.status}' state`);
+  }
+
+  const now = new Date().toISOString();
+  const cancelReason = reason ?? "Cancelled by user";
+
+  // Cancel non-terminal steps and their associated tasks
+  const steps = getWorkflowRunStepsByRunId(runId);
+  for (const step of steps) {
+    if (terminalStatuses.includes(step.status)) continue;
+
+    // Cancel any task linked to this step
+    const task = getTaskByWorkflowRunStepId(step.id);
+    if (task) {
+      cancelTask(task.id, cancelReason);
+    }
+
+    updateWorkflowRunStep(step.id, {
+      status: "cancelled",
+      error: cancelReason,
+      finishedAt: now,
+    });
+  }
+
+  // Mark the run itself as cancelled
+  updateWorkflowRun(runId, {
+    status: "cancelled",
+    error: cancelReason,
+    finishedAt: now,
+  });
 }
 
 /**

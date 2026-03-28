@@ -7,7 +7,13 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, getWorkflowVersions, initDb } from "../be/db";
+import {
+  closeDb,
+  createWorkflowRun,
+  createWorkflowRunStep,
+  getWorkflowVersions,
+  initDb,
+} from "../be/db";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
 import type {
@@ -594,6 +600,129 @@ describe("Workflow HTTP API v2", () => {
         headers,
       });
       expect(res.status).toBe(404);
+    });
+  });
+
+  // ─── CANCEL RUN ──────────────────────────────────────────
+
+  describe("POST /api/workflow-runs/:id/cancel", () => {
+    test("cancels a running workflow run", async () => {
+      const workflow = await createTestWorkflow();
+
+      // Create a run directly in 'running' state (notify executor completes instantly)
+      const runId = crypto.randomUUID();
+      createWorkflowRun({ id: runId, workflowId: workflow.id });
+
+      // Create a step in 'running' state
+      createWorkflowRunStep({
+        id: crypto.randomUUID(),
+        runId,
+        nodeId: "n1",
+        nodeType: "notify",
+      });
+
+      // Cancel the run
+      const cancelRes = await fetch(`${baseUrl}/api/workflow-runs/${runId}/cancel`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ reason: "Test cancellation" }),
+      });
+      expect(cancelRes.status).toBe(200);
+      const cancelBody = (await cancelRes.json()) as { success: boolean };
+      expect(cancelBody.success).toBe(true);
+
+      // Verify the run is cancelled
+      const getRes = await fetch(`${baseUrl}/api/workflow-runs/${runId}`, { headers });
+      expect(getRes.status).toBe(200);
+      const { run } = (await getRes.json()) as { run: WorkflowRun; steps: WorkflowRunStep[] };
+      expect(run.status).toBe("cancelled");
+      expect(run.error).toBe("Test cancellation");
+      expect(run.finishedAt).toBeDefined();
+    });
+
+    test("returns 400 for already completed run", async () => {
+      const workflow = await createTestWorkflow();
+
+      // Trigger a run (notify executor completes synchronously)
+      const triggerRes = await fetch(`${baseUrl}/api/workflows/${workflow.id}/trigger`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({}),
+      });
+      const { runId } = (await triggerRes.json()) as { runId: string };
+
+      // Wait for run to complete
+      await new Promise((r) => setTimeout(r, 100));
+
+      // Try to cancel — should fail
+      const cancelRes = await fetch(`${baseUrl}/api/workflow-runs/${runId}/cancel`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({}),
+      });
+      expect(cancelRes.status).toBe(400);
+    });
+
+    test("returns 400 for non-existent run", async () => {
+      const cancelRes = await fetch(`${baseUrl}/api/workflow-runs/${crypto.randomUUID()}/cancel`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({}),
+      });
+      expect(cancelRes.status).toBe(400);
+    });
+
+    test("cancel uses default reason when none provided", async () => {
+      const workflow = await createTestWorkflow();
+
+      // Create a run directly in 'running' state
+      const runId = crypto.randomUUID();
+      createWorkflowRun({ id: runId, workflowId: workflow.id });
+
+      const cancelRes = await fetch(`${baseUrl}/api/workflow-runs/${runId}/cancel`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({}),
+      });
+      expect(cancelRes.status).toBe(200);
+
+      const getRes = await fetch(`${baseUrl}/api/workflow-runs/${runId}`, { headers });
+      const { run } = (await getRes.json()) as { run: WorkflowRun };
+      expect(run.status).toBe("cancelled");
+      expect(run.error).toBe("Cancelled by user");
+    });
+
+    test("cancelling a run also cancels non-terminal steps", async () => {
+      const workflow = await createTestWorkflow();
+
+      // Create a run with steps in various states
+      const runId = crypto.randomUUID();
+      createWorkflowRun({ id: runId, workflowId: workflow.id });
+
+      // Running step — should be cancelled
+      createWorkflowRunStep({
+        id: crypto.randomUUID(),
+        runId,
+        nodeId: "n1",
+        nodeType: "notify",
+      });
+
+      // Cancel the run
+      await fetch(`${baseUrl}/api/workflow-runs/${runId}/cancel`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({}),
+      });
+
+      // Get the run with steps
+      const getRes = await fetch(`${baseUrl}/api/workflow-runs/${runId}`, { headers });
+      const { steps } = (await getRes.json()) as { run: WorkflowRun; steps: WorkflowRunStep[] };
+
+      // All non-terminal steps should be cancelled
+      for (const step of steps) {
+        expect(step.status).toBe("cancelled");
+        expect(step.finishedAt).toBeDefined();
+      }
     });
   });
 });

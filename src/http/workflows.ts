@@ -22,7 +22,7 @@ import {
 import { getExecutorRegistry, startWorkflowExecution } from "../workflows";
 import { generateEdges, validateDefinition } from "../workflows/definition";
 import { TriggerSchemaError } from "../workflows/engine";
-import { retryFailedRun } from "../workflows/resume";
+import { cancelWorkflowRun, retryFailedRun } from "../workflows/resume";
 import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
 import { snapshotWorkflow } from "../workflows/version";
 import { route } from "./route-def";
@@ -170,6 +170,21 @@ const retryWorkflowRunRoute = route({
     200: { description: "Retry started" },
     400: { description: "Cannot retry" },
   },
+});
+
+const cancelWorkflowRunRoute = route({
+  method: "post",
+  path: "/api/workflow-runs/{id}/cancel",
+  pattern: ["api", "workflow-runs", null, "cancel"],
+  summary: "Cancel a running or waiting workflow run",
+  tags: ["Workflows"],
+  params: z.object({ id: z.string() }),
+  body: z.object({ reason: z.string().optional() }).optional(),
+  responses: {
+    200: { description: "Run cancelled" },
+    400: { description: "Cannot cancel" },
+  },
+  auth: { apiKey: true },
 });
 
 const listExecutorTypesRoute = route({
@@ -519,6 +534,18 @@ export async function handleWorkflows(
     if (!parsed) return true;
     try {
       await retryFailedRun(parsed.params.id, getExecutorRegistry());
+      json(res, { success: true });
+    } catch (err) {
+      jsonError(res, String(err), 400);
+    }
+    return true;
+  }
+
+  if (cancelWorkflowRunRoute.match(req.method, pathSegments)) {
+    const parsed = await cancelWorkflowRunRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    try {
+      cancelWorkflowRun(parsed.params.id, parsed.body?.reason);
       json(res, { success: true });
     } catch (err) {
       jsonError(res, String(err), 400);

@@ -108,6 +108,7 @@ import { registerUpdateProfileTool } from "./tools/update-profile";
 import { registerUpdateServiceStatusTool } from "./tools/update-service-status";
 // Workflows capability
 import {
+  registerCancelWorkflowRunTool,
   registerCreateWorkflowTool,
   registerDeleteWorkflowTool,
   registerGetWorkflowRunTool,
@@ -266,6 +267,7 @@ export function createServer() {
     registerListWorkflowRunsTool(server);
     registerGetWorkflowRunTool(server);
     registerRetryWorkflowRunTool(server);
+    registerCancelWorkflowRunTool(server);
     registerRequestHumanInputTool(server);
   }
 

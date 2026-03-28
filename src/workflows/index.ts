@@ -2,7 +2,7 @@ export { findEntryNodes, getSuccessors } from "./definition";
 export { startWorkflowExecution } from "./engine";
 export { workflowEventBus } from "./event-bus";
 export { recoverIncompleteRuns } from "./recovery";
-export { retryFailedRun, setupWorkflowResumeListener } from "./resume";
+export { cancelWorkflowRun, retryFailedRun, setupWorkflowResumeListener } from "./resume";
 export { startRetryPoller, stopRetryPoller } from "./retry-poller";
 export { interpolate } from "./template";
 export { instantiateTemplate, validateTemplateVariables } from "./templates";
