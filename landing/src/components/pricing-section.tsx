@@ -117,10 +117,10 @@ export function PricingSection({ compact }: { compact?: boolean }) {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, margin: "-50px" }}
           transition={{ duration: 0.5, delay: 0.1 }}
-          className="grid sm:grid-cols-2 gap-6 max-w-3xl mx-auto mb-12"
+          className="grid sm:grid-cols-2 gap-6 max-w-4xl mx-auto mb-12"
         >
           {/* Platform card */}
-          <div className="group relative rounded-2xl bg-white border border-zinc-100 p-6 hover:border-zinc-200 hover:shadow-xl hover:shadow-zinc-100/50 transition-all duration-300">
+          <div className="group relative rounded-2xl bg-white border border-zinc-200 p-6 hover:border-zinc-300 hover:shadow-xl hover:shadow-zinc-100/50 hover:scale-[1.02] transition-all duration-300">
             <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 mb-4 shadow-lg">
               <LayoutDashboard className="w-5 h-5 text-white" />
             </div>
@@ -144,7 +144,7 @@ export function PricingSection({ compact }: { compact?: boolean }) {
           </div>
 
           {/* Worker card */}
-          <div className="group relative rounded-2xl bg-white border border-zinc-100 p-6 hover:border-zinc-200 hover:shadow-xl hover:shadow-zinc-100/50 transition-all duration-300">
+          <div className="group relative rounded-2xl bg-white border border-zinc-200 p-6 hover:border-zinc-300 hover:shadow-xl hover:shadow-zinc-100/50 hover:scale-[1.02] transition-all duration-300">
             <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 mb-4 shadow-lg">
               <Server className="w-5 h-5 text-white" />
             </div>
@@ -242,7 +242,7 @@ export function PricingSection({ compact }: { compact?: boolean }) {
             <h3 className="text-2xl font-bold text-zinc-900 text-center mb-8">
               Frequently asked questions
             </h3>
-            <div className="rounded-2xl bg-white border border-zinc-100 px-6">
+            <div className="rounded-2xl bg-white border border-zinc-200 px-6">
               {faqs.map((faq) => (
                 <FAQItem key={faq.question} question={faq.question} answer={faq.answer} />
               ))}

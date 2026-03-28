@@ -20,9 +20,9 @@ const features = [
   },
   {
     icon: Workflow,
-    title: "Tasks, Epics & Scheduling",
+    title: "Tasks, Workflows & Scheduling",
     description:
-      "Tasks flow through a rich lifecycle with full traceability. Organize work into epics, schedule recurring tasks with cron — the swarm runs while you sleep.",
+      "Tasks flow through a rich lifecycle with full traceability. Orchestrate multi-step workflows, schedule recurring tasks with cron — the swarm runs while you sleep.",
     color: "from-emerald-500 to-teal-500",
   },
   {

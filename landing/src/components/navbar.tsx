@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Github, BookOpen, Menu, X, Blocks, ArrowRight, DollarSign } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-export function Navbar() {
+export function Navbar({ animate = true }: { animate?: boolean }) {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -18,9 +18,9 @@ export function Navbar() {
 
   return (
     <motion.nav
-      initial={{ y: -100 }}
-      animate={{ y: 0 }}
-      transition={{ duration: 0.6, ease: "easeOut" }}
+      initial={animate ? { y: -100 } : false}
+      animate={animate ? { y: 0 } : undefined}
+      transition={animate ? { duration: 0.6, ease: "easeOut" } : undefined}
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
         scrolled
           ? "bg-white/80 backdrop-blur-xl border-b border-zinc-200/60 shadow-sm"
