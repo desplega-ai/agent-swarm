@@ -4,7 +4,6 @@ import {
   closeDb,
   completeTask,
   createAgent,
-  createEpic,
   createMemory,
   createTaskExtended,
   failTask,
@@ -216,31 +215,7 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldShareWithSwarm).toBe(true);
     });
 
-    test("epic-linked task promotes to swarm scope", () => {
-      const epic = createEpic({
-        name: "Test Epic for Promotion",
-        goal: "Test that epic-linked tasks promote to swarm scope",
-        createdByAgentId: leadId,
-      });
-
-      const task = createTaskExtended("Implement feature X for epic", {
-        agentId: workerId,
-        source: "mcp",
-        priority: 50,
-        taskType: "implementation",
-        epicId: epic.id,
-      });
-
-      const shouldShareWithSwarm =
-        task.taskType === "research" ||
-        task.tags?.includes("knowledge") ||
-        task.tags?.includes("shared") ||
-        task.epicId != null;
-
-      expect(shouldShareWithSwarm).toBe(true);
-    });
-
-    test("regular task without epicId does NOT promote to swarm scope", () => {
+    test("regular task does NOT promote to swarm scope", () => {
       const task = createTaskExtended("Fix a typo", {
         agentId: workerId,
         source: "mcp",
@@ -252,8 +227,7 @@ describe("Self-Improvement Mechanisms", () => {
       const shouldShareWithSwarm =
         task.taskType === "research" ||
         task.tags?.includes("knowledge") ||
-        task.tags?.includes("shared") ||
-        task.epicId != null;
+        task.tags?.includes("shared");
 
       expect(shouldShareWithSwarm).toBe(false);
     });
@@ -272,8 +246,7 @@ describe("Self-Improvement Mechanisms", () => {
         status === "completed" &&
         (task.taskType === "research" ||
           task.tags?.includes("knowledge") ||
-          task.tags?.includes("shared") ||
-          task.epicId != null);
+          task.tags?.includes("shared"));
 
       expect(shouldShareWithSwarm).toBe(false);
     });

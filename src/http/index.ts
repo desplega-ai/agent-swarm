@@ -23,7 +23,6 @@ import { handleContext } from "./context";
 import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
 import { handleDbQuery } from "./db-query";
 import { handleEcosystem } from "./ecosystem";
-import { handleEpics } from "./epics";
 import { handleEvents } from "./events";
 import { handleHeartbeat } from "./heartbeat";
 import { handleMcp } from "./mcp";
@@ -110,7 +109,6 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleTasks(req, res, pathSegments, queryParams, myAgentId),
     () => handleStats(req, res, pathSegments, queryParams),
     () => handleActiveSessions(req, res, pathSegments, queryParams, myAgentId),
-    () => handleEpics(req, res, pathSegments, queryParams, myAgentId),
     () => handleSchedules(req, res, pathSegments, queryParams, myAgentId),
     () => handleWorkflows(req, res, pathSegments, queryParams, myAgentId),
     () => handleApprovalRequests(req, res, pathSegments, queryParams),

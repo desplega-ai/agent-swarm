@@ -128,7 +128,7 @@ swarm_worker_2           → /workspace/personal   → Worker 2's private worksp
 
 | Volume | Critical? | Backup? | Description |
 |--------|-----------|---------|-------------|
-| `swarm_api` | **Yes** | **Yes** | Contains the SQLite database (`agent-swarm-db.sqlite`) with all tasks, agents, epics, schedules, and configuration. Losing this = losing all swarm state. |
+| `swarm_api` | **Yes** | **Yes** | Contains the SQLite database (`agent-swarm-db.sqlite`) with all tasks, agents, schedules, and configuration. Losing this = losing all swarm state. |
 | `swarm_logs` | No | Optional | Session logs from all agents. Useful for debugging. Can be recreated. |
 | `swarm_shared` | Moderate | Recommended | Shared workspace. Agents store research, plans, and memory under `/workspace/shared/{thoughts,memory,downloads,misc}/$AGENT_ID`. All agents can read each other's files. |
 | `swarm_<agent>` | Low | No | Personal workspace per agent (`/workspace/personal`). Isolated — only that agent can see it. Contains cloned repos, working files, and agent-specific state. |

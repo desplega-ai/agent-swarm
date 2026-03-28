@@ -33,7 +33,6 @@ const listTasks = route({
   query: z.object({
     status: z.string().optional(),
     agentId: z.string().optional(),
-    epicId: z.string().optional(),
     scheduleId: z.string().optional(),
     search: z.string().optional(),
     includeHeartbeat: z.enum(["true", "false"]).optional(),
@@ -223,7 +222,6 @@ export async function handleTasks(
     const filters = {
       status: (parsed.query.status as import("../types").AgentTaskStatus) || undefined,
       agentId: parsed.query.agentId || undefined,
-      epicId: parsed.query.epicId || undefined,
       scheduleId: parsed.query.scheduleId || undefined,
       search: parsed.query.search || undefined,
       includeHeartbeat: parsed.query.includeHeartbeat === "true" || undefined,
@@ -268,7 +266,6 @@ export async function handleTasks(
           priority: task.priority,
           tags: task.tags,
           parentTaskId: task.parentTaskId,
-          epicId: task.epicId,
         },
       });
 

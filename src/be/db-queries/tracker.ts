@@ -5,7 +5,7 @@ import { getDb } from "../db";
 
 export function getTrackerSync(
   provider: string,
-  entityType: "task" | "epic",
+  entityType: "task",
   swarmId: string,
 ): TrackerSync | null {
   return getDb()
@@ -15,7 +15,7 @@ export function getTrackerSync(
 
 export function getTrackerSyncByExternalId(
   provider: string,
-  entityType: "task" | "epic",
+  entityType: "task",
   externalId: string,
 ): TrackerSync | null {
   return getDb()
@@ -25,7 +25,7 @@ export function getTrackerSyncByExternalId(
 
 export function createTrackerSync(data: {
   provider: string;
-  entityType: "task" | "epic";
+  entityType: "task";
   providerEntityType?: string | null;
   swarmId: string;
   externalId: string;
@@ -110,7 +110,7 @@ export function deleteTrackerSync(id: string): void {
   getDb().query("DELETE FROM tracker_sync WHERE id = ?").run(id);
 }
 
-export function getAllTrackerSyncs(provider?: string, entityType?: "task" | "epic"): TrackerSync[] {
+export function getAllTrackerSyncs(provider?: string, entityType?: "task"): TrackerSync[] {
   const conditions: string[] = [];
   const values: string[] = [];
 

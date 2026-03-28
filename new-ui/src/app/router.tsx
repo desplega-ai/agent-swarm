@@ -7,8 +7,6 @@ const AgentsPage = lazy(() => import("@/pages/agents/page"));
 const AgentDetailPage = lazy(() => import("@/pages/agents/[id]/page"));
 const TasksPage = lazy(() => import("@/pages/tasks/page"));
 const TaskDetailPage = lazy(() => import("@/pages/tasks/[id]/page"));
-const EpicsPage = lazy(() => import("@/pages/epics/page"));
-const EpicDetailPage = lazy(() => import("@/pages/epics/[id]/page"));
 const ChatPage = lazy(() => import("@/pages/chat/page"));
 const ServicesPage = lazy(() => import("@/pages/services/page"));
 const SchedulesPage = lazy(() => import("@/pages/schedules/page"));
@@ -43,8 +41,6 @@ export const router = createBrowserRouter([
       { path: "agents/:id", element: <AgentDetailPage /> },
       { path: "tasks", element: <TasksPage /> },
       { path: "tasks/:id", element: <TaskDetailPage /> },
-      { path: "epics", element: <EpicsPage /> },
-      { path: "epics/:id", element: <EpicDetailPage /> },
       { path: "chat", element: <ChatPage /> },
       { path: "chat/:channelId", element: <ChatPage /> },
       { path: "services", element: <ServicesPage /> },

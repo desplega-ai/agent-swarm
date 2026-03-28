@@ -3,10 +3,8 @@ import { unlink } from "node:fs/promises";
 import {
   closeDb,
   createAgent,
-  createEpic,
   createTaskExtended,
   findTaskByVcs,
-  getEpicById,
   getTaskById,
   initDb,
 } from "../be/db";
@@ -142,36 +140,5 @@ describe("findTaskByVcs", () => {
   test("returns null for non-existent repo/number", () => {
     const found = findTaskByVcs("nonexistent/repo", 9999);
     expect(found).toBeNull();
-  });
-});
-
-// ═══════════════════════════════════════════════════════
-// VCS columns in epics
-// ═══════════════════════════════════════════════════════
-
-describe("VCS columns in epics", () => {
-  test("creates epic with vcsRepo and vcsMilestone", () => {
-    const epic = createEpic({
-      name: "vcs-epic-test",
-      goal: "Test VCS columns in epics",
-      vcsRepo: "group/project",
-      vcsMilestone: "v2.0",
-    });
-
-    expect(epic.vcsRepo).toBe("group/project");
-    expect(epic.vcsMilestone).toBe("v2.0");
-
-    const retrieved = getEpicById(epic.id);
-    expect(retrieved?.vcsRepo).toBe("group/project");
-    expect(retrieved?.vcsMilestone).toBe("v2.0");
-  });
-
-  test("creates epic without VCS fields", () => {
-    const epic = createEpic({
-      name: "no-vcs-epic",
-      goal: "Epic without VCS",
-    });
-
-    expect(epic.vcsRepo).toBeUndefined();
   });
 });

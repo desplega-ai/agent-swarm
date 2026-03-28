@@ -55,14 +55,6 @@
   - [update-schedule](#update-schedule)
   - [delete-schedule](#delete-schedule)
   - [run-schedule-now](#run-schedule-now)
-- [Epics Tools](#epics-tools)
-  - [create-epic](#create-epic)
-  - [list-epics](#list-epics)
-  - [get-epic-details](#get-epic-details)
-  - [update-epic](#update-epic)
-  - [delete-epic](#delete-epic)
-  - [assign-task-to-epic](#assign-task-to-epic)
-  - [unassign-task-from-epic](#unassign-task-from-epic)
 - [Memory Tools](#memory-tools)
   - [memory-search](#memory-search)
   - [memory-get](#memory-get)
@@ -141,7 +133,6 @@ Sends a task to a specific agent, creates an unassigned task for the pool, or of
 |-----------|------|----------|---------|-------------|
 | `task` | `string` | Yes | - | The task description to send. |
 | `dependsOn` | `array` | No | - | Task IDs this task depends on. |
-| `epicId` | `string` | No | - | Epic to associate this task with. |
 | `slackUserId` | `string` | No | - | Slack user ID of the original requester. |
 
 ### get-task-details
@@ -348,7 +339,7 @@ Download a file from Slack by file ID or URL. Files are saved to the agent's dow
 
 ## Task Pool Tools
 
-*Epics*
+*Task Pool*
 
 ### task-action
 
@@ -572,115 +563,6 @@ Immediately execute a scheduled task, creating a task right away. Does not affec
 |-----------|------|----------|---------|-------------|
 | `scheduleId` | `string` | No | - | Schedule ID to run |
 | `name` | `string` | No | - | Schedule name to run (alternative to ID) |
-
-## Epics Tools
-
-*Epics*
-
-### create-epic
-
-**Create Epic**
-
-Create a new epic (project) to organize related tasks.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `name` | `string` | Yes | - | Unique name for the epic |
-| `goal` | `string` | Yes | - | The goal/objective of this epic |
-| `description` | `string` | No | - | Detailed description |
-| `prd` | `string` | No | - | Product Requirements Document (markdown) |
-| `plan` | `string` | No | - | Implementation plan (markdown) |
-| `priority` | `number` | No | 50 | - |
-| `tags` | `array` | No | - | Tags for filtering |
-| `leadAgentId` | `string` | No | - | Lead agent for this epic |
-| `researchDocPath` | `string` | No | - | Path to research document |
-| `planDocPath` | `string` | No | - | Path to plan document |
-| `slackChannelId` | `string` | No | - | - |
-| `slackThreadTs` | `string` | No | - | - |
-| `vcsRepo` | `string` | No | - | - |
-| `vcsMilestone` | `string` | No | - | - |
-
-### list-epics
-
-**List Epics**
-
-List epics with optional filters. Returns epics with progress information.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `search` | `string` | No | - | Search in name, description, or goal |
-| `leadAgentId` | `string` | No | - | Filter by lead agent |
-| `createdByAgentId` | `string` | No | - | Filter by creator |
-
-### get-epic-details
-
-**Get Epic Details**
-
-Get detailed information about a specific epic, including progress and associated tasks.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `epicId` | `string` | No | - | The ID of the epic |
-| `name` | `string` | No | - | The name of the epic (alternative to ID) |
-
-### update-epic
-
-**Update Epic**
-
-Update an existing epic. Only the creator, lead agent, or swarm lead can update.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `epicId` | `string` | No | - | The ID of the epic to update |
-| `name` | `string` | No | - | Epic name (alternative to ID for lookup) |
-| `newName` | `string` | No | - | New name for the epic |
-| `description` | `string` | No | - | New description |
-| `goal` | `string` | No | - | New goal |
-| `prd` | `string` | No | - | New PRD (markdown) |
-| `plan` | `string` | No | - | New plan (markdown) |
-| `priority` | `number` | No | - | New priority |
-| `tags` | `array` | No | - | New tags |
-| `leadAgentId` | `string` | No | - | New lead agent |
-| `researchDocPath` | `string` | No | - | - |
-| `planDocPath` | `string` | No | - | - |
-| `slackChannelId` | `string` | No | - | - |
-| `slackThreadTs` | `string` | No | - | - |
-| `vcsRepo` | `string` | No | - | - |
-| `vcsMilestone` | `string` | No | - | - |
-| `nextSteps` | `string` | No | - | Notes on what to do next for this epic |
-
-### delete-epic
-
-**Delete Epic**
-
-Delete an epic. Only the creator or swarm lead can delete. Tasks are unassigned, not deleted.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `epicId` | `string` | No | - | The ID of the epic to delete |
-| `name` | `string` | No | - | Epic name (alternative to ID) |
-
-### assign-task-to-epic
-
-**Assign Task to Epic**
-
-Assign an existing task to an epic.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `taskId` | `string` | Yes | - | The ID of the task to assign |
-| `epicId` | `string` | No | - | The ID of the epic |
-| `epicName` | `string` | No | - | Epic name (alternative to ID) |
-
-### unassign-task-from-epic
-
-**Unassign Task from Epic**
-
-Remove a task from its epic. The task is kept but no longer associated.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `taskId` | `string` | Yes | - | The ID of the task to unassign |
 
 ## Memory Tools
 
@@ -940,19 +822,6 @@ Delete an MCP server definition. Only the owning agent or lead can delete.
 |-----------|------|----------|---------|-------------|
 | `id` | `string` | Yes | - | ID of the MCP server to delete |
 
-### tracker-link-epic
-
-**Link Epic to Tracker**
-
-Link a swarm epic to an external tracker issue or project.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear |
-| `swarmEpicId` | `string` | Yes | - | The swarm epic ID to link |
-| `externalId` | `string` | Yes | - | The external issue/project ID in the tracker |
-| `externalUrl` | `string` | No | - | URL to the external issue/project |
-
 ### tracker-map-agent
 
 **Map Agent to Tracker User**
@@ -988,7 +857,7 @@ Show all tracker sync mappings with their state.
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `provider` | `string` | No | - | Filter by provider (e.g. 'linear |
-| `entityType` | `task \| epic` | No | - | Filter by entity type |
+| `entityType` | `task` | No | - | Filter by entity type |
 
 ### tracker-status
 

@@ -103,7 +103,6 @@ describe("Tool Annotations & Classification", () => {
     const expectedDestructive = [
       "cancel-task",
       "delete-channel",
-      "delete-epic",
       "delete-schedule",
       "delete-config",
       "delete-workflow",
@@ -122,9 +121,7 @@ describe("Tool Annotations & Classification", () => {
       "get-swarm",
       "get-task-details",
       "get-tasks",
-      "get-epic-details",
       "get-config",
-      "list-epics",
       "list-channels",
       "list-services",
       "list-schedules",
@@ -262,21 +259,6 @@ describe("Tool Annotations & Classification", () => {
       "run-schedule-now",
     ];
     for (const tool of scheduleTools) {
-      expect(DEFERRED_TOOLS.has(tool)).toBe(true);
-    }
-  });
-
-  test("epic tools are all deferred", () => {
-    const epicTools = [
-      "create-epic",
-      "list-epics",
-      "get-epic-details",
-      "update-epic",
-      "delete-epic",
-      "assign-task-to-epic",
-      "unassign-task-from-epic",
-    ];
-    for (const tool of epicTools) {
       expect(DEFERRED_TOOLS.has(tool)).toBe(true);
     }
   });

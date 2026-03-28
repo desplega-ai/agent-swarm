@@ -9,9 +9,6 @@ import type {
   ChannelMessage,
   ChannelsResponse,
   DashboardCostResponse,
-  Epic,
-  EpicsResponse,
-  EpicWithTasks,
   EventDefinition,
   LogsResponse,
   McpServer,
@@ -123,7 +120,6 @@ class ApiClient {
   async fetchTasks(filters?: {
     status?: string;
     agentId?: string;
-    epicId?: string;
     scheduleId?: string;
     search?: string;
     includeHeartbeat?: boolean;
@@ -133,7 +129,6 @@ class ApiClient {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
     if (filters?.agentId) params.set("agentId", filters.agentId);
-    if (filters?.epicId) params.set("epicId", filters.epicId);
     if (filters?.scheduleId) params.set("scheduleId", filters.scheduleId);
     if (filters?.search) params.set("search", filters.search);
     if (filters?.includeHeartbeat) params.set("includeHeartbeat", "true");
@@ -477,91 +472,6 @@ class ApiClient {
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error || `Failed to run schedule: ${res.status}`);
-    }
-    return res.json();
-  }
-
-  async fetchEpics(filters?: {
-    status?: string;
-    search?: string;
-    leadAgentId?: string;
-  }): Promise<EpicsResponse> {
-    const params = new URLSearchParams();
-    if (filters?.status) params.set("status", filters.status);
-    if (filters?.search) params.set("search", filters.search);
-    if (filters?.leadAgentId) params.set("leadAgentId", filters.leadAgentId);
-    const queryString = params.toString();
-    const url = `${this.getBaseUrl()}/api/epics${queryString ? `?${queryString}` : ""}`;
-    const res = await fetch(url, { headers: this.getHeaders() });
-    if (!res.ok) throw new Error(`Failed to fetch epics: ${res.status}`);
-    return res.json();
-  }
-
-  async fetchEpic(id: string): Promise<EpicWithTasks> {
-    const url = `${this.getBaseUrl()}/api/epics/${id}`;
-    const res = await fetch(url, { headers: this.getHeaders() });
-    if (!res.ok) throw new Error(`Failed to fetch epic: ${res.status}`);
-    return res.json();
-  }
-
-  async createEpic(data: {
-    name: string;
-    goal: string;
-    description?: string;
-    priority?: number;
-    tags?: string[];
-    leadAgentId?: string;
-  }): Promise<Epic> {
-    const url = `${this.getBaseUrl()}/api/epics`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { ...this.getHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `Failed to create epic: ${res.status}`);
-    }
-    return res.json();
-  }
-
-  async updateEpic(id: string, data: Partial<Epic>): Promise<Epic> {
-    const url = `${this.getBaseUrl()}/api/epics/${id}`;
-    const res = await fetch(url, {
-      method: "PUT",
-      headers: { ...this.getHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `Failed to update epic: ${res.status}`);
-    }
-    return res.json();
-  }
-
-  async deleteEpic(id: string): Promise<{ success: boolean }> {
-    const url = `${this.getBaseUrl()}/api/epics/${id}`;
-    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `Failed to delete epic: ${res.status}`);
-    }
-    return res.json();
-  }
-
-  async assignTaskToEpic(
-    epicId: string,
-    data: { taskId?: string; task?: string },
-  ): Promise<TaskWithLogs> {
-    const url = `${this.getBaseUrl()}/api/epics/${epicId}/tasks`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { ...this.getHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `Failed to assign task to epic: ${res.status}`);
     }
     return res.json();
   }

@@ -65,7 +65,6 @@ interface StatsBarProps {
     completed: number;
     failed: number;
   };
-  epics?: { active: number };
   healthy?: boolean;
   costToday?: number;
   costMtd?: number;

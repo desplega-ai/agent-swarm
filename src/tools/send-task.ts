@@ -5,7 +5,6 @@ import {
   getActiveTaskCount,
   getAgentById,
   getDb,
-  getEpicById,
   getTaskById,
   hasCapacity,
 } from "@/be/db";
@@ -48,7 +47,6 @@ export const registerSendTaskTool = (server: McpServer) => {
           .optional()
           .describe("Priority 0-100 (default: 50)."),
         dependsOn: z.array(z.uuid()).optional().describe("Task IDs this task depends on."),
-        epicId: z.string().uuid().optional().describe("Epic to associate this task with."),
         parentTaskId: z
           .uuid()
           .optional()
@@ -111,7 +109,6 @@ export const registerSendTaskTool = (server: McpServer) => {
         tags,
         priority,
         dependsOn,
-        epicId,
         dir,
         parentTaskId,
         vcsRepo,
@@ -156,24 +153,7 @@ export const registerSendTaskTool = (server: McpServer) => {
         };
       }
 
-      // Validate epicId and auto-inherit vcsRepo from epic if not explicitly provided
-      let effectiveVcsRepo = vcsRepo;
-      if (epicId) {
-        const epic = getEpicById(epicId);
-        if (!epic) {
-          return {
-            content: [{ type: "text", text: `Epic not found: ${epicId}` }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: `Epic not found: ${epicId}`,
-            },
-          };
-        }
-        if (!vcsRepo && epic.vcsRepo) {
-          effectiveVcsRepo = epic.vcsRepo;
-        }
-      }
+      const effectiveVcsRepo = vcsRepo;
 
       // Auto-route to parent's worker if parentTaskId is set and no explicit agentId
       let effectiveAgentId = agentId;
@@ -205,8 +185,7 @@ export const registerSendTaskTool = (server: McpServer) => {
       }
 
       const txn = getDb().transaction(() => {
-        // Build tags with epic tag if epicId is provided
-        const finalTags = epicId ? [...(tags || []), `epic:${getEpicById(epicId)?.name}`] : tags;
+        const finalTags = tags;
 
         // If no agentId (and no auto-routed agentId), create an unassigned task for the pool
         if (!effectiveAgentId) {
@@ -217,7 +196,6 @@ export const registerSendTaskTool = (server: McpServer) => {
             tags: finalTags,
             priority,
             dependsOn,
-            epicId,
             dir,
             parentTaskId,
             vcsRepo: effectiveVcsRepo,
@@ -269,7 +247,6 @@ export const registerSendTaskTool = (server: McpServer) => {
             tags: finalTags,
             priority,
             dependsOn,
-            epicId,
             dir,
             parentTaskId,
             vcsRepo: effectiveVcsRepo,
@@ -295,7 +272,6 @@ export const registerSendTaskTool = (server: McpServer) => {
           tags: finalTags,
           priority,
           dependsOn,
-          epicId,
           dir,
           parentTaskId,
           vcsRepo: effectiveVcsRepo,

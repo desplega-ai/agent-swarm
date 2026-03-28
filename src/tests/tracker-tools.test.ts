@@ -85,24 +85,6 @@ describe("tracker-link-task (DB layer)", () => {
   });
 });
 
-describe("tracker-link-epic (DB layer)", () => {
-  test("creates an epic sync mapping", () => {
-    const sync = createTrackerSync({
-      provider: "linear",
-      entityType: "epic",
-      swarmId: "tool-epic-001",
-      externalId: "LIN-EPIC-001",
-      externalIdentifier: "PROJ-1",
-      externalUrl: "https://linear.app/team/PROJ-1",
-      syncDirection: "bidirectional",
-    });
-
-    expect(sync.id).toBeDefined();
-    expect(sync.entityType).toBe("epic");
-    expect(sync.swarmId).toBe("tool-epic-001");
-  });
-});
-
 describe("tracker-unlink (DB layer)", () => {
   test("removes a sync mapping", () => {
     const sync = createTrackerSync({
@@ -123,20 +105,17 @@ describe("tracker-unlink (DB layer)", () => {
 describe("tracker-sync-status (DB layer)", () => {
   test("returns all syncs", () => {
     const all = getAllTrackerSyncs();
-    expect(all.length).toBeGreaterThanOrEqual(2);
+    expect(all.length).toBeGreaterThanOrEqual(1);
   });
 
   test("filters by provider", () => {
     const linear = getAllTrackerSyncs("linear");
-    expect(linear.length).toBeGreaterThanOrEqual(2);
+    expect(linear.length).toBeGreaterThanOrEqual(1);
   });
 
   test("filters by entityType", () => {
     const tasks = getAllTrackerSyncs(undefined, "task");
     expect(tasks.length).toBeGreaterThanOrEqual(1);
-
-    const epics = getAllTrackerSyncs(undefined, "epic");
-    expect(epics.length).toBeGreaterThanOrEqual(1);
   });
 
   test("filters by both provider and entityType", () => {

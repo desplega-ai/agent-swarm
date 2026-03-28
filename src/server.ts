@@ -7,16 +7,6 @@ import { registerContextHistoryTool } from "./tools/context-history";
 import { registerCreateChannelTool } from "./tools/create-channel";
 import { registerDbQueryTool } from "./tools/db-query";
 import { registerDeleteChannelTool } from "./tools/delete-channel";
-// Epics capability
-import {
-  registerAssignTaskToEpicTool,
-  registerCreateEpicTool,
-  registerDeleteEpicTool,
-  registerGetEpicDetailsTool,
-  registerListEpicsTool,
-  registerUnassignTaskFromEpicTool,
-  registerUpdateEpicTool,
-} from "./tools/epics";
 import { registerGetSwarmTool } from "./tools/get-swarm";
 import { registerGetTaskDetailsTool } from "./tools/get-task-details";
 import { registerGetTasksTool } from "./tools/get-tasks";
@@ -95,7 +85,6 @@ import {
 import { registerTaskActionTool } from "./tools/task-action";
 // Tracker capability
 import {
-  registerTrackerLinkEpicTool,
   registerTrackerLinkTaskTool,
   registerTrackerMapAgentTool,
   registerTrackerStatusTool,
@@ -125,7 +114,7 @@ import {
 // Capability-based feature flags
 // Default: all capabilities enabled
 const DEFAULT_CAPABILITIES =
-  "core,task-pool,messaging,profiles,services,scheduling,epics,memory,workflows";
+  "core,task-pool,messaging,profiles,services,scheduling,memory,workflows";
 const CAPABILITIES = new Set(
   (process.env.CAPABILITIES || DEFAULT_CAPABILITIES).split(",").map((s) => s.trim()),
 );
@@ -232,17 +221,6 @@ export function createServer() {
     registerRunScheduleNowTool(server);
   }
 
-  // Epics capability - epic/project management
-  if (hasCapability("epics")) {
-    registerCreateEpicTool(server);
-    registerListEpicsTool(server);
-    registerGetEpicDetailsTool(server);
-    registerUpdateEpicTool(server);
-    registerDeleteEpicTool(server);
-    registerAssignTaskToEpicTool(server);
-    registerUnassignTaskFromEpicTool(server);
-  }
-
   // Memory capability - persistent memory with vector search
   if (hasCapability("memory")) {
     registerMemorySearchTool(server);
@@ -253,7 +231,6 @@ export function createServer() {
   // Tracker capability - external issue tracker integration
   registerTrackerStatusTool(server);
   registerTrackerLinkTaskTool(server);
-  registerTrackerLinkEpicTool(server);
   registerTrackerUnlinkTool(server);
   registerTrackerSyncStatusTool(server);
   registerTrackerMapAgentTool(server);

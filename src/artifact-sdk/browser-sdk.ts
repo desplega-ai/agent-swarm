@@ -13,7 +13,6 @@ class SwarmSDK {
   async readMessages(opts) { return this._get('/@swarm/api/messages?' + new URLSearchParams(opts)); }
   async getSwarm() { return this._get('/@swarm/api/agents'); }
   async listServices() { return this._get('/@swarm/api/services'); }
-  async listEpics(opts) { return this._get('/@swarm/api/epics?' + new URLSearchParams(opts || {})); }
   async slackReply(opts) { return this._post('/@swarm/api/slack/reply', opts); }
 
   async _post(url, body) {

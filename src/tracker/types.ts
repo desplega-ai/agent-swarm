@@ -28,7 +28,7 @@ export interface OAuthTokens {
 export interface TrackerSync {
   id: string;
   provider: string;
-  entityType: "task" | "epic";
+  entityType: "task";
   providerEntityType: string | null;
   swarmId: string;
   externalId: string;

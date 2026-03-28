@@ -101,7 +101,6 @@ A task with dependencies won't be offered or claimable until all dependencies ar
 | `tags` | Labels for filtering (e.g., `['urgent', 'frontend']`) |
 | `taskType` | Classification (e.g., `bug`, `feature`, `review`) |
 | `dependsOn` | Array of task IDs that must complete first |
-| `epicId` | Optional association with an epic |
 | `parentTaskId` | For session continuity — child task resumes parent's Claude session |
 | `dir` | Working directory (absolute path) for the agent to start in. Falls back to repo clone path or default cwd |
 | `model` | Model override: `haiku`, `sonnet`, or `opus`. Priority: task > `MODEL_OVERRIDE` config > `opus` |
@@ -146,7 +145,6 @@ Stalled task detection uses the heartbeat's code-level triage: if a task has bee
 
 ## Related
 
-- [Epics](/docs/concepts/epics) — Organizing related tasks into larger projects
 - [Scheduled Tasks](/docs/concepts/scheduling) — Automate recurring task creation
 - [Architecture Overview](/docs/architecture/overview) — How the task system fits into the overall architecture
 - [Deployment Guide](/docs/guides/deployment) — Graceful shutdown and task resume in production

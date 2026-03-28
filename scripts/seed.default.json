@@ -64,27 +64,6 @@
   "tasks": {
     "count": 12
   },
-  "epics": {
-    "count": 2,
-    "data": [
-      {
-        "name": "Auth System Overhaul",
-        "goal": "Replace legacy session-based auth with JWT tokens and OAuth2 support",
-        "description": "Complete rewrite of the authentication system to support modern auth flows",
-        "status": "active",
-        "priority": 80,
-        "tags": ["security", "auth", "backend"]
-      },
-      {
-        "name": "Dashboard v2",
-        "goal": "Rebuild the monitoring dashboard with real-time updates and improved UX",
-        "description": "Next-gen dashboard with WebSocket updates, better charts, and mobile support",
-        "status": "draft",
-        "priority": 60,
-        "tags": ["frontend", "dashboard", "ux"]
-      }
-    ]
-  },
   "workflows": {
     "count": 1,
     "data": [

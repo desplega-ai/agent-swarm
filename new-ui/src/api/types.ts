@@ -324,56 +324,6 @@ export interface ScheduledTasksResponse {
   scheduledTasks: ScheduledTask[];
 }
 
-export type EpicStatus = "draft" | "active" | "paused" | "completed" | "cancelled";
-
-export interface Epic {
-  id: string;
-  name: string;
-  description?: string;
-  goal: string;
-  prd?: string;
-  plan?: string;
-  status: EpicStatus;
-  priority: number;
-  tags: string[];
-  createdByAgentId?: string;
-  leadAgentId?: string;
-  channelId?: string;
-  researchDocPath?: string;
-  planDocPath?: string;
-  slackChannelId?: string;
-  slackThreadTs?: string;
-  vcsProvider?: "github" | "gitlab";
-  vcsRepo?: string;
-  vcsMilestone?: string;
-  createdAt: string;
-  lastUpdatedAt: string;
-  startedAt?: string;
-  completedAt?: string;
-}
-
-export interface EpicTaskStats {
-  total: number;
-  completed: number;
-  failed: number;
-  inProgress: number;
-  pending: number;
-}
-
-export interface EpicWithProgress extends Epic {
-  taskStats: EpicTaskStats;
-  progress: number;
-}
-
-export interface EpicWithTasks extends EpicWithProgress {
-  tasks: AgentTask[];
-}
-
-export interface EpicsResponse {
-  epics: Epic[];
-  total: number;
-}
-
 export type SwarmConfigScope = "global" | "agent" | "repo";
 
 export interface SwarmConfig {

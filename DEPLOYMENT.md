@@ -115,7 +115,7 @@ swarm_content_strategist → /workspace/personal   → Content strategist's priv
 
 **How it works:**
 
-- **`swarm_api`** — The most critical volume. Contains the SQLite database with all tasks, agents, epics, and configuration. **Back this up regularly.** Losing this volume means losing all swarm state.
+- **`swarm_api`** — The most critical volume. Contains the SQLite database with all tasks, agents, schedules, and configuration. **Back this up regularly.** Losing this volume means losing all swarm state.
 - **`swarm_logs`** — Shared by all agent containers. Each agent writes session logs here. Useful for debugging but not critical — can be recreated.
 - **`swarm_shared`** — A workspace visible to all agents. Each agent creates subdirectories under `/workspace/shared/{thoughts,memory,downloads,misc}/$AGENT_ID`. Agents can read each other's files but conventionally only write to their own subdirectory.
 - **`swarm_<agent>`** (personal volumes) — Each agent gets an isolated workspace at `/workspace/personal` for its own files. Not visible to other agents.

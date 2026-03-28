@@ -1,4 +1,3 @@
-export { registerTrackerLinkEpicTool } from "./tracker-link-epic";
 export { registerTrackerLinkTaskTool } from "./tracker-link-task";
 export { registerTrackerMapAgentTool } from "./tracker-map-agent";
 export { registerTrackerStatusTool } from "./tracker-status";
