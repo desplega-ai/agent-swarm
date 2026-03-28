@@ -1,12 +1,13 @@
 ---
 date: 2026-03-28T12:00:00Z
 topic: "Claude Code --input-format stream-json Protocol"
+status: draft
 ---
 
 # Research: Claude Code `--input-format stream-json` Protocol
 
 **Date**: 2026-03-28
-**Status**: Complete
+**Status**: Draft
 **Sources**: Claude Code CLI help, `@anthropic-ai/claude-agent-sdk` v0.2.86 TypeScript types, `claude-agent-sdk-python` source, `The-Vibe-Company/companion` reverse-engineering, GitHub issue anthropics/claude-code#24594
 
 ## Executive Summary

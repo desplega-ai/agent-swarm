@@ -102,6 +102,8 @@ First event emitted per session. Contains session configuration but no account-l
 }
 ```
 
+**Actionable:** We could expand `processJsonLine()` to also extract from the init event: (1) `cwd`, (2) `claude_code_version` (harness version), (3) `apiKeySource` (last 5 chars for identification without leaking full key). These would be useful metadata to store per-session on the agent/task record.
+
 **`apiKeySource`** is the closest thing to account info. Known values: `"ANTHROPIC_API_KEY"` (env var), `"claude_ai"` (Pro/Max subscription). No email, no plan tier, no org name.
 
 ### 3. The `system/api_error` Event
@@ -282,8 +284,6 @@ No prior research on this specific topic was found in `thoughts/`.
 
 ## Open Questions
 
-- The `utilization` field (0.0–1.0) is in the SDK type but was never observed in local session data. Is it only emitted for certain plan types or when approaching limits?
-- The `system/api_error` event contains `anthropic-organization-id` in the response headers. Could this be used as a stable org identifier?
-- Will Anthropic eventually add account/identity data to the init event? Multiple open issues suggest demand.
-- The `service_tier` field on usage blocks — are there values other than `"standard"` (e.g., for priority/batch tiers)?
-- How does `rate_limit_event` behave with API keys (non-subscription) vs. Pro/Max subscription auth? The `rateLimitType: "five_hour"` suggests subscription-specific windows.
+- The `utilization` field (0.0–1.0) represents how close the account is to hitting its rate limit (0.0 = no usage, 1.0 = at the limit). It is defined in the SDK type but was never observed in local session data. It may only be emitted when approaching limits or for certain plan types. Worth monitoring once we start capturing `rate_limit_event` structured data.
+- The `system/api_error` event contains `anthropic-organization-id` in the response headers. This could potentially be used as a stable org identifier — worth exploring.
+- `rate_limit_event` may not be emitted for all auth types (API keys vs. Pro/Max subscription). The `rateLimitType: "five_hour"` suggests subscription-specific windows. Implementation should be fail-safe: no-op if the event or fields don’t exist.

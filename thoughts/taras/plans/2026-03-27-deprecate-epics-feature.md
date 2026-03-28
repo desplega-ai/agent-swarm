@@ -46,7 +46,7 @@ Complete removal of the epics feature from agent-swarm. Epics are an unused proj
 |---|------|---------------|
 | 1 | `src/types.ts` | Remove `epicId` from task schema (~L125), remove `EpicStatusSchema`, `EpicSchema`, `EpicWithProgressSchema` and their types (~L487-540) |
 | 2 | `src/be/db.ts` | Remove: `epicId` from task row types/mappings, epic filter from `getTasks`/`getTasksForAgent`, `epicId` from `createTaskExtended`. Remove all epic functions (~L4234-4734): `rowToEpic`, `getEpics`, `getEpicById`, `getEpicByName`, `createEpic`, `updateEpic`, `deleteEpic`, `getEpicTaskStats`, `getEpicWithProgress`, `getTasksByEpicId`, `assignTaskToEpic`, `unassignTaskFromEpic`, `getEpicsWithProgressUpdates`, `markEpicProgressNotified`, `markEpicsProgressNotified`. Remove `Epic`/`EpicStatus`/`EpicWithProgress` imports |
-| 3 | `src/be/db.ts` (initDb) | Remove `idx_agent_tasks_epicId` index creation (~L182). Remove `epicId` from inline task table creation (~L137, L157, L168) |
+| 3 | `src/be/db.ts` (initDb) | In the legacy CHECK-constraint migration (~L87-199): remove `epicId` from CREATE TABLE column list (~L137), both INSERT column lists (~L157, L168), and the `idx_agent_tasks_epicId` index recreation (~L182) |
 
 #### MCP Tools & Server
 | # | File | What to change |
@@ -56,6 +56,11 @@ Complete removal of the epics feature from agent-swarm. Epics are an unused proj
 | 6 | `src/tools/send-task.ts` | Remove `epicId` parameter, remove epic validation/lookup logic (~L51, L114, L159-174), remove epic tag building (~L208-209), remove `epicId` from task creation calls (~L220, L272, L298) |
 | 7 | `src/tools/store-progress.ts` | Remove epic imports (~L12, L15), remove epic-linked promotion logic (~L277-283), remove epic context enrichment in follow-up (~L345-382) |
 | 8 | `src/tools/tracker/index.ts` | Remove `registerTrackerLinkEpicTool` export |
+
+#### Artifact SDK
+| # | File | What to change |
+|---|------|---------------|
+| 8b | `src/artifact-sdk/browser-sdk.ts` | Remove `listEpics` method and any epic-related API methods |
 
 #### HTTP & Polling
 | # | File | What to change |
@@ -116,6 +121,8 @@ Complete removal of the epics feature from agent-swarm. Epics are an unused proj
 |---|------|---------------|
 | 35 | `MCP.md` | Remove entire Epics Tools section, remove `epicId` param from send-task, remove TOC entries |
 | 36 | `plugin/commands/work-on-task.md` | Remove epic reference (~L19) |
+| 36b | `plugin/skills/artifacts/skill.md` | Remove `listEpics` documentation |
+| 36c | `DEPLOYMENT.md` | Remove epic references from database description |
 | 37 | `docs-site/content/docs/api-reference/meta.json` | Remove epics entry |
 | 38 | `docs-site/content/docs/(documentation)/concepts/meta.json` | Remove epics entry |
 | 39 | Various docs-site files | Remove epic references from getting-started, deployment, architecture, agents, memory, linear-integration |
@@ -149,25 +156,109 @@ Complete removal of the epics feature from agent-swarm. Epics are an unused proj
 
 **Goal:** Drop the `epics` table and remove `epicId` FK from `agent_tasks`.
 
-Create `src/be/migrations/NNN_drop_epics.sql` (next number after highest existing):
+Create `src/be/migrations/026_drop_epics.sql`:
 
 ```sql
 -- Remove epic feature entirely
 
--- 1. Null out epicId on tasks (FK will be dropped with column)
+-- 1. Null out epicId on tasks before table recreation
 UPDATE agent_tasks SET epicId = NULL WHERE epicId IS NOT NULL;
 
--- 2. Drop epicId column from agent_tasks
-ALTER TABLE agent_tasks DROP COLUMN epicId;
+-- 2. Recreate agent_tasks without epicId (12-step pattern per codebase convention)
+PRAGMA foreign_keys=off;
+
+CREATE TABLE agent_tasks_new (
+  id TEXT PRIMARY KEY,
+  agentId TEXT,
+  creatorAgentId TEXT,
+  task TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  source TEXT NOT NULL DEFAULT 'mcp' CHECK(source IN ('mcp', 'slack', 'api', 'github', 'agentmail', 'system', 'schedule', 'linear', 'workflow')),
+  taskType TEXT,
+  tags TEXT DEFAULT '[]',
+  priority INTEGER DEFAULT 50,
+  dependsOn TEXT DEFAULT '[]',
+  offeredTo TEXT,
+  offeredAt TEXT,
+  acceptedAt TEXT,
+  rejectionReason TEXT,
+  slackChannelId TEXT,
+  slackThreadTs TEXT,
+  slackUserId TEXT,
+  createdAt TEXT NOT NULL,
+  lastUpdatedAt TEXT NOT NULL,
+  finishedAt TEXT,
+  failureReason TEXT,
+  output TEXT,
+  progress TEXT,
+  notifiedAt TEXT,
+  mentionMessageId TEXT,
+  mentionChannelId TEXT,
+  githubRepo TEXT,
+  githubEventType TEXT,
+  githubNumber INTEGER,
+  githubCommentId INTEGER,
+  githubAuthor TEXT,
+  githubUrl TEXT,
+  parentTaskId TEXT,
+  claudeSessionId TEXT,
+  agentmailInboxId TEXT,
+  agentmailMessageId TEXT,
+  agentmailThreadId TEXT,
+  model TEXT,
+  scheduleId TEXT,
+  dir TEXT,
+  vcsRepo TEXT,
+  outputSchema TEXT,
+  wasPaused INTEGER DEFAULT 0
+);
+
+INSERT INTO agent_tasks_new (
+  id, agentId, creatorAgentId, task, status, source, taskType, tags,
+  priority, dependsOn, offeredTo, offeredAt, acceptedAt, rejectionReason,
+  slackChannelId, slackThreadTs, slackUserId, createdAt, lastUpdatedAt,
+  finishedAt, failureReason, output, progress, notifiedAt,
+  mentionMessageId, mentionChannelId, githubRepo, githubEventType,
+  githubNumber, githubCommentId, githubAuthor, githubUrl,
+  parentTaskId, claudeSessionId,
+  agentmailInboxId, agentmailMessageId, agentmailThreadId,
+  model, scheduleId, dir, vcsRepo, outputSchema, wasPaused
+)
+SELECT
+  id, agentId, creatorAgentId, task, status, source, taskType, tags,
+  priority, dependsOn, offeredTo, offeredAt, acceptedAt, rejectionReason,
+  slackChannelId, slackThreadTs, slackUserId, createdAt, lastUpdatedAt,
+  finishedAt, failureReason, output, progress, notifiedAt,
+  mentionMessageId, mentionChannelId, githubRepo, githubEventType,
+  githubNumber, githubCommentId, githubAuthor, githubUrl,
+  parentTaskId, claudeSessionId,
+  agentmailInboxId, agentmailMessageId, agentmailThreadId,
+  model, scheduleId, dir, vcsRepo, outputSchema, wasPaused
+FROM agent_tasks;
+
+DROP TABLE agent_tasks;
+ALTER TABLE agent_tasks_new RENAME TO agent_tasks;
+
+-- Recreate indexes (without epicId index)
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_agentId ON agent_tasks(agentId);
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_offeredTo ON agent_tasks(offeredTo);
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_taskType ON agent_tasks(taskType);
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_agentmailThreadId ON agent_tasks(agentmailThreadId);
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_schedule_id ON agent_tasks(scheduleId);
+
+PRAGMA foreign_keys=on;
 
 -- 3. Remove tracker links for epics
 DELETE FROM tracker_links WHERE entityType = 'epic';
 
--- 4. Drop the epics table (cascades indexes)
+-- 4. Drop the epics table
 DROP TABLE IF EXISTS epics;
 ```
 
-Also update `src/be/db.ts` `initDb()` to remove the inline epic table creation and index.
+**Important:** The column list in the migration must match the current `agent_tasks` schema at implementation time. Verify with `sqlite3 agent-swarm-db.sqlite ".schema agent_tasks"` before finalizing.
+
+Also update `src/be/db.ts` `initDb()` legacy CHECK-constraint migration (lines 87-199): remove `epicId` from the CREATE TABLE column list (L137), both INSERT column lists (L157, L168), and the `idx_agent_tasks_epicId` index recreation (L182).
 
 **Note on migration 005:** Leave `005_epic_next_steps.sql` in place. It runs before the drop migration on fresh DBs, and the drop migration then removes the table. This is correct behavior — never modify applied migrations.
 
@@ -176,8 +267,8 @@ Also update `src/be/db.ts` `initDb()` to remove the inline epic table creation a
 rm -f agent-swarm-db.sqlite agent-swarm-db.sqlite-wal agent-swarm-db.sqlite-shm
 bun run start:http &
 sleep 3
-sqlite3 agent-swarm-db.sqlite ".tables" | grep -v epic
-sqlite3 agent-swarm-db.sqlite ".schema agent_tasks" | grep -v epic
+sqlite3 agent-swarm-db.sqlite ".tables" | grep epic        # Expected: no output
+sqlite3 agent-swarm-db.sqlite ".schema agent_tasks" | grep epic  # Expected: no output
 kill $(lsof -ti :3013)
 ```
 
@@ -211,6 +302,7 @@ bun run tsc:check
 10. **Edit** `src/tools/send-task.ts`: Remove `epicId` param, validation, tag logic
 11. **Edit** `src/tools/store-progress.ts`: Remove epic enrichment and follow-up logic
 12. **Edit** `src/tools/tracker/tracker-sync-status.ts`: Remove `"epic"` from entity type enum
+13. **Edit** `src/artifact-sdk/browser-sdk.ts`: Remove `listEpics` method and epic-related API methods
 
 **Verification:**
 ```bash
@@ -278,11 +370,13 @@ bun test
 
 1. **Edit** `MCP.md`: Remove Epics Tools section, epicId from send-task, TOC entries
 2. **Edit** `plugin/commands/work-on-task.md`: Remove epic line
-3. **Delete** docs-site epic pages
-4. **Edit** docs-site meta.json files
-5. **Edit** other docs-site pages referencing epics
-6. **Edit** landing page files to remove epic mentions
-7. **Regenerate** `openapi.json` — this is a generated artifact that must be committed with the changes
+3. **Edit** `plugin/skills/artifacts/skill.md`: Remove `listEpics` documentation
+4. **Edit** `DEPLOYMENT.md`: Remove epic references from database description
+5. **Delete** docs-site epic pages
+6. **Edit** docs-site meta.json files
+7. **Edit** other docs-site pages referencing epics
+8. **Edit** landing page files to remove epic mentions
+9. **Regenerate** `openapi.json` — this is a generated artifact that must be committed with the changes
 
 **Verification:**
 ```bash
@@ -367,7 +461,7 @@ grep '"version"' package.json
 
 | Risk | Mitigation |
 |------|-----------|
-| Existing tasks in production have `epicId` set | Migration NULLs them before dropping column |
+| Existing tasks in production have `epicId` set | Migration NULLs them before table recreation |
 | Tracker links reference epics | Migration deletes epic tracker links |
 | Agents mid-flight reference epic tools | Tools disappear on restart — agents get clean tool list on reconnect |
 | Migration 005 references epics table | Left in place — runs before drop migration, then drop cleans up |
@@ -378,3 +472,28 @@ grep '"version"' package.json
 - **CHANGELOG.md**: Historical entries mentioning epics are left as-is (they're history)
 - **thoughts/ directory**: Old research/plans mentioning epics are left (historical context), except the two epic-specific docs which are deleted
 - **Git history**: No rewriting
+
+---
+
+## Review Errata
+
+_Reviewed: 2026-03-28 by Claude — all findings addressed, plan updated_
+
+### Resolved
+
+- [x] **Migration SQL rewrote to use 12-step table recreation pattern** (was `ALTER TABLE DROP COLUMN` which breaks codebase convention)
+- [x] **Phase 1 verification commands fixed** (`grep -v epic` → `grep epic` expecting no output)
+- [x] **`db.ts initDb()` description corrected** — now accurately describes legacy CHECK-constraint migration edits at L137, L157, L168, L182
+- [x] **Added `src/artifact-sdk/browser-sdk.ts`** to edit list and Phase 3 (has `listEpics` method)
+- [x] **Added `plugin/skills/artifacts/skill.md`** to edit list and Phase 8
+- [x] **Added `DEPLOYMENT.md`** to edit list and Phase 8
+- [x] Migration number set to `026` (highest existing: `025_workflow_run_cancelled_status.sql`)
+- [x] All 18 deletion targets verified to exist
+- [x] Line number claims in edit targets verified as approximately correct
+- [x] Migration 005 handling is correct — leave in place, drop migration cleans up after it
+- [x] `docs-site/.source/` auto-generated files will regenerate after changes, no manual edits needed
+- [x] Version bump assumption (1.54.1) should be verified at implementation time
+
+### Note on migration column list
+
+The `026_drop_epics.sql` migration includes a full `agent_tasks` column list based on the schema as of 2026-03-28. **If new columns are added before this plan is implemented**, the migration must be updated to include them. Verify with `sqlite3 agent-swarm-db.sqlite ".schema agent_tasks"` before finalizing.

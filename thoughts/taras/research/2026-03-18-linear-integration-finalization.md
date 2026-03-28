@@ -3,7 +3,7 @@ date: 2026-03-18T12:00:00Z
 topic: "Linear Integration Finalization"
 branch: linear-integration-foundation
 pr: 161
-status: draft
+status: complete
 ---
 
 # Ticket Tracker Integration — Linear First
