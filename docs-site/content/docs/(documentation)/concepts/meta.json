@@ -1,4 +1,4 @@
 {
   "title": "Concepts",
-  "pages": ["task-lifecycle", "epics", "services", "scheduling", "workflows"]
+  "pages": ["task-lifecycle", "services", "scheduling", "workflows"]
 }

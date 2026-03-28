@@ -4,7 +4,6 @@ import { Link, useLocation } from "react-router-dom";
 const routeLabels: Record<string, string> = {
   agents: "Agents",
   tasks: "Tasks",
-  epics: "Epics",
   chat: "Chat",
   services: "Services",
   schedules: "Schedules",

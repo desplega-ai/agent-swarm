@@ -72,34 +72,6 @@ Note: Claims are first-come-first-serve. If claim fails, pick another.`,
 });
 
 registerTemplate({
-  eventType: "task.trigger.epic_progress",
-  header: "",
-  defaultBody: `## Epic Progress Update
-
-{{epic_count}} epic(s) have progress updates:
-
-{{epics_detail}}
-## Your Task: Plan Next Steps
-
-For each epic:
-1. **Review** the completed work and any failures
-2. **Determine** if the epic goal is met (progress = 100% and all tasks succeeded)
-3. **If complete:** Use \`update-epic\` to mark status as "completed"
-4. **If not complete:**
-   - Retry failed tasks with \`send-task\` (reassign or modify)
-   - Create new tasks for remaining work with \`send-task\` (include epicId)
-   - Keep the epic progressing until the goal is achieved
-
-This is an iterative process - you'll be notified again when more tasks finish.
-The epic should keep progressing until 100% complete and the goal is achieved.`,
-  variables: [
-    { name: "epic_count", description: "Number of epics with progress updates" },
-    { name: "epics_detail", description: "Formatted detail section for all epics" },
-  ],
-  category: "task_lifecycle",
-});
-
-registerTemplate({
   eventType: "task.trigger.channel_activity",
   header: "",
   defaultBody: `## Slack Channel Activity

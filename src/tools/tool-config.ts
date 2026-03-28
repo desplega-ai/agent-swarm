@@ -60,15 +60,6 @@ export const DEFERRED_TOOLS = new Set([
   "retry-workflow-run",
   "cancel-workflow-run",
 
-  // Epics (7)
-  "create-epic",
-  "list-epics",
-  "get-epic-details",
-  "update-epic",
-  "delete-epic",
-  "assign-task-to-epic",
-  "unassign-task-from-epic",
-
   // Services (4)
   "register-service",
   "unregister-service",
@@ -103,7 +94,6 @@ export const DEFERRED_TOOLS = new Set([
   // Tracker (6)
   "tracker-status",
   "tracker-link-task",
-  "tracker-link-epic",
   "tracker-unlink",
   "tracker-sync-status",
   "tracker-map-agent",

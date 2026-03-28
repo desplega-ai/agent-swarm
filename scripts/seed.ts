@@ -43,15 +43,6 @@ interface ChannelSeed {
   type: "public" | "dm";
 }
 
-interface EpicSeed {
-  name: string;
-  goal: string;
-  description: string;
-  status: "draft" | "active" | "paused" | "completed" | "cancelled";
-  priority: number;
-  tags: string[];
-}
-
 interface WorkflowSeed {
   name: string;
   description: string;
@@ -83,7 +74,6 @@ interface SeedConfig {
   channels: { count: number; data?: ChannelSeed[] };
   messages: { perChannel: number };
   tasks: { count: number };
-  epics: { count: number; data?: EpicSeed[] };
   workflows: { count: number; data?: WorkflowSeed[] };
   schedules: { count: number; data?: ScheduleSeed[] };
   memories: { count: number };
@@ -261,17 +251,6 @@ function generateChannelName(): ChannelSeed {
       { value: "public" as const, weight: 4 },
       { value: "dm" as const, weight: 1 },
     ]),
-  };
-}
-
-function generateEpic(): EpicSeed {
-  return {
-    name: faker.company.catchPhrase(),
-    goal: faker.lorem.sentence({ min: 8, max: 15 }),
-    description: faker.lorem.paragraph(),
-    status: faker.helpers.arrayElement(["draft", "active", "paused", "completed", "cancelled"]),
-    priority: faker.number.int({ min: 20, max: 90 }),
-    tags: faker.helpers.arrayElements(TAG_POOL, { min: 1, max: 3 }),
   };
 }
 
@@ -463,64 +442,22 @@ function seedMessages(
   console.log(`  ✓ Seeded ${total} messages across ${channels.length} channels`);
 }
 
-function seedEpics(
-  db: Database,
-  config: SeedConfig,
-  agents: { id: string; isLead: boolean }[],
-  channels: { id: string }[],
-): { id: string; name: string }[] {
-  const count = config.epics.count;
-  const explicit = config.epics.data ?? [];
-  const epics: { id: string; name: string }[] = [];
-
-  const lead = agents.find((a) => a.isLead) ?? agents[0];
-  const stmt = db.prepare(`
-    INSERT OR IGNORE INTO epics (id, name, description, goal, status, priority, tags, createdByAgentId, leadAgentId, channelId, createdAt, lastUpdatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  for (let i = 0; i < count; i++) {
-    const seed = i < explicit.length ? explicit[i] : generateEpic();
-    const id = seedId("epic", i);
-    const channel = channels.length > 0 ? pick(channels).id : null;
-    stmt.run(
-      id,
-      seed.name,
-      seed.description,
-      seed.goal,
-      seed.status,
-      seed.priority,
-      JSON.stringify(seed.tags),
-      lead.id,
-      lead.id,
-      channel,
-      daysAgo(21),
-      now(),
-    );
-    epics.push({ id, name: seed.name });
-  }
-
-  console.log(`  ✓ Seeded ${count} epics`);
-  return epics;
-}
-
 function seedTasks(
   db: Database,
   config: SeedConfig,
   agents: { id: string }[],
-  epics: { id: string }[],
 ): { id: string; agentId: string | null }[] {
   const count = config.tasks.count;
 
   const stmt = db.prepare(`
     INSERT OR IGNORE INTO agent_tasks (
       id, agentId, creatorAgentId, task, status, source, taskType, tags,
-      priority, dependsOn, epicId, createdAt, lastUpdatedAt, finishedAt,
+      priority, dependsOn, createdAt, lastUpdatedAt, finishedAt,
       failureReason, output, progress,
       model, dir, parentTaskId, claudeSessionId,
       vcsProvider, vcsRepo, vcsNumber, vcsEventType, vcsUrl, vcsAuthor
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const logStmt = db.prepare(`
@@ -536,7 +473,6 @@ function seedTasks(
     const id = seedId("task", i);
     const agent = statusInfo.needsAgent ? pick(agents) : null;
     const creator = pick(agents);
-    const epic = faker.datatype.boolean(0.5) && epics.length > 0 ? pick(epics) : null;
     const priority = faker.number.int({ min: 20, max: 80 });
     const createdAt = daysAgo(faker.number.int({ min: 0, max: 14 }));
     const finishedAt = statusInfo.needsFinish
@@ -625,7 +561,6 @@ function seedTasks(
       JSON.stringify(template.tags),
       priority,
       "[]",
-      epic?.id ?? null,
       createdAt,
       now(),
       finishedAt,
@@ -1438,7 +1373,6 @@ const TABLES_IN_DELETE_ORDER = [
   "agent_tasks",
   "scheduled_tasks",
   "services",
-  "epics",
   "channels",
   "swarm_config",
   "swarm_repos",
@@ -1480,7 +1414,6 @@ Options:
   --agents <n>        Number of agents to seed
   --tasks <n>         Number of tasks to seed
   --channels <n>      Number of channels to seed
-  --epics <n>         Number of epics to seed
   --messages <n>      Messages per channel
   --help              Show this help message
 
@@ -1499,7 +1432,6 @@ function parseArgs(argv: string[]): {
     agentCount?: number;
     taskCount?: number;
     channelCount?: number;
-    epicCount?: number;
     messagesPerChannel?: number;
   };
 } {
@@ -1533,9 +1465,6 @@ function parseArgs(argv: string[]): {
         break;
       case "--channels":
         overrides.channelCount = Number.parseInt(args[++i], 10);
-        break;
-      case "--epics":
-        overrides.epicCount = Number.parseInt(args[++i], 10);
         break;
       case "--messages":
         overrides.messagesPerChannel = Number.parseInt(args[++i], 10);
@@ -1576,10 +1505,6 @@ async function loadConfig(
     },
     tasks: {
       count: overrides.taskCount ?? raw.tasks?.count ?? 12,
-    },
-    epics: {
-      count: overrides.epicCount ?? raw.epics?.count ?? 2,
-      data: raw.epics?.data,
     },
     workflows: {
       count: raw.workflows?.count ?? 1,
@@ -1639,8 +1564,7 @@ async function main(): Promise<void> {
   const agents = seedAgents(db, config);
   const channels = seedChannels(db, config, agents);
   seedMessages(db, config, agents, channels);
-  const epics = seedEpics(db, config, agents, channels);
-  const tasks = seedTasks(db, config, agents, epics);
+  const tasks = seedTasks(db, config, agents);
   seedSessionLogs(db, config, tasks);
   seedContextSnapshots(db, config, tasks);
   seedWorkflows(db, config);

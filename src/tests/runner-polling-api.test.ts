@@ -120,7 +120,7 @@ async function handleRequest(
       }
 
       if (agent.isLead) {
-        // Lead-specific triggers would go here (inbox, epics, etc.)
+        // Lead-specific triggers would go here (inbox, etc.)
       } else {
         // Worker-specific: check for unassigned tasks in pool
         const unassignedCount = getUnassignedTasksCount();

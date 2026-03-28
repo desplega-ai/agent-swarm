@@ -1,7 +1,7 @@
 ---
 date: 2026-03-27T20:00:00Z
 topic: "Deprecate & Remove Epics Feature"
-status: draft
+status: completed
 autonomy: autopilot
 ---
 
@@ -497,3 +497,40 @@ _Reviewed: 2026-03-28 by Claude — all findings addressed, plan updated_
 ### Note on migration column list
 
 The `026_drop_epics.sql` migration includes a full `agent_tasks` column list based on the schema as of 2026-03-28. **If new columns are added before this plan is implemented**, the migration must be updated to include them. Verify with `sqlite3 agent-swarm-db.sqlite ".schema agent_tasks"` before finalizing.
+
+---
+
+## Post-Implementation Verification (2026-03-28)
+
+_Verified by Claude via `/verify-plan` — autopilot mode_
+
+### Verification Summary
+
+| Check | Result |
+|-------|--------|
+| All 18 file deletions | **PASS** — all confirmed absent |
+| All ~52 file edits | **PASS** — 13 key files spot-checked, all epic refs removed |
+| Migration 026 structure | **PASS** — correct 12-step table recreation |
+| Migration 005 preserved | **PASS** — old migration left in place as planned |
+| `bun run tsc:check` | **PASS** |
+| `bun run lint:fix` | **PASS** |
+| `new-ui tsc --noEmit` | **PASS** |
+| `new-ui pnpm lint` | **PASS** |
+| `bash scripts/check-db-boundary.sh` | **PASS** |
+| `bun test` (tracker) | **PASS** (after fix) |
+| `openapi.json` epic-free | **PASS** (0 matches after regen) |
+| `package.json` version | **PASS** — `1.55.0` |
+
+### Blocking Issues Found & Resolved
+
+1. **`src/be/migrations/runner.ts:22`** — `"epics"` was still in `BASELINE_TABLES` array. This is live runtime code used to detect pre-migration databases. Leaving it would cause the runner to fail baseline detection on DBs where 026 already dropped the epics table, potentially re-running 001_initial.sql and creating a zombie table. **Fix:** removed `"epics"` from the array.
+
+2. **`openapi.json`** — Had 27 epic references (endpoints, tags, parameters). Plan Phase 8 required regeneration but it hadn't been done. **Fix:** ran `bun run docs:openapi`, confirmed 0 epic matches.
+
+3. **`src/tests/db-queries-tracker.test.ts:124`** — `getAllTrackerSyncs filters by provider` expected `linear.length >= 2`, but the removed "same externalId for different entityTypes" test was the one creating the second linear sync (with entityType `"epic"`). Only 1 linear sync remains. **Fix:** changed assertion to `>= 1`.
+
+### Non-Blocking Notes
+
+- **12 channel test failures** in `http-api-integration.test.ts`: Pre-existing — channel HTTP handler was never registered in `src/http/index.ts`. Unrelated to epic removal.
+- **Plan item #50** (`landing/src/components/architecture.tsx`): File does not exist. No action needed.
+- **Old migrations** (001, 004, 005, 006, 009): Contain epic references as expected — checksum-protected, cannot/should not be modified.

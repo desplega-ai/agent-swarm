@@ -103,16 +103,6 @@ describe("Tracker Sync CRUD", () => {
     ).toThrow();
   });
 
-  test("same externalId allowed for different entityTypes", () => {
-    const epic = createTrackerSync({
-      provider: "linear",
-      entityType: "epic",
-      swarmId: "epic-001",
-      externalId: "LIN-123",
-    });
-    expect(epic.entityType).toBe("epic");
-  });
-
   test("same swarmId allowed for different providers", () => {
     const jiraSync = createTrackerSync({
       provider: "jira" as "linear", // cast for test — DB doesn't constrain provider values
@@ -125,21 +115,19 @@ describe("Tracker Sync CRUD", () => {
 
   test("getAllTrackerSyncs returns all", () => {
     const all = getAllTrackerSyncs();
-    expect(all.length).toBeGreaterThanOrEqual(3);
+    expect(all.length).toBeGreaterThanOrEqual(2);
   });
 
   test("getAllTrackerSyncs filters by provider", () => {
     const linear = getAllTrackerSyncs("linear");
     const jira = getAllTrackerSyncs("jira");
-    expect(linear.length).toBeGreaterThanOrEqual(2);
+    expect(linear.length).toBeGreaterThanOrEqual(1);
     expect(jira.length).toBe(1);
   });
 
   test("getAllTrackerSyncs filters by entityType", () => {
     const tasks = getAllTrackerSyncs(undefined, "task");
-    const epics = getAllTrackerSyncs(undefined, "epic");
     expect(tasks.length).toBeGreaterThanOrEqual(2);
-    expect(epics.length).toBeGreaterThanOrEqual(1);
   });
 
   test("deleteTrackerSync removes the mapping", () => {

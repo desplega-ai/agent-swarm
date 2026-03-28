@@ -25,15 +25,6 @@ export {
   useTaskUsage,
 } from "./use-costs";
 export { useDbQuery, useTableColumns, useTableList } from "./use-db-query";
-export type { EpicFilters } from "./use-epics";
-export {
-  useAssignTaskToEpic,
-  useCreateEpic,
-  useDeleteEpic,
-  useEpic,
-  useEpics,
-  useUpdateEpic,
-} from "./use-epics";
 export type { McpServerFilters } from "./use-mcp-servers";
 export {
   useAgentMcpServers,

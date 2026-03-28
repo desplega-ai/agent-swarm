@@ -73,7 +73,6 @@ describe("BROWSER_SDK_JS", () => {
       "readMessages",
       "getSwarm",
       "listServices",
-      "listEpics",
       "slackReply",
     ];
     for (const method of expectedMethods) {
@@ -90,7 +89,6 @@ describe("BROWSER_SDK_JS", () => {
     expect(BROWSER_SDK_JS).toContain("/@swarm/api/agents");
     expect(BROWSER_SDK_JS).toContain("/@swarm/api/messages");
     expect(BROWSER_SDK_JS).toContain("/@swarm/api/services");
-    expect(BROWSER_SDK_JS).toContain("/@swarm/api/epics");
     expect(BROWSER_SDK_JS).toContain("/@swarm/api/slack/reply");
   });
 

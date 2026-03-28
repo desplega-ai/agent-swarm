@@ -19,7 +19,6 @@ interface AppliedMigration {
 const BASELINE_TABLES = [
   "agents",
   "channels",
-  "epics",
   "agent_tasks",
   "agent_log",
   "channel_messages",

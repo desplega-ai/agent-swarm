@@ -13,7 +13,7 @@ export const registerTrackerSyncStatusTool = (server: McpServer) => {
 
       inputSchema: z.object({
         provider: z.string().optional().describe("Filter by provider (e.g. 'linear')"),
-        entityType: z.enum(["task", "epic"]).optional().describe("Filter by entity type"),
+        entityType: z.enum(["task"]).optional().describe("Filter by entity type"),
       }),
       outputSchema: z.object({
         success: z.boolean(),

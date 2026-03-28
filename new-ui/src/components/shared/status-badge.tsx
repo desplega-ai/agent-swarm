@@ -3,7 +3,6 @@ import type {
   AgentStatus,
   AgentTaskStatus,
   ApprovalRequestStatus,
-  EpicStatus,
   ServiceStatus,
   WorkflowRunStatus,
   WorkflowRunStepStatus,
@@ -15,7 +14,6 @@ type Status =
   | AgentStatus
   | AgentTaskStatus
   | ApprovalRequestStatus
-  | EpicStatus
   | ServiceStatus
   | WorkflowRunStatus
   | WorkflowRunStepStatus;
@@ -63,15 +61,6 @@ const statusConfig: Record<string, StatusConfig> = {
   },
   failed: { label: "FAILED", dot: "bg-red-500", text: "text-red-600 dark:text-red-400" },
   cancelled: { label: "CANCELLED", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
-
-  // Epic statuses
-  draft: { label: "DRAFT", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
-  active: {
-    label: "ACTIVE",
-    dot: "bg-amber-500",
-    text: "text-amber-600 dark:text-amber-400",
-    spinner: true,
-  },
 
   // Service statuses
   starting: {

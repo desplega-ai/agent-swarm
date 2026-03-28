@@ -54,7 +54,6 @@ HTML artifacts can interact with the swarm API:
 - `readMessages(opts)` — Read messages from a channel
 - `getSwarm()` — Get list of agents
 - `listServices()` — List registered services
-- `listEpics(opts)` — List epics
 - `slackReply(opts)` — Reply to a Slack thread
 
 ## Auth

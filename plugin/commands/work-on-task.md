@@ -16,7 +16,6 @@ Once you have the task details, you should:
 <!-- claude-only -->
 1. **Recall relevant memories (REQUIRED):** Before starting any work, search your memory for relevant context:
    - Use `memory-search` with the task description as query
-   - If the task has an epicId, also search with the epic name/goal
    - Review any returned memories — they may contain solutions, patterns, or warnings from previous tasks
    - Use `memory-get` on any highly relevant results to get full details
    - This step is NOT optional. Past learnings compound your effectiveness.

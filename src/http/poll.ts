@@ -8,13 +8,11 @@ import {
   getAgentById,
   getAllChannelActivityCursors,
   getDb,
-  getEpicsWithProgressUpdates,
   getInboxSummary,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
   getUnassignedTaskIds,
   hasCapacity,
-  markEpicsProgressNotified,
   startTask,
   upsertChannelActivityCursor,
 } from "../be/db";
@@ -28,7 +26,7 @@ const pollTriggers = route({
   method: "get",
   path: "/api/poll",
   pattern: ["api", "poll"],
-  summary: "Poll for triggers (tasks, mentions, epic updates)",
+  summary: "Poll for triggers (tasks, mentions)",
   tags: ["Poll"],
   auth: { apiKey: true, agentId: true },
   responses: {
@@ -174,29 +172,11 @@ export async function handlePoll(
 
         if (agent.isLead) {
           // === LEAD-SPECIFIC TRIGGERS ===
-
           // NOTE: tasks_finished trigger has been replaced by follow-up task creation
           // in store-progress. When a worker completes/fails a task, a follow-up task
           // is created and assigned to the lead, which is picked up via the normal
           // task_assigned trigger above. This is more reliable and visible than the
           // old poll-based notification approach.
-
-          // Check for epic progress updates (tasks completed/failed for active epics)
-          // This trigger helps lead plan next steps for epics - similar to ralph loop
-          const epicsWithUpdates = getEpicsWithProgressUpdates();
-          if (epicsWithUpdates.length > 0) {
-            // Atomically mark as notified within this transaction
-            const epicIds = epicsWithUpdates.map((e) => e.epic.id);
-            markEpicsProgressNotified(epicIds);
-
-            return {
-              trigger: {
-                type: "epic_progress_changed",
-                count: epicsWithUpdates.length,
-                epics: epicsWithUpdates,
-              },
-            };
-          }
         } else {
           // === WORKER-SPECIFIC TRIGGERS ===
 
