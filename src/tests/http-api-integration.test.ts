@@ -52,6 +52,7 @@ async function api(
 const get = (p: string, o?: Parameters<typeof api>[2]) => api("GET", p, o);
 const post = (p: string, o?: Parameters<typeof api>[2]) => api("POST", p, o);
 const put = (p: string, o?: Parameters<typeof api>[2]) => api("PUT", p, o);
+const patch = (p: string, o?: Parameters<typeof api>[2]) => api("PATCH", p, o);
 const del = (p: string, o?: Parameters<typeof api>[2]) => api("DELETE", p, o);
 
 async function waitForServer(url: string, timeoutMs = 15000) {
@@ -1501,6 +1502,148 @@ describe("Close Agent", () => {
 // ===========================================================================
 // AgentMail Webhooks
 // ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Workflows
+// ---------------------------------------------------------------------------
+
+describe("Workflows", () => {
+  let workflowId: string;
+
+  test("POST /api/workflows — create workflow", async () => {
+    const { status, body } = await post("/api/workflows", {
+      body: {
+        name: "integration-test-wf",
+        definition: {
+          nodes: [
+            { id: "a", type: "agent-task", config: { template: "Hello" }, next: "b" },
+            { id: "b", type: "agent-task", config: { template: "World" } },
+          ],
+        },
+      },
+    });
+    expect(status).toBe(201);
+    expect(body.id).toBeDefined();
+    expect(body.definition.nodes).toHaveLength(2);
+    workflowId = body.id;
+  });
+
+  test("GET /api/workflows — list workflows", async () => {
+    const { status, body } = await get("/api/workflows");
+    expect(status).toBe(200);
+    expect(Array.isArray(body)).toBe(true);
+    expect(body.some((w: { id: string }) => w.id === workflowId)).toBe(true);
+  });
+
+  test("GET /api/workflows/:id — get workflow", async () => {
+    const { status, body } = await get(`/api/workflows/${workflowId}`);
+    expect(status).toBe(200);
+    expect(body.name).toBe("integration-test-wf");
+    expect(body.edges).toBeDefined(); // auto-generated edges
+  });
+
+  test("PUT /api/workflows/:id — update workflow", async () => {
+    const { status, body } = await put(`/api/workflows/${workflowId}`, {
+      body: { name: "renamed-wf" },
+    });
+    expect(status).toBe(200);
+    expect(body.name).toBe("renamed-wf");
+  });
+
+  test("PATCH /api/workflows/:id — bulk patch (create + update nodes)", async () => {
+    const { status, body } = await patch(`/api/workflows/${workflowId}`, {
+      body: {
+        create: [{ id: "c", type: "agent-task", config: { template: "New" } }],
+        update: [{ nodeId: "b", node: { next: "c" } }],
+      },
+    });
+    expect(status).toBe(200);
+    expect(body.definition.nodes).toHaveLength(3);
+    const nodeB = body.definition.nodes.find((n: { id: string }) => n.id === "b");
+    expect(nodeB.next).toBe("c");
+  });
+
+  test("PATCH /api/workflows/:id — bulk patch (delete + replace node)", async () => {
+    // State: a → b → c. Delete c, create d, rewire b → d.
+    const { status, body } = await patch(`/api/workflows/${workflowId}`, {
+      body: {
+        delete: ["c"],
+        create: [{ id: "d", type: "agent-task", config: { template: "Replacement" } }],
+        update: [{ nodeId: "b", node: { next: "d" } }],
+      },
+    });
+    expect(status).toBe(200);
+    expect(body.definition.nodes).toHaveLength(3); // a, b, d
+    expect(body.definition.nodes.find((n: { id: string }) => n.id === "c")).toBeUndefined();
+    expect(body.definition.nodes.find((n: { id: string }) => n.id === "d")).toBeDefined();
+  });
+
+  test("PATCH /api/workflows/:id — patch onNodeFailure", async () => {
+    const { status, body } = await patch(`/api/workflows/${workflowId}`, {
+      body: { onNodeFailure: "continue" },
+    });
+    expect(status).toBe(200);
+    expect(body.definition.onNodeFailure).toBe("continue");
+  });
+
+  test("PATCH /api/workflows/:id — 400 on non-existent delete", async () => {
+    const { status, body } = await patch(`/api/workflows/${workflowId}`, {
+      body: { delete: ["nonexistent"] },
+    });
+    expect(status).toBe(400);
+    expect(body.error).toContain("non-existent");
+  });
+
+  test("PATCH /api/workflows/:id — 400 on broken next ref", async () => {
+    const { status, body } = await patch(`/api/workflows/${workflowId}`, {
+      body: { update: [{ nodeId: "b", node: { next: "ghost" } }] },
+    });
+    expect(status).toBe(400);
+    expect(body.error).toContain("non-existent");
+  });
+
+  test("PATCH /api/workflows/:id/nodes/:nodeId — single node patch", async () => {
+    const { status, body } = await patch(`/api/workflows/${workflowId}/nodes/b`, {
+      body: { label: "Updated Label", config: { template: "Changed" } },
+    });
+    expect(status).toBe(200);
+    const nodeB = body.definition.nodes.find((n: { id: string }) => n.id === "b");
+    expect(nodeB.label).toBe("Updated Label");
+    expect(nodeB.config.template).toBe("Changed");
+  });
+
+  test("PATCH /api/workflows/:id/nodes/:nodeId — 400 on non-existent node", async () => {
+    const { status, body } = await patch(`/api/workflows/${workflowId}/nodes/nope`, {
+      body: { label: "x" },
+    });
+    expect(status).toBe(400);
+    expect(body.error).toContain("non-existent");
+  });
+
+  test("GET /api/workflows/:id/versions — version history", async () => {
+    const { status, body } = await get(`/api/workflows/${workflowId}/versions`);
+    expect(status).toBe(200);
+    // Multiple patches should have created multiple versions
+    expect(body.versions.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("DELETE /api/workflows/:id — delete workflow", async () => {
+    const { status } = await del(`/api/workflows/${workflowId}`);
+    expect(status).toBe(204);
+  });
+
+  test("GET /api/workflows/:id — 404 after delete", async () => {
+    const { status } = await get(`/api/workflows/${workflowId}`);
+    expect(status).toBe(404);
+  });
+
+  test("PATCH /api/workflows/:id — 404 for deleted workflow", async () => {
+    const { status } = await patch(`/api/workflows/${workflowId}`, {
+      body: { create: [{ id: "x", type: "agent-task", config: {} }] },
+    });
+    expect(status).toBe(404);
+  });
+});
 
 describe("AgentMail Webhooks (disabled)", () => {
   test("POST /api/agentmail/webhook returns 503 when disabled", async () => {

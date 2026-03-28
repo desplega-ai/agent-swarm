@@ -746,6 +746,38 @@ export const WorkflowDefinitionSchema = z.object({
 });
 export type WorkflowDefinition = z.infer<typeof WorkflowDefinitionSchema>;
 
+// --- Workflow Patch Schemas ---
+
+/** Partial node update — all fields optional, id is NOT included (comes from path/nodeId) */
+export const WorkflowNodePatchSchema = WorkflowNodeSchema.partial().omit({ id: true });
+export type WorkflowNodePatch = z.infer<typeof WorkflowNodePatchSchema>;
+
+/** Bulk workflow definition patch */
+export const WorkflowDefinitionPatchSchema = z.object({
+  update: z
+    .array(
+      z.object({
+        nodeId: z.string().describe("ID of the node to update"),
+        node: WorkflowNodePatchSchema.describe("Partial node data to merge"),
+      }),
+    )
+    .optional()
+    .describe("Nodes to update (partial merge)"),
+  delete: z.array(z.string()).optional().describe("Node IDs to delete"),
+  create: z.array(WorkflowNodeSchema).optional().describe("New nodes to add"),
+  onNodeFailure: z
+    .enum(["fail", "continue"])
+    .optional()
+    .describe("Update the definition-level onNodeFailure behavior"),
+});
+export type WorkflowDefinitionPatch = z.infer<typeof WorkflowDefinitionPatchSchema>;
+
+/** Result of applying a patch — collects all errors instead of throwing on the first */
+export interface PatchResult {
+  definition: WorkflowDefinition;
+  errors: string[];
+}
+
 // --- Trigger Configuration ---
 
 export const TriggerConfigSchema = z.discriminatedUnion("type", [

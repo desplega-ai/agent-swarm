@@ -46,11 +46,13 @@ export const DEFERRED_TOOLS = new Set([
   "delete-schedule",
   "run-schedule-now",
 
-  // Workflows (9)
+  // Workflows (11)
   "create-workflow",
   "list-workflows",
   "get-workflow",
   "update-workflow",
+  "patch-workflow",
+  "patch-workflow-node",
   "delete-workflow",
   "trigger-workflow",
   "list-workflow-runs",

@@ -1,8 +1,9 @@
 ---
 date: 2026-03-27T12:00:00Z
 topic: "Workflow Patch Endpoints"
-status: ready
+status: implemented
 autonomy: critical
+implemented: 2026-03-28
 ---
 
 # Workflow Patch Endpoints Implementation Plan
@@ -139,12 +140,12 @@ export type WorkflowDefinitionPatch = z.infer<typeof WorkflowDefinitionPatchSche
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
-- [ ] Schemas are properly exported and usable from other modules
-- [ ] `WorkflowNodePatchSchema` makes all WorkflowNode fields optional and omits `id`
+- [x] Schemas are properly exported and usable from other modules
+- [x] `WorkflowNodePatchSchema` makes all WorkflowNode fields optional and omits `id`
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. Commit after verification passes.
 
@@ -257,14 +258,14 @@ export function applyDefinitionPatch(
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Tests pass: `bun test src/tests/workflow-patch.test.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Tests pass: `bun test src/tests/workflow-patch.test.ts`
 
 #### Manual Verification:
-- [ ] Function handles delete → create → update ordering correctly
-- [ ] Returns all errors collected, not just the first one
-- [ ] Preserves `onNodeFailure` and other definition-level fields
+- [x] Function handles delete → create → update ordering correctly
+- [x] Returns all errors collected, not just the first one
+- [x] Preserves `onNodeFailure` and other definition-level fields
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. Commit after verification passes.
 
@@ -341,13 +342,13 @@ For the single-node endpoint, convert the body into a bulk patch: `{ update: [{ 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] DB boundary check: `bash scripts/check-db-boundary.sh`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] DB boundary check: `bash scripts/check-db-boundary.sh`
 
 #### Manual Verification:
-- [ ] Use the seed script (`bun run scripts/seed.ts`) to populate workflows, then test PATCH against seeded data
-- [ ] Test bulk PATCH with curl — create a workflow, then patch it:
+- [x] Use the seed script (`bun run scripts/seed.ts`) to populate workflows, then test PATCH against seeded data
+- [x] Test bulk PATCH with curl — create a workflow, then patch it:
   ```bash
   # Create a test workflow
   curl -s -X POST http://localhost:3013/api/workflows \
@@ -364,9 +365,9 @@ For the single-node endpoint, convert the body into a bulk patch: `{ update: [{ 
     -H "Authorization: Bearer 123123" -H "Content-Type: application/json" \
     -d '{"label":"Updated Label","config":{"template":"Updated"}}'
   ```
-- [ ] Verify 400 on invalid patch (e.g., deleting non-existent node)
-- [ ] Verify 400 when resulting definition is structurally invalid (e.g., broken next ref)
-- [ ] Verify version snapshot is created before patch
+- [x] Verify 400 on invalid patch (e.g., deleting non-existent node)
+- [x] Verify 400 when resulting definition is structurally invalid (e.g., broken next ref)
+- [x] Verify version snapshot is created before patch
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. Commit after verification passes.
 
@@ -374,16 +375,16 @@ For the single-node endpoint, convert the body into a bulk patch: `{ update: [{ 
 
 **Approach:** cli-verification
 **Test Scenarios:**
-- [ ] TC-1: Bulk add + wire nodes
+- [x] TC-1: Bulk add + wire nodes
   - Steps: 1. Create workflow with one node, 2. PATCH to add a second node and update first node's `next`, 3. GET workflow
   - Expected: Two nodes, first pointing to second via `next`
-- [ ] TC-2: Delete a node
+- [x] TC-2: Delete a node
   - Steps: 1. Create workflow with two chained nodes, 2. PATCH to delete second node and remove first's `next`, 3. GET workflow
   - Expected: One node, no `next`
-- [ ] TC-3: Error on invalid patch
+- [x] TC-3: Error on invalid patch
   - Steps: 1. PATCH to delete non-existent node ID
   - Expected: 400 with clear error message
-- [ ] TC-4: Error on invalid resulting graph
+- [x] TC-4: Error on invalid resulting graph
   - Steps: 1. PATCH to add node with `next` pointing to non-existent ID
   - Expected: 400 with validation error
 
@@ -469,14 +470,14 @@ export { registerPatchWorkflowNodeTool } from "./patch-workflow-node";
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] DB boundary check: `bash scripts/check-db-boundary.sh`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] DB boundary check: `bash scripts/check-db-boundary.sh`
 
 #### Manual Verification:
-- [ ] Verify tools appear in MCP tool listing via `tools/list` call
-- [ ] Test `patch-workflow` tool via MCP session (create workflow, then patch nodes)
-- [ ] Test `patch-workflow-node` tool via MCP session
+- [x] Verify tools appear in MCP tool listing via `tools/list` call
+- [x] Test `patch-workflow` tool via MCP session (create workflow, then patch nodes)
+- [x] Test `patch-workflow-node` tool via MCP session
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. Commit after verification passes.
 
@@ -496,12 +497,12 @@ Regenerate the OpenAPI spec to include the two new PATCH endpoints. Unit tests w
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] OpenAPI spec regenerated: `bun run docs:openapi`
-- [ ] All tests still pass: `bun test`
-- [ ] Lint passes: `bun run lint:fix`
+- [x] OpenAPI spec regenerated: `bun run docs:openapi`
+- [x] All tests still pass: `bun test` (2115 pass, 0 fail)
+- [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
-- [ ] Verify `openapi.json` includes the two new PATCH endpoints (search for `"patch"` method)
+- [x] Verify `openapi.json` includes the two new PATCH endpoints (search for `"patch"` method)
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. Commit after verification passes.
 

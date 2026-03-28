@@ -115,6 +115,8 @@ import {
   registerGetWorkflowTool,
   registerListWorkflowRunsTool,
   registerListWorkflowsTool,
+  registerPatchWorkflowNodeTool,
+  registerPatchWorkflowTool,
   registerRetryWorkflowRunTool,
   registerTriggerWorkflowTool,
   registerUpdateWorkflowTool,
@@ -262,6 +264,8 @@ export function createServer() {
     registerListWorkflowsTool(server);
     registerGetWorkflowTool(server);
     registerUpdateWorkflowTool(server);
+    registerPatchWorkflowTool(server);
+    registerPatchWorkflowNodeTool(server);
     registerDeleteWorkflowTool(server);
     registerTriggerWorkflowTool(server);
     registerListWorkflowRunsTool(server);

@@ -1,4 +1,10 @@
-import type { WorkflowDefinition, WorkflowEdge, WorkflowNode } from "../types";
+import type {
+  PatchResult,
+  WorkflowDefinition,
+  WorkflowDefinitionPatch,
+  WorkflowEdge,
+  WorkflowNode,
+} from "../types";
 import type { ExecutorRegistry } from "./executors/registry";
 
 /** Extract all target node IDs from a node's `next` field */
@@ -232,4 +238,68 @@ export function validateDefinition(
   }
 
   return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Apply a patch to a workflow definition. Returns a result with the
+ * patched definition and a list of errors (empty if all operations succeeded).
+ *
+ * Operations are applied in order: delete → create → update.
+ * Each operation collects errors independently — all operations are attempted
+ * even if earlier ones have errors. Validation of the resulting definition
+ * (next refs, entry nodes, etc.) is the caller's responsibility.
+ */
+export function applyDefinitionPatch(
+  def: WorkflowDefinition,
+  patch: WorkflowDefinitionPatch,
+): PatchResult {
+  const errors: string[] = [];
+  let nodes = [...def.nodes];
+
+  // 1. Delete
+  if (patch.delete?.length) {
+    const missing = patch.delete.filter((id) => !nodes.some((n) => n.id === id));
+    if (missing.length > 0) {
+      errors.push(`Cannot delete non-existent nodes: ${missing.join(", ")}`);
+    }
+    const toDelete = new Set(patch.delete);
+    nodes = nodes.filter((n) => !toDelete.has(n.id));
+  }
+
+  // 2. Create
+  if (patch.create?.length) {
+    const existingIds = new Set(nodes.map((n) => n.id));
+    for (const newNode of patch.create) {
+      if (existingIds.has(newNode.id)) {
+        errors.push(`Cannot create node with duplicate ID: "${newNode.id}"`);
+        continue;
+      }
+      nodes.push(newNode);
+      existingIds.add(newNode.id);
+    }
+  }
+
+  // 3. Update (shallow merge per node)
+  if (patch.update?.length) {
+    for (const { nodeId, node: partial } of patch.update) {
+      const idx = nodes.findIndex((n) => n.id === nodeId);
+      if (idx === -1) {
+        errors.push(`Cannot update non-existent node: "${nodeId}"`);
+        continue;
+      }
+      // Filter out undefined values so we don't overwrite required fields with undefined
+      const defined: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(partial)) {
+        if (v !== undefined) defined[k] = v;
+      }
+      nodes[idx] = { ...nodes[idx], ...defined, id: nodeId } as WorkflowNode;
+    }
+  }
+
+  const patchedDef: WorkflowDefinition = { ...def, nodes };
+  if (patch.onNodeFailure !== undefined) {
+    patchedDef.onNodeFailure = patch.onNodeFailure;
+  }
+
+  return { definition: patchedDef, errors };
 }

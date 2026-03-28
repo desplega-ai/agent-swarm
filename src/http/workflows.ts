@@ -16,11 +16,13 @@ import {
   CooldownConfigSchema,
   InputValueSchema,
   TriggerConfigSchema,
+  WorkflowDefinitionPatchSchema,
   WorkflowDefinitionSchema,
+  WorkflowNodePatchSchema,
   WorkflowRunStatusSchema,
 } from "../types";
 import { getExecutorRegistry, startWorkflowExecution } from "../workflows";
-import { generateEdges, validateDefinition } from "../workflows/definition";
+import { applyDefinitionPatch, generateEdges, validateDefinition } from "../workflows/definition";
 import { TriggerSchemaError } from "../workflows/engine";
 import { cancelWorkflowRun, retryFailedRun } from "../workflows/resume";
 import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
@@ -100,6 +102,36 @@ const updateWorkflowRoute = route({
     200: { description: "Workflow updated (version snapshot created)" },
     400: { description: "Invalid definition" },
     404: { description: "Workflow not found" },
+  },
+});
+
+const patchWorkflowRoute = route({
+  method: "patch",
+  path: "/api/workflows/{id}",
+  pattern: ["api", "workflows", null],
+  summary: "Patch a workflow definition (create/update/delete nodes)",
+  tags: ["Workflows"],
+  params: z.object({ id: z.string() }),
+  body: WorkflowDefinitionPatchSchema,
+  responses: {
+    200: { description: "Workflow patched (version snapshot created)" },
+    400: { description: "Invalid patch or resulting definition" },
+    404: { description: "Workflow not found" },
+  },
+});
+
+const patchWorkflowNodeRoute = route({
+  method: "patch",
+  path: "/api/workflows/{id}/nodes/{nodeId}",
+  pattern: ["api", "workflows", null, "nodes", null],
+  summary: "Patch a single node in a workflow definition",
+  tags: ["Workflows"],
+  params: z.object({ id: z.string(), nodeId: z.string() }),
+  body: WorkflowNodePatchSchema,
+  responses: {
+    200: { description: "Node patched (version snapshot created)" },
+    400: { description: "Invalid patch or resulting definition" },
+    404: { description: "Workflow or node not found" },
   },
 });
 
@@ -401,6 +433,90 @@ export async function handleWorkflows(
     // Include auto-generated edges for UI rendering
     const edges = generateEdges(workflow.definition);
     json(res, { ...workflow, edges });
+    return true;
+  }
+
+  // PATCH single node (5-segment) must be checked before bulk PATCH (3-segment)
+  if (patchWorkflowNodeRoute.match(req.method, pathSegments)) {
+    const parsed = await patchWorkflowNodeRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const { id, nodeId } = parsed.params;
+
+    const existing = getWorkflow(id);
+    if (!existing) {
+      res.writeHead(404);
+      res.end();
+      return true;
+    }
+
+    // Convert single-node patch to bulk patch format
+    const patchResult = applyDefinitionPatch(existing.definition, {
+      update: [{ nodeId, node: parsed.body }],
+    });
+    if (patchResult.errors.length > 0) {
+      jsonError(res, patchResult.errors.join("; "), 400);
+      return true;
+    }
+
+    const validation = validateDefinition(patchResult.definition);
+    if (!validation.valid) {
+      jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
+      return true;
+    }
+
+    try {
+      snapshotWorkflow(id, myAgentId);
+    } catch {
+      // Snapshot failure should not block the update
+    }
+
+    const workflow = updateWorkflow(id, { definition: patchResult.definition });
+    if (!workflow) {
+      res.writeHead(404);
+      res.end();
+      return true;
+    }
+    json(res, workflow);
+    return true;
+  }
+
+  if (patchWorkflowRoute.match(req.method, pathSegments)) {
+    const parsed = await patchWorkflowRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const { id } = parsed.params;
+
+    const existing = getWorkflow(id);
+    if (!existing) {
+      res.writeHead(404);
+      res.end();
+      return true;
+    }
+
+    const patchResult = applyDefinitionPatch(existing.definition, parsed.body);
+    if (patchResult.errors.length > 0) {
+      jsonError(res, patchResult.errors.join("; "), 400);
+      return true;
+    }
+
+    const validation = validateDefinition(patchResult.definition);
+    if (!validation.valid) {
+      jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
+      return true;
+    }
+
+    try {
+      snapshotWorkflow(id, myAgentId);
+    } catch {
+      // Snapshot failure should not block the update
+    }
+
+    const workflow = updateWorkflow(id, { definition: patchResult.definition });
+    if (!workflow) {
+      res.writeHead(404);
+      res.end();
+      return true;
+    }
+    json(res, workflow);
     return true;
   }
 

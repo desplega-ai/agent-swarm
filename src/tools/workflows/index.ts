@@ -5,6 +5,8 @@ export { registerGetWorkflowTool } from "./get-workflow";
 export { registerGetWorkflowRunTool } from "./get-workflow-run";
 export { registerListWorkflowRunsTool } from "./list-workflow-runs";
 export { registerListWorkflowsTool } from "./list-workflows";
+export { registerPatchWorkflowTool } from "./patch-workflow";
+export { registerPatchWorkflowNodeTool } from "./patch-workflow-node";
 export { registerRetryWorkflowRunTool } from "./retry-workflow-run";
 export { registerTriggerWorkflowTool } from "./trigger-workflow";
 export { registerUpdateWorkflowTool } from "./update-workflow";

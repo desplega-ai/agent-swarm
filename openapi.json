@@ -6502,6 +6502,361 @@
           }
         }
       },
+      "patch": {
+        "summary": "Patch a workflow definition (create/update/delete nodes)",
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "update": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "nodeId": {
+                          "type": "string",
+                          "description": "ID of the node to update"
+                        },
+                        "node": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "description": "Executor type: 'agent-task', 'script', 'raw-llm', 'validate', 'property-match'"
+                            },
+                            "label": {
+                              "type": "string",
+                              "description": "Human-readable label for UI display"
+                            },
+                            "config": {
+                              "type": "object",
+                              "additionalProperties": {},
+                              "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                            },
+                            "next": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  }
+                                }
+                              ],
+                              "description": "Next node(s): string for simple chaining, string[] for fan-out to parallel nodes, or record for port-based routing ({pass: 'a', fail: 'b'})"
+                            },
+                            "validation": {
+                              "type": "object",
+                              "properties": {
+                                "executor": {
+                                  "type": "string",
+                                  "default": "validate"
+                                },
+                                "config": {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                },
+                                "mustPass": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
+                                "retry": {
+                                  "type": "object",
+                                  "properties": {
+                                    "maxRetries": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "default": 3
+                                    },
+                                    "strategy": {
+                                      "type": "string",
+                                      "enum": [
+                                        "exponential",
+                                        "static",
+                                        "linear"
+                                      ],
+                                      "default": "exponential"
+                                    },
+                                    "baseDelayMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "default": 1000
+                                    },
+                                    "maxDelayMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "default": 60000
+                                    }
+                                  }
+                                }
+                              },
+                              "required": [
+                                "config"
+                              ]
+                            },
+                            "retry": {
+                              "type": "object",
+                              "properties": {
+                                "maxRetries": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 3
+                                },
+                                "strategy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "exponential",
+                                    "static",
+                                    "linear"
+                                  ],
+                                  "default": "exponential"
+                                },
+                                "baseDelayMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 1000
+                                },
+                                "maxDelayMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 60000
+                                }
+                              }
+                            },
+                            "inputs": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "description": "REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation — only 'trigger' and 'input' are. Example: { \"cityData\": \"generate-city\" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { \"pr\": \"trigger.pullRequest\" }."
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "additionalProperties": {},
+                              "description": "JSON Schema to validate resolved inputs before execution"
+                            },
+                            "outputSchema": {
+                              "type": "object",
+                              "additionalProperties": {},
+                              "description": "JSON Schema to validate the executor's output (e.g. {taskId, taskOutput} for agent-task). Different from config.outputSchema which validates the agent's raw output."
+                            }
+                          },
+                          "description": "Partial node data to merge"
+                        }
+                      },
+                      "required": [
+                        "nodeId",
+                        "node"
+                      ]
+                    },
+                    "description": "Nodes to update (partial merge)"
+                  },
+                  "delete": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Node IDs to delete"
+                  },
+                  "create": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "Unique node identifier, used in 'next' and 'inputs' mappings"
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Executor type: 'agent-task', 'script', 'raw-llm', 'validate', 'property-match'"
+                        },
+                        "label": {
+                          "type": "string",
+                          "description": "Human-readable label for UI display"
+                        },
+                        "config": {
+                          "type": "object",
+                          "additionalProperties": {},
+                          "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                        },
+                        "next": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            }
+                          ],
+                          "description": "Next node(s): string for simple chaining, string[] for fan-out to parallel nodes, or record for port-based routing ({pass: 'a', fail: 'b'})"
+                        },
+                        "validation": {
+                          "type": "object",
+                          "properties": {
+                            "executor": {
+                              "type": "string",
+                              "default": "validate"
+                            },
+                            "config": {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            "mustPass": {
+                              "type": "boolean",
+                              "default": false
+                            },
+                            "retry": {
+                              "type": "object",
+                              "properties": {
+                                "maxRetries": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 3
+                                },
+                                "strategy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "exponential",
+                                    "static",
+                                    "linear"
+                                  ],
+                                  "default": "exponential"
+                                },
+                                "baseDelayMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 1000
+                                },
+                                "maxDelayMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 60000
+                                }
+                              }
+                            }
+                          },
+                          "required": [
+                            "config"
+                          ]
+                        },
+                        "retry": {
+                          "type": "object",
+                          "properties": {
+                            "maxRetries": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "default": 3
+                            },
+                            "strategy": {
+                              "type": "string",
+                              "enum": [
+                                "exponential",
+                                "static",
+                                "linear"
+                              ],
+                              "default": "exponential"
+                            },
+                            "baseDelayMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "default": 1000
+                            },
+                            "maxDelayMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "default": 60000
+                            }
+                          }
+                        },
+                        "inputs": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "description": "REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation — only 'trigger' and 'input' are. Example: { \"cityData\": \"generate-city\" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { \"pr\": \"trigger.pullRequest\" }."
+                        },
+                        "inputSchema": {
+                          "type": "object",
+                          "additionalProperties": {},
+                          "description": "JSON Schema to validate resolved inputs before execution"
+                        },
+                        "outputSchema": {
+                          "type": "object",
+                          "additionalProperties": {},
+                          "description": "JSON Schema to validate the executor's output (e.g. {taskId, taskOutput} for agent-task). Different from config.outputSchema which validates the agent's raw output."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "type",
+                        "config"
+                      ]
+                    },
+                    "description": "New nodes to add"
+                  },
+                  "onNodeFailure": {
+                    "type": "string",
+                    "enum": [
+                      "fail",
+                      "continue"
+                    ],
+                    "description": "Update the definition-level onNodeFailure behavior"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workflow patched (version snapshot created)"
+          },
+          "400": {
+            "description": "Invalid patch or resulting definition"
+          },
+          "404": {
+            "description": "Workflow not found"
+          }
+        }
+      },
       "delete": {
         "summary": "Delete a workflow",
         "tags": [
@@ -6528,6 +6883,187 @@
           },
           "404": {
             "description": "Workflow not found"
+          }
+        }
+      }
+    },
+    "/api/workflows/{id}/nodes/{nodeId}": {
+      "patch": {
+        "summary": "Patch a single node in a workflow definition",
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "nodeId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "Executor type: 'agent-task', 'script', 'raw-llm', 'validate', 'property-match'"
+                  },
+                  "label": {
+                    "type": "string",
+                    "description": "Human-readable label for UI display"
+                  },
+                  "config": {
+                    "type": "object",
+                    "additionalProperties": {},
+                    "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                  },
+                  "next": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      }
+                    ],
+                    "description": "Next node(s): string for simple chaining, string[] for fan-out to parallel nodes, or record for port-based routing ({pass: 'a', fail: 'b'})"
+                  },
+                  "validation": {
+                    "type": "object",
+                    "properties": {
+                      "executor": {
+                        "type": "string",
+                        "default": "validate"
+                      },
+                      "config": {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      "mustPass": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "retry": {
+                        "type": "object",
+                        "properties": {
+                          "maxRetries": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 3
+                          },
+                          "strategy": {
+                            "type": "string",
+                            "enum": [
+                              "exponential",
+                              "static",
+                              "linear"
+                            ],
+                            "default": "exponential"
+                          },
+                          "baseDelayMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 1000
+                          },
+                          "maxDelayMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 60000
+                          }
+                        }
+                      }
+                    },
+                    "required": [
+                      "config"
+                    ]
+                  },
+                  "retry": {
+                    "type": "object",
+                    "properties": {
+                      "maxRetries": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 3
+                      },
+                      "strategy": {
+                        "type": "string",
+                        "enum": [
+                          "exponential",
+                          "static",
+                          "linear"
+                        ],
+                        "default": "exponential"
+                      },
+                      "baseDelayMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 1000
+                      },
+                      "maxDelayMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 60000
+                      }
+                    }
+                  },
+                  "inputs": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation — only 'trigger' and 'input' are. Example: { \"cityData\": \"generate-city\" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { \"pr\": \"trigger.pullRequest\" }."
+                  },
+                  "inputSchema": {
+                    "type": "object",
+                    "additionalProperties": {},
+                    "description": "JSON Schema to validate resolved inputs before execution"
+                  },
+                  "outputSchema": {
+                    "type": "object",
+                    "additionalProperties": {},
+                    "description": "JSON Schema to validate the executor's output (e.g. {taskId, taskOutput} for agent-task). Different from config.outputSchema which validates the agent's raw output."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Node patched (version snapshot created)"
+          },
+          "400": {
+            "description": "Invalid patch or resulting definition"
+          },
+          "404": {
+            "description": "Workflow or node not found"
           }
         }
       }
@@ -6597,7 +7133,8 @@
                 "waiting",
                 "completed",
                 "failed",
-                "skipped"
+                "skipped",
+                "cancelled"
               ]
             },
             "required": false,
@@ -6670,6 +7207,51 @@
           },
           "400": {
             "description": "Cannot retry"
+          }
+        }
+      }
+    },
+    "/api/workflow-runs/{id}/cancel": {
+      "post": {
+        "summary": "Cancel a running or waiting workflow run",
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Run cancelled"
+          },
+          "400": {
+            "description": "Cannot cancel"
           }
         }
       }
