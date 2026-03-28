@@ -171,6 +171,27 @@ Each node can define a `retryPolicy`:
 
 Backoff strategies: `exponential`, `linear`, `static`. The poller detects failed steps and re-executes them according to the policy.
 
+### Per-Node Timeout
+
+Each node can set a custom `timeoutMs` to override the default step timeout:
+
+```json
+{
+  "id": "slow-analysis",
+  "type": "agent-task",
+  "timeoutMs": 600000,
+  "config": {
+    "template": "Perform a deep code analysis..."
+  }
+}
+```
+
+If the step exceeds its timeout, it is marked as failed and the retry/failure policy applies.
+
+### Cancelling a Workflow Run
+
+Running or waiting workflow runs can be cancelled using the `cancel-workflow-run` MCP tool. Cancellation terminates all non-terminal steps and their associated tasks. An optional reason can be provided for audit purposes.
+
 ### Per-Step Validation
 
 The `validate` executor runs after a step to check output quality. It can:

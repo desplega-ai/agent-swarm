@@ -4,6 +4,17 @@ All notable changes to Agent Swarm are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- `cancel-workflow-run` MCP tool — cancel running or waiting workflow runs, including all non-terminal steps and associated tasks (#265)
+- Per-node `timeoutMs` support in workflow config — set custom timeouts for individual workflow nodes (#261)
+
+### Fixed
+- Workflow engine safeguards — cooldown periods, circuit breaker, and rate-limit detection to prevent runaway execution (#264)
+- `validate` executor strict JSON schema disabled for OpenRouter compatibility (#263)
+- `raw-llm` executor strict JSON schema disabled for OpenRouter compatibility (#262)
+
 ## [1.54.1] - 2026-03-27
 
 ### Added
