@@ -6597,7 +6597,8 @@
                 "waiting",
                 "completed",
                 "failed",
-                "skipped"
+                "skipped",
+                "cancelled"
               ]
             },
             "required": false,
@@ -6670,6 +6671,51 @@
           },
           "400": {
             "description": "Cannot retry"
+          }
+        }
+      }
+    },
+    "/api/workflow-runs/{id}/cancel": {
+      "post": {
+        "summary": "Cancel a running or waiting workflow run",
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Run cancelled"
+          },
+          "400": {
+            "description": "Cannot cancel"
           }
         }
       }
