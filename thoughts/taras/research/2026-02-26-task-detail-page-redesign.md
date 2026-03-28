@@ -1,6 +1,7 @@
 ---
 date: 2026-02-26T12:00:00Z
 topic: "Task Detail Page Redesign: Modern Patterns from Linear, GitHub, Vercel, Jira"
+status: complete
 ---
 
 # Task Detail Page Redesign: Modern Patterns from Linear, GitHub, Vercel, Jira

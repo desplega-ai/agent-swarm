@@ -1,3 +1,7 @@
+---
+status: complete
+---
+
 # Workflow Engine Design Research
 **Date**: 2026-03-06
 **Context**: Building a lightweight workflow/automation engine inside the agent-swarm TypeScript/Bun/SQLite application.

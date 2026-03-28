@@ -1,7 +1,7 @@
 ---
 date: 2026-03-19T18:00:00Z
 topic: "Workflow Node I/O Schemas, Data Flow Mapping, and Engine Bugs"
-status: reviewed
+status: complete
 researcher: taras+claude
 autonomy: verbose
 ---

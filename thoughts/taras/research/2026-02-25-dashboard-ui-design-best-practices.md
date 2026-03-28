@@ -1,6 +1,7 @@
 ---
 date: 2026-02-25T12:00:00Z
 topic: "Modern Dashboard UI Design Best Practices (2025-2026)"
+status: complete
 ---
 
 # Modern Dashboard UI Design Best Practices (2025-2026)

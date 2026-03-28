@@ -1,7 +1,7 @@
 ---
 date: 2026-03-18T14:30:00Z
 topic: "Workflow Engine Redesign"
-status: reviewed
+status: complete
 researcher: taras+claude
 ---
 

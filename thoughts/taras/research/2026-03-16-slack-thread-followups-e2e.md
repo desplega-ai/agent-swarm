@@ -1,6 +1,7 @@
 ---
 date: 2026-03-16T12:00:00Z
 topic: "Slack Thread Follow-Up Fixes — E2E Test Results"
+status: complete
 branch: fix/slack-thread-followups
 commit: f1d2147
 ---

@@ -2,6 +2,7 @@
 date: 2026-03-26T12:00:00Z
 topic: "Workflow & Run Detail Pages — UI Improvements"
 type: research
+status: complete
 scope: new-ui workflow and run detail pages
 ---
 
