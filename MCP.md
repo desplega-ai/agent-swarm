@@ -64,6 +64,8 @@
   - [list-workflows](#list-workflows)
   - [get-workflow](#get-workflow)
   - [update-workflow](#update-workflow)
+  - [patch-workflow](#patch-workflow)
+  - [patch-workflow-node](#patch-workflow-node)
   - [delete-workflow](#delete-workflow)
   - [trigger-workflow](#trigger-workflow)
   - [list-workflow-runs](#list-workflow-runs)
@@ -339,7 +341,7 @@ Download a file from Slack by file ID or URL. Files are saved to the agent's dow
 
 ## Task Pool Tools
 
-*Task Pool*
+*Messaging*
 
 ### task-action
 
@@ -648,6 +650,28 @@ Update an existing workflow's name, description, definition, triggers, cooldown,
 | `description` | `string` | No | - | New description |
 | `triggers` | `array` | No | - | New trigger configurations |
 | `enabled` | `boolean` | No | - | Enable or disable the workflow |
+
+### patch-workflow
+
+**Patch Workflow Definition**
+
+Partially update a workflow definition by creating, updating, or deleting individual nodes. " + "Operations are applied in order: delete → create → update. " + "Creates a version snapshot before applying changes.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | Workflow ID to patch |
+| `delete` | `array` | No | - | Node IDs to delete |
+
+### patch-workflow-node
+
+**Patch Workflow Node**
+
+Partially update a single node in a workflow definition. " + "Merges the provided fields into the existing node. " + "Creates a version snapshot before applying changes.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | Workflow ID |
+| `nodeId` | `string` | Yes | - | Node ID to update |
 
 ### delete-workflow
 
