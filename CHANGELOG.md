@@ -6,9 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.55.0] - 2026-03-29
+
 ### Added
+- `patch-workflow` MCP tool — partially update workflow definitions by creating, updating, or deleting individual nodes with automatic version snapshots
+- `patch-workflow-node` MCP tool — partially update a single node in a workflow definition with automatic version snapshots
 - `cancel-workflow-run` MCP tool — cancel running or waiting workflow runs, including all non-terminal steps and associated tasks (#265)
 - Per-node `timeoutMs` support in workflow config — set custom timeouts for individual workflow nodes (#261)
+
+### Removed
+- Epics system deprecated — all epic MCP tools removed (`create-epic`, `get-epic-details`, `list-epics`, `update-epic`, `delete-epic`, `assign-task-to-epic`, `unassign-task-from-epic`, `tracker-link-epic`). Use workflows for multi-task orchestration instead
+- `epicId` parameter removed from `send-task` and `store-progress` tools
 
 ### Fixed
 - Workflow engine safeguards — cooldown periods, circuit breaker, and rate-limit detection to prevent runaway execution (#264)

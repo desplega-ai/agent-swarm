@@ -10,7 +10,7 @@ Agent Swarm exposes its functionality through MCP (Model Context Protocol) tools
 All MCP tools have structured annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) to improve Claude Code's Tool Search discoverability. Tools are split into two tiers:
 
 - **Core tools** (16) — Always available in context: task lifecycle, basic communication, memory recall, debug, and swarm awareness
-- **Deferred tools** (73) — Discovered on demand via Claude Code's Tool Search when the agent needs them (scheduling, config, skills, workflows, MCP servers, file operations, etc.)
+- **Deferred tools** (67) — Discovered on demand via Claude Code's Tool Search when the agent needs them (scheduling, config, skills, workflows, MCP servers, file operations, etc.)
 
 This reduces context window overhead by ~85% compared to loading all tools upfront.
 
@@ -402,6 +402,28 @@ Cancel a running or waiting workflow run. Cancels all non-terminal steps and the
 |-----------|------|----------|-------------|
 | `runId` | uuid | Yes | Workflow run ID to cancel |
 | `reason` | string | No | Optional reason for cancellation |
+
+### patch-workflow
+
+Partially update a workflow definition by creating, updating, or deleting individual nodes. Operations are applied in order: delete → create → update. Creates a version snapshot before applying changes.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | uuid | Yes | Workflow ID to patch |
+| `update` | array | No | Nodes to update (partial merge): `[{ nodeId, node }]` |
+| `delete` | array | No | Node IDs to delete |
+| `create` | array | No | New nodes to add: `[{ id, type, config, label?, next?, inputs? }]` |
+| `onNodeFailure` | string | No | Update failure behavior: `fail` or `continue` |
+
+### patch-workflow-node
+
+Partially update a single node in a workflow definition. Merges the provided fields into the existing node. Creates a version snapshot before applying changes.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | uuid | Yes | Workflow ID |
+| `nodeId` | string | Yes | Node ID to update |
+| Additional fields from node schema (type, config, label, next, inputs, etc.) |
 
 ## Human-in-the-Loop Tools
 
