@@ -7,6 +7,7 @@ import {
   Clock,
   FileText,
   GitBranch,
+  Key,
   LayoutDashboard,
   ListTodo,
   MessageSquare,
@@ -65,6 +66,7 @@ const navGroups = [
     items: [
       { title: "Config", path: "/config", icon: Settings },
       { title: "Repos", path: "/repos", icon: GitBranch },
+      { title: "API Keys", path: "/keys", icon: Key },
       { title: "Debug", path: "/debug", icon: Bug },
     ],
   },

@@ -1,9 +1,10 @@
 {
-  "title": "API Reference v1.56.4",
+  "title": "API Reference v1.56.5",
   "description": "REST API reference for Agent Swarm",
   "root": true,
   "pages": [
     "index",
+    "api-keys",
     "active-sessions",
     "agents",
     "approvalrequests",

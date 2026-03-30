@@ -28,6 +28,7 @@ const McpServersPage = lazy(() => import("@/pages/mcp-servers/page"));
 const McpServerDetailPage = lazy(() => import("@/pages/mcp-servers/[id]/page"));
 const SkillsPage = lazy(() => import("@/pages/skills/page"));
 const SkillDetailPage = lazy(() => import("@/pages/skills/[id]/page"));
+const ApiKeysPage = lazy(() => import("@/pages/api-keys/page"));
 const DebugPage = lazy(() => import("@/pages/debug/page"));
 const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
 
@@ -61,6 +62,7 @@ export const router = createBrowserRouter([
       { path: "skills", element: <SkillsPage /> },
       { path: "skills/:id", element: <SkillDetailPage /> },
       { path: "repos", element: <ReposPage /> },
+      { path: "keys", element: <ApiKeysPage /> },
       { path: "debug", element: <DebugPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],

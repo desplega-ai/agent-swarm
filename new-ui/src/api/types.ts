@@ -729,6 +729,31 @@ export interface TaskContextResponse {
   summary: ContextSummary;
 }
 
+// API Key Status
+export type ApiKeyStatusType = "available" | "rate_limited";
+
+export interface ApiKeyStatus {
+  id: string;
+  keyType: string;
+  keySuffix: string;
+  keyIndex: number;
+  scope: string;
+  scopeId: string;
+  status: ApiKeyStatusType;
+  rateLimitedUntil: string | null;
+  lastUsedAt: string | null;
+  lastRateLimitAt: string | null;
+  totalUsageCount: number;
+  rateLimitCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApiKeyStatusResponse {
+  success: boolean;
+  keys: ApiKeyStatus[];
+}
+
 // Debug / DB Explorer
 export interface DbQueryRequest {
   sql: string;

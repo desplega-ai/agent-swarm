@@ -7487,3 +7487,157 @@ export function getContextSummaryByTaskId(taskId: string): ContextSummary {
     snapshotCount: countRow?.cnt ?? 0,
   };
 }
+
+// ─── API Key Pool Tracking ───────────────────────────────────────────────────
+
+export interface ApiKeyStatus {
+  id: string;
+  keyType: string;
+  keySuffix: string;
+  keyIndex: number;
+  scope: string;
+  scopeId: string | null;
+  status: string;
+  rateLimitedUntil: string | null;
+  lastUsedAt: string | null;
+  lastRateLimitAt: string | null;
+  totalUsageCount: number;
+  rateLimitCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Get available (non-rate-limited) key indices for a credential type.
+ * Automatically clears expired rate limits before returning.
+ */
+export function getAvailableKeyIndices(
+  keyType: string,
+  totalKeys: number,
+  scope = "global",
+  scopeId: string | null = null,
+): number[] {
+  const now = new Date().toISOString();
+  const db = getDb();
+  const effectiveScopeId = scopeId ?? "";
+
+  // Auto-clear expired rate limits
+  db.prepare(
+    `UPDATE api_key_status
+     SET status = 'available', rateLimitedUntil = NULL, updatedAt = ?
+     WHERE keyType = ? AND scope = ? AND scopeId = ?
+       AND status = 'rate_limited' AND rateLimitedUntil IS NOT NULL AND rateLimitedUntil <= ?`,
+  ).run(now, keyType, scope, effectiveScopeId, now);
+
+  // Get currently rate-limited key indices
+  const rateLimited = db
+    .prepare<{ keyIndex: number }, [string, string, string]>(
+      `SELECT keyIndex FROM api_key_status
+       WHERE keyType = ? AND scope = ? AND scopeId = ?
+         AND status = 'rate_limited'`,
+    )
+    .all(keyType, scope, effectiveScopeId);
+
+  const blockedIndices = new Set(rateLimited.map((r) => r.keyIndex));
+  const available: number[] = [];
+  for (let i = 0; i < totalKeys; i++) {
+    if (!blockedIndices.has(i)) available.push(i);
+  }
+  return available;
+}
+
+/**
+ * Record that a key was used for a task (upsert key status + update task).
+ */
+export function recordKeyUsage(
+  keyType: string,
+  keySuffix: string,
+  keyIndex: number,
+  taskId: string | null,
+  scope = "global",
+  scopeId: string | null = null,
+): void {
+  const now = new Date().toISOString();
+  const db = getDb();
+  const effectiveScopeId = scopeId ?? "";
+
+  // Upsert key status record
+  db.prepare(
+    `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, lastUsedAt, totalUsageCount, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+     ON CONFLICT(keyType, keySuffix, scope, scopeId)
+     DO UPDATE SET
+       lastUsedAt = excluded.lastUsedAt,
+       totalUsageCount = totalUsageCount + 1,
+       keyIndex = excluded.keyIndex,
+       updatedAt = excluded.updatedAt`,
+  ).run(keyType, keySuffix, keyIndex, scope, effectiveScopeId, now, now);
+
+  // Record which key was used on the task
+  if (taskId) {
+    db.prepare("UPDATE agent_tasks SET credentialKeySuffix = ? WHERE id = ?").run(
+      keySuffix,
+      taskId,
+    );
+  }
+}
+
+/**
+ * Mark a key as rate-limited with a retry-after timestamp.
+ */
+export function markKeyRateLimited(
+  keyType: string,
+  keySuffix: string,
+  keyIndex: number,
+  rateLimitedUntil: string,
+  scope = "global",
+  scopeId: string | null = null,
+): void {
+  const now = new Date().toISOString();
+  const effectiveScopeId = scopeId ?? "";
+  getDb()
+    .prepare(
+      `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, status, rateLimitedUntil, lastRateLimitAt, rateLimitCount, updatedAt)
+       VALUES (?, ?, ?, ?, ?, 'rate_limited', ?, ?, 1, ?)
+       ON CONFLICT(keyType, keySuffix, scope, scopeId)
+       DO UPDATE SET
+         status = 'rate_limited',
+         rateLimitedUntil = excluded.rateLimitedUntil,
+         lastRateLimitAt = excluded.lastRateLimitAt,
+         rateLimitCount = rateLimitCount + 1,
+         keyIndex = excluded.keyIndex,
+         updatedAt = excluded.updatedAt`,
+    )
+    .run(keyType, keySuffix, keyIndex, scope, effectiveScopeId, rateLimitedUntil, now, now);
+}
+
+/**
+ * Get all key status records for a credential type.
+ */
+export function getKeyStatuses(
+  keyType?: string,
+  scope?: string,
+  scopeId?: string | null,
+): ApiKeyStatus[] {
+  const db = getDb();
+  const conditions: string[] = [];
+  const params: string[] = [];
+
+  if (keyType) {
+    conditions.push("keyType = ?");
+    params.push(keyType);
+  }
+  if (scope) {
+    conditions.push("scope = ?");
+    params.push(scope);
+    if (scopeId !== undefined) {
+      conditions.push("scopeId = ?");
+      params.push(scopeId ?? "");
+    }
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  return db
+    .prepare<ApiKeyStatus, string[]>(`SELECT * FROM api_key_status ${where} ORDER BY keyIndex`)
+    .all(...params);
+}

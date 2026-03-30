@@ -4,6 +4,7 @@ import type {
   AgentSkillsResponse,
   AgentsResponse,
   AgentWithTasks,
+  ApiKeyStatusResponse,
   ApprovalRequest,
   ApprovalRequestsResponse,
   ChannelMessage,
@@ -1120,6 +1121,16 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/mcp-servers/${serverId}/install/${agentId}`;
     const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to uninstall MCP server: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchApiKeyStatuses(keyType?: string): Promise<ApiKeyStatusResponse> {
+    const params = new URLSearchParams();
+    if (keyType) params.set("keyType", keyType);
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/keys/status${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch API key statuses: ${res.status}`);
     return res.json();
   }
 
