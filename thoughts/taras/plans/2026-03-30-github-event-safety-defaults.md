@@ -3,7 +3,7 @@ date: 2026-03-30
 author: Claude
 topic: "GitHub Event Safety Defaults — Quick Win"
 tags: [plan, github, events, safety, auto-merge]
-status: draft
+status: ready-for-review
 autonomy: autopilot
 brainstorm: thoughts/taras/brainstorms/2026-03-28-pr-auto-merge-safety.md
 ---
@@ -120,7 +120,7 @@ Add the `GITHUB_EVENT_LABELS` env var and implement label-based triggering for P
 
 #### 1. Label configuration
 **File**: `src/github/mentions.ts`
-**Changes**: Add label config alongside existing bot name config.
+**Changes**: Add label config alongside existing bot name config. Follow the same comma-separated env var pattern used by `AGENTMAIL_INBOX_DOMAIN_FILTER` in `src/agentmail/handlers.ts:14-41`.
 
 ```typescript
 // After the existing GITHUB_BOT_ALIASES definition (~line 8)
@@ -133,6 +133,13 @@ export const GITHUB_EVENT_LABELS: string[] = GITHUB_EVENT_LABELS_RAW
 export function isSwarmLabel(label: string): boolean {
   return GITHUB_EVENT_LABELS.includes(label.toLowerCase());
 }
+```
+
+#### 1b. Barrel export
+**File**: `src/github/index.ts`
+**Changes**: Add exports for the new label functions:
+```typescript
+export { detectMention, extractMentionContext, GITHUB_BOT_NAME, GITHUB_EVENT_LABELS, isBotAssignee, isSwarmLabel } from "./mentions";
 ```
 
 #### 2. Label handler in handlePullRequest
@@ -344,9 +351,9 @@ Previously, CI status events (check failures), PR lifecycle events (closed, new 
 **Migration:** If you relied on CI failure notifications or PR lifecycle events, these now require explicit human action (e.g., @mention the agent). In the future, workflow event triggers will provide a way to opt in to automation for specific event types.
 ```
 
-#### 2. Update .env.example (if exists)
-**File**: `.env` or `.env.example`
-**Changes**: Add documentation for the new env var:
+#### 2. Update .env.example
+**File**: `.env.example`
+**Changes**: Add documentation for the new env var (follows existing pattern alongside `GITHUB_DISABLE`, `GITHUB_WEBHOOK_SECRET`, etc.):
 
 ```
 # Comma-separated labels that trigger agent action on PR/issue label events
