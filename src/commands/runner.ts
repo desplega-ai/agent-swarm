@@ -18,11 +18,7 @@ import {
   type ProviderSessionConfig,
 } from "../providers/index.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
-import {
-  CREDENTIAL_POOL_VARS,
-  type CredentialSelection,
-  resolveCredentialPools,
-} from "../utils/credentials.ts";
+import { type CredentialSelection, resolveCredentialPools } from "../utils/credentials.ts";
 import { parseRateLimitResetTime } from "../utils/error-tracker.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
@@ -223,33 +219,7 @@ async function fetchResolvedEnv(
     }
   }
 
-  // Fetch available key indices from the API for rate-limit-aware selection
-  const availableIndicesMap: Record<string, number[]> = {};
-  for (const envVar of CREDENTIAL_POOL_VARS) {
-    const val = env[envVar];
-    if (val?.includes(",")) {
-      const totalKeys = val.split(",").filter((s) => s.trim()).length;
-      try {
-        const resp = await fetch(
-          `${apiUrl}/api/keys/available?keyType=${encodeURIComponent(envVar)}&totalKeys=${totalKeys}`,
-          { headers: { Authorization: `Bearer ${apiKey}` } },
-        );
-        if (resp.ok) {
-          const data = (await resp.json()) as { availableIndices: number[] };
-          availableIndicesMap[envVar] = data.availableIndices;
-          if (data.availableIndices.length < totalKeys) {
-            console.log(
-              `[credentials] ${envVar}: ${data.availableIndices.length}/${totalKeys} keys available (${totalKeys - data.availableIndices.length} rate-limited)`,
-            );
-          }
-        }
-      } catch {
-        // Non-critical — fall back to random selection
-      }
-    }
-  }
-
-  const credentialSelections = resolveCredentialPools(env, availableIndicesMap);
+  const credentialSelections = await resolveCredentialPools(env, { apiUrl, apiKey });
 
   return { env, credentialSelections };
 }

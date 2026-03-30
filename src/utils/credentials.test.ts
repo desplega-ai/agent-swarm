@@ -60,50 +60,50 @@ describe("selectRandomCredential", () => {
 });
 
 describe("resolveCredentialPools", () => {
-  it("resolves comma-separated CLAUDE_CODE_OAUTH_TOKEN", () => {
+  it("resolves comma-separated CLAUDE_CODE_OAUTH_TOKEN", async () => {
     const env: Record<string, string | undefined> = {
       CLAUDE_CODE_OAUTH_TOKEN: "token1,token2",
       OTHER_VAR: "unchanged",
     };
-    resolveCredentialPools(env);
+    await resolveCredentialPools(env);
     expect(["token1", "token2"]).toContain(env.CLAUDE_CODE_OAUTH_TOKEN!);
     expect(env.OTHER_VAR).toBe("unchanged");
   });
 
-  it("resolves comma-separated ANTHROPIC_API_KEY", () => {
+  it("resolves comma-separated ANTHROPIC_API_KEY", async () => {
     const env: Record<string, string | undefined> = {
       ANTHROPIC_API_KEY: "key1,key2,key3",
     };
-    resolveCredentialPools(env);
+    await resolveCredentialPools(env);
     expect(["key1", "key2", "key3"]).toContain(env.ANTHROPIC_API_KEY!);
   });
 
-  it("leaves single values unchanged", () => {
+  it("leaves single values unchanged", async () => {
     const env: Record<string, string | undefined> = {
       CLAUDE_CODE_OAUTH_TOKEN: "single-token",
       ANTHROPIC_API_KEY: "single-key",
     };
-    resolveCredentialPools(env);
+    await resolveCredentialPools(env);
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("single-token");
     expect(env.ANTHROPIC_API_KEY).toBe("single-key");
   });
 
-  it("handles undefined credential vars", () => {
+  it("handles undefined credential vars", async () => {
     const env: Record<string, string | undefined> = {
       SOME_OTHER_VAR: "value",
     };
-    resolveCredentialPools(env);
+    await resolveCredentialPools(env);
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(env.SOME_OTHER_VAR).toBe("value");
   });
 
-  it("resolves both credential vars independently", () => {
+  it("resolves both credential vars independently", async () => {
     const env: Record<string, string | undefined> = {
       CLAUDE_CODE_OAUTH_TOKEN: "oauth1,oauth2",
       ANTHROPIC_API_KEY: "apikey1,apikey2",
     };
-    resolveCredentialPools(env);
+    await resolveCredentialPools(env);
     expect(["oauth1", "oauth2"]).toContain(env.CLAUDE_CODE_OAUTH_TOKEN!);
     expect(["apikey1", "apikey2"]).toContain(env.ANTHROPIC_API_KEY!);
   });

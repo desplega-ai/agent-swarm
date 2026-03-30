@@ -80,14 +80,57 @@ export function validateClaudeCredentials(
 }
 
 /**
+ * Fetch available (non-rate-limited) key indices from the API for each credential pool.
+ * Returns a map of envVar → available indices.
+ */
+async function fetchAvailableIndices(
+  env: Record<string, string | undefined>,
+  apiUrl: string,
+  apiKey: string,
+): Promise<Record<string, number[]>> {
+  const availableIndicesMap: Record<string, number[]> = {};
+  for (const envVar of CREDENTIAL_POOL_VARS) {
+    const val = env[envVar];
+    if (val?.includes(",")) {
+      const totalKeys = val.split(",").filter((s) => s.trim()).length;
+      try {
+        const resp = await fetch(
+          `${apiUrl}/api/keys/available?keyType=${encodeURIComponent(envVar)}&totalKeys=${totalKeys}`,
+          { headers: { Authorization: `Bearer ${apiKey}` } },
+        );
+        if (resp.ok) {
+          const data = (await resp.json()) as { availableIndices: number[] };
+          availableIndicesMap[envVar] = data.availableIndices;
+          if (data.availableIndices.length < totalKeys) {
+            console.log(
+              `[credentials] ${envVar}: ${data.availableIndices.length}/${totalKeys} keys available (${totalKeys - data.availableIndices.length} rate-limited)`,
+            );
+          }
+        }
+      } catch {
+        // Non-critical — fall back to random selection
+      }
+    }
+  }
+  return availableIndicesMap;
+}
+
+/**
  * For credential env vars that contain comma-separated values,
- * select one based on availability (rate-limit aware when availableIndicesMap is provided).
+ * select one based on availability (rate-limit aware when API info is available).
+ * When apiUrl and apiKey are provided, fetches rate-limit availability from the API.
  * Returns tracking info about which credentials were selected.
  */
-export function resolveCredentialPools(
+export async function resolveCredentialPools(
   env: Record<string, string | undefined>,
-  availableIndicesMap?: Record<string, number[]>,
-): CredentialSelection[] {
+  opts?: { apiUrl?: string; apiKey?: string; availableIndicesMap?: Record<string, number[]> },
+): Promise<CredentialSelection[]> {
+  const availableIndicesMap =
+    opts?.availableIndicesMap ??
+    (opts?.apiUrl && opts?.apiKey
+      ? await fetchAvailableIndices(env, opts.apiUrl, opts.apiKey)
+      : undefined);
+
   const selections: CredentialSelection[] = [];
   for (const envVar of CREDENTIAL_POOL_VARS) {
     const val = env[envVar];

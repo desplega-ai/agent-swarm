@@ -79,11 +79,11 @@ describe("selectCredential", () => {
 });
 
 describe("resolveCredentialPools", () => {
-  test("returns selections for pool vars", () => {
+  test("returns selections for pool vars", async () => {
     const env: Record<string, string | undefined> = {
       ANTHROPIC_API_KEY: "key-aaa11,key-bbb22",
     };
-    const selections = resolveCredentialPools(env);
+    const selections = await resolveCredentialPools(env);
     expect(selections.length).toBe(1);
     expect(selections[0]!.total).toBe(2);
     expect(selections[0]!.keyType).toBe("ANTHROPIC_API_KEY");
@@ -91,21 +91,23 @@ describe("resolveCredentialPools", () => {
     expect(["key-aaa11", "key-bbb22"]).toContain(env.ANTHROPIC_API_KEY);
   });
 
-  test("passes availableIndicesMap through", () => {
+  test("passes availableIndicesMap through", async () => {
     const env: Record<string, string | undefined> = {
       ANTHROPIC_API_KEY: "key-aaa11,key-bbb22,key-ccc33",
     };
-    const selections = resolveCredentialPools(env, { ANTHROPIC_API_KEY: [2] });
+    const selections = await resolveCredentialPools(env, {
+      availableIndicesMap: { ANTHROPIC_API_KEY: [2] },
+    });
     expect(selections.length).toBe(1);
     expect(selections[0]!.index).toBe(2);
     expect(env.ANTHROPIC_API_KEY).toBe("key-ccc33");
   });
 
-  test("non-pool vars are unchanged", () => {
+  test("non-pool vars are unchanged", async () => {
     const env: Record<string, string | undefined> = {
       ANTHROPIC_API_KEY: "single-key",
     };
-    const selections = resolveCredentialPools(env);
+    const selections = await resolveCredentialPools(env);
     expect(selections.length).toBe(0);
     expect(env.ANTHROPIC_API_KEY).toBe("single-key");
   });
