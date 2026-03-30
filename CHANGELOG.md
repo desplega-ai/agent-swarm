@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.56.3] - 2026-03-30
+
+### Changed
+- GitHub event handling restricted to explicit human actions — PR closed/synchronize, reviews, CI checks are now suppressed by default to prevent cascade auto-merge behavior
+- New `GITHUB_EVENT_LABELS` env var (default: `swarm-review`) — label-based triggers for PR and issue events
+- Heartbeat system rewritten with checklist-based approach and improved stall detection
+- Session templates support added to hook system for dynamic prompt injection
+- `maxTasks` schema limit increased to 100 in `get-swarm` output validation (DES-20)
+
 ## [1.55.0] - 2026-03-29
 
 ### Added
