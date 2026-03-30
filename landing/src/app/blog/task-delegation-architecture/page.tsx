@@ -145,17 +145,22 @@ export default function TaskDelegationArchitecturePost() {
         <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">
           Every piece of work in Agent Swarm flows through a state machine. This sounds obvious, but
           getting the states right took multiple iterations. Our first version had three states
-          (pending, running, done). The current version has seven:
+          (pending, running, done). The current version has ten — but the core flow looks like this:
         </p>
 
         <MermaidDiagram
           chart={`stateDiagram-v2
-    [*] --> unassigned
+    [*] --> backlog
+    backlog --> unassigned
     unassigned --> offered
     offered --> pending
+    offered --> reviewing
+    reviewing --> pending
     pending --> in_progress
     in_progress --> completed
     in_progress --> failed
+    in_progress --> paused
+    paused --> in_progress
     pending --> cancelled
     in_progress --> cancelled`}
         />
@@ -261,8 +266,7 @@ export default function TaskDelegationArchitecturePost() {
 
         <Callout>
           <strong>Lesson:</strong> Your routing agent needs structured access to agent capabilities,
-          not just names. We store each agent&apos;s role, specialization, and recent task success
-          rate. Without this, the Lead agent guesses — and guesses wrong about 15% of the time.
+          not just names. We store each agent&apos;s role, specialization, and task history. Without this, the Lead agent guesses — and guesses wrong about 15% of the time.
         </Callout>
       </section>
 
