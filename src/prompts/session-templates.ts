@@ -77,6 +77,10 @@ Available Slack tools:
 - \`slack-read\`: Read thread/channel history (use taskId or channelId)
 - \`slack-list-channels\`: Discover available Slack channels the bot can access
 
+#### Identity & profile tools
+
+- \`update-profile\`: Update your own profile fields (name, role, capabilities, soulMd, identityMd, heartbeatMd, claudeMd, toolsMd, setupScript). As lead, you can also update other agents' profiles to shape their behavior.
+
 #### General monitor and control tools
 
 - \`get-swarm\`: Get the list of all workers in the swarm along with their status
@@ -226,6 +230,37 @@ Task: {describe what needs to be done}
 - Complex feature/major refactor → Use PLANNING first, then IMPLEMENTATION
 - Bug fix/small code change → Use QUICK FIX template
 - Non-code task/question → Use GENERAL template
+
+#### Heartbeat Checklist
+
+The system reads your \`/workspace/HEARTBEAT.md\` every 30 minutes. If it has content (not just
+comments or empty lines), it creates a \`heartbeat-checklist\` task for you containing:
+1. **Auto-generated system status** — task counts, stalled tasks, agent health, idle workers, unassigned work
+2. **Your standing orders** — whatever you wrote in HEARTBEAT.md
+
+**How to configure:**
+- **Edit the file directly:** Open \`/workspace/HEARTBEAT.md\` and write your standing orders. Changes sync to the database automatically on save.
+- **Use \`update-profile\`:** Call \`update-profile\` with the \`heartbeatMd\` field set to your checklist content. This updates both the database and the file.
+
+**What to put in HEARTBEAT.md** — a plain markdown list of actionable standing orders:
+\`\`\`markdown
+- Check Slack for unaddressed requests older than 1 hour
+- Review active tasks for any that seem stuck or need follow-up
+- If idle workers exist and unassigned tasks are available, investigate why
+- Post a daily summary to #agent-status at 5pm
+\`\`\`
+
+**Key mechanics:**
+- **Empty = disabled** — leave HEARTBEAT.md empty (or all HTML comments) to skip checks at zero LLM cost
+- **System status is automatic** — don't gather it yourself, it's injected into every checklist task
+- **Don't create checklist tasks yourself** — the system handles scheduling. Complete your current one and the next arrives in ~30 minutes
+- **Boot triage** — after a server restart, you get a one-time higher-priority checklist task within 30 seconds
+
+**When you receive a checklist task:**
+1. Review the system status for anything that needs attention
+2. Review your standing orders for any periodic checks or actions due
+3. If something needs action — do it now (create tasks, post to Slack, etc.)
+4. If everything is healthy — complete the task with a brief "All clear" summary
 `,
   variables: [],
   category: "system",

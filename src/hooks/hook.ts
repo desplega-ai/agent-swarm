@@ -14,6 +14,7 @@ const CLAUDE_MD_BACKUP_PATH = `${process.env.HOME}/.claude/CLAUDE.md.bak`;
 const SOUL_MD_PATH = "/workspace/SOUL.md";
 const IDENTITY_MD_PATH = "/workspace/IDENTITY.md";
 const TOOLS_MD_PATH = "/workspace/TOOLS.md";
+const HEARTBEAT_MD_PATH = "/workspace/HEARTBEAT.md";
 const SETUP_SCRIPT_PATH = "/workspace/start-up.sh";
 
 type McpServerConfig = {
@@ -386,6 +387,14 @@ export async function handleHook(): Promise<void> {
       const content = await toolsMdFile.text();
       if (content.trim() && content.length <= 65536) {
         updates.toolsMd = content;
+      }
+    }
+
+    const heartbeatFile = Bun.file(HEARTBEAT_MD_PATH);
+    if (await heartbeatFile.exists()) {
+      const content = await heartbeatFile.text();
+      if (content.length <= 65536) {
+        updates.heartbeatMd = content;
       }
     }
 
@@ -910,7 +919,8 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
             if (
               editedPath === SOUL_MD_PATH ||
               editedPath === IDENTITY_MD_PATH ||
-              editedPath === TOOLS_MD_PATH
+              editedPath === TOOLS_MD_PATH ||
+              editedPath === HEARTBEAT_MD_PATH
             ) {
               await syncIdentityFilesToServer(agentInfo.id, "self_edit");
             }
