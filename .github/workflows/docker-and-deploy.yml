@@ -38,7 +38,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Check for version change
         id: check
@@ -46,7 +46,8 @@ jobs:
           NEW_VERSION=$(jq -r '.version' package.json)
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
-          OLD_VERSION=$(git show HEAD~1:package.json 2>/dev/null | jq -r '.version' 2>/dev/null || echo "")
+          git fetch origin main
+          OLD_VERSION=$(git show origin/main:package.json 2>/dev/null | jq -r '.version' 2>/dev/null || echo "")
           if [ "$OLD_VERSION" != "$NEW_VERSION" ] && [ -n "$OLD_VERSION" ]; then
             echo "version_changed=true" >> $GITHUB_OUTPUT
             echo "::notice::Version changed: $OLD_VERSION -> $NEW_VERSION"
