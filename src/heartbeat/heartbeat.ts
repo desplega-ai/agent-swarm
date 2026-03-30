@@ -47,11 +47,12 @@ const STALE_CLEANUP_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALE_CLEAN
 /** Max pool tasks to auto-assign per sweep */
 const MAX_AUTO_ASSIGN_PER_SWEEP = Number(process.env.HEARTBEAT_MAX_AUTO_ASSIGN) || 5;
 
-/** Escalation cooldown: minimum time between escalations for the same task set (ms) */
-const ESCALATION_COOLDOWN_MS =
-  Number(process.env.HEARTBEAT_ESCALATION_COOLDOWN_MS) || 15 * 60 * 1000;
+/** Heartbeat checklist interval: how often to check HEARTBEAT.md (default: 30 min) */
+const HEARTBEAT_CHECKLIST_INTERVAL_MS =
+  Number(process.env.HEARTBEAT_CHECKLIST_INTERVAL_MS) || 30 * 60 * 1000;
 
-const HEARTBEAT_ESCALATION_MARKER = "[heartbeat-escalation]";
+/** Whether to disable the heartbeat checklist entirely */
+const HEARTBEAT_CHECKLIST_DISABLE = Boolean(process.env.HEARTBEAT_CHECKLIST_DISABLE);
 
 // ============================================================================
 // Types
@@ -69,8 +70,6 @@ export interface HeartbeatFindings {
     inboxProcessing: number;
     workflowRuns: number;
   };
-  escalationNeeded: boolean;
-  escalationReason?: string;
 }
 
 // ============================================================================
@@ -78,10 +77,8 @@ export interface HeartbeatFindings {
 // ============================================================================
 
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+let checklistInterval: ReturnType<typeof setInterval> | null = null;
 let isSweeping = false;
-
-/** Tracks last escalation time per escalation key to prevent spam */
-const lastEscalationTime: Map<string, number> = new Map();
 
 // ============================================================================
 // Tier 1: Preflight Gate
@@ -133,10 +130,9 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
       inboxProcessing: 0,
       workflowRuns: 0,
     },
-    escalationNeeded: false,
   };
 
-  // 1. Detect and remediate stalled tasks (tiered: auto-fail dead workers, escalate ambiguous)
+  // 1. Detect and remediate stalled tasks (tiered: auto-fail dead workers)
   detectAndRemediateStalledTasks(findings);
 
   // 2. Check and fix worker health
@@ -147,9 +143,6 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
 
   // 4. Cleanup stale resources (including workflow run recovery)
   await cleanupStaleResources(findings);
-
-  // 5. Determine if escalation is needed
-  evaluateEscalation(findings);
 
   return findings;
 }
@@ -306,102 +299,150 @@ async function cleanupStaleResources(findings: HeartbeatFindings): Promise<void>
 }
 
 // ============================================================================
-// Tier 3: Escalation
+// Heartbeat Checklist (HEARTBEAT.md-based periodic check)
 // ============================================================================
 
 /**
- * Evaluate whether findings require escalation to a Claude session (lead agent).
- * Only escalate for ambiguous stalls (worker alive but task not updating).
+ * Check if content is effectively empty (only headers, comments, empty items).
+ * Returns true if there are no actionable items — the checklist should be skipped.
  */
-function evaluateEscalation(findings: HeartbeatFindings): void {
-  if (findings.stalledTasks.length > 0) {
-    findings.escalationNeeded = true;
-    const taskIds = findings.stalledTasks.map((t) => t.id.slice(0, 8)).join(", ");
-    findings.escalationReason = `${findings.stalledTasks.length} task(s) stalled with active worker (no task update for ${STALL_THRESHOLD_MINUTES}+ min): ${taskIds}`;
+export function isEffectivelyEmpty(content: string): boolean {
+  const lines = content.split("\n");
+  let inComment = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Track multi-line HTML comments
+    if (inComment) {
+      if (trimmed.includes("-->")) {
+        inComment = false;
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith("<!--")) {
+      if (!trimmed.includes("-->")) {
+        inComment = true;
+      }
+      continue;
+    }
+
+    // Skip blank lines
+    if (trimmed === "") continue;
+
+    // Skip markdown headers
+    if (/^#{1,6}\s/.test(trimmed)) continue;
+
+    // Skip empty list items (just a marker with no text)
+    if (/^[-*+]\s*\[\s*\]\s*$/.test(trimmed)) continue;
+    if (/^[-*+]\s*$/.test(trimmed)) continue;
+
+    // If we get here, there's real content
+    return false;
   }
+
+  return true;
 }
 
 /**
- * Create a triage task for the lead agent to investigate ambiguous findings.
+ * Gather current system status as a markdown string for the lead's checklist task.
  */
-function escalateToLead(findings: HeartbeatFindings): void {
-  const lead = getLeadAgent();
-  if (!lead) {
-    console.log("[Heartbeat] No lead agent found — skipping escalation");
-    return;
-  }
+export function gatherSystemStatus(): string {
+  const stats = getTaskStats();
+  const stalledTasks = getStalledInProgressTasks(STALL_THRESHOLD_MINUTES);
+  const agents = getAllAgents();
+  const idleWorkers = getIdleWorkersWithCapacity();
+  const poolTasks = getUnassignedPoolTasks(10);
 
-  const escalationKey = buildEscalationKey(findings);
+  const sections: string[] = [];
 
-  // Cooldown check — prevent repeated escalations for the same task set
-  const lastTime = lastEscalationTime.get(escalationKey);
-  if (lastTime && Date.now() - lastTime < ESCALATION_COOLDOWN_MS) {
-    return;
-  }
+  // Task overview
+  sections.push("## Task Overview [auto-generated]");
+  sections.push(`- In Progress: ${stats.in_progress ?? 0}`);
+  sections.push(`- Pending: ${stats.pending ?? 0}`);
+  sections.push(`- Unassigned: ${stats.unassigned ?? 0}`);
+  sections.push(`- Completed (24h): ${stats.completed ?? 0}`);
+  sections.push(`- Failed (24h): ${stats.failed ?? 0}`);
 
-  if (hasActiveEscalationTask(lead.id, escalationKey)) {
-    return;
-  }
-
-  // Build stalled tasks section
-  let stalledTasksSection = "";
-  if (findings.stalledTasks.length > 0) {
-    const lines: string[] = ["## Stalled Tasks"];
-    for (const task of findings.stalledTasks) {
+  // Stalled tasks
+  if (stalledTasks.length > 0) {
+    sections.push("");
+    sections.push("## Stalled Tasks [auto-generated]");
+    for (const task of stalledTasks) {
       const agentSlice = task.agentId?.slice(0, 8) ?? "unassigned";
-      lines.push(
-        `- Task ${task.id.slice(0, 8)} (agent: ${agentSlice}): last updated ${task.lastUpdatedAt}`,
+      sections.push(
+        `- [${task.id.slice(0, 8)}] "${task.task.slice(0, 60)}" — assigned to ${agentSlice}, last update: ${task.lastUpdatedAt}`,
       );
     }
-    lines.push(
-      "\nCheck if these tasks are genuinely stuck or just working without calling store-progress. " +
-        "If stuck, consider cancelling and reassigning.",
-    );
-    stalledTasksSection = lines.join("\n");
   }
 
-  const escalationMarker = `\n${HEARTBEAT_ESCALATION_MARKER} ${escalationKey}`;
+  // Agent status
+  const idle = agents.filter((a) => a.status === "idle");
+  const busy = agents.filter((a) => a.status === "busy");
+  const offline = agents.filter((a) => a.status === "offline");
+  sections.push("");
+  sections.push("## Agent Status [auto-generated]");
+  sections.push(
+    `- Online: ${idle.length + busy.length} (${idle.length} idle, ${busy.length} busy), Offline: ${offline.length}`,
+  );
 
-  const result = resolveTemplate("heartbeat.escalation.stalled", {
-    stalled_tasks_section: stalledTasksSection,
-    escalation_marker: escalationMarker,
+  // Available work
+  if (poolTasks.length > 0 || idleWorkers.length > 0) {
+    sections.push("");
+    sections.push("## Available Work [auto-generated]");
+    if (poolTasks.length > 0) {
+      sections.push(`- ${poolTasks.length} unassigned pool task(s) waiting`);
+    }
+    if (idleWorkers.length > 0) {
+      sections.push(`- ${idleWorkers.length} idle worker(s) with capacity`);
+    }
+  }
+
+  return sections.join("\n");
+}
+
+/**
+ * Check HEARTBEAT.md content and create a checklist task for the lead if needed.
+ */
+export async function checkHeartbeatChecklist(): Promise<void> {
+  const lead = getLeadAgent();
+  if (!lead) return;
+
+  const heartbeatMd = lead.heartbeatMd;
+  if (!heartbeatMd) return;
+
+  if (isEffectivelyEmpty(heartbeatMd)) return;
+
+  // Dedup: skip if lead already has an active heartbeat-checklist task
+  const existing = getDb()
+    .prepare<{ id: string }, [string]>(
+      `SELECT id FROM agent_tasks
+       WHERE agentId = ?
+         AND taskType = 'heartbeat-checklist'
+         AND status NOT IN ('completed', 'failed', 'cancelled')
+       LIMIT 1`,
+    )
+    .get(lead.id);
+  if (existing) return;
+
+  const systemStatus = gatherSystemStatus();
+
+  const result = resolveTemplate("heartbeat.checklist", {
+    system_status: systemStatus,
+    heartbeat_content: heartbeatMd,
   });
 
-  if (result.skipped) {
-    return;
-  }
+  if (result.skipped) return;
 
   createTaskExtended(result.text, {
     agentId: lead.id,
-    taskType: "heartbeat",
-    tags: ["heartbeat", "triage", "auto-generated"],
-    priority: 70,
+    taskType: "heartbeat-checklist",
+    tags: ["checklist", "auto-generated"],
+    priority: 60,
   });
 
-  lastEscalationTime.set(escalationKey, Date.now());
-  console.log(`[Heartbeat] Created triage task for lead ${lead.name}`);
-}
-
-function buildEscalationKey(findings: HeartbeatFindings): string {
-  const stalledTaskIds = findings.stalledTasks
-    .map((task) => task.id)
-    .sort((a, b) => a.localeCompare(b));
-  return `stalled:${stalledTaskIds.join(",")}`;
-}
-
-function hasActiveEscalationTask(leadAgentId: string, escalationKey: string): boolean {
-  const existing = getDb()
-    .prepare<{ id: string }, [string, string]>(
-      `SELECT id FROM agent_tasks
-       WHERE agentId = ?
-         AND taskType = 'heartbeat'
-         AND status NOT IN ('completed', 'failed', 'cancelled')
-         AND task LIKE ?
-       LIMIT 1`,
-    )
-    .get(leadAgentId, `%${HEARTBEAT_ESCALATION_MARKER} ${escalationKey}%`);
-
-  return Boolean(existing);
+  console.log(`[Heartbeat] Checklist task created for lead ${lead.name}`);
 }
 
 // ============================================================================
@@ -409,7 +450,7 @@ function hasActiveEscalationTask(leadAgentId: string, escalationKey: string): bo
 // ============================================================================
 
 /**
- * Run a single heartbeat sweep (Tier 1 → Tier 2 → Tier 3).
+ * Run a single heartbeat sweep (Tier 1 → Tier 2).
  */
 export async function runHeartbeatSweep(): Promise<void> {
   if (isSweeping) {
@@ -432,7 +473,6 @@ export async function runHeartbeatSweep(): Promise<void> {
           inboxProcessing: 0,
           workflowRuns: 0,
         },
-        escalationNeeded: false,
       };
       await cleanupStaleResources(cleanupOnlyFindings);
       logFindings(cleanupOnlyFindings);
@@ -444,11 +484,6 @@ export async function runHeartbeatSweep(): Promise<void> {
 
     // Log findings summary
     logFindings(findings);
-
-    // Tier 3: Escalate if needed
-    if (findings.escalationNeeded) {
-      escalateToLead(findings);
-    }
   } finally {
     isSweeping = false;
   }
@@ -508,6 +543,9 @@ export function startHeartbeat(intervalMs = DEFAULT_INTERVAL_MS): void {
   heartbeatInterval = setInterval(() => {
     runHeartbeatSweep();
   }, intervalMs);
+
+  // Also start the checklist interval
+  startHeartbeatChecklist();
 }
 
 /**
@@ -520,11 +558,82 @@ export function stopHeartbeat(): void {
     isSweeping = false;
     console.log("[Heartbeat] Stopped");
   }
+  stopHeartbeatChecklist();
 }
 
 /**
- * Reset escalation cooldown state. Exported for testing only.
+ * Create a one-off boot triage task for the lead after a server restart.
+ * Uses the same HEARTBEAT.md content but with reboot-specific context prepended.
  */
-export function resetEscalationCooldowns(): void {
-  lastEscalationTime.clear();
+export async function createBootTriageTask(): Promise<void> {
+  const lead = getLeadAgent();
+  if (!lead) return;
+
+  const heartbeatMd = lead.heartbeatMd ?? "";
+
+  // Dedup: skip if lead already has an active boot-triage task
+  const existing = getDb()
+    .prepare<{ id: string }, [string]>(
+      `SELECT id FROM agent_tasks
+       WHERE agentId = ?
+         AND taskType = 'boot-triage'
+         AND status NOT IN ('completed', 'failed', 'cancelled')
+       LIMIT 1`,
+    )
+    .get(lead.id);
+  if (existing) return;
+
+  const systemStatus = gatherSystemStatus();
+
+  const result = resolveTemplate("heartbeat.boot-triage", {
+    system_status: systemStatus,
+    heartbeat_content: isEffectivelyEmpty(heartbeatMd)
+      ? "_No standing orders configured._"
+      : heartbeatMd,
+  });
+
+  if (result.skipped) return;
+
+  createTaskExtended(result.text, {
+    agentId: lead.id,
+    taskType: "boot-triage",
+    tags: ["boot", "triage", "auto-generated"],
+    priority: 70, // Higher than regular checklist (60)
+  });
+
+  console.log(`[Heartbeat] Boot triage task created for lead ${lead.name}`);
+}
+
+/**
+ * Start the heartbeat checklist polling loop (separate from the infrastructure sweep).
+ */
+export function startHeartbeatChecklist(intervalMs = HEARTBEAT_CHECKLIST_INTERVAL_MS): void {
+  if (HEARTBEAT_CHECKLIST_DISABLE) {
+    console.log("[Heartbeat] Checklist disabled via HEARTBEAT_CHECKLIST_DISABLE");
+    return;
+  }
+  if (checklistInterval) {
+    return; // Already running
+  }
+
+  console.log(`[Heartbeat] Checklist starting with ${intervalMs}ms interval`);
+
+  // Boot triage replaces the first checklist (30s delay to let system settle)
+  setTimeout(() => createBootTriageTask(), 30_000);
+
+  // Recurring checklist starts from the second interval onward
+  checklistInterval = setInterval(() => {
+    checkHeartbeatChecklist();
+  }, intervalMs);
+}
+
+/**
+ * Stop the heartbeat checklist polling loop.
+ */
+export function stopHeartbeatChecklist(): void {
+  if (checklistInterval) {
+    clearInterval(checklistInterval);
+    checklistInterval = null;
+    console.log("[Heartbeat] Checklist stopped");
+  }
 }

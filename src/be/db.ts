@@ -229,6 +229,7 @@ const VERSIONABLE_FIELDS: VersionableField[] = [
   "toolsMd",
   "claudeMd",
   "setupScript",
+  "heartbeatMd",
 ];
 
 function ensureAgentProfileColumns(database: Database): void {
@@ -399,9 +400,10 @@ function seedContextVersions(): void {
         toolsMd: string | null;
         claudeMd: string | null;
         setupScript: string | null;
+        heartbeatMd: string | null;
       },
       []
-    >(`SELECT id, soulMd, identityMd, toolsMd, claudeMd, setupScript FROM agents`)
+    >(`SELECT id, soulMd, identityMd, toolsMd, claudeMd, setupScript, heartbeatMd FROM agents`)
     .all();
 
   for (const agent of agents) {
@@ -450,6 +452,7 @@ type AgentRow = {
   identityMd: string | null;
   setupScript: string | null;
   toolsMd: string | null;
+  heartbeatMd: string | null;
   lastActivityAt: string | null;
   createdAt: string;
   lastUpdatedAt: string;
@@ -471,6 +474,7 @@ function rowToAgent(row: AgentRow): Agent {
     identityMd: row.identityMd ?? undefined,
     setupScript: row.setupScript ?? undefined,
     toolsMd: row.toolsMd ?? undefined,
+    heartbeatMd: row.heartbeatMd ?? undefined,
     lastActivityAt: row.lastActivityAt ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
@@ -2259,6 +2263,7 @@ export function updateAgentProfile(
     identityMd?: string;
     setupScript?: string;
     toolsMd?: string;
+    heartbeatMd?: string;
   },
   meta?: VersionMeta,
 ): Agent | null {
@@ -2312,6 +2317,7 @@ export function updateAgentProfile(
           string | null,
           string | null,
           string | null,
+          string | null,
           string,
           string,
         ]
@@ -2325,6 +2331,7 @@ export function updateAgentProfile(
           identityMd = COALESCE(?, identityMd),
           setupScript = COALESCE(?, setupScript),
           toolsMd = COALESCE(?, toolsMd),
+          heartbeatMd = COALESCE(?, heartbeatMd),
           lastUpdatedAt = ?
          WHERE id = ? RETURNING *`,
       )
@@ -2337,6 +2344,7 @@ export function updateAgentProfile(
         updates.identityMd ?? null,
         updates.setupScript ?? null,
         updates.toolsMd ?? null,
+        updates.heartbeatMd ?? null,
         now,
         id,
       );

@@ -100,6 +100,7 @@ const updateAgentProfileRoute = route({
     identityMd: z.string().max(65536).optional(),
     setupScript: z.string().max(65536).optional(),
     toolsMd: z.string().max(65536).optional(),
+    heartbeatMd: z.string().max(65536).optional(),
     changeSource: z.string().optional(),
     changedByAgentId: z.string().optional(),
     changeReason: z.string().optional(),
@@ -283,11 +284,12 @@ export async function handleAgentsRest(
       body.soulMd === undefined &&
       body.identityMd === undefined &&
       body.setupScript === undefined &&
-      body.toolsMd === undefined
+      body.toolsMd === undefined &&
+      body.heartbeatMd === undefined
     ) {
       jsonError(
         res,
-        "At least one field (role, description, capabilities, claudeMd, soulMd, identityMd, setupScript, or toolsMd) must be provided",
+        "At least one field (role, description, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, or heartbeatMd) must be provided",
         400,
       );
       return true;
@@ -317,6 +319,7 @@ export async function handleAgentsRest(
         identityMd: body.identityMd,
         setupScript: body.setupScript,
         toolsMd: body.toolsMd,
+        heartbeatMd: body.heartbeatMd,
       },
       versionMeta,
     );

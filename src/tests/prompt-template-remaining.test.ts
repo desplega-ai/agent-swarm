@@ -99,7 +99,7 @@ describe("template registration — all sources", () => {
   test("Heartbeat template is registered (1 event)", () => {
     const all = getAllTemplateDefinitions();
     const eventTypes = all.map((d) => d.eventType);
-    expect(eventTypes).toContain("heartbeat.escalation.stalled");
+    expect(eventTypes).toContain("heartbeat.checklist");
   });
 
   test("Task lifecycle templates are registered (2 task_lifecycle)", () => {

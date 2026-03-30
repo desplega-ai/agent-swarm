@@ -18,7 +18,6 @@ import {
 import {
   codeLevelTriage,
   preflightGate,
-  resetEscalationCooldowns,
   runHeartbeatSweep,
   startHeartbeat,
   stopHeartbeat,
@@ -53,7 +52,6 @@ describe("Heartbeat Triage", () => {
     getDb().run("DELETE FROM agent_tasks");
     getDb().run("DELETE FROM agents");
     getDb().run("DELETE FROM active_sessions");
-    resetEscalationCooldowns();
   });
 
   // ==========================================================================
@@ -285,8 +283,6 @@ describe("Heartbeat Triage", () => {
       expect(findings.autoFailedTasks.length).toBe(0);
       expect(findings.stalledTasks.length).toBe(1);
       expect(findings.stalledTasks[0]!.id).toBe(task.id);
-      expect(findings.escalationNeeded).toBe(true);
-
       // Task should NOT be failed
       const updated = getTaskById(task.id);
       expect(updated?.status).toBe("in_progress");
@@ -356,11 +352,11 @@ describe("Heartbeat Triage", () => {
       ).toBe(true);
     });
 
-    test("no escalation when no stalled tasks", async () => {
+    test("no stalled tasks when workers are healthy", async () => {
       createAgent({ name: "healthy-worker", isLead: false, status: "idle" });
 
       const findings = await codeLevelTriage();
-      expect(findings.escalationNeeded).toBe(false);
+      expect(findings.stalledTasks.length).toBe(0);
     });
 
     test("sets agent to idle after auto-failing its only task", async () => {
@@ -404,57 +400,6 @@ describe("Heartbeat Triage", () => {
         .query("SELECT * FROM agent_tasks WHERE status = 'in_progress' AND agentId = ?")
         .all(worker.id) as Array<{ id: string }>;
       expect(tasks.length).toBe(1);
-    });
-
-    test("creates triage task for lead when stalled tasks found with fresh session", async () => {
-      const lead = createAgent({ name: "triage-lead", isLead: true, status: "idle" });
-      const worker = createAgent({ name: "stall-worker", isLead: false, status: "busy" });
-      const task = createTaskExtended("Stalled task", { agentId: worker.id });
-      startTask(task.id);
-
-      // Create fresh active session (worker alive but task stale)
-      insertActiveSession({
-        agentId: worker.id,
-        taskId: task.id,
-        triggerType: "task_assigned",
-      });
-
-      // Make task stale (45 min)
-      const oldTime = new Date(Date.now() - 45 * 60 * 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
-
-      await runHeartbeatSweep();
-
-      // Verify triage task was created for lead
-      const triageTasks = getDb()
-        .query("SELECT * FROM agent_tasks WHERE taskType = 'heartbeat' AND agentId = ?")
-        .all(lead.id) as Array<{ id: string; task: string }>;
-      expect(triageTasks.length).toBe(1);
-      expect(triageTasks[0]!.task).toContain("Stalled Tasks");
-    });
-
-    test("does not create duplicate triage tasks due to escalation cooldown", async () => {
-      const lead = createAgent({ name: "triage-lead", isLead: true, status: "idle" });
-      const worker = createAgent({ name: "stall-worker", isLead: false, status: "busy" });
-      const task = createTaskExtended("Stalled task", { agentId: worker.id });
-      startTask(task.id);
-
-      insertActiveSession({
-        agentId: worker.id,
-        taskId: task.id,
-        triggerType: "task_assigned",
-      });
-
-      const oldTime = new Date(Date.now() - 45 * 60 * 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
-
-      await runHeartbeatSweep();
-      await runHeartbeatSweep();
-
-      const triageTasks = getDb()
-        .query("SELECT id FROM agent_tasks WHERE taskType = 'heartbeat' AND agentId = ?")
-        .all(lead.id) as Array<{ id: string }>;
-      expect(triageTasks.length).toBe(1);
     });
 
     test("auto-fails stalled task with no session during sweep", async () => {

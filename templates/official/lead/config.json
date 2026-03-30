@@ -17,6 +17,7 @@
   "files": {
     "claudeMd": "CLAUDE.md",
     "soulMd": "SOUL.md",
-    "identityMd": "IDENTITY.md"
+    "identityMd": "IDENTITY.md",
+    "heartbeatMd": "HEARTBEAT.md"
   }
 }

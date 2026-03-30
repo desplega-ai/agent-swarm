@@ -175,6 +175,8 @@ export const AgentSchema = z.object({
   setupScript: z.string().max(65536).optional(),
   // Tools/environment reference: Operational knowledge (synced to /workspace/TOOLS.md)
   toolsMd: z.string().max(65536).optional(),
+  // Heartbeat checklist: Standing orders checked periodically (synced to /workspace/HEARTBEAT.md)
+  heartbeatMd: z.string().max(65536).optional(),
 
   // Concurrency limit (defaults to 1 for backwards compatibility)
   maxTasks: z.number().int().min(1).max(20).optional(),
@@ -218,6 +220,7 @@ export const VersionableFieldSchema = z.enum([
   "toolsMd",
   "claudeMd",
   "setupScript",
+  "heartbeatMd",
 ]);
 
 export const ContextVersionSchema = z.object({

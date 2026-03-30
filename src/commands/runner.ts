@@ -1991,6 +1991,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let agentSetupScript: string | undefined;
   let agentToolsMd: string | undefined;
   let agentClaudeMd: string | undefined;
+  let agentHeartbeatMd: string | undefined;
   let agentProfileName: string | undefined;
   let agentDescription: string | undefined;
   let agentSkillsSummary: { name: string; description: string }[] | undefined;
@@ -2170,6 +2171,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           claudeMd?: string;
           setupScript?: string;
           toolsMd?: string;
+          heartbeatMd?: string;
           name?: string;
           description?: string;
         };
@@ -2178,12 +2180,19 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         agentSetupScript = profile.setupScript;
         agentToolsMd = profile.toolsMd;
         agentClaudeMd = profile.claudeMd;
+        agentHeartbeatMd = profile.heartbeatMd;
         agentProfileName = profile.name;
         agentDescription = profile.description;
 
         // Generate default templates if missing (runner registers via POST /api/agents
         // which doesn't generate templates like join-swarm does)
-        if (!agentSoulMd || !agentIdentityMd || !agentToolsMd || !agentClaudeMd) {
+        if (
+          !agentSoulMd ||
+          !agentIdentityMd ||
+          !agentToolsMd ||
+          !agentClaudeMd ||
+          !agentHeartbeatMd
+        ) {
           // Use already-fetched template (from pre-registration step)
           if (cachedTemplate) {
             const ctx = {
@@ -2202,6 +2211,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               agentClaudeMd = interpolate(cachedTemplate.files.claudeMd, ctx).result;
             if (!agentSetupScript)
               agentSetupScript = interpolate(cachedTemplate.files.setupScript, ctx).result;
+            if (!agentHeartbeatMd)
+              agentHeartbeatMd = interpolate(cachedTemplate.files.heartbeatMd, ctx).result;
             console.log(`[${role}] Applied template: ${templateId}`);
           }
 
@@ -2226,6 +2237,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             if (!profile.claudeMd && agentClaudeMd) profileUpdate.claudeMd = agentClaudeMd;
             if (!profile.setupScript && agentSetupScript)
               profileUpdate.setupScript = agentSetupScript;
+            if (!profile.heartbeatMd && agentHeartbeatMd)
+              profileUpdate.heartbeatMd = agentHeartbeatMd;
 
             await fetch(`${apiUrl}/api/agents/${agentId}/profile`, {
               method: "PUT",
@@ -2361,6 +2374,16 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         console.log(`[${role}] Wrote TOOLS.md to workspace`);
       } catch (err) {
         console.warn(`[${role}] Could not write TOOLS.md: ${(err as Error).message}`);
+      }
+    }
+
+    // Write HEARTBEAT.md to workspace (lead's periodic checklist)
+    if (agentHeartbeatMd) {
+      try {
+        await Bun.write("/workspace/HEARTBEAT.md", agentHeartbeatMd);
+        console.log(`[${role}] Wrote HEARTBEAT.md to workspace`);
+      } catch (err) {
+        console.warn(`[${role}] Could not write HEARTBEAT.md: ${(err as Error).message}`);
       }
     }
 
