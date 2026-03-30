@@ -102,6 +102,7 @@ class ApiClient {
       identityMd?: string;
       toolsMd?: string;
       setupScript?: string;
+      heartbeatMd?: string;
     },
   ): Promise<AgentWithTasks> {
     const url = `${this.getBaseUrl()}/api/agents/${id}/profile`;

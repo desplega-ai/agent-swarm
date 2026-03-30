@@ -1,5 +1,3 @@
-PRAGMA defer_foreign_keys = ON;
-
 -- Add 'cancelled' as a valid status for workflow runs.
 -- SQLite does not support ALTER CHECK constraints, so we recreate the table.
 

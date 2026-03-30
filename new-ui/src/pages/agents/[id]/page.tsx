@@ -44,7 +44,7 @@ import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
 const PAGE_SIZE = 100;
 
-type MdField = "soulMd" | "identityMd" | "claudeMd" | "toolsMd" | "setupScript";
+type MdField = "soulMd" | "identityMd" | "claudeMd" | "toolsMd" | "setupScript" | "heartbeatMd";
 
 function EditableMarkdownField({
   title,
@@ -436,6 +436,13 @@ export default function AgentDetailPage() {
           <EditableMarkdownField
             title="Setup Script"
             field="setupScript"
+            agent={agent}
+            onSave={saveField}
+            saving={updateProfile.isPending}
+          />
+          <EditableMarkdownField
+            title="HEARTBEAT.md"
+            field="heartbeatMd"
             agent={agent}
             onSave={saveField}
             saving={updateProfile.isPending}

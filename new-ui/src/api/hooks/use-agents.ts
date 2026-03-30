@@ -48,6 +48,7 @@ export function useUpdateAgentProfile() {
         identityMd?: string;
         toolsMd?: string;
         setupScript?: string;
+        heartbeatMd?: string;
       };
     }) => api.updateAgentProfile(id, profile),
     onSuccess: () => {

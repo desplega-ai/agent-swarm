@@ -16,6 +16,10 @@ import {
   isEffectivelyEmpty,
 } from "../heartbeat/heartbeat";
 
+// Side-effect import: register heartbeat templates (also done by heartbeat.ts,
+// but other test files may call clearTemplateDefinitions() in parallel)
+import "../heartbeat/templates";
+
 const TEST_DB_PATH = "./test-heartbeat-checklist.sqlite";
 
 describe("Heartbeat Checklist", () => {
@@ -30,9 +34,12 @@ describe("Heartbeat Checklist", () => {
     await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     getDb().run("DELETE FROM agent_tasks");
     getDb().run("DELETE FROM agents");
+    // Re-register heartbeat templates — other test files (prompt-template-resolver,
+    // prompt-template-session) call clearTemplateDefinitions() in parallel
+    await import(`../heartbeat/templates?t=${Date.now()}`);
   });
 
   // ==========================================================================

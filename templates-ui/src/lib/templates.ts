@@ -69,6 +69,7 @@ export function getTemplateFiles(category: string, name: string): TemplateRespon
       ? readFileOrEmpty(path.join(dir, config.files.identityMd))
       : "",
     toolsMd: config.files.toolsMd ? readFileOrEmpty(path.join(dir, config.files.toolsMd)) : "",
+    heartbeatMd: config.files.heartbeatMd ? readFileOrEmpty(path.join(dir, config.files.heartbeatMd)) : "",
     setupScript: config.files.setupScript
       ? readFileOrEmpty(path.join(dir, config.files.setupScript))
       : "",

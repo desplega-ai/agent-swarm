@@ -46,8 +46,7 @@ jobs:
           NEW_VERSION=$(jq -r '.version' package.json)
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
-          git fetch origin main
-          OLD_VERSION=$(git show origin/main:package.json 2>/dev/null | jq -r '.version' 2>/dev/null || echo "")
+          OLD_VERSION=$(git show ${{ github.event.before }}:package.json 2>/dev/null | jq -r '.version' 2>/dev/null || echo "")
           if [ "$OLD_VERSION" != "$NEW_VERSION" ] && [ -n "$OLD_VERSION" ]; then
             echo "version_changed=true" >> $GITHUB_OUTPUT
             echo "::notice::Version changed: $OLD_VERSION -> $NEW_VERSION"

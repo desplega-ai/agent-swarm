@@ -152,6 +152,12 @@ export function runMigrations(db: Database): void {
   }
 
   // 5. Run pending migrations
+  // Disable FK checks for the entire migration pass. Individual migrations
+  // (008, 025, 026) need to DROP + recreate tables, which can violate FKs
+  // mid-transaction. PRAGMA foreign_keys cannot be changed inside a transaction,
+  // so we disable it here, outside any transaction, and re-enable after.
+  db.run("PRAGMA foreign_keys = OFF");
+
   for (const migration of migrations) {
     const existing = applied.get(migration.version);
 
@@ -184,4 +190,6 @@ export function runMigrations(db: Database): void {
     const elapsed = (performance.now() - start).toFixed(1);
     console.debug(`[migrations] Applied: ${migration.name} (${elapsed}ms)`);
   }
+
+  db.run("PRAGMA foreign_keys = ON");
 }

@@ -27,6 +27,7 @@ export interface Agent {
   identityMd?: string;
   toolsMd?: string;
   setupScript?: string;
+  heartbeatMd?: string;
   maxTasks?: number;
   capacity?: {
     current: number;
