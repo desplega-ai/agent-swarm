@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { BlogPostLayout } from "@/components/blog-post-layout";
+import { MermaidDiagram } from "@/components/mermaid-diagram";
 
 export const metadata: Metadata = {
   title:
@@ -147,11 +148,17 @@ export default function TaskDelegationArchitecturePost() {
           (pending, running, done). The current version has seven:
         </p>
 
-        <CodeBlock>
-          {`unassigned → offered → pending → in_progress → completed
-                                                      ↘ failed
-                                         ↗ cancelled`}
-        </CodeBlock>
+        <MermaidDiagram
+          chart={`stateDiagram-v2
+    [*] --> unassigned
+    unassigned --> offered
+    offered --> pending
+    pending --> in_progress
+    in_progress --> completed
+    in_progress --> failed
+    pending --> cancelled
+    in_progress --> cancelled`}
+        />
 
         <p className="text-[15px] text-zinc-600 leading-relaxed mb-6">
           The key insight was separating <strong>assignment</strong> from{" "}
