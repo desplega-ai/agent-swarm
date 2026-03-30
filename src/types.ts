@@ -179,7 +179,7 @@ export const AgentSchema = z.object({
   heartbeatMd: z.string().max(65536).optional(),
 
   // Concurrency limit (defaults to 1 for backwards compatibility)
-  maxTasks: z.number().int().min(1).max(20).optional(),
+  maxTasks: z.number().int().min(1).max(100).optional(),
 
   // Polling limit tracking (consecutive empty polls)
   emptyPollCount: z.number().int().min(0).optional(),
