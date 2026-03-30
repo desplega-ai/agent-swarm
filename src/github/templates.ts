@@ -197,6 +197,35 @@ Context:
   category: "event",
 });
 
+registerTemplate({
+  eventType: "github.pull_request.labeled",
+  header: "[GitHub PR #{{pr_number}}] {{pr_title}}",
+  defaultBody: `Label added: {{label_name}}
+From: {{sender_login}}
+Repo: {{repo_full_name}}
+Branch: {{head_ref}} → {{base_ref}}
+URL: {{pr_url}}
+
+Context:
+{{context}}
+
+---
+{{@template[common.delegation_instruction]}}
+{{@template[common.command_suggestions.github_pr]}}`,
+  variables: [
+    { name: "pr_number", description: "Pull request number" },
+    { name: "pr_title", description: "Pull request title" },
+    { name: "label_name", description: "Label that was added" },
+    { name: "sender_login", description: "Event sender login" },
+    { name: "repo_full_name", description: "Repository full name (owner/repo)" },
+    { name: "head_ref", description: "Head branch name" },
+    { name: "base_ref", description: "Base branch name" },
+    { name: "pr_url", description: "Pull request HTML URL" },
+    { name: "context", description: "PR body or title as context" },
+  ],
+  category: "event",
+});
+
 // ============================================================================
 // Issue events
 // ============================================================================
@@ -247,6 +276,32 @@ Context:
     { name: "repo_full_name", description: "Repository full name (owner/repo)" },
     { name: "issue_url", description: "Issue HTML URL" },
     { name: "context", description: "Extracted mention context or issue title" },
+  ],
+  category: "event",
+});
+
+registerTemplate({
+  eventType: "github.issue.labeled",
+  header: "[GitHub Issue #{{issue_number}}] {{issue_title}}",
+  defaultBody: `Label added: {{label_name}}
+From: {{sender_login}}
+Repo: {{repo_full_name}}
+URL: {{issue_url}}
+
+Context:
+{{context}}
+
+---
+{{@template[common.delegation_instruction]}}
+{{@template[common.command_suggestions.github_issue]}}`,
+  variables: [
+    { name: "issue_number", description: "Issue number" },
+    { name: "issue_title", description: "Issue title" },
+    { name: "label_name", description: "Label that was added" },
+    { name: "sender_login", description: "Event sender login" },
+    { name: "repo_full_name", description: "Repository full name (owner/repo)" },
+    { name: "issue_url", description: "Issue HTML URL" },
+    { name: "context", description: "Issue body or title as context" },
   ],
   category: "event",
 });

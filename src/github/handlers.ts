@@ -1,6 +1,12 @@
 import { createTaskExtended, failTask, findTaskByVcs, getAllAgents } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
-import { detectMention, extractMentionContext, GITHUB_BOT_NAME, isBotAssignee } from "./mentions";
+import {
+  detectMention,
+  extractMentionContext,
+  GITHUB_BOT_NAME,
+  isBotAssignee,
+  isSwarmLabel,
+} from "./mentions";
 import { addIssueReaction, addReaction } from "./reactions";
 // Side-effect import: registers all GitHub event templates in the in-memory registry
 import "./templates";
@@ -315,95 +321,32 @@ export async function handlePullRequest(
     return { created: false };
   }
 
-  // Handle closed action - PR was merged or closed without merge
-  if (action === "closed") {
-    // Find the related task
-    const task = findTaskByVcs(repository.full_name, pr.number);
-    if (!task) {
-      // No task for this PR, nothing to notify
+  // Handle labeled action - swarm label added to PR
+  if (action === "labeled") {
+    const labelName = event.label?.name;
+    if (!labelName || !isSwarmLabel(labelName)) {
       return { created: false };
     }
 
     // Deduplicate
-    const eventKey = `pr-closed:${repository.full_name}:${pr.number}`;
-    if (isDuplicate(eventKey)) {
-      return { created: false };
-    }
-
-    const lead = findLeadAgent();
-    const wasMerged = pr.merged;
-    const emoji = wasMerged ? "🎉" : "❌";
-    const status = wasMerged ? "MERGED" : "CLOSED";
-    const mergedBy = wasMerged && pr.merged_by ? ` by ${pr.merged_by.login}` : "";
-    const followUpSuggestion = wasMerged
-      ? "💡 PR successfully merged! Update any related issues or documentation."
-      : "💡 PR was closed without merging. Review if follow-up is needed.";
-
-    const result = resolveTemplate(
-      "github.pull_request.closed",
-      {
-        status_emoji: emoji,
-        pr_number: pr.number,
-        status,
-        merged_by: mergedBy,
-        pr_title: pr.title,
-        repo_full_name: repository.full_name,
-        pr_url: pr.html_url,
-        related_task_id: task.id,
-        follow_up_suggestion: followUpSuggestion,
-      },
-      { agentId: lead?.id, repoId: repository.full_name },
-    );
-
-    if (result.skipped) {
-      return { created: false };
-    }
-
-    const notifyTask = createTaskExtended(result.text, {
-      agentId: lead?.id ?? "",
-      source: "github",
-      vcsProvider: "github",
-      taskType: "github-pr-status",
-      vcsRepo: repository.full_name,
-      vcsEventType: "pull_request",
-      vcsNumber: pr.number,
-      vcsAuthor: sender.login,
-      vcsUrl: pr.html_url,
-    });
-
-    console.log(
-      `[GitHub] Created task ${notifyTask.id} for PR #${pr.number} (${status}) -> ${lead?.name ?? "unassigned"}`,
-    );
-
-    return { created: true, taskId: notifyTask.id };
-  }
-
-  // Handle synchronize action - new commits pushed to PR
-  if (action === "synchronize") {
-    // Find the related task
-    const task = findTaskByVcs(repository.full_name, pr.number);
-    if (!task) {
-      // No task for this PR, nothing to notify
-      return { created: false };
-    }
-
-    // Deduplicate using SHA to avoid duplicate notifications for same push
-    const eventKey = `pr-sync:${repository.full_name}:${pr.number}:${pr.head.sha}`;
+    const eventKey = `pr-labeled:${repository.full_name}:${pr.number}:${labelName}`;
     if (isDuplicate(eventKey)) {
       return { created: false };
     }
 
     const lead = findLeadAgent();
     const result = resolveTemplate(
-      "github.pull_request.synchronize",
+      "github.pull_request.labeled",
       {
         pr_number: pr.number,
         pr_title: pr.title,
+        label_name: labelName,
+        sender_login: sender.login,
         repo_full_name: repository.full_name,
         head_ref: pr.head.ref,
-        head_sha_short: pr.head.sha.substring(0, 7),
+        base_ref: pr.base.ref,
         pr_url: pr.html_url,
-        related_task_id: task.id,
+        context: pr.body || pr.title,
       },
       { agentId: lead?.id, repoId: repository.full_name },
     );
@@ -412,11 +355,11 @@ export async function handlePullRequest(
       return { created: false };
     }
 
-    const notifyTask = createTaskExtended(result.text, {
+    const task = createTaskExtended(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
-      taskType: "github-pr-update",
+      taskType: "github-pr",
       vcsRepo: repository.full_name,
       vcsEventType: "pull_request",
       vcsNumber: pr.number,
@@ -424,11 +367,37 @@ export async function handlePullRequest(
       vcsUrl: pr.html_url,
     });
 
-    console.log(
-      `[GitHub] Created task ${notifyTask.id} for PR #${pr.number} (synchronize) -> ${lead?.name ?? "unassigned"}`,
-    );
+    if (lead) {
+      console.log(
+        `[GitHub] Created task ${task.id} for PR #${pr.number} (labeled: ${labelName}) -> ${lead.name}`,
+      );
+    } else {
+      console.log(
+        `[GitHub] Created unassigned task ${task.id} for PR #${pr.number} (labeled: ${labelName}, no lead available)`,
+      );
+    }
 
-    return { created: true, taskId: notifyTask.id };
+    if (installation?.id) {
+      addIssueReaction(repository.full_name, pr.number, "eyes", installation.id);
+    }
+
+    return { created: true, taskId: task.id };
+  }
+
+  // Suppressed: see thoughts/taras/plans/2026-03-30-github-event-safety-defaults.md
+  if (action === "closed") {
+    console.log(
+      `[GitHub:suppressed] pull_request.closed on ${repository.full_name}#${pr.number} — lifecycle events disabled by default`,
+    );
+    return { created: false };
+  }
+
+  // Suppressed: see thoughts/taras/plans/2026-03-30-github-event-safety-defaults.md
+  if (action === "synchronize") {
+    console.log(
+      `[GitHub:suppressed] pull_request.synchronize on ${repository.full_name}#${pr.number} — lifecycle events disabled by default`,
+    );
+    return { created: false };
   }
 
   // Only handle opened/edited actions for mention-based flow
@@ -593,6 +562,67 @@ export async function handleIssue(
     }
 
     return { created: false };
+  }
+
+  // Handle labeled action - swarm label added to issue
+  if (action === "labeled") {
+    const labelName = event.label?.name;
+    if (!labelName || !isSwarmLabel(labelName)) {
+      return { created: false };
+    }
+
+    // Deduplicate
+    const eventKey = `issue-labeled:${repository.full_name}:${issue.number}:${labelName}`;
+    if (isDuplicate(eventKey)) {
+      return { created: false };
+    }
+
+    const lead = findLeadAgent();
+    const result = resolveTemplate(
+      "github.issue.labeled",
+      {
+        issue_number: issue.number,
+        issue_title: issue.title,
+        label_name: labelName,
+        sender_login: sender.login,
+        repo_full_name: repository.full_name,
+        issue_url: issue.html_url,
+        context: issue.body || issue.title,
+      },
+      { agentId: lead?.id, repoId: repository.full_name },
+    );
+
+    if (result.skipped) {
+      return { created: false };
+    }
+
+    const task = createTaskExtended(result.text, {
+      agentId: lead?.id ?? "",
+      source: "github",
+      vcsProvider: "github",
+      taskType: "github-issue",
+      vcsRepo: repository.full_name,
+      vcsEventType: "issues",
+      vcsNumber: issue.number,
+      vcsAuthor: sender.login,
+      vcsUrl: issue.html_url,
+    });
+
+    if (lead) {
+      console.log(
+        `[GitHub] Created task ${task.id} for issue #${issue.number} (labeled: ${labelName}) -> ${lead.name}`,
+      );
+    } else {
+      console.log(
+        `[GitHub] Created unassigned task ${task.id} for issue #${issue.number} (labeled: ${labelName}, no lead available)`,
+      );
+    }
+
+    if (installation?.id) {
+      addIssueReaction(repository.full_name, issue.number, "eyes", installation.id);
+    }
+
+    return { created: true, taskId: task.id };
   }
 
   // Only handle opened/edited actions for mention-based flow
@@ -770,103 +800,13 @@ export async function handleComment(
 export async function handlePullRequestReview(
   event: PullRequestReviewEvent,
 ): Promise<{ created: boolean; taskId?: string }> {
-  const { action, review, pull_request: pr, repository, sender, installation } = event;
+  const { action, pull_request: pr, repository } = event;
 
-  // Only handle submitted reviews (the most important action)
-  // Edited reviews are less common and dismissed is handled by the state
-  if (action !== "submitted") {
-    return { created: false };
-  }
-
-  // Skip "commented" reviews that are empty - these are often just line comments
-  // without an overall review body
-  if (review.state === "commented" && !review.body) {
-    return { created: false };
-  }
-
-  // Deduplicate
-  const eventKey = `pr-review:${repository.full_name}:${pr.number}:${review.id}`;
-  if (isDuplicate(eventKey)) {
-    return { created: false };
-  }
-
-  // Find any existing task for this PR
-  const existingTask = findTaskByVcs(repository.full_name, pr.number);
-
-  // Only notify for PRs where bot is creator or already has a task
-  const isBotCreator = isBotAssignee(pr.user.login);
-  if (!isBotCreator && !existingTask) {
-    return { created: false };
-  }
-
-  // Find lead agent for new task
-  const lead = findLeadAgent();
-
-  // Get review state info
-  const { emoji, label } = getReviewStateInfo(review.state);
-
-  // Build task description
-  const reviewBodySection = review.body ? `\n\nReview Comment:\n${review.body}` : "";
-  const relatedTaskSection = existingTask
-    ? `Related task: ${existingTask.id}\n🔀 Consider routing to the same agent working on the related task.\n`
-    : "";
-  const reviewSuggestions =
-    review.state === "approved"
-      ? "💡 Suggested: Merge the PR or wait for additional reviews"
-      : review.state === "changes_requested"
-        ? "💡 Suggested: Address the requested changes and update the PR"
-        : "💡 Suggested: Review the feedback and respond if needed";
-
-  const result = resolveTemplate(
-    "github.pull_request.review_submitted",
-    {
-      review_emoji: emoji,
-      pr_number: pr.number,
-      review_label: label,
-      pr_title: pr.title,
-      sender_login: sender.login,
-      repo_full_name: repository.full_name,
-      review_url: review.html_url,
-      review_body_section: reviewBodySection,
-      related_task_section: relatedTaskSection,
-      review_suggestions: reviewSuggestions,
-    },
-    { agentId: lead?.id, repoId: repository.full_name },
+  // Suppressed: see thoughts/taras/plans/2026-03-30-github-event-safety-defaults.md
+  console.log(
+    `[GitHub:suppressed] pull_request_review.${action} on ${repository.full_name}#${pr.number} — review events disabled by default`,
   );
-
-  if (result.skipped) {
-    return { created: false };
-  }
-
-  // Create task (assigned to lead if available, otherwise unassigned)
-  const task = createTaskExtended(result.text, {
-    agentId: lead?.id ?? "",
-    source: "github",
-    vcsProvider: "github",
-    taskType: "github-review",
-    vcsRepo: repository.full_name,
-    vcsEventType: "pull_request_review",
-    vcsNumber: pr.number,
-    vcsAuthor: sender.login,
-    vcsUrl: review.html_url,
-  });
-
-  if (lead) {
-    console.log(
-      `[GitHub] Created task ${task.id} for PR #${pr.number} review (${review.state}) -> ${lead.name}`,
-    );
-  } else {
-    console.log(
-      `[GitHub] Created unassigned task ${task.id} for PR #${pr.number} review (${review.state}, no lead available)`,
-    );
-  }
-
-  // Add reaction to acknowledge the review
-  if (installation?.id) {
-    addIssueReaction(repository.full_name, pr.number, "eyes", installation.id);
-  }
-
-  return { created: true, taskId: task.id };
+  return { created: false };
 }
 
 /**
@@ -879,89 +819,12 @@ export async function handleCheckRun(
 ): Promise<{ created: boolean; taskId?: string }> {
   const { action, check_run, repository } = event;
 
-  // Only handle completed check runs
-  if (action !== "completed") {
-    return { created: false };
-  }
-
-  // Only notify on failure or action_required - success is less critical
-  // Skip neutral/skipped/cancelled as they're usually not actionable
-  const conclusion = check_run.conclusion;
-  if (conclusion !== "failure" && conclusion !== "action_required") {
-    return { created: false };
-  }
-
-  // Must be associated with at least one PR
-  if (!check_run.pull_requests || check_run.pull_requests.length === 0) {
-    return { created: false };
-  }
-
-  // Check if we have a task for any of these PRs
-  let relatedTask = null;
-  let prNumber = 0;
-  for (const pr of check_run.pull_requests) {
-    const task = findTaskByVcs(repository.full_name, pr.number);
-    if (task) {
-      relatedTask = task;
-      prNumber = pr.number;
-      break;
-    }
-  }
-
-  if (!relatedTask) {
-    // No task for any of the associated PRs
-    return { created: false };
-  }
-
-  // Deduplicate
-  const eventKey = `check-run:${repository.full_name}:${check_run.id}`;
-  if (isDuplicate(eventKey)) {
-    return { created: false };
-  }
-
-  const lead = findLeadAgent();
-  const { emoji, label } = getCheckConclusionInfo(conclusion);
-
-  const outputSummarySection = check_run.output.summary
-    ? `\n\nSummary:\n${check_run.output.summary.substring(0, 500)}`
-    : "";
-
-  const result = resolveTemplate(
-    "github.check_run.failed",
-    {
-      conclusion_emoji: emoji,
-      pr_number: prNumber,
-      check_name: check_run.name,
-      conclusion_label: label,
-      repo_full_name: repository.full_name,
-      check_url: check_run.html_url,
-      output_summary_section: outputSummarySection,
-      related_task_id: relatedTask.id,
-    },
-    { agentId: lead?.id, repoId: repository.full_name },
-  );
-
-  if (result.skipped) {
-    return { created: false };
-  }
-
-  const task = createTaskExtended(result.text, {
-    agentId: lead?.id ?? "",
-    source: "github",
-    vcsProvider: "github",
-    taskType: "github-ci",
-    vcsRepo: repository.full_name,
-    vcsEventType: "check_run",
-    vcsNumber: prNumber,
-    vcsAuthor: "",
-    vcsUrl: check_run.html_url,
-  });
-
+  // Suppressed: see thoughts/taras/plans/2026-03-30-github-event-safety-defaults.md
+  const conclusion = check_run.conclusion ?? "unknown";
   console.log(
-    `[GitHub] Created task ${task.id} for check_run ${check_run.name} (${conclusion}) on PR #${prNumber} -> ${lead?.name ?? "unassigned"}`,
+    `[GitHub:suppressed] check_run.${action} (${conclusion}) on ${repository.full_name} — CI events disabled by default`,
   );
-
-  return { created: true, taskId: task.id };
+  return { created: false };
 }
 
 /**
@@ -974,84 +837,12 @@ export async function handleCheckSuite(
 ): Promise<{ created: boolean; taskId?: string }> {
   const { action, check_suite, repository } = event;
 
-  // Only handle completed check suites
-  if (action !== "completed") {
-    return { created: false };
-  }
-
-  // Only notify on failure - success notifications would be too noisy
-  const conclusion = check_suite.conclusion;
-  if (conclusion !== "failure") {
-    return { created: false };
-  }
-
-  // Must be associated with at least one PR
-  if (!check_suite.pull_requests || check_suite.pull_requests.length === 0) {
-    return { created: false };
-  }
-
-  // Check if we have a task for any of these PRs
-  let relatedTask = null;
-  let prNumber = 0;
-  for (const pr of check_suite.pull_requests) {
-    const task = findTaskByVcs(repository.full_name, pr.number);
-    if (task) {
-      relatedTask = task;
-      prNumber = pr.number;
-      break;
-    }
-  }
-
-  if (!relatedTask) {
-    // No task for any of the associated PRs
-    return { created: false };
-  }
-
-  // Deduplicate
-  const eventKey = `check-suite:${repository.full_name}:${check_suite.id}`;
-  if (isDuplicate(eventKey)) {
-    return { created: false };
-  }
-
-  const lead = findLeadAgent();
-  const { emoji, label } = getCheckConclusionInfo(conclusion);
-  const branch = check_suite.head_branch ?? "unknown";
-
-  const result = resolveTemplate(
-    "github.check_suite.failed",
-    {
-      conclusion_emoji: emoji,
-      pr_number: prNumber,
-      conclusion_label: label,
-      repo_full_name: repository.full_name,
-      branch,
-      head_sha_short: check_suite.head_sha.substring(0, 7),
-      related_task_id: relatedTask.id,
-    },
-    { agentId: lead?.id, repoId: repository.full_name },
-  );
-
-  if (result.skipped) {
-    return { created: false };
-  }
-
-  const task = createTaskExtended(result.text, {
-    agentId: lead?.id ?? "",
-    source: "github",
-    vcsProvider: "github",
-    taskType: "github-ci",
-    vcsRepo: repository.full_name,
-    vcsEventType: "check_suite",
-    vcsNumber: prNumber,
-    vcsAuthor: "",
-    vcsUrl: repository.html_url,
-  });
-
+  // Suppressed: see thoughts/taras/plans/2026-03-30-github-event-safety-defaults.md
+  const conclusion = check_suite.conclusion ?? "unknown";
   console.log(
-    `[GitHub] Created task ${task.id} for check_suite (${conclusion}) on PR #${prNumber} -> ${lead?.name ?? "unassigned"}`,
+    `[GitHub:suppressed] check_suite.${action} (${conclusion}) on ${repository.full_name} — CI events disabled by default`,
   );
-
-  return { created: true, taskId: task.id };
+  return { created: false };
 }
 
 /**
@@ -1065,87 +856,12 @@ export async function handleCheckSuite(
 export async function handleWorkflowRun(
   event: WorkflowRunEvent,
 ): Promise<{ created: boolean; taskId?: string }> {
-  const { action, workflow_run, workflow, repository } = event;
+  const { action, workflow_run, repository } = event;
 
-  // Only handle completed workflow runs
-  if (action !== "completed") {
-    return { created: false };
-  }
-
-  // Only notify on failure - success notifications would be too noisy
-  const conclusion = workflow_run.conclusion;
-  if (conclusion !== "failure") {
-    return { created: false };
-  }
-
-  // Must be associated with at least one PR
-  if (!workflow_run.pull_requests || workflow_run.pull_requests.length === 0) {
-    return { created: false };
-  }
-
-  // Check if we have a task for any of these PRs
-  let relatedTask = null;
-  let prNumber = 0;
-  for (const pr of workflow_run.pull_requests) {
-    const task = findTaskByVcs(repository.full_name, pr.number);
-    if (task) {
-      relatedTask = task;
-      prNumber = pr.number;
-      break;
-    }
-  }
-
-  if (!relatedTask) {
-    // No task for any of the associated PRs
-    return { created: false };
-  }
-
-  // Deduplicate
-  const eventKey = `workflow-run:${repository.full_name}:${workflow_run.id}`;
-  if (isDuplicate(eventKey)) {
-    return { created: false };
-  }
-
-  const lead = findLeadAgent();
-  const { emoji, label } = getCheckConclusionInfo(conclusion);
-
-  const result = resolveTemplate(
-    "github.workflow_run.failed",
-    {
-      conclusion_emoji: emoji,
-      pr_number: prNumber,
-      workflow_run_name: workflow_run.name,
-      conclusion_label: label,
-      repo_full_name: repository.full_name,
-      workflow_name: workflow.name,
-      run_number: workflow_run.run_number,
-      head_branch: workflow_run.head_branch,
-      trigger_event: workflow_run.event,
-      logs_url: workflow_run.html_url,
-      related_task_id: relatedTask.id,
-    },
-    { agentId: lead?.id, repoId: repository.full_name },
-  );
-
-  if (result.skipped) {
-    return { created: false };
-  }
-
-  const task = createTaskExtended(result.text, {
-    agentId: lead?.id ?? "",
-    source: "github",
-    vcsProvider: "github",
-    taskType: "github-ci",
-    vcsRepo: repository.full_name,
-    vcsEventType: "workflow_run",
-    vcsNumber: prNumber,
-    vcsAuthor: "",
-    vcsUrl: workflow_run.html_url,
-  });
-
+  // Suppressed: see thoughts/taras/plans/2026-03-30-github-event-safety-defaults.md
+  const conclusion = workflow_run.conclusion ?? "unknown";
   console.log(
-    `[GitHub] Created task ${task.id} for workflow_run "${workflow_run.name}" (${conclusion}) on PR #${prNumber} -> ${lead?.name ?? "unassigned"}`,
+    `[GitHub:suppressed] workflow_run.${action} (${conclusion}) on ${repository.full_name} — CI events disabled by default`,
   );
-
-  return { created: true, taskId: task.id };
+  return { created: false };
 }
