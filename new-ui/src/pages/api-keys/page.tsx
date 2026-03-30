@@ -1,10 +1,11 @@
-import type { ColDef, ICellRendererParams } from "ag-grid-community";
+import type { ColDef } from "ag-grid-community";
+import { BarChart3, Key, Search, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
-
 import { useApiKeyStatuses } from "@/api/hooks/use-api-keys";
-import type { ApiKeyStatus } from "@/api/types";
+import type { ApiKeyStatus, ApiKeyStatusType } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -13,64 +14,83 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { formatRelativeTime } from "@/lib/utils";
+import { cn, formatSmartTime } from "@/lib/utils";
 
-function StatusBadge({ status }: { status: string }) {
-  const isRateLimited = status === "rate_limited";
+const statusConfig: Record<ApiKeyStatusType, { label: string; dot: string; text: string }> = {
+  available: {
+    label: "AVAILABLE",
+    dot: "bg-emerald-500",
+    text: "text-emerald-600 dark:text-emerald-400",
+  },
+  rate_limited: {
+    label: "RATE LIMITED",
+    dot: "bg-red-500",
+    text: "text-red-600 dark:text-red-400",
+  },
+};
+
+function KeyStatusBadge({ status }: { status: ApiKeyStatusType }) {
+  const config = statusConfig[status] ?? {
+    label: status,
+    dot: "bg-zinc-400",
+    text: "text-zinc-500",
+  };
   return (
     <Badge
       variant="outline"
-      className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${
-        isRateLimited ? "border-red-500/30 text-red-400" : "border-emerald-500/30 text-emerald-400"
-      }`}
+      className="gap-1.5 text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center"
     >
-      {isRateLimited ? "Rate Limited" : "Available"}
+      <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", config.dot)} />
+      <span className={config.text}>{config.label}</span>
     </Badge>
   );
 }
 
-function KeyTypeBadge({ keyType }: { keyType: string }) {
-  const label = keyType.includes("OAUTH")
-    ? "OAuth"
-    : keyType.includes("ANTHROPIC")
-      ? "Anthropic"
-      : keyType.includes("OPENROUTER")
-        ? "OpenRouter"
-        : keyType;
-  const colors = keyType.includes("OAUTH")
-    ? "border-amber-500/30 text-amber-400"
-    : keyType.includes("ANTHROPIC")
-      ? "border-blue-500/30 text-blue-400"
-      : "border-zinc-500/30 text-zinc-400";
-  return (
-    <Badge
-      variant="outline"
-      className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${colors}`}
-    >
-      {label}
-    </Badge>
-  );
+function formatKeyType(keyType: string): string {
+  if (keyType === "ANTHROPIC_API_KEY") return "Anthropic";
+  if (keyType === "CLAUDE_CODE_OAUTH_TOKEN") return "OAuth";
+  if (keyType === "OPENROUTER_API_KEY") return "OpenRouter";
+  return keyType;
+}
+
+function formatExpiry(until: string | null): string {
+  if (!until) return "-";
+  const d = new Date(until);
+  if (d <= new Date()) return "Expired";
+  const diff = d.getTime() - Date.now();
+  const mins = Math.floor(diff / 60000);
+  const secs = Math.floor((diff % 60000) / 1000);
+  if (mins > 0) return `${mins}m ${secs}s`;
+  return `${secs}s`;
 }
 
 export default function ApiKeysPage() {
+  const { data: keys, isLoading } = useApiKeyStatuses();
   const [search, setSearch] = useState("");
-  const [keyTypeFilter, setKeyTypeFilter] = useState<string>("all");
-
-  const { data: keys, isLoading } = useApiKeyStatuses(
-    keyTypeFilter !== "all" ? keyTypeFilter : undefined,
-  );
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
 
   const keyTypes = useMemo(() => {
     if (!keys) return [];
     return [...new Set(keys.map((k) => k.keyType))];
   }, [keys]);
 
+  const filteredKeys = useMemo(() => {
+    if (!keys) return [];
+    return keys.filter((k) => {
+      if (statusFilter !== "all" && k.status !== statusFilter) return false;
+      if (typeFilter !== "all" && k.keyType !== typeFilter) return false;
+      return true;
+    });
+  }, [keys, statusFilter, typeFilter]);
+
   const stats = useMemo(() => {
-    if (!keys) return { total: 0, available: 0, rateLimited: 0 };
+    if (!keys) return { total: 0, available: 0, rateLimited: 0, totalUsage: 0 };
     return {
       total: keys.length,
       available: keys.filter((k) => k.status === "available").length,
       rateLimited: keys.filter((k) => k.status === "rate_limited").length,
+      totalUsage: keys.reduce((sum, k) => sum + k.totalUsageCount, 0),
     };
   }, [keys]);
 
@@ -80,14 +100,20 @@ export default function ApiKeysPage() {
         field: "keyType",
         headerName: "Type",
         width: 140,
-        cellRenderer: (params: ICellRendererParams<ApiKeyStatus>) =>
-          params.data ? <KeyTypeBadge keyType={params.data.keyType} /> : null,
+        cellRenderer: (params: { value: string }) => (
+          <Badge
+            variant="outline"
+            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase font-mono"
+          >
+            {formatKeyType(params.value)}
+          </Badge>
+        ),
       },
       {
         field: "keySuffix",
         headerName: "Key Suffix",
         width: 120,
-        cellRenderer: (params: ICellRendererParams<ApiKeyStatus>) => (
+        cellRenderer: (params: { value: string }) => (
           <span className="font-mono text-muted-foreground">...{params.value}</span>
         ),
       },
@@ -95,66 +121,58 @@ export default function ApiKeysPage() {
         field: "keyIndex",
         headerName: "Index",
         width: 80,
-        cellRenderer: (params: ICellRendererParams<ApiKeyStatus>) => (
-          <span className="font-mono">{params.value}</span>
+        cellRenderer: (params: { value: number }) => (
+          <span className="font-mono text-xs">{params.value}</span>
         ),
       },
       {
         field: "status",
         headerName: "Status",
-        width: 130,
-        cellRenderer: (params: ICellRendererParams<ApiKeyStatus>) =>
-          params.data ? <StatusBadge status={params.data.status} /> : null,
+        width: 140,
+        cellRenderer: (params: { value: ApiKeyStatusType }) => (
+          <KeyStatusBadge status={params.value} />
+        ),
       },
       {
         field: "rateLimitedUntil",
-        headerName: "Rate Limit Expires",
-        width: 170,
-        cellRenderer: (params: ICellRendererParams<ApiKeyStatus>) => {
-          if (!params.value) return <span className="text-muted-foreground/50">-</span>;
-          const expiry = new Date(params.value);
-          const now = new Date();
-          const isExpired = expiry <= now;
+        headerName: "Rate Limit Expiry",
+        width: 150,
+        cellRenderer: (params: { value: string | null; data: ApiKeyStatus | undefined }) => {
+          if (params.data?.status !== "rate_limited")
+            return <span className="text-muted-foreground">-</span>;
           return (
-            <span className={isExpired ? "text-muted-foreground/50 line-through" : "text-red-400"}>
-              {formatRelativeTime(params.value)}
-            </span>
+            <span className="text-xs font-mono text-red-400">{formatExpiry(params.value)}</span>
           );
         },
       },
       {
         field: "totalUsageCount",
-        headerName: "Usage Count",
-        width: 120,
-        cellRenderer: (params: ICellRendererParams<ApiKeyStatus>) => (
-          <span className="font-mono">{params.value?.toLocaleString()}</span>
+        headerName: "Usage",
+        width: 90,
+        cellRenderer: (params: { value: number }) => (
+          <span className="font-mono text-xs">{params.value.toLocaleString()}</span>
         ),
       },
       {
         field: "rateLimitCount",
         headerName: "Rate Limits",
         width: 110,
-        cellRenderer: (params: ICellRendererParams<ApiKeyStatus>) => {
-          const count = params.value ?? 0;
-          return (
-            <span
-              className={`font-mono ${count > 0 ? "text-red-400" : "text-muted-foreground/50"}`}
-            >
-              {count}
-            </span>
-          );
-        },
+        cellRenderer: (params: { value: number }) => (
+          <span className={cn("font-mono text-xs", params.value > 0 && "text-red-400")}>
+            {params.value}
+          </span>
+        ),
       },
       {
         field: "lastUsedAt",
         headerName: "Last Used",
         flex: 1,
         minWidth: 140,
-        cellRenderer: (params: ICellRendererParams<ApiKeyStatus>) =>
+        cellRenderer: (params: { value: string | null }) =>
           params.value ? (
-            <span className="text-muted-foreground">{formatRelativeTime(params.value)}</span>
+            <span className="text-xs text-muted-foreground">{formatSmartTime(params.value)}</span>
           ) : (
-            <span className="text-muted-foreground/50">Never</span>
+            <span className="text-muted-foreground">-</span>
           ),
       },
     ],
@@ -163,47 +181,97 @@ export default function ApiKeysPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">API Keys</h1>
-        <div className="flex items-center gap-3 text-sm text-muted-foreground">
-          <span>
-            <span className="font-mono text-foreground">{stats.total}</span> total
-          </span>
-          <span>
-            <span className="font-mono text-emerald-400">{stats.available}</span> available
-          </span>
-          {stats.rateLimited > 0 && (
-            <span>
-              <span className="font-mono text-red-400">{stats.rateLimited}</span> rate limited
-            </span>
-          )}
-        </div>
+      <h1 className="text-xl font-semibold">API Keys</h1>
+
+      {/* Summary cards */}
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardContent className="p-3 flex items-center gap-3">
+            <div className="rounded-md bg-muted p-2">
+              <Key className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Total Keys</p>
+              <p className="text-lg font-semibold">{stats.total}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-3 flex items-center gap-3">
+            <div className="rounded-md bg-emerald-500/10 p-2">
+              <ShieldCheck className="h-4 w-4 text-emerald-500" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Available</p>
+              <p className="text-lg font-semibold text-emerald-500">{stats.available}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-3 flex items-center gap-3">
+            <div className="rounded-md bg-red-500/10 p-2">
+              <ShieldAlert className="h-4 w-4 text-red-500" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Rate Limited</p>
+              <p className="text-lg font-semibold text-red-500">{stats.rateLimited}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-3 flex items-center gap-3">
+            <div className="rounded-md bg-muted p-2">
+              <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Total Usage</p>
+              <p className="text-lg font-semibold">{stats.totalUsage.toLocaleString()}</p>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
-      <div className="flex gap-3">
-        <Input
-          placeholder="Search keys..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="max-w-xs"
-        />
-        <Select value={keyTypeFilter} onValueChange={setKeyTypeFilter}>
-          <SelectTrigger className="w-[200px]">
-            <SelectValue placeholder="All key types" />
+      {/* Filters */}
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Search keys..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-[160px]">
+            <SelectValue placeholder="Status" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All key types</SelectItem>
-            {keyTypes.map((kt) => (
-              <SelectItem key={kt} value={kt}>
-                {kt}
-              </SelectItem>
-            ))}
+            <SelectItem value="all">All Statuses</SelectItem>
+            <SelectItem value="available">Available</SelectItem>
+            <SelectItem value="rate_limited">Rate Limited</SelectItem>
           </SelectContent>
         </Select>
+        {keyTypes.length > 1 && (
+          <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Key Type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Types</SelectItem>
+              {keyTypes.map((kt) => (
+                <SelectItem key={kt} value={kt}>
+                  {formatKeyType(kt)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
-      <DataGrid<ApiKeyStatus>
-        rowData={keys}
+      {/* Data grid */}
+      <DataGrid
+        rowData={filteredKeys}
         columnDefs={columnDefs}
         quickFilterText={search}
         loading={isLoading}
