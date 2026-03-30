@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  parseRateLimitResetTime,
   parseStderrForErrors,
   SessionErrorTracker,
   trackErrorFromJson,
@@ -364,5 +365,63 @@ describe("parseStderrForErrors", () => {
     parseStderrForErrors("Debugger attached.\nWaiting for connections...", tracker);
 
     expect(tracker.hasErrors()).toBe(false);
+  });
+});
+
+describe("parseRateLimitResetTime", () => {
+  test("parses 'resets 3pm (UTC)' format", () => {
+    const result = parseRateLimitResetTime(
+      "Rate limit hit: You've hit your limit · resets 3pm (UTC)",
+    );
+    expect(result).toBeDefined();
+    const parsed = new Date(result!);
+    expect(parsed.getUTCHours()).toBe(15);
+    expect(parsed.getUTCMinutes()).toBe(0);
+  });
+
+  test("parses 'resets 3:30pm (UTC)' format with minutes", () => {
+    const result = parseRateLimitResetTime("resets 3:30pm (UTC)");
+    expect(result).toBeDefined();
+    const parsed = new Date(result!);
+    expect(parsed.getUTCHours()).toBe(15);
+    expect(parsed.getUTCMinutes()).toBe(30);
+  });
+
+  test("parses 'resets 12am (UTC)' as midnight", () => {
+    const result = parseRateLimitResetTime("resets 12am (UTC)");
+    expect(result).toBeDefined();
+    const parsed = new Date(result!);
+    expect(parsed.getUTCHours()).toBe(0);
+  });
+
+  test("parses 'retry after N seconds'", () => {
+    const before = Date.now();
+    const result = parseRateLimitResetTime("Rate limited. retry after 60 seconds");
+    expect(result).toBeDefined();
+    const parsed = new Date(result!).getTime();
+    expect(parsed).toBeGreaterThanOrEqual(before + 59_000);
+    expect(parsed).toBeLessThanOrEqual(before + 62_000);
+  });
+
+  test("parses 'wait N minutes'", () => {
+    const before = Date.now();
+    const result = parseRateLimitResetTime("Please wait 5 minutes before retrying");
+    expect(result).toBeDefined();
+    const parsed = new Date(result!).getTime();
+    expect(parsed).toBeGreaterThanOrEqual(before + 4 * 60_000);
+    expect(parsed).toBeLessThanOrEqual(before + 6 * 60_000);
+  });
+
+  test("returns undefined for unparseable messages", () => {
+    expect(parseRateLimitResetTime("Rate limit exceeded")).toBeUndefined();
+    expect(parseRateLimitResetTime("Too many requests")).toBeUndefined();
+    expect(parseRateLimitResetTime("")).toBeUndefined();
+  });
+
+  test("rejects unreasonable durations", () => {
+    // More than 24 hours in seconds
+    expect(parseRateLimitResetTime("retry after 100000 seconds")).toBeUndefined();
+    // More than 24 hours in minutes
+    expect(parseRateLimitResetTime("wait 2000 minutes")).toBeUndefined();
   });
 });

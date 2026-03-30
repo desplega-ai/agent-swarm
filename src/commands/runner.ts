@@ -23,6 +23,7 @@ import {
   type CredentialSelection,
   resolveCredentialPools,
 } from "../utils/credentials.ts";
+import { parseRateLimitResetTime } from "../utils/error-tracker.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
 import { interpolate } from "../workflows/template.ts";
@@ -1976,9 +1977,16 @@ async function checkCompletedProcesses(
 
         // If rate-limited and we know which key was used, report it
         if (credentialInfo && /rate.?limit/i.test(failureReason)) {
-          // Fixed 5-minute cooldown — we don't parse Retry-After from provider errors
-          const cooldownMs = 5 * 60 * 1000;
-          const rateLimitedUntil = new Date(Date.now() + cooldownMs).toISOString();
+          // Try to extract reset time from the error message (e.g. "resets 3pm (UTC)")
+          const parsedResetTime = parseRateLimitResetTime(failureReason);
+          const defaultCooldownMs = 5 * 60 * 1000;
+          const rateLimitedUntil =
+            parsedResetTime ?? new Date(Date.now() + defaultCooldownMs).toISOString();
+          if (parsedResetTime) {
+            console.log(
+              `[credentials] Parsed rate limit reset time from error: ${parsedResetTime}`,
+            );
+          }
           reportKeyRateLimit(
             apiConfig.apiUrl,
             apiConfig.apiKey,
