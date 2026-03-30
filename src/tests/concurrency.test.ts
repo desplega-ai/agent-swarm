@@ -203,11 +203,11 @@ describe("Concurrency Integration Tests", () => {
         isLead: false,
         status: "idle",
         capabilities: [],
-        maxTasks: 20, // Max allowed by schema
+        maxTasks: 100, // Max allowed by schema
       });
 
-      expect(agent.maxTasks).toBe(20);
-      expect(getRemainingCapacity(agent.id)).toBe(20);
+      expect(agent.maxTasks).toBe(100);
+      expect(getRemainingCapacity(agent.id)).toBe(100);
     });
   });
 });
