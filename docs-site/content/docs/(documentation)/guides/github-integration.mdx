@@ -1,9 +1,9 @@
 ---
 title: GitHub App Integration
-description: Set up GitHub webhooks for automated task creation from PR reviews, issues, and @mentions
+description: Set up GitHub webhooks for automated task creation from @mentions, assignments, and label-based triggers
 ---
 
-Enable GitHub webhooks for automated task creation from PR reviews, issue assignments, and @mentions.
+Enable GitHub webhooks for automated task creation from @mentions, issue assignments, and label-based triggers.
 
 ## Setup
 
@@ -39,6 +39,9 @@ GITHUB_BOT_NAME=your-bot-name
 # Optional: Additional @mention aliases (comma-separated)
 GITHUB_BOT_ALIASES=heysidekick,sidekick
 
+# Optional: Labels that trigger agent action on PR/issue label events (comma-separated, default: swarm-review)
+GITHUB_EVENT_LABELS=swarm-review
+
 # Optional: Enable bot reactions (requires GitHub App)
 GITHUB_APP_ID=123456
 GITHUB_APP_PRIVATE_KEY=base64-encoded-key
@@ -54,8 +57,18 @@ GITHUB_DISABLE=true
 | Bot assigned to PR/issue | Creates a task for the lead agent |
 | Review requested from bot | Creates a review task |
 | `@bot-name` or `@alias` in comment/issue/PR | Creates a task with the mention context |
-| PR review submitted (on bot's PR) | Creates a notification task with review feedback |
-| CI failure (on PRs with existing tasks) | Creates a CI notification task |
+| `swarm-review` label added to PR/issue | Creates a task for review (configurable via `GITHUB_EVENT_LABELS`) |
+
+### Suppressed Events (Safety Defaults)
+
+The following events are **suppressed by default** to prevent cascade behavior where agents auto-merge PRs without meaningful human review:
+
+- **PR closed/merged** — No automatic task creation on PR close
+- **PR synchronize** (new commits pushed) — No automatic task on push
+- **PR review submitted** — No automatic task from review events
+- **CI check failures** (check_run, check_suite, workflow_run) — No automatic task from CI events
+
+These events still emit to the internal `workflowEventBus` for workflow triggers, but do not create agent tasks.
 
 ## Bot Reactions
 
