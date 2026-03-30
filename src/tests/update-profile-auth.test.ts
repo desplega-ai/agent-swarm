@@ -154,7 +154,7 @@ describe("update-profile authorization", () => {
   test("changeSource is 'lead_coaching' for remote updates", async () => {
     const result = await callUpdateProfile(server, LEAD_ID, {
       agentId: WORKER_ID,
-      soulMd: "Updated by lead",
+      soulMd: `# SOUL.md — Updated by Lead\n\nYou are a specialized agent in the swarm. Your role is to execute tasks with precision and care. You follow instructions carefully and report progress accurately. You collaborate with other agents effectively.${"x".repeat(50)}`,
     });
 
     expect(result.structuredContent.success).toBe(true);
@@ -168,7 +168,7 @@ describe("update-profile authorization", () => {
 
   test("changeSource is 'self_edit' for self updates", async () => {
     const result = await callUpdateProfile(server, WORKER_ID, {
-      soulMd: "Updated by myself",
+      soulMd: `# SOUL.md — Updated by Myself\n\nI am a worker agent in the swarm. My role is to implement features, fix bugs, and ship working code. I follow existing codebase conventions and test my changes thoroughly.${"x".repeat(50)}`,
     });
 
     expect(result.structuredContent.success).toBe(true);
@@ -183,7 +183,7 @@ describe("update-profile authorization", () => {
   test("changeSource is 'self_edit' when explicit agentId matches caller", async () => {
     const result = await callUpdateProfile(server, WORKER_ID, {
       agentId: WORKER_ID,
-      identityMd: "Self update with explicit ID",
+      identityMd: `# IDENTITY.md — Self Update\n\nName: Test Worker\nRole: Implementation Engineer\nExpertise: TypeScript, testing, bug fixes\nWorking style: thorough investigation before coding, test-driven.${"x".repeat(50)}`,
     });
 
     expect(result.structuredContent.success).toBe(true);
