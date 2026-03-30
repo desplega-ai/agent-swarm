@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
   getAvailableKeyIndices,
+  getKeyCostSummary,
   getKeyStatuses,
   markKeyRateLimited,
   recordKeyUsage,
@@ -93,6 +94,22 @@ const listStatuses = route({
   auth: { apiKey: true },
 });
 
+const getCosts = route({
+  method: "get",
+  path: "/api/keys/costs",
+  pattern: ["api", "keys", "costs"],
+  summary: "Get aggregated cost data per API key",
+  tags: ["API Keys"],
+  query: z.object({
+    keyType: z.string().optional(),
+  }),
+  responses: {
+    200: { description: "Per-key cost aggregation" },
+    401: { description: "Unauthorized" },
+  },
+  auth: { apiKey: true },
+});
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleApiKeys(
@@ -145,6 +162,21 @@ export async function handleApiKeys(
       json(res, { success: true, availableIndices: indices, totalKeys });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to get available keys", 500);
+    }
+    return true;
+  }
+
+  // GET /api/keys/costs
+  if (getCosts.match(req.method, pathSegments)) {
+    const parsed = await getCosts.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const { keyType } = parsed.query;
+    try {
+      const costs = getKeyCostSummary(keyType);
+      json(res, { success: true, costs });
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : "Failed to get key costs", 500);
     }
     return true;
   }

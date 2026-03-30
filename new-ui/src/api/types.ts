@@ -75,6 +75,8 @@ export interface AgentTask {
   vcsNumber?: number;
   vcsEventType?: string;
   vcsAuthor?: string;
+  credentialKeySuffix?: string;
+  credentialKeyType?: string;
 }
 
 export interface AgentWithTasks extends Agent {
@@ -752,6 +754,20 @@ export interface ApiKeyStatus {
 export interface ApiKeyStatusResponse {
   success: boolean;
   keys: ApiKeyStatus[];
+}
+
+export interface KeyCostSummary {
+  keyType: string;
+  keySuffix: string;
+  totalCost: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  taskCount: number;
+}
+
+export interface KeyCostResponse {
+  success: boolean;
+  costs: KeyCostSummary[];
 }
 
 // Debug / DB Explorer

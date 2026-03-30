@@ -1,7 +1,7 @@
 import type { ColDef } from "ag-grid-community";
-import { BarChart3, Key, Search, ShieldAlert, ShieldCheck } from "lucide-react";
+import { BarChart3, DollarSign, Key, Search, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useApiKeyStatuses } from "@/api/hooks/use-api-keys";
+import { useApiKeyCosts, useApiKeyStatuses } from "@/api/hooks/use-api-keys";
 import type { ApiKeyStatus, ApiKeyStatusType } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
@@ -66,9 +66,19 @@ function formatExpiry(until: string | null): string {
 
 export default function ApiKeysPage() {
   const { data: keys, isLoading } = useApiKeyStatuses();
+  const { data: costs } = useApiKeyCosts();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
+
+  const costMap = useMemo(() => {
+    if (!costs) return new Map<string, number>();
+    const map = new Map<string, number>();
+    for (const c of costs) {
+      map.set(`${c.keyType}:${c.keySuffix}`, c.totalCost);
+    }
+    return map;
+  }, [costs]);
 
   const keyTypes = useMemo(() => {
     if (!keys) return [];
@@ -85,14 +95,16 @@ export default function ApiKeysPage() {
   }, [keys, statusFilter, typeFilter]);
 
   const stats = useMemo(() => {
-    if (!keys) return { total: 0, available: 0, rateLimited: 0, totalUsage: 0 };
+    const totalCost = costs ? costs.reduce((sum, c) => sum + c.totalCost, 0) : 0;
+    if (!keys) return { total: 0, available: 0, rateLimited: 0, totalUsage: 0, totalCost };
     return {
       total: keys.length,
       available: keys.filter((k) => k.status === "available").length,
       rateLimited: keys.filter((k) => k.status === "rate_limited").length,
       totalUsage: keys.reduce((sum, k) => sum + k.totalUsageCount, 0),
+      totalCost,
     };
-  }, [keys]);
+  }, [keys, costs]);
 
   const columnDefs = useMemo<ColDef<ApiKeyStatus>[]>(
     () => [
@@ -164,6 +176,19 @@ export default function ApiKeysPage() {
         ),
       },
       {
+        headerName: "Cost",
+        width: 100,
+        valueGetter: (params) => {
+          if (!params.data) return 0;
+          return costMap.get(`${params.data.keyType}:${params.data.keySuffix}`) ?? 0;
+        },
+        cellRenderer: (params: { value: number }) => (
+          <span className="font-mono text-xs">
+            {params.value > 0 ? `$${params.value.toFixed(4)}` : "-"}
+          </span>
+        ),
+      },
+      {
         field: "lastUsedAt",
         headerName: "Last Used",
         flex: 1,
@@ -176,7 +201,7 @@ export default function ApiKeysPage() {
           ),
       },
     ],
-    [],
+    [costMap],
   );
 
   return (
@@ -184,7 +209,7 @@ export default function ApiKeysPage() {
       <h1 className="text-xl font-semibold">API Keys</h1>
 
       {/* Summary cards */}
-      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-5">
         <Card>
           <CardContent className="p-3 flex items-center gap-3">
             <div className="rounded-md bg-muted p-2">
@@ -226,6 +251,17 @@ export default function ApiKeysPage() {
             <div>
               <p className="text-xs text-muted-foreground">Total Usage</p>
               <p className="text-lg font-semibold">{stats.totalUsage.toLocaleString()}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-3 flex items-center gap-3">
+            <div className="rounded-md bg-muted p-2">
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Total Cost</p>
+              <p className="text-lg font-semibold">${stats.totalCost.toFixed(2)}</p>
             </div>
           </CardContent>
         </Card>

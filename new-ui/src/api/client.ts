@@ -1134,6 +1134,16 @@ class ApiClient {
     return res.json();
   }
 
+  async fetchApiKeyCosts(keyType?: string): Promise<import("./types").KeyCostResponse> {
+    const params = new URLSearchParams();
+    if (keyType) params.set("keyType", keyType);
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/keys/costs${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch API key costs: ${res.status}`);
+    return res.json();
+  }
+
   async fetchAgentMcpServers(agentId: string): Promise<AgentMcpServersResponse> {
     const url = `${this.getBaseUrl()}/api/agents/${agentId}/mcp-servers`;
     const res = await fetch(url, { headers: this.getHeaders() });

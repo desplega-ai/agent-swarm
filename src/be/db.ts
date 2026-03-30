@@ -727,6 +727,8 @@ type AgentTaskRow = {
   totalContextTokensUsed: number | null;
   contextWindowSize: number | null;
   was_paused: number;
+  credentialKeySuffix: string | null;
+  credentialKeyType: string | null;
 };
 
 function rowToAgentTask(row: AgentTaskRow): AgentTask {
@@ -780,6 +782,8 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     output: row.output ?? undefined,
     progress: row.progress ?? undefined,
     wasPaused: !!row.was_paused,
+    credentialKeySuffix: row.credentialKeySuffix ?? undefined,
+    credentialKeyType: row.credentialKeyType ?? undefined,
   };
 }
 
@@ -7575,10 +7579,9 @@ export function recordKeyUsage(
 
   // Record which key was used on the task
   if (taskId) {
-    db.prepare("UPDATE agent_tasks SET credentialKeySuffix = ? WHERE id = ?").run(
-      keySuffix,
-      taskId,
-    );
+    db.prepare(
+      "UPDATE agent_tasks SET credentialKeySuffix = ?, credentialKeyType = ? WHERE id = ?",
+    ).run(keySuffix, keyType, taskId);
   }
 }
 
@@ -7639,5 +7642,45 @@ export function getKeyStatuses(
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   return db
     .prepare<ApiKeyStatus, string[]>(`SELECT * FROM api_key_status ${where} ORDER BY keyIndex`)
+    .all(...params);
+}
+
+export interface KeyCostSummary {
+  keyType: string;
+  keySuffix: string;
+  totalCost: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  taskCount: number;
+}
+
+/**
+ * Aggregate cost data per API key by joining session_costs through agent_tasks.
+ */
+export function getKeyCostSummary(keyType?: string): KeyCostSummary[] {
+  const db = getDb();
+  const conditions = ["t.credentialKeySuffix IS NOT NULL"];
+  const params: string[] = [];
+
+  if (keyType) {
+    conditions.push("t.credentialKeyType = ?");
+    params.push(keyType);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  return db
+    .prepare<KeyCostSummary, string[]>(
+      `SELECT
+        t.credentialKeyType as keyType,
+        t.credentialKeySuffix as keySuffix,
+        COALESCE(SUM(sc.totalCostUsd), 0) as totalCost,
+        COALESCE(SUM(sc.inputTokens), 0) as totalInputTokens,
+        COALESCE(SUM(sc.outputTokens), 0) as totalOutputTokens,
+        COUNT(DISTINCT sc.taskId) as taskCount
+      FROM session_costs sc
+      JOIN agent_tasks t ON sc.taskId = t.id
+      ${where}
+      GROUP BY t.credentialKeyType, t.credentialKeySuffix`,
+    )
     .all(...params);
 }

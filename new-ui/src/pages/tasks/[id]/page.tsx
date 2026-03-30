@@ -18,6 +18,7 @@ import {
   Gitlab,
   GitPullRequest,
   Hash,
+  Key,
   Link2,
   Pause,
   Play,
@@ -538,6 +539,20 @@ export default function TaskDetailPage() {
           <span className="text-xs font-mono truncate" title={task.claudeSessionId}>
             {task.claudeSessionId.slice(0, 12)}...
           </span>
+        </MetaRow>
+      )}
+      {task.credentialKeySuffix && (
+        <MetaRow icon={Key} label="API Key">
+          <Link to="/keys" className="text-primary hover:underline font-mono text-xs">
+            {task.credentialKeyType === "CLAUDE_CODE_OAUTH_TOKEN"
+              ? "OAuth"
+              : task.credentialKeyType === "ANTHROPIC_API_KEY"
+                ? "Anthropic"
+                : task.credentialKeyType === "OPENROUTER_API_KEY"
+                  ? "OpenRouter"
+                  : (task.credentialKeyType ?? "Key")}{" "}
+            ...{task.credentialKeySuffix}
+          </Link>
         </MetaRow>
       )}
       {task.workflowRunId && (

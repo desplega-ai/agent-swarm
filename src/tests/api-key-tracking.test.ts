@@ -103,12 +103,16 @@ describe("resolveCredentialPools", () => {
     expect(env.ANTHROPIC_API_KEY).toBe("key-ccc33");
   });
 
-  test("non-pool vars are unchanged", async () => {
+  test("single keys are tracked with index 0", async () => {
     const env: Record<string, string | undefined> = {
       ANTHROPIC_API_KEY: "single-key",
     };
     const selections = await resolveCredentialPools(env);
-    expect(selections.length).toBe(0);
+    expect(selections.length).toBe(1);
+    expect(selections[0]!.index).toBe(0);
+    expect(selections[0]!.total).toBe(1);
+    expect(selections[0]!.keySuffix).toBe("e-key");
+    expect(selections[0]!.keyType).toBe("ANTHROPIC_API_KEY");
     expect(env.ANTHROPIC_API_KEY).toBe("single-key");
   });
 });

@@ -8,3 +8,11 @@ export function useApiKeyStatuses(keyType?: string) {
     select: (data) => data.keys,
   });
 }
+
+export function useApiKeyCosts(keyType?: string) {
+  return useQuery({
+    queryKey: ["api-key-costs", keyType],
+    queryFn: () => api.fetchApiKeyCosts(keyType),
+    select: (data) => data.costs,
+  });
+}

@@ -91,8 +91,8 @@ async function fetchAvailableIndices(
   const availableIndicesMap: Record<string, number[]> = {};
   for (const envVar of CREDENTIAL_POOL_VARS) {
     const val = env[envVar];
-    if (val?.includes(",")) {
-      const totalKeys = val.split(",").filter((s) => s.trim()).length;
+    if (val) {
+      const totalKeys = val.includes(",") ? val.split(",").filter((s) => s.trim()).length : 1;
       try {
         const resp = await fetch(
           `${apiUrl}/api/keys/available?keyType=${encodeURIComponent(envVar)}&totalKeys=${totalKeys}`,
@@ -134,7 +134,7 @@ export async function resolveCredentialPools(
   const selections: CredentialSelection[] = [];
   for (const envVar of CREDENTIAL_POOL_VARS) {
     const val = env[envVar];
-    if (val?.includes(",")) {
+    if (val) {
       const available = availableIndicesMap?.[envVar];
       const result = selectCredential(val, available, envVar);
       env[envVar] = result.selected;

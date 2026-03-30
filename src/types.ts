@@ -149,6 +149,10 @@ export const AgentTaskSchema = z.object({
   peakContextPercent: z.number().min(0).max(100).optional(),
   totalContextTokensUsed: z.number().int().min(0).optional(),
   contextWindowSize: z.number().int().min(0).optional(),
+
+  // Credential tracking
+  credentialKeySuffix: z.string().optional(),
+  credentialKeyType: z.string().optional(),
 });
 
 export const AgentStatusSchema = z.enum(["idle", "busy", "offline"]);
