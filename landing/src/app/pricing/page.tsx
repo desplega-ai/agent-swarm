@@ -41,6 +41,7 @@ export default function PricingPage() {
       <Navbar />
       {/* Spacer for fixed navbar */}
       <div className="h-20" />
+      <h1 className="sr-only">Pricing — Agent Swarm Cloud</h1>
       <PricingSection />
       <Footer />
 

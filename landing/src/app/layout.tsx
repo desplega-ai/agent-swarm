@@ -44,6 +44,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
+    site: "@desplegalabs",
+    creator: "@desplegalabs",
     title: "Agent Swarm — Multi-Agent Orchestration for AI Coding Assistants",
     description:
       "Run a team of AI coding agents that coordinate autonomously. Start your 7-day free trial on Agent Swarm Cloud, or self-host for free. Open source, MCP-powered.",

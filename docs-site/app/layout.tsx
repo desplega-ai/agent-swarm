@@ -50,6 +50,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
+    site: "@desplegalabs",
+    creator: "@desplegalabs",
     title: "Agent Swarm Documentation",
     description:
       "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants.",
