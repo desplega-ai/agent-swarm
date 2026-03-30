@@ -3,7 +3,7 @@ date: 2026-03-28T12:00:00-07:00
 author: Taras
 topic: "PR Auto-Merge Safety Controls"
 tags: [brainstorm, github, auto-merge, pr-lifecycle, safety]
-status: in-progress
+status: complete
 exploration_type: problem
 last_updated: 2026-03-28
 last_updated_by: Claude
@@ -131,13 +131,13 @@ This also aligns the quick win with the long-term vision: the quick win restrict
 
 5. **Agent-created PRs get no special handling.** They follow the same event filtering as any PR. The existing task completion notification already informs the lead about PR creation.
 
-### Open Questions
+### Open Questions (Resolved)
 
-- **Event taxonomy for workflows:** When we build workflow event triggers, what's the event schema? Do we mirror GitHub's event structure verbatim, or create a normalized/simplified event model?
-- **Label convention:** What label(s) trigger agent action by default? `swarm-review`? Is this configurable? What if users want custom labels?
-- **Backward compatibility:** The quick win is a breaking change for users who rely on the current event cascade. How do we communicate this? Migration guide? Changelog entry? Opt-in period?
-- **Event logging:** Should suppressed events be logged/visible somewhere (swarm dashboard?) so users can see what's being filtered and understand the system's behavior?
-- **Workflow trigger matching:** How do workflow triggers match events? Exact event type? Pattern matching? Conditions on event payload fields?
+- **Event taxonomy for workflows:** ~~New schema needed?~~ **Resolved:** Existing infrastructure already supports this. `WorkflowEventBus` (event-bus.ts) + `handleScheduleTrigger` / `handleWebhookTrigger` (triggers.ts) provide the pattern. GitHub events become a new trigger type alongside `schedule` and `webhook`.
+- **Label convention:** Default label(s) configurable by env var (e.g., `GITHUB_EVENT_LABELS=swarm-review,agent-review`). Ships with a sensible default.
+- **Backward compatibility:** ~~Migration concern~~ **Resolved:** It’s fine to break. Ship it with a changelog entry explaining the change and why.
+- **Event logging:** Not for now. Info-level logging of suppressed events is sufficient.
+- **Workflow trigger matching:** Event-based, following the same pattern as schedule triggers. Users define a new trigger type (e.g., `{ type: “github-event”, event: “pull_request”, action: “opened” }`) on their workflows.
 
 ### Constraints Identified
 
@@ -148,7 +148,7 @@ This also aligns the quick win with the long-term vision: the quick win restrict
 
 ### Core Requirements
 
-**Quick Win (ship ASAP):**
+**Quick Win (ship ASAP):** ✅ Confirmed — info logging for suppressed events is fine.
 1. GitHub webhook handler defaults to only creating tasks/messages for:
    - Agent @mentioned in a comment (issue_comment, pull_request_review_comment)
    - Agent assigned as reviewer (pull_request.review_requested)
@@ -164,6 +164,17 @@ This also aligns the quick win with the long-term vision: the quick win restrict
 4. Default: no workflows are pre-configured (safe default stands)
 5. Documentation with example workflows for common automation patterns (auto-review, auto-merge with gates, etc.)
 
+## Existing Infrastructure (discovered during review)
+
+The codebase already has the building blocks for the long-term solution:
+
+- **`src/workflows/event-bus.ts`** — `WorkflowEventBus` (in-process EventEmitter). Already used by `src/http/webhooks.ts` to emit GitHub events.
+- **`src/workflows/triggers.ts`** — `handleScheduleTrigger()` and `handleWebhookTrigger()`. Schedule triggers already find workflows by schedule ID and execute them. The GitHub event trigger would follow the same pattern.
+- **`src/http/webhooks.ts`** — Already emits to `workflowEventBus` after processing GitHub events.
+
+The long-term "GitHub event → workflow trigger" feature is a natural extension of the schedule trigger pattern, not a greenfield build.
+
 ## Next Steps
 
-- [Handoff decision: research, plan, or parked]
+- **→ `/create-plan`** for the quick win: restrict default GitHub event handling to @mention + assign + label only.
+- **Later:** Plan workflow event triggers (long-term solution) as a separate effort.
