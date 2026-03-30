@@ -17,6 +17,7 @@ import { startSlackApp, stopSlackApp } from "../slack";
 import { initWorkflows } from "../workflows";
 import { handleActiveSessions } from "./active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
+import { handleApiKeys } from "./api-keys";
 import { handleApprovalRequests } from "./approval-requests";
 import { handleConfig } from "./config";
 import { handleContext } from "./context";
@@ -119,6 +120,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
     () => handleMcpServers(req, res, pathSegments, queryParams),
     () => handleMemory(req, res, pathSegments, myAgentId),
+    () => handleApiKeys(req, res, pathSegments, queryParams),
     () => handleHeartbeat(req, res, pathSegments),
     () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
     () => handleMcp(req, res, transports),

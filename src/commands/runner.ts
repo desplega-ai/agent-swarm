@@ -18,7 +18,11 @@ import {
   type ProviderSessionConfig,
 } from "../providers/index.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
-import { resolveCredentialPools } from "../utils/credentials.ts";
+import {
+  CREDENTIAL_POOL_VARS,
+  type CredentialSelection,
+  resolveCredentialPools,
+} from "../utils/credentials.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
 import { interpolate } from "../workflows/template.ts";
@@ -178,12 +182,19 @@ async function closeAgent(config: ApiConfig, role: string): Promise<void> {
  * Falls back to baseEnv on any error (network, parse, etc).
  * Credential env vars with comma-separated values get one randomly selected.
  */
+interface ResolvedEnvResult {
+  env: Record<string, string | undefined>;
+  credentialSelections: CredentialSelection[];
+  /** Which credential pool var was used (for tracking) */
+  activeCredentialVar?: string;
+}
+
 async function fetchResolvedEnv(
   apiUrl: string,
   apiKey: string,
   agentId: string,
   baseEnv: Record<string, string | undefined> = process.env,
-): Promise<Record<string, string | undefined>> {
+): Promise<ResolvedEnvResult> {
   const env: Record<string, string | undefined> = { ...baseEnv };
 
   if (apiUrl && agentId) {
@@ -213,8 +224,40 @@ async function fetchResolvedEnv(
     }
   }
 
-  resolveCredentialPools(env);
-  return env;
+  // Fetch available key indices from the API for rate-limit-aware selection
+  const availableIndicesMap: Record<string, number[]> = {};
+  for (const envVar of CREDENTIAL_POOL_VARS) {
+    const val = env[envVar];
+    if (val?.includes(",")) {
+      const totalKeys = val.split(",").filter((s) => s.trim()).length;
+      try {
+        const resp = await fetch(
+          `${apiUrl}/api/keys/available?keyType=${encodeURIComponent(envVar)}&totalKeys=${totalKeys}`,
+          { headers: { Authorization: `Bearer ${apiKey}` } },
+        );
+        if (resp.ok) {
+          const data = (await resp.json()) as { availableIndices: number[] };
+          availableIndicesMap[envVar] = data.availableIndices;
+          if (data.availableIndices.length < totalKeys) {
+            console.log(
+              `[credentials] ${envVar}: ${data.availableIndices.length}/${totalKeys} keys available (${totalKeys - data.availableIndices.length} rate-limited)`,
+            );
+          }
+        }
+      } catch {
+        // Non-critical — fall back to random selection
+      }
+    }
+  }
+
+  const credentialSelections = resolveCredentialPools(env, availableIndicesMap);
+
+  // Determine which credential var is active
+  let activeCredentialVar: string | undefined;
+  if (env.CLAUDE_CODE_OAUTH_TOKEN) activeCredentialVar = "CLAUDE_CODE_OAUTH_TOKEN";
+  else if (env.ANTHROPIC_API_KEY) activeCredentialVar = "ANTHROPIC_API_KEY";
+
+  return { env, credentialSelections, activeCredentialVar };
 }
 
 /** Tools that produce noise — skip auto-progress for these */
@@ -545,6 +588,64 @@ async function ensureTaskFinished(
   }
 }
 
+/** Report key usage to the API (fire-and-forget) */
+async function reportKeyUsage(
+  apiUrl: string,
+  apiKey: string,
+  keyType: string,
+  selection: CredentialSelection,
+  taskId?: string,
+): Promise<void> {
+  try {
+    await fetch(`${apiUrl}/api/keys/report-usage`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        keyType,
+        keySuffix: selection.keySuffix,
+        keyIndex: selection.index,
+        taskId,
+      }),
+    });
+  } catch {
+    // Non-blocking
+  }
+}
+
+/** Report a rate-limited key to the API (fire-and-forget) */
+async function reportKeyRateLimit(
+  apiUrl: string,
+  apiKey: string,
+  keyType: string,
+  keySuffix: string,
+  keyIndex: number,
+  rateLimitedUntil: string,
+): Promise<void> {
+  try {
+    await fetch(`${apiUrl}/api/keys/report-rate-limit`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        keyType,
+        keySuffix,
+        keyIndex,
+        rateLimitedUntil,
+      }),
+    });
+    console.log(
+      `[credentials] Reported key ...${keySuffix} as rate-limited until ${rateLimitedUntil}`,
+    );
+  } catch {
+    // Non-blocking
+  }
+}
+
 /**
  * Pause a task via the API (for graceful shutdown).
  * Unlike marking as failed, paused tasks can be resumed after container restart.
@@ -775,6 +876,12 @@ interface RunningTask {
   cursorUpdates?: Array<{ channelId: string; ts: string }>;
   /** Resolved working directory for VCS detection */
   workingDir?: string;
+  /** Credential tracking: which key was used for this task */
+  credentialInfo?: {
+    keyType: string;
+    keySuffix: string;
+    keyIndex: number;
+  };
 }
 
 /** Runner state for tracking concurrent tasks */
@@ -1395,7 +1502,19 @@ async function spawnProviderProcess(
   const effectiveTaskId = realTaskId || crypto.randomUUID();
 
   // Resolve env first so we can use MODEL_OVERRIDE from config
-  const freshEnv = await fetchResolvedEnv(opts.apiUrl, opts.apiKey, opts.agentId);
+  const {
+    env: freshEnv,
+    credentialSelections,
+    activeCredentialVar,
+  } = await fetchResolvedEnv(opts.apiUrl, opts.apiKey, opts.agentId);
+
+  // Report which key was selected for this task (fire-and-forget)
+  if (credentialSelections.length > 0 && realTaskId) {
+    for (const sel of credentialSelections) {
+      const keyType = activeCredentialVar || "ANTHROPIC_API_KEY";
+      reportKeyUsage(opts.apiUrl, opts.apiKey, keyType, sel, realTaskId).catch(() => {});
+    }
+  }
 
   // Propagate agent-fs config to process.env so getBasePrompt() can read them
   // (fetchResolvedEnv returns a new object, doesn't update process.env)
@@ -1729,6 +1848,16 @@ async function spawnProviderProcess(
     return result;
   });
 
+  // Build credential info for rate limit tracking
+  const primarySelection = credentialSelections[0];
+  const credentialInfo = primarySelection
+    ? {
+        keyType: activeCredentialVar || "ANTHROPIC_API_KEY",
+        keySuffix: primarySelection.keySuffix,
+        keyIndex: primarySelection.index,
+      }
+    : undefined;
+
   const runningTask: RunningTask = {
     taskId: effectiveTaskId,
     session,
@@ -1736,6 +1865,7 @@ async function spawnProviderProcess(
     startTime: new Date(),
     promise,
     result: null,
+    credentialInfo,
   };
 
   // Non-blocking completion tracking
@@ -1766,7 +1896,7 @@ async function runProviderIteration(
     cwd?: string;
   },
 ): Promise<ProviderResult> {
-  const freshEnv = await fetchResolvedEnv(opts.apiUrl, opts.apiKey, opts.agentId);
+  const { env: freshEnv } = await fetchResolvedEnv(opts.apiUrl, opts.apiKey, opts.agentId);
   const model = (freshEnv.MODEL_OVERRIDE as string) || "";
 
   const config: ProviderSessionConfig = {
@@ -1811,6 +1941,7 @@ async function checkCompletedProcesses(
     triggerType?: string;
     cursorUpdates?: Array<{ channelId: string; ts: string }>;
     workingDir?: string;
+    credentialInfo?: RunningTask["credentialInfo"];
   }> = [];
 
   for (const [taskId, task] of state.activeTasks) {
@@ -1825,12 +1956,13 @@ async function checkCompletedProcesses(
         triggerType: task.triggerType,
         cursorUpdates: task.cursorUpdates,
         workingDir: task.workingDir,
+        credentialInfo: task.credentialInfo,
       });
     }
   }
 
   // Remove completed tasks from the map and ensure they're marked as finished
-  for (const { taskId, result, cursorUpdates, workingDir } of completedTasks) {
+  for (const { taskId, result, cursorUpdates, workingDir, credentialInfo } of completedTasks) {
     state.activeTasks.delete(taskId);
 
     if (apiConfig) {
@@ -1849,6 +1981,21 @@ async function checkCompletedProcesses(
       if (result.exitCode !== 0 && result.failureReason) {
         failureReason = result.failureReason;
         console.log(`[${role}] Detected error for task ${taskId.slice(0, 8)}: ${failureReason}`);
+
+        // If rate-limited and we know which key was used, report it
+        if (credentialInfo && /rate.?limit/i.test(failureReason)) {
+          // Default cooldown: 5 minutes from now (if no specific retry-after available)
+          const cooldownMs = 5 * 60 * 1000;
+          const rateLimitedUntil = new Date(Date.now() + cooldownMs).toISOString();
+          reportKeyRateLimit(
+            apiConfig.apiUrl,
+            apiConfig.apiKey,
+            credentialInfo.keyType,
+            credentialInfo.keySuffix,
+            credentialInfo.keyIndex,
+            rateLimitedUntil,
+          ).catch(() => {});
+        }
       }
       await ensureTaskFinished(apiConfig, role, taskId, result.exitCode, failureReason);
 

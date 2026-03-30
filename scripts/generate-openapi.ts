@@ -8,6 +8,7 @@ import "../src/http/context";
 import "../src/http/db-query";
 import "../src/http/ecosystem";
 
+import "../src/http/api-keys";
 import "../src/http/events";
 import "../src/http/heartbeat";
 import "../src/http/memory";
