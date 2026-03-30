@@ -1,6 +1,16 @@
 // Bot name for @mentions (can be overridden via env)
 export const GITHUB_BOT_NAME = process.env.GITHUB_BOT_NAME || "agent-swarm-bot";
 
+// Labels that trigger agent action on PR/issue label events (comma-separated env var)
+const GITHUB_EVENT_LABELS_RAW = process.env.GITHUB_EVENT_LABELS || "swarm-review";
+export const GITHUB_EVENT_LABELS: string[] = GITHUB_EVENT_LABELS_RAW.split(",")
+  .map((l) => l.trim().toLowerCase())
+  .filter(Boolean);
+
+export function isSwarmLabel(label: string): boolean {
+  return GITHUB_EVENT_LABELS.includes(label.toLowerCase());
+}
+
 // Additional aliases that also trigger the bot (comma-separated env var)
 // Example: GITHUB_BOT_ALIASES=heysidekick,sidekick,review-bot
 function computeBotNames(): string[] {

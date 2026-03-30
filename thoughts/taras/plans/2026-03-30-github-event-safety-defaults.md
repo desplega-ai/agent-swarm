@@ -3,7 +3,7 @@ date: 2026-03-30
 author: Claude
 topic: "GitHub Event Safety Defaults — Quick Win"
 tags: [plan, github, events, safety, auto-merge]
-status: ready-for-review
+status: completed
 autonomy: autopilot
 brainstorm: thoughts/taras/brainstorms/2026-03-28-pr-auto-merge-safety.md
 ---
@@ -171,11 +171,11 @@ These follow the exact same pattern as the existing `github.pull_request.assigne
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Existing tests pass: `bun test`
-- [ ] `isSwarmLabel("swarm-review")` returns true
-- [ ] `isSwarmLabel("unrelated")` returns false
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Existing tests pass: `bun test`
+- [x] `isSwarmLabel("swarm-review")` returns true
+- [x] `isSwarmLabel("unrelated")` returns false
 
 #### Manual Verification:
 - [ ] Start API server, send a mock `pull_request.labeled` webhook with `label.name: "swarm-review"` → task created
@@ -206,7 +206,9 @@ case "closed": {
 }
 ```
 
-Same pattern for `synchronize`. The existing task lookup and notification task creation code stays in place (just unreachable in the default path). This makes it easy to re-enable via workflow triggers later.
+Same pattern for `synchronize`.
+
+> **Implementation note (2026-03-30):** The cascade handler bodies were fully replaced rather than kept as unreachable code. This is cleaner, and the old code is recoverable from git history. When workflow event triggers are implemented, the handler logic can be restored from git or rewritten to use the new trigger system.
 
 #### 2. Suppress pull_request_review events
 **File**: `src/github/handlers.ts`
@@ -255,9 +257,9 @@ return { created: false };
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Existing tests pass: `bun test`
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Existing tests pass: `bun test`
 
 #### Manual Verification:
 - [ ] Start API server, send `pull_request_review.submitted` webhook → no task created, log shows `[GitHub:suppressed]`
@@ -313,11 +315,11 @@ Note: These tests will need to mock the DB functions (`findTaskByVcs`, `createTa
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] New tests pass: `bun test src/tests/github-event-labels.test.ts`
-- [ ] New tests pass: `bun test src/tests/github-event-filter.test.ts`
-- [ ] All existing tests still pass: `bun test`
-- [ ] TypeScript compiles: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
+- [x] New tests pass: `bun test src/tests/github-event-labels.test.ts`
+- [x] New tests pass: `bun test src/tests/github-event-filter.test.ts`
+- [x] All existing tests still pass: `bun test`
+- [x] TypeScript compiles: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
 - [ ] Review test coverage — all suppressed event types have a test
@@ -364,13 +366,13 @@ Previously, CI status events (check failures), PR lifecycle events (closed, new 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] No broken links in docs
+- [x] Lint passes: `bun run lint:fix`
+- [x] No broken links in docs
 
 #### Manual Verification:
-- [ ] Changelog entry is clear and accurate
-- [ ] Env var is documented
-- [ ] Breaking change migration path is documented
+- [x] Changelog entry is clear and accurate (no project CHANGELOG.md — docs go in PR description)
+- [x] Env var is documented
+- [x] Breaking change migration path is documented (in PR description)
 
 **Implementation Note**: After completing this phase, the feature is ready for PR.
 
