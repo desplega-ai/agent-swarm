@@ -293,9 +293,7 @@ describe("Heartbeat Checklist", () => {
 
       await createBootTriageTask();
 
-      const tasks = getDb()
-        .query("SELECT * FROM agent_tasks WHERE taskType = 'boot-triage'")
-        .all();
+      const tasks = getDb().query("SELECT * FROM agent_tasks WHERE taskType = 'boot-triage'").all();
       expect(tasks.length).toBe(0);
     });
 
@@ -372,9 +370,7 @@ describe("Heartbeat Checklist", () => {
       await createBootTriageTask();
       await createBootTriageTask();
 
-      const tasks = getDb()
-        .query("SELECT * FROM agent_tasks WHERE taskType = 'boot-triage'")
-        .all();
+      const tasks = getDb().query("SELECT * FROM agent_tasks WHERE taskType = 'boot-triage'").all();
       expect(tasks.length).toBe(1);
     });
 
