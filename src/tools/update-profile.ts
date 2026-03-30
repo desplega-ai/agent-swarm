@@ -41,17 +41,19 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           ),
         soulMd: z
           .string()
+          .min(200)
           .max(65536)
           .optional()
           .describe(
-            "Soul content: persona and behavioral directives. Updates both DB and /workspace/SOUL.md.",
+            "Soul content: persona and behavioral directives. Updates both DB and /workspace/SOUL.md. Must be at least 200 characters to prevent accidental corruption.",
           ),
         identityMd: z
           .string()
+          .min(200)
           .max(65536)
           .optional()
           .describe(
-            "Identity content: expertise and working style. Updates both DB and /workspace/IDENTITY.md.",
+            "Identity content: expertise and working style. Updates both DB and /workspace/IDENTITY.md. Must be at least 200 characters to prevent accidental corruption.",
           ),
         setupScript: z
           .string()
