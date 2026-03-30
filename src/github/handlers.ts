@@ -800,13 +800,103 @@ export async function handleComment(
 export async function handlePullRequestReview(
   event: PullRequestReviewEvent,
 ): Promise<{ created: boolean; taskId?: string }> {
-  const { action, pull_request: pr, repository } = event;
+  const { action, review, pull_request: pr, repository, sender, installation } = event;
 
-  // Suppressed: see thoughts/taras/plans/2026-03-30-github-event-safety-defaults.md
-  console.log(
-    `[GitHub:suppressed] pull_request_review.${action} on ${repository.full_name}#${pr.number} — review events disabled by default`,
+  // Only handle submitted reviews (the most important action)
+  // Edited reviews are less common and dismissed is handled by the state
+  if (action !== "submitted") {
+    return { created: false };
+  }
+
+  // Skip "commented" reviews that are empty - these are often just line comments
+  // without an overall review body
+  if (review.state === "commented" && !review.body) {
+    return { created: false };
+  }
+
+  // Deduplicate
+  const eventKey = `pr-review:${repository.full_name}:${pr.number}:${review.id}`;
+  if (isDuplicate(eventKey)) {
+    return { created: false };
+  }
+
+  // Find any existing task for this PR
+  const existingTask = findTaskByVcs(repository.full_name, pr.number);
+
+  // Only notify for PRs where bot is creator or already has a task
+  const isBotCreator = isBotAssignee(pr.user.login);
+  if (!isBotCreator && !existingTask) {
+    return { created: false };
+  }
+
+  // Find lead agent for new task
+  const lead = findLeadAgent();
+
+  // Get review state info
+  const { emoji, label } = getReviewStateInfo(review.state);
+
+  // Build task description
+  const reviewBodySection = review.body ? `\n\nReview Comment:\n${review.body}` : "";
+  const relatedTaskSection = existingTask
+    ? `Related task: ${existingTask.id}\n🔀 Consider routing to the same agent working on the related task.\n`
+    : "";
+  const reviewSuggestions =
+    review.state === "approved"
+      ? "💡 Suggested: Merge the PR or wait for additional reviews"
+      : review.state === "changes_requested"
+        ? "💡 Suggested: Address the requested changes and update the PR"
+        : "💡 Suggested: Review the feedback and respond if needed";
+
+  const result = resolveTemplate(
+    "github.pull_request.review_submitted",
+    {
+      review_emoji: emoji,
+      pr_number: pr.number,
+      review_label: label,
+      pr_title: pr.title,
+      sender_login: sender.login,
+      repo_full_name: repository.full_name,
+      review_url: review.html_url,
+      review_body_section: reviewBodySection,
+      related_task_section: relatedTaskSection,
+      review_suggestions: reviewSuggestions,
+    },
+    { agentId: lead?.id, repoId: repository.full_name },
   );
-  return { created: false };
+
+  if (result.skipped) {
+    return { created: false };
+  }
+
+  // Create task (assigned to lead if available, otherwise unassigned)
+  const task = createTaskExtended(result.text, {
+    agentId: lead?.id ?? "",
+    source: "github",
+    vcsProvider: "github",
+    taskType: "github-review",
+    vcsRepo: repository.full_name,
+    vcsEventType: "pull_request_review",
+    vcsNumber: pr.number,
+    vcsAuthor: sender.login,
+    vcsUrl: review.html_url,
+  });
+
+  if (lead) {
+    console.log(
+      `[GitHub] Created task ${task.id} for PR #${pr.number} review (${review.state}) -> ${lead.name}`,
+    );
+  } else {
+    console.log(
+      `[GitHub] Created unassigned task ${task.id} for PR #${pr.number} review (${review.state}, no lead available)`,
+    );
+  }
+
+  // Add reaction to acknowledge the review
+  if (installation?.id) {
+    addIssueReaction(repository.full_name, pr.number, "eyes", installation.id);
+  }
+
+  return { created: true, taskId: task.id };
 }
 
 /**

@@ -101,7 +101,7 @@ describe("suppressed cascade events", () => {
     expect(result.created).toBe(false);
   });
 
-  test("pull_request_review.submitted returns created: false", async () => {
+  test("pull_request_review.submitted returns created: false when bot is not PR author and no existing task", async () => {
     const event: PullRequestReviewEvent = {
       action: "submitted",
       review: {
@@ -119,6 +119,88 @@ describe("suppressed cascade events", () => {
         html_url: "https://github.com/test/repo/pull/1",
         user: { login: "testuser" },
         head: { ref: "feature" },
+        base: { ref: "main" },
+      },
+      repository: BASE_REPO,
+      sender: { login: "reviewer" },
+    };
+    const result = await handlePullRequestReview(event);
+    expect(result.created).toBe(false);
+  });
+
+  test("pull_request_review.submitted creates task when bot is PR author", async () => {
+    const event: PullRequestReviewEvent = {
+      action: "submitted",
+      review: {
+        id: 2,
+        body: "LGTM",
+        state: "approved",
+        html_url: "https://github.com/test/repo/pull/99#pullrequestreview-2",
+        user: { login: "reviewer" },
+        submitted_at: "2026-01-01T00:00:00Z",
+      },
+      pull_request: {
+        number: 99,
+        title: "Bot PR",
+        body: null,
+        html_url: "https://github.com/test/repo/pull/99",
+        user: { login: GITHUB_BOT_NAME },
+        head: { ref: "bot-feature" },
+        base: { ref: "main" },
+      },
+      repository: BASE_REPO,
+      sender: { login: "reviewer" },
+    };
+    const result = await handlePullRequestReview(event);
+    expect(result.created).toBe(true);
+    expect(result.taskId).toBeDefined();
+  });
+
+  test("pull_request_review.edited is ignored", async () => {
+    const event: PullRequestReviewEvent = {
+      action: "edited",
+      review: {
+        id: 3,
+        body: "Updated review",
+        state: "approved",
+        html_url: "https://github.com/test/repo/pull/99#pullrequestreview-3",
+        user: { login: "reviewer" },
+        submitted_at: "2026-01-01T00:00:00Z",
+      },
+      pull_request: {
+        number: 99,
+        title: "Bot PR",
+        body: null,
+        html_url: "https://github.com/test/repo/pull/99",
+        user: { login: GITHUB_BOT_NAME },
+        head: { ref: "bot-feature" },
+        base: { ref: "main" },
+      },
+      repository: BASE_REPO,
+      sender: { login: "reviewer" },
+    };
+    const result = await handlePullRequestReview(event);
+    expect(result.created).toBe(false);
+  });
+
+  test("pull_request_review.submitted with empty commented review is ignored", async () => {
+    const event: PullRequestReviewEvent = {
+      action: "submitted",
+      review: {
+        id: 4,
+        body: "",
+        state: "commented",
+        html_url: "https://github.com/test/repo/pull/99#pullrequestreview-4",
+        user: { login: "reviewer" },
+        submitted_at: "2026-01-01T00:00:00Z",
+      },
+      pull_request: {
+        number: 99,
+        title: "Bot PR",
+        body: null,
+        html_url: "https://github.com/test/repo/pull/99",
+        user: { login: GITHUB_BOT_NAME },
+        head: { ref: "bot-feature" },
         base: { ref: "main" },
       },
       repository: BASE_REPO,
