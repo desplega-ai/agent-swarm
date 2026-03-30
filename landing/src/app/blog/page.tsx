@@ -42,6 +42,15 @@ interface BlogPost {
 
 const posts: BlogPost[] = [
   {
+    slug: "task-delegation-architecture",
+    title: "The Architecture Behind Task Delegation: Pools, Routing, and Dependencies",
+    description:
+      "How we built a task delegation system that routes work to the right AI agent automatically. Task pools, dependency graphs, offer/accept patterns, and the lessons from 3,000+ completed tasks.",
+    date: "March 30, 2026",
+    readTime: "7 min read",
+    tags: ["architecture", "task delegation", "AI agents", "orchestration"],
+  },
+  {
     slug: "swarm-metrics",
     title: "Agent Swarm by the Numbers: 80 Days, 242 PRs, 6 Agents",
     description:
