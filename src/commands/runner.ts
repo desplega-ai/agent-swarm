@@ -185,8 +185,6 @@ async function closeAgent(config: ApiConfig, role: string): Promise<void> {
 interface ResolvedEnvResult {
   env: Record<string, string | undefined>;
   credentialSelections: CredentialSelection[];
-  /** Which credential pool var was used (for tracking) */
-  activeCredentialVar?: string;
 }
 
 async function fetchResolvedEnv(
@@ -252,12 +250,7 @@ async function fetchResolvedEnv(
 
   const credentialSelections = resolveCredentialPools(env, availableIndicesMap);
 
-  // Determine which credential var is active
-  let activeCredentialVar: string | undefined;
-  if (env.CLAUDE_CODE_OAUTH_TOKEN) activeCredentialVar = "CLAUDE_CODE_OAUTH_TOKEN";
-  else if (env.ANTHROPIC_API_KEY) activeCredentialVar = "ANTHROPIC_API_KEY";
-
-  return { env, credentialSelections, activeCredentialVar };
+  return { env, credentialSelections };
 }
 
 /** Tools that produce noise — skip auto-progress for these */
@@ -1502,17 +1495,16 @@ async function spawnProviderProcess(
   const effectiveTaskId = realTaskId || crypto.randomUUID();
 
   // Resolve env first so we can use MODEL_OVERRIDE from config
-  const {
-    env: freshEnv,
-    credentialSelections,
-    activeCredentialVar,
-  } = await fetchResolvedEnv(opts.apiUrl, opts.apiKey, opts.agentId);
+  const { env: freshEnv, credentialSelections } = await fetchResolvedEnv(
+    opts.apiUrl,
+    opts.apiKey,
+    opts.agentId,
+  );
 
   // Report which key was selected for this task (fire-and-forget)
   if (credentialSelections.length > 0 && realTaskId) {
     for (const sel of credentialSelections) {
-      const keyType = activeCredentialVar || "ANTHROPIC_API_KEY";
-      reportKeyUsage(opts.apiUrl, opts.apiKey, keyType, sel, realTaskId).catch(() => {});
+      reportKeyUsage(opts.apiUrl, opts.apiKey, sel.keyType, sel, realTaskId).catch(() => {});
     }
   }
 
@@ -1852,7 +1844,7 @@ async function spawnProviderProcess(
   const primarySelection = credentialSelections[0];
   const credentialInfo = primarySelection
     ? {
-        keyType: activeCredentialVar || "ANTHROPIC_API_KEY",
+        keyType: primarySelection.keyType,
         keySuffix: primarySelection.keySuffix,
         keyIndex: primarySelection.index,
       }
@@ -1984,7 +1976,7 @@ async function checkCompletedProcesses(
 
         // If rate-limited and we know which key was used, report it
         if (credentialInfo && /rate.?limit/i.test(failureReason)) {
-          // Default cooldown: 5 minutes from now (if no specific retry-after available)
+          // Fixed 5-minute cooldown — we don't parse Retry-After from provider errors
           const cooldownMs = 5 * 60 * 1000;
           const rateLimitedUntil = new Date(Date.now() + cooldownMs).toISOString();
           reportKeyRateLimit(

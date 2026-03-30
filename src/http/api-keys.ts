@@ -43,7 +43,7 @@ const reportRateLimit = route({
     keyType: z.string(),
     keySuffix: z.string().min(1).max(10),
     keyIndex: z.number().int().min(0),
-    rateLimitedUntil: z.string(),
+    rateLimitedUntil: z.string().datetime(),
     scope: z.string().optional(),
     scopeId: z.string().optional(),
   }),
@@ -63,7 +63,7 @@ const getAvailable = route({
   tags: ["API Keys"],
   query: z.object({
     keyType: z.string(),
-    totalKeys: z.string().transform(Number),
+    totalKeys: z.coerce.number().int().min(1),
     scope: z.string().optional(),
     scopeId: z.string().optional(),
   }),

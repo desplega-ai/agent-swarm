@@ -8,6 +8,8 @@ export interface CredentialSelection {
   total: number;
   /** Last 5 characters of the selected credential (for tracking) */
   keySuffix: string;
+  /** Which credential pool env var this selection came from */
+  keyType: string;
 }
 
 /**
@@ -15,14 +17,18 @@ export interface CredentialSelection {
  * When availableIndices is provided, only those indices are considered (rate-limit aware).
  * Falls back to random selection from all credentials if no available indices match.
  */
-export function selectCredential(value: string, availableIndices?: number[]): CredentialSelection {
+export function selectCredential(
+  value: string,
+  availableIndices?: number[],
+  keyType = "ANTHROPIC_API_KEY",
+): CredentialSelection {
   const credentials = value
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
   if (credentials.length <= 1) {
     const selected = value.trim();
-    return { selected, index: 0, total: 1, keySuffix: selected.slice(-5) };
+    return { selected, index: 0, total: 1, keySuffix: selected.slice(-5), keyType };
   }
 
   let index: number;
@@ -44,7 +50,7 @@ export function selectCredential(value: string, availableIndices?: number[]): Cr
   }
 
   const selected = credentials[index]!;
-  return { selected, index, total: credentials.length, keySuffix: selected.slice(-5) };
+  return { selected, index, total: credentials.length, keySuffix: selected.slice(-5), keyType };
 }
 
 /**
@@ -87,7 +93,7 @@ export function resolveCredentialPools(
     const val = env[envVar];
     if (val?.includes(",")) {
       const available = availableIndicesMap?.[envVar];
-      const result = selectCredential(val, available);
+      const result = selectCredential(val, available, envVar);
       env[envVar] = result.selected;
       const availInfo = available ? ` (${available.length} available of ${result.total})` : "";
       console.log(

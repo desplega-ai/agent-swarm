@@ -23,7 +23,11 @@ CREATE TABLE IF NOT EXISTS api_key_status (
   -- Metadata
   createdAt TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updatedAt TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-  -- Unique constraint: one entry per key type + suffix + scope
+  -- Unique constraint: one entry per key type + suffix + scope.
+  -- Known limitation: two different keys sharing the same last 5 chars will collide,
+  -- causing the ON CONFLICT upsert to overwrite keyIndex. In practice this is rare
+  -- (1 in ~60M for random alphanumeric suffixes) and the impact is minor (wrong index
+  -- logged, but rate-limit tracking still works since suffix is the real identifier).
   UNIQUE(keyType, keySuffix, scope, scopeId)
 );
 

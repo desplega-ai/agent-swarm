@@ -66,6 +66,16 @@ describe("selectCredential", () => {
     const result = selectCredential("sk-ant-api03-abcde12345");
     expect(result.keySuffix).toBe("12345");
   });
+
+  test("keyType defaults to ANTHROPIC_API_KEY", () => {
+    const result = selectCredential("sk-ant-123456789");
+    expect(result.keyType).toBe("ANTHROPIC_API_KEY");
+  });
+
+  test("keyType is passed through when specified", () => {
+    const result = selectCredential("oauth-token-abc", undefined, "CLAUDE_CODE_OAUTH_TOKEN");
+    expect(result.keyType).toBe("CLAUDE_CODE_OAUTH_TOKEN");
+  });
 });
 
 describe("resolveCredentialPools", () => {
@@ -76,6 +86,7 @@ describe("resolveCredentialPools", () => {
     const selections = resolveCredentialPools(env);
     expect(selections.length).toBe(1);
     expect(selections[0]!.total).toBe(2);
+    expect(selections[0]!.keyType).toBe("ANTHROPIC_API_KEY");
     // Env should be mutated to the selected key
     expect(["key-aaa11", "key-bbb22"]).toContain(env.ANTHROPIC_API_KEY);
   });
