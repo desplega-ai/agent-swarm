@@ -5164,6 +5164,42 @@ export function getUnassignedPoolTasks(limit: number = 10): AgentTask[] {
     .map(rowToAgentTask);
 }
 
+export function getRecentFailedTasks(hours: number = 6): AgentTask[] {
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  return getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks
+       WHERE status = 'failed'
+         AND finishedAt > ?
+       ORDER BY finishedAt DESC
+       LIMIT 20`,
+    )
+    .all(since)
+    .map(rowToAgentTask);
+}
+
+export function getRecentCompletedCount(hours: number = 24): number {
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const row = getDb()
+    .prepare<{ count: number }, [string]>(
+      `SELECT COUNT(*) as count FROM agent_tasks
+       WHERE status = 'completed' AND finishedAt > ?`,
+    )
+    .get(since);
+  return row?.count ?? 0;
+}
+
+export function getRecentFailedCount(hours: number = 24): number {
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const row = getDb()
+    .prepare<{ count: number }, [string]>(
+      `SELECT COUNT(*) as count FROM agent_tasks
+       WHERE status = 'failed' AND finishedAt > ?`,
+    )
+    .get(since);
+  return row?.count ?? 0;
+}
+
 // ============================================================================
 // Workflow CRUD
 // ============================================================================

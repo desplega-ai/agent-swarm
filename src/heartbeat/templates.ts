@@ -28,7 +28,8 @@ Goal: Review system status and your standing orders, take action if needed.
 2. Review your standing orders for any periodic checks or actions.
 3. If something needs attention — take action now using your available tools (create tasks, post to Slack, cancel stuck tasks, etc.).
 4. If everything looks healthy and no standing orders are actionable — complete this task with a brief "All clear" summary.
-5. Do NOT create another heartbeat-checklist task — the system handles scheduling.`,
+5. Do NOT create another heartbeat-checklist task — the system handles scheduling.
+6. **Update your standing orders** — if you noticed a new pattern (e.g., recurring failures, a worker that needs attention), add it to your HEARTBEAT.md via \`update-profile\` with \`heartbeatMd\`. Remove resolved items. Keep it a live operational runbook.`,
   variables: [
     {
       name: "system_status",
@@ -70,7 +71,8 @@ The API server has just restarted (possible pod rotation or deployment). This is
 3. Review your standing orders for any checks that are relevant post-reboot.
 4. Take action using your available tools (re-create failed tasks, notify affected parties, etc.).
 5. Complete this task with a summary of what you found and what actions you took.
-6. Do NOT create another boot-triage task — this is a one-off event.`,
+6. Do NOT create another boot-triage task — this is a one-off event.
+7. **Update your standing orders** — if the reboot was caused by an issue worth monitoring, add a standing order to HEARTBEAT.md via \`update-profile\` with \`heartbeatMd\`. Keep it a live operational runbook.`,
   variables: [
     {
       name: "system_status",

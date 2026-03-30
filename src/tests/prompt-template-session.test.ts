@@ -64,7 +64,7 @@ describe("Session templates — registration", () => {
       "system.agent.agent_fs",
       "system.agent.self_awareness",
       "system.agent.context_mode",
-      "system.agent.guidelines",
+
       "system.agent.system",
       "system.agent.services",
       "system.agent.artifacts",
@@ -90,7 +90,7 @@ describe("Session templates — registration", () => {
   test("total of 14 session/system templates registered", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
-    expect(sessionSystem.length).toBe(14);
+    expect(sessionSystem.length).toBe(13);
   });
 });
 
@@ -146,7 +146,7 @@ describe("Session templates — individual resolution", () => {
 
   test("system.agent.lead contains delegation rules", () => {
     const result = resolveTemplate("system.agent.lead", {});
-    expect(result.text).toContain("CRITICAL DELEGATION RULE");
+    expect(result.text).toContain("CRITICAL: You are a coordinator");
     expect(result.text).toContain("coordinator");
   });
 
@@ -173,10 +173,7 @@ describe("Session templates — individual resolution", () => {
     expect(result.text).toContain("batch_execute");
   });
 
-  test("system.agent.guidelines contains operational guidelines", () => {
-    const result = resolveTemplate("system.agent.guidelines", {});
-    expect(result.text).toContain("Operational Guidelines");
-  });
+  // system.agent.guidelines was removed — its content was redundant with worker/lead templates
 
   test("system.agent.system contains package info", () => {
     const result = resolveTemplate("system.agent.system", {});
@@ -217,7 +214,7 @@ describe("Session templates — composite resolution", () => {
     expect(result.text).toContain("join-swarm");
 
     // Contains lead-specific section (not worker)
-    expect(result.text).toContain("CRITICAL DELEGATION RULE");
+    expect(result.text).toContain("CRITICAL: You are a coordinator");
     expect(result.text).toContain("coordinator");
     expect(result.text).not.toContain("task-action");
 
@@ -230,8 +227,7 @@ describe("Session templates — composite resolution", () => {
     // Contains context_mode
     expect(result.text).toContain("Context Window Management");
 
-    // Contains guidelines
-    expect(result.text).toContain("Operational Guidelines");
+    // Guidelines template was removed (redundant with lead/worker templates)
 
     // Contains system
     expect(result.text).toContain("System packages available");
@@ -255,7 +251,7 @@ describe("Session templates — composite resolution", () => {
     // Contains worker-specific section (not lead)
     expect(result.text).toContain("store-progress");
     expect(result.text).toContain("task-action");
-    expect(result.text).not.toContain("CRITICAL DELEGATION RULE");
+    expect(result.text).not.toContain("CRITICAL: You are a coordinator");
 
     // Contains filesystem section with interpolated agentId
     expect(result.text).toContain("/workspace/shared/thoughts/worker-agent-001/");
@@ -266,8 +262,7 @@ describe("Session templates — composite resolution", () => {
     // Contains context_mode
     expect(result.text).toContain("Context Window Management");
 
-    // Contains guidelines
-    expect(result.text).toContain("Operational Guidelines");
+    // Guidelines template was removed (redundant with lead/worker templates)
 
     // Contains system
     expect(result.text).toContain("System packages available");
@@ -302,12 +297,12 @@ describe("Session templates — composite resolution", () => {
     expect(workerResult.text).toContain("How You Are Built");
 
     // Lead has lead content, not worker
-    expect(leadResult.text).toContain("CRITICAL DELEGATION RULE");
+    expect(leadResult.text).toContain("CRITICAL: You are a coordinator");
     expect(leadResult.text).not.toContain("task-action");
 
     // Worker has worker content, not lead
     expect(workerResult.text).toContain("task-action");
-    expect(workerResult.text).not.toContain("CRITICAL DELEGATION RULE");
+    expect(workerResult.text).not.toContain("CRITICAL: You are a coordinator");
   });
 });
 
@@ -355,7 +350,7 @@ describe("Session templates — getBasePrompt integration", () => {
     // Core sections from composite
     expect(result).toContain("your role is: lead");
     expect(result).toContain("integration-test-lead");
-    expect(result).toContain("CRITICAL DELEGATION RULE");
+    expect(result).toContain("CRITICAL: You are a coordinator");
 
     // Should NOT have worker content
     expect(result).not.toContain("task-action");

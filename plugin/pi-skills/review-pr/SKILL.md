@@ -5,257 +5,102 @@ description: Review a pull request (GitHub) or merge request (GitLab) and provid
 
 # Review Pull Request / Merge Request
 
-Review a pull request (GitHub) or merge request (GitLab) by analyzing the changes and providing structured feedback.
+Review a PR (GitHub) or MR (GitLab) by analyzing changes and providing structured feedback.
 
-**Provider detection:** Check the remote URL or the provided URL to determine the VCS provider:
+**Provider detection:** Check the remote URL or provided URL:
 - If GitHub → use `gh pr` commands
 - If GitLab → use `glab mr` commands
 
 ## Arguments
 
-- `pr-number-or-url`: Either a PR number (e.g., `123`) or a full GitHub PR URL (e.g., `https://github.com/owner/repo/pull/123`)
+- `pr-number-or-url`: Either a PR number (e.g., `123`) or a full URL
 
 ## Workflow
 
-### 1. Parse the Input
+### 1. Setup
 
-If given a URL, extract the owner, repo, and PR number. If given just a number, use the current repository context.
+- Ensure the repo is cloned to `/workspace/personal/<repo-name>` (clone with `gh repo clone` if needed)
+- Fetch, checkout the PR branch, get PR details and diff
 
-### 2. Ensure Repository is Cloned Locally
+### 2. Check CI Status (MANDATORY)
 
-Before reviewing, make sure the repository is cloned in your personal workspace:
+Check CI with `gh pr checks <pr-number>` (or `glab mr view --json pipelines`).
 
-```bash
-# Clone to your personal workspace
-REPO_PATH=/workspace/personal/<repo-name>
+**If CI checks are failing, this is an automatic REQUEST_CHANGES.** Do not approve a PR with failing CI. Include the failing check names and error details in your review.
 
-if [ ! -d "$REPO_PATH" ]; then
-  gh repo clone <owner>/<repo> "$REPO_PATH"
-fi
+### 3. Verify Tests Are Included (MANDATORY)
 
-cd "$REPO_PATH"
-git fetch origin
-```
+Check that the PR includes test changes. **If the PR modifies code but does not add or update tests, this is an automatic REQUEST_CHANGES.** Every code change must include corresponding tests.
 
-### 3. Checkout the PR Branch
-
-```bash
-gh pr checkout <pr-number>
-```
-
-### 4. Fetch PR Details
-
-```bash
-gh pr view <pr-number> --json title,body,author,headRefName,baseRefName,additions,deletions,changedFiles
-```
-
-### 5. Get the Diff
-
-```bash
-gh pr diff <pr-number>
-```
-
-### 6. Check CI Status (MANDATORY)
-
-Before analyzing the code, check if CI checks are passing:
-
-```bash
-# GitHub
-gh pr checks <pr-number>
-
-# GitLab
-glab mr view <mr-number> --json pipelines
-```
-
-**If CI checks are failing, this is an automatic REQUEST_CHANGES.** Do not approve a PR with failing CI. Include the failing check names and any relevant error details in your review.
-
-### 7. Verify Tests Are Included (MANDATORY)
-
-Check that the PR includes test changes:
-
-```bash
-# Look for test files in the diff
-gh pr diff <pr-number> | grep -E '^\+\+\+ b/.*\.(test|spec)\.' || echo "NO TEST FILES CHANGED"
-```
-
-**If the PR modifies code but does not add or update tests, this is an automatic REQUEST_CHANGES.** Every code change must include corresponding tests. The only exceptions are:
+Exceptions:
 - Pure documentation changes (README, comments only)
 - Configuration-only changes (CI config, linter config, env files)
 - Dependency version bumps with no code changes
 
 When requesting changes for missing tests, be specific about what tests are needed.
 
-### 8. Analyze the Changes
+### 4. Analyze the Changes
 
 Review the diff for:
 - **Security issues**: SQL injection, XSS, command injection, secrets in code
 - **Logic errors**: Off-by-one errors, null handling, edge cases
 - **Performance concerns**: N+1 queries, unnecessary loops, memory leaks
 - **Code quality**: Naming, complexity, duplication, missing error handling
-- **Test coverage**: Are the included tests sufficient? Do they cover edge cases?
+- **Test coverage**: Are included tests sufficient? Do they cover edge cases?
 
-You can also:
-- Run the test suite locally to verify tests pass
-- Check for TypeScript errors with `bun tsc --noEmit` or equivalent
-- Review the actual files in context, not just the diff
+Also consider running the test suite locally and checking for TypeScript errors.
 
-### 9. Provide Structured Feedback
+### 5. Post the Review
 
-Format your review as:
-
-```markdown
-## PR Review: <title>
-
-### Summary
-<Brief summary of what this PR does>
-
-### Findings
-
-#### Critical Issues
-<List any blocking issues that must be fixed>
-
-#### Suggestions
-<Non-blocking improvements to consider>
-
-#### Positive Notes
-<Good patterns or practices observed>
-
-### Verdict
-<APPROVE | REQUEST_CHANGES | COMMENT>
-
-<Overall recommendation>
-```
-
-### 10. Optionally Post the Review
-
-If the user wants to post the review to GitHub:
+Post your review with a verdict: APPROVE, REQUEST_CHANGES, or COMMENT.
 
 ```bash
-gh pr review <pr-number> --approve --body "Your review message"
-# or
-gh pr review <pr-number> --request-changes --body "Your review message"
-# or
-gh pr review <pr-number> --comment --body "Your review message"
+gh pr review <pr-number> --approve --body "Review message"
+gh pr review <pr-number> --request-changes --body "Review message"
+gh pr review <pr-number> --comment --body "Review message"
 ```
 
-### 11. Post Inline Comments on Specific Lines
+### 6. Post Inline Comments on Specific Lines
 
-For more detailed feedback, you can post inline comments directly on specific lines of code using the GitHub API:
-
-#### Get the Commit SHA
-
-First, get the latest commit SHA for the PR head:
+For detailed feedback on specific lines, use the GitHub API:
 
 ```bash
+# Get the commit SHA
 COMMIT_SHA=$(gh pr view <pr-number> --json headRefOid --jq '.headRefOid')
-```
 
-#### Post an Inline Comment
-
-Use `gh api` to post a comment on a specific line:
-
-```bash
+# Post an inline comment
 gh api repos/<owner>/<repo>/pulls/<pr-number>/comments \
   --method POST \
   -f commit_id="$COMMIT_SHA" \
   -f path="src/path/to/file.ts" \
   -f line=42 \
   -f side="RIGHT" \
-  -f body="Your inline comment here explaining the issue or suggestion."
+  -f body="Your inline comment here."
 ```
 
 **Parameters:**
-- `commit_id`: The SHA of the commit to comment on (use the PR head commit)
-- `path`: The relative path to the file being commented on
-- `line`: The line number in the diff to attach the comment to
-- `side`: Use `"RIGHT"` for the new code (additions), `"LEFT"` for removed code
-- `body`: The comment text (supports markdown)
+- `commit_id`: PR head commit SHA
+- `path`: Relative file path
+- `line`: Line number in the diff
+- `side`: `"RIGHT"` for new code (additions), `"LEFT"` for removed code
+- `body`: Comment text (supports markdown)
 
-#### Example: Multiple Inline Comments
+### 7. Re-reviewing After Changes
 
-```bash
-# Get commit SHA once
-COMMIT_SHA=$(gh pr view 123 --json headRefOid --jq '.headRefOid')
+When the author pushes updates:
 
-# Comment on a potential bug
-gh api repos/owner/repo/pulls/123/comments \
-  --method POST \
-  -f commit_id="$COMMIT_SHA" \
-  -f path="src/utils/validate.ts" \
-  -f line=15 \
-  -f side="RIGHT" \
-  -f body="This could throw if \`input\` is undefined. Consider adding a null check."
-
-# Comment on a security concern
-gh api repos/owner/repo/pulls/123/comments \
-  --method POST \
-  -f commit_id="$COMMIT_SHA" \
-  -f path="src/api/handler.ts" \
-  -f line=28 \
-  -f side="RIGHT" \
-  -f body="⚠️ SQL injection risk: Use parameterized queries instead of string interpolation."
-```
-
-### 12. Re-reviewing and Resolving Comments
-
-When the PR author makes changes in response to your review:
-
-#### Re-review After Changes
-
-Check for new commits and re-review the updated code:
-
-```bash
-# Fetch latest changes
-git fetch origin
-gh pr checkout <pr-number>
-
-# View commits since your last review
-gh pr view <pr-number> --json commits --jq '.commits[-3:]'
-
-# See the full updated diff
-gh pr diff <pr-number>
-```
-
-#### Follow Up on Previous Comments
-
-When re-reviewing:
-- Check if your previous concerns have been addressed
-- Resolve comment threads that are now fixed
-- Add follow-up comments if changes need further refinement
-
-```bash
-# View existing review comments on the PR
-gh api repos/<owner>/<repo>/pulls/<pr-number>/comments --jq '.[].body'
-
-# Reply to a specific comment thread
-gh api repos/<owner>/<repo>/pulls/<pr-number>/comments/<comment-id>/replies \
-  --method POST \
-  -f body="Thanks, this looks good now!"
-```
-
-#### Resolve Conversations (via GitHub UI)
-
-Comment threads are typically resolved through the GitHub web interface:
-- Navigate to the PR's "Files changed" tab
-- Click "Resolve conversation" on addressed comments
-- This keeps the review history clean and shows progress
-
-#### Update Your Review Status
-
-After re-reviewing, update your overall review status:
-
-```bash
-# If all issues are addressed
-gh pr review <pr-number> --approve --body "All feedback addressed. LGTM!"
-
-# If some issues remain
-gh pr review <pr-number> --request-changes --body "A few items still need attention - see comments."
-```
+1. Fetch latest and re-checkout the PR
+2. Check if previous concerns were addressed
+3. Reply to existing comment threads:
+   ```bash
+   gh api repos/<owner>/<repo>/pulls/<pr-number>/comments/<comment-id>/replies \
+     --method POST \
+     -f body="Thanks, this looks good now!"
+   ```
+4. Update your review status (approve or request further changes)
 
 ## Tips
 
-- Focus on substantive issues, not style nitpicks
-- Be constructive and explain why something is a problem
+- Focus on substantive issues over style nitpicks
 - Acknowledge good work when you see it
-- If changes look good, say so clearly
-- Having the repo cloned allows you to run tests and verify changes work
+- Having the repo cloned allows you to run tests and verify changes locally

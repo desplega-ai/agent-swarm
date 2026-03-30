@@ -10,6 +10,9 @@ import {
   getDb,
   getIdleWorkersWithCapacity,
   getLeadAgent,
+  getRecentCompletedCount,
+  getRecentFailedCount,
+  getRecentFailedTasks,
   getStalledInProgressTasks,
   getTaskStats,
   getUnassignedPoolTasks,
@@ -354,16 +357,18 @@ export function gatherSystemStatus(): string {
   const agents = getAllAgents();
   const idleWorkers = getIdleWorkersWithCapacity();
   const poolTasks = getUnassignedPoolTasks(10);
+  const recentCompleted = getRecentCompletedCount(24);
+  const recentFailedCount = getRecentFailedCount(24);
 
   const sections: string[] = [];
 
-  // Task overview
+  // Task overview (with real 24h filtering)
   sections.push("## Task Overview [auto-generated]");
   sections.push(`- In Progress: ${stats.in_progress ?? 0}`);
   sections.push(`- Pending: ${stats.pending ?? 0}`);
   sections.push(`- Unassigned: ${stats.unassigned ?? 0}`);
-  sections.push(`- Completed (24h): ${stats.completed ?? 0}`);
-  sections.push(`- Failed (24h): ${stats.failed ?? 0}`);
+  sections.push(`- Completed (24h): ${recentCompleted}`);
+  sections.push(`- Failed (24h): ${recentFailedCount}`);
 
   // Stalled tasks
   if (stalledTasks.length > 0) {
@@ -374,6 +379,46 @@ export function gatherSystemStatus(): string {
       sections.push(
         `- [${task.id.slice(0, 8)}] "${task.task.slice(0, 60)}" — assigned to ${agentSlice}, last update: ${task.lastUpdatedAt}`,
       );
+    }
+  }
+
+  // Recent failures with reasons and pattern detection (last 6 hours)
+  const recentFailures = getRecentFailedTasks(6);
+  if (recentFailures.length > 0) {
+    sections.push("");
+    sections.push("## Recent Failures (last 6h) [auto-generated]");
+
+    // Group by similar failure reasons for pattern detection
+    const reasonGroups = new Map<string, typeof recentFailures>();
+    for (const task of recentFailures) {
+      const key = (task.failureReason ?? "unknown").slice(0, 80).toLowerCase().trim();
+      const group = reasonGroups.get(key) ?? [];
+      group.push(task);
+      reasonGroups.set(key, group);
+    }
+
+    // Show patterns first (groups with 2+ failures)
+    const patterns = [...reasonGroups.entries()].filter(([, tasks]) => tasks.length >= 2);
+    if (patterns.length > 0) {
+      sections.push("");
+      sections.push("**Failure patterns detected:**");
+      for (const [reason, tasks] of patterns) {
+        const agentIds = [...new Set(tasks.map((t) => t.agentId?.slice(0, 8) ?? "?"))].join(", ");
+        sections.push(`- ${tasks.length}x: "${reason}" (agents: ${agentIds})`);
+      }
+    }
+
+    // List individual failures (max 10)
+    sections.push("");
+    for (const task of recentFailures.slice(0, 10)) {
+      const agentSlice = task.agentId?.slice(0, 8) ?? "unassigned";
+      const reason = task.failureReason?.slice(0, 100) ?? "no reason";
+      sections.push(
+        `- [${task.id.slice(0, 8)}] "${task.task.slice(0, 50)}" — agent: ${agentSlice}, reason: ${reason}, at: ${task.finishedAt}`,
+      );
+    }
+    if (recentFailures.length > 10) {
+      sections.push(`- ... and ${recentFailures.length - 10} more`);
     }
   }
 
