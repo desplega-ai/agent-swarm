@@ -268,8 +268,8 @@ Update an agent's profile, identity files, and setup script. By default updates 
 | `name` | string | No | Agent name |
 | `role` | string | No | Agent role |
 | `description` | string | No | Agent description |
-| `soulMd` | string | No | SOUL.md content |
-| `identityMd` | string | No | IDENTITY.md content |
+| `soulMd` | string (min 200 chars) | No | SOUL.md content. Must be at least 200 characters to prevent accidental corruption. |
+| `identityMd` | string (min 200 chars) | No | IDENTITY.md content. Must be at least 200 characters to prevent accidental corruption. |
 | `toolsMd` | string | No | TOOLS.md content |
 | `claudeMd` | string | No | CLAUDE.md content |
 | `setupScript` | string | No | Startup script content |
