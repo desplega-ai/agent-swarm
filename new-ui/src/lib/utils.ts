@@ -9,11 +9,23 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
+ * Parse a date string as UTC, handling both ISO 8601 (with T/Z) and bare
+ * SQLite format (YYYY-MM-DD HH:MM:SS). The bare format is ambiguous —
+ * browsers parse it as local time — so we append 'Z' to force UTC.
+ */
+export function parseUTCDate(dateStr: string): Date {
+  if (dateStr.includes("T") || dateStr.endsWith("Z")) {
+    return new Date(dateStr);
+  }
+  return new Date(`${dateStr.replace(" ", "T")}Z`);
+}
+
+/**
  * Format a date as relative time (e.g., "2 minutes ago", "just now")
  */
 export function formatRelativeTime(date: string | Date): string {
   const now = Date.now();
-  const then = new Date(date).getTime();
+  const then = typeof date === "string" ? parseUTCDate(date).getTime() : date.getTime();
   const diff = now - then;
 
   const seconds = Math.floor(diff / 1000);
@@ -37,7 +49,7 @@ export function formatRelativeTime(date: string | Date): string {
  * Format a date as smart time - relative for recent, absolute for older
  */
 export function formatSmartTime(dateStr: string): string {
-  const date = new Date(dateStr);
+  const date = parseUTCDate(dateStr);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
@@ -102,8 +114,8 @@ export function formatDuration(ms: number): string {
  * Returns compact string like "2m", "1h 23m", "3d 4h".
  */
 export function formatElapsed(start: string, end?: string | null): string {
-  const startMs = new Date(start).getTime();
-  const endMs = end ? new Date(end).getTime() : Date.now();
+  const startMs = parseUTCDate(start).getTime();
+  const endMs = end ? parseUTCDate(end).getTime() : Date.now();
   const diffMs = endMs - startMs;
   if (diffMs < 0) return "—";
 

@@ -68,7 +68,7 @@ describe("Heartbeat Triage", () => {
       createTaskExtended("Completed task", { agentId: agent.id });
       // Manually mark as completed
       getDb().run(
-        "UPDATE agent_tasks SET status = 'completed', finishedAt = datetime('now') WHERE agentId = ?",
+        "UPDATE agent_tasks SET status = 'completed', finishedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE agentId = ?",
         [agent.id],
       );
 

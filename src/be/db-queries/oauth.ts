@@ -33,7 +33,7 @@ export function upsertOAuthApp(
          redirectUri = excluded.redirectUri,
          scopes = excluded.scopes,
          metadata = excluded.metadata,
-         updatedAt = datetime('now')`,
+         updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
     )
     .run(
       provider,
@@ -73,7 +73,7 @@ export function storeOAuthTokens(
          refreshToken = COALESCE(excluded.refreshToken, oauth_tokens.refreshToken),
          expiresAt = excluded.expiresAt,
          scope = COALESCE(excluded.scope, oauth_tokens.scope),
-         updatedAt = datetime('now')`,
+         updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
     )
     .run(provider, data.accessToken, data.refreshToken ?? null, data.expiresAt, data.scope ?? null);
 }
