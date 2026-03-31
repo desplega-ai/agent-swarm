@@ -1,12 +1,30 @@
 import type { OAuthApp, OAuthTokens } from "../../tracker/types";
+import { normalizeDateRequired } from "../date-utils";
 import { getDb } from "../db";
 
 // ── OAuth Apps ──
 
+function normalizeOAuthApp(row: OAuthApp): OAuthApp {
+  return {
+    ...row,
+    createdAt: normalizeDateRequired(row.createdAt),
+    updatedAt: normalizeDateRequired(row.updatedAt),
+  };
+}
+
+function normalizeOAuthTokens(row: OAuthTokens): OAuthTokens {
+  return {
+    ...row,
+    createdAt: normalizeDateRequired(row.createdAt),
+    updatedAt: normalizeDateRequired(row.updatedAt),
+  };
+}
+
 export function getOAuthApp(provider: string): OAuthApp | null {
-  return getDb()
+  const row = getDb()
     .query("SELECT * FROM oauth_apps WHERE provider = ?")
     .get(provider) as OAuthApp | null;
+  return row ? normalizeOAuthApp(row) : null;
 }
 
 export function upsertOAuthApp(
@@ -50,9 +68,10 @@ export function upsertOAuthApp(
 // ── OAuth Tokens ──
 
 export function getOAuthTokens(provider: string): OAuthTokens | null {
-  return getDb()
+  const row = getDb()
     .query("SELECT * FROM oauth_tokens WHERE provider = ?")
     .get(provider) as OAuthTokens | null;
+  return row ? normalizeOAuthTokens(row) : null;
 }
 
 export function storeOAuthTokens(

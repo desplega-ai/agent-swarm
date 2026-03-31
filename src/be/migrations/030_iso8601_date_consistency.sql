@@ -71,10 +71,16 @@ UPDATE channel_activity_cursors SET
 
 -- oauth_apps
 UPDATE oauth_apps SET
+  createdAt = replace(createdAt, ' ', 'T') || '.000Z'
+  WHERE createdAt LIKE '____-__-__ __:__:__' AND createdAt NOT LIKE '%T%';
+UPDATE oauth_apps SET
   updatedAt = replace(updatedAt, ' ', 'T') || '.000Z'
   WHERE updatedAt LIKE '____-__-__ __:__:__' AND updatedAt NOT LIKE '%T%';
 
 -- oauth_tokens
+UPDATE oauth_tokens SET
+  createdAt = replace(createdAt, ' ', 'T') || '.000Z'
+  WHERE createdAt LIKE '____-__-__ __:__:__' AND createdAt NOT LIKE '%T%';
 UPDATE oauth_tokens SET
   updatedAt = replace(updatedAt, ' ', 'T') || '.000Z'
   WHERE updatedAt LIKE '____-__-__ __:__:__' AND updatedAt NOT LIKE '%T%';
