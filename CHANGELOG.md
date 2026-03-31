@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.57.0] - 2026-03-31
+
+### Added
+- API key rate limit tracking and automatic rotation — tracks per-key rate limits, extracts reset times from Claude error messages, and rotates to available keys (#274)
+- API Keys dashboard page with summary cards for monitoring rate limit status
+- API key reference documentation and OpenAPI spec updates
+
+### Changed
+- `update-profile` tool now enforces minimum 200 character length for `soulMd` and `identityMd` fields to prevent accidental profile corruption (#272)
+- Rate-limit availability fetch moved into `resolveCredentialPools` helper for cleaner code organization
+
+### Fixed
+- Profile min-length validation added server-side after repeated client-side failures (#272)
+- Rate limit reset time extraction from Claude error messages
+
+## [1.56.5] - 2026-03-30
+
+### Changed
+- GitHub event handling restricted to explicit human actions — PR closed/synchronize, reviews, CI checks are now suppressed by default to prevent cascade auto-merge behavior
+
 ## [1.56.3] - 2026-03-30
 
 ### Changed
