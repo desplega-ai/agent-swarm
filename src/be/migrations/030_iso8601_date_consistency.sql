@@ -89,3 +89,20 @@ UPDATE oauth_tokens SET
 UPDATE workflow_versions SET
   createdAt = replace(createdAt, ' ', 'T') || '.000Z'
   WHERE createdAt LIKE '____-__-__ __:__:__' AND createdAt NOT LIKE '%T%';
+
+-- scheduled_tasks (defense-in-depth — dates are written from JS toISOString() but normalize any legacy data)
+UPDATE scheduled_tasks SET
+  createdAt = replace(createdAt, ' ', 'T') || '.000Z'
+  WHERE createdAt LIKE '____-__-__ __:__:__' AND createdAt NOT LIKE '%T%';
+UPDATE scheduled_tasks SET
+  lastUpdatedAt = replace(lastUpdatedAt, ' ', 'T') || '.000Z'
+  WHERE lastUpdatedAt LIKE '____-__-__ __:__:__' AND lastUpdatedAt NOT LIKE '%T%';
+UPDATE scheduled_tasks SET
+  lastRunAt = replace(lastRunAt, ' ', 'T') || '.000Z'
+  WHERE lastRunAt IS NOT NULL AND lastRunAt LIKE '____-__-__ __:__:__' AND lastRunAt NOT LIKE '%T%';
+UPDATE scheduled_tasks SET
+  nextRunAt = replace(nextRunAt, ' ', 'T') || '.000Z'
+  WHERE nextRunAt IS NOT NULL AND nextRunAt LIKE '____-__-__ __:__:__' AND nextRunAt NOT LIKE '%T%';
+UPDATE scheduled_tasks SET
+  lastErrorAt = replace(lastErrorAt, ' ', 'T') || '.000Z'
+  WHERE lastErrorAt IS NOT NULL AND lastErrorAt LIKE '____-__-__ __:__:__' AND lastErrorAt NOT LIKE '%T%';

@@ -3961,17 +3961,17 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     priority: row.priority,
     targetAgentId: row.targetAgentId ?? undefined,
     enabled: row.enabled === 1,
-    lastRunAt: row.lastRunAt ?? undefined,
-    nextRunAt: row.nextRunAt ?? undefined,
+    lastRunAt: normalizeDate(row.lastRunAt) ?? undefined,
+    nextRunAt: normalizeDate(row.nextRunAt) ?? undefined,
     createdByAgentId: row.createdByAgentId ?? undefined,
     timezone: row.timezone,
     consecutiveErrors: row.consecutiveErrors ?? 0,
-    lastErrorAt: row.lastErrorAt ?? undefined,
+    lastErrorAt: normalizeDate(row.lastErrorAt) ?? undefined,
     lastErrorMessage: row.lastErrorMessage ?? undefined,
     model: (row.model as "haiku" | "sonnet" | "opus" | null) ?? undefined,
     scheduleType: row.scheduleType as "recurring" | "one_time",
-    createdAt: row.createdAt,
-    lastUpdatedAt: row.lastUpdatedAt,
+    createdAt: normalizeDateRequired(row.createdAt),
+    lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
   };
 }
 
