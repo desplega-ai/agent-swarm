@@ -55,6 +55,7 @@ import type {
   WorkflowSnapshot,
   WorkflowVersion,
 } from "../types";
+import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import { runMigrations } from "./migrations/runner";
 import { seedDefaultTemplates } from "./seed";
 
@@ -3960,17 +3961,17 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     priority: row.priority,
     targetAgentId: row.targetAgentId ?? undefined,
     enabled: row.enabled === 1,
-    lastRunAt: row.lastRunAt ?? undefined,
-    nextRunAt: row.nextRunAt ?? undefined,
+    lastRunAt: normalizeDate(row.lastRunAt) ?? undefined,
+    nextRunAt: normalizeDate(row.nextRunAt) ?? undefined,
     createdByAgentId: row.createdByAgentId ?? undefined,
     timezone: row.timezone,
     consecutiveErrors: row.consecutiveErrors ?? 0,
-    lastErrorAt: row.lastErrorAt ?? undefined,
+    lastErrorAt: normalizeDate(row.lastErrorAt) ?? undefined,
     lastErrorMessage: row.lastErrorMessage ?? undefined,
     model: (row.model as "haiku" | "sonnet" | "opus" | null) ?? undefined,
     scheduleType: row.scheduleType as "recurring" | "one_time",
-    createdAt: row.createdAt,
-    lastUpdatedAt: row.lastUpdatedAt,
+    createdAt: normalizeDateRequired(row.createdAt),
+    lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
   };
 }
 
@@ -5241,8 +5242,8 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
     dir: row.dir ?? undefined,
     vcsRepo: row.vcs_repo ?? undefined,
     createdByAgentId: row.createdByAgentId ?? undefined,
-    createdAt: row.createdAt,
-    lastUpdatedAt: row.lastUpdatedAt,
+    createdAt: normalizeDateRequired(row.createdAt),
+    lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
   };
 }
 
@@ -5446,9 +5447,9 @@ function rowToWorkflowRun(row: WorkflowRunRow): WorkflowRun {
     triggerData: row.triggerData ? JSON.parse(row.triggerData) : undefined,
     context: row.context ? (JSON.parse(row.context) as Record<string, unknown>) : undefined,
     error: row.error ?? undefined,
-    startedAt: row.startedAt,
-    lastUpdatedAt: row.lastUpdatedAt,
-    finishedAt: row.finishedAt ?? undefined,
+    startedAt: normalizeDateRequired(row.startedAt),
+    lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
+    finishedAt: normalizeDate(row.finishedAt) ?? undefined,
   };
 }
 
@@ -5555,11 +5556,11 @@ function rowToWorkflowRunStep(row: WorkflowRunStepRow): WorkflowRunStep {
     input: row.input ? JSON.parse(row.input) : undefined,
     output: row.output ? JSON.parse(row.output) : undefined,
     error: row.error ?? undefined,
-    startedAt: row.startedAt,
-    finishedAt: row.finishedAt ?? undefined,
+    startedAt: normalizeDateRequired(row.startedAt),
+    finishedAt: normalizeDate(row.finishedAt) ?? undefined,
     retryCount: row.retryCount,
     maxRetries: row.maxRetries,
-    nextRetryAt: row.nextRetryAt ?? undefined,
+    nextRetryAt: normalizeDate(row.nextRetryAt) ?? undefined,
     idempotencyKey: row.idempotencyKey ?? undefined,
     diagnostics: row.diagnostics ?? undefined,
     nextPort: row.nextPort ?? undefined,
@@ -5806,7 +5807,7 @@ function rowToWorkflowVersion(row: WorkflowVersionRow): WorkflowVersion {
     version: row.version,
     snapshot: JSON.parse(row.snapshot) as WorkflowSnapshot,
     changedByAgentId: row.changedByAgentId ?? undefined,
-    createdAt: row.createdAt,
+    createdAt: normalizeDateRequired(row.createdAt),
   };
 }
 
@@ -6315,7 +6316,7 @@ function rowToChannelActivityCursor(row: ChannelActivityCursorRow): ChannelActiv
   return {
     channelId: row.channelId,
     lastSeenTs: row.lastSeenTs,
-    updatedAt: row.updatedAt,
+    updatedAt: normalizeDateRequired(row.updatedAt),
   };
 }
 
@@ -6339,7 +6340,7 @@ export function upsertChannelActivityCursor(channelId: string, lastSeenTs: strin
   getDb()
     .prepare(
       `INSERT INTO channel_activity_cursors (channelId, lastSeenTs, updatedAt)
-       VALUES (?, ?, datetime('now'))
+       VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
        ON CONFLICT(channelId) DO UPDATE SET lastSeenTs = excluded.lastSeenTs, updatedAt = excluded.updatedAt`,
     )
     .run(channelId, lastSeenTs);
@@ -6399,12 +6400,12 @@ function rowToApprovalRequest(row: ApprovalRequestRow): ApprovalRequest {
     status: row.status as ApprovalRequest["status"],
     responses: row.responses ? JSON.parse(row.responses) : null,
     resolvedBy: row.resolvedBy,
-    resolvedAt: row.resolvedAt,
+    resolvedAt: normalizeDate(row.resolvedAt),
     timeoutSeconds: row.timeoutSeconds,
-    expiresAt: row.expiresAt,
+    expiresAt: normalizeDate(row.expiresAt),
     notificationChannels: row.notificationChannels ? JSON.parse(row.notificationChannels) : null,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
+    createdAt: normalizeDateRequired(row.createdAt),
+    updatedAt: normalizeDateRequired(row.updatedAt),
   };
 }
 
@@ -6565,7 +6566,7 @@ export function getStuckApprovalRuns(): StuckApprovalRun[] {
       JOIN approval_requests ar ON ar.workflowRunStepId = wrs.id
       WHERE wr.status = 'waiting'
         AND (ar.status IN ('approved', 'rejected', 'timeout')
-             OR (ar.status = 'pending' AND ar.expiresAt IS NOT NULL AND ar.expiresAt < datetime('now')))`,
+             OR (ar.status = 'pending' AND ar.expiresAt IS NOT NULL AND ar.expiresAt < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))`,
     )
     .all();
 }
@@ -6586,7 +6587,7 @@ export function getExpiredPendingApprovals(): ApprovalRequest[] {
       `SELECT * FROM approval_requests
        WHERE status = 'pending'
          AND expiresAt IS NOT NULL
-         AND expiresAt < datetime('now')`,
+         AND expiresAt < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
     )
     .all();
   return rows.map(rowToApprovalRequest);

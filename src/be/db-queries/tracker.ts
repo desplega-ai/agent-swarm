@@ -1,5 +1,21 @@
 import type { TrackerAgentMapping, TrackerSync } from "../../tracker/types";
+import { normalizeDateRequired } from "../date-utils";
 import { getDb } from "../db";
+
+function normalizeTrackerSync(row: TrackerSync): TrackerSync {
+  return {
+    ...row,
+    lastSyncedAt: normalizeDateRequired(row.lastSyncedAt),
+    createdAt: normalizeDateRequired(row.createdAt),
+  };
+}
+
+function normalizeTrackerAgentMapping(row: TrackerAgentMapping): TrackerAgentMapping {
+  return {
+    ...row,
+    createdAt: normalizeDateRequired(row.createdAt),
+  };
+}
 
 // ── Tracker Sync ──
 
@@ -8,9 +24,10 @@ export function getTrackerSync(
   entityType: "task",
   swarmId: string,
 ): TrackerSync | null {
-  return getDb()
+  const row = getDb()
     .query("SELECT * FROM tracker_sync WHERE provider = ? AND entityType = ? AND swarmId = ?")
     .get(provider, entityType, swarmId) as TrackerSync | null;
+  return row ? normalizeTrackerSync(row) : null;
 }
 
 export function getTrackerSyncByExternalId(
@@ -18,9 +35,10 @@ export function getTrackerSyncByExternalId(
   entityType: "task",
   externalId: string,
 ): TrackerSync | null {
-  return getDb()
+  const row = getDb()
     .query("SELECT * FROM tracker_sync WHERE provider = ? AND entityType = ? AND externalId = ?")
     .get(provider, entityType, externalId) as TrackerSync | null;
+  return row ? normalizeTrackerSync(row) : null;
 }
 
 export function createTrackerSync(data: {
@@ -53,7 +71,7 @@ export function createTrackerSync(data: {
       data.lastDeliveryId ?? null,
       data.syncDirection ?? "inbound",
     ) as TrackerSync;
-  return result;
+  return normalizeTrackerSync(result);
 }
 
 export function updateTrackerSync(
@@ -124,9 +142,11 @@ export function getAllTrackerSyncs(provider?: string, entityType?: "task"): Trac
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  return getDb()
-    .query(`SELECT * FROM tracker_sync ${where} ORDER BY createdAt DESC`)
-    .all(...values) as TrackerSync[];
+  return (
+    getDb()
+      .query(`SELECT * FROM tracker_sync ${where} ORDER BY createdAt DESC`)
+      .all(...values) as TrackerSync[]
+  ).map(normalizeTrackerSync);
 }
 
 // ── Tracker Agent Mapping ──
@@ -135,18 +155,20 @@ export function getTrackerAgentMapping(
   provider: string,
   agentId: string,
 ): TrackerAgentMapping | null {
-  return getDb()
+  const row = getDb()
     .query("SELECT * FROM tracker_agent_mapping WHERE provider = ? AND agentId = ?")
     .get(provider, agentId) as TrackerAgentMapping | null;
+  return row ? normalizeTrackerAgentMapping(row) : null;
 }
 
 export function getTrackerAgentMappingByExternalUser(
   provider: string,
   externalUserId: string,
 ): TrackerAgentMapping | null {
-  return getDb()
+  const row = getDb()
     .query("SELECT * FROM tracker_agent_mapping WHERE provider = ? AND externalUserId = ?")
     .get(provider, externalUserId) as TrackerAgentMapping | null;
+  return row ? normalizeTrackerAgentMapping(row) : null;
 }
 
 export function createTrackerAgentMapping(data: {
@@ -155,13 +177,14 @@ export function createTrackerAgentMapping(data: {
   externalUserId: string;
   agentName: string;
 }): TrackerAgentMapping {
-  return getDb()
+  const result = getDb()
     .query(
       `INSERT INTO tracker_agent_mapping (provider, agentId, externalUserId, agentName)
        VALUES (?, ?, ?, ?)
        RETURNING *`,
     )
     .get(data.provider, data.agentId, data.externalUserId, data.agentName) as TrackerAgentMapping;
+  return normalizeTrackerAgentMapping(result);
 }
 
 export function deleteTrackerAgentMapping(provider: string, agentId: string): void {
@@ -172,11 +195,15 @@ export function deleteTrackerAgentMapping(provider: string, agentId: string): vo
 
 export function getAllTrackerAgentMappings(provider?: string): TrackerAgentMapping[] {
   if (provider) {
-    return getDb()
-      .query("SELECT * FROM tracker_agent_mapping WHERE provider = ? ORDER BY createdAt DESC")
-      .all(provider) as TrackerAgentMapping[];
+    return (
+      getDb()
+        .query("SELECT * FROM tracker_agent_mapping WHERE provider = ? ORDER BY createdAt DESC")
+        .all(provider) as TrackerAgentMapping[]
+    ).map(normalizeTrackerAgentMapping);
   }
-  return getDb()
-    .query("SELECT * FROM tracker_agent_mapping ORDER BY createdAt DESC")
-    .all() as TrackerAgentMapping[];
+  return (
+    getDb()
+      .query("SELECT * FROM tracker_agent_mapping ORDER BY createdAt DESC")
+      .all() as TrackerAgentMapping[]
+  ).map(normalizeTrackerAgentMapping);
 }
