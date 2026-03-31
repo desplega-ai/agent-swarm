@@ -75,6 +75,20 @@ export function formatSmartTime(dateStr: string): string {
 }
 
 /**
+ * Format a date string as UTC time (e.g., "Mar 31, 04:00 UTC")
+ */
+export function formatUTCTime(dateStr: string): string {
+  const date = parseUTCDate(dateStr);
+  return `${date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+  })} UTC`;
+}
+
+/**
  * Format a number in compact notation (e.g., 1.2K, 3.4M)
  */
 export function formatCompactNumber(num: number): string {

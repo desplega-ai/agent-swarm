@@ -21,6 +21,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "cronstrue": "^3.14.0",
     "dagre": "^0.8.5",
     "lucide-react": "^0.575.0",
     "next-themes": "^0.4.6",
