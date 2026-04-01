@@ -5,6 +5,8 @@ export type ValidationOutcome = "pass" | "halt" | "retry";
 
 export interface ValidationRunResult {
   outcome: ValidationOutcome;
+  /** Whether the validation actually passed (true) or failed (false). */
+  passed?: boolean;
   /** Context additions if retry is needed */
   retryContext?: Record<string, unknown>;
 }
@@ -82,7 +84,7 @@ export async function runStepValidation(
   const passed = result.status === "success" && extractPassResult(executorType, result.output);
 
   if (passed) {
-    return { outcome: "pass" };
+    return { outcome: "pass", passed: true };
   }
 
   // Validation failed
@@ -90,15 +92,16 @@ export async function runStepValidation(
     if (validation.retry) {
       return {
         outcome: "retry",
+        passed: false,
         retryContext: {
           previousOutput: stepOutput,
           validationResult: result.output,
         },
       };
     }
-    return { outcome: "halt" };
+    return { outcome: "halt", passed: false };
   }
 
   // mustPass is false — treat failure as pass (advisory validation)
-  return { outcome: "pass" };
+  return { outcome: "pass", passed: false };
 }
