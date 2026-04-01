@@ -29,6 +29,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.7,
     },
     {
+      url: `${baseUrl}/blog/task-delegation-architecture`,
+      lastModified: new Date("2026-03-30"),
+      changeFrequency: "monthly",
+      priority: 0.7,
+    },
+    {
       url: `${baseUrl}/blog/openfort-hackathon`,
       lastModified: new Date("2026-02-28"),
       changeFrequency: "monthly",
