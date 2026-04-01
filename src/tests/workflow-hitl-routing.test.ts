@@ -360,7 +360,7 @@ describe("HITL port-based routing", () => {
     const requestId1 = hitlExecutor.lastRequestId!;
 
     // REJECT — should loop back to generate-question
-    const reject1Promise = new Promise<void>((resolve) => setTimeout(resolve, 200));
+    const reject1Promise = new Promise<void>((resolve) => setTimeout(resolve, 10));
     eventBus.emit("approval.resolved", {
       requestId: requestId1,
       status: "rejected",
@@ -392,7 +392,7 @@ describe("HITL port-based routing", () => {
     expect(requestId2).not.toBe(requestId1); // Different request
 
     // APPROVE — should go to success
-    const approve2Promise = new Promise<void>((resolve) => setTimeout(resolve, 200));
+    const approve2Promise = new Promise<void>((resolve) => setTimeout(resolve, 10));
     eventBus.emit("approval.resolved", {
       requestId: requestId2,
       status: "approved",
@@ -458,7 +458,7 @@ describe("HITL port-based routing", () => {
 
     // Simulate async task completion for generate-question (1st iteration)
     const genMeta1 = asyncTaskExecutor.lastMeta!;
-    const taskComplete1Promise = new Promise<void>((resolve) => setTimeout(resolve, 200));
+    const taskComplete1Promise = new Promise<void>((resolve) => setTimeout(resolve, 10));
     eventBus.emit("task.completed", {
       taskId: "fake-task-1",
       output: JSON.stringify({ question: "What is 2+2?" }),
@@ -478,7 +478,7 @@ describe("HITL port-based routing", () => {
     const requestId1 = hitlExecutor.lastRequestId!;
 
     // REJECT — should loop back to generate-question (async)
-    const reject1Promise = new Promise<void>((resolve) => setTimeout(resolve, 200));
+    const reject1Promise = new Promise<void>((resolve) => setTimeout(resolve, 10));
     eventBus.emit("approval.resolved", {
       requestId: requestId1,
       status: "rejected",
@@ -496,7 +496,7 @@ describe("HITL port-based routing", () => {
     expect(genMeta2.stepId).not.toBe(genMeta1.stepId); // Different step
 
     // Simulate async task completion for generate-question (2nd iteration)
-    const taskComplete2Promise = new Promise<void>((resolve) => setTimeout(resolve, 200));
+    const taskComplete2Promise = new Promise<void>((resolve) => setTimeout(resolve, 10));
     eventBus.emit("task.completed", {
       taskId: "fake-task-2",
       output: JSON.stringify({ question: "What is 3+3?" }),
@@ -523,7 +523,7 @@ describe("HITL port-based routing", () => {
     expect(requestId2).not.toBe(requestId1);
 
     // APPROVE — should go to success
-    const approve2Promise = new Promise<void>((resolve) => setTimeout(resolve, 200));
+    const approve2Promise = new Promise<void>((resolve) => setTimeout(resolve, 10));
     eventBus.emit("approval.resolved", {
       requestId: requestId2,
       status: "approved",
