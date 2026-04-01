@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build",
+    "generate:llms": "bun run scripts/generate-llms-txt.ts",
+    "build": "bun run generate:llms && next build",
     "start": "next start",
     "lint": "next lint"
   },
