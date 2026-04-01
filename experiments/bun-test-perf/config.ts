@@ -1,70 +1,31 @@
 const config = {
   name: "bun-test-perf",
 
-  prompt: `You are optimizing the bun test runner performance for a large TypeScript project.
+  prompt: `You are optimizing the wall-clock time of \`bun test\` in a TypeScript project.
 
 ## Goal
-Minimize the total wall-clock time of \`bun test\` while keeping the exact same number of tests (2181 total).
+Make \`bun test\` run faster. That's it.
 
-## Current State
-- 2181 tests across 121 files, currently taking ~44 seconds
-- No bunfig.toml exists yet — bun uses all defaults
-- Tests use isolated SQLite DBs (test-*.sqlite files created/cleaned per suite)
-- Many test files do DB init/teardown in beforeAll/afterAll
-- Runtime: Bun 1.3.11, macOS arm64
+## Baseline
+- 2181 tests across 121 files, ~44 seconds
+- Bun 1.3.11, macOS arm64
+- Tests use isolated SQLite DBs (test-*.sqlite, created per suite)
 
-## Target Files
-- bunfig.toml — bun's configuration file (test runner settings)
+## Rules
+1. \`bun test\` must still pass — total test count must be >= 2181
+2. No deleting or skipping tests
+3. Make ONE focused change per iteration
 
-## IMPORTANT: Do NOT waste time exploring
-- Do NOT read test files — you cannot modify them
-- Do NOT read source files — you cannot modify them
-- ONLY create/modify bunfig.toml — go straight to writing it
-- Look up bun test runner docs if needed, but don't explore the codebase
+## Everything else is fair game
+You can modify any file, create new files, add helpers, preload scripts, change config, restructure — whatever you think will help. Think from first principles about what makes test suites slow and what levers you have.
 
-## What You CAN Do
-- Create or modify bunfig.toml to tune the [test] section and other top-level settings
-- Adjust test runner concurrency, timeout, preloading, coverage settings
-- Configure smol mode, memory settings, module resolution
-- Set test-specific environment variables via bunfig.toml
-- Add top-level bun settings that affect startup/transpilation speed
-
-## What You CANNOT Do
-- Modify any test files (*.test.ts) or source files
-- Delete or skip tests
-- Install new packages or modify package.json
-- Create preload scripts or any other files (only bunfig.toml)
-
-## Bun Test Config Reference (bunfig.toml)
-\`\`\`toml
-[test]
-coverage = false          # disable coverage collection
-smol = true               # use less memory (trade memory for speed)
-timeout = 30000           # per-test timeout in ms
-preload = ["./setup.ts"]  # scripts to run before tests
-root = "./src"            # test root directory
-bail = 0                  # stop after N failures (0 = don't bail)
-rerunEach = 1             # times to rerun each test
-
-# Top-level settings that may help:
-[install]
-# lockfile settings
-
-[run]
-# runtime settings
-\`\`\`
-
-## Ideas to Explore (one per iteration)
-- coverage = false (avoid coverage overhead)
-- smol = true (reduced memory mode)
-- Adjusting timeout to avoid waiting on slow tests
-- root = "./src" (narrow test discovery scope)
-- Top-level transpiler/resolver settings
-
-## Constraints
-- Make ONE focused change per iteration
-- The total test count MUST remain exactly 2181 after your change
-- Go straight to writing bunfig.toml — do not explore the codebase`,
+Some areas to consider (not exhaustive):
+- Bun test runner config (bunfig.toml)
+- Test setup/teardown patterns (DB init, migrations)
+- Module resolution and transpilation overhead
+- Parallelism and concurrency
+- Preload scripts that cache expensive operations
+- File I/O patterns (SQLite WAL mode, tmpfs, etc.)`,
 
   eval: {
     type: "command" as const,
@@ -88,9 +49,9 @@ rerunEach = 1             # times to rerun each test
         exit 0
       fi
 
-      if [ "$TOTAL" -ne 2181 ]; then
+      if [ "$TOTAL" -lt 2181 ]; then
         echo "Score: 9999"
-        echo "ERROR: Expected 2181 tests but got $TOTAL"
+        echo "ERROR: Expected >= 2181 tests but got $TOTAL"
         exit 0
       fi
 
@@ -102,7 +63,7 @@ rerunEach = 1             # times to rerun each test
 
   direction: "minimize" as const,
   timeoutMs: 10 * 60 * 1000,
-  allowedPaths: ["bunfig.toml"],
+  // no allowedPaths restriction — proposer can modify anything
 };
 
 export default config;
