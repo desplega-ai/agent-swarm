@@ -386,8 +386,8 @@ describe("Workflow Engine v2 (Phase 3)", () => {
       const registry = createTestRegistry();
       const def: WorkflowDefinition = {
         nodes: [
-          // 60s delay should exceed the 30s default timeout
-          { id: "slow", type: "slow", config: { delayMs: 60_000 } },
+          // 2s delay should exceed the 500ms timeout
+          { id: "slow", type: "slow", config: { delayMs: 2_000, timeoutMs: 500 } },
         ],
       };
 
@@ -397,7 +397,7 @@ describe("Workflow Engine v2 (Phase 3)", () => {
       const run = getWorkflowRun(runId);
       expect(run!.status).toBe("failed");
       expect(run!.error).toContain("timed out");
-    }, 35_000); // Allow test up to 35s
+    }, 5_000); // Allow test up to 5s
   });
 
   // ─── Validation ───────────────────────────────────────────
