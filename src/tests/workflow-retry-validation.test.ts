@@ -192,10 +192,10 @@ describe("Retry Poller — Validation on Retry", () => {
     const validationCountAfterInitial = validateCallCount;
 
     // Wait for nextRetryAt to pass, then run the poller
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
-    startRetryPoller(registry, 50);
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    startRetryPoller(registry, 10);
+    await new Promise((resolve) => setTimeout(resolve, 150));
     stopRetryPoller();
 
     // Validation should have been called again during the retry

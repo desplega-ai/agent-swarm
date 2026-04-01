@@ -599,7 +599,7 @@ describe("REST API Endpoints", () => {
     test("should return empty stats for empty database", async () => {
       // Clean up the database for this test
       closeDb();
-      await unlink(TEST_DB_PATH);
+      await unlink(TEST_DB_PATH).catch(() => {});
       await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
       await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
       initDb(TEST_DB_PATH);

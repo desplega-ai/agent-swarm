@@ -251,7 +251,7 @@ describe("Workflow Retry v2 (Phase 4)", () => {
       expect(step.retryCount).toBe(1);
 
       // Wait for nextRetryAt to pass
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await new Promise((resolve) => setTimeout(resolve, 10));
 
       // Verify getRetryableSteps finds it
       const retryable = getRetryableSteps();
@@ -294,11 +294,11 @@ describe("Workflow Retry v2 (Phase 4)", () => {
 
       if (step.status === "failed" && step.nextRetryAt) {
         // Was given one retry chance — let it expire and start poller
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await new Promise((resolve) => setTimeout(resolve, 10));
 
         // Start poller with very short interval
-        startRetryPoller(registry, 50);
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        startRetryPoller(registry, 10);
+        await new Promise((resolve) => setTimeout(resolve, 50));
         stopRetryPoller();
 
         // After retry, the second failure should be terminal (retryCount >= maxRetries)

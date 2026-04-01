@@ -64,7 +64,7 @@ async function waitForServer(url: string, timeoutMs = 15000) {
     } catch {
       // not ready yet
     }
-    await Bun.sleep(200);
+    await Bun.sleep(50);
   }
   throw new Error(`Server did not start within ${timeoutMs}ms`);
 }
@@ -128,7 +128,7 @@ afterAll(async () => {
       await serverProc.exited;
     } catch {}
   }
-  await Bun.sleep(300);
+  await Bun.sleep(50);
   try {
     await unlink(TEST_DB_PATH);
   } catch {}
@@ -1557,7 +1557,7 @@ describe("AgentMail Webhooks (with filters)", () => {
         await agentmailProc.exited;
       } catch {}
     }
-    await Bun.sleep(300);
+    await Bun.sleep(50);
     try {
       await unlink(AGENTMAIL_DB);
     } catch {}
