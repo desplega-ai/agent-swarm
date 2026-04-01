@@ -1,5 +1,4 @@
 import { Database } from "bun:sqlite";
-import { writeFileSync } from "node:fs";
 import { configureDbResolver } from "../prompts/resolver";
 import type {
   ActiveSession,
@@ -69,12 +68,11 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
 
   // Fast path for tests: restore schema from pre-built migration template
   // instead of re-running all 31 migrations for every test suite.
+  // Use in-memory DB directly from serialized bytes — no disk I/O needed.
   const templateBytes = (globalThis as any).__testMigrationTemplate as Uint8Array | undefined;
   if (templateBytes) {
-    writeFileSync(dbPath, templateBytes);
-    db = new Database(dbPath);
+    db = new Database(templateBytes);
     const database = db;
-    database.run("PRAGMA journal_mode = WAL;");
     database.run("PRAGMA foreign_keys = ON;");
     ensureAgentProfileColumns(database);
     seedContextVersions();
