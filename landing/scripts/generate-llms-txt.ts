@@ -46,6 +46,9 @@ function extractHowItWorks(): Array<{ number: string; title: string; description
 }
 
 function extractPricing(): {
+  platformPrice: number;
+  workerPrice: number;
+  examples: Array<{ workers: number; total: number }>;
   platformFeatures: string[];
   workerFeatures: string[];
   faqs: Array<{ question: string; answer: string }>;
@@ -75,7 +78,24 @@ function extractPricing(): {
     faqs.push({ question: fm[1], answer: fm[2].replace(/\\"/g, '"') });
   }
 
-  return { platformFeatures, workerFeatures, faqs };
+  // Extract prices from the card JSX: {/* Platform card */} ... &euro;N ... {/* Worker card */} ... &euro;N
+  const platformPriceMatch = src.match(/\{\/\* Platform card \*\/\}[\s\S]*?&euro;(\d+)/);
+  const platformPrice = platformPriceMatch ? Number.parseInt(platformPriceMatch[1], 10) : 0;
+  const workerPriceMatch = src.match(/\{\/\* Worker card \*\/\}[\s\S]*?&euro;(\d+)/);
+  const workerPrice = workerPriceMatch ? Number.parseInt(workerPriceMatch[1], 10) : 0;
+
+  // Extract examples array: { workers: N, total: N }
+  const examples: Array<{ workers: number; total: number }> = [];
+  const exMatch = src.match(/const examples = \[([\s\S]*?)\];/);
+  if (exMatch) {
+    const exRe = /workers:\s*(\d+),\s*total:\s*(\d+)/g;
+    let em: RegExpExecArray | null;
+    while ((em = exRe.exec(exMatch[1]))) {
+      examples.push({ workers: Number.parseInt(em[1], 10), total: Number.parseInt(em[2], 10) });
+    }
+  }
+
+  return { platformPrice, workerPrice, examples, platformFeatures, workerFeatures, faqs };
 }
 
 function extractWorkshops(): {
@@ -84,27 +104,35 @@ function extractWorkshops(): {
   references: Array<{ label: string; href: string }>;
 } {
   const src = readComponent("workshops");
+  const itemRe = /time:\s*"([^"]+)",\s*title:\s*"([^"]+)",\s*description:\s*"((?:[^"\\]|\\.)*)"/g;
 
   const timeline: Array<{ time: string; title: string; description: string }> = [];
-  const tlRe = /time:\s*"([^"]+)",\s*title:\s*"([^"]+)",\s*description:\s*"((?:[^"\\]|\\.)*)"/g;
-  let m: RegExpExecArray | null;
-  // First set of matches = workshopTimeline, second set = briefingTopics
-  const allMatches: Array<{ time: string; title: string; description: string }> = [];
-  while ((m = tlRe.exec(src))) {
-    allMatches.push({ time: m[1], title: m[2], description: m[3].replace(/\\"/g, '"') });
+  const tlMatch = src.match(/const workshopTimeline = \[([\s\S]*?)\];/);
+  if (tlMatch) {
+    let m: RegExpExecArray | null;
+    while ((m = itemRe.exec(tlMatch[1]))) {
+      timeline.push({ time: m[1], title: m[2], description: m[3].replace(/\\"/g, '"') });
+    }
   }
 
-  // workshopTimeline has 4 items, briefingTopics has 3
-  const workshopTimeline = allMatches.slice(0, 4);
-  const briefingTopics = allMatches.slice(4, 7);
+  const briefing: Array<{ time: string; title: string; description: string }> = [];
+  const brMatch = src.match(/const briefingTopics = \[([\s\S]*?)\];/);
+  if (brMatch) {
+    itemRe.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = itemRe.exec(brMatch[1]))) {
+      briefing.push({ time: m[1], title: m[2], description: m[3].replace(/\\"/g, '"') });
+    }
+  }
 
   const references: Array<{ label: string; href: string }> = [];
   const refRe = /label:\s*"([^"]+)",\s*href:\s*"([^"]+)"/g;
+  let m: RegExpExecArray | null;
   while ((m = refRe.exec(src))) {
     references.push({ label: m[1], href: m[2] });
   }
 
-  return { timeline: workshopTimeline, briefing: briefingTopics, references };
+  return { timeline, briefing, references };
 }
 
 // ── Generate markdown ─────────────────────────────────────────────────────
@@ -148,7 +176,7 @@ ${steps.map((s) => `${s.number}. **${s.title}** — ${s.description}`).join("\n"
 function generateLlmsFullTxt(): string {
   const features = extractFeatures();
   const steps = extractHowItWorks();
-  const { platformFeatures, workerFeatures, faqs } = extractPricing();
+  const { platformPrice, workerPrice, examples, platformFeatures, workerFeatures, faqs } = extractPricing();
   const { timeline, briefing, references } = extractWorkshops();
 
   return `# Agent Swarm
@@ -204,13 +232,13 @@ ${references.map((r) => `- [${r.label}](${r.href})`).join("\n")}
 
 Simple, predictable pricing. One platform fee, plus a flat rate per worker. No usage surprises, no hidden costs.
 
-### Platform — €9/mo
+### Platform — €${platformPrice}/mo
 
 Base infrastructure. 7-day free trial included.
 
 ${platformFeatures.map((f) => `- ${f}`).join("\n")}
 
-### Worker Compute — €29/mo per worker
+### Worker Compute — €${workerPrice}/mo per worker
 
 Docker-isolated agent. 7-day free trial included.
 
@@ -220,9 +248,7 @@ ${workerFeatures.map((f) => `- ${f}`).join("\n")}
 
 | Workers | Monthly cost |
 |---------|-------------|
-| 1 | €38/mo |
-| 3 | €96/mo |
-| 6 | €183/mo |
+${examples.map((ex) => `| ${ex.workers} | €${ex.total}/mo |`).join("\n")}
 
 Prefer self-hosting? It's [free and MIT-licensed](https://docs.agent-swarm.dev/docs/getting-started).
 
@@ -247,6 +273,25 @@ Start your 7-day free trial on [Agent Swarm Cloud](https://cloud.agent-swarm.dev
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────
+
+const features = extractFeatures();
+if (features.length === 0) throw new Error("extractFeatures() returned nothing — check features.tsx structure");
+
+const steps = extractHowItWorks();
+if (steps.length === 0) throw new Error("extractHowItWorks() returned nothing — check how-it-works.tsx structure");
+
+const pricing = extractPricing();
+if (pricing.platformFeatures.length === 0) throw new Error("extractPricing() returned no platformFeatures — check pricing-section.tsx structure");
+if (pricing.workerFeatures.length === 0) throw new Error("extractPricing() returned no workerFeatures — check pricing-section.tsx structure");
+if (pricing.faqs.length === 0) throw new Error("extractPricing() returned no FAQs — check pricing-section.tsx structure");
+if (pricing.platformPrice === 0) throw new Error("extractPricing() could not find platform price — check pricing-section.tsx structure");
+if (pricing.workerPrice === 0) throw new Error("extractPricing() could not find worker price — check pricing-section.tsx structure");
+if (pricing.examples.length === 0) throw new Error("extractPricing() returned no examples — check pricing-section.tsx structure");
+
+const workshops = extractWorkshops();
+if (workshops.timeline.length === 0) throw new Error("extractWorkshops() returned no timeline items — check workshops.tsx structure");
+if (workshops.briefing.length === 0) throw new Error("extractWorkshops() returned no briefing items — check workshops.tsx structure");
+if (workshops.references.length === 0) throw new Error("extractWorkshops() returned no references — check workshops.tsx structure");
 
 const llmsTxt = generateLlmsTxt();
 const llmsFullTxt = generateLlmsFullTxt();
