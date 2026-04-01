@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { writeFileSync } from "node:fs";
 import { configureDbResolver } from "../prompts/resolver";
 import type {
   ActiveSession,
@@ -63,6 +64,22 @@ let db: Database | null = null;
 
 export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   if (db) {
+    return db;
+  }
+
+  // Fast path for tests: restore schema from pre-built migration template
+  // instead of re-running all 31 migrations for every test suite.
+  const templateBytes = (globalThis as any).__testMigrationTemplate as Uint8Array | undefined;
+  if (templateBytes) {
+    writeFileSync(dbPath, templateBytes);
+    db = new Database(dbPath);
+    const database = db;
+    database.run("PRAGMA journal_mode = WAL;");
+    database.run("PRAGMA foreign_keys = ON;");
+    ensureAgentProfileColumns(database);
+    seedContextVersions();
+    configureDbResolver(resolvePromptTemplate);
+    seedDefaultTemplates();
     return db;
   }
 
