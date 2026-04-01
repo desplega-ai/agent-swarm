@@ -66,6 +66,17 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     return db;
   }
 
+  // Fast path for tests: restore from pre-built template that already has
+  // migrations, seeds, and all post-init work baked in. Only the per-connection
+  // PRAGMA and the in-memory resolver function need to be set.
+  const templateBytes = (globalThis as any).__testMigrationTemplate as Uint8Array | undefined;
+  if (templateBytes) {
+    db = Database.deserialize(templateBytes);
+    db.run("PRAGMA foreign_keys = ON;");
+    configureDbResolver(resolvePromptTemplate);
+    return db;
+  }
+
   db = new Database(dbPath, { create: true });
   console.log(`Database initialized at ${dbPath}`);
 

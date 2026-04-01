@@ -54,7 +54,7 @@ describe("Linear Outbound Sync", () => {
     });
 
     // Allow async handler to run
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(mockCreateComment).toHaveBeenCalledTimes(1);
     const callArgs = mockCreateComment.mock.calls[0] as unknown[];
@@ -82,7 +82,7 @@ describe("Linear Outbound Sync", () => {
       failureReason: "Build error in module X",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(mockCreateComment).toHaveBeenCalledTimes(1);
     const callArgs = mockCreateComment.mock.calls[0] as unknown[];
@@ -98,7 +98,7 @@ describe("Linear Outbound Sync", () => {
       output: "done",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(mockCreateComment).not.toHaveBeenCalled();
   });
@@ -123,7 +123,7 @@ describe("Linear Outbound Sync", () => {
       output: "done",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(mockCreateComment).not.toHaveBeenCalled();
   });
@@ -148,7 +148,7 @@ describe("Linear Outbound Sync", () => {
       output: "done",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(mockCreateComment).toHaveBeenCalledTimes(1);
   });
@@ -172,7 +172,7 @@ describe("Linear Outbound Sync", () => {
       output: "done",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(mockCreateComment).toHaveBeenCalledTimes(1);
   });
@@ -193,7 +193,7 @@ describe("Linear Outbound Sync", () => {
       output: "done",
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(mockCreateComment).not.toHaveBeenCalled();
   });
