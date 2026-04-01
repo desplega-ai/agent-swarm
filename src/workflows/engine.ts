@@ -19,7 +19,7 @@ import type { ExecutorRegistry } from "./executors/registry";
 import { resolveInputs } from "./input";
 import { validateJsonSchema } from "./json-schema-validator";
 import { deepInterpolate } from "./template";
-import { runStepValidation } from "./validation";
+import { runStepValidation, type ValidationRunResult } from "./validation";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_ITERATIONS = Number(process.env.WORKFLOW_MAX_ITERATIONS) || 100;
@@ -526,8 +526,9 @@ async function executeStep(
   }
 
   // 7. Run validation if configured
+  let validationResult: ValidationRunResult | undefined;
   if (node.validation) {
-    const validationResult = await runStepValidation(registry, node, result.output, ctx, meta);
+    validationResult = await runStepValidation(registry, node, result.output, ctx, meta);
 
     if (validationResult.outcome === "halt") {
       const errorMsg = "Validation failed (mustPass)";
@@ -555,10 +556,23 @@ async function executeStep(
     }
   }
 
-  // 8. Checkpoint success
+  // 8. Set nextPort from validation result for record-based routing
+  // When validation determines pass/fail and the node uses port-based `next`,
+  // route to the correct port instead of activating all ports.
+  if (
+    validationResult?.passed !== undefined &&
+    !result.nextPort &&
+    node.next &&
+    typeof node.next === "object" &&
+    !Array.isArray(node.next)
+  ) {
+    result.nextPort = validationResult.passed ? "pass" : "fail";
+  }
+
+  // 9. Checkpoint success
   checkpointStep(runId, stepId, node.id, result, ctx);
 
-  // 9. Determine successors based on nextPort
+  // 10. Determine successors based on nextPort
   // If executor returned a specific port, use it. Otherwise, get all successors
   // (fan-out behavior for non-branching nodes with record-based `next`).
   const successors = result.nextPort
