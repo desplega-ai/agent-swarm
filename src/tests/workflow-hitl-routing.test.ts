@@ -191,7 +191,7 @@ async function runHITLWorkflow(
   // Use a small delay to let the event handler finish
   const resumePromise = new Promise<void>((resolve) => {
     // Give the event handler time to run walkGraph
-    setTimeout(resolve, 200);
+    setTimeout(resolve, 10);
   });
 
   eventBus.emit("approval.resolved", {

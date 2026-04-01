@@ -652,7 +652,7 @@ describe("Workflow HTTP API v2", () => {
       const { runId } = (await triggerRes.json()) as { runId: string };
 
       // Wait for run to complete
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 10));
 
       // Try to cancel — should fail
       const cancelRes = await fetch(`${baseUrl}/api/workflow-runs/${runId}/cancel`, {
