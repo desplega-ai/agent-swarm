@@ -102,9 +102,9 @@ RUN mkdir -p /home/worker/.claude \
     && claude plugin marketplace add desplega-ai/qa-use || true \
     && claude plugin install qa-use@desplega.ai --scope user || true \
     && claude plugin marketplace add mksglu/claude-context-mode || true \
-    && claude plugin install context-mode@claude-context-mode --scope user || true \
+    && claude plugin install context-mode@context-mode --scope user || true \
     && claude plugin marketplace add desplega-ai/agent-fs || true \
-    && claude plugin install agent-fs@desplega-ai-agent-fs --scope user || true
+    && claude plugin install agent-fs@agent-fs --scope user || true
 
 # Configure wts for agent mode (no tmux, no auto-Claude)
 RUN mkdir -p /home/worker/.wts \
