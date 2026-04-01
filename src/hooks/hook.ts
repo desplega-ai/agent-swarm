@@ -355,6 +355,9 @@ export async function handleHook(): Promise<void> {
     }
   };
 
+  // Minimum length for SOUL.md and IDENTITY.md to prevent accidental corruption
+  const IDENTITY_FILE_MIN_LENGTH = 100;
+
   /**
    * Sync SOUL.md and IDENTITY.md content back to the server
    */
@@ -370,7 +373,13 @@ export async function handleHook(): Promise<void> {
     if (await soulFile.exists()) {
       const content = await soulFile.text();
       if (content.trim() && content.length <= 65536) {
-        updates.soulMd = content;
+        if (content.length < IDENTITY_FILE_MIN_LENGTH) {
+          console.error(
+            `[hook] Skipping SOUL.md sync: content too short (${content.length} chars, minimum ${IDENTITY_FILE_MIN_LENGTH}). This prevents accidental profile corruption.`,
+          );
+        } else {
+          updates.soulMd = content;
+        }
       }
     }
 
@@ -378,7 +387,13 @@ export async function handleHook(): Promise<void> {
     if (await identityFile.exists()) {
       const content = await identityFile.text();
       if (content.trim() && content.length <= 65536) {
-        updates.identityMd = content;
+        if (content.length < IDENTITY_FILE_MIN_LENGTH) {
+          console.error(
+            `[hook] Skipping IDENTITY.md sync: content too short (${content.length} chars, minimum ${IDENTITY_FILE_MIN_LENGTH}). This prevents accidental profile corruption.`,
+          );
+        } else {
+          updates.identityMd = content;
+        }
       }
     }
 
