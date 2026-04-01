@@ -42,6 +42,16 @@ interface BlogPost {
 
 const posts: BlogPost[] = [
   {
+    slug: "deep-dive-task-state-machine-recovery",
+    title:
+      "The Task State Machine: 7-State Lifecycle for Recovering From Agent Crashes",
+    description:
+      "How we designed a resilient task lifecycle (unassigned→offered→pending→in_progress) with heartbeat detection and checkpoint recovery for autonomous agent swarms.",
+    date: "April 1, 2026",
+    readTime: "12 min read",
+    tags: ["state machine", "task lifecycle", "resilience", "distributed systems"],
+  },
+  {
     slug: "task-delegation-architecture",
     title: "The Architecture Behind Task Delegation: Pools, Routing, and Dependencies",
     description:
