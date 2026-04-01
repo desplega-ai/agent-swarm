@@ -71,7 +71,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   // PRAGMA and the in-memory resolver function need to be set.
   const templateBytes = (globalThis as any).__testMigrationTemplate as Uint8Array | undefined;
   if (templateBytes) {
-    db = new Database(templateBytes);
+    db = Database.deserialize(templateBytes);
     db.run("PRAGMA foreign_keys = ON;");
     configureDbResolver(resolvePromptTemplate);
     return db;
