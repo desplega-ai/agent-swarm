@@ -74,7 +74,7 @@ bunfig.toml [test] section supports:
       fi
 
       echo "Score: $TIME"
-      echo "Tests: $TOTAL | Time: ${TIME}s"
+      echo "Tests: $TOTAL | Time: $TIME seconds"
     '`,
     scorePattern: /Score:\s+(?<score>[\d.]+)/,
   },
