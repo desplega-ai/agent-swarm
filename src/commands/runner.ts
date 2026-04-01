@@ -128,7 +128,7 @@ async function ensureRepoForTask(
 }
 
 /** API configuration for ping/close */
-interface ApiConfig {
+export interface ApiConfig {
   apiUrl: string;
   apiKey: string;
   agentId: string;
@@ -401,11 +401,18 @@ async function updateProgressViaAPI(
  * - Claude adapter: runs a fallback extraction via `claude -p --json-schema`
  * - Pi-mono adapter: returns an error (no fallback available)
  */
-async function handleStructuredOutputFallback(
+export type FallbackResult =
+  | { kind: "extracted"; output: string }
+  | { kind: "already-has-output" }
+  | { kind: "no-schema"; lastProgress?: string }
+  | { kind: "schema-fail"; failReason: string }
+  | { kind: "fetch-error"; error: string };
+
+export async function handleStructuredOutputFallback(
   config: ApiConfig,
   taskId: string,
   adapterType: string,
-): Promise<{ output?: string; failReason?: string } | null> {
+): Promise<FallbackResult> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -416,23 +423,33 @@ async function handleStructuredOutputFallback(
   try {
     // Fetch the task to check for outputSchema
     const taskRes = await fetch(`${config.apiUrl}/api/tasks/${taskId}`, { headers });
-    if (!taskRes.ok) return null;
+    if (!taskRes.ok) return { kind: "fetch-error", error: `HTTP ${taskRes.status}` };
 
+    // Response is a flat spread of task fields + logs (see src/http/tasks.ts)
     const taskData = (await taskRes.json()) as {
-      task?: {
-        task?: string;
-        output?: string;
-        outputSchema?: Record<string, unknown>;
-      };
+      id?: string;
+      task?: string;
+      status?: string;
+      output?: string;
+      progress?: string;
+      outputSchema?: Record<string, unknown>;
       logs?: Array<{ eventType: string; newValue?: string; createdAt?: string }>;
     };
 
-    const task = taskData.task;
-    if (!task?.outputSchema) return null; // No schema — no fallback needed
-    if (task.output) return null; // Agent already stored valid output
+    if (!taskData.outputSchema) {
+      // No structured output required — extract last progress as context
+      const lastProgressLog = (taskData.logs ?? [])
+        .filter((l) => l.eventType === "task_progress")
+        .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""))[0];
+      const lastProgress = lastProgressLog?.newValue ?? taskData.progress;
+      return { kind: "no-schema", lastProgress: lastProgress || undefined };
+    }
+
+    if (taskData.output) return { kind: "already-has-output" };
 
     if (adapterType !== "claude") {
       return {
+        kind: "schema-fail",
         failReason:
           "Structured output required by outputSchema but not provided via store-progress",
       };
@@ -450,36 +467,37 @@ async function handleStructuredOutputFallback(
     const extractionPrompt = `Extract structured data from this task's execution history.
 
 ## Task Description
-${task.task || "(no description)"}
+${taskData.task || "(no description)"}
 
 ## Progress Updates (chronological)
 ${progressEntries || "(no progress recorded)"}
 
 ## Required Output Schema
-${JSON.stringify(task.outputSchema, null, 2)}
+${JSON.stringify(taskData.outputSchema, null, 2)}
 
 Extract the structured data from the progress updates above. Return ONLY valid JSON matching the schema.`;
 
-    const schemaJson = JSON.stringify(task.outputSchema);
+    const schemaJson = JSON.stringify(taskData.outputSchema);
     const result =
       await Bun.$`claude -p ${extractionPrompt} --json-schema ${schemaJson} --output-format json --model sonnet`
         .json()
         .catch(() => null);
 
     if (result && typeof result === "object") {
-      return { output: JSON.stringify(result) };
+      return { kind: "extracted", output: JSON.stringify(result) };
     }
 
     return {
+      kind: "schema-fail",
       failReason: "Structured output extraction fallback failed — could not produce valid JSON",
     };
   } catch (err) {
     console.warn(`[runner] Structured output fallback failed for task ${taskId}: ${err}`);
-    return null;
+    return { kind: "fetch-error", error: String(err) };
   }
 }
 
-async function ensureTaskFinished(
+export async function ensureTaskFinished(
   config: ApiConfig,
   role: string,
   taskId: string,
@@ -506,15 +524,31 @@ async function ensureTaskFinished(
     const adapterType = process.env.HARNESS_PROVIDER || "claude";
     const fallback = await handleStructuredOutputFallback(config, taskId, adapterType);
 
-    if (fallback?.output) {
-      body.output = fallback.output;
-    } else if (fallback?.failReason) {
-      status = "failed";
-      body.status = "failed";
-      body.failureReason = fallback.failReason;
-    } else {
-      body.output =
-        "Process completed (runner wrapper fallback - agent may have provided explicit output)";
+    console.log(`[${role}] Task ${taskId.slice(0, 8)} fallback result: ${fallback.kind}`);
+
+    switch (fallback.kind) {
+      case "extracted":
+        body.output = fallback.output;
+        break;
+      case "already-has-output":
+        body.output = "Process completed successfully";
+        break;
+      case "no-schema": {
+        if (fallback.lastProgress) {
+          body.output = fallback.lastProgress.slice(0, 2000);
+        } else {
+          body.output = "Process completed successfully (no output captured)";
+        }
+        break;
+      }
+      case "schema-fail":
+        status = "failed";
+        body.status = "failed";
+        body.failureReason = fallback.failReason;
+        break;
+      case "fetch-error":
+        body.output = `Process completed (could not verify task state: ${fallback.error})`;
+        break;
     }
   }
 
