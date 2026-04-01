@@ -38,7 +38,7 @@ async function waitForServer(url: string, timeoutMs = 15000) {
       const r = await fetch(url);
       if (r.ok) return;
     } catch {}
-    await Bun.sleep(200);
+    await Bun.sleep(50);
   }
   throw new Error(`Server did not start within ${timeoutMs}ms`);
 }
@@ -74,7 +74,7 @@ afterAll(async () => {
       await serverProc.exited;
     } catch {}
   }
-  await Bun.sleep(300);
+  await Bun.sleep(50);
   try {
     await unlink(TEST_DB_PATH);
     await unlink(`${TEST_DB_PATH}-wal`);
