@@ -41,9 +41,24 @@ export class ScriptExecutor extends BaseExecutor<
     try {
       const result = await Promise.race([this.runScript(config), this.timeoutPromise(timeoutMs)]);
 
+      // If stdout is valid JSON object, merge parsed fields into output
+      // so downstream nodes can access them via {{myScript.field}} interpolation
+      // (mirrors how agent-task nodes parse JSON in resume.ts)
+      let output: Record<string, unknown> = result;
+      if (result.exitCode === 0 && result.stdout) {
+        try {
+          const parsed = JSON.parse(result.stdout);
+          if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+            output = { ...result, ...parsed };
+          }
+        } catch {
+          // Not valid JSON — keep raw {exitCode, stdout, stderr}
+        }
+      }
+
       return {
         status: "success",
-        output: result,
+        output: output as typeof result,
         nextPort: result.exitCode === 0 ? "success" : "failure",
       };
     } catch (err) {
