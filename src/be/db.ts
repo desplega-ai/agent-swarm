@@ -66,18 +66,14 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
     return db;
   }
 
-  // Fast path for tests: restore schema from pre-built migration template
-  // instead of re-running all 31 migrations for every test suite.
-  // Use in-memory DB directly from serialized bytes — no disk I/O needed.
+  // Fast path for tests: restore from pre-built template that already has
+  // migrations, seeds, and all post-init work baked in. Only the per-connection
+  // PRAGMA and the in-memory resolver function need to be set.
   const templateBytes = (globalThis as any).__testMigrationTemplate as Uint8Array | undefined;
   if (templateBytes) {
     db = new Database(templateBytes);
-    const database = db;
-    database.run("PRAGMA foreign_keys = ON;");
-    ensureAgentProfileColumns(database);
-    seedContextVersions();
+    db.run("PRAGMA foreign_keys = ON;");
     configureDbResolver(resolvePromptTemplate);
-    seedDefaultTemplates();
     return db;
   }
 
