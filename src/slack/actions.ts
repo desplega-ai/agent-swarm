@@ -1,5 +1,12 @@
 import type { App } from "@slack/bolt";
-import { cancelTask, createTaskExtended, getAgentById, getLeadAgent, getTaskById } from "../be/db";
+import {
+  cancelTask,
+  createTaskExtended,
+  getAgentById,
+  getLeadAgent,
+  getTaskById,
+  resolveUser,
+} from "../be/db";
 import { buildCancelledBlocks, getTaskLink } from "./blocks";
 
 export function registerActionHandlers(app: App): void {
@@ -65,6 +72,7 @@ export function registerActionHandlers(app: App): void {
     if (!originalTask || !originalTask.slackChannelId) return;
 
     const lead = getLeadAgent();
+    const requestedByUserId = resolveUser({ slackUserId: body.user.id })?.id;
     const followUpTask = createTaskExtended(followUpText, {
       agentId: lead?.id,
       source: "slack",
@@ -72,6 +80,7 @@ export function registerActionHandlers(app: App): void {
       slackChannelId: originalTask.slackChannelId,
       slackThreadTs: originalTask.slackThreadTs,
       slackUserId: body.user.id,
+      requestedByUserId,
     });
 
     const taskLink = getTaskLink(followUpTask.id);

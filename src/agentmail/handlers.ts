@@ -4,12 +4,23 @@ import {
   getAgentById,
   getAgentMailInboxMapping,
   getAllAgents,
+  resolveUser,
 } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
 import { workflowEventBus } from "../workflows/event-bus";
 // Side-effect import: registers all AgentMail event templates in the in-memory registry
 import "./templates";
 import type { AgentMailMessage, AgentMailWebhookPayload } from "./types";
+
+/**
+ * Extract bare email address from a from_ field like "Taras Yarema <t@desplega.ai>" or "t@desplega.ai".
+ */
+function extractEmailFromField(from: string): string | undefined {
+  const angleMatch = from.match(/<([^>]+@[^>]+)>/);
+  if (angleMatch?.[1]) return angleMatch[1].toLowerCase();
+  const bareMatch = from.match(/[\w.+-]+@[\w.-]+\.\w+/);
+  return bareMatch?.[0]?.toLowerCase();
+}
 
 /**
  * Check if an inbox domain is allowed by the filter.
@@ -96,6 +107,10 @@ export async function handleMessageReceived(
     (Array.isArray(message.from_) ? message.from_.join(", ") : message.from_) || "unknown";
   const subject = message.subject || "(no subject)";
   const body = message.text || message.html || "";
+
+  // Resolve canonical user from sender email
+  const senderEmail = extractEmailFromField(from);
+  const requestedByUserId = senderEmail ? resolveUser({ email: senderEmail })?.id : undefined;
   const preview = body.length > 500 ? `${body.substring(0, 500)}...` : body;
 
   // Emit workflow trigger event
@@ -132,6 +147,7 @@ export async function handleMessageReceived(
       agentmailMessageId: message_id,
       agentmailThreadId: thread_id,
       parentTaskId: existingTask.id,
+      requestedByUserId,
     });
 
     console.log(
@@ -168,6 +184,7 @@ export async function handleMessageReceived(
           agentmailInboxId: inbox_id,
           agentmailMessageId: message_id,
           agentmailThreadId: thread_id,
+          requestedByUserId,
         });
 
         console.log(
@@ -196,6 +213,7 @@ export async function handleMessageReceived(
         agentmailInboxId: inbox_id,
         agentmailMessageId: message_id,
         agentmailThreadId: thread_id,
+        requestedByUserId,
       });
 
       console.log(
@@ -228,6 +246,7 @@ export async function handleMessageReceived(
       agentmailInboxId: inbox_id,
       agentmailMessageId: message_id,
       agentmailThreadId: thread_id,
+      requestedByUserId,
     });
 
     console.log(
@@ -255,6 +274,7 @@ export async function handleMessageReceived(
     agentmailInboxId: inbox_id,
     agentmailMessageId: message_id,
     agentmailThreadId: thread_id,
+    requestedByUserId,
   });
 
   console.log(`[AgentMail] Created unassigned task ${task.id} (no lead or mapping available)`);

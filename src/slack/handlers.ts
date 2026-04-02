@@ -1,13 +1,13 @@
 import type { App } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import {
-  createTask,
   createTaskExtended,
   getAgentById,
   getAgentWorkingOnThread,
   getLeadAgent,
   getMostRecentTaskInThread,
   getTasksByAgentId,
+  resolveUser,
 } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
 import { workflowEventBus } from "../workflows/event-bus";
@@ -336,6 +336,9 @@ export function registerMessageHandler(app: App): void {
       return;
     }
 
+    // Resolve canonical user identity (graceful — null if not found)
+    const requestedByUserId = resolveUser({ slackUserId: msg.user })?.id;
+
     // Emit workflow trigger event for Slack messages
     workflowEventBus.emit("slack.message", {
       channel: msg.channel,
@@ -465,6 +468,7 @@ export function registerMessageHandler(app: App): void {
         slackChannelId: msg.channel,
         slackThreadTs: threadTs,
         slackUserId: msg.user,
+        requestedByUserId,
       });
 
       await say({
@@ -537,17 +541,20 @@ export function registerMessageHandler(app: App): void {
             slackThreadTs: threadTs,
             slackUserId: msg.user,
             parentTaskId: latestTask?.id,
+            requestedByUserId,
           });
           results.assigned.push({ agentName: agent.name, taskId: task.id });
           continue;
         }
 
         // Workers receive tasks as before
-        const task = createTask(agent.id, fullTaskDescription, {
+        const task = createTaskExtended(fullTaskDescription, {
+          agentId: agent.id,
           source: "slack",
           slackChannelId: msg.channel,
           slackThreadTs: threadTs,
           slackUserId: msg.user,
+          requestedByUserId,
         });
 
         // Check if agent has an in-progress task in this thread (queued follow-up)
