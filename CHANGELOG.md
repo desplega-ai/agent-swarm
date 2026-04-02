@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.57.5] - 2026-04-02
+
+### Added
+- Auto-generated `llms.txt` for AI discoverability on the landing page (#283)
+
+### Changed
+- Runner structured output fallback refactored with discriminated union `FallbackResult` type for clearer error handling
+- Dockerfile worker: updated plugin install commands and bumped `qa-use` to v2.11.0
+
+### Fixed
+- Workflow engine routes to correct port after validation instead of broadcasting to all ports (#280)
+- Workflow script nodes now parse JSON stdout correctly for interpolation (#279)
+- PostToolUse hook now validates minimum content length (100 chars) for SOUL.md/IDENTITY.md sync to prevent accidental profile corruption (#278)
+- Bun test failure and typecheck error in test infrastructure (#281)
+
 ## [1.57.0] - 2026-03-31
 
 ### Added
