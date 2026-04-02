@@ -1,56 +1,54 @@
 import type { MetadataRoute } from "next";
+import { readdirSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
+
+const baseUrl = "https://agent-swarm.dev";
+
+/**
+ * Recursively find all page.tsx files in the app directory
+ * and derive their routes. Skips route groups and dynamic segments.
+ */
+function discoverRoutes(dir: string, appDir: string): string[] {
+  const routes: string[] = [];
+
+  for (const entry of readdirSync(dir)) {
+    const fullPath = join(dir, entry);
+    const stat = statSync(fullPath);
+
+    if (stat.isDirectory()) {
+      // Skip private folders, api routes, and route groups
+      if (entry.startsWith("_") || entry === "api" || entry.startsWith("(")) {
+        // For route groups like (marketing), still recurse into them
+        if (entry.startsWith("(")) {
+          routes.push(...discoverRoutes(fullPath, appDir));
+        }
+        continue;
+      }
+      routes.push(...discoverRoutes(fullPath, appDir));
+    } else if (entry === "page.tsx" || entry === "page.ts") {
+      const relativePath = relative(appDir, dir);
+      const route = relativePath === "" ? "/" : `/${relativePath}`;
+      routes.push(route);
+    }
+  }
+
+  return routes;
+}
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = "https://agent-swarm.dev";
+  const appDir = join(process.cwd(), "src/app");
+  const routes = discoverRoutes(appDir, appDir);
 
-  return [
-    {
-      url: baseUrl,
+  return routes.map((route) => {
+    const isBlogPost = route.startsWith("/blog/") && route !== "/blog";
+    const isHome = route === "/";
+    const depth = route.split("/").filter(Boolean).length;
+
+    return {
+      url: `${baseUrl}${route === "/" ? "" : route}`,
       lastModified: new Date(),
-      changeFrequency: "weekly",
-      priority: 1,
-    },
-    {
-      url: `${baseUrl}/pricing`,
-      lastModified: new Date(),
-      changeFrequency: "monthly",
-      priority: 0.9,
-    },
-    {
-      url: `${baseUrl}/blog`,
-      lastModified: new Date(),
-      changeFrequency: "weekly",
-      priority: 0.8,
-    },
-    {
-      url: `${baseUrl}/blog/swarm-metrics`,
-      lastModified: new Date("2026-03-13"),
-      changeFrequency: "monthly",
-      priority: 0.7,
-    },
-    {
-      url: `${baseUrl}/blog/task-delegation-architecture`,
-      lastModified: new Date("2026-03-30"),
-      changeFrequency: "monthly",
-      priority: 0.7,
-    },
-    {
-      url: `${baseUrl}/blog/openfort-hackathon`,
-      lastModified: new Date("2026-02-28"),
-      changeFrequency: "monthly",
-      priority: 0.7,
-    },
-    {
-      url: `${baseUrl}/examples`,
-      lastModified: new Date(),
-      changeFrequency: "weekly",
-      priority: 0.6,
-    },
-    {
-      url: `${baseUrl}/examples/x402`,
-      lastModified: new Date("2026-02-28"),
-      changeFrequency: "monthly",
-      priority: 0.6,
-    },
-  ];
+      changeFrequency: isBlogPost ? "monthly" : "weekly",
+      priority: isHome ? 1 : isBlogPost ? 0.7 : depth <= 1 ? 0.8 : 0.6,
+    };
+  });
 }
