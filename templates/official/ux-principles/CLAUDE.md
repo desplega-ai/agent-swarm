@@ -42,8 +42,14 @@ Run automated tools to collect structured data:
 # Component usage mapping
 npx react-scanner -c react-scanner.config.js
 
-# Accessibility audit
-npx eslint --plugin jsx-a11y --rule '{...}' src/
+# Accessibility audit (create a temporary eslint config for jsx-a11y)
+cat > /tmp/.eslintrc.a11y.json << 'ESLINT_EOF'
+{
+  "plugins": ["jsx-a11y"],
+  "extends": ["plugin:jsx-a11y/recommended"]
+}
+ESLINT_EOF
+npx eslint -c /tmp/.eslintrc.a11y.json src/
 
 # Dependency architecture
 npx depcruise --config .dependency-cruiser.cjs src/
