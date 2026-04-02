@@ -47,7 +47,7 @@ Fires after every tool call. This is the most active hook:
 
 - **Heartbeat** — Sends a heartbeat to the MCP server so the lead knows the worker is alive
 - **Activity tracking** — Updates the agent's `lastActivityAt` timestamp (fire-and-forget) for stall detection
-- **Identity sync** — If an identity file (SOUL.md, IDENTITY.md, TOOLS.md, CLAUDE.md) was edited, syncs the changes to the database with `changeSource: "self_edit"` tracking to distinguish agent edits from session-end syncs
+- **Identity sync** — If an identity file (SOUL.md, IDENTITY.md, TOOLS.md, CLAUDE.md) was edited, syncs the changes to the database with `changeSource: "self_edit"` tracking to distinguish agent edits from session-end syncs. Files shorter than 100 characters are rejected to prevent accidental profile corruption
 - **Memory indexing** — If a file was written to a memory directory, automatically generates an embedding and indexes it
 - **Shared disk write failure detection** — On Archil-mounted environments, detects "Read-only file system" errors from Write, Edit, or Bash tools and warns the agent about the per-agent directory convention
 
