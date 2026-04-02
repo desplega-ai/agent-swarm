@@ -42,6 +42,16 @@ interface BlogPost {
 
 const posts: BlogPost[] = [
   {
+    slug: "deep-dive-agent-identity-soul-md",
+    title:
+      "Why Your AI Agent Needs a Job Description: SOUL.md & Identity Architecture",
+    description:
+      "Turn generic LLMs into reliable specialists using SOUL.md and IDENTITY.md. Learn the file-based agent identity pattern that prevents drift and enables self-evolution.",
+    date: "April 2, 2026",
+    readTime: "12 min read",
+    tags: ["SOUL.md", "identity architecture", "agent specialization", "LLM orchestration"],
+  },
+  {
     slug: "deep-dive-task-state-machine-recovery",
     title:
       "The Task State Machine: 7-State Lifecycle for Recovering From Agent Crashes",
