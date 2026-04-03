@@ -1222,6 +1222,7 @@ interface Trigger {
     text?: string;
   }>;
   cursorUpdates?: Array<{ channelId: string; ts: string }>; // Deferred cursor commits for channel_activity
+  requestedBy?: { name: string; email?: string };
 }
 
 /** Options for polling */
@@ -1339,10 +1340,16 @@ async function buildPromptForTrigger(
           '\n\nWhen done, use `store-progress` with status: "completed" and include your output.';
       }
 
+      // Include requesting user info if available from the poll trigger
+      const requestedBy = trigger.requestedBy;
+      const requestedBySection = requestedBy
+        ? `\n\nRequested by: ${requestedBy.name}${requestedBy.email ? ` (${requestedBy.email})` : ""}`
+        : "";
+
       const result = await resolveTemplateAsync("task.trigger.assigned", {
         work_on_task_cmd: fmt("work-on-task"),
         task_id: trigger.taskId,
-        task_desc_section: taskDescSection,
+        task_desc_section: taskDescSection + requestedBySection,
         output_instructions: outputInstructions,
       });
       return result.text;
