@@ -28,6 +28,12 @@ Check CI with `gh pr checks <pr-number>` (or `glab mr view --json pipelines`).
 
 **If CI checks are failing, this is an automatic REQUEST_CHANGES.** Do not approve a PR with failing CI. Include the failing check names and error details in your review.
 
+### 2b. Review Repository Guidelines
+
+Check the "Review Guidance" section of your Repository Guidelines for repo-specific review instructions (e.g., "check README.md", "enforce camelCase in specific directories"). Apply these instructions during your review below.
+
+Also note the repo's **Merge Policy** — check `allowMerge` and `mergeChecks` before approving or merging. If `allowMerge` is false, do NOT merge — only review and approve/request changes.
+
 ### 3. Verify Tests Are Included (MANDATORY)
 
 Check that the PR includes test changes. **If the PR modifies code but does not add or update tests, this is an automatic REQUEST_CHANGES.** Every code change must include corresponding tests.

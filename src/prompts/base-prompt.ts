@@ -37,6 +37,12 @@ export type BasePromptArgs = {
     claudeMd?: string | null;
     clonePath: string;
     warning?: string | null;
+    guidelines?: {
+      prChecks: string[];
+      mergeChecks: string[];
+      allowMerge?: boolean;
+      review: string[];
+    } | null;
   };
   /** Pre-fetched skill summaries for the installed skills section */
   skillsSummary?: { name: string; description: string }[];
@@ -98,6 +104,41 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
       prompt += `${args.repoContext.claudeMd}\n`;
     } else if (!args.repoContext.warning) {
       prompt += `Repository is cloned at \`${args.repoContext.clonePath}\` but has no CLAUDE.md file.\n`;
+    }
+
+    // Inject repo guidelines
+    const g = args.repoContext.guidelines;
+    if (g === null || g === undefined) {
+      prompt += `\n### Repository Guidelines\n\nNo repository guidelines defined. If you need to push code, ask the lead or user to define guidelines first.\n`;
+    } else {
+      const hasAnyContent =
+        g.prChecks.length > 0 || g.mergeChecks.length > 0 || g.review.length > 0;
+      if (hasAnyContent) {
+        prompt += `\n### Repository Guidelines (MANDATORY)\n\n`;
+        if (g.prChecks.length > 0) {
+          prompt += `**PR Checks — Run ALL before pushing code or creating a PR:**\n`;
+          g.prChecks.forEach((check, i) => {
+            prompt += `${i + 1}. \`${check}\`\n`;
+          });
+          prompt += `If ANY check fails, fix the issue before pushing. Do NOT push code with failing checks.\nDo NOT use \`--no-verify\` or any flag that bypasses git hooks.\n\n`;
+        }
+        prompt += `**Merge Policy:**\n`;
+        prompt += `- Auto-merge: ${g.allowMerge ? "Allowed" : "Not allowed (default)"}\n`;
+        if (g.mergeChecks.length > 0) {
+          prompt += `- Before merging, verify:\n`;
+          g.mergeChecks.forEach((check) => {
+            prompt += `  - ${check}\n`;
+          });
+        }
+        prompt += `\n`;
+        if (g.review.length > 0) {
+          prompt += `**Review Guidance:**\n`;
+          g.review.forEach((item) => {
+            prompt += `- ${item}\n`;
+          });
+          prompt += `\n`;
+        }
+      }
     }
   }
 

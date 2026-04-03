@@ -2,11 +2,12 @@
 date: 2026-04-03T14:00:00-07:00
 topic: "Per-Repo Guidelines (PR Checks, Merge Policy, Review Guidance)"
 author: Claude
-status: ready
+status: implemented
 tags: [plan, ci, code-quality, pre-commit, pr-quality, prompting]
 autonomy: verbose
 last_updated: 2026-04-03
 last_updated_by: Claude
+implemented_at: 2026-04-03
 ---
 
 # Per-Repo Code Quality Checks Implementation Plan

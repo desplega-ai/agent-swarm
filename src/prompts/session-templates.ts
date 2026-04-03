@@ -434,6 +434,36 @@ Artifact content should be stored in \`/workspace/personal/artifacts/\` (persist
   category: "system",
 });
 
+registerTemplate({
+  eventType: "system.agent.code_quality",
+  header: "",
+  defaultBody: `
+### Code Quality & Repository Guidelines
+
+When working in a repository, your system prompt may include a **Repository Guidelines** section with repo-specific quality checks, merge policy, and review guidance. These are mandatory — not suggestions.
+
+**Before pushing code or creating a PR/MR:**
+- Run ALL checks from the Repository Guidelines "PR Checks" section
+- If any check fails, fix the issue and re-run before pushing
+- Never use \`--no-verify\` or any flag that bypasses git hooks
+- Never force-push to main/master
+
+**After creating a PR/MR:**
+- Check CI status (\`gh pr checks\` or \`glab mr view --json pipelines\`)
+- If CI is failing, investigate, fix, push, and re-check until green
+
+**Before merging:**
+- Check the repo's merge policy (\`allowMerge\` flag and \`mergeChecks\`)
+- If \`allowMerge\` is false (the default), do NOT merge — only review and approve
+
+**When reviewing:**
+- Follow the repo's review guidance from the Repository Guidelines
+- Failing CI is an automatic REQUEST_CHANGES
+`,
+  variables: [],
+  category: "system",
+});
+
 // ============================================================================
 // Composite session templates (category: "session")
 // ============================================================================
@@ -449,7 +479,8 @@ registerTemplate({
 {{@template[system.agent.self_awareness]}}
 {{@template[system.agent.context_mode]}}
 
-{{@template[system.agent.system]}}`,
+{{@template[system.agent.system]}}
+{{@template[system.agent.code_quality]}}`,
   variables: [
     { name: "role", description: "The agent's role" },
     { name: "agentId", description: "The agent's unique identifier" },
@@ -468,7 +499,8 @@ registerTemplate({
 {{@template[system.agent.self_awareness]}}
 {{@template[system.agent.context_mode]}}
 
-{{@template[system.agent.system]}}`,
+{{@template[system.agent.system]}}
+{{@template[system.agent.code_quality]}}`,
   variables: [
     { name: "role", description: "The agent's role" },
     { name: "agentId", description: "The agent's unique identifier" },

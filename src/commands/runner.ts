@@ -42,7 +42,18 @@ async function fetchRepoConfig(
   apiUrl: string,
   apiKey: string,
   vcsRepo: string,
-): Promise<{ url: string; name: string; clonePath: string; defaultBranch: string } | null> {
+): Promise<{
+  url: string;
+  name: string;
+  clonePath: string;
+  defaultBranch: string;
+  guidelines?: {
+    prChecks: string[];
+    mergeChecks: string[];
+    allowMerge?: boolean;
+    review: string[];
+  } | null;
+} | null> {
   try {
     const repoName = vcsRepo.split("/").pop() || vcsRepo;
     const resp = await fetch(`${apiUrl}/api/repos?name=${encodeURIComponent(repoName)}`, {
@@ -50,7 +61,18 @@ async function fetchRepoConfig(
     });
     if (!resp.ok) return null;
     const data = (await resp.json()) as {
-      repos: Array<{ url: string; name: string; clonePath: string; defaultBranch: string }>;
+      repos: Array<{
+        url: string;
+        name: string;
+        clonePath: string;
+        defaultBranch: string;
+        guidelines?: {
+          prChecks: string[];
+          mergeChecks: string[];
+          allowMerge?: boolean;
+          review: string[];
+        } | null;
+      }>;
     };
     return data.repos.find((r) => r.url.includes(vcsRepo)) ?? data.repos[0] ?? null;
   } catch {
@@ -2921,7 +2943,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               clonePath: `/workspace/repos/${taskVcsRepo.split("/").pop() || taskVcsRepo}`,
               defaultBranch: "main",
             };
-            currentRepoContext = await ensureRepoForTask(effectiveConfig, role);
+            const repoResult = await ensureRepoForTask(effectiveConfig, role);
+            currentRepoContext = {
+              ...repoResult,
+              guidelines: repoConfig?.guidelines ?? null,
+            };
           } else {
             currentRepoContext = undefined;
           }

@@ -2879,6 +2879,41 @@
                       "type": "boolean",
                       "default": true
                     },
+                    "guidelines": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "prChecks": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "mergeChecks": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "allowMerge": {
+                          "type": "boolean",
+                          "default": false
+                        },
+                        "review": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "prChecks",
+                        "mergeChecks",
+                        "review"
+                      ]
+                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -2959,6 +2994,41 @@
                   },
                   "autoClone": {
                     "type": "boolean"
+                  },
+                  "guidelines": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "prChecks": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "mergeChecks": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "allowMerge": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "review": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "prChecks",
+                      "mergeChecks",
+                      "review"
+                    ]
                   }
                 }
               }
@@ -2997,6 +3067,41 @@
                     "autoClone": {
                       "type": "boolean",
                       "default": true
+                    },
+                    "guidelines": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "prChecks": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "mergeChecks": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "allowMerge": {
+                          "type": "boolean",
+                          "default": false
+                        },
+                        "review": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "prChecks",
+                        "mergeChecks",
+                        "review"
+                      ]
                     },
                     "createdAt": {
                       "type": "string"
@@ -3187,6 +3292,41 @@
                             "type": "boolean",
                             "default": true
                           },
+                          "guidelines": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "prChecks": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "mergeChecks": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "allowMerge": {
+                                "type": "boolean",
+                                "default": false
+                              },
+                              "review": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": [
+                              "prChecks",
+                              "mergeChecks",
+                              "review"
+                            ]
+                          },
                           "createdAt": {
                             "type": "string"
                           },
@@ -3246,6 +3386,41 @@
                   },
                   "autoClone": {
                     "type": "boolean"
+                  },
+                  "guidelines": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "prChecks": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "mergeChecks": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "allowMerge": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "review": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "prChecks",
+                      "mergeChecks",
+                      "review"
+                    ]
                   }
                 },
                 "required": [
@@ -3288,6 +3463,41 @@
                     "autoClone": {
                       "type": "boolean",
                       "default": true
+                    },
+                    "guidelines": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "prChecks": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "mergeChecks": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "allowMerge": {
+                          "type": "boolean",
+                          "default": false
+                        },
+                        "review": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "prChecks",
+                        "mergeChecks",
+                        "review"
+                      ]
                     },
                     "createdAt": {
                       "type": "string"
