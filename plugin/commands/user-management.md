@@ -112,7 +112,7 @@ manage-user action: "update" userId: "abc-123" githubUsername: "janedoe"
 
 ## Important Notes
 
-- `manage-user` requires **lead** role for create/update/delete operations. Workers can only use `resolve-user` and `manage-user` with `action: "list"` or `action: "get"`.
+- `manage-user` is **lead-only** — workers cannot use it for any action (the lead check happens before action dispatch). Workers must use `resolve-user` for lookups.
 - `slackUserId`, `githubUsername`, `gitlabUsername`, and `linearUserId` have **unique constraints** — duplicates will error.
 - Deleting a user clears `requestedByUserId` on all their associated tasks (sets to null).
 - Email aliases are case-insensitive for resolution.
