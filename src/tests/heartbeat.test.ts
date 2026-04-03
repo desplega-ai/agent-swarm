@@ -586,6 +586,28 @@ describe("Heartbeat Triage", () => {
       expect(retries.length).toBe(0);
     });
 
+    test("does not retry system tasks (heartbeat)", async () => {
+      const agent = createAgent({ name: "worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Heartbeat task", {
+        agentId: agent.id,
+        taskType: "heartbeat",
+      });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("failed");
+
+      const retries = getDb()
+        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
+        .all(task.id);
+      expect(retries.length).toBe(0);
+    });
+
     test("sets agent to idle after auto-failing its only task", async () => {
       const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
       const task = createTaskExtended("Interrupted task", { agentId: agent.id });

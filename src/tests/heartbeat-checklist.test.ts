@@ -6,7 +6,6 @@ import {
   createTaskExtended,
   getDb,
   initDb,
-  insertActiveSession,
   startTask,
   updateAgentProfile,
 } from "../be/db";

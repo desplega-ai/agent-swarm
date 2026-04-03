@@ -248,7 +248,12 @@ export async function runRebootSweep(): Promise<void> {
     const reason = "Auto-failed by reboot sweep: worker session not found after server restart";
 
     for (const task of allInProgress) {
-      if (!task.agentId) continue;
+      if (!task.agentId) {
+        console.warn(
+          `[Heartbeat] Reboot sweep: skipping task ${task.id} — in_progress with no agentId`,
+        );
+        continue;
+      }
 
       const session = getActiveSessionForTask(task.id);
       if (session) continue; // Session exists — worker might still be alive, skip
@@ -554,7 +559,7 @@ export function gatherSystemStatus(options?: { isBootTriage?: boolean }): string
 
       for (const { original, retryTaskId } of rebootTasks) {
         const agentName = original.agentId
-          ? (getAllAgents().find((a) => a.id === original.agentId)?.name ?? original.agentId)
+          ? (agents.find((a) => a.id === original.agentId)?.name ?? original.agentId)
           : "unassigned";
         const retryNote = retryTaskId
           ? `→ retry created: ${retryTaskId}`
@@ -572,7 +577,6 @@ export function gatherSystemStatus(options?: { isBootTriage?: boolean }): string
     }
 
     // Orphaned pending/offered tasks (assigned to workers with no active session)
-    const allAgents = getAllAgents();
     const orphanedTasks: AgentTask[] = [];
 
     for (const status of ["pending", "offered"] as const) {
@@ -580,7 +584,7 @@ export function gatherSystemStatus(options?: { isBootTriage?: boolean }): string
 
       for (const task of tasks) {
         if (!task.agentId) continue;
-        const agent = allAgents.find((a) => a.id === task.agentId);
+        const agent = agents.find((a) => a.id === task.agentId);
         if (!agent || agent.status === "offline") {
           orphanedTasks.push(task);
         }
@@ -592,7 +596,7 @@ export function gatherSystemStatus(options?: { isBootTriage?: boolean }): string
       sections.push("## Orphaned Tasks [auto-generated, NEEDS ATTENTION]");
       sections.push("These tasks are pending/offered but assigned to workers that are offline:");
       for (const task of orphanedTasks) {
-        const agentName = allAgents.find((a) => a.id === task.agentId)?.name ?? task.agentId ?? "?";
+        const agentName = agents.find((a) => a.id === task.agentId)?.name ?? task.agentId ?? "?";
         sections.push(
           `- [${task.id}] "${task.task.slice(0, 100)}" — status: ${task.status}, assigned to: ${agentName}`,
         );
