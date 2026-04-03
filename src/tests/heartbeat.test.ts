@@ -17,8 +17,10 @@ import {
 } from "../be/db";
 import {
   codeLevelTriage,
+  getRebootAffectedTasks,
   preflightGate,
   runHeartbeatSweep,
+  runRebootSweep,
   startHeartbeat,
   stopHeartbeat,
 } from "../heartbeat/heartbeat";
@@ -431,6 +433,235 @@ describe("Heartbeat Triage", () => {
         .query("SELECT COUNT(*) as count FROM active_sessions WHERE id = ?")
         .get("test-stale-session") as { count: number };
       expect(remaining.count).toBe(0);
+    });
+  });
+
+  // ==========================================================================
+  // Reboot Sweep
+  // ==========================================================================
+
+  describe("Reboot Sweep", () => {
+    test("no-op when no in_progress tasks exist", async () => {
+      await runRebootSweep();
+
+      const affected = getRebootAffectedTasks();
+      expect(affected.length).toBe(0);
+    });
+
+    test("auto-fails in_progress task with no session and creates retry", async () => {
+      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Interrupted task", { agentId: agent.id });
+      startTask(task.id);
+
+      // Backdate so getStalledInProgressTasks(0) picks it up (avoids same-ms timing issue)
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      // Original task should be failed
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("failed");
+      expect(updated?.failureReason).toContain("reboot sweep");
+
+      // Retry task should exist
+      const affected = getRebootAffectedTasks();
+      expect(affected.length).toBe(1);
+      expect(affected[0]!.original.id).toBe(task.id);
+      expect(affected[0]!.retryTaskId).not.toBeNull();
+
+      // Verify retry task in DB
+      const retryTask = getTaskById(affected[0]!.retryTaskId!);
+      expect(retryTask).not.toBeNull();
+      expect(retryTask!.parentTaskId).toBe(task.id);
+      expect(retryTask!.task).toBe(task.task);
+      // No agentId → goes to pool as "unassigned", auto-assign will route it
+      expect(retryTask!.status).toBe("unassigned");
+
+      // Verify retry has correct tags
+      const retryRow = getDb()
+        .query("SELECT tags FROM agent_tasks WHERE id = ?")
+        .get(affected[0]!.retryTaskId!) as { tags: string };
+      const tags = JSON.parse(retryRow.tags);
+      expect(tags).toContain("reboot-retry");
+      expect(tags).toContain("auto-generated");
+    });
+
+    test("skips in_progress task that has an active session", async () => {
+      const agent = createAgent({ name: "alive-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Active task", { agentId: agent.id });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      // Create an active session — worker is still alive
+      insertActiveSession({
+        agentId: agent.id,
+        taskId: task.id,
+        triggerType: "task_assigned",
+      });
+
+      await runRebootSweep();
+
+      // Task should NOT be failed
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("in_progress");
+
+      // No retry tasks should exist for this task
+      const retries = getDb()
+        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
+        .all(task.id);
+      expect(retries.length).toBe(0);
+    });
+
+    test("retry dedup: does not create second retry when one already exists", async () => {
+      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Interrupted task", { agentId: agent.id });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      // Pre-create a retry task (simulating a previous reboot sweep)
+      createTaskExtended("Retry of interrupted task", { parentTaskId: task.id });
+
+      await runRebootSweep();
+
+      // Should only have the one pre-existing retry, not a second
+      const retries = getDb()
+        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
+        .all(task.id);
+      expect(retries.length).toBe(1);
+    });
+
+    test("does not retry system tasks (heartbeat-checklist)", async () => {
+      const lead = createAgent({ name: "lead", isLead: true, status: "busy" });
+      const task = createTaskExtended("Heartbeat check", {
+        agentId: lead.id,
+        taskType: "heartbeat-checklist",
+      });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      // Task should be failed
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("failed");
+
+      // But no retry should be created
+      const retries = getDb()
+        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
+        .all(task.id);
+      expect(retries.length).toBe(0);
+
+      // Affected list should show null retryTaskId
+      const affected = getRebootAffectedTasks();
+      expect(affected.length).toBe(1);
+      expect(affected[0]!.retryTaskId).toBeNull();
+    });
+
+    test("does not retry system tasks (boot-triage)", async () => {
+      const lead = createAgent({ name: "lead", isLead: true, status: "busy" });
+      const task = createTaskExtended("Boot triage", {
+        agentId: lead.id,
+        taskType: "boot-triage",
+      });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("failed");
+
+      const retries = getDb()
+        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
+        .all(task.id);
+      expect(retries.length).toBe(0);
+    });
+
+    test("does not retry system tasks (heartbeat)", async () => {
+      const agent = createAgent({ name: "worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Heartbeat task", {
+        agentId: agent.id,
+        taskType: "heartbeat",
+      });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("failed");
+
+      const retries = getDb()
+        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
+        .all(task.id);
+      expect(retries.length).toBe(0);
+    });
+
+    test("sets agent to idle after auto-failing its only task", async () => {
+      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Interrupted task", { agentId: agent.id });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      const agentRow = getDb().query("SELECT status FROM agents WHERE id = ?").get(agent.id) as {
+        status: string;
+      };
+      expect(agentRow.status).toBe("idle");
+    });
+
+    test("concurrent calls only process tasks once (dedup guard)", async () => {
+      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Interrupted task", { agentId: agent.id });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      // Run two sweeps concurrently
+      await Promise.all([runRebootSweep(), runRebootSweep()]);
+
+      // Only one retry should be created
+      const retries = getDb()
+        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
+        .all(task.id);
+      expect(retries.length).toBe(1);
+    });
+
+    test("preserves task priority and source in retry", async () => {
+      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("High priority task", {
+        agentId: agent.id,
+        priority: 90,
+        source: "slack",
+      });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      const affected = getRebootAffectedTasks();
+      expect(affected.length).toBe(1);
+
+      const retryTask = getTaskById(affected[0]!.retryTaskId!);
+      expect(retryTask!.priority).toBe(90);
+      expect(retryTask!.source).toBe("slack");
     });
   });
 

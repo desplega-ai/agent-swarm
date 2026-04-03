@@ -14,6 +14,7 @@ import {
   createBootTriageTask,
   gatherSystemStatus,
   isEffectivelyEmpty,
+  runRebootSweep,
 } from "../heartbeat/heartbeat";
 
 // Side-effect import: register heartbeat templates (also done by heartbeat.ts,
@@ -412,6 +413,117 @@ describe("Heartbeat Checklist", () => {
         .all();
       expect(bootTasks.length).toBe(1);
       expect(checklistTasks.length).toBe(1);
+    });
+  });
+
+  // ==========================================================================
+  // gatherSystemStatus() — boot triage sections
+  // ==========================================================================
+
+  describe("gatherSystemStatus boot triage", () => {
+    test("isBootTriage includes Reboot-Interrupted Work section after reboot sweep", async () => {
+      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Important feature work", { agentId: agent.id });
+      startTask(task.id);
+
+      // Backdate so reboot sweep picks it up
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      const status = gatherSystemStatus({ isBootTriage: true });
+      expect(status).toContain("## Reboot-Interrupted Work [auto-generated, ACTION REQUIRED]");
+      expect(status).toContain("auto-failed and a retry task created");
+      expect(status).toContain("You MUST triage each task above");
+    });
+
+    test("isBootTriage shows full task IDs (not truncated)", async () => {
+      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Test task for ID check", { agentId: agent.id });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      const status = gatherSystemStatus({ isBootTriage: true });
+      // Full UUID (36 chars) should appear, not truncated to 8 chars
+      expect(status).toContain(task.id);
+    });
+
+    test("isBootTriage shows retry task ID when retry was created", async () => {
+      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Retryable task", { agentId: agent.id });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      const status = gatherSystemStatus({ isBootTriage: true });
+      expect(status).toContain("→ retry created:");
+    });
+
+    test("isBootTriage shows 'no retry (system task)' for system tasks", async () => {
+      const lead = createAgent({ name: "lead", isLead: true, status: "busy" });
+      const task = createTaskExtended("Heartbeat check", {
+        agentId: lead.id,
+        taskType: "heartbeat-checklist",
+      });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      const status = gatherSystemStatus({ isBootTriage: true });
+      expect(status).toContain("→ no retry (system task)");
+    });
+
+    test("isBootTriage includes Orphaned Tasks for pending tasks on offline agents", () => {
+      const offlineAgent = createAgent({
+        name: "offline-worker",
+        isLead: false,
+        status: "offline",
+      });
+      createTaskExtended("Orphaned pending task", { agentId: offlineAgent.id });
+
+      const status = gatherSystemStatus({ isBootTriage: true });
+      expect(status).toContain("## Orphaned Tasks [auto-generated, NEEDS ATTENTION]");
+      expect(status).toContain("Orphaned pending task");
+      expect(status).toContain("offline-worker");
+    });
+
+    test("non-boot mode does NOT include reboot or orphan sections", async () => {
+      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Some task", { agentId: agent.id });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      // Regular status (no isBootTriage flag)
+      const status = gatherSystemStatus();
+      expect(status).not.toContain("Reboot-Interrupted Work");
+      expect(status).not.toContain("Orphaned Tasks");
+    });
+
+    test("orphaned tasks note about re-registering workers is included", () => {
+      const offlineAgent = createAgent({
+        name: "recovering-worker",
+        isLead: false,
+        status: "offline",
+      });
+      createTaskExtended("Waiting task", { agentId: offlineAgent.id });
+
+      const status = gatherSystemStatus({ isBootTriage: true });
+      expect(status).toContain("Some workers may appear offline briefly while re-registering");
     });
   });
 });

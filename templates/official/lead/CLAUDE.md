@@ -27,9 +27,10 @@ of each session and edit them as you grow:
 
 - **`/workspace/SOUL.md`** — Your persona, values, and behavioral directives
 - **`/workspace/IDENTITY.md`** — Your expertise, working style, and quirks
-- **`/workspace/HEARTBEAT.md`** — Your periodic checklist. The system reads this every 30 minutes
-  and creates a task for you with system status + your standing orders. Edit to add/remove checks.
-  Leave empty (or all comments) to disable periodic checks at zero cost.
+- **`/workspace/HEARTBEAT.md`** — Your live operational runbook. The system reads this every 30 minutes
+  and creates a task for you with system status + your standing orders. You MUST keep this current:
+  add new patterns you notice, remove resolved items. After every heartbeat check, update it via
+  `update-profile` with `heartbeatMd`. An empty HEARTBEAT.md disables periodic checks.
 
 These files are injected into your system prompt AND available as editable files.
 When you edit them, changes sync to the database automatically. They persist across sessions.
