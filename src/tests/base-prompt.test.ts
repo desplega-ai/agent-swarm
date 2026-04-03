@@ -166,6 +166,78 @@ describe("getBasePrompt — repoContext", () => {
     });
     expect(result).toContain("but has no CLAUDE.md file");
   });
+
+  test("shows warning when guidelines is null", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      repoContext: {
+        claudeMd: "Rules",
+        clonePath: "/workspace/my-repo",
+        guidelines: null,
+      },
+    });
+    expect(result).toContain("No repository guidelines defined");
+    expect(result).toContain("ask the lead or user to define guidelines");
+  });
+
+  test("renders PR checks, merge policy, and review guidance when guidelines has content", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      repoContext: {
+        claudeMd: "Rules",
+        clonePath: "/workspace/my-repo",
+        guidelines: {
+          prChecks: ["bun test", "bun run lint"],
+          mergeChecks: ["all CI checks pass"],
+          allowMerge: false,
+          review: ["check README.md"],
+        },
+      },
+    });
+    expect(result).toContain("Repository Guidelines (MANDATORY)");
+    expect(result).toContain("`bun test`");
+    expect(result).toContain("`bun run lint`");
+    expect(result).toContain("Auto-merge: Not allowed (default)");
+    expect(result).toContain("all CI checks pass");
+    expect(result).toContain("check README.md");
+    expect(result).toContain("Do NOT push code with failing checks");
+  });
+
+  test("renders nothing when guidelines has all empty arrays", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      repoContext: {
+        claudeMd: "Rules",
+        clonePath: "/workspace/my-repo",
+        guidelines: {
+          prChecks: [],
+          mergeChecks: [],
+          allowMerge: false,
+          review: [],
+        },
+      },
+    });
+    expect(result).not.toContain("Repository Guidelines (MANDATORY)");
+    expect(result).not.toContain("No repository guidelines defined");
+  });
+
+  test("renders merge policy when allowMerge is true even with empty arrays", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      repoContext: {
+        claudeMd: "Rules",
+        clonePath: "/workspace/my-repo",
+        guidelines: {
+          prChecks: [],
+          mergeChecks: [],
+          allowMerge: true,
+          review: [],
+        },
+      },
+    });
+    expect(result).toContain("Repository Guidelines (MANDATORY)");
+    expect(result).toContain("Auto-merge: Allowed");
+  });
 });
 
 // ---------------------------------------------------------------------------

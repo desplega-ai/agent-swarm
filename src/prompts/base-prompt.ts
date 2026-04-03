@@ -112,7 +112,7 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
       prompt += `\n### Repository Guidelines\n\nNo repository guidelines defined. If you need to push code, ask the lead or user to define guidelines first.\n`;
     } else {
       const hasAnyContent =
-        g.prChecks.length > 0 || g.mergeChecks.length > 0 || g.review.length > 0;
+        g.prChecks.length > 0 || g.mergeChecks.length > 0 || g.review.length > 0 || g.allowMerge;
       if (hasAnyContent) {
         prompt += `\n### Repository Guidelines (MANDATORY)\n\n`;
         if (g.prChecks.length > 0) {

@@ -17,6 +17,7 @@ import {
   type ProviderSession,
   type ProviderSessionConfig,
 } from "../providers/index.ts";
+import type { RepoGuidelines } from "../types.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
 import { type CredentialSelection, resolveCredentialPools } from "../utils/credentials.ts";
 import { parseRateLimitResetTime } from "../utils/error-tracker.ts";
@@ -47,12 +48,7 @@ async function fetchRepoConfig(
   name: string;
   clonePath: string;
   defaultBranch: string;
-  guidelines?: {
-    prChecks: string[];
-    mergeChecks: string[];
-    allowMerge?: boolean;
-    review: string[];
-  } | null;
+  guidelines?: RepoGuidelines | null;
 } | null> {
   try {
     const repoName = vcsRepo.split("/").pop() || vcsRepo;
@@ -66,12 +62,7 @@ async function fetchRepoConfig(
         name: string;
         clonePath: string;
         defaultBranch: string;
-        guidelines?: {
-          prChecks: string[];
-          mergeChecks: string[];
-          allowMerge?: boolean;
-          review: string[];
-        } | null;
+        guidelines?: RepoGuidelines | null;
       }>;
     };
     return data.repos.find((r) => r.url.includes(vcsRepo)) ?? data.repos[0] ?? null;
