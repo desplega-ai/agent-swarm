@@ -1,0 +1,23 @@
+{
+  "name": "ux-principles",
+  "displayName": "UX Principles Agent",
+  "description": "Analyzes frontend codebases to extract, maintain, and evolve UX principles. Detects component inconsistencies, accessibility gaps, design token violations, and UX anti-patterns.",
+  "version": "1.0.0",
+  "category": "official",
+  "icon": "palette",
+  "author": "Agent Swarm <contact@agent-swarm.dev>",
+  "createdAt": "2026-04-02",
+  "lastUpdatedAt": "2026-04-02",
+  "agentDefaults": {
+    "role": "worker",
+    "capabilities": ["core", "task-pool", "messaging", "profiles", "services", "scheduling", "memory", "ux-analysis"],
+    "maxTasks": 1
+  },
+  "files": {
+    "claudeMd": "CLAUDE.md",
+    "soulMd": "SOUL.md",
+    "identityMd": "IDENTITY.md",
+    "toolsMd": "TOOLS.md",
+    "setupScript": "start-up.sh"
+  }
+}
