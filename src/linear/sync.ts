@@ -1,4 +1,4 @@
-import { cancelTask, createTaskExtended, getAllAgents, getTaskById } from "../be/db";
+import { cancelTask, createTaskExtended, getAllAgents, getTaskById, resolveUser } from "../be/db";
 import { getOAuthTokens } from "../be/db-queries/oauth";
 import {
   createTrackerSync,
@@ -269,6 +269,17 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
     return;
   }
 
+  // Extract actor identity from Linear webhook payload
+  const actor = event.actor as Record<string, unknown> | undefined;
+  const actorLinearId = actor ? String(actor.id ?? "") : "";
+  const actorName = actor ? String(actor.name ?? "") : "";
+  const actorEmail = actor ? String(actor.email ?? "") : "";
+  const requestedByUserId = resolveUser({
+    linearUserId: actorLinearId || undefined,
+    email: actorEmail || undefined,
+    name: actorName || undefined,
+  })?.id;
+
   // Check if we already track this issue
   const existing = getTrackerSyncByExternalId("linear", "task", issueId);
   const sessionId = agentSession ? String(agentSession.id ?? "") : "";
@@ -320,6 +331,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
     agentId: lead?.id ?? "",
     source: "linear",
     taskType: "linear-issue",
+    requestedByUserId,
   });
 
   // Delete old tracker_sync before creating new one (UNIQUE constraint)
@@ -536,6 +548,17 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
   // Task is completed/failed/cancelled or doesn't exist — create a new follow-up task
   const lead = findLeadAgent();
 
+  // Extract actor identity from Linear webhook payload
+  const promptedActor = event.actor as Record<string, unknown> | undefined;
+  const promptedActorLinearId = promptedActor ? String(promptedActor.id ?? "") : "";
+  const promptedActorEmail = promptedActor ? String(promptedActor.email ?? "") : "";
+  const promptedActorName = promptedActor ? String(promptedActor.name ?? "") : "";
+  const promptedRequestedByUserId = resolveUser({
+    linearUserId: promptedActorLinearId || undefined,
+    email: promptedActorEmail || undefined,
+    name: promptedActorName || undefined,
+  })?.id;
+
   const followupResult = resolveTemplate("linear.issue.followup", {
     issue_identifier: issueIdentifier,
     issue_title: issueTitle,
@@ -551,6 +574,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
     agentId: lead?.id ?? "",
     source: "linear",
     taskType: "linear-issue",
+    requestedByUserId: promptedRequestedByUserId,
   });
 
   // Repoint the existing tracker_sync to the new follow-up task (can't create a

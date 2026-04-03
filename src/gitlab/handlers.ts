@@ -8,7 +8,7 @@
  * - Detects bot mentions
  */
 
-import { createTaskExtended, failTask, findTaskByVcs, getAllAgents } from "../be/db";
+import { createTaskExtended, failTask, findTaskByVcs, getAllAgents, resolveUser } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
 import { GITLAB_BOT_NAME } from "./auth";
 import { addGitLabNoteReaction, addGitLabReaction } from "./reactions";
@@ -60,6 +60,9 @@ export async function handleMergeRequest(
   const action = mr.action;
   const repo = project.path_with_namespace;
 
+  // Resolve canonical user from GitLab sender
+  const requestedByUserId = resolveUser({ gitlabUsername: user.username })?.id;
+
   console.log(`[GitLab] MR #${mr.iid} ${action} by ${user.username} in ${repo}`);
 
   const dedupKey = `gitlab-mr-${repo}-${mr.iid}-${action}-${user.username}`;
@@ -105,6 +108,7 @@ export async function handleMergeRequest(
         vcsEventType: "merge_request",
         vcsNumber: mr.iid,
         vcsAuthor: user.username,
+        requestedByUserId,
         vcsUrl: mr.url,
       });
 
@@ -150,6 +154,9 @@ export async function handleIssue(
   const { user, project, object_attributes: issue } = event;
   const action = issue.action;
   const repo = project.path_with_namespace;
+
+  // Resolve canonical user from GitLab sender
+  const requestedByUserId = resolveUser({ gitlabUsername: user.username })?.id;
 
   console.log(`[GitLab] Issue #${issue.iid} ${action} by ${user.username} in ${repo}`);
 
@@ -198,6 +205,7 @@ export async function handleIssue(
         vcsEventType: "issue",
         vcsNumber: issue.iid,
         vcsAuthor: user.username,
+        requestedByUserId,
         vcsUrl: issue.url,
       });
 
@@ -225,6 +233,9 @@ export async function handleIssue(
 export async function handleNote(event: NoteEvent): Promise<{ created: boolean; taskId?: string }> {
   const { user, project, object_attributes: note } = event;
   const repo = project.path_with_namespace;
+
+  // Resolve canonical user from GitLab sender
+  const requestedByUserId = resolveUser({ gitlabUsername: user.username })?.id;
 
   // Only handle comments with bot mentions
   if (!detectMention(note.note)) {

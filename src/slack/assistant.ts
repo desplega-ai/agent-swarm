@@ -4,6 +4,7 @@ import {
   getAgentWorkingOnThread,
   getLeadAgent,
   getMostRecentTaskInThread,
+  resolveUser,
 } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
 import { bufferThreadMessage } from "./thread-buffer";
@@ -47,6 +48,9 @@ export function createAssistant(): Assistant {
         const messageText = (msg.text as string) || "";
         const userId = (msg.user as string) || "";
 
+        // Resolve canonical user identity (graceful — null if not found)
+        const requestedByUserId = userId ? resolveUser({ slackUserId: userId })?.id : undefined;
+
         // 1. Check if an agent is already working in this thread
         const workingAgent = getAgentWorkingOnThread(channelId, threadTs);
 
@@ -67,6 +71,7 @@ export function createAssistant(): Assistant {
             slackThreadTs: threadTs,
             slackUserId: userId,
             parentTaskId: latestTask?.id,
+            requestedByUserId,
           });
 
           await setStatus("Processing follow-up...");
@@ -96,6 +101,7 @@ export function createAssistant(): Assistant {
             slackChannelId: channelId,
             slackThreadTs: threadTs,
             slackUserId: userId,
+            requestedByUserId,
           });
           const offlineResult = resolveTemplate("slack.assistant.offline", {});
           await say(offlineResult.text);
@@ -108,6 +114,7 @@ export function createAssistant(): Assistant {
           slackChannelId: channelId,
           slackThreadTs: threadTs,
           slackUserId: userId,
+          requestedByUserId,
         });
         // setStatus shows typing indicator — watcher will post final result when done
       } catch (error) {

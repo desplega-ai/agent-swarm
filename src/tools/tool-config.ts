@@ -133,6 +133,10 @@ export const DEFERRED_TOOLS = new Set([
   "mcp-server-uninstall",
   "mcp-server-update",
 
+  // User Identity (2)
+  "resolve-user",
+  "manage-user",
+
   // Other (3)
   "cancel-task",
   "inject-learning",
