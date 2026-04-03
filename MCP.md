@@ -22,6 +22,8 @@
   - [get-config](#get-config)
   - [list-config](#list-config)
   - [delete-config](#delete-config)
+  - [get-repos](#get-repos)
+  - [update-repo](#update-repo)
   - [list-prompt-templates](#list-prompt-templates)
   - [get-prompt-template](#get-prompt-template)
   - [set-prompt-template](#set-prompt-template)
@@ -266,6 +268,31 @@ Delete a swarm configuration entry by its ID. Use list-config to find config IDs
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `id` | `string` | Yes | - | The config entry ID to delete. |
+
+### get-repos
+
+**Get Repos**
+
+List registered repos with their guidelines (PR checks, merge policy, review guidance). Use the optional name filter to check a specific repo. The lead should use this to verify a repo has guidelines before routing tasks.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | No | - | Filter by repo name. If omitted, returns all repos. |
+
+### update-repo
+
+**Update Repo**
+
+Update a repo's configuration including guidelines (PR checks, merge policy, review guidance). The lead uses this to set guidelines after asking the user. Pass null for guidelines to clear them.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | The repo ID to update. |
+| `url` | `string` | No | - | New repo URL. |
+| `name` | `string` | No | - | New repo name. |
+| `clonePath` | `string` | No | - | New clone path. |
+| `defaultBranch` | `string` | No | - | New default branch. |
+| `autoClone` | `boolean` | No | - | Whether to auto-clone. |
 
 ### list-prompt-templates
 
