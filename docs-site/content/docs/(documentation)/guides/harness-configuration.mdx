@@ -217,3 +217,10 @@ The Docker entrypoint requires at least one pi-mono credential (`ANTHROPIC_API_K
 ### Wrong provider selected
 
 Check the startup logs — the entrypoint prints `Harness Provider: <value>`. If it says `claude` when you expected `pi`, ensure `HARNESS_PROVIDER=pi` is in your env file and not being overridden.
+
+## Related
+
+- [Environment Variables](/docs/reference/environment-variables) — Full reference for all configuration variables including auth credentials
+- [Deployment Guide](/docs/guides/deployment) — Deploy agents to production with Docker Compose
+- [Getting Started](/docs/getting-started) — Initial setup including credential configuration
+- [Architecture Overview](/docs/architecture/overview) — How harnesses fit into the overall system
