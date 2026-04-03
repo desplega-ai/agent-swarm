@@ -32,6 +32,7 @@ const SKILLS_TO_CONVERT = [
   "review-offered-task",
   "review-pr",
   "todos",
+  "user-management",
 ];
 
 function convertToPiSkill(name: string, content: string): string {
