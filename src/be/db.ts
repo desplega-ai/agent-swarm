@@ -44,6 +44,7 @@ import type {
   SwarmConfig,
   SwarmRepo,
   TriggerConfig,
+  User,
   VersionableField,
   VersionMeta,
   Workflow,
@@ -741,6 +742,7 @@ type AgentTaskRow = {
   was_paused: number;
   credentialKeySuffix: string | null;
   credentialKeyType: string | null;
+  requestedByUserId: string | null;
 };
 
 function rowToAgentTask(row: AgentTaskRow): AgentTask {
@@ -796,6 +798,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     wasPaused: !!row.was_paused,
     credentialKeySuffix: row.credentialKeySuffix ?? undefined,
     credentialKeyType: row.credentialKeyType ?? undefined,
+    requestedByUserId: row.requestedByUserId ?? undefined,
   };
 }
 
@@ -1809,6 +1812,7 @@ export interface CreateTaskOptions {
   workflowRunStepId?: string;
   sourceTaskId?: string;
   outputSchema?: Record<string, unknown>;
+  requestedByUserId?: string;
 }
 
 /**
@@ -1876,6 +1880,9 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       if (parent.agentmailThreadId && !options.agentmailThreadId) {
         options.agentmailThreadId = parent.agentmailThreadId;
       }
+      if (parent.requestedByUserId && !options.requestedByUserId) {
+        options.requestedByUserId = parent.requestedByUserId;
+      }
     }
   }
 
@@ -1900,8 +1907,8 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, dir, parentTaskId, model, scheduleId,
-        workflowRunId, workflowRunStepId, outputSchema, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        workflowRunId, workflowRunStepId, outputSchema, requestedByUserId, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -1938,6 +1945,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.workflowRunId ?? null,
       options?.workflowRunStepId ?? null,
       options?.outputSchema ? JSON.stringify(options.outputSchema) : null,
+      options?.requestedByUserId ?? null,
       now,
       now,
     );
@@ -7695,4 +7703,248 @@ export function getKeyCostSummary(keyType?: string): KeyCostSummary[] {
       GROUP BY t.credentialKeyType, t.credentialKeySuffix`,
     )
     .all(...params);
+}
+
+// ============================================================================
+// User Identity Operations
+// ============================================================================
+
+type UserRow = {
+  id: string;
+  name: string;
+  email: string | null;
+  role: string | null;
+  notes: string | null;
+  slackUserId: string | null;
+  linearUserId: string | null;
+  githubUsername: string | null;
+  gitlabUsername: string | null;
+  emailAliases: string | null;
+  preferredChannel: string | null;
+  timezone: string | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+};
+
+function rowToUser(row: UserRow): User {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email ?? undefined,
+    role: row.role ?? undefined,
+    notes: row.notes ?? undefined,
+    slackUserId: row.slackUserId ?? undefined,
+    linearUserId: row.linearUserId ?? undefined,
+    githubUsername: row.githubUsername ?? undefined,
+    gitlabUsername: row.gitlabUsername ?? undefined,
+    emailAliases: row.emailAliases ? JSON.parse(row.emailAliases) : [],
+    preferredChannel: row.preferredChannel ?? "slack",
+    timezone: row.timezone ?? undefined,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+/**
+ * Resolve a user by any platform-specific identifier.
+ * Priority: exact match on platform ID, then email (including aliases), then name substring.
+ */
+export function resolveUser(opts: {
+  slackUserId?: string;
+  linearUserId?: string;
+  githubUsername?: string;
+  gitlabUsername?: string;
+  email?: string;
+  name?: string;
+}): User | null {
+  const db = getDb();
+
+  // Try exact platform ID matches first
+  if (opts.slackUserId) {
+    const row = db
+      .prepare<UserRow, string>("SELECT * FROM users WHERE slackUserId = ?")
+      .get(opts.slackUserId);
+    if (row) return rowToUser(row);
+  }
+  if (opts.linearUserId) {
+    const row = db
+      .prepare<UserRow, string>("SELECT * FROM users WHERE linearUserId = ?")
+      .get(opts.linearUserId);
+    if (row) return rowToUser(row);
+  }
+  if (opts.githubUsername) {
+    const row = db
+      .prepare<UserRow, string>("SELECT * FROM users WHERE githubUsername = ?")
+      .get(opts.githubUsername);
+    if (row) return rowToUser(row);
+  }
+  if (opts.gitlabUsername) {
+    const row = db
+      .prepare<UserRow, string>("SELECT * FROM users WHERE gitlabUsername = ?")
+      .get(opts.gitlabUsername);
+    if (row) return rowToUser(row);
+  }
+
+  // Try email match (primary email)
+  if (opts.email) {
+    const row = db.prepare<UserRow, string>("SELECT * FROM users WHERE email = ?").get(opts.email);
+    if (row) return rowToUser(row);
+
+    // Check emailAliases (JSON array search)
+    const aliasRows = db
+      .prepare<UserRow, []>("SELECT * FROM users WHERE emailAliases != '[]'")
+      .all();
+    for (const r of aliasRows) {
+      const aliases: string[] = r.emailAliases ? JSON.parse(r.emailAliases) : [];
+      if (aliases.some((a) => a.toLowerCase() === opts.email!.toLowerCase())) {
+        return rowToUser(r);
+      }
+    }
+  }
+
+  // Try name substring match (case-insensitive)
+  if (opts.name) {
+    const row = db
+      .prepare<UserRow, string>("SELECT * FROM users WHERE LOWER(name) LIKE '%' || LOWER(?) || '%'")
+      .get(opts.name);
+    if (row) return rowToUser(row);
+  }
+
+  return null;
+}
+
+export function getUserById(id: string): User | null {
+  const row = getDb().prepare<UserRow, string>("SELECT * FROM users WHERE id = ?").get(id);
+  return row ? rowToUser(row) : null;
+}
+
+export function getAllUsers(): User[] {
+  return getDb().prepare<UserRow, []>("SELECT * FROM users ORDER BY name").all().map(rowToUser);
+}
+
+export function createUser(data: {
+  name: string;
+  email?: string;
+  role?: string;
+  notes?: string;
+  slackUserId?: string;
+  linearUserId?: string;
+  githubUsername?: string;
+  gitlabUsername?: string;
+  emailAliases?: string[];
+  preferredChannel?: string;
+  timezone?: string;
+}): User {
+  const id = crypto.randomUUID().replace(/-/g, "");
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<UserRow, (string | null)[]>(
+      `INSERT INTO users (id, name, email, role, notes, slackUserId, linearUserId, githubUsername, gitlabUsername, emailAliases, preferredChannel, timezone, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      data.name,
+      data.email ?? null,
+      data.role ?? null,
+      data.notes ?? null,
+      data.slackUserId ?? null,
+      data.linearUserId ?? null,
+      data.githubUsername ?? null,
+      data.gitlabUsername ?? null,
+      JSON.stringify(data.emailAliases ?? []),
+      data.preferredChannel ?? "slack",
+      data.timezone ?? null,
+      now,
+      now,
+    );
+  if (!row) throw new Error("Failed to create user");
+  return rowToUser(row);
+}
+
+export function updateUser(
+  id: string,
+  data: Partial<{
+    name: string;
+    email: string;
+    role: string;
+    notes: string;
+    slackUserId: string;
+    linearUserId: string;
+    githubUsername: string;
+    gitlabUsername: string;
+    emailAliases: string[];
+    preferredChannel: string;
+    timezone: string;
+  }>,
+): User | null {
+  const sets: string[] = [];
+  const params: (string | null)[] = [];
+
+  if (data.name !== undefined) {
+    sets.push("name = ?");
+    params.push(data.name);
+  }
+  if (data.email !== undefined) {
+    sets.push("email = ?");
+    params.push(data.email);
+  }
+  if (data.role !== undefined) {
+    sets.push("role = ?");
+    params.push(data.role);
+  }
+  if (data.notes !== undefined) {
+    sets.push("notes = ?");
+    params.push(data.notes);
+  }
+  if (data.slackUserId !== undefined) {
+    sets.push("slackUserId = ?");
+    params.push(data.slackUserId);
+  }
+  if (data.linearUserId !== undefined) {
+    sets.push("linearUserId = ?");
+    params.push(data.linearUserId);
+  }
+  if (data.githubUsername !== undefined) {
+    sets.push("githubUsername = ?");
+    params.push(data.githubUsername);
+  }
+  if (data.gitlabUsername !== undefined) {
+    sets.push("gitlabUsername = ?");
+    params.push(data.gitlabUsername);
+  }
+  if (data.emailAliases !== undefined) {
+    sets.push("emailAliases = ?");
+    params.push(JSON.stringify(data.emailAliases));
+  }
+  if (data.preferredChannel !== undefined) {
+    sets.push("preferredChannel = ?");
+    params.push(data.preferredChannel);
+  }
+  if (data.timezone !== undefined) {
+    sets.push("timezone = ?");
+    params.push(data.timezone);
+  }
+
+  if (sets.length === 0) return getUserById(id);
+
+  sets.push("lastUpdatedAt = ?");
+  params.push(new Date().toISOString());
+  params.push(id);
+
+  const row = getDb()
+    .prepare<UserRow, (string | null)[]>(
+      `UPDATE users SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
+    )
+    .get(...params);
+  return row ? rowToUser(row) : null;
+}
+
+export function deleteUser(id: string): boolean {
+  // Clear any task references before deleting
+  getDb()
+    .prepare("UPDATE agent_tasks SET requestedByUserId = NULL WHERE requestedByUserId = ?")
+    .run(id);
+  const result = getDb().prepare("DELETE FROM users WHERE id = ?").run(id);
+  return result.changes > 0;
 }

@@ -15,6 +15,7 @@ import { registerJoinSwarmTool } from "./tools/join-swarm";
 // Messaging capability
 import { registerListChannelsTool } from "./tools/list-channels";
 import { registerListServicesTool } from "./tools/list-services";
+import { registerManageUserTool } from "./tools/manage-user";
 // MCP Servers capability
 import {
   registerMcpServerCreateTool,
@@ -44,6 +45,7 @@ import { registerRegisterAgentMailInboxTool } from "./tools/register-agentmail-i
 // Services capability
 import { registerRegisterServiceTool } from "./tools/register-service";
 import { registerRequestHumanInputTool } from "./tools/request-human-input";
+import { registerResolveUserTool } from "./tools/resolve-user";
 // Scheduling capability
 import {
   registerCreateScheduleTool,
@@ -155,6 +157,10 @@ export function createServer() {
   registerStoreProgressTool(server);
   registerMyAgentInfoTool(server);
   registerCancelTaskTool(server);
+
+  // User identity tools - always registered
+  registerResolveUserTool(server);
+  registerManageUserTool(server); // self-guards with lead check
 
   // Debug tools - always registered (self-guards with lead check)
   registerDbQueryTool(server);

@@ -42,6 +42,16 @@ interface BlogPost {
 
 const posts: BlogPost[] = [
   {
+    slug: "deep-dive-soul-md-identity-stack",
+    title:
+      "SOUL.md and the 4-File Identity Stack: Persistent AI Agent Personalities",
+    description:
+      "How we gave AI agents persistent personalities that survive restarts, self-evolve, and get coached by their lead using a 4-file identity architecture.",
+    date: "April 3, 2026",
+    readTime: "12 min read",
+    tags: ["SOUL.md", "agent identity", "persistent memory", "self-evolution"],
+  },
+  {
     slug: "deep-dive-agent-identity-soul-md",
     title:
       "Why Your AI Agent Needs a Job Description: SOUL.md & Identity Architecture",

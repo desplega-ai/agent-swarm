@@ -1,4 +1,4 @@
-import { createTaskExtended, failTask, findTaskByVcs, getAllAgents } from "../be/db";
+import { createTaskExtended, failTask, findTaskByVcs, getAllAgents, resolveUser } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
 import {
   detectMention,
@@ -134,6 +134,9 @@ export async function handlePullRequest(
     requested_reviewer,
   } = event;
 
+  // Resolve canonical user from GitHub sender
+  const requestedByUserId = resolveUser({ githubUsername: sender.login })?.id;
+
   // Handle assigned action - bot was assigned to PR
   if (action === "assigned") {
     // Check if bot was assigned
@@ -178,6 +181,7 @@ export async function handlePullRequest(
       vcsEventType: "pull_request",
       vcsNumber: pr.number,
       vcsAuthor: sender.login,
+      requestedByUserId,
       vcsUrl: pr.html_url,
     });
 
@@ -275,6 +279,7 @@ export async function handlePullRequest(
       vcsEventType: "pull_request",
       vcsNumber: pr.number,
       vcsAuthor: sender.login,
+      requestedByUserId,
       vcsUrl: pr.html_url,
     });
 
@@ -364,6 +369,7 @@ export async function handlePullRequest(
       vcsEventType: "pull_request",
       vcsNumber: pr.number,
       vcsAuthor: sender.login,
+      requestedByUserId,
       vcsUrl: pr.html_url,
     });
 
@@ -478,6 +484,9 @@ export async function handleIssue(
 ): Promise<{ created: boolean; taskId?: string }> {
   const { action, issue, repository, sender, installation, assignee } = event;
 
+  // Resolve canonical user from GitHub sender
+  const requestedByUserId = resolveUser({ githubUsername: sender.login })?.id;
+
   // Handle assigned action - bot was assigned to issue
   if (action === "assigned") {
     // Check if bot was assigned
@@ -520,6 +529,7 @@ export async function handleIssue(
       vcsEventType: "issues",
       vcsNumber: issue.number,
       vcsAuthor: sender.login,
+      requestedByUserId,
       vcsUrl: issue.html_url,
     });
 
@@ -605,6 +615,7 @@ export async function handleIssue(
       vcsEventType: "issues",
       vcsNumber: issue.number,
       vcsAuthor: sender.login,
+      requestedByUserId,
       vcsUrl: issue.html_url,
     });
 
@@ -701,6 +712,9 @@ export async function handleComment(
   eventType: "issue_comment" | "pull_request_review_comment",
 ): Promise<{ created: boolean; taskId?: string }> {
   const { action, comment, repository, sender, issue, pull_request, installation } = event;
+
+  // Resolve canonical user from GitHub sender
+  const requestedByUserId = resolveUser({ githubUsername: sender.login })?.id;
 
   // Only handle created action
   if (action !== "created") {
@@ -801,6 +815,9 @@ export async function handlePullRequestReview(
   event: PullRequestReviewEvent,
 ): Promise<{ created: boolean; taskId?: string }> {
   const { action, review, pull_request: pr, repository, sender, installation } = event;
+
+  // Resolve canonical user from GitHub sender
+  const requestedByUserId = resolveUser({ githubUsername: sender.login })?.id;
 
   // Only handle submitted reviews (the most important action)
   // Edited reviews are less common and dismissed is handled by the state

@@ -15,6 +15,8 @@
   - [store-progress](#store-progress)
   - [my-agent-info](#my-agent-info)
   - [cancel-task](#cancel-task)
+  - [resolve-user](#resolve-user)
+  - [manage-user](#manage-user)
   - [db-query](#db-query)
   - [set-config](#set-config)
   - [get-config](#get-config)
@@ -177,6 +179,43 @@ Cancel a task that is pending or in progress. Only the lead or task creator can 
 |-----------|------|----------|---------|-------------|
 | `taskId` | `uuid` | Yes | - | The ID of the task to cancel. |
 | `reason` | `string` | No | - | Reason for cancellation. |
+
+### resolve-user
+
+**Resolve user identity**
+
+Look up a canonical user profile by any platform-specific identifier (Slack ID, Linear ID, GitHub username, email, or name). Returns the full user profile or null.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `slackUserId` | `string` | No | - | Slack user ID (e.g., U08NR6QD6CS) |
+| `linearUserId` | `string` | No | - | Linear user UUID |
+| `githubUsername` | `string` | No | - | GitHub username |
+| `gitlabUsername` | `string` | No | - | GitLab username |
+| `email` | `string` | No | - | Email address |
+| `name` | `string` | No | - | Name (fuzzy substring match, lowest priority) |
+
+### manage-user
+
+**Manage user profiles**
+
+Create, update, delete, or list user profiles in the user registry. Lead-only.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `action` | `create \| update \| delete \| list \| get` | Yes | - | Action to perform |
+| `userId` | `string` | No | - | User ID (required for update/delete/get) |
+| `name` | `string` | No | - | Display name (required for create) |
+| `email` | `string` | No | - | Primary email address |
+| `role` | `string` | No | - | Role (e.g., "founder", "engineer |
+| `notes` | `string` | No | - | Free-form notes |
+| `slackUserId` | `string` | No | - | Slack user ID |
+| `linearUserId` | `string` | No | - | Linear user UUID |
+| `githubUsername` | `string` | No | - | GitHub username |
+| `gitlabUsername` | `string` | No | - | GitLab username |
+| `emailAliases` | `array` | No | - | Additional email addresses |
+| `preferredChannel` | `string` | No | - | Preferred contact channel |
+| `timezone` | `string` | No | - | Timezone (e.g., America/New_York) |
 
 ### db-query
 
@@ -757,25 +796,27 @@ Register an AgentMail inbox ID to route incoming emails to this agent. When emai
 
 *No parameters*
 
-### mcp-server-update
+### mcp-server-get
 
-**Update MCP Server**
+**Get MCP Server**
 
-Update an MCP server's configuration. Only the owner or lead can update.
+Get MCP server details by ID or name. Name resolution uses scope cascade: agent > swarm > global.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `id` | `string` | Yes | - | ID of the MCP server to update |
-| `name` | `string` | No | - | New name |
-| `description` | `string` | No | - | New description |
-| `transport` | `stdio \| http \| sse` | No | - | New transport type |
-| `command` | `string` | No | - | New command (stdio) |
-| `args` | `string` | No | - | New JSON array of arguments (stdio) |
-| `url` | `string` | No | - | New URL (http/sse) |
-| `headers` | `string` | No | - | New JSON object of non-secret headers |
-| `envConfigKeys` | `string` | No | - | New env config key mappings |
-| `headerConfigKeys` | `string` | No | - | New header config key mappings |
-| `isEnabled` | `boolean` | No | - | Toggle enabled/disabled |
+| `id` | `string` | No | - | MCP server ID |
+| `name` | `string` | No | - | MCP server name (resolved with scope cascade) |
+
+### mcp-server-uninstall
+
+**Uninstall MCP Server**
+
+Uninstall an MCP server from an agent. Self-uninstall is always allowed; cross-agent requires lead.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `mcpServerId` | `string` | Yes | - | ID of the MCP server to uninstall |
+| `agentId` | `string` | No | - | Target agent (default: calling agent) |
 
 ### mcp-server-create
 
@@ -802,6 +843,36 @@ Install an MCP server for an agent. Self-install is always allowed; cross-agent 
 |-----------|------|----------|---------|-------------|
 | `mcpServerId` | `string` | Yes | - | ID of the MCP server to install |
 
+### mcp-server-delete
+
+**Delete MCP Server**
+
+Delete an MCP server definition. Only the owning agent or lead can delete.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | ID of the MCP server to delete |
+
+### mcp-server-update
+
+**Update MCP Server**
+
+Update an MCP server's configuration. Only the owner or lead can update.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `id` | `string` | Yes | - | ID of the MCP server to update |
+| `name` | `string` | No | - | New name |
+| `description` | `string` | No | - | New description |
+| `transport` | `stdio \| http \| sse` | No | - | New transport type |
+| `command` | `string` | No | - | New command (stdio) |
+| `args` | `string` | No | - | New JSON array of arguments (stdio) |
+| `url` | `string` | No | - | New URL (http/sse) |
+| `headers` | `string` | No | - | New JSON object of non-secret headers |
+| `envConfigKeys` | `string` | No | - | New env config key mappings |
+| `headerConfigKeys` | `string` | No | - | New header config key mappings |
+| `isEnabled` | `boolean` | No | - | Toggle enabled/disabled |
+
 ### mcp-server-list
 
 **List MCP Servers**
@@ -814,37 +885,127 @@ List MCP servers with optional filters. Use installedOnly to see servers install
 | `transport` | `stdio \| http \| sse` | No | - | Filter by transport type |
 | `search` | `string` | No | - | Search by name or description |
 
-### mcp-server-uninstall
+### skill-search
 
-**Uninstall MCP Server**
+**Search Skills**
 
-Uninstall an MCP server from an agent. Self-uninstall is always allowed; cross-agent requires lead.
+Search skills by keyword (name and description).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `mcpServerId` | `string` | Yes | - | ID of the MCP server to uninstall |
+| `query` | `string` | Yes | - | Search query |
+| `limit` | `number` | No | 20 | - |
+
+### skill-install
+
+**Install Skill**
+
+Install/assign a skill to an agent. Leads can install for other agents.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | Yes | - | ID of the skill to install |
+
+### skill-install-remote
+
+**Install Remote Skill**
+
+Fetch and install a remote skill from a GitHub repository. Fetches SKILL.md via GitHub raw content API.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `sourceRepo` | `string` | Yes | - | GitHub repo (e.g. "vercel-labs/skills |
+| `sourcePath` | `string` | No | - | Path within repo (e.g. "skills/nextjs |
+
+### skill-list
+
+**List Skills**
+
+List available skills with optional filters.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `type` | `remote \| personal` | No | - | Filter by type |
+| `scope` | `global \| swarm \| agent` | No | - | Filter by scope |
+| `agentId` | `string` | No | - | Filter by owning agent |
+
+### skill-sync-remote
+
+**Sync Remote Skills**
+
+Check and update remote skills from their GitHub sources. Compares content and updates if changed.
+
+*No parameters*
+
+### skill-publish
+
+**Publish Skill**
+
+Publish a personal skill to swarm scope. Creates an approval task for the lead agent.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | Yes | - | ID of the personal skill to publish |
+
+### skill-get
+
+**Get Skill**
+
+Get full skill content by ID or name. Name resolution checks agent scope first, then swarm, then global.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | No | - | Skill ID |
+| `name` | `string` | No | - | Skill name (resolved with precedence) |
+
+### skill-update
+
+**Update Skill**
+
+Update a skill's content or settings. Re-parses frontmatter if content changes.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | No | - | Skill ID to update |
+| `content` | `string` | No | - | New SKILL.md content (re-parses frontmatter) |
+| `isEnabled` | `boolean` | No | - | Toggle enabled/disabled |
+
+### skill-delete
+
+**Delete Skill**
+
+Delete a skill. Only the owning agent or lead can delete.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | Yes | - | ID of the skill to delete |
+
+### skill-create
+
+**Create Skill**
+
+Create a personal skill from SKILL.md content. Parses frontmatter for name, description, and metadata.
+
+*No parameters*
+
+### skill-uninstall
+
+**Uninstall Skill**
+
+Remove a skill from an agent.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `skillId` | `string` | Yes | - | ID of the skill to uninstall |
 | `agentId` | `string` | No | - | Target agent (default: calling agent) |
 
-### mcp-server-get
+### tracker-status
 
-**Get MCP Server**
+**Tracker Status**
 
-Get MCP server details by ID or name. Name resolution uses scope cascade: agent > swarm > global.
+Show all connected trackers and their OAuth status (token expiry, workspace info).
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `id` | `string` | No | - | MCP server ID |
-| `name` | `string` | No | - | MCP server name (resolved with scope cascade) |
-
-### mcp-server-delete
-
-**Delete MCP Server**
-
-Delete an MCP server definition. Only the owning agent or lead can delete.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `id` | `string` | Yes | - | ID of the MCP server to delete |
+*No parameters*
 
 ### tracker-map-agent
 
@@ -872,25 +1033,6 @@ Link a swarm task to an external tracker issue.
 | `externalId` | `string` | Yes | - | The external issue ID in the tracker |
 | `externalUrl` | `string` | No | - | URL to the external issue |
 
-### tracker-sync-status
-
-**Tracker Sync Status**
-
-Show all tracker sync mappings with their state.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `provider` | `string` | No | - | Filter by provider (e.g. 'linear |
-| `entityType` | `task` | No | - | Filter by entity type |
-
-### tracker-status
-
-**Tracker Status**
-
-Show all connected trackers and their OAuth status (token expiry, workspace info).
-
-*No parameters*
-
 ### tracker-unlink
 
 **Unlink Tracker Sync**
@@ -901,117 +1043,14 @@ Remove a tracker sync mapping by ID.
 |-----------|------|----------|---------|-------------|
 | `syncId` | `string` | Yes | - | The tracker sync mapping ID to remove |
 
-### skill-install-remote
+### tracker-sync-status
 
-**Install Remote Skill**
+**Tracker Sync Status**
 
-Fetch and install a remote skill from a GitHub repository. Fetches SKILL.md via GitHub raw content API.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `sourceRepo` | `string` | Yes | - | GitHub repo (e.g. "vercel-labs/skills |
-| `sourcePath` | `string` | No | - | Path within repo (e.g. "skills/nextjs |
-
-### skill-update
-
-**Update Skill**
-
-Update a skill's content or settings. Re-parses frontmatter if content changes.
+Show all tracker sync mappings with their state.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `skillId` | `string` | No | - | Skill ID to update |
-| `content` | `string` | No | - | New SKILL.md content (re-parses frontmatter) |
-| `isEnabled` | `boolean` | No | - | Toggle enabled/disabled |
-
-### skill-create
-
-**Create Skill**
-
-Create a personal skill from SKILL.md content. Parses frontmatter for name, description, and metadata.
-
-*No parameters*
-
-### skill-get
-
-**Get Skill**
-
-Get full skill content by ID or name. Name resolution checks agent scope first, then swarm, then global.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `skillId` | `string` | No | - | Skill ID |
-| `name` | `string` | No | - | Skill name (resolved with precedence) |
-
-### skill-search
-
-**Search Skills**
-
-Search skills by keyword (name and description).
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `query` | `string` | Yes | - | Search query |
-| `limit` | `number` | No | 20 | - |
-
-### skill-sync-remote
-
-**Sync Remote Skills**
-
-Check and update remote skills from their GitHub sources. Compares content and updates if changed.
-
-*No parameters*
-
-### skill-install
-
-**Install Skill**
-
-Install/assign a skill to an agent. Leads can install for other agents.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `skillId` | `string` | Yes | - | ID of the skill to install |
-
-### skill-publish
-
-**Publish Skill**
-
-Publish a personal skill to swarm scope. Creates an approval task for the lead agent.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `skillId` | `string` | Yes | - | ID of the personal skill to publish |
-
-### skill-uninstall
-
-**Uninstall Skill**
-
-Remove a skill from an agent.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `skillId` | `string` | Yes | - | ID of the skill to uninstall |
-| `agentId` | `string` | No | - | Target agent (default: calling agent) |
-
-### skill-delete
-
-**Delete Skill**
-
-Delete a skill. Only the owning agent or lead can delete.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `skillId` | `string` | Yes | - | ID of the skill to delete |
-
-### skill-list
-
-**List Skills**
-
-List available skills with optional filters.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `type` | `remote \| personal` | No | - | Filter by type |
-| `scope` | `global \| swarm \| agent` | No | - | Filter by scope |
-| `agentId` | `string` | No | - | Filter by owning agent |
+| `provider` | `string` | No | - | Filter by provider (e.g. 'linear |
+| `entityType` | `task` | No | - | Filter by entity type |
 

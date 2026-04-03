@@ -12,6 +12,7 @@ import {
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
   getUnassignedTaskIds,
+  getUserById,
   hasCapacity,
   startTask,
   upsertChannelActivityCursor,
@@ -144,11 +145,19 @@ export async function handlePoll(
               conditions: [{ timeout_ms: 300_000 }], // 5 min: polling interval + queue wait
             });
 
+            // Resolve requesting user if available
+            const requestedByUser = pendingTask.requestedByUserId
+              ? getUserById(pendingTask.requestedByUserId)
+              : undefined;
+
             return {
               trigger: {
                 type: "task_assigned",
                 taskId: pendingTask.id,
                 task: { ...pendingTask, status: "in_progress" },
+                ...(requestedByUser && {
+                  requestedBy: { name: requestedByUser.name, email: requestedByUser.email },
+                }),
               },
             };
           }
