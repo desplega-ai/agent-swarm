@@ -17,6 +17,7 @@ import {
   type ProviderSession,
   type ProviderSessionConfig,
 } from "../providers/index.ts";
+import type { RepoGuidelines } from "../types.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
 import { type CredentialSelection, resolveCredentialPools } from "../utils/credentials.ts";
 import { parseRateLimitResetTime } from "../utils/error-tracker.ts";
@@ -42,7 +43,13 @@ async function fetchRepoConfig(
   apiUrl: string,
   apiKey: string,
   vcsRepo: string,
-): Promise<{ url: string; name: string; clonePath: string; defaultBranch: string } | null> {
+): Promise<{
+  url: string;
+  name: string;
+  clonePath: string;
+  defaultBranch: string;
+  guidelines?: RepoGuidelines | null;
+} | null> {
   try {
     const repoName = vcsRepo.split("/").pop() || vcsRepo;
     const resp = await fetch(`${apiUrl}/api/repos?name=${encodeURIComponent(repoName)}`, {
@@ -50,7 +57,13 @@ async function fetchRepoConfig(
     });
     if (!resp.ok) return null;
     const data = (await resp.json()) as {
-      repos: Array<{ url: string; name: string; clonePath: string; defaultBranch: string }>;
+      repos: Array<{
+        url: string;
+        name: string;
+        clonePath: string;
+        defaultBranch: string;
+        guidelines?: RepoGuidelines | null;
+      }>;
     };
     return data.repos.find((r) => r.url.includes(vcsRepo)) ?? data.repos[0] ?? null;
   } catch {
@@ -2921,7 +2934,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               clonePath: `/workspace/repos/${taskVcsRepo.split("/").pop() || taskVcsRepo}`,
               defaultBranch: "main",
             };
-            currentRepoContext = await ensureRepoForTask(effectiveConfig, role);
+            const repoResult = await ensureRepoForTask(effectiveConfig, role);
+            currentRepoContext = {
+              ...repoResult,
+              guidelines: repoConfig?.guidelines ?? null,
+            };
           } else {
             currentRepoContext = undefined;
           }

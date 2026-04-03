@@ -539,6 +539,15 @@ export type SwarmConfig = z.infer<typeof SwarmConfigSchema>;
 // Swarm Repos Types (Centralized Repository Management)
 // ============================================================================
 
+export const RepoGuidelinesSchema = z.object({
+  prChecks: z.array(z.string()),
+  mergeChecks: z.array(z.string()),
+  allowMerge: z.boolean().optional().default(false),
+  review: z.array(z.string()),
+});
+
+export type RepoGuidelines = z.infer<typeof RepoGuidelinesSchema>;
+
 export const SwarmRepoSchema = z.object({
   id: z.string().uuid(),
   url: z.string().min(1),
@@ -546,6 +555,7 @@ export const SwarmRepoSchema = z.object({
   clonePath: z.string().min(1),
   defaultBranch: z.string().default("main"),
   autoClone: z.boolean().default(true),
+  guidelines: RepoGuidelinesSchema.nullable().optional(),
   createdAt: z.string(),
   lastUpdatedAt: z.string(),
 });

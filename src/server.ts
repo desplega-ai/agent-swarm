@@ -44,6 +44,8 @@ import { registerReadMessagesTool } from "./tools/read-messages";
 import { registerRegisterAgentMailInboxTool } from "./tools/register-agentmail-inbox";
 // Services capability
 import { registerRegisterServiceTool } from "./tools/register-service";
+// Repo management tools
+import { registerGetReposTool, registerUpdateRepoTool } from "./tools/repos";
 import { registerRequestHumanInputTool } from "./tools/request-human-input";
 import { registerResolveUserTool } from "./tools/resolve-user";
 // Scheduling capability
@@ -170,6 +172,10 @@ export function createServer() {
   registerGetConfigTool(server);
   registerListConfigTool(server);
   registerDeleteConfigTool(server);
+
+  // Repo management tools - always registered (repo config is fundamental)
+  registerGetReposTool(server);
+  registerUpdateRepoTool(server);
 
   // Prompt template tools - always registered (prompt management is fundamental)
   registerListPromptTemplatesTool(server);

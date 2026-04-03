@@ -32,6 +32,7 @@ import type {
   McpServerWithInstallInfo,
   PromptTemplate,
   PromptTemplateHistory,
+  RepoGuidelines,
   ScheduledTask,
   Service,
   ServiceStatus,
@@ -4498,6 +4499,7 @@ type SwarmRepoRow = {
   clonePath: string;
   defaultBranch: string;
   autoClone: number; // SQLite boolean
+  guidelines: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -4510,6 +4512,7 @@ function rowToSwarmRepo(row: SwarmRepoRow): SwarmRepo {
     clonePath: row.clonePath,
     defaultBranch: row.defaultBranch,
     autoClone: row.autoClone === 1,
+    guidelines: row.guidelines ? JSON.parse(row.guidelines) : null,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -4564,15 +4567,20 @@ export function createSwarmRepo(data: {
   clonePath?: string;
   defaultBranch?: string;
   autoClone?: boolean;
+  guidelines?: RepoGuidelines | null;
 }): SwarmRepo {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const clonePath = data.clonePath || `/workspace/repos/${data.name}`;
+  const guidelinesJson = data.guidelines ? JSON.stringify(data.guidelines) : null;
 
   const row = getDb()
-    .prepare<SwarmRepoRow, [string, string, string, string, string, number, string, string]>(
-      `INSERT INTO swarm_repos (id, url, name, clonePath, defaultBranch, autoClone, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    .prepare<
+      SwarmRepoRow,
+      [string, string, string, string, string, number, string | null, string, string]
+    >(
+      `INSERT INTO swarm_repos (id, url, name, clonePath, defaultBranch, autoClone, guidelines, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -4581,6 +4589,7 @@ export function createSwarmRepo(data: {
       clonePath,
       data.defaultBranch ?? "main",
       data.autoClone !== false ? 1 : 0,
+      guidelinesJson,
       now,
       now,
     );
@@ -4597,10 +4606,11 @@ export function updateSwarmRepo(
     clonePath: string;
     defaultBranch: string;
     autoClone: boolean;
+    guidelines: RepoGuidelines | null;
   }>,
 ): SwarmRepo | null {
   const setClauses: string[] = [];
-  const params: (string | number)[] = [];
+  const params: (string | number | null)[] = [];
 
   const stringFields = ["url", "name", "clonePath", "defaultBranch"] as const;
   for (const field of stringFields) {
@@ -4613,6 +4623,10 @@ export function updateSwarmRepo(
     setClauses.push("autoClone = ?");
     params.push(updates.autoClone ? 1 : 0);
   }
+  if (updates.guidelines !== undefined) {
+    setClauses.push("guidelines = ?");
+    params.push(updates.guidelines ? JSON.stringify(updates.guidelines) : null);
+  }
 
   if (setClauses.length === 0) return getSwarmRepoById(id);
 
@@ -4621,7 +4635,7 @@ export function updateSwarmRepo(
   params.push(id);
 
   const row = getDb()
-    .prepare<SwarmRepoRow, (string | number)[]>(
+    .prepare<SwarmRepoRow, (string | number | null)[]>(
       `UPDATE swarm_repos SET ${setClauses.join(", ")} WHERE id = ? RETURNING *`,
     )
     .get(...params);

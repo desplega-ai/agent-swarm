@@ -7,7 +7,7 @@ import {
   getSwarmRepos,
   updateSwarmRepo,
 } from "../be/db";
-import { SwarmRepoSchema } from "../types";
+import { RepoGuidelinesSchema, SwarmRepoSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -56,6 +56,7 @@ const createRepo = route({
     clonePath: z.string().optional(),
     defaultBranch: z.string().optional(),
     autoClone: z.boolean().optional(),
+    guidelines: RepoGuidelinesSchema.nullable().optional(),
   }),
   responses: {
     201: { description: "Repo created", schema: SwarmRepoSchema },
@@ -77,6 +78,7 @@ const updateRepo = route({
     clonePath: z.string().optional(),
     defaultBranch: z.string().optional(),
     autoClone: z.boolean().optional(),
+    guidelines: RepoGuidelinesSchema.nullable().optional(),
   }),
   responses: {
     200: { description: "Repo updated", schema: SwarmRepoSchema },
@@ -139,6 +141,7 @@ export async function handleRepos(
         clonePath: parsed.body.clonePath,
         defaultBranch: parsed.body.defaultBranch,
         autoClone: parsed.body.autoClone,
+        guidelines: parsed.body.guidelines,
       });
       json(res, repo, 201);
     } catch (error) {
@@ -162,6 +165,7 @@ export async function handleRepos(
         clonePath: parsed.body.clonePath,
         defaultBranch: parsed.body.defaultBranch,
         autoClone: parsed.body.autoClone,
+        guidelines: parsed.body.guidelines,
       });
       if (!updated) {
         jsonError(res, "Repo not found", 404);

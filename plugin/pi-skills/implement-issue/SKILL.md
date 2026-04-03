@@ -37,13 +37,17 @@ If given a URL, extract owner, repo, and issue number. Fetch issue details (titl
 
 Keep changes focused on what the issue requests. Avoid scope creep.
 
-### 4. Commit and Push
+### 4. Quality Checks, Commit, and Push
 
-Commit with a message referencing the issue (e.g., `Fix #123: <description>`). Use conventional commit style if the repo uses it. Push with `git push -u origin HEAD`.
+1. **Run PR checks (MANDATORY)** — Run ALL checks from the "PR Checks" section of your Repository Guidelines. Fix any failures before proceeding. If no guidelines are defined, check the project's CLAUDE.md for a pre-PR checklist.
+2. **Commit** with a message referencing the issue (e.g., `Fix #123: <description>`). Use conventional commit style if the repo uses it.
+3. **Push** with `git push -u origin HEAD`.
 
 ### 5. Create the PR
 
 Create the PR with a descriptive title and body including: summary of changes, key changes list, testing done, and `Fixes #<issue-number>` to auto-close the issue on merge.
+
+After creating the PR, check CI status with `gh pr checks` (GitHub) or `glab mr view --json pipelines` (GitLab). If CI fails, fix the issues, push, and re-check until green.
 
 ### 6. Report Back
 
@@ -56,4 +60,3 @@ Provide the PR URL, summary of changes, and any caveats. Optionally comment on t
 - One issue = one PR
 - If the issue is too large, break it into smaller PRs
 - If unclear, use `/skill:respond-github` to ask for clarification
-- Run linters and tests before creating the PR
