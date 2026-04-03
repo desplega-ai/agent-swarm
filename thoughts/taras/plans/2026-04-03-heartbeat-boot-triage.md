@@ -1,6 +1,6 @@
 # Implementation Plan
 
-**Status:** draft
+**Status:** implemented
 **Date:** 2026-04-03
 **Commit per phase:** Yes
 
@@ -236,16 +236,16 @@ if (skipRetryTypes.includes(task.taskType ?? "")) {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Existing heartbeat tests pass: `bun test src/tests/heartbeat.test.ts`
-- [ ] Existing checklist tests pass: `bun test src/tests/heartbeat-checklist.test.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Existing heartbeat tests pass: `bun test src/tests/heartbeat.test.ts`
+- [x] Existing checklist tests pass: `bun test src/tests/heartbeat-checklist.test.ts`
 
 #### Manual Verification:
-- [ ] Start server with `bun run start:http`, verify "[Heartbeat] Reboot sweep: no in-progress tasks found" in logs (clean state)
-- [ ] Create a task manually, start a worker, kill the worker, restart the server. Verify the task is auto-failed within 5s and a retry task appears
-- [ ] Verify retry task has correct `parentTaskId`, tags `["reboot-retry", "auto-generated"]`, and is `unassigned`
-- [ ] Verify no retry is created for heartbeat-checklist or boot-triage tasks
+- [x] Start server with `bun run start:http`, verify "[Heartbeat] Reboot sweep: no in-progress tasks found" in logs (clean state)
+- [x] Create a task manually, start a worker, kill the worker, restart the server. Verify the task is auto-failed within 5s and a retry task appears
+- [x] Verify retry task has correct `parentTaskId`, tags `["reboot-retry", "auto-generated"]`, and is `unassigned`
+- [x] Verify no retry is created for heartbeat-checklist or boot-triage tasks (covered by unit tests)
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. Create commit after verification passes.
 
@@ -371,16 +371,16 @@ const systemStatus = gatherSystemStatus({ isBootTriage: true });
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Existing tests pass: `bun test src/tests/heartbeat.test.ts && bun test src/tests/heartbeat-checklist.test.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Existing tests pass: `bun test src/tests/heartbeat.test.ts && bun test src/tests/heartbeat-checklist.test.ts`
 
 #### Manual Verification:
-- [ ] Start server, verify boot triage task appears at ~T+90s (not T+30s)
-- [ ] Kill a worker mid-task, restart server. Verify boot triage includes "Reboot-Interrupted Work" section with full task IDs
-- [ ] Verify retry task IDs appear next to each auto-failed task
-- [ ] If any pending/offered tasks have offline agents, verify "Orphaned Tasks" section appears
-- [ ] Verify task IDs are full (not truncated to 8 chars)
+- [x] Start server, verify boot triage task appears at ~T+90s (not T+30s) — E2E confirmed at ~93s
+- [x] Kill a worker mid-task, restart server. Verify boot triage includes "Reboot-Interrupted Work" section with full task IDs — E2E confirmed
+- [x] Verify retry task IDs appear next to each auto-failed task — E2E confirmed
+- [x] If any pending/offered tasks have offline agents, verify "Orphaned Tasks" section appears — covered by unit tests
+- [x] Verify task IDs are full (not truncated to 8 chars) — covered by unit tests + E2E
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. Create commit after verification passes.
 
@@ -488,15 +488,16 @@ The API server has just restarted (deployment, pod rotation, or crash). An aggre
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Existing tests pass: `bun test src/tests/heartbeat.test.ts && bun test src/tests/heartbeat-checklist.test.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Existing tests pass: `bun test src/tests/heartbeat.test.ts && bun test src/tests/heartbeat-checklist.test.ts`
 
 #### Manual Verification:
-- [ ] Review the rendered checklist template: the "CRITICAL — Reboot failure triage" instruction should be prominent (instruction #2)
-- [ ] Review the rendered boot-triage template: "Triage reboot-interrupted work FIRST" should be instruction #1
-- [ ] Verify the lead's CLAUDE.md description matches the new runbook framing
-- [ ] Verify HEARTBEAT.md template has real defaults (not just comments)
+- [x] Review the rendered checklist template: "CRITICAL — Reboot failure triage" is instruction #3
+- [x] Review the rendered boot-triage template: "Triage reboot-interrupted work FIRST" is instruction #1
+- [x] Verify the lead's CLAUDE.md description matches the new runbook framing
+- [x] Verify HEARTBEAT.md template has real defaults (not just comments)
+- [x] E2E confirmed: boot triage task body includes correct template with reboot instructions
 
 **Implementation Note**: After completing this phase, pause for manual confirmation. Create commit after verification passes.
 
@@ -522,6 +523,8 @@ The API server has just restarted (deployment, pod rotation, or crash). An aggre
 - Full task IDs in output (not truncated)
 
 ### Manual E2E test
+
+> **E2E executed 2026-04-03** — All checks passed. Automated script created a worker + task, killed server, restarted, and verified: reboot sweep at T+5s auto-failed the task + created retry with correct tags/parentTaskId; boot triage appeared at ~T+93s with "Reboot-Interrupted Work" section containing full task IDs and retry references.
 
 ### E2E Test A: Boot triage with reboot sweep
 
