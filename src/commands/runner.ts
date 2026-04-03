@@ -1222,6 +1222,7 @@ interface Trigger {
     text?: string;
   }>;
   cursorUpdates?: Array<{ channelId: string; ts: string }>; // Deferred cursor commits for channel_activity
+  requestedBy?: { name: string; email?: string };
 }
 
 /** Options for polling */
@@ -1340,9 +1341,7 @@ async function buildPromptForTrigger(
       }
 
       // Include requesting user info if available from the poll trigger
-      const requestedBy = (trigger as unknown as Record<string, unknown>).requestedBy as
-        | { name: string; email?: string }
-        | undefined;
+      const requestedBy = trigger.requestedBy;
       const requestedBySection = requestedBy
         ? `\n\nRequested by: ${requestedBy.name}${requestedBy.email ? ` (${requestedBy.email})` : ""}`
         : "";
