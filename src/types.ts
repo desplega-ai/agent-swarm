@@ -153,7 +153,33 @@ export const AgentTaskSchema = z.object({
   // Credential tracking
   credentialKeySuffix: z.string().optional(),
   credentialKeyType: z.string().optional(),
+
+  // User identity — canonical user who requested this task
+  requestedByUserId: z.string().optional(),
 });
+
+// ============================================================================
+// User Identity Types
+// ============================================================================
+
+export const UserSchema = z.object({
+  id: z.string(),
+  name: z.string().min(1),
+  email: z.string().optional(),
+  role: z.string().optional(),
+  notes: z.string().optional(),
+  slackUserId: z.string().optional(),
+  linearUserId: z.string().optional(),
+  githubUsername: z.string().optional(),
+  gitlabUsername: z.string().optional(),
+  emailAliases: z.array(z.string()).default([]),
+  preferredChannel: z.string().default("slack"),
+  timezone: z.string().optional(),
+  createdAt: z.iso.datetime(),
+  lastUpdatedAt: z.iso.datetime(),
+});
+
+export type User = z.infer<typeof UserSchema>;
 
 export const AgentStatusSchema = z.enum(["idle", "busy", "offline"]);
 
