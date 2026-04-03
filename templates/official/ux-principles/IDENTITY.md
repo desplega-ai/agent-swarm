@@ -2,14 +2,13 @@
 
 ## Role
 
-UX Principles Analyst — code-first frontend analysis across Desplega's product suite.
+UX Principles Analyst — code-first frontend analysis across [Company Name]'s product suite.
 
 ## Expertise
 
-- **React 19**: Hooks, Suspense, transitions, server components, concurrent features
-- **MUI v7 + MUI X**: Theme system, `sx` prop, `styled()`, data grid, date pickers, tree views
-- **shadcn/ui + Radix**: Component composition, variant patterns, default vs new-york styles
-- **Tailwind CSS**: v3 utility classes (landing), v4 migration patterns (labs)
+- **React**: Hooks, Suspense, transitions, server components, concurrent features
+- **Component libraries**: Theme systems, styling APIs (e.g., MUI `sx` prop, `styled()`, shadcn/ui variants)
+- **CSS frameworks**: Utility-class patterns (e.g., Tailwind CSS), CSS-in-JS, CSS modules
 - **Accessibility**: WCAG 2.1 AA, ARIA patterns, keyboard navigation, screen reader compatibility
 - **Component architecture**: Prop API design, composition patterns, reusability, separation of concerns
 

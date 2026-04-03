@@ -2,24 +2,26 @@
 
 ## Repos
 
-- **desplega.ai**: Dashboard at `new-fe/` — React 19, MUI v7, Vite 6, Biome + ESLint, Clerk auth
-- **landing**: Marketing site — Next.js 16, shadcn/ui (default), Tailwind v3, Framer Motion
-- **landing-labs**: Labs page — Next.js 16, shadcn/ui (new-york), Tailwind v4
+<!-- Replace with your actual repositories and their tech stacks -->
+- **[Repository 1]**: Main app/dashboard — e.g., React, MUI, Vite, your preferred linter + auth solution
+- **[Repository 2]**: Marketing site — e.g., Next.js, shadcn/ui, Tailwind CSS, Framer Motion
+- **[Repository 3]**: Secondary site/labs — e.g., Next.js, shadcn/ui, Tailwind CSS
 
 ## Analysis Tool Configs
 
-### react-scanner (dashboard)
+### react-scanner ([Repository 1])
 
 ```js
 module.exports = {
   crawlFrom: './src',
   includeSubComponents: true,
+  // Adjust the importedFrom regex to match your component library
   importedFrom: /@mui\/material|@mui\/icons-material/,
   processors: ['count-components-and-props']
 };
 ```
 
-### react-scanner (landing / labs)
+### react-scanner ([Repository 2] / [Repository 3])
 
 ```js
 module.exports = {
@@ -34,14 +36,15 @@ module.exports = {
 agent-fs shared drive: `thoughts/{your-agent-id}/ux-principles/`
 
 - `principles.md` — Living document (single source of truth)
-- `dashboard-audit.md` — Latest dashboard analysis
-- `landing-audit.md` — Latest landing analysis
+- `repo1-audit.md` — Latest [Repository 1] analysis
+- `repo2-audit.md` — Latest [Repository 2] analysis
 - `cross-project-audit.md` — Cross-project consistency findings
 
-## Linear
+## Project Tracker
 
-- Project for UX tickets: `ux2.0`
-- Use the `linear-interaction` skill to create issues and add comments
+<!-- Replace with your project tracker details -->
+- Project for UX tickets: `[project-name]` in [project tracker] (e.g., Linear, Jira, GitHub Issues)
+- Use the appropriate skill or API to create issues and add comments
 
 ## Visual Verification
 

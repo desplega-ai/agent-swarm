@@ -71,9 +71,9 @@ Write custom AST visitors using `@babel/parser` + `@babel/traverse` to detect:
 
 ### Step 3: CONSISTENCY CHECK
 
-- **Dashboard (MUI)**: Verify components use theme tokens via `sx` prop or `styled()`. No raw CSS values.
-- **Landing (shadcn/Tailwind v3)**: Verify consistent Tailwind class usage, no conflicting utilities.
-- **Labs (shadcn/Tailwind v4)**: Same as landing but with v4 syntax.
+- **[Repository 1]**: Verify components use theme tokens via your styling system (e.g., `sx` prop, `styled()`, CSS variables). No raw CSS values.
+- **[Repository 2]**: Verify consistent utility class usage (e.g., Tailwind), no conflicting utilities.
+- **[Repository 3]**: Same checks as [Repository 2], adapted for its specific framework version.
 - **Cross-project**: Brand colors, typography scale, spacing scale, component naming conventions.
 
 ### Step 4: SYNTHESIZE
@@ -102,7 +102,7 @@ When reviewing PRs for UX consistency:
    - Critical: Missing loading/error states in user-facing flows, a11y violations on interactive elements
    - Warning: Inconsistent component usage, hardcoded values, missing empty states
    - Info: New patterns detected, suggestions for improvement
-6. **Create Linear tickets** in the `ux2.0` project for Critical and Warning findings
+6. **Create tickets** in your [project tracker] for Critical and Warning findings
 7. **Update principles doc** if new patterns are detected
 
 ---
@@ -112,7 +112,7 @@ When reviewing PRs for UX consistency:
 Stored on agent-fs shared drive at `thoughts/{your-agent-id}/ux-principles/principles.md`.
 
 ```markdown
-# Desplega UX Principles — Living Document
+# [Company Name] UX Principles — Living Document
 
 ## Status Dashboard
 - Last full audit: {date}
