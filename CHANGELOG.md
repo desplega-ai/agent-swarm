@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.59.0] - 2026-04-04
+
+### Added
+- Unified user identity system — canonical user registry with cross-platform resolution across Slack, GitHub, GitLab, Linear, and email (DES-51, #287)
+- `resolve-user` MCP tool for looking up user profiles by any platform identifier
+- `manage-user` MCP tool for lead-only CRUD operations on user profiles
+- Per-repo guidelines system — configurable PR checks, merge policy, and review guidance per repository (#294)
+- `get-repos` and `update-repo` MCP tools for lead repo management with guidelines
+- Requesting user identity surfaced in task details and agent prompts (#292)
+- User management skill for creating and managing user profiles across platforms
+
+### Changed
+- Slack, GitHub, GitLab, and AgentMail handlers now resolve requesting user identity and attach it to tasks
+- UX principles template generalized — replaced Desplega-specific references with placeholders
+
+### Fixed
+- Heartbeat system: aggressive reboot sweep and boot triage improvements
+- `allowMerge` edge case in repo guidelines and removed type duplication
+- `requestedBy` added to Trigger interface, removing double cast workaround
+
 ## [1.57.5] - 2026-04-02
 
 ### Added

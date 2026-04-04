@@ -10,7 +10,7 @@ Agent Swarm exposes its functionality through MCP (Model Context Protocol) tools
 All MCP tools have structured annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) to improve Claude Code's Tool Search discoverability. Tools are split into two tiers:
 
 - **Core tools** (16) — Always available in context: task lifecycle, basic communication, memory recall, debug, and swarm awareness
-- **Deferred tools** (67) — Discovered on demand via Claude Code's Tool Search when the agent needs them (scheduling, config, skills, workflows, MCP servers, file operations, etc.)
+- **Deferred tools** (72) — Discovered on demand via Claude Code's Tool Search when the agent needs them (scheduling, config, skills, workflows, MCP servers, user identity, repos, etc.)
 
 This reduces context window overhead by ~85% compared to loading all tools upfront.
 
@@ -657,3 +657,65 @@ Lead agent pushes learnings into a worker's memory.
 | `agentId` | uuid | Yes | Target worker |
 | `learning` | string | Yes | Learning content |
 | `category` | string | Yes | `mistake-pattern`, `best-practice`, `codebase-knowledge`, or `preference` |
+
+## User Identity Tools
+
+Tools for managing the canonical user registry across platforms.
+
+### resolve-user
+
+Look up a canonical user profile by any platform-specific identifier (Slack ID, Linear ID, GitHub username, email, or name).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `slackUserId` | string | No | Slack user ID |
+| `linearUserId` | string | No | Linear user UUID |
+| `githubUsername` | string | No | GitHub username |
+| `gitlabUsername` | string | No | GitLab username |
+| `email` | string | No | Email address |
+| `name` | string | No | Name (fuzzy substring match) |
+
+### manage-user
+
+Create, update, delete, or list user profiles in the user registry. Lead-only.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | string | Yes | `create`, `update`, `delete`, `list`, or `get` |
+| `userId` | string | No | User ID (required for update/delete/get) |
+| `name` | string | No | Display name (required for create) |
+| `email` | string | No | Primary email address |
+| `role` | string | No | Role (e.g., "founder", "engineer") |
+| `notes` | string | No | Free-form notes |
+| `slackUserId` | string | No | Slack user ID |
+| `linearUserId` | string | No | Linear user UUID |
+| `githubUsername` | string | No | GitHub username |
+| `gitlabUsername` | string | No | GitLab username |
+| `emailAliases` | array | No | Additional email addresses |
+| `preferredChannel` | string | No | Preferred contact channel |
+| `timezone` | string | No | Timezone (e.g., America/New_York) |
+
+## Repository Tools
+
+Tools for managing registered repos and their guidelines.
+
+### get-repos
+
+List registered repos with their guidelines (PR checks, merge policy, review guidance).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | No | Filter by repo name (returns all if omitted) |
+
+### update-repo
+
+Update a repo's configuration including guidelines.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | Yes | Repo ID to update |
+| `url` | string | No | New repo URL |
+| `name` | string | No | New repo name |
+| `clonePath` | string | No | New clone path |
+| `defaultBranch` | string | No | New default branch |
+| `autoClone` | boolean | No | Whether to auto-clone |
