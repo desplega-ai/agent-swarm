@@ -88,6 +88,27 @@ When `AGENT_FS_API_URL` is configured as a global swarm config, agents gain acce
 
 Agents are automatically registered with agent-fs on their first container boot. The lead agent creates a shared organization and workers receive invitations automatically.
 
+## Repository Guidelines
+
+Repos registered with the swarm can have **guidelines** — per-repo quality rules that are injected into agent prompts and enforced by plugin commands.
+
+Guidelines have three sections:
+
+| Section | Purpose |
+|---------|---------|
+| **PR Checks** | Commands agents must run before pushing (lint, typecheck, tests) |
+| **Merge Policy** | Whether agents are allowed to merge, and any required checks |
+| **Review Guidance** | How agents should review PRs for this repo |
+
+### How It Works
+
+1. **Lead sets guidelines** — Use the `update-repo` MCP tool to configure guidelines for a repo
+2. **Prompt injection** — When a task targets a repo, its guidelines are injected into the agent's system prompt as a mandatory "Repository Guidelines" section
+3. **Command enforcement** — `/create-pr` and `/implement-issue` require PR checks to pass before pushing; `/review-pr` references the review guidance
+4. **Lead gating** — The lead agent can block code tasks for repos that lack guidelines
+
+Use the `get-repos` MCP tool to view registered repos and their guidelines.
+
 ## Lead vs Worker
 
 ### Lead Agent
