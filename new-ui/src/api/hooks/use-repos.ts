@@ -1,5 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
+import type { RepoGuidelines } from "../types";
+
+export function useRepo(id: string) {
+  return useQuery({
+    queryKey: ["repos", id],
+    queryFn: () => api.fetchRepo(id),
+    enabled: !!id,
+  });
+}
 
 export function useRepos(filters?: { autoClone?: boolean }) {
   return useQuery({
@@ -41,6 +50,7 @@ export function useUpdateRepo() {
         clonePath: string;
         defaultBranch: string;
         autoClone: boolean;
+        guidelines: RepoGuidelines | null;
       }>;
     }) => api.updateRepo(id, data),
     onSuccess: () => {
