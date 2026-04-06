@@ -54,12 +54,13 @@ describe("Session templates — registration", () => {
     await ensureTemplatesRegistered();
   });
 
-  test("all 12 system templates are registered", () => {
+  test("all 13 system templates are registered", () => {
     const systemTemplates = [
       "system.agent.role",
       "system.agent.register",
       "system.agent.lead",
       "system.agent.worker",
+      "system.agent.worker.slack",
       "system.agent.filesystem",
       "system.agent.agent_fs",
       "system.agent.self_awareness",
