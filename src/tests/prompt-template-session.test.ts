@@ -90,7 +90,7 @@ describe("Session templates — registration", () => {
   test("total of 15 session/system templates registered", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
-    expect(sessionSystem.length).toBe(14);
+    expect(sessionSystem.length).toBe(15);
   });
 });
 
