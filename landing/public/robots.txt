@@ -1,0 +1,6 @@
+# Allow all crawlers to access all content
+User-agent: *
+Allow: /
+
+# Sitemap location
+Sitemap: https://agent-swarm.dev/sitemap.xml
