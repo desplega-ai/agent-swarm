@@ -2170,6 +2170,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
   // Per-task repo context — set when processing a task with githubRepo
   let currentRepoContext: BasePromptArgs["repoContext"] | undefined;
+  // Slack context for current task (gates Slack instructions in prompt)
+  let currentTaskSlackContext: BasePromptArgs["slackContext"] | undefined;
 
   // Generate base prompt (identity fields injected after profile fetch below)
   const buildSystemPrompt = async () => {
@@ -2185,6 +2187,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       toolsMd: agentToolsMd,
       claudeMd: agentClaudeMd,
       repoContext: currentRepoContext,
+      slackContext: currentTaskSlackContext,
       skillsSummary: agentSkillsSummary,
       mcpServersSummary: agentMcpServersSummary,
     });
@@ -2922,6 +2925,15 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
           // Extract model from task data for per-task model selection
           const taskModel = (trigger.task as { model?: string } | undefined)?.model;
+
+          // Detect Slack context for conditional prompt sections
+          const taskSlackChannelId = (trigger.task as { slackChannelId?: string } | undefined)
+            ?.slackChannelId;
+          const taskSlackThreadTs = (trigger.task as { slackThreadTs?: string } | undefined)
+            ?.slackThreadTs;
+          currentTaskSlackContext = taskSlackChannelId
+            ? { channelId: taskSlackChannelId, threadTs: taskSlackThreadTs }
+            : undefined;
 
           // Handle repo context for tasks with vcsRepo (GitHub/GitLab)
           const taskVcsRepo = (trigger.task as { vcsRepo?: string } | undefined)?.vcsRepo;

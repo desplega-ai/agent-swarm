@@ -44,6 +44,8 @@ export type BasePromptArgs = {
       review: string[];
     } | null;
   };
+  /** Slack context from the current task, if present */
+  slackContext?: { channelId: string; threadTs?: string };
   /** Pre-fetched skill summaries for the installed skills section */
   skillsSummary?: { name: string; description: string }[];
   /** Pre-fetched MCP server summaries for the installed MCP servers section */
@@ -59,6 +61,15 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   const compositeEventType = role === "lead" ? "system.session.lead" : "system.session.worker";
   const compositeResult = await resolveTemplateAsync(compositeEventType, vars);
   let prompt = compositeResult.text;
+
+  // Conditionally inject Slack instructions for workers with Slack-originated tasks
+  if (role !== "lead" && args.slackContext) {
+    const slackResult = await resolveTemplateAsync("system.agent.worker.slack", {
+      slackChannelId: args.slackContext.channelId,
+      slackThreadTs: args.slackContext.threadTs ?? "",
+    });
+    prompt += slackResult.text;
+  }
 
   // Inject agent identity (soul + identity + name/description) if available
   if (args.soulMd || args.identityMd || args.name) {

@@ -26,8 +26,6 @@ export const CORE_TOOLS = new Set([
   // Communication (used every session)
   "read-messages", // internal swarm chat
   "post-message", // internal swarm chat
-  "slack-reply", // respond to Slack threads
-  "slack-read", // read Slack thread history
 
   // Memory (used at session start)
   "memory-search", // recall relevant context
@@ -81,7 +79,9 @@ export const DEFERRED_TOOLS = new Set([
   "context-history",
   "context-diff",
 
-  // Slack extras (4)
+  // Slack (6)
+  "slack-reply",
+  "slack-read",
   "slack-upload-file",
   "slack-download-file",
   "slack-list-channels",

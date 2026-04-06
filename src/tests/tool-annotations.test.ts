@@ -178,8 +178,8 @@ describe("Tool Annotations & Classification", () => {
     expect(overlap).toEqual([]);
   });
 
-  test("CORE_TOOLS contains exactly 15 tools", () => {
-    expect(CORE_TOOLS.size).toBe(15);
+  test("CORE_TOOLS contains exactly 13 tools", () => {
+    expect(CORE_TOOLS.size).toBe(13);
   });
 
   test("ALL_TOOLS equals CORE_TOOLS union DEFERRED_TOOLS", () => {
@@ -237,7 +237,7 @@ describe("Tool Annotations & Classification", () => {
   });
 
   test("core tools include essential communication tools", () => {
-    const commTools = ["read-messages", "post-message", "slack-reply", "slack-read"];
+    const commTools = ["read-messages", "post-message"];
     for (const tool of commTools) {
       expect(CORE_TOOLS.has(tool)).toBe(true);
     }
