@@ -288,9 +288,9 @@ export default function ScheduleDetailPage() {
                         <Timer className="h-4 w-4 text-muted-foreground" />
                         <span className="text-sm">
                           {schedule.lastRunAt
-                            ? formatSmartTime(schedule.lastRunAt)
+                            ? formatUTCTime(schedule.lastRunAt)
                             : schedule.nextRunAt
-                              ? formatSmartTime(schedule.nextRunAt)
+                              ? formatUTCTime(schedule.nextRunAt)
                               : "—"}
                         </span>
                       </>
