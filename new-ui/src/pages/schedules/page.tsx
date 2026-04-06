@@ -370,9 +370,9 @@ export default function SchedulesPage() {
 
           if (data.scheduleType === "one_time") {
             const label = data.nextRunAt
-              ? `at ${formatSmartTime(data.nextRunAt)}`
+              ? `at ${formatUTCTime(data.nextRunAt)}`
               : data.lastRunAt
-                ? `ran ${formatSmartTime(data.lastRunAt)}`
+                ? `ran ${formatUTCTime(data.lastRunAt)}`
                 : "—";
             return <span className="font-mono text-xs text-muted-foreground">{label}</span>;
           }

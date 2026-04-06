@@ -46,12 +46,46 @@ export function formatRelativeTime(date: string | Date): string {
 }
 
 /**
- * Format a date as smart time - relative for recent, absolute for older
+ * Format a date as smart time - relative for recent, absolute for older.
+ * Handles both past and future dates.
  */
 export function formatSmartTime(dateStr: string): string {
   const date = parseUTCDate(dateStr);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
+
+  // Future dates
+  if (diffMs < 0) {
+    const futureMins = Math.floor(-diffMs / 60000);
+    const futureHours = Math.floor(futureMins / 60);
+    const futureDays = Math.floor(futureHours / 24);
+
+    if (futureMins < 1) return "in <1m";
+    if (futureMins < 60) return `in ${futureMins}m`;
+    if (futureHours < 6) return `in ${futureHours}h`;
+    if (futureDays < 1) {
+      const isToday = date.toDateString() === now.toDateString();
+      if (isToday) {
+        return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+      }
+      return date.toLocaleDateString([], {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "UTC",
+      });
+    }
+    return date.toLocaleDateString([], {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "UTC",
+    });
+  }
+
+  // Past dates
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMins / 60);
 
