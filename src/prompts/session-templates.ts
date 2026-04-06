@@ -152,14 +152,14 @@ registerTemplate({
   defaultBody: `
 #### Slack Thread Updates
 
-This task has Slack metadata — you MUST keep the originating Slack thread informed:
+This task originated from Slack (channel: \`{{slackChannelId}}\`). You MUST keep the originating Slack thread informed:
 - **On start**: Post a brief update that you've picked up the task using \`slack-reply\` with your taskId
 - **On completion**: Post a summary of the result using \`slack-reply\` with your taskId
 - **On failure**: Post what went wrong so the requester knows immediately
 
 This ensures humans who requested work via Slack get timely feedback without having to check the dashboard.
 `,
-  variables: [],
+  variables: ["slackChannelId", "slackThreadTs"],
   category: "system",
 });
 

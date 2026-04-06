@@ -44,8 +44,8 @@ export type BasePromptArgs = {
       review: string[];
     } | null;
   };
-  /** Whether the current task has Slack context (slackChannelId/slackThreadTs) */
-  hasSlackContext?: boolean;
+  /** Slack context from the current task, if present */
+  slackContext?: { channelId: string; threadTs?: string };
   /** Pre-fetched skill summaries for the installed skills section */
   skillsSummary?: { name: string; description: string }[];
   /** Pre-fetched MCP server summaries for the installed MCP servers section */
@@ -63,8 +63,11 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   let prompt = compositeResult.text;
 
   // Conditionally inject Slack instructions for workers with Slack-originated tasks
-  if (role !== "lead" && args.hasSlackContext) {
-    const slackResult = await resolveTemplateAsync("system.agent.worker.slack", {});
+  if (role !== "lead" && args.slackContext) {
+    const slackResult = await resolveTemplateAsync("system.agent.worker.slack", {
+      slackChannelId: args.slackContext.channelId,
+      slackThreadTs: args.slackContext.threadTs ?? "",
+    });
     prompt += slackResult.text;
   }
 
