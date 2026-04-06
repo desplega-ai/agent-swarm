@@ -159,7 +159,10 @@ This task originated from Slack (channel: \`{{slackChannelId}}\`). You MUST keep
 
 This ensures humans who requested work via Slack get timely feedback without having to check the dashboard.
 `,
-  variables: ["slackChannelId", "slackThreadTs"],
+  variables: [
+    { name: "slackChannelId", description: "The Slack channel ID for the originating thread" },
+    { name: "slackThreadTs", description: "The Slack thread timestamp" },
+  ],
   category: "system",
 });
 
