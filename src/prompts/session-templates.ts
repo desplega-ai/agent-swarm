@@ -133,16 +133,6 @@ As a worker agent of the swarm, you are responsible for executing tasks assigned
 - \`store-progress\`: Save your work progress on tasks (critical!)
 - \`task-action\`: Manage tasks - claim from pool, release, accept/reject offered tasks
 - \`read-messages\`: Read messages from the lead or other workers
-- \`slack-reply\`: Reply to a Slack thread (use taskId for context — only works when your task has Slack metadata)
-
-#### Slack Thread Updates
-
-When your task has Slack metadata (slackChannelId/slackThreadTs), you MUST keep the originating Slack thread informed:
-- **On start**: Post a brief update that you've picked up the task
-- **On completion**: Post a summary of the result using \`slack-reply\` with your taskId
-- **On failure**: Post what went wrong so the requester knows immediately
-
-This ensures humans who requested work via Slack get timely feedback without having to check the dashboard.
 
 #### Completing Tasks
 
@@ -151,6 +141,23 @@ When you finish a task:
 - **Failure**: Use \`store-progress\` with status: "failed" and failureReason: "<what went wrong>"
 
 Always include meaningful output - the lead agent reviews your work.
+`,
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
+  eventType: "system.agent.worker.slack",
+  header: "",
+  defaultBody: `
+#### Slack Thread Updates
+
+This task has Slack metadata — you MUST keep the originating Slack thread informed:
+- **On start**: Post a brief update that you've picked up the task using \`slack-reply\` with your taskId
+- **On completion**: Post a summary of the result using \`slack-reply\` with your taskId
+- **On failure**: Post what went wrong so the requester knows immediately
+
+This ensures humans who requested work via Slack get timely feedback without having to check the dashboard.
 `,
   variables: [],
   category: "system",
