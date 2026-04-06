@@ -1,6 +1,7 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
 import { ExternalLink, FolderGit2, GitBranch, Pencil, Plus, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useCreateRepo, useDeleteRepo, useRepos, useUpdateRepo } from "@/api/hooks/use-repos";
 import type { SwarmRepo } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
@@ -151,6 +152,7 @@ export default function ReposPage() {
   const updateRepo = useUpdateRepo();
   const deleteRepo = useDeleteRepo();
 
+  const navigate = useNavigate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRepo, setEditingRepo] = useState<SwarmRepo | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SwarmRepo | null>(null);
@@ -289,15 +291,16 @@ export default function ReposPage() {
     [handleEdit],
   );
 
-  const onRowClicked = useCallback((event: RowClickedEvent<SwarmRepo>) => {
-    // Skip if click originated from a button (action column)
-    const target = event.event?.target as HTMLElement;
-    if (target?.closest("button")) return;
-    if (event.data) {
-      setEditingRepo(event.data);
-      setDialogOpen(true);
-    }
-  }, []);
+  const onRowClicked = useCallback(
+    (event: RowClickedEvent<SwarmRepo>) => {
+      const target = event.event?.target as HTMLElement;
+      if (target?.closest("button") || target?.closest("a")) return;
+      if (event.data) {
+        navigate(`/repos/${event.data.id}`);
+      }
+    },
+    [navigate],
+  );
 
   if (!isLoading && (!repos || repos.length === 0)) {
     return (
@@ -314,6 +317,7 @@ export default function ReposPage() {
         </div>
 
         <RepoDialog
+          key={editingRepo?.id ?? "new"}
           open={dialogOpen}
           onOpenChange={setDialogOpen}
           editRepo={editingRepo}
@@ -341,6 +345,7 @@ export default function ReposPage() {
       />
 
       <RepoDialog
+        key={editingRepo?.id ?? "new"}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         editRepo={editingRepo}

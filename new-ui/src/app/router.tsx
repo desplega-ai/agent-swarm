@@ -14,6 +14,7 @@ const ScheduleDetailPage = lazy(() => import("@/pages/schedules/[id]/page"));
 const UsagePage = lazy(() => import("@/pages/usage/page"));
 const ConfigPage = lazy(() => import("@/pages/config/page"));
 const ReposPage = lazy(() => import("@/pages/repos/page"));
+const RepoDetailPage = lazy(() => import("@/pages/repos/[id]/page"));
 const WorkflowsPage = lazy(() => import("@/pages/workflows/page"));
 const WorkflowDetailPage = lazy(() => import("@/pages/workflows/[id]/page"));
 const WorkflowRunDetailPage = lazy(() => import("@/pages/workflow-runs/[id]/page"));
@@ -62,6 +63,7 @@ export const router = createBrowserRouter([
       { path: "skills", element: <SkillsPage /> },
       { path: "skills/:id", element: <SkillDetailPage /> },
       { path: "repos", element: <ReposPage /> },
+      { path: "repos/:id", element: <RepoDetailPage /> },
       { path: "keys", element: <ApiKeysPage /> },
       { path: "debug", element: <DebugPage /> },
       { path: "*", element: <NotFoundPage /> },

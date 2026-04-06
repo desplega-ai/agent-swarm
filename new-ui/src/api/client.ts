@@ -540,6 +540,13 @@ class ApiClient {
     return res.json();
   }
 
+  async fetchRepo(id: string): Promise<SwarmRepo> {
+    const url = `${this.getBaseUrl()}/api/repos/${id}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch repo: ${res.status}`);
+    return res.json();
+  }
+
   async fetchRepos(filters?: { autoClone?: boolean }): Promise<SwarmReposResponse> {
     const params = new URLSearchParams();
     if (filters?.autoClone !== undefined) params.set("autoClone", String(filters.autoClone));
@@ -578,6 +585,7 @@ class ApiClient {
       clonePath: string;
       defaultBranch: string;
       autoClone: boolean;
+      guidelines: import("./types").RepoGuidelines | null;
     }>,
   ): Promise<SwarmRepo> {
     const url = `${this.getBaseUrl()}/api/repos/${id}`;
