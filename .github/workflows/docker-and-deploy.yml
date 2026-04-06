@@ -226,3 +226,55 @@ jobs:
         run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  create-release:
+    runs-on: ubuntu-latest
+    needs: [detect-version-change, create-git-tag, publish-npm]
+    if: needs.detect-version-change.outputs.version_changed == 'true'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.detect-version-change.outputs.version }}
+        run: |
+          TAG="v${VERSION}"
+          cat > /tmp/release-notes.md <<EOF
+          ## Install & Run
+
+          **npm:**
+          \`\`\`bash
+          npx @desplega.ai/agent-swarm@${VERSION}
+          # or install globally
+          npm i -g @desplega.ai/agent-swarm@${VERSION}
+          \`\`\`
+
+          **bun:**
+          \`\`\`bash
+          bunx @desplega.ai/agent-swarm@${VERSION}
+          # or install globally
+          bun i -g @desplega.ai/agent-swarm@${VERSION}
+          \`\`\`
+
+          **Docker:**
+          \`\`\`bash
+          # Server
+          docker pull ghcr.io/desplega-ai/agent-swarm:${VERSION}
+          # Worker
+          docker pull ghcr.io/desplega-ai/agent-swarm-worker:${VERSION}
+          \`\`\`
+
+          ---
+          EOF
+          sed -i 's/^          //' /tmp/release-notes.md
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file /tmp/release-notes.md \
+            --generate-notes \
+            --verify-tag
