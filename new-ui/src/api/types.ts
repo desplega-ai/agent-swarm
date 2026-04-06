@@ -346,6 +346,13 @@ export interface SwarmConfigsResponse {
   configs: SwarmConfig[];
 }
 
+export interface RepoGuidelines {
+  prChecks: string[];
+  mergeChecks: string[];
+  allowMerge: boolean;
+  review: string[];
+}
+
 export interface SwarmRepo {
   id: string;
   url: string;
@@ -353,6 +360,7 @@ export interface SwarmRepo {
   clonePath: string;
   defaultBranch: string;
   autoClone: boolean;
+  guidelines: RepoGuidelines | null;
   createdAt: string;
   lastUpdatedAt: string;
 }
