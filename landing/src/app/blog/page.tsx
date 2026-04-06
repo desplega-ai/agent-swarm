@@ -42,6 +42,16 @@ interface BlogPost {
 
 const posts: BlogPost[] = [
   {
+    slug: "deep-dive-dag-workflow-engine-pause-resume",
+    title:
+      "Building a DAG Workflow Engine That Waits: Pause, Resume, and Convergence Gates",
+    description:
+      "Production-grade DAG orchestration for AI agent swarms: async pause/resume, convergence gates, crash recovery, and explicit data flow patterns.",
+    date: "April 6, 2026",
+    readTime: "14 min read",
+    tags: ["DAG", "workflow engine", "pause/resume", "convergence gates", "crash recovery"],
+  },
+  {
     slug: "deep-dive-soul-md-identity-stack",
     title:
       "SOUL.md and the 4-File Identity Stack: Persistent AI Agent Personalities",
