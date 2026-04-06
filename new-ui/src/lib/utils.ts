@@ -60,17 +60,28 @@ export function formatSmartTime(dateStr: string): string {
     const futureHours = Math.floor(futureMins / 60);
     const futureDays = Math.floor(futureHours / 24);
 
-    if (futureMins < 1) return "just now";
+    if (futureMins < 1) return "in <1m";
     if (futureMins < 60) return `in ${futureMins}m`;
     if (futureHours < 6) return `in ${futureHours}h`;
     if (futureDays < 1) {
-      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const isToday = date.toDateString() === now.toDateString();
+      if (isToday) {
+        return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+      }
+      return date.toLocaleDateString([], {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "UTC",
+      });
     }
     return date.toLocaleDateString([], {
       month: "short",
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: "UTC",
     });
   }
 
