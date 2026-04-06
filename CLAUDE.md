@@ -269,6 +269,8 @@ Use `qa-use` tool (`/qa-use:test-run`, `/qa-use:verify`, `/qa-use:explore`). Das
 
 **Worktree port check:** `lsof -i :5274`. If occupied, `cd new-ui && pnpm run dev --port 5275` and update `APP_URL`.
 
+**PR requirement:** Any PR changing frontend code (`new-ui/`, `landing/`, `templates-ui/`) must include a `qa-use` session with screenshots verifying the changes running locally.
+
 </important>
 
 <important if="you are preparing a commit, push, or pull request">
@@ -286,6 +288,8 @@ bash scripts/check-db-boundary.sh
 **If you changed `plugin/commands/*.md`:** `bun run build:pi-skills` — CI enforces freshness.
 
 **new-ui/:** `cd new-ui && pnpm lint && pnpm exec tsc --noEmit`
+
+**Frontend changes (new-ui/, landing/, templates-ui/):** PRs must include a `qa-use` session with screenshots verifying the changes with the frontend running locally. Use `qa-use` to capture browser verification before creating or updating the PR.
 
 **Docker changes:** `docker build -f <Dockerfile> .`
 
