@@ -1,6 +1,6 @@
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { ChevronLeft, ChevronRight, Clock, GitBranch, Plus, Search, X } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useScheduledTasks } from "@/api/hooks/use-schedules";
@@ -279,12 +279,13 @@ export default function TasksPage() {
 
   const { data: agents } = useAgents();
   const { data: schedules } = useScheduledTasks();
-  const agentMap = useMemo(() => {
+  const agentMapRef = useRef(new Map<string, string>());
+  useMemo(() => {
     const m = new Map<string, string>();
     agents?.forEach((a) => {
       m.set(a.id, a.name);
     });
-    return m;
+    agentMapRef.current = m;
   }, [agents]);
 
   const filters = useMemo(() => {
@@ -418,7 +419,7 @@ export default function TasksPage() {
         width: 150,
         valueFormatter: (params) =>
           params.value
-            ? (agentMap.get(params.value) ?? `${params.value.slice(0, 8)}...`)
+            ? (agentMapRef.current.get(params.value) ?? `${params.value.slice(0, 8)}...`)
             : "Unassigned",
       },
       {
@@ -484,7 +485,7 @@ export default function TasksPage() {
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
     ],
-    [agentMap],
+    [],
   );
 
   const onRowClicked = useCallback(
