@@ -146,7 +146,6 @@ interface MessageEvent {
   text?: string;
   user?: string;
   channel: string;
-  channel_type?: string;
   ts: string;
   thread_ts?: string;
   files?: SlackFile[];

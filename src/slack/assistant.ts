@@ -40,9 +40,9 @@ export function createAssistant(): Assistant {
     },
 
     userMessage: async ({ message, say, setStatus, setTitle, getThreadContext }) => {
-      // Wrap setStatus/setTitle to handle no_permission errors gracefully.
-      // These calls fail when the thread wasn't started by the assistant
-      // (e.g. originated from a file_share event), so we log and continue.
+      // Wrap setStatus/setTitle to swallow all errors gracefully.
+      // These calls can fail for various reasons (no_permission when the thread
+      // wasn't started by the assistant, network errors, etc.), so we log and continue.
       const safeSetStatus = async (status: string) => {
         try {
           await setStatus(status);
