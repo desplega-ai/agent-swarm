@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.59.2] - 2026-04-07
+
+### Changed
+- Slack tools (`slack-reply`, `slack-read`) moved from core to deferred — only loaded when task has Slack context (#298)
+- Slack prompt instructions now conditionally injected via `system.agent.worker.slack` template only for Slack-originated tasks (#298)
+- New `system.agent.code_quality` template added to all session composites for repository guidelines enforcement (#298)
+- Repository guidelines (PR checks, merge policy, review guidance) now injected into system prompt from per-repo configuration (#298)
+- `get-repos` and `update-repo` tools added to deferred tools set (#294)
+
+### Fixed
+- Repos edit modal and added repository detail page in dashboard UI (#301)
+- Task table sort state now preserved across data refreshes (#300)
+- Schedule UI showing wrong "Runs At" time for future dates (#299)
+- Slack template variables now use `VariableDefinition` type for proper validation (#298)
+
 ## [1.59.0] - 2026-04-04
 
 ### Added

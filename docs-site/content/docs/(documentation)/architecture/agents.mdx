@@ -35,11 +35,13 @@ All identity file changes are tracked with version history. You can:
 The system prompt is built from multiple layers, assembled at task start:
 
 1. **Base role instructions** — Lead or worker-specific behavior rules
-2. **Agent identity** — SOUL.md + IDENTITY.md content
-3. **Repository context** — If the task targets a specific GitHub repo, that repo's CLAUDE.md is included
-4. **Filesystem guide** — Memory directories, personal/shared workspace, setup script instructions
-5. **Self-awareness** — How the agent is built (runtime, hooks, memory system, task lifecycle)
-6. **Additional prompt** — Custom text from `SYSTEM_PROMPT` env var or `--system-prompt` CLI flag
+2. **Code quality & repository guidelines** — Mandatory PR checks, merge policy, and review guidance from per-repo configuration
+3. **Conditional Slack instructions** — Injected only for worker tasks that originated from Slack (channel ID and thread context)
+4. **Agent identity** — SOUL.md + IDENTITY.md content
+5. **Repository context** — If the task targets a specific GitHub repo, that repo's CLAUDE.md and guidelines are included
+6. **Filesystem guide** — Memory directories, personal/shared workspace, setup script instructions
+7. **Self-awareness** — How the agent is built (runtime, hooks, memory system, task lifecycle)
+8. **Additional prompt** — Custom text from `SYSTEM_PROMPT` env var or `--system-prompt` CLI flag
 
 ## Startup Scripts
 
