@@ -42,6 +42,16 @@ interface BlogPost {
 
 const posts: BlogPost[] = [
   {
+    slug: "deep-dive-lead-agent-pattern",
+    title:
+      "The Lead Agent Pattern: How We Taught One AI to Decompose, Delegate, and Recover When Its Workers Fail",
+    description:
+      "Stop hardcoding routing rules. Learn how to build a Lead Agent that decomposes tasks, manages dependencies, and recovers from worker failures autonomously.",
+    date: "April 7, 2026",
+    readTime: "14 min read",
+    tags: ["lead agent pattern", "agent orchestration", "task decomposition", "failure recovery"],
+  },
+  {
     slug: "deep-dive-dag-workflow-engine-pause-resume",
     title:
       "Building a DAG Workflow Engine That Waits: Pause, Resume, and Convergence Gates",
