@@ -40,6 +40,24 @@ export function createAssistant(): Assistant {
     },
 
     userMessage: async ({ message, say, setStatus, setTitle, getThreadContext }) => {
+      // Wrap setStatus/setTitle to handle no_permission errors gracefully.
+      // These calls fail when the thread wasn't started by the assistant
+      // (e.g. originated from a file_share event), so we log and continue.
+      const safeSetStatus = async (status: string) => {
+        try {
+          await setStatus(status);
+        } catch (error) {
+          console.warn("[Slack] setStatus failed (thread may not be an assistant thread):", error);
+        }
+      };
+      const safeSetTitle = async (title: string) => {
+        try {
+          await setTitle(title);
+        } catch (error) {
+          console.warn("[Slack] setTitle failed (thread may not be an assistant thread):", error);
+        }
+      };
+
       try {
         // Cast to access fields — Bolt's message union type is complex
         const msg = message as unknown as Record<string, unknown>;
@@ -58,7 +76,7 @@ export function createAssistant(): Assistant {
           // Follow-up message → route to the same agent
           if (additiveSlack) {
             bufferThreadMessage(channelId, threadTs, messageText, userId, message.ts);
-            await setStatus("Queuing follow-up...");
+            await safeSetStatus("Queuing follow-up...");
             return;
           }
 
@@ -74,16 +92,16 @@ export function createAssistant(): Assistant {
             requestedByUserId,
           });
 
-          await setStatus("Processing follow-up...");
+          await safeSetStatus("Processing follow-up...");
           return;
         }
 
         // 2. First message in thread — create new task for lead
-        await setStatus("Processing your request...");
+        await safeSetStatus("Processing your request...");
 
         if (messageText) {
           const title = messageText.length > 50 ? `${messageText.slice(0, 47)}...` : messageText;
-          await setTitle(title);
+          await safeSetTitle(title);
         }
 
         // Optionally enrich with channel context
