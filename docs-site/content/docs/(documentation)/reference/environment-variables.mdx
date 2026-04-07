@@ -54,7 +54,7 @@ Which credentials you need depends on your selected harness provider:
 | `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models via pi-mono |
 | `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key for multi-provider model access |
 
-\* At least one credential source is required (API key or `~/.pi/agent/auth.json`).
+\* At least one credential source is required (API key or `~/.pi/agent/auth.json`). **Do not** pass `CLAUDE_CODE_OAUTH_TOKEN` when using pi-mono — it will override the configured provider. See [Harness Configuration](/docs/guides/harness-configuration) for details.
 
 ### General Worker Settings
 

@@ -10,7 +10,7 @@ Agent Swarm uses a **harness** abstraction to decouple task execution from the u
 | Provider | `HARNESS_PROVIDER` | Description |
 |----------|-------------------|-------------|
 | **Claude Code** | `claude` (default) | Anthropic's Claude Code CLI. Recommended for most use cases |
-| **pi-mono** | `pi` | Open-source coding agent by [@mariozechner](https://github.com/mariozechner/pi-mono). Supports multiple model backends |
+| **pi-mono** | `pi` | Open-source coding agent by [@badlogic](https://github.com/badlogic/pi-mono). Supports multiple model backends |
 
 ## How It Works
 
@@ -76,13 +76,13 @@ The Claude adapter passes the model string directly to the `claude` CLI via `--m
 | `sonnet` | Claude Sonnet (balanced) |
 | `haiku` | Claude Haiku (fastest) |
 
-Models can be set per-task via the API or per-agent via the agent profile.
+Models can be set per-task via the API or per-agent via the agent profile. See the [Anthropic models overview](https://platform.claude.com/docs/en/about-claude/models/overview) for all available model IDs.
 
 ---
 
 ## pi-mono
 
-[pi-mono](https://github.com/mariozechner/pi-mono) is an open-source coding agent that runs as a library (no external CLI process). It supports multiple LLM backends through a provider/model system.
+[pi-mono](https://github.com/badlogic/pi-mono) is an open-source coding agent that runs as a library (no external CLI process). It supports multiple LLM backends through a provider/model system. See the [coding agent README](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/README.md) for detailed configuration and usage.
 
 ### Authentication
 
@@ -106,15 +106,19 @@ At least one of these must be available. The Docker entrypoint validates this on
 
 \* At least one credential source is required (API key or `~/.pi/agent/auth.json`).
 
+<Callout type="warn">
+**Do not pass `CLAUDE_CODE_OAUTH_TOKEN`** when using `HARNESS_PROVIDER=pi`. If Claude credentials are present in the environment, the harness will attempt to use them instead of the configured pi-mono provider, causing misconfiguration. Only pass the credentials relevant to your selected provider (`OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`).
+</Callout>
+
 ### Model Selection
 
-pi-mono resolves models using a `provider/model-id` format:
+pi-mono resolves models using a `provider/model-id` format. Set the model via `MODEL_OVERRIDE` in your environment:
 
-| Format | Example | Description |
-|--------|---------|-------------|
+| Format | Example | Model Reference |
+|--------|---------|-----------------|
 | Shortname | `opus`, `sonnet`, `haiku` | Maps to Anthropic Claude models |
-| Provider/model | `anthropic/claude-sonnet-4-20250514` | Explicit provider and model ID |
-| OpenRouter | `openrouter/google/gemini-2.5-flash-lite` | Any OpenRouter-supported model |
+| Provider/model | `anthropic/claude-sonnet-4-6` | [Anthropic model IDs](https://platform.claude.com/docs/en/about-claude/models/overview) |
+| OpenRouter | `moonshotai/kimi-k2.5` | [OpenRouter model catalog](https://openrouter.ai/models) |
 
 ### pi-mono Specifics
 
@@ -177,10 +181,12 @@ GITHUB_TOKEN=ghp_...
 # .env.docker
 HARNESS_PROVIDER=pi
 OPENROUTER_API_KEY=sk-or-...         # Or ANTHROPIC_API_KEY
+MODEL_OVERRIDE=moonshotai/kimi-k2.5  # See https://openrouter.ai/models
 API_KEY=your-api-key
 MCP_BASE_URL=http://host.docker.internal:3013
 AGENT_ID=your-worker-uuid
 GITHUB_TOKEN=ghp_...
+# Do NOT include CLAUDE_CODE_OAUTH_TOKEN — it will override the pi provider
 ```
 
 ### Mixed Swarm

@@ -41,7 +41,7 @@ import {
   registerSetPromptTemplateTool,
 } from "./tools/prompt-templates";
 import { registerReadMessagesTool } from "./tools/read-messages";
-import { registerRegisterAgentMailInboxTool } from "./tools/register-agentmail-inbox";
+import { registerRegisterAgentmailInboxTool } from "./tools/register-agentmail-inbox";
 // Services capability
 import { registerRegisterServiceTool } from "./tools/register-service";
 // Repo management tools
@@ -193,7 +193,7 @@ export function createServer() {
   registerSlackDownloadFileTool(server);
 
   // AgentMail integration tool (always registered, self-service inbox mapping)
-  registerRegisterAgentMailInboxTool(server);
+  registerRegisterAgentmailInboxTool(server);
 
   // Task pool capability - task pool operations (create unassigned, claim, release, accept, reject)
   if (hasCapability("task-pool")) {

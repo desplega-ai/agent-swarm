@@ -238,6 +238,10 @@ volumes:
   swarm_worker_3:
 ```
 
+<Callout type="warn">
+If using `HARNESS_PROVIDER=pi` for this worker, **do not** include `CLAUDE_CODE_OAUTH_TOKEN` — pass `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY` instead. Claude credentials in the environment will override the pi-mono provider. See [Harness Configuration](/docs/guides/harness-configuration).
+</Callout>
+
 Then:
 
 ```bash
