@@ -149,6 +149,7 @@ interface MessageEvent {
   ts: string;
   thread_ts?: string;
   files?: SlackFile[];
+  assistant_thread?: Record<string, unknown>;
 }
 
 interface ThreadMessage {
@@ -358,6 +359,12 @@ export function registerMessageHandler(app: App): void {
     // Check if bot was mentioned (in original text only)
     const botMentioned = !!msg.text?.includes(`<@${botUserId}>`);
 
+    // Detect assistant thread context — file_share messages in DM assistant threads
+    // bypass the assistant handler and land here instead. Treat them as implicit mentions
+    // so they route to the lead agent rather than being silently dropped.
+    const isAssistantThread = !!msg.assistant_thread;
+    const isImplicitMention = isAssistantThread && !botMentioned;
+
     // ADDITIVE_SLACK: Check for !now command in threads
     const additiveSlack = process.env.ADDITIVE_SLACK === "true";
     if (additiveSlack && msg.thread_ts) {
@@ -420,12 +427,17 @@ export function registerMessageHandler(app: App): void {
     const routingThreadContext = msg.thread_ts
       ? { channelId: msg.channel, threadTs: msg.thread_ts }
       : undefined;
-    const matches = routeMessage(routingText, botUserId, botMentioned, routingThreadContext);
+    const matches = routeMessage(
+      routingText,
+      botUserId,
+      botMentioned || isImplicitMention,
+      routingThreadContext,
+    );
 
     if (matches.length === 0) {
-      if (!botMentioned) return;
+      if (!botMentioned && !isImplicitMention) return;
 
-      // Bot was mentioned but no online agents matched — queue the request
+      // Bot was mentioned (or message is in assistant thread) but no online agents matched — queue the request
       if (!checkRateLimit(msg.user)) {
         await say({
           text: ":satellite: _You're sending too many requests. Please slow down._",
@@ -434,12 +446,16 @@ export function registerMessageHandler(app: App): void {
         return;
       }
 
-      const taskDescription = extractTaskFromMessage(effectiveText, botUserId);
+      const taskDescription = isImplicitMention
+        ? effectiveText
+        : extractTaskFromMessage(effectiveText, botUserId);
       if (!taskDescription) {
-        await say({
-          text: ":satellite: _Please provide a task description after mentioning an agent._",
-          thread_ts: msg.thread_ts || msg.ts,
-        });
+        if (!isImplicitMention) {
+          await say({
+            text: ":satellite: _Please provide a task description after mentioning an agent._",
+            thread_ts: msg.thread_ts || msg.ts,
+          });
+        }
         return;
       }
 
