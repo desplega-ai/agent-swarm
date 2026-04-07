@@ -9,7 +9,7 @@ import {
 } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 
-export const registerRegisterAgentMailInboxTool = (server: McpServer) => {
+export const registerRegisterAgentmailInboxTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "register-agentmail-inbox",
     {

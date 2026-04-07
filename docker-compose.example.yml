@@ -45,7 +45,11 @@ services:
       - swarm_api:/app
 
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3013/health || wget -q --spider http://localhost:3013/health || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "curl -f http://localhost:3013/health || wget -q --spider http://localhost:3013/health || exit 1",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -235,18 +239,20 @@ services:
         condition: service_healthy
 
     environment:
-      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
       # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
       - AGENT_ID=fc637423-24db-418a-ad03-a64e17c7b10a
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/content-reviewer
-      - MODEL_OVERRIDE=sonnet
       - CAPABILITIES=core,task-pool,messaging,profiles,services,scheduling,epics,memory,content-review
-      # Content reviewer uses Gemini via OpenRouter
+      # Content reviewer uses pi-mono via OpenRouter
       - HARNESS_PROVIDER=pi
+      - MODEL_OVERRIDE=moonshotai/kimi-k2.5
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # In the pi case we MUST NOT pass the claude creds as these will
+      # be used instead and the harness won't be correctly configure
+      # - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
 
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
@@ -372,9 +378,15 @@ services:
   #
   #   environment:
   #     - HARNESS_PROVIDER=pi
+  #     # Set the model as defined in Anthropic API
+  #     # https://platform.claude.com/docs/en/about-claude/models/overview
+  #     - MODEL_OVERRIDE=claude-sonnet-4-6
   #     - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
   #     # Or use OpenRouter instead:
   #     # - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+  #     # Set the model as defined in Openrouter UI
+  #     # https://openrouter.ai/models
+  #     # - MODEL_OVERRIDE=moonshotai/kimi-k2.5
   #     - API_KEY=${API_KEY}
   #     # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
   #     - AGENT_ID=b2a3c4d5-6789-01ef-abcd-234567890abc
