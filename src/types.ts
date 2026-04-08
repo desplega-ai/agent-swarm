@@ -111,6 +111,8 @@ export const AgentTaskSchema = z.object({
   vcsCommentId: z.number().int().optional(),
   vcsAuthor: z.string().optional(),
   vcsUrl: z.string().optional(),
+  vcsInstallationId: z.number().int().optional(),
+  vcsNodeId: z.string().optional(),
 
   // AgentMail-specific metadata (optional)
   agentmailInboxId: z.string().optional(),

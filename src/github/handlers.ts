@@ -183,6 +183,7 @@ export async function handlePullRequest(
       vcsAuthor: sender.login,
       requestedByUserId,
       vcsUrl: pr.html_url,
+      vcsInstallationId: installation?.id,
     });
 
     if (lead) {
@@ -281,6 +282,7 @@ export async function handlePullRequest(
       vcsAuthor: sender.login,
       requestedByUserId,
       vcsUrl: pr.html_url,
+      vcsInstallationId: installation?.id,
     });
 
     if (lead) {
@@ -371,6 +373,7 @@ export async function handlePullRequest(
       vcsAuthor: sender.login,
       requestedByUserId,
       vcsUrl: pr.html_url,
+      vcsInstallationId: installation?.id,
     });
 
     if (lead) {
@@ -458,6 +461,7 @@ export async function handlePullRequest(
     vcsNumber: pr.number,
     vcsAuthor: sender.login,
     vcsUrl: pr.html_url,
+    vcsInstallationId: installation?.id,
   });
 
   if (lead) {
@@ -531,6 +535,7 @@ export async function handleIssue(
       vcsAuthor: sender.login,
       requestedByUserId,
       vcsUrl: issue.html_url,
+      vcsInstallationId: installation?.id,
     });
 
     if (lead) {
@@ -617,6 +622,7 @@ export async function handleIssue(
       vcsAuthor: sender.login,
       requestedByUserId,
       vcsUrl: issue.html_url,
+      vcsInstallationId: installation?.id,
     });
 
     if (lead) {
@@ -686,6 +692,7 @@ export async function handleIssue(
     vcsNumber: issue.number,
     vcsAuthor: sender.login,
     vcsUrl: issue.html_url,
+    vcsInstallationId: installation?.id,
   });
 
   if (lead) {
@@ -784,6 +791,8 @@ export async function handleComment(
     vcsCommentId: comment.id,
     vcsAuthor: sender.login,
     vcsUrl: targetUrl,
+    vcsInstallationId: installation?.id,
+    vcsNodeId: comment.node_id,
   });
 
   if (lead) {
@@ -896,6 +905,8 @@ export async function handlePullRequestReview(
     vcsNumber: pr.number,
     vcsAuthor: sender.login,
     vcsUrl: review.html_url,
+    vcsInstallationId: installation?.id,
+    vcsNodeId: review.node_id,
   });
 
   if (lead) {
