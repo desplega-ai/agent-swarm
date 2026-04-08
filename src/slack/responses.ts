@@ -7,6 +7,7 @@ import {
   buildCompletedBlocks,
   buildFailedBlocks,
   buildProgressBlocks,
+  formatDuration,
   markdownToSlack,
 } from "./blocks";
 
@@ -49,11 +50,24 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
     if (task.status === "completed") {
       const output = task.output || "Task completed.";
       const slackOutput = markdownToSlack(output);
-      const blocks = buildCompletedBlocks({ agentName, taskId: task.id, body: slackOutput });
+      const duration =
+        task.finishedAt && task.createdAt
+          ? formatDuration(new Date(task.createdAt), new Date(task.finishedAt))
+          : undefined;
+      console.log(
+        `[Slack] sendTaskResponse: task=${task.id} slackReplySent=${!!task.slackReplySent} minimal=${!!task.slackReplySent}`,
+      );
+      const blocks = buildCompletedBlocks({
+        agentName,
+        taskId: task.id,
+        body: slackOutput,
+        duration,
+        minimal: !!task.slackReplySent,
+      });
       await sendWithPersona(client, {
         channel: task.slackChannelId,
         thread_ts: task.slackThreadTs,
-        text: slackOutput,
+        text: task.slackReplySent ? `✅ ${agentName} completed` : slackOutput,
         username: getAgentDisplayName(agent),
         icon_emoji: getAgentEmoji(agent),
         blocks,
@@ -161,8 +175,21 @@ export async function updateToFinal(task: AgentTask, messageTs: string): Promise
   if (task.status === "completed") {
     const output = task.output || "Task completed.";
     const slackOutput = markdownToSlack(output);
-    blocks = buildCompletedBlocks({ agentName, taskId: task.id, body: slackOutput });
-    text = slackOutput;
+    const duration =
+      task.finishedAt && task.createdAt
+        ? formatDuration(new Date(task.createdAt), new Date(task.finishedAt))
+        : undefined;
+    console.log(
+      `[Slack] updateToFinal: task=${task.id} slackReplySent=${!!task.slackReplySent} minimal=${!!task.slackReplySent}`,
+    );
+    blocks = buildCompletedBlocks({
+      agentName,
+      taskId: task.id,
+      body: slackOutput,
+      duration,
+      minimal: !!task.slackReplySent,
+    });
+    text = task.slackReplySent ? `✅ ${agentName} completed` : slackOutput;
   } else if (task.status === "cancelled") {
     blocks = buildCancelledBlocks({ agentName, taskId: task.id });
     text = "Task cancelled";

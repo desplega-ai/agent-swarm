@@ -6,6 +6,7 @@ import {
   buildCompletedBlocks,
   buildFailedBlocks,
   buildProgressBlocks,
+  formatDuration,
   getTaskLink,
   getTaskUrl,
   markdownToSlack,
@@ -243,5 +244,117 @@ describe("buildBufferFlushBlocks", () => {
     });
 
     expect(blocks[0].elements[0].text).toContain("queued pending");
+  });
+});
+
+describe("buildCompletedBlocks — minimal mode", () => {
+  test("minimal: true suppresses body sections", () => {
+    const blocks = buildCompletedBlocks({
+      agentName: "Alpha",
+      taskId: "abcdef12-3456-7890-abcd-ef1234567890",
+      body: "This body should be suppressed",
+      minimal: true,
+    });
+
+    // Only the header block, no body sections
+    expect(blocks.length).toBe(1);
+    expect(blocks[0].type).toBe("section");
+    expect(blocks[0].text.text).toContain("✅");
+    expect(blocks[0].text.text).toContain("Alpha");
+    expect(blocks[0].text.text).not.toContain("This body should be suppressed");
+  });
+
+  test("minimal: false includes body sections (default behavior)", () => {
+    const blocks = buildCompletedBlocks({
+      agentName: "Alpha",
+      taskId: "abcdef12-3456-7890-abcd-ef1234567890",
+      body: "Task output here",
+      minimal: false,
+    });
+
+    expect(blocks.length).toBe(2);
+    expect(blocks[1].text.text).toBe("Task output here");
+  });
+
+  test("minimal: true with duration shows duration in header", () => {
+    const blocks = buildCompletedBlocks({
+      agentName: "Alpha",
+      taskId: "abcdef12-3456-7890-abcd-ef1234567890",
+      body: "Suppressed",
+      duration: "2m 14s",
+      minimal: true,
+    });
+
+    expect(blocks.length).toBe(1);
+    expect(blocks[0].text.text).toContain("2m 14s");
+  });
+
+  test("duration shown in header without minimal mode", () => {
+    const blocks = buildCompletedBlocks({
+      agentName: "Alpha",
+      taskId: "abcdef12-3456-7890-abcd-ef1234567890",
+      body: "Output",
+      duration: "1h 5m",
+    });
+
+    expect(blocks[0].text.text).toContain("1h 5m");
+    // Body still present
+    expect(blocks.length).toBe(2);
+    expect(blocks[1].text.text).toBe("Output");
+  });
+});
+
+describe("formatDuration", () => {
+  test("seconds only (< 60s)", () => {
+    const start = new Date("2026-01-01T00:00:00Z");
+    const end = new Date("2026-01-01T00:00:45Z");
+    expect(formatDuration(start, end)).toBe("45s");
+  });
+
+  test("zero seconds", () => {
+    const t = new Date("2026-01-01T00:00:00Z");
+    expect(formatDuration(t, t)).toBe("0s");
+  });
+
+  test("minutes and seconds (< 60m)", () => {
+    const start = new Date("2026-01-01T00:00:00Z");
+    const end = new Date("2026-01-01T00:02:14Z");
+    expect(formatDuration(start, end)).toBe("2m 14s");
+  });
+
+  test("exact minutes (no remaining seconds)", () => {
+    const start = new Date("2026-01-01T00:00:00Z");
+    const end = new Date("2026-01-01T00:05:00Z");
+    expect(formatDuration(start, end)).toBe("5m 0s");
+  });
+
+  test("hours and minutes (>= 60m)", () => {
+    const start = new Date("2026-01-01T00:00:00Z");
+    const end = new Date("2026-01-01T01:30:00Z");
+    expect(formatDuration(start, end)).toBe("1h 30m");
+  });
+
+  test("multiple hours", () => {
+    const start = new Date("2026-01-01T00:00:00Z");
+    const end = new Date("2026-01-01T03:15:00Z");
+    expect(formatDuration(start, end)).toBe("3h 15m");
+  });
+
+  test("just under a minute", () => {
+    const start = new Date("2026-01-01T00:00:00Z");
+    const end = new Date("2026-01-01T00:00:59Z");
+    expect(formatDuration(start, end)).toBe("59s");
+  });
+
+  test("exactly one minute", () => {
+    const start = new Date("2026-01-01T00:00:00Z");
+    const end = new Date("2026-01-01T00:01:00Z");
+    expect(formatDuration(start, end)).toBe("1m 0s");
+  });
+
+  test("exactly one hour", () => {
+    const start = new Date("2026-01-01T00:00:00Z");
+    const end = new Date("2026-01-01T01:00:00Z");
+    expect(formatDuration(start, end)).toBe("1h 0m");
   });
 });

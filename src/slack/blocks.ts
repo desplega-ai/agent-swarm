@@ -128,6 +128,24 @@ function cancelActionBlock(taskId: string): SlackBlock {
   };
 }
 
+// --- Utilities ---
+
+/**
+ * Format a duration between two dates in a compact human-readable form.
+ * Examples: "45s", "2m 14s", "1h 30m"
+ */
+export function formatDuration(start: Date, end: Date): string {
+  const ms = end.getTime() - start.getTime();
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes < 60) return `${minutes}m ${remainingSeconds}s`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${hours}h ${remainingMinutes}m`;
+}
+
 // --- High-level block builders ---
 
 /**
@@ -139,14 +157,19 @@ export function buildCompletedBlocks(opts: {
   taskId: string;
   body: string;
   duration?: string;
+  minimal?: boolean; // true = suppress body (agent already replied via slack-reply)
 }): SlackBlock[] {
   const taskLink = getTaskLink(opts.taskId);
   let line = `✅ *${opts.agentName}* (${taskLink})`;
   if (opts.duration) line += ` · ${opts.duration}`;
 
   const blocks: SlackBlock[] = [sectionBlock(line)];
-  for (const chunk of splitText(opts.body)) {
-    blocks.push(sectionBlock(chunk));
+
+  // Only include body if not minimal (agent didn't reply via slack-reply)
+  if (!opts.minimal) {
+    for (const chunk of splitText(opts.body)) {
+      blocks.push(sectionBlock(chunk));
+    }
   }
   return blocks;
 }

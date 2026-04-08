@@ -4,8 +4,8 @@ topic: "Slack Message Deduplication + Tree-Based Status Messages"
 status: in-progress
 autonomy: critical
 research: thoughts/taras/brainstorms/2026-04-08-slack-message-deduplication.md
-last_updated: 2026-04-09
-last_updated_by: claude
+last_updated: 2026-04-09T00:00:00Z
+last_updated_by: claude (phase 2)
 ---
 
 # Plan: Slack Message Deduplication + Tree-Based Status Messages
@@ -283,10 +283,10 @@ export function formatDuration(start: Date, end: Date): string {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] All tests pass: `bun test`
-- [ ] Blocks test specifically: `bun test src/tests/slack-blocks.test.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] All tests pass: `bun test`
+- [x] Blocks test specifically: `bun test src/tests/slack-blocks.test.ts`
 
 #### Manual Verification:
 - [ ] Start server, trigger a Slack task where the agent uses `slack-reply`. Verify the evolving message shows only `✅ AgentName (link) · duration` — no body text.
