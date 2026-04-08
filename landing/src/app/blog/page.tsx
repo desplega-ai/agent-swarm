@@ -42,16 +42,6 @@ interface BlogPost {
 
 const posts: BlogPost[] = [
   {
-    slug: "deep-dive-circuit-breaker-agent-swarm",
-    title:
-      "Why Your Agent Swarm Keeps Burning Through API Budgets (And the Circuit Breaker Pattern That Fixed Ours)",
-    description:
-      "We burned $2,400 in 45 minutes because our agents kept retrying failed API calls. Here is the distributed circuit breaker pattern that cut costs by 94%.",
-    date: "April 8, 2026",
-    readTime: "14 min read",
-    tags: ["circuit breaker", "cost optimization", "distributed systems", "AI agents"],
-  },
-  {
     slug: "deep-dive-dag-workflow-engine-pause-resume",
     title:
       "Building a DAG Workflow Engine That Waits: Pause, Resume, and Convergence Gates",
