@@ -17,6 +17,8 @@ import {
   _getTaskToTree,
   _getTreeLastUpdateTime,
   _getTreeMessages,
+  _isDMChannel,
+  _postInitialDMTreeMessage,
   buildTreeNodes,
   processTreeMessages,
   registerTreeMessage,
@@ -337,12 +339,22 @@ describe("buildTreeNodes", () => {
 
 // --- Phase 5: processTreeMessages tests ---
 
-// Mock the Slack app so updateTreeMessage doesn't fail on missing app
+// Mock Slack API methods for tree message updates, DM posting, and assistant status
+const mockChatUpdate = mock(() => Promise.resolve({ ok: true }));
+const mockChatPostMessage = mock(() => Promise.resolve({ ok: true, ts: "mock.dm.tree.000001" }));
+const mockSetStatus = mock(() => Promise.resolve({ ok: true }));
+
 mock.module("../slack/app", () => ({
   getSlackApp: () => ({
     client: {
       chat: {
-        update: mock(() => Promise.resolve({ ok: true })),
+        update: mockChatUpdate,
+        postMessage: mockChatPostMessage,
+      },
+      assistant: {
+        threads: {
+          setStatus: mockSetStatus,
+        },
       },
     },
   }),
@@ -604,5 +616,221 @@ describe("tree-tracked tasks skip flat processing", () => {
 
     expect(taskToTree.has(child.id)).toBe(true);
     expect(taskToTree.get(child.id)).toBe(messageTs);
+  });
+});
+
+// --- Phase 6: DM Unification tests ---
+
+describe("isDMChannel", () => {
+  test("returns true for DM channels (starting with D)", () => {
+    expect(_isDMChannel("D12345678")).toBe(true);
+    expect(_isDMChannel("DABCDEFGH")).toBe(true);
+  });
+
+  test("returns false for regular channels", () => {
+    expect(_isDMChannel("C12345678")).toBe(false);
+    expect(_isDMChannel("G12345678")).toBe(false);
+  });
+});
+
+describe("DM unification — postInitialDMTreeMessage", () => {
+  test("posts a tree message for a DM task and returns messageTs", async () => {
+    const agent = createAgent({ name: "DMTreeAgent", isLead: false, status: "idle" });
+    const task = createTaskExtended("dm tree test", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: "D_DM_TREE1",
+      slackThreadTs: "1212121212.000001",
+      slackUserId: "U_DM1",
+    });
+
+    startTask(task.id);
+
+    // Re-fetch the task to get in_progress status
+    const { getTaskById } = await import("../be/db");
+    const freshTask = getTaskById(task.id)!;
+
+    const messageTs = await _postInitialDMTreeMessage(freshTask);
+    expect(messageTs).toBe("mock.dm.tree.000001");
+
+    // Verify chat.postMessage was called with the DM channel
+    expect(mockChatPostMessage).toHaveBeenCalled();
+    const lastCall = mockChatPostMessage.mock.calls[mockChatPostMessage.mock.calls.length - 1];
+    expect((lastCall[0] as any).channel).toBe("D_DM_TREE1");
+    expect((lastCall[0] as any).thread_ts).toBe("1212121212.000001");
+    expect((lastCall[0] as any).blocks).toBeDefined();
+  });
+
+  test("returns undefined when task has no agentId", async () => {
+    const task = createTaskExtended("dm no agent test", {
+      source: "slack",
+      slackChannelId: "D_DM_TREE2",
+      slackThreadTs: "1313131313.000001",
+      slackUserId: "U_DM2",
+    });
+
+    const { getTaskById } = await import("../be/db");
+    const freshTask = getTaskById(task.id)!;
+
+    const messageTs = await _postInitialDMTreeMessage(freshTask);
+    expect(messageTs).toBeUndefined();
+  });
+});
+
+describe("DM unification — tree messages in DMs", () => {
+  test("DM tasks get tree messages registered via registerTreeMessage", () => {
+    const agent = createAgent({ name: "DMRegAgent", isLead: false, status: "idle" });
+    const task = createTaskExtended("dm register test", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: "D_DM_REG1",
+      slackThreadTs: "1414141414.000001",
+      slackUserId: "U_DM_REG1",
+    });
+
+    const messageTs = "1414141414.000002";
+    // DM channel ID starts with "D" — this is the same registerTreeMessage used for channels
+    registerTreeMessage(task.id, "D_DM_REG1", "1414141414.000001", messageTs);
+
+    const treeMessages = _getTreeMessages();
+    const tree = treeMessages.get(messageTs);
+    expect(tree).toBeDefined();
+    expect(tree!.channelId).toBe("D_DM_REG1");
+    expect(tree!.rootTaskIds.has(task.id)).toBe(true);
+
+    // Task is tracked in taskToTree
+    const taskToTree = _getTaskToTree();
+    expect(taskToTree.get(task.id)).toBe(messageTs);
+  });
+
+  test("DM tree updates work via processTreeMessages (chat.update)", async () => {
+    const agent = createAgent({ name: "DMUpdateAgent", isLead: true, status: "idle" });
+    const task = createTaskExtended("dm tree update test", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: "D_DM_UPD1",
+      slackThreadTs: "1515151515.000001",
+      slackUserId: "U_DM_UPD1",
+    });
+
+    startTask(task.id);
+
+    const messageTs = "1515151515.000002";
+    registerTreeMessage(task.id, "D_DM_UPD1", "1515151515.000001", messageTs);
+
+    // Clear rate limit and rendered state
+    _getTreeLastUpdateTime().delete(messageTs);
+    _getLastRenderedTree().delete(messageTs);
+
+    // Reset mock call counts
+    mockChatUpdate.mockClear();
+    mockSetStatus.mockClear();
+
+    await processTreeMessages();
+
+    // chat.update should have been called (tree rendering)
+    expect(mockChatUpdate).toHaveBeenCalled();
+
+    // Rendered state should be recorded
+    const lastRendered = _getLastRenderedTree().get(messageTs);
+    expect(lastRendered).toBeDefined();
+    expect(lastRendered!.length).toBeGreaterThan(0);
+  });
+
+  test("assistant status is set in parallel for DM tree messages", async () => {
+    const agent = createAgent({ name: "DMStatusAgent", isLead: true, status: "idle" });
+    const task = createTaskExtended("dm status test", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: "D_DM_STATUS1",
+      slackThreadTs: "1616161616.000001",
+      slackUserId: "U_DM_STATUS1",
+    });
+
+    startTask(task.id);
+
+    const messageTs = "1616161616.000002";
+    registerTreeMessage(task.id, "D_DM_STATUS1", "1616161616.000001", messageTs);
+
+    // Clear rate limit and rendered state
+    _getTreeLastUpdateTime().delete(messageTs);
+    _getLastRenderedTree().delete(messageTs);
+
+    mockSetStatus.mockClear();
+
+    await processTreeMessages();
+
+    // Wait a tick for the fire-and-forget setAssistantStatus to complete
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // setAssistantStatus should have been called for the DM channel
+    expect(mockSetStatus).toHaveBeenCalled();
+    const statusCall = mockSetStatus.mock.calls[mockSetStatus.mock.calls.length - 1];
+    expect((statusCall[0] as any).channel_id).toBe("D_DM_STATUS1");
+    expect((statusCall[0] as any).thread_ts).toBe("1616161616.000001");
+    // Status text should be set (not empty — task is still in progress)
+    expect((statusCall[0] as any).status).toBeTruthy();
+  });
+
+  test("assistant status is cleared when DM tree is fully terminal", async () => {
+    const agent = createAgent({ name: "DMTermAgent", isLead: true, status: "idle" });
+    const task = createTaskExtended("dm terminal test", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: "D_DM_TERM1",
+      slackThreadTs: "1717171717.000001",
+      slackUserId: "U_DM_TERM1",
+    });
+
+    startTask(task.id);
+    completeTask(task.id, "Done in DM");
+
+    const messageTs = "1717171717.000002";
+    registerTreeMessage(task.id, "D_DM_TERM1", "1717171717.000001", messageTs);
+
+    _getTreeLastUpdateTime().delete(messageTs);
+    _getLastRenderedTree().delete(messageTs);
+
+    mockSetStatus.mockClear();
+
+    await processTreeMessages();
+
+    // Wait a tick for the fire-and-forget setAssistantStatus to complete
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // setAssistantStatus should have been called with empty status (clearing indicator)
+    expect(mockSetStatus).toHaveBeenCalled();
+    const statusCall = mockSetStatus.mock.calls[mockSetStatus.mock.calls.length - 1];
+    expect((statusCall[0] as any).channel_id).toBe("D_DM_TERM1");
+    expect((statusCall[0] as any).status).toBe("");
+  });
+
+  test("non-DM channel trees do NOT trigger assistant status", async () => {
+    const agent = createAgent({ name: "NonDMAgent", isLead: true, status: "idle" });
+    const task = createTaskExtended("non dm test", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: "C_NON_DM1",
+      slackThreadTs: "1818181818.000001",
+      slackUserId: "U_NON_DM1",
+    });
+
+    startTask(task.id);
+
+    const messageTs = "1818181818.000002";
+    registerTreeMessage(task.id, "C_NON_DM1", "1818181818.000001", messageTs);
+
+    _getTreeLastUpdateTime().delete(messageTs);
+    _getLastRenderedTree().delete(messageTs);
+
+    mockSetStatus.mockClear();
+
+    await processTreeMessages();
+
+    // Wait a tick
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // setAssistantStatus should NOT have been called for a non-DM channel
+    expect(mockSetStatus).not.toHaveBeenCalled();
   });
 });

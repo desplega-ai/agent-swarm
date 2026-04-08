@@ -5,7 +5,7 @@ status: in-progress
 autonomy: critical
 research: thoughts/taras/brainstorms/2026-04-08-slack-message-deduplication.md
 last_updated: 2026-04-09T00:00:00Z
-last_updated_by: claude (phase 5)
+last_updated_by: claude (phase 6)
 ---
 
 # Plan: Slack Message Deduplication + Tree-Based Status Messages
@@ -643,10 +643,10 @@ Remove the DM-specific code path in the watcher. DMs get tree messages via `chat
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] All tests pass: `bun test`
-- [ ] Watcher tests: `bun test src/tests/slack-watcher.test.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] All tests pass: `bun test`
+- [x] Watcher tests: `bun test src/tests/slack-watcher.test.ts`
 
 #### Manual Verification:
 - [ ] Send a DM to the bot. Verify a tree message appears in the DM thread.

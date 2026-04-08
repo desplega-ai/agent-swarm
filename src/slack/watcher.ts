@@ -5,6 +5,7 @@ import {
   getInProgressSlackTasks,
   getTaskById,
 } from "../be/db";
+import type { AgentTask } from "../types";
 import { getSlackApp } from "./app";
 import type { TreeNode } from "./blocks";
 import { buildTreeBlocks, formatDuration } from "./blocks";
@@ -175,6 +176,10 @@ export function _getTreeLastUpdateTime(): Map<string, number> {
   return treeLastUpdateTime;
 }
 
+// Expose DM helpers for testing
+export const _isDMChannel = isDMChannel;
+export const _postInitialDMTreeMessage = postInitialDMTreeMessage;
+
 /**
  * Check if ALL tasks in a tree are terminal (completed/failed/cancelled).
  */
@@ -286,6 +291,25 @@ export async function processTreeMessages(): Promise<void> {
       );
     }
 
+    // DM channels: set assistant status in parallel for typing indicator UX
+    if (isDMChannel(tree.channelId) && !fullyTerminal) {
+      // Find the first in-progress node to use its progress text
+      const activeNode =
+        nodes.find((n) => n.status === "in_progress") ??
+        nodes.flatMap((n) => n.children).find((c) => c.status === "in_progress");
+      const statusText = activeNode?.progress || "Processing your request...";
+      setAssistantStatus(tree.channelId, tree.threadTs, statusText).catch((error) =>
+        console.error(`[Slack] Failed to set DM assistant status for tree ${messageTs}:`, error),
+      );
+    }
+
+    // Clear assistant status when DM tree is fully terminal
+    if (isDMChannel(tree.channelId) && fullyTerminal) {
+      setAssistantStatus(tree.channelId, tree.threadTs, "").catch((error) =>
+        console.error(`[Slack] Failed to clear DM assistant status for tree ${messageTs}:`, error),
+      );
+    }
+
     // Clean up fully terminal trees after final render
     if (fullyTerminal && success) {
       cleanupCompletedTree(messageTs, tree, nodes);
@@ -316,6 +340,60 @@ async function setAssistantStatus(channelId: string, threadTs: string, status: s
   } catch (error) {
     console.error(`[Slack] Failed to set assistant status:`, error);
   }
+}
+
+/**
+ * Post an initial tree message for a DM task that is in_progress but not yet
+ * tracked in a tree. Returns the messageTs of the posted message, or undefined
+ * if posting failed.
+ */
+async function postInitialDMTreeMessage(task: AgentTask): Promise<string | undefined> {
+  const app = getSlackApp();
+  if (!app || !task.slackChannelId || !task.slackThreadTs || !task.agentId) return undefined;
+
+  const agent = getAgentById(task.agentId);
+  if (!agent) return undefined;
+
+  // Build an initial tree with this single task
+  const initialNode: TreeNode = {
+    taskId: task.id,
+    agentName: agent.name,
+    status: task.status as TreeNode["status"],
+    progress: task.progress ?? undefined,
+    children: [],
+  };
+
+  let blocks: unknown[];
+  try {
+    blocks = buildTreeBlocks([initialNode]);
+  } catch (error) {
+    console.error(`[Slack] Failed to build initial DM tree blocks:`, error);
+    return undefined;
+  }
+
+  const fallbackText = `Task in progress: ${agent.name}`;
+
+  try {
+    // DM channels skip persona overrides (handled by sendWithPersona / postMessage)
+    const result = await app.client.chat.postMessage({
+      channel: task.slackChannelId,
+      thread_ts: task.slackThreadTs,
+      text: fallbackText,
+      // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
+      blocks: blocks as any,
+    });
+
+    if (result.ts) {
+      console.log(
+        `[Slack] Posted initial DM tree message for task ${task.id.slice(0, 8)} (messageTs=${result.ts})`,
+      );
+      return result.ts;
+    }
+  } catch (error) {
+    console.error(`[Slack] Failed to post initial DM tree message:`, error);
+  }
+
+  return undefined;
 }
 
 /**
@@ -359,23 +437,29 @@ export function startTaskWatcher(intervalMs = 3000): void {
 
         const isDM = task.slackChannelId && isDMChannel(task.slackChannelId);
 
-        if (isDM && task.slackChannelId && task.slackThreadTs) {
-          // DM/assistant thread: use setStatus for typing indicator
-          const progressText = task.progress || "Processing your request...";
-          if (progressText !== sentProgress.get(task.id)) {
-            pendingSends.add(progressKey);
-            sentProgress.set(task.id, progressText);
-            lastSendTime.set(progressKey, now);
-            try {
-              await setAssistantStatus(task.slackChannelId, task.slackThreadTs, progressText);
-              console.log(`[Slack] Set assistant status for task ${task.id.slice(0, 8)}`);
-            } catch (error) {
-              sentProgress.delete(task.id);
-              lastSendTime.delete(progressKey);
-              console.error(`[Slack] Failed to set assistant status:`, error);
-            } finally {
-              pendingSends.delete(progressKey);
+        // DM tasks: post initial tree message if not yet tracked, and set assistant status in parallel
+        if (isDM && task.slackChannelId && task.slackThreadTs && !taskToTree.has(task.id)) {
+          pendingSends.add(progressKey);
+          lastSendTime.set(progressKey, now);
+          try {
+            // Post initial tree message and register it
+            const dmMessageTs = await postInitialDMTreeMessage(task);
+            if (dmMessageTs) {
+              registerTreeMessage(task.id, task.slackChannelId, task.slackThreadTs, dmMessageTs);
+              console.log(
+                `[Slack] DM task ${task.id.slice(0, 8)} registered in tree, will be updated by processTreeMessages()`,
+              );
             }
+            // Set assistant status in parallel for typing indicator UX
+            const progressText = task.progress || "Processing your request...";
+            await setAssistantStatus(task.slackChannelId, task.slackThreadTs, progressText);
+            sentProgress.set(task.id, progressText);
+            console.log(`[Slack] Set assistant status for DM task ${task.id.slice(0, 8)}`);
+          } catch (error) {
+            lastSendTime.delete(progressKey);
+            console.error(`[Slack] Failed to initialize DM tree message:`, error);
+          } finally {
+            pendingSends.delete(progressKey);
           }
           continue;
         }
