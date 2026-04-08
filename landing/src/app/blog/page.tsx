@@ -42,6 +42,16 @@ interface BlogPost {
 
 const posts: BlogPost[] = [
   {
+    slug: "deep-dive-git-worktree-concurrency",
+    title:
+      "Your Agent Swarm Has a Concurrency Bug: How Git Worktrees Prevent 5 Agents From Destroying Each Other's Code",
+    description:
+      "When scaling from 1 to 5 agents, git concurrency becomes your biggest enemy. Here's how we used git worktrees to eliminate race conditions and stop silent code regressions.",
+    date: "April 8, 2026",
+    readTime: "14 min read",
+    tags: ["git worktrees", "concurrency", "race conditions", "isolation", "multi-agent systems"],
+  },
+  {
     slug: "deep-dive-dag-workflow-engine-pause-resume",
     title:
       "Building a DAG Workflow Engine That Waits: Pause, Resume, and Convergence Gates",
