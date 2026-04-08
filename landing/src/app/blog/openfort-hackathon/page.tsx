@@ -15,26 +15,32 @@ import { BlogPostLayout } from "@/components/blog-post-layout";
 export const metadata: Metadata = {
   title: "Openfort Hackathon: Teaching Agents to Pay — Agent Swarm Blog",
   description:
-    "We shipped x402 payment capability into Agent Swarm — AI agents can now autonomously pay for API services using crypto. Built with Openfort managed wallets on Base mainnet.",
-  authors: [{ name: "Agent Swarm", url: "https://agent-swarm.dev" }],
+    "We added x402 HTTP payment support to Agent Swarm — AI agents now autonomously pay for API services with USDC on Base mainnet via Openfort managed wallets. No human approval needed.",
+  authors: [{ name: "Agent Swarm Team", url: "https://agent-swarm.dev" }],
   keywords: [
-    "agent-swarm",
+    "agent swarm",
     "AI agents",
-    "orchestration",
-    "x402",
+    "x402 protocol",
+    "HTTP 402",
     "crypto payments",
     "Openfort",
     "autonomous payments",
+    "Base mainnet",
+    "USDC",
+    "web3 AI agent",
+    "AI agent wallet",
     "AI automation",
   ],
   openGraph: {
     title: "Openfort Hackathon: Teaching Agents to Pay",
     description:
-      "We shipped x402 payment capability into Agent Swarm — AI agents can now autonomously pay for API services using crypto.",
+      "We added x402 HTTP payment support to Agent Swarm — AI agents now pay for API services with USDC on Base mainnet via Openfort managed wallets, no human approval needed.",
     url: "https://agent-swarm.dev/blog/openfort-hackathon",
     siteName: "Agent Swarm",
     type: "article",
     publishedTime: "2026-02-28T00:00:00Z",
+    section: "Agent Swarm",
+    tags: ["x402", "Openfort", "Base", "USDC", "hackathon", "crypto payments"],
     images: [
       {
         url: "https://agent-swarm.dev/og-image.png",
@@ -48,7 +54,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Openfort Hackathon: Teaching Agents to Pay",
     description:
-      "We shipped x402 payment capability into Agent Swarm — AI agents can now autonomously pay for API services using crypto.",
+      "We added x402 HTTP payment support to Agent Swarm — AI agents now pay for API services with USDC on Base mainnet via Openfort managed wallets, no human approval needed.",
     images: ["https://agent-swarm.dev/og-image.png"],
   },
   alternates: {
@@ -117,12 +123,12 @@ const jsonLd = {
   "@type": "BlogPosting",
   headline: "Openfort Hackathon: Teaching Agents to Pay",
   description:
-    "We shipped x402 payment capability into Agent Swarm — AI agents can now autonomously pay for API services using crypto. Built with Openfort managed wallets on Base mainnet.",
+    "We added x402 HTTP payment support to Agent Swarm — AI agents now autonomously pay for API services with USDC on Base mainnet via Openfort managed wallets.",
   datePublished: "2026-02-28T00:00:00Z",
   dateModified: "2026-02-28T00:00:00Z",
   author: {
     "@type": "Organization",
-    name: "Agent Swarm",
+    name: "Agent Swarm Team",
     url: "https://agent-swarm.dev",
   },
   publisher: {
@@ -139,6 +145,9 @@ const jsonLd = {
     "@id": "https://agent-swarm.dev/blog/openfort-hackathon",
   },
   image: "https://agent-swarm.dev/og-image.png",
+  articleSection: "Agent Swarm",
+  keywords: "agent swarm, AI agents, x402 protocol, HTTP 402, crypto payments, Openfort, autonomous payments, Base mainnet, USDC, web3 AI agent, AI agent wallet",
+  wordCount: 1600,
 };
 
 export default function OpenfortHackathonPost() {

@@ -15,26 +15,32 @@ import { BlogPostLayout } from "@/components/blog-post-layout";
 export const metadata: Metadata = {
   title: "Agent Swarm by the Numbers: 80 Days, 242 PRs, 6 Agents — Agent Swarm Blog",
   description:
-    "In 80 days, our swarm of 6 AI agents autonomously created 242 pull requests across 4 repositories, completed 7 projects, and built its own UI, marketing campaign, and CLI tools.",
-  authors: [{ name: "Agent Swarm", url: "https://agent-swarm.dev" }],
+    "In 80 days, 6 Claude Code AI agents autonomously shipped 242 pull requests across 4 repos — building their own UI, fixing bugs, and running marketing. Real metrics from an open-source multi-agent swarm.",
+  authors: [{ name: "Agent Swarm Team", url: "https://agent-swarm.dev" }],
   keywords: [
-    "agent-swarm",
+    "agent swarm",
     "AI agents",
-    "orchestration",
-    "autonomous agents",
+    "Claude Code",
     "multi-agent system",
+    "autonomous agents",
     "AI automation",
-    "software development metrics",
-    "pull requests",
+    "AI software development",
+    "automated pull requests",
+    "open source agent framework",
+    "agent swarm metrics",
+    "AI coding agents",
+    "multi-agent orchestration",
   ],
   openGraph: {
     title: "Agent Swarm by the Numbers: 80 Days, 242 PRs, 6 Agents",
     description:
-      "In 80 days, our swarm of 6 AI agents autonomously created 242 pull requests across 4 repositories.",
+      "6 Claude Code AI agents autonomously shipped 242 pull requests across 4 repos in 80 days — building their own UI, fixing bugs, and running a marketing campaign.",
     url: "https://agent-swarm.dev/blog/swarm-metrics",
     siteName: "Agent Swarm",
     type: "article",
     publishedTime: "2026-03-13T00:00:00Z",
+    section: "Agent Swarm",
+    tags: ["metrics", "AI agents", "Claude Code", "automation", "open source"],
     images: [
       {
         url: "https://agent-swarm.dev/og-image.png",
@@ -48,7 +54,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "Agent Swarm by the Numbers: 80 Days, 242 PRs, 6 Agents",
     description:
-      "In 80 days, our swarm of 6 AI agents autonomously created 242 pull requests across 4 repositories.",
+      "6 Claude Code AI agents autonomously shipped 242 pull requests across 4 repos in 80 days — building their own UI, fixing bugs, and running a marketing campaign.",
     images: ["https://agent-swarm.dev/og-image.png"],
   },
   alternates: {
@@ -93,12 +99,12 @@ const jsonLd = {
   "@type": "BlogPosting",
   headline: "Agent Swarm by the Numbers: 80 Days, 242 PRs, 6 Agents",
   description:
-    "In 80 days, our swarm of 6 AI agents autonomously created 242 pull requests across 4 repositories, completed 7 projects, and built its own UI, marketing campaign, and CLI tools.",
+    "In 80 days, 6 Claude Code AI agents autonomously shipped 242 pull requests across 4 repos — building their own UI, fixing bugs, and running a marketing campaign.",
   datePublished: "2026-03-13T00:00:00Z",
   dateModified: "2026-03-13T00:00:00Z",
   author: {
     "@type": "Organization",
-    name: "Agent Swarm",
+    name: "Agent Swarm Team",
     url: "https://agent-swarm.dev",
   },
   publisher: {
@@ -115,6 +121,9 @@ const jsonLd = {
     "@id": "https://agent-swarm.dev/blog/swarm-metrics",
   },
   image: "https://agent-swarm.dev/og-image.png",
+  articleSection: "Agent Swarm",
+  keywords: "agent swarm, AI agents, Claude Code, multi-agent system, autonomous agents, AI automation, automated pull requests, open source agent framework, AI coding agents",
+  wordCount: 1200,
 };
 
 export default function SwarmMetricsPost() {
