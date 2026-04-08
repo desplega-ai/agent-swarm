@@ -5,7 +5,7 @@
  * Scans content/docs/(documentation)/releases/ for MDX files,
  * orders them by filename (YYYY-MM-DD) descending, and writes meta.json.
  */
-import { readdirSync, writeFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,7 +27,7 @@ const meta = {
   pages: ["index", ...mdxFiles],
 };
 
-writeFileSync(
+await Bun.write(
   resolve(releasesDir, "meta.json"),
   `${JSON.stringify(meta, null, 2)}\n`,
 );
