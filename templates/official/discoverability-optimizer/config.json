@@ -1,0 +1,23 @@
+{
+  "name": "discoverability-optimizer",
+  "displayName": "Discoverability Optimizer",
+  "description": "Optimizes web pages for discoverability through SEO, AEO, schema markup, and metadata — structural changes only, no content creation",
+  "version": "1.0.0",
+  "category": "official",
+  "icon": "globe",
+  "author": "Agent Swarm <contact@agent-swarm.dev>",
+  "createdAt": "2026-04-08",
+  "lastUpdatedAt": "2026-04-08",
+  "agentDefaults": {
+    "role": "worker",
+    "capabilities": ["seo", "aeo", "schema-markup", "metadata-optimization", "web-analysis", "discoverability"],
+    "maxTasks": 2
+  },
+  "files": {
+    "claudeMd": "CLAUDE.md",
+    "soulMd": "SOUL.md",
+    "identityMd": "IDENTITY.md",
+    "toolsMd": "TOOLS.md",
+    "setupScript": "start-up.sh"
+  }
+}
