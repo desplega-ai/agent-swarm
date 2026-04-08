@@ -11,13 +11,13 @@ import {
 } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
 import { workflowEventBus } from "../workflows/event-bus";
-import { buildAssignmentSummaryBlocks } from "./blocks";
+import { buildTreeBlocks, type TreeNode } from "./blocks";
 import type { SlackFile } from "./files";
 import { extractTaskFromMessage, routeMessage } from "./router";
 // Side-effect import: registers all Slack event templates in the in-memory registry
 import "./templates";
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
-import { registerTaskMessage } from "./watcher";
+import { registerTreeMessage } from "./watcher";
 
 // User filtering configuration from environment variables
 const allowedEmailDomains = (process.env.SLACK_ALLOWED_EMAIL_DOMAINS || "")
@@ -591,9 +591,40 @@ export function registerMessageHandler(app: App): void {
       }
     }
 
-    // Send consolidated summary with Block Kit
+    // Send consolidated summary as initial tree with Block Kit
     const totalResults = results.assigned.length + results.queued.length + results.failed.length;
     if (totalResults > 0) {
+      // Build initial tree nodes from assignment results
+      const initialNodes: TreeNode[] = results.assigned.map(({ agentName, taskId }) => ({
+        taskId,
+        agentName,
+        status: "in_progress" as const,
+        children: [],
+      }));
+
+      // Add queued tasks
+      for (const q of results.queued) {
+        initialNodes.push({
+          taskId: q.taskId,
+          agentName: q.agentName,
+          status: "pending" as const,
+          children: [],
+        });
+      }
+
+      const blocks = buildTreeBlocks(initialNodes);
+
+      // Append failed assignment lines as context below the tree
+      if (results.failed.length > 0) {
+        const failedLines = results.failed
+          .map((f) => `⚠️ Could not assign to: *${f.agentName}* — ${f.reason}`)
+          .join("\n");
+        blocks.push({
+          type: "context",
+          elements: [{ type: "mrkdwn", text: failedLines }],
+        });
+      }
+
       // Build plain-text fallback
       const parts: string[] = [];
       if (results.assigned.length > 0) {
@@ -609,17 +640,25 @@ export function registerMessageHandler(app: App): void {
         parts.push(`Could not assign to: ${names}`);
       }
 
+      console.log(
+        `[Slack] Posting initial tree message with ${initialNodes.length} node(s)${results.failed.length > 0 ? ` and ${results.failed.length} failed assignment(s)` : ""}`,
+      );
+
       const resp = await say({
         text: parts.join(". "),
-        blocks: buildAssignmentSummaryBlocks(results),
+        blocks,
         thread_ts: msg.thread_ts || msg.ts,
       });
 
-      // Register the assignment message so the watcher can update it in-place
-      // (assignment → progress → completion all in one evolving message)
+      // Register the tree message so the watcher can update it in-place
+      // (assignment → progress → completion all in one evolving tree message)
       if (resp?.ts) {
         for (const { taskId } of results.assigned) {
-          registerTaskMessage(taskId, msg.channel, threadTs, resp.ts);
+          registerTreeMessage(taskId, msg.channel, threadTs, resp.ts);
+        }
+        // Also register queued tasks so they appear in the tree when they start
+        for (const { taskId } of results.queued) {
+          registerTreeMessage(taskId, msg.channel, threadTs, resp.ts);
         }
       }
     }

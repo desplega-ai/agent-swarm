@@ -5,7 +5,7 @@ status: in-progress
 autonomy: critical
 research: thoughts/taras/brainstorms/2026-04-08-slack-message-deduplication.md
 last_updated: 2026-04-09T00:00:00Z
-last_updated_by: claude (phase 6)
+last_updated_by: claude (phase 7)
 ---
 
 # Plan: Slack Message Deduplication + Tree-Based Status Messages
@@ -707,11 +707,11 @@ const blocks = buildTreeBlocks(initialNodes);
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] All tests pass: `bun test`
-- [ ] Handler tests: `bun test src/slack/handlers.test.ts`
-- [ ] Block tests: `bun test src/tests/slack-blocks.test.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] All tests pass: `bun test`
+- [x] Handler tests: `bun test src/slack/handlers.test.ts`
+- [x] Block tests: `bun test src/tests/slack-blocks.test.ts`
 
 #### Manual Verification:
 - [ ] Send a Slack message. Verify the INITIAL response is already a tree (not flat text).
