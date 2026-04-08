@@ -146,6 +146,20 @@ export function formatDuration(start: Date, end: Date): string {
   return `${hours}h ${remainingMinutes}m`;
 }
 
+// --- Tree types ---
+
+export interface TreeNode {
+  taskId: string;
+  agentName: string;
+  status: "pending" | "in_progress" | "completed" | "failed" | "cancelled";
+  progress?: string;
+  duration?: string;
+  slackReplySent?: boolean;
+  output?: string; // Only used when !slackReplySent on completion
+  failureReason?: string; // Always shown on failure
+  children: TreeNode[];
+}
+
 // --- High-level block builders ---
 
 /**
@@ -253,4 +267,132 @@ export function buildBufferFlushBlocks(opts: {
     : `${opts.messageCount} follow-up message(s) batched into task`;
 
   return [contextBlock(`📡 _${text}_ (${taskLink})`)];
+}
+
+// --- Tree rendering ---
+
+const STATUS_ICON: Record<TreeNode["status"], string> = {
+  pending: "📡",
+  in_progress: "⏳",
+  completed: "✅",
+  failed: "❌",
+  cancelled: "🚫",
+};
+
+const MAX_VISIBLE_CHILDREN = 8;
+
+/**
+ * Render a single node line: icon + bold name + task link + optional duration.
+ */
+function renderNodeLine(node: TreeNode): string {
+  const icon = STATUS_ICON[node.status];
+  const taskLink = getTaskLink(node.taskId);
+  let line = `${icon} *${node.agentName}* (${taskLink})`;
+  if (node.duration) line += ` · ${node.duration}`;
+  return line;
+}
+
+/**
+ * Render detail lines for a child node (progress, output, failure reason).
+ * Returns an array of indented lines to appear below the child's main line.
+ */
+function renderChildDetail(node: TreeNode, indent: string): string[] {
+  const lines: string[] = [];
+
+  if (node.status === "failed" && node.failureReason) {
+    lines.push(`${indent}Error: ${node.failureReason}`);
+  }
+
+  if (node.status === "in_progress" && node.progress) {
+    lines.push(`${indent}${node.progress}`);
+  }
+
+  if (node.status === "completed" && !node.slackReplySent && node.output) {
+    lines.push(`${indent}${node.output}`);
+  }
+
+  return lines;
+}
+
+/**
+ * Render a single root node and its children as a mrkdwn tree string.
+ */
+function renderTree(root: TreeNode): string {
+  const lines: string[] = [];
+
+  // Root line
+  lines.push(renderNodeLine(root));
+
+  // Root-level detail (progress for in-progress root with no children)
+  if (root.children.length === 0) {
+    if (root.status === "in_progress" && root.progress) {
+      lines.push(`    ${root.progress}`);
+    }
+    if (root.status === "failed" && root.failureReason) {
+      lines.push(`    Error: ${root.failureReason}`);
+    }
+    if (root.status === "completed" && !root.slackReplySent && root.output) {
+      lines.push(`    ${root.output}`);
+    }
+    return lines.join("\n");
+  }
+
+  const visibleChildren = root.children.slice(0, MAX_VISIBLE_CHILDREN);
+  const hiddenCount = root.children.length - visibleChildren.length;
+
+  for (let i = 0; i < visibleChildren.length; i++) {
+    const child = visibleChildren[i] as TreeNode;
+    const isLast = i === visibleChildren.length - 1 && hiddenCount === 0;
+    const prefix = isLast ? "└ " : "├ ";
+    const continuationPrefix = isLast ? "    " : "│   ";
+
+    lines.push(`${prefix}${renderNodeLine(child)}`);
+
+    for (const detail of renderChildDetail(child, continuationPrefix)) {
+      lines.push(detail);
+    }
+  }
+
+  if (hiddenCount > 0) {
+    lines.push(`└ _and ${hiddenCount} more..._`);
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Check if any node in the tree is still active (pending or in_progress).
+ */
+function isTreeActive(node: TreeNode): boolean {
+  if (node.status === "pending" || node.status === "in_progress") return true;
+  return node.children.some(isTreeActive);
+}
+
+/**
+ * Build Slack blocks for a tree-based status message.
+ *
+ * Renders one or more root nodes as mrkdwn trees with status icons,
+ * agent names, task links, durations, progress text, and error details.
+ *
+ * For in-progress trees, includes a cancel button per active root.
+ *
+ * @param roots - Array of root TreeNode objects (one per assigned task in a round)
+ * @returns SlackBlock[] suitable for chat.postMessage / chat.update
+ */
+export function buildTreeBlocks(roots: TreeNode[]): SlackBlock[] {
+  console.log(
+    `[Slack] Building tree blocks for ${roots.length} root(s): ${roots.map((r) => r.taskId.slice(0, 8)).join(", ")}`,
+  );
+
+  const treeTexts = roots.map(renderTree);
+  const blocks: SlackBlock[] = [sectionBlock(treeTexts.join("\n\n"))];
+
+  // Add cancel buttons for active roots
+  for (const root of roots) {
+    if (isTreeActive(root)) {
+      blocks.push(cancelActionBlock(root.taskId));
+    }
+  }
+
+  return blocks;
 }

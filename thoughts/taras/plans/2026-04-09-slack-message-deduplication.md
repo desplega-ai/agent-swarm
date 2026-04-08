@@ -5,7 +5,7 @@ status: in-progress
 autonomy: critical
 research: thoughts/taras/brainstorms/2026-04-08-slack-message-deduplication.md
 last_updated: 2026-04-09T00:00:00Z
-last_updated_by: claude (phase 2)
+last_updated_by: claude (phase 3)
 ---
 
 # Plan: Slack Message Deduplication + Tree-Based Status Messages
@@ -371,9 +371,9 @@ The function returns `SlackBlock[]` with a single `sectionBlock` containing the 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Blocks tests pass: `bun test src/tests/slack-blocks.test.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Blocks tests pass: `bun test src/tests/slack-blocks.test.ts`
 
 #### Manual Verification:
 - [ ] Review the rendered mrkdwn output in tests — verify tree chars (├ └ │) look correct
