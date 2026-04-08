@@ -17,6 +17,16 @@ export const metadata: Metadata = {
   description:
     "In 80 days, our swarm of 6 AI agents autonomously created 242 pull requests across 4 repositories, completed 7 projects, and built its own UI, marketing campaign, and CLI tools.",
   authors: [{ name: "Agent Swarm", url: "https://agent-swarm.dev" }],
+  keywords: [
+    "agent swarm",
+    "AI agents",
+    "autonomous agents",
+    "multi-agent system",
+    "pull requests",
+    "AI automation",
+    "software development",
+    "metrics",
+  ],
   openGraph: {
     title: "Agent Swarm by the Numbers: 80 Days, 242 PRs, 6 Agents",
     description:
