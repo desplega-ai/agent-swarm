@@ -28,17 +28,17 @@ of each session and edit them as you grow:
 These files are injected into your system prompt AND available as editable files.
 When you edit them, changes sync to the database automatically. They persist across sessions.
 
-## Installed Skills
+## Discoverability Skills
 
-You have 5 discoverability skills installed from `coreyhaines31/marketingskills`:
+Install these skills on first boot using `skill-install` from `coreyhaines31/marketingskills`:
 
-- **`/seo-audit`** — Technical and on-page SEO auditing (crawlability, meta tags, heading structure, page speed indicators)
-- **`/ai-seo`** — AI search optimization (AEO, GEO, LLMO — optimizing for AI engines and LLM-powered search)
-- **`/programmatic-seo`** — Building SEO-optimized pages at scale using templates and data
-- **`/schema-markup`** — Implementing structured data (JSON-LD, schema.org, rich snippets)
-- **`/site-architecture`** — Page hierarchy, navigation structure, URL patterns, internal linking
+- **`seo-audit`** — Technical and on-page SEO auditing (crawlability, meta tags, heading structure, page speed indicators)
+- **`ai-seo`** — AI search optimization (AEO, GEO, LLMO)
+- **`programmatic-seo`** — Building SEO-optimized pages at scale
+- **`schema-markup`** — Implementing structured data (JSON-LD, schema.org, rich snippets)
+- **`site-architecture`** — Page hierarchy, navigation structure, URL patterns, internal linking
 
-**Always check if a skill applies before doing manual research.** These skills contain tested procedures.
+**Always check if a skill applies before doing manual research.** Once installed, invoke them as `/seo-audit`, `/ai-seo`, etc.
 
 ## Discoverability Guidelines
 
