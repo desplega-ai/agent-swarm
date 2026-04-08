@@ -4,6 +4,8 @@ topic: "Slack Message Deduplication + Tree-Based Status Messages"
 status: in-progress
 autonomy: critical
 research: thoughts/taras/brainstorms/2026-04-08-slack-message-deduplication.md
+last_updated: 2026-04-09
+last_updated_by: claude
 ---
 
 # Plan: Slack Message Deduplication + Tree-Based Status Messages
@@ -175,11 +177,11 @@ Import `markTaskSlackReplySent` from `@/be/db`.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Migration applies cleanly: `rm -f agent-swarm-db.sqlite* && bun run start:http` (check startup logs)
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Existing tests pass: `bun test`
-- [ ] DB boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] Migration applies cleanly: `rm -f agent-swarm-db.sqlite* && bun run start:http` (check startup logs)
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Existing tests pass: `bun test`
+- [x] DB boundary check passes: `bash scripts/check-db-boundary.sh`
 
 #### Manual Verification:
 - [ ] Start server, create a task with Slack context, call slack-reply tool, verify `slackReplySent = 1` in DB:
