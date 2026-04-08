@@ -17,6 +17,16 @@ export const metadata: Metadata = {
   description:
     "We shipped x402 payment capability into Agent Swarm — AI agents can now autonomously pay for API services using crypto. Built with Openfort managed wallets on Base mainnet.",
   authors: [{ name: "Agent Swarm", url: "https://agent-swarm.dev" }],
+  keywords: [
+    "agent swarm",
+    "AI agents",
+    "x402",
+    "crypto payments",
+    "Openfort",
+    "autonomous payments",
+    "AI automation",
+    "Base mainnet",
+  ],
   openGraph: {
     title: "Openfort Hackathon: Teaching Agents to Pay",
     description:

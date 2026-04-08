@@ -19,6 +19,16 @@ export const metadata: Metadata = {
   description:
     "How we built a task delegation system that routes work to the right AI agent automatically. Task pools, dependency graphs, offer/accept patterns, and the lessons from 3,000+ completed tasks.",
   authors: [{ name: "Agent Swarm", url: "https://agent-swarm.dev" }],
+  keywords: [
+    "agent swarm",
+    "task delegation",
+    "AI orchestration",
+    "multi-agent system",
+    "task pools",
+    "dependency graphs",
+    "distributed AI",
+    "autonomous agents",
+  ],
   openGraph: {
     title: "The Architecture Behind Task Delegation: Pools, Routing, and Dependencies",
     description:
