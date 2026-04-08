@@ -37,6 +37,7 @@ export interface IssueEvent extends GitHubWebhookEvent {
 export interface CommentEvent extends GitHubWebhookEvent {
   comment: {
     id: number;
+    node_id?: string;
     body: string;
     html_url: string;
     user: { login: string };
@@ -49,6 +50,7 @@ export interface PullRequestReviewEvent extends GitHubWebhookEvent {
   action: "submitted" | "edited" | "dismissed";
   review: {
     id: number;
+    node_id?: string;
     body: string | null;
     state: "approved" | "changes_requested" | "commented" | "dismissed";
     html_url: string;
