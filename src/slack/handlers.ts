@@ -367,6 +367,8 @@ export function registerMessageHandler(app: App): void {
 
     // ADDITIVE_SLACK: Check for !now command in threads
     const additiveSlack = process.env.ADDITIVE_SLACK === "true";
+    const requireMentionForThreadFollowup =
+      process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION === "true";
     if (additiveSlack && msg.thread_ts) {
       const stripped = effectiveText.replace(/<@[A-Z0-9]+>/g, "").trim();
       if (stripped.startsWith("!now")) {
@@ -395,7 +397,7 @@ export function registerMessageHandler(app: App): void {
     }
 
     // ADDITIVE_SLACK: Buffer non-mention thread messages
-    if (additiveSlack && !botMentioned && msg.thread_ts) {
+    if (additiveSlack && !botMentioned && msg.thread_ts && !requireMentionForThreadFollowup) {
       // Check if this thread has any swarm activity (existing tasks)
       const hasSwarmActivity = getAgentWorkingOnThread(msg.channel, msg.thread_ts) !== null;
 
