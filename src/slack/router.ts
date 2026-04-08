@@ -1,9 +1,6 @@
 import { getAgentById, getAgentWorkingOnThread, getAllAgents } from "../be/db";
 import type { AgentMatch } from "./types";
 
-const requireMentionForThreadFollowup =
-  process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION === "true";
-
 export interface ThreadContext {
   channelId: string;
   threadTs: string;
@@ -24,6 +21,8 @@ export function routeMessage(
   threadContext?: ThreadContext,
 ): AgentMatch[] {
   const matches: AgentMatch[] = [];
+  const requireMentionForThreadFollowup =
+    process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION === "true";
   const agents = getAllAgents().filter((a) => a.status !== "offline");
 
   // Check for explicit swarm#<id> syntax
