@@ -1,5 +1,13 @@
-import { getCompletedSlackTasks, getInProgressSlackTasks } from "../be/db";
+import {
+  getAgentById,
+  getChildTasks,
+  getCompletedSlackTasks,
+  getInProgressSlackTasks,
+  getTaskById,
+} from "../be/db";
 import { getSlackApp } from "./app";
+import type { TreeNode } from "./blocks";
+import { formatDuration } from "./blocks";
 import {
   sendProgressUpdate,
   sendTaskResponse,
@@ -23,21 +31,133 @@ const pendingSends = new Set<string>();
 const lastSendTime = new Map<string, number>();
 const MIN_SEND_INTERVAL = 1000; // Don't send for same task within 1 second
 
-// Track task message timestamps for chat.update (taskId -> message info)
-// This is THE message that evolves: assignment → progress → completion
+// --- Tree-aware tracking (Phase 4) ---
+
+// Per-round tree state (one tree message per user interaction round)
+interface TreeMessageState {
+  channelId: string;
+  threadTs: string;
+  messageTs: string;
+  rootTaskIds: Set<string>; // Tasks directly assigned from this round
+}
+
+// messageTs → tree state
+const treeMessages = new Map<string, TreeMessageState>();
+
+// taskId → messageTs (reverse lookup — includes both root and discovered children)
+const taskToTree = new Map<string, string>();
+
+// Legacy flat map kept for backward compatibility during transition.
+// The watcher's flat processing still uses this until Phase 5 rewrites the polling loop.
 const taskMessages = new Map<string, { channelId: string; threadTs: string; messageTs: string }>();
 
 /**
- * Register the initial message ts for a task (called by handlers.ts after posting assignment).
- * This allows the watcher to update the same message through the task lifecycle.
+ * Register a task in a tree message (called by handlers.ts after posting assignment).
+ * Creates or extends a tree for the given Slack message, and also populates the
+ * legacy taskMessages map so that the existing flat watcher processing still works.
  */
-export function registerTaskMessage(
+export function registerTreeMessage(
   taskId: string,
   channelId: string,
   threadTs: string,
   messageTs: string,
 ): void {
+  let tree = treeMessages.get(messageTs);
+  if (!tree) {
+    tree = { channelId, threadTs, messageTs, rootTaskIds: new Set() };
+    treeMessages.set(messageTs, tree);
+  }
+  tree.rootTaskIds.add(taskId);
+  taskToTree.set(taskId, messageTs);
+
+  // Also register in legacy flat map so existing watcher processing still works
   taskMessages.set(taskId, { channelId, threadTs, messageTs });
+
+  console.log(`[Slack] Registered task ${taskId.slice(0, 8)} in tree message ${messageTs}`);
+}
+
+// Backward-compatible alias — handlers.ts imports registerTaskMessage
+export const registerTaskMessage = registerTreeMessage;
+
+/**
+ * Build TreeNode[] for a tree's root tasks and their children.
+ * Used by the tree rendering loop (Phase 5) to construct the data for buildTreeBlocks().
+ */
+export function buildTreeNodes(tree: TreeMessageState): TreeNode[] {
+  const nodes: TreeNode[] = [];
+
+  for (const rootTaskId of tree.rootTaskIds) {
+    const task = getTaskById(rootTaskId);
+    if (!task) {
+      console.log(`[Slack] Tree root task ${rootTaskId.slice(0, 8)} not found, skipping`);
+      continue;
+    }
+
+    const agent = task.agentId ? getAgentById(task.agentId) : null;
+    const agentName = agent?.name ?? "Unknown";
+
+    // Compute duration for completed/failed tasks
+    let duration: string | undefined;
+    if (task.finishedAt && task.createdAt) {
+      duration = formatDuration(new Date(task.createdAt), new Date(task.finishedAt));
+    }
+
+    // Discover children
+    const childTasks = getChildTasks(rootTaskId);
+    const childNodes: TreeNode[] = [];
+
+    for (const child of childTasks) {
+      // Register discovered children in taskToTree so they're skipped in flat processing
+      if (!taskToTree.has(child.id)) {
+        taskToTree.set(child.id, tree.messageTs);
+        console.log(
+          `[Slack] Discovered child task ${child.id.slice(0, 8)} under root ${rootTaskId.slice(0, 8)}`,
+        );
+      }
+
+      const childAgent = child.agentId ? getAgentById(child.agentId) : null;
+      const childAgentName = childAgent?.name ?? "Unknown";
+
+      let childDuration: string | undefined;
+      if (child.finishedAt && child.createdAt) {
+        childDuration = formatDuration(new Date(child.createdAt), new Date(child.finishedAt));
+      }
+
+      childNodes.push({
+        taskId: child.id,
+        agentName: childAgentName,
+        status: child.status as TreeNode["status"],
+        progress: child.progress ?? undefined,
+        duration: childDuration,
+        slackReplySent: child.slackReplySent,
+        output: child.output ?? undefined,
+        failureReason: child.failureReason ?? undefined,
+        children: [],
+      });
+    }
+
+    nodes.push({
+      taskId: task.id,
+      agentName,
+      status: task.status as TreeNode["status"],
+      progress: task.progress ?? undefined,
+      duration,
+      slackReplySent: task.slackReplySent,
+      output: task.output ?? undefined,
+      failureReason: task.failureReason ?? undefined,
+      children: childNodes,
+    });
+  }
+
+  return nodes;
+}
+
+// Expose tree data structures for testing
+export function _getTreeMessages(): Map<string, TreeMessageState> {
+  return treeMessages;
+}
+export function _getTaskToTree(): Map<string, string> {
+  return taskToTree;
 }
 
 /**

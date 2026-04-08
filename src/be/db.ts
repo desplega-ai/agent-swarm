@@ -974,6 +974,15 @@ export function markTaskSlackReplySent(taskId: string): void {
   getDb().run(`UPDATE agent_tasks SET slackReplySent = 1 WHERE id = ?`, [taskId]);
 }
 
+export function getChildTasks(parentTaskId: string): AgentTask[] {
+  return getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks WHERE parentTaskId = ? ORDER BY createdAt ASC`,
+    )
+    .all(parentTaskId)
+    .map(rowToAgentTask);
+}
+
 export function updateTaskClaudeSessionId(
   taskId: string,
   claudeSessionId: string,
