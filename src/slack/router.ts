@@ -1,6 +1,9 @@
 import { getAgentById, getAgentWorkingOnThread, getAllAgents } from "../be/db";
 import type { AgentMatch } from "./types";
 
+const requireMentionForThreadFollowup =
+  process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION === "true";
+
 export interface ThreadContext {
   channelId: string;
   threadTs: string;
@@ -45,7 +48,7 @@ export function routeMessage(
   }
 
   // Thread follow-up — route to agent already working in this thread
-  if (matches.length === 0 && threadContext) {
+  if (matches.length === 0 && threadContext && (!requireMentionForThreadFollowup || botMentioned)) {
     const workingAgent = getAgentWorkingOnThread(threadContext.channelId, threadContext.threadTs);
     if (workingAgent && workingAgent.status !== "offline") {
       console.log(
