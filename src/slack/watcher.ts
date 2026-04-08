@@ -7,12 +7,13 @@ import {
 } from "../be/db";
 import { getSlackApp } from "./app";
 import type { TreeNode } from "./blocks";
-import { formatDuration } from "./blocks";
+import { buildTreeBlocks, formatDuration } from "./blocks";
 import {
   sendProgressUpdate,
   sendTaskResponse,
   updateProgressInPlace,
   updateToFinal,
+  updateTreeMessage,
 } from "./responses";
 
 let watcherInterval: ReturnType<typeof setInterval> | null = null;
@@ -47,8 +48,8 @@ const treeMessages = new Map<string, TreeMessageState>();
 // taskId → messageTs (reverse lookup — includes both root and discovered children)
 const taskToTree = new Map<string, string>();
 
-// Legacy flat map kept for backward compatibility during transition.
-// The watcher's flat processing still uses this until Phase 5 rewrites the polling loop.
+// Legacy flat map kept for backward compatibility.
+// Used by flat processing for tasks NOT tracked in a tree (e.g. non-tree tasks, server restarts).
 const taskMessages = new Map<string, { channelId: string; threadTs: string; messageTs: string }>();
 
 /**
@@ -152,12 +153,144 @@ export function buildTreeNodes(tree: TreeMessageState): TreeNode[] {
   return nodes;
 }
 
+// --- Tree rendering state ---
+
+// messageTs → last serialized tree output (for no-op detection)
+const lastRenderedTree = new Map<string, string>();
+
+// messageTs → last update timestamp (for rate limiting)
+const treeLastUpdateTime = new Map<string, number>();
+
 // Expose tree data structures for testing
 export function _getTreeMessages(): Map<string, TreeMessageState> {
   return treeMessages;
 }
 export function _getTaskToTree(): Map<string, string> {
   return taskToTree;
+}
+export function _getLastRenderedTree(): Map<string, string> {
+  return lastRenderedTree;
+}
+export function _getTreeLastUpdateTime(): Map<string, number> {
+  return treeLastUpdateTime;
+}
+
+/**
+ * Check if ALL tasks in a tree are terminal (completed/failed/cancelled).
+ */
+function isTreeFullyTerminal(nodes: TreeNode[]): boolean {
+  for (const node of nodes) {
+    if (node.status === "pending" || node.status === "in_progress") return false;
+    for (const child of node.children) {
+      if (child.status === "pending" || child.status === "in_progress") return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Clean up tracking for a completed tree.
+ * Removes tree from treeMessages, removes all task IDs from taskToTree,
+ * adds root task IDs to notifiedCompletions, and cleans up rendering state.
+ */
+function cleanupCompletedTree(messageTs: string, _tree: TreeMessageState, nodes: TreeNode[]): void {
+  const now = Date.now();
+
+  // Collect all task IDs in this tree (roots + children)
+  const allTaskIds: string[] = [];
+  for (const node of nodes) {
+    allTaskIds.push(node.taskId);
+    for (const child of node.children) {
+      allTaskIds.push(child.taskId);
+    }
+  }
+
+  // Add all to notifiedCompletions so flat processing doesn't re-process
+  for (const taskId of allTaskIds) {
+    notifiedCompletions.set(taskId, now);
+  }
+
+  // Remove from tree tracking
+  for (const taskId of allTaskIds) {
+    taskToTree.delete(taskId);
+    taskMessages.delete(taskId);
+    sentProgress.delete(taskId);
+  }
+
+  treeMessages.delete(messageTs);
+  lastRenderedTree.delete(messageTs);
+  treeLastUpdateTime.delete(messageTs);
+
+  console.log(`[Slack] Tree ${messageTs} fully terminal, cleaned up ${allTaskIds.length} task(s)`);
+}
+
+/**
+ * Process all active tree messages: re-render and update via chat.update.
+ * Called from the main polling interval.
+ */
+export async function processTreeMessages(): Promise<void> {
+  const now = Date.now();
+
+  for (const [messageTs, tree] of treeMessages) {
+    // Rate limit: don't update the same tree more than once per MIN_SEND_INTERVAL
+    const lastUpdate = treeLastUpdateTime.get(messageTs);
+    if (lastUpdate && now - lastUpdate < MIN_SEND_INTERVAL) continue;
+
+    let nodes: TreeNode[];
+    try {
+      nodes = buildTreeNodes(tree);
+    } catch (error) {
+      console.error(`[Slack] Tree render failed for ${messageTs}, skipping:`, error);
+      continue;
+    }
+
+    if (nodes.length === 0) continue;
+
+    // Check if tree is fully terminal — do one final render then clean up
+    const fullyTerminal = isTreeFullyTerminal(nodes);
+
+    // Build blocks
+    let blocks: unknown[];
+    try {
+      blocks = buildTreeBlocks(nodes);
+    } catch (error) {
+      console.error(`[Slack] Tree render failed, falling back to flat message:`, error);
+      continue;
+    }
+
+    // Serialize for no-op detection
+    const serialized = JSON.stringify(blocks);
+    const lastSerialized = lastRenderedTree.get(messageTs);
+    if (serialized === lastSerialized) {
+      // No changes — skip update
+      if (fullyTerminal) {
+        // Even though nothing changed visually, clean up if terminal
+        cleanupCompletedTree(messageTs, tree, nodes);
+      }
+      continue;
+    }
+
+    // Build fallback text
+    const rootNames = nodes.map((n) => `${n.agentName}`).join(", ");
+    const fallbackText = fullyTerminal
+      ? `Tasks completed: ${rootNames}`
+      : `Tasks in progress: ${rootNames}`;
+
+    // Update the Slack message
+    const success = await updateTreeMessage(tree.channelId, messageTs, blocks, fallbackText);
+    if (success) {
+      lastRenderedTree.set(messageTs, serialized);
+      treeLastUpdateTime.set(messageTs, now);
+      console.log(
+        `[Slack] Updated tree message ${messageTs} (${nodes.length} root(s), terminal=${fullyTerminal})`,
+      );
+    }
+
+    // Clean up fully terminal trees after final render
+    if (fullyTerminal && success) {
+      cleanupCompletedTree(messageTs, tree, nodes);
+    }
+  }
 }
 
 /**
@@ -208,10 +341,15 @@ export function startTaskWatcher(intervalMs = 3000): void {
     isProcessing = true;
 
     try {
+      // Process tree messages first (renders all tracked trees via chat.update)
+      await processTreeMessages();
+
       // Check for progress updates on in-progress tasks
       const inProgressTasks = getInProgressSlackTasks();
       const now = Date.now();
       for (const task of inProgressTasks) {
+        // Skip tasks tracked in a tree — they're rendered by processTreeMessages()
+        if (taskToTree.has(task.id)) continue;
         const progressKey = `progress:${task.id}`;
 
         // Skip if already sending or sent recently (throttle)
@@ -303,6 +441,13 @@ export function startTaskWatcher(intervalMs = 3000): void {
       // Check for completed tasks
       const completedTasks = getCompletedSlackTasks();
       for (const task of completedTasks) {
+        // Skip tasks tracked in a tree — they're rendered by processTreeMessages()
+        // But mark as notified to prevent re-processing if tree is cleaned up
+        if (taskToTree.has(task.id)) {
+          notifiedCompletions.set(task.id, now);
+          continue;
+        }
+
         const completionKey = `completion:${task.id}`;
 
         // Skip if already notified or currently sending or sent recently

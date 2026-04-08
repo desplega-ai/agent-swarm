@@ -214,6 +214,34 @@ export async function updateToFinal(task: AgentTask, messageTs: string): Promise
   }
 }
 
+/**
+ * Update a tree message directly with pre-built blocks via chat.update.
+ * Used by the watcher's tree rendering loop (Phase 5).
+ */
+export async function updateTreeMessage(
+  channelId: string,
+  messageTs: string,
+  blocks: unknown[],
+  fallbackText: string,
+): Promise<boolean> {
+  const app = getSlackApp();
+  if (!app) return false;
+
+  try {
+    await app.client.chat.update({
+      channel: channelId,
+      ts: messageTs,
+      text: fallbackText,
+      // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
+      blocks: blocks as any,
+    });
+    return true;
+  } catch (error) {
+    console.error(`[Slack] Failed to update tree message:`, error);
+    return false;
+  }
+}
+
 async function sendWithPersona(
   client: WebClient,
   options: {

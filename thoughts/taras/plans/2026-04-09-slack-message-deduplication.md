@@ -5,7 +5,7 @@ status: in-progress
 autonomy: critical
 research: thoughts/taras/brainstorms/2026-04-08-slack-message-deduplication.md
 last_updated: 2026-04-09T00:00:00Z
-last_updated_by: claude (phase 4)
+last_updated_by: claude (phase 5)
 ---
 
 # Plan: Slack Message Deduplication + Tree-Based Status Messages
@@ -576,10 +576,10 @@ export async function updateTreeMessage(
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] All tests pass: `bun test`
-- [ ] Watcher tests: `bun test src/tests/slack-watcher.test.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] All tests pass: `bun test`
+- [x] Watcher tests: `bun test src/tests/slack-watcher.test.ts`
 
 #### Manual Verification:
 - [ ] Start server + Docker worker. Send a Slack message that triggers lead delegation to a worker.
