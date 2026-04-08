@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { addEyesReactionOnTaskStart } from "../github/task-reactions";
 import { configureDbResolver } from "../prompts/resolver";
 import type {
   ActiveSession,
@@ -716,6 +717,8 @@ type AgentTaskRow = {
   vcsCommentId: number | null;
   vcsAuthor: string | null;
   vcsUrl: string | null;
+  vcsInstallationId: number | null;
+  vcsNodeId: string | null;
   agentmailInboxId: string | null;
   agentmailMessageId: string | null;
   agentmailThreadId: string | null;
@@ -772,6 +775,8 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     vcsCommentId: row.vcsCommentId ?? undefined,
     vcsAuthor: row.vcsAuthor ?? undefined,
     vcsUrl: row.vcsUrl ?? undefined,
+    vcsInstallationId: row.vcsInstallationId ?? undefined,
+    vcsNodeId: row.vcsNodeId ?? undefined,
     agentmailInboxId: row.agentmailInboxId ?? undefined,
     agentmailMessageId: row.agentmailMessageId ?? undefined,
     agentmailThreadId: row.agentmailThreadId ?? undefined,
@@ -950,7 +955,12 @@ export function startTask(taskId: string): AgentTask | null {
       });
     } catch {}
   }
-  return row ? rowToAgentTask(row) : null;
+  const result = row ? rowToAgentTask(row) : null;
+  // Fire-and-forget: add eyes reaction for GitHub-sourced tasks
+  if (result && oldTask.status !== "in_progress") {
+    addEyesReactionOnTaskStart(result).catch(() => {});
+  }
+  return result;
 }
 
 export function getTaskById(id: string): AgentTask | null {
@@ -1800,6 +1810,8 @@ export interface CreateTaskOptions {
   vcsCommentId?: number;
   vcsAuthor?: string;
   vcsUrl?: string;
+  vcsInstallationId?: number;
+  vcsNodeId?: string;
   agentmailInboxId?: string;
   agentmailMessageId?: string;
   agentmailThreadId?: string;
@@ -1906,10 +1918,11 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         taskType, tags, priority, dependsOn, offeredTo, offeredAt,
         slackChannelId, slackThreadTs, slackUserId,
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
+        vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, dir, parentTaskId, model, scheduleId,
         workflowRunId, workflowRunStepId, outputSchema, requestedByUserId, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -1934,6 +1947,8 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.vcsCommentId ?? null,
       options?.vcsAuthor ?? null,
       options?.vcsUrl ?? null,
+      options?.vcsInstallationId ?? null,
+      options?.vcsNodeId ?? null,
       options?.agentmailInboxId ?? null,
       options?.agentmailMessageId ?? null,
       options?.agentmailThreadId ?? null,
@@ -2005,7 +2020,12 @@ export function claimTask(taskId: string, agentId: string): AgentTask | null {
     } catch {}
   }
 
-  return row ? rowToAgentTask(row) : null;
+  const result = row ? rowToAgentTask(row) : null;
+  // Fire-and-forget: add eyes reaction for GitHub-sourced tasks
+  if (result) {
+    addEyesReactionOnTaskStart(result).catch(() => {});
+  }
+  return result;
 }
 
 export function releaseTask(taskId: string): AgentTask | null {

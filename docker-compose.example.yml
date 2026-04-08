@@ -362,6 +362,48 @@ services:
 
     restart: unless-stopped
 
+  worker-discoverability-optimizer:
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    platform: linux/amd64
+    pull_policy: always
+    stop_grace_period: 60s
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    environment:
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - API_KEY=${API_KEY}
+      # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
+      - AGENT_ID=3794020f-4bab-4d7e-a1e3-f9e2f2be33ce
+      - AGENT_ROLE=worker
+      # Template for initial profile (fetched on first boot)
+      - TEMPLATE_ID=official/discoverability-optimizer
+      - CAPABILITIES=core,task-pool,messaging,profiles,services,scheduling,memory,seo,aeo,discoverability
+
+      # If in the same Docker network, use the service name
+      - MCP_BASE_URL=http://api:3013
+
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
+
+      - YOLO=true
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_EMAIL=${GITHUB_EMAIL:-}
+      - GITHUB_NAME=${GITHUB_NAME:-}
+      - SWARM_URL=${SWARM_URL:-localhost}
+
+    ports:
+      - "${DISCOVERABILITY_OPTIMIZER_PORT:-3030}:3000"
+
+    volumes:
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_discoverability_optimizer:/workspace/personal
+
+    restart: unless-stopped
+
   # Example: Pi-mono worker (uses HARNESS_PROVIDER=pi instead of Claude)
   # Uncomment to add a pi-mono powered worker to the swarm.
   # Requires ANTHROPIC_API_KEY or OPENROUTER_API_KEY for authentication.
@@ -423,6 +465,7 @@ volumes:
   swarm_content_reviewer:
   swarm_content_strategist:
   swarm_ux_principles:
+  swarm_discoverability_optimizer:
   # Uncomment if using the pi-worker service above
   # swarm_pi_worker:
   # swarm_pi_agent:
