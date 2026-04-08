@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.59.3] - 2026-04-08
+
+### Fixed
+- Slack assistant thread: `file_share` messages now correctly route to the lead agent instead of being silently dropped (DES-138, #304)
+- Slack assistant `setStatus`/`setTitle` calls wrapped with error handling to prevent crashes in non-assistant threads
+
+### Changed
+- `registerRegisterAgentMailInboxTool` renamed to `registerRegisterAgentmailInboxTool` for naming consistency
+- Docker Compose example updated: content reviewer worker now uses `pi` harness provider with `moonshotai/kimi-k2.5` model via OpenRouter
+- MCP.md regenerated to reflect tool registration changes
+
 ## [1.59.2] - 2026-04-07
 
 ### Changed

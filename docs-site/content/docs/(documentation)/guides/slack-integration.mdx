@@ -119,7 +119,8 @@ The bot supports Slack's [Assistant](https://api.slack.com/docs/apps/ai) sidebar
 - Open the sidebar in any channel or DM to start a conversation
 - Suggested prompts help you get started ("Check agent status", "Assign a task", "List recent tasks")
 - Follow-up messages in assistant threads route to the same agent that handled the original task
-- The assistant sets a typing status while the agent is working
+- File uploads (`file_share` messages) in assistant threads are automatically detected and routed to the lead agent
+- The assistant sets a typing status while the agent is working (gracefully handles permission errors in non-assistant threads)
 
 ### Progress Updates
 
