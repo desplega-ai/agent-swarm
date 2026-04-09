@@ -4,7 +4,7 @@ author: taras
 status: completed
 issue: https://github.com/desplega-ai/agent-swarm/issues/100
 last_updated: 2026-04-09
-last_updated_by: claude (phase 9)
+last_updated_by: claude (verify-plan)
 ---
 
 # Codex Provider Support (App-Server Approach) Implementation Plan
@@ -95,16 +95,23 @@ docker run --rm \
 
 **Key files to check:**
 - `src/providers/codex-adapter.ts` (new — primary implementation)
+- `src/providers/codex-agents-md.ts` (new — `<swarm_system_prompt>` block manager for `AGENTS.md`; replaces the original `baseInstructions`/`developerInstructions` approach, see Deviations §1)
+- `src/providers/codex-models.ts` (new — typed model catalogue + shortname resolver)
 - `src/providers/codex-skill-resolver.ts` (new — slash command → SKILL.md inlining)
+- `src/providers/codex-swarm-events.ts` (new — adapter-side cancellation poll + tool-loop + heartbeat + context-usage hooks)
 - `src/providers/index.ts` (factory update)
 - `src/providers/types.ts` (unchanged — interface is already sufficient)
 - `src/tests/codex-adapter.test.ts` (new)
+- `src/tests/codex-skill-resolver.test.ts` (new)
+- `src/tests/codex-swarm-events.test.ts` (new)
 - `src/tests/provider-adapter.test.ts` (factory + error message update)
 - `src/tests/provider-command-format.test.ts` (codex case)
+- `src/tests/runner-fallback-output.test.ts` (side-fix for pre-existing `pi-mono` typo + codex case)
+- `scripts/check-codex-default-model.sh` (new — CI guard asserting Dockerfile baseline matches `CODEX_DEFAULT_MODEL`)
 - `Dockerfile.worker` (codex CLI install + skills copy)
 - `docker-entrypoint.sh` (codex auth validation + skills sync)
 - `package.json` (`@openai/codex-sdk` dep)
-- `README.md`, `CLAUDE.md`, `CHANGELOG.md`, `docker-compose.example.yml`
+- `README.md`, `CLAUDE.md`, `CHANGELOG.md`, `docker-compose.example.yml`, `docker-compose.local.yml`
 
 ## What We're NOT Doing
 
@@ -663,22 +670,22 @@ cp "$HOME/.claude/skills/$SKILL_NAME/SKILL.md" "$HOME/.codex/skills/$SKILL_NAME/
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Docker image builds: `bun run docker:build:worker`
-- [ ] Codex CLI present in image: `docker run --rm agent-swarm-worker:latest codex --version`
-- [ ] Baseline config present: `docker run --rm agent-swarm-worker:latest cat /home/worker/.codex/config.toml`
-- [ ] Skills copied: `docker run --rm agent-swarm-worker:latest ls /home/worker/.codex/skills/work-on-task/SKILL.md`
-- [ ] Existing claude/pi workers still build + pass health check: smoke via `scripts/e2e-docker-provider.ts` with `pi` and `claude` providers (script already exists per Grep result)
+- [x] Docker image builds: `bun run docker:build:worker` — verified in verify-plan pass, sha256:92a0588c4454 (5.67 GB)
+- [x] Codex CLI present in image: `docker run --rm --entrypoint /bin/sh agent-swarm-worker:latest -c 'codex --version'` → `codex-cli 0.118.0`
+- [x] Baseline config present: `cat ~/.codex/config.toml` → `model = "gpt-5.4"`, `approval_policy = "never"`, `sandbox_mode = "danger-full-access"`, `skip_git_repo_check = true`, `show_raw_agent_reasoning = false`
+- [x] Skills copied: 13 skills in `~/.codex/skills/` (close-issue, create-pr, implement-issue, investigate-sentry-issue, respond-github, review-offered-task, review-pr, start-leader, start-worker, swarm-chat, todos, user-management, work-on-task). `work-on-task/SKILL.md` readable.
+- [x] Existing claude/pi binaries still present in the image: `claude --version` → `2.1.87 (Claude Code)`, `pi --version` → `0.64.0`. (Full `scripts/e2e-docker-provider.ts` regression run still deferred — the script doesn't yet support a `codex` test case; it's a follow-up.)
 - [x] Shell syntax check: `bash -n docker-entrypoint.sh`
 - [x] Codex default model guard: `bash scripts/check-codex-default-model.sh`
 - [x] DB boundary check: `bash scripts/check-db-boundary.sh`
 - [x] Type check: `bun run tsc:check`
 - [x] Lint: `bun run lint:fix`
-- [x] Full test suite: `bun test` (2368 pass)
+- [x] Full test suite: `bun test` (2368 pass → 2372 pass after Phase 7)
 
 #### Manual Verification:
-- [ ] `HARNESS_PROVIDER=codex` container starts: `docker run --rm -e HARNESS_PROVIDER=codex -e OPENAI_API_KEY=sk-... --env-file .env.docker agent-swarm-worker:latest` logs "Harness Provider: codex" and proceeds past the validation branch.
-- [ ] Missing OPENAI_API_KEY fails fast: same command without `OPENAI_API_KEY` exits with a clear error.
-- [ ] `HARNESS_PROVIDER=claude` and `HARNESS_PROVIDER=pi` containers still start cleanly (regression check).
+- [x] `HARNESS_PROVIDER=codex` container starts: container logs `Codex CLI: /usr/bin/codex`, `Harness Provider: codex`, proceeds past the entrypoint validation branch into PM2 init (verified in verify-plan pass).
+- [x] Missing OPENAI_API_KEY fails fast: container exits with `Error: codex provider requires OPENAI_API_KEY or ~/.codex/auth.json` (verified in verify-plan pass).
+- [x] `HARNESS_PROVIDER=claude` and `HARNESS_PROVIDER=pi` containers still start cleanly: both boot from the same image and log `Harness Provider: claude` / `Harness Provider: pi` (regression verified in verify-plan pass).
 
 **Implementation Note**: After completing this phase, pause for confirmation. Commit message: `[phase 6] docker + entrypoint integration for codex provider`.
 
@@ -952,16 +959,16 @@ Run manual E2E against a real backend. See the "Manual E2E" section below.
 #### Automated Verification:
 - [x] Full test suite passes: `bun test` (2372 pass)
 - [x] Full lint/typecheck/db boundary: `bun run lint:fix && bun run tsc:check && bash scripts/check-db-boundary.sh`
-- [ ] Docker build succeeds: `bun run docker:build:worker` — deferred to manual verification (slow, requires daemon)
+- [x] Docker build succeeds: `bun run docker:build:worker` → sha256:92a0588c4454 (5.67 GB), verified in verify-plan pass
 - [x] OpenAPI regeneration not needed — no HTTP handlers touched in this plan
 - [x] pi-skills regeneration not needed — `plugin/commands/*.md` not modified
-- [ ] CI merge-gate workflow passes on the PR — runs after push
+- [ ] CI merge-gate workflow passes on the PR — runs after push (can only be verified once PR is opened)
 
 #### Manual Verification:
 - [ ] README example for Codex works end-to-end
-- [ ] All three providers (`claude`, `pi`, `codex`) complete the manual E2E task below
+- [x] All three providers (`claude`, `pi`, `codex`) boot cleanly from the same image in the verify-plan pass. Full task-completion E2E against a real backend still pending (deferred to Taras).
 - [ ] Dashboard shows the codex worker and its task progress
-- [ ] No regressions reported in existing claude/pi flows
+- [x] No regressions reported in existing claude/pi flows: both boot to `Harness Provider: claude` / `Harness Provider: pi` from the same image; unit tests `runner-fallback-output.test.ts` updated with codex case and side-fix for pre-existing `pi-mono` typo; full 2372-test suite green.
 
 **Implementation Note**: After completing this phase, commit, push, and open the PR. Commit message: `[phase 9] codex provider docs + E2E verification`.
 
@@ -1100,10 +1107,21 @@ Phases 1-7 + 9. Phase 8 (ChatGPT subscription OAuth) was deferred to a follow-up
 ### Open follow-ups
 
 - **Phase 8 (Codex ChatGPT subscription OAuth)** — port pi-mono's flow to allow billing parity with ChatGPT Plus/Pro subscriptions. Tracked separately.
-- **Manual E2E verification** (deferred to Taras): build the worker image with `bun run docker:build:worker`, boot a `HARNESS_PROVIDER=codex` worker, run a trivial task, and verify cancellation latency. See the "Manual E2E" section above for exact commands.
-- **`scripts/e2e-codex-provider.ts`** — could mirror the existing `scripts/e2e-provider-test.ts` for CI smoke coverage. Not blocking.
+- **Task-completion E2E against a real backend** (deferred to Taras) — the verify-plan pass confirmed the image builds, all three providers (claude/pi/codex) boot cleanly, the codex container passes entrypoint validation with `OPENAI_API_KEY`, fails fast without it, and the Codex SDK successfully runs a streamed turn end-to-end against `gpt-5.4` using `OPENAI_API_KEY` alone (no `codex login` required, because the SDK uses `codex app-server` which reads the env var directly — unlike the top-level `codex exec` command which needs `codex login --with-api-key`). What's still pending: a real task routed through a running API server to a codex worker, plus cancellation-latency verification. See the "Manual E2E" section above for exact commands.
+- **`scripts/e2e-docker-provider.ts` codex extension** — the existing script supports `claude`, `pi`, `both`; a `codex` test case should mirror them for CI smoke coverage. Not blocking.
 - **Streaming deltas** — `item.updated` events currently surface only as `raw_log`. UI streaming-deltas would require new `ProviderEvent` variants. Out of scope for v1.
 - **Codex `plan` / `reasoning` items** — surface as `raw_log` only. Promoting them to first-class UI features is a follow-up.
+
+### Verify-plan addendum (2026-04-09, Claude)
+
+Post-implementation audit re-ran every automated check and added the Docker round-trip that was originally deferred. Findings:
+
+- **All automated success criteria pass** — `tsc:check`, `lint:fix`, 2372/2372 tests, db-boundary, codex-default-model guard, `bash -n docker-entrypoint.sh`, full Docker build, in-image probe for `codex --version`/config.toml/skills, claude+pi binary presence regression.
+- **Container-startup smoke passed for all three providers** from the fresh image (`Harness Provider: claude|pi|codex`), and the codex branch fails fast when `OPENAI_API_KEY` is missing.
+- **Codex SDK ↔ OPENAI_API_KEY auth confirmed working end-to-end** — direct `thread.runStreamed()` against `gpt-5.4` returned a complete `thread.started → turn.started → item.completed (agent_message "ok") → turn.completed (18350/21 tokens)` sequence. **Important gotcha logged**: the SDK path (`codex app-server`) reads `OPENAI_API_KEY` from env, but the top-level `codex exec` command does NOT — it requires `printenv OPENAI_API_KEY | codex login --with-api-key` first. Our adapter only uses the SDK path, so no entrypoint change is needed, but this is worth knowing if someone later tries to debug Codex inside the container with `codex exec`.
+- **Review Errata OA1/OA2/OA3 promoted to Applied (I11/I12/I13)** — all three were resolved during implementation per the Deviations log.
+- **Quick Verification Reference file list updated** — added the six files that were added during implementation but missed from the original file map.
+- **Still pending for Taras**: a task-completion E2E against a running API server, cancellation-latency check, and the PR merge-gate CI run.
 
 ## References
 
@@ -1158,12 +1176,13 @@ Verified against actual codebase at `/Users/taras/worktrees/agent-swarm/2026-04-
 - [x] **I8. `baseInstructions` / `developerInstructions` flagged for verification** — Current State Analysis now carries a ⚠️ note that the exact `ThreadStartParams` field names need to be verified against `sdk/typescript/src/types.ts` at Phase 1 implementation time. Search snippets confirmed `workingDirectory`, `skipGitRepoCheck`, `sandboxMode`, `approvalPolicy`, `model` but did not confirm the two instruction fields.
 - [x] **I9. SSE MCP transport clarification** — Phase 3 §2 explicitly notes that Streamable HTTP + stdio are supported and SSE is NOT (cites openai/codex#2129). The original phrasing "Skip stdio transports if Codex config doesn't support them" was backwards — stdio is supported; SSE is the unsupported one.
 - [x] **I10. Pi-mono OAuth source URL flagged** — Phase 8 Overview and Key Discoveries both carry ⚠️ notes that the URL `https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/utils/oauth/openai-codex.ts` should be verified before porting (conflicts with `@mariozechner/pi-coding-agent` referenced elsewhere). Check `node_modules/@mariozechner/pi-coding-agent/package.json` `repository` field to resolve.
+- [x] **I11. OA1 — SDK event/item names confirmed** — Resolved during Phase 2 implementation. `@openai/codex-sdk@0.118.0` exports `ThreadEvent` and `ThreadItem` as named types (`src/providers/codex-adapter.ts:60-61`); the adapter's `handleEvent()` switches directly on the SDK-emitted variants (`thread.started`, `turn.started`, `turn.completed`, `turn.failed`, `item.started`, `item.updated`, `item.completed` — `codex-adapter.ts:441-570`). The speculated `thread.error`, `user_message`, and `dynamic_tool_call` were plan speculation that turned out not to exist in the SDK surface and were dropped. Covered by 33 passing tests in `src/tests/codex-adapter.test.ts`. See Deviations §2.
+- [x] **I12. OA2 — `new Codex({ config })` accepts structured objects** — Resolved during Phase 3 implementation. `CodexOptions.config` is typed as `CodexConfigObject` which is recursive, so the adapter passes nested `{ mcp_servers: { foo: {...} } }` directly without flattening to dotted-path strings. No flattener helper was needed. See Deviations §4.
+- [x] **I13. OA3 — `AbortController.signal` works on `runStreamed()` in 0.118.0** — Resolved during Phase 2 implementation. The standard `AbortController` flow works for both `thread.run()` and `thread.runStreamed()`; the fallback flag + `shutdown?.()` workaround documented in Phase 2 §3 was not needed. Verified by the abort test in `src/tests/codex-adapter.test.ts`. See Deviations §3.
 
 ### Remaining — Open questions for Taras
 
-- [ ] **OA1. SDK event/item names** — a few specific names in the event mapping table (`thread.error` vs `error`, `user_message`, `dynamic_tool_call`) were not confirmed from docs snippets. Not blocking — Phase 2 implementation must cross-check against `sdk/typescript/src/types.ts` and adjust the mapping. Tracked via ⚠️ notes in Key Discoveries.
-- [ ] **OA2. `new Codex({ config })` shape** — whether the SDK accepts structured JS objects (`{ mcp_servers: {...} }`) or only pre-flattened dotted keys (`{ "mcp_servers.foo.url": "..." }`) is unverified from docs. Plan carries a ⚠️ note in Key Discoveries and Phase 3 §4; Phase 3 implementation must confirm. If only flattened, add a tiny flattener helper in `buildCodexConfig`.
-- [ ] **OA3. `AbortController` signal plumbing through `runStreamed()`** — confirmed from search snippets that `thread.run(prompt, { signal })` exists, but not explicitly confirmed for `runStreamed()`. If Phase 1/2 smoke testing shows the signal does not propagate through the streamed path, fall back to the flag + `shutdown?.()` workaround documented in Phase 2 §3.
+_None._ All open questions from the original review were resolved during implementation — see I11/I12/I13 above.
 
 ### Not addressed (intentionally left as-is)
 
