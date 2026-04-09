@@ -184,12 +184,14 @@ describe("CodexSession event mapping", () => {
 
     // context_usage event fired with the *uncached + output* peak proxy
     // (input=100, cached=25, output=50 → uncached=75 → peak=125)
+    // contextPercent is on a 0-100 scale (claude/pi convention).
     const contextUsage = emitted.find((e) => e.type === "context_usage");
     expect(contextUsage).toBeDefined();
     if (contextUsage && contextUsage.type === "context_usage") {
       expect(contextUsage.contextUsedTokens).toBe(125);
       expect(contextUsage.contextTotalTokens).toBe(200_000);
-      expect(contextUsage.contextPercent).toBeCloseTo(125 / 200_000, 6);
+      // 125 / 200_000 × 100 = 0.0625
+      expect(contextUsage.contextPercent).toBeCloseTo((125 / 200_000) * 100, 6);
     }
 
     // result event is final and non-error, with cost computed from token counts
@@ -254,9 +256,9 @@ describe("CodexSession event mapping", () => {
       // peak proxy = (357142 - 278912) + 2156 = 78230 + 2156 = 80386
       expect(contextUsage.contextUsedTokens).toBe(80386);
       expect(contextUsage.contextTotalTokens).toBe(200_000);
-      // 80386 / 200000 = 0.40193 — well below 1.0, NOT clamped
-      expect(contextUsage.contextPercent).toBeCloseTo(0.40193, 4);
-      expect(contextUsage.contextPercent).toBeLessThan(1);
+      // 80386 / 200000 × 100 = 40.193 — on the 0-100 scale, NOT clamped to 100
+      expect(contextUsage.contextPercent).toBeCloseTo(40.193, 2);
+      expect(contextUsage.contextPercent).toBeLessThan(100);
     }
 
     // Cost still uses the full input_tokens — billing semantics are

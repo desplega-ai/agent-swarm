@@ -577,11 +577,17 @@ class CodexSession implements ProviderSession {
             event.usage.input_tokens - event.usage.cached_input_tokens,
           );
           const peakProxy = uncachedInput + event.usage.output_tokens;
+          // `contextPercent` is on a 0-100 scale across all providers — claude
+          // emits `(used / total) * 100`, pi-mono passes through `usage.percent`
+          // which is already 0-100. The dashboard at
+          // new-ui/src/pages/tasks/[id]/page.tsx renders it via `.toFixed(0)`
+          // expecting an integer percent, so a 0-1 fraction would render as
+          // "0%" instead of e.g. "40%".
           this.emit({
             type: "context_usage",
             contextUsedTokens: peakProxy,
             contextTotalTokens: this.contextWindow,
-            contextPercent: Math.min(1, peakProxy / this.contextWindow),
+            contextPercent: Math.min(100, (peakProxy / this.contextWindow) * 100),
             outputTokens: event.usage.output_tokens,
           });
         }
