@@ -72,6 +72,7 @@ import {
   resolveCodexModel,
 } from "./codex-models";
 import { resolveCodexPrompt } from "./codex-skill-resolver";
+import { createCodexSwarmEventHandler } from "./codex-swarm-events";
 import type {
   CostData,
   ProviderAdapter,
@@ -252,6 +253,12 @@ class CodexSession implements ProviderSession {
   private readonly completionPromise: Promise<ProviderResult>;
   private resolveCompletion!: (result: ProviderResult) => void;
   private abortController: AbortController | null = null;
+  /**
+   * Mutable holder for the current turn's `AbortController`. Shared with the
+   * swarm event handler so it can trigger an abort from outside `runSession`
+   * (e.g. when a tool-loop is detected or the task has been cancelled).
+   */
+  private readonly abortRef: { current: AbortController | null } = { current: null };
   private _sessionId: string | undefined;
   private numTurns = 0;
   private lastUsage: Usage | null = null;
@@ -281,6 +288,23 @@ class CodexSession implements ProviderSession {
     this.completionPromise = new Promise<ProviderResult>((resolve) => {
       this.resolveCompletion = resolve;
     });
+
+    // Adapter-side swarm hooks: lower-latency cancellation poll, tool-loop
+    // detection, heartbeat, activity ping, and context-usage reporting. The
+    // handler reads `abortRef.current` to trigger aborts from outside
+    // `runSession` (the runner-side polling at `runner.ts:2812-2841` is the
+    // backstop). Skipped when there's no task or API context to talk to.
+    if (config.taskId && config.apiUrl && config.apiKey) {
+      this.listeners.push(
+        createCodexSwarmEventHandler({
+          apiUrl: config.apiUrl,
+          apiKey: config.apiKey,
+          agentId: config.agentId,
+          taskId: config.taskId,
+          abortRef: this.abortRef,
+        }),
+      );
+    }
 
     // Replay any events that fired before the session was constructed
     // (e.g. warnings from `buildCodexConfig`). They enter the same path as
@@ -508,6 +532,9 @@ class CodexSession implements ProviderSession {
 
   private async runSession(): Promise<void> {
     this.abortController = new AbortController();
+    // Expose the controller to the swarm event handler so it can trigger an
+    // abort from outside this method (tool-loop detection, cancellation poll).
+    this.abortRef.current = this.abortController;
     let terminalError: string | undefined;
     let sawTurnCompleted = false;
 
@@ -583,6 +610,8 @@ class CodexSession implements ProviderSession {
         failureReason: message,
       });
     } finally {
+      // Detach the abort controller now that the turn has settled.
+      this.abortRef.current = null;
       try {
         await this.logFileHandle.end();
       } catch {

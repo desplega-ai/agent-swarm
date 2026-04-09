@@ -536,10 +536,10 @@ Implement adapter-internal hook-equivalent behaviors by subscribing to the SDK e
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] New unit test: `bun test src/tests/codex-swarm-events.test.ts` — verifies that given a canned event stream, the handler issues the expected fetch calls (mocked via `globalThis.fetch`)
-- [ ] Existing tool-loop-detection tests (if any) still pass: `bun test src/hooks/tool-loop-detection.test.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] New unit test: `bun test src/tests/codex-swarm-events.test.ts` — verifies that given a canned event stream, the handler issues the expected fetch calls (mocked via `globalThis.fetch`)
+- [x] Existing tool-loop-detection tests (if any) still pass — confirmed pure helper, no regressions in `bun test` (2368 pass)
 
 #### Manual Verification:
 - [ ] Smoke test against real backend: start a Codex session, then cancel the task via the API. The session should abort within one tool-start cycle.
