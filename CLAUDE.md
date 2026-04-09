@@ -179,7 +179,7 @@ Uses `@desplega.ai/business-use` to track system invariants. See [BUSINESS_USE.m
 
 **Environment files:** `.env` (API server), `.env.docker` (Docker worker), `.env.docker-lead` (Docker lead).
 
-**Key env vars:** `API_KEY` (auth, default: `123123`), `MCP_BASE_URL` (default: `http://localhost:3013`), `SLACK_DISABLE=true` / `GITHUB_DISABLE=true`, `HARNESS_PROVIDER` (`claude` or `pi`), `TEMPLATE_ID` (e.g. `official/coder`), `TEMPLATE_REGISTRY_URL` (default: `https://templates.agent-swarm.dev`).
+**Key env vars:** `API_KEY` (auth, default: `123123`), `MCP_BASE_URL` (default: `http://localhost:3013`), `SLACK_DISABLE=true` / `GITHUB_DISABLE=true`, `HARNESS_PROVIDER` (`claude`, `pi`, or `codex` — codex requires `OPENAI_API_KEY` or `~/.codex/auth.json`), `TEMPLATE_ID` (e.g. `official/coder`), `TEMPLATE_REGISTRY_URL` (default: `https://templates.agent-swarm.dev`).
 
 **Testing API locally:**
 ```bash

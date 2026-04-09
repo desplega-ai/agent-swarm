@@ -454,6 +454,51 @@ services:
   #
   #   restart: unless-stopped
 
+  # Example: Codex worker (uses HARNESS_PROVIDER=codex instead of Claude)
+  # Uncomment to add a Codex powered worker to the swarm.
+  # Requires OPENAI_API_KEY (or a pre-seeded ~/.codex/auth.json volume mount).
+  #
+  # codex-worker:
+  #   image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+  #   platform: linux/amd64
+  #   pull_policy: always
+  #   stop_grace_period: 60s
+  #
+  #   depends_on:
+  #     api:
+  #       condition: service_healthy
+  #
+  #   environment:
+  #     - HARNESS_PROVIDER=codex
+  #     # Codex model — see src/providers/codex-models.ts for the full catalogue.
+  #     # Default baked into the image: gpt-5.4
+  #     # - MODEL_OVERRIDE=gpt-5.4
+  #     - OPENAI_API_KEY=${OPENAI_API_KEY}
+  #     - API_KEY=${API_KEY}
+  #     # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
+  #     - AGENT_ID=c3b4d5e6-7890-12fa-bcde-345678901bcd
+  #     - AGENT_ROLE=worker
+  #
+  #     - MCP_BASE_URL=http://api:3013
+  #
+  #     - YOLO=true
+  #     - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+  #     - GITHUB_EMAIL=${GITHUB_EMAIL:-}
+  #     - GITHUB_NAME=${GITHUB_NAME:-}
+  #     - SWARM_URL=${SWARM_URL:-localhost}
+  #
+  #   ports:
+  #     - "${CODEX_WORKER_PORT:-3024}:3000"
+  #
+  #   volumes:
+  #     - swarm_logs:/logs
+  #     - swarm_shared:/workspace/shared
+  #     - swarm_codex_worker:/workspace/personal
+  #     # Persist codex auth/session files across restarts
+  #     - swarm_codex_agent:/home/worker/.codex
+  #
+  #   restart: unless-stopped
+
 volumes:
   swarm_api:
   swarm_logs:
@@ -469,3 +514,6 @@ volumes:
   # Uncomment if using the pi-worker service above
   # swarm_pi_worker:
   # swarm_pi_agent:
+  # Uncomment if using the codex-worker service above
+  # swarm_codex_worker:
+  # swarm_codex_agent:

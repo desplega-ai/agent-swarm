@@ -58,6 +58,7 @@ import type {
   WorkflowSnapshot,
   WorkflowVersion,
 } from "../types";
+import { deriveProviderFromKeyType } from "../utils/credentials";
 import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import { runMigrations } from "./migrations/runner";
 import { seedDefaultTemplates } from "./seed";
@@ -7576,6 +7577,10 @@ export interface ApiKeyStatus {
   lastRateLimitAt: string | null;
   totalUsageCount: number;
   rateLimitCount: number;
+  /** Optional human-friendly label set from the dashboard. */
+  name: string | null;
+  /** Auto-derived harness provider (claude/pi/codex) — see deriveProviderFromKeyType. */
+  provider: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -7634,17 +7639,21 @@ export function recordKeyUsage(
   const db = getDb();
   const effectiveScopeId = scopeId ?? "";
 
-  // Upsert key status record
+  // Upsert key status record. Sets `provider` on insert (auto-derived from
+  // keyType — see deriveProviderFromKeyType in src/utils/credentials.ts).
+  // The `name` column is left null on insert and only set via the
+  // setApiKeyName API endpoint when the user manually labels the key.
+  const provider = deriveProviderFromKeyType(keyType);
   db.prepare(
-    `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, lastUsedAt, totalUsageCount, updatedAt)
-     VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+    `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, lastUsedAt, totalUsageCount, provider, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
      ON CONFLICT(keyType, keySuffix, scope, scopeId)
      DO UPDATE SET
        lastUsedAt = excluded.lastUsedAt,
        totalUsageCount = totalUsageCount + 1,
        keyIndex = excluded.keyIndex,
        updatedAt = excluded.updatedAt`,
-  ).run(keyType, keySuffix, keyIndex, scope, effectiveScopeId, now, now);
+  ).run(keyType, keySuffix, keyIndex, scope, effectiveScopeId, now, provider, now);
 
   // Record which key was used on the task
   if (taskId) {
@@ -7667,10 +7676,11 @@ export function markKeyRateLimited(
 ): void {
   const now = new Date().toISOString();
   const effectiveScopeId = scopeId ?? "";
+  const provider = deriveProviderFromKeyType(keyType);
   getDb()
     .prepare(
-      `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, status, rateLimitedUntil, lastRateLimitAt, rateLimitCount, updatedAt)
-       VALUES (?, ?, ?, ?, ?, 'rate_limited', ?, ?, 1, ?)
+      `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, status, rateLimitedUntil, lastRateLimitAt, rateLimitCount, provider, updatedAt)
+       VALUES (?, ?, ?, ?, ?, 'rate_limited', ?, ?, 1, ?, ?)
        ON CONFLICT(keyType, keySuffix, scope, scopeId)
        DO UPDATE SET
          status = 'rate_limited',
@@ -7680,7 +7690,39 @@ export function markKeyRateLimited(
          keyIndex = excluded.keyIndex,
          updatedAt = excluded.updatedAt`,
     )
-    .run(keyType, keySuffix, keyIndex, scope, effectiveScopeId, rateLimitedUntil, now, now);
+    .run(
+      keyType,
+      keySuffix,
+      keyIndex,
+      scope,
+      effectiveScopeId,
+      rateLimitedUntil,
+      now,
+      provider,
+      now,
+    );
+}
+
+/**
+ * Set or clear the human-friendly `name` label on a pooled credential.
+ * Identified by the natural key (keyType + keySuffix + scope + scopeId).
+ * Returns true if a row was updated, false if no matching key exists.
+ */
+export function setApiKeyName(
+  keyType: string,
+  keySuffix: string,
+  name: string | null,
+  scope = "global",
+  scopeId: string | null = null,
+): boolean {
+  const result = getDb()
+    .prepare(
+      `UPDATE api_key_status
+       SET name = ?, updatedAt = ?
+       WHERE keyType = ? AND keySuffix = ? AND scope = ? AND scopeId = ?`,
+    )
+    .run(name, new Date().toISOString(), keyType, keySuffix, scope, scopeId ?? "");
+  return result.changes > 0;
 }
 
 /**

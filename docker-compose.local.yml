@@ -111,9 +111,53 @@ services:
 
     restart: unless-stopped
 
+  # Codex worker — opt-in via `docker compose --profile codex up`.
+  # Requires OPENAI_API_KEY in .env. Not enabled by default because most devs
+  # won't have an OpenAI key handy.
+  codex-worker:
+    container_name: swarm-codex-worker
+    platform: linux/amd64
+    image: swarm-worker:local
+    profiles: ["codex"]
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    depends_on:
+      api:
+        condition: service_healthy
+    stop_grace_period: 60s
+
+    environment:
+      - HARNESS_PROVIDER=codex
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # Baseline model is baked into the image (see Dockerfile.worker + codex-models.ts).
+      # Override here if needed:
+      # - MODEL_OVERRIDE=gpt-5.4
+      - API_KEY=${API_KEY}
+      - AGENT_ID=a4d5e6f7-8901-23fb-cdef-456789012cde
+      - AGENT_ROLE=worker
+      - MCP_BASE_URL=http://api:3013
+      - YOLO=true
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_EMAIL=${GITHUB_EMAIL:-dev@localhost}
+      - GITHUB_NAME=${GITHUB_NAME:-Codex Worker}
+
+    ports:
+      - "3022:3000"
+
+    volumes:
+      - local_logs:/logs
+      - local_shared:/workspace/shared
+      - local_codex_worker:/workspace/personal
+      - local_codex_agent:/home/worker/.codex
+
+    restart: unless-stopped
+
 volumes:
   local_logs:
   local_shared:
   local_lead:
   local_pi_worker:
   local_pi_agent:
+  local_codex_worker:
+  local_codex_agent:

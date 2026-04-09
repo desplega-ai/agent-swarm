@@ -6,7 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.63.0] - 2026-04-09
+
 ### Added
+- **Codex provider** — Run agents with OpenAI Codex via `HARNESS_PROVIDER=codex`. Wraps `@openai/codex-sdk` 0.118 to drive the `codex app-server` JSON-RPC protocol. Includes per-session MCP config (Streamable HTTP), slash-command skill inlining, AGENTS.md system-prompt injection, AbortController-based cancellation, tool-loop detection, heartbeat/activity reporting, and a typed model catalogue (gpt-5.4 default). Auth via `OPENAI_API_KEY` or `~/.codex/auth.json` (#100)
+- Docker worker image installs the Codex CLI (`@openai/codex@0.118.0`) alongside Claude and pi-mono and ships a baseline `~/.codex/config.toml`; entrypoint validates codex auth, bootstraps `~/.codex/auth.json` from `OPENAI_API_KEY` via `codex login --with-api-key` at boot (idempotent), and mirrors slash-command skills into `~/.codex/skills/<name>/SKILL.md` (#100)
+- Per-model pricing table for Codex models in `src/providers/codex-models.ts` (gpt-5.4, gpt-5.4-mini, gpt-5.3-codex, gpt-5.2-codex) sourced from developers.openai.com/api/docs/pricing — codex tasks now record real `totalCostUsd` in `session_costs` and contribute to dashboard cost summaries (#100)
+- `name` and `provider` columns on the `api_key_status` table — pooled credentials now carry an auto-derived harness provider (claude/pi/codex) and an optional human-friendly label settable from the dashboard. New `PATCH /api/keys/name` endpoint and the API Keys page in the dashboard gains a Name column (click to rename via Dialog) and a Provider dropdown filter (#100)
+- Provider-aware credential pooling — `resolveCredentialPools` accepts a `provider` hint and only pools env vars relevant to the active harness, so a codex worker no longer stamps a stale `CLAUDE_CODE_OAUTH_TOKEN` on its task records (#100)
+- Codex `[context-overflow]` failure rewrite — when a codex turn hits the context window, the failure message is rewritten with a clear prefix and points users at Linear DES-143 for the auto-compaction follow-up. Codex `reasoning`, `todo_list`, and `agent_message` deltas now flow as `custom` ProviderEvents (`codex.reasoning`, `codex.todo_list`, `codex.message_delta`) so future UI surfaces can render them without raw_log scraping (#100)
+- `scripts/e2e-docker-provider.ts` now supports `--provider codex` and `--provider all` (claude+pi+codex) for end-to-end Docker testing (#100)
+- Codex log support in the dashboard's session log viewer — `parseSessionLogs` dispatches on `cli === "codex"` and maps Codex's `item.completed` events (`agent_message`, `mcp_tool_call`, `command_execution`, `reasoning`, `file_change`, `web_search`, `todo_list`) to the same ContentBlock schema used by claude/pi (#100)
 - Slack message deduplication with `slackReplySent` flag — when agents post results via `slack-reply`, the task completion message shows a minimal one-liner instead of duplicating the full output (#314)
 - Tree-based Slack status messages — parent tasks render child task progress in a visual tree with status icons, indentation, and overflow handling (#314)
 - Slack thread buffer (`ADDITIVE_SLACK=true`) — non-mention thread replies are captured, debounced, and batched into a single follow-up task with dependency chaining (#314)
@@ -15,6 +25,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `slackChannelId`, `slackThreadTs`, `slackUserId` parameters on `send-task` MCP tool for explicit Slack context propagation (#314)
 - GitHub eyes reaction (👀) automatically added when agents pick up GitHub-sourced tasks — supports issue comments, PR review comments, PR reviews, and issue/PR bodies (#310)
 - Discoverability Optimizer agent template added to `docker-compose.example.yml` (#311)
+
+### Fixed
+- Codex adapter `peakContextPercent` no longer clamps to 100% on chatty turns — the SDK reports `input_tokens` as per-turn-cumulative across every model invocation (with cached portions counted at every roundtrip), which routinely exceeds the model's context window even when no individual call did. New formula uses `(input - cached + output) / window` as a peak proxy (#100)
+- Codex adapter `contextPercent` is now emitted on the same 0-100 scale as claude/pi (was 0-1 fraction), so the dashboard's `Peak %` cell renders correctly via `.toFixed(0)` (#100)
+- Dashboard `model` badge falls back to `costs[0]?.model` when `task.model` is null — codex tasks created without an explicit model in the POST body now display the actual model used (recorded by the runner in `session_costs`) (#100)
+- DataGrid wrapper auto-detects editable columns and only suppresses cell focus when none are present — read-only tables are unaffected, editable columns can now take focus (#100)
+- Codex SDK binary path resolved via `CODEX_PATH_OVERRIDE` env var (`/usr/bin/codex` in the Docker image) — the bundled SDK can no longer `require.resolve("@openai/codex")` from inside a Bun-compiled executable, so the override sidesteps the failure (#100)
 
 ### Changed
 - Slack completion messages now conditionally show minimal or full output based on whether the agent already posted via `slack-reply` (#314)

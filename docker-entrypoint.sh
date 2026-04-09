@@ -10,6 +10,32 @@ if [ "$HARNESS_PROVIDER" = "pi" ]; then
         echo "Error: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or ~/.pi/agent/auth.json required for pi provider"
         exit 1
     fi
+elif [ "$HARNESS_PROVIDER" = "codex" ]; then
+    # Codex auth: OPENAI_API_KEY env var or pre-seeded ~/.codex/auth.json
+    # (host `codex login` or volume mount). Phase 8 will add a third path that
+    # restores OAuth credentials from the API config store at boot.
+    if [ -z "${OPENAI_API_KEY:-}" ] && [ ! -f "$HOME/.codex/auth.json" ]; then
+        echo "Error: codex provider requires OPENAI_API_KEY or ~/.codex/auth.json"
+        exit 1
+    fi
+    # The Codex CLI's `exec --experimental-json` command (used by
+    # @openai/codex-sdk under the hood) does NOT read OPENAI_API_KEY from the
+    # environment directly — it requires a persistent ~/.codex/auth.json
+    # created by `codex login --with-api-key`. If we have an OPENAI_API_KEY
+    # but no auth.json yet, bootstrap it now as the worker user so subsequent
+    # codex invocations (which run as worker via `gosu worker` further down)
+    # can read the file. Idempotent: skip if auth.json already exists (e.g.
+    # pre-seeded via volume mount or previous boot).
+    WORKER_CODEX_HOME="/home/worker/.codex"
+    if [ -n "${OPENAI_API_KEY:-}" ] && [ ! -f "$WORKER_CODEX_HOME/auth.json" ]; then
+        mkdir -p "$WORKER_CODEX_HOME"
+        chown -R worker:worker "$WORKER_CODEX_HOME" 2>/dev/null || true
+        if gosu worker bash -c 'printenv OPENAI_API_KEY | codex login --with-api-key' >/dev/null 2>&1; then
+            echo "Codex: registered OPENAI_API_KEY via 'codex login --with-api-key'"
+        else
+            echo "Warning: 'codex login --with-api-key' failed; worker may fail at first turn" >&2
+        fi
+    fi
 else
     # Claude auth (default)
     if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
@@ -23,8 +49,16 @@ if [ -z "$API_KEY" ]; then
     exit 1
 fi
 
-# ---- Verify claude binary is reachable ----
-if [ "$HARNESS_PROVIDER" != "pi" ]; then
+# ---- Verify provider binary is reachable ----
+if [ "$HARNESS_PROVIDER" = "codex" ]; then
+    CODEX_BIN="${CODEX_BINARY:-codex}"
+    if ! command -v "$CODEX_BIN" > /dev/null 2>&1; then
+        echo "FATAL: Codex CLI not found: '$CODEX_BIN'"
+        echo "  PATH=$PATH"
+        exit 1
+    fi
+    echo "Codex CLI: $(command -v "$CODEX_BIN")"
+elif [ "$HARNESS_PROVIDER" != "pi" ]; then
     CLAUDE_BIN="${CLAUDE_BINARY:-claude}"
     if ! command -v "$CLAUDE_BIN" > /dev/null 2>&1; then
         echo "FATAL: Claude CLI not found: '$CLAUDE_BIN'"
@@ -712,6 +746,9 @@ if [ -n "$AGENT_ID" ] && [ -n "$API_KEY" ] && [ -n "$MCP_BASE_URL" ]; then
 
                 mkdir -p "$HOME/.pi/agent/skills/$SKILL_NAME"
                 cp "$HOME/.claude/skills/$SKILL_NAME/SKILL.md" "$HOME/.pi/agent/skills/$SKILL_NAME/SKILL.md"
+
+                mkdir -p "$HOME/.codex/skills/$SKILL_NAME"
+                cp "$HOME/.claude/skills/$SKILL_NAME/SKILL.md" "$HOME/.codex/skills/$SKILL_NAME/SKILL.md"
                 echo "[entrypoint] Synced skill: $SKILL_NAME"
             fi
         done

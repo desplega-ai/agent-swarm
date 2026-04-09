@@ -19,7 +19,7 @@ describe("createProviderAdapter", () => {
 
   test("throws for unknown provider", () => {
     expect(() => createProviderAdapter("unknown")).toThrow(
-      'Unknown HARNESS_PROVIDER: "unknown". Supported: claude, pi',
+      'Unknown HARNESS_PROVIDER: "unknown". Supported: claude, pi, codex',
     );
   });
 
