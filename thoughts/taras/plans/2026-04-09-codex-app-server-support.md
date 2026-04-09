@@ -4,7 +4,7 @@ author: taras
 status: in-progress
 issue: https://github.com/desplega-ai/agent-swarm/issues/100
 last_updated: 2026-04-09
-last_updated_by: claude (phase 1)
+last_updated_by: claude (phase 2)
 ---
 
 # Codex Provider Support (App-Server Approach) Implementation Plan
@@ -269,10 +269,10 @@ Wire `thread.runStreamed()` into `CodexSession`. Consume the async iterable of S
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] New unit test (stubbed event stream): `bun test src/tests/codex-adapter.test.ts` — verifies that given a canned async iterable of SDK events, the adapter emits the expected `ProviderEvent` sequence
-- [ ] DB boundary check: `bash scripts/check-db-boundary.sh`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] New unit test (stubbed event stream): `bun test src/tests/codex-adapter.test.ts` — verifies that given a canned async iterable of SDK events, the adapter emits the expected `ProviderEvent` sequence
+- [x] DB boundary check: `bash scripts/check-db-boundary.sh`
 
 #### Manual Verification:
 - [ ] Run the adapter directly via a smoke script: `bun run scripts/smoke-codex.ts` (new throwaway file, not committed) that calls `createSession` with a real prompt "Say hi" and prints normalized events. Verify: `session_init` fires, at least one `message` fires, `result` fires with non-zero token counts.
@@ -450,8 +450,17 @@ Codex has no native slash-command/skill resolver. Mirror the pi-mono pattern —
 
 #### 3. AGENTS.md handling
 
-**File**: `src/providers/codex-adapter.ts`
-**Changes**: Codex reads `AGENTS.md` from cwd automatically. Mirror `createAgentsMdSymlink` from `pi-mono-adapter.ts:110-123` — if `CLAUDE.md` exists and `AGENTS.md` does not, symlink `AGENTS.md → CLAUDE.md` for the session. Track `createdSymlink` and clean up in the `finally` block. **Reuse the pi-mono helpers verbatim** if we extract them into `src/providers/agents-md.ts` (low-effort extraction, no behavior change).
+**Status: Superseded by Phase 2 `codex-agents-md` helper; no action in Phase 4.**
+
+The original design here was to mirror pi-mono's `createAgentsMdSymlink` — symlink `AGENTS.md → CLAUDE.md` for the session and clean up in the `finally` block. That approach has been replaced by a managed-block strategy owned by Phase 2's new helper `src/providers/codex-agents-md.ts`:
+
+- `writeCodexAgentsMd(cwd, systemPrompt)` writes a `<swarm_system_prompt>…</swarm_system_prompt>` block into `${cwd}/AGENTS.md`. If AGENTS.md didn't exist, it creates the file (preseeding it with `CLAUDE.md` contents when present). If AGENTS.md exists with the block, it replaces the block in place. If AGENTS.md exists without the block, it prepends the block.
+- Returns a `cleanup()` handle. Fresh files are deleted on cleanup; otherwise the block is stripped and the rest of the file is preserved (so anything the agent appended during the session is kept).
+- `CodexSession.runSession()` awaits the cleanup in its `finally` block (parity with pi-mono's symlink cleanup location).
+
+**Phase 4 work in this section is just to confirm the Phase 2 helper is still wired correctly** — no new code needed. This means Phase 4 no longer needs to touch AGENTS.md at all; it only owns the slash-command / SKILL.md resolver (§§1-2 above) and the Dockerfile skill-sync hand-off (§4 below).
+
+The trade-off vs the symlink approach: we now also deliver the per-session `systemPrompt` through AGENTS.md, which the symlink approach couldn't do at all (it just exposed `CLAUDE.md` verbatim). The managed block means `config.systemPrompt` reaches Codex in every session — previously the Phase 1 skeleton had no wiring for `systemPrompt` whatsoever.
 
 #### 4. Dockerfile + entrypoint skill sync (hooked here, implemented in Phase 6)
 
