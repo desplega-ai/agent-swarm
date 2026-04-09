@@ -101,6 +101,14 @@ ARG CODEX_VERSION=0.118.0
 RUN sudo npm install -g @openai/codex@${CODEX_VERSION}
 RUN which codex && codex --version
 
+# The @openai/codex-sdk bundled inside the compiled agent-swarm binary cannot
+# resolve `require.resolve("@openai/codex")` at runtime because the globally-
+# installed package is not part of the Bun bundle. Point the SDK at the global
+# Codex CLI wrapper via CODEX_PATH_OVERRIDE so `src/providers/codex-adapter.ts`
+# forwards it to `new Codex({ codexPathOverride })`. The wrapper is a node
+# shebang script that resolves the platform-specific native binary itself.
+ENV CODEX_PATH_OVERRIDE=/usr/bin/codex
+
 # Baseline ~/.codex/config.toml for the worker user. The `model` key must stay
 # in sync with CODEX_DEFAULT_MODEL in src/providers/codex-models.ts (enforced by
 # scripts/check-codex-default-model.sh).

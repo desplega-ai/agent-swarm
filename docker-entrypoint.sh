@@ -18,6 +18,24 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
         echo "Error: codex provider requires OPENAI_API_KEY or ~/.codex/auth.json"
         exit 1
     fi
+    # The Codex CLI's `exec --experimental-json` command (used by
+    # @openai/codex-sdk under the hood) does NOT read OPENAI_API_KEY from the
+    # environment directly — it requires a persistent ~/.codex/auth.json
+    # created by `codex login --with-api-key`. If we have an OPENAI_API_KEY
+    # but no auth.json yet, bootstrap it now as the worker user so subsequent
+    # codex invocations (which run as worker via `gosu worker` further down)
+    # can read the file. Idempotent: skip if auth.json already exists (e.g.
+    # pre-seeded via volume mount or previous boot).
+    WORKER_CODEX_HOME="/home/worker/.codex"
+    if [ -n "${OPENAI_API_KEY:-}" ] && [ ! -f "$WORKER_CODEX_HOME/auth.json" ]; then
+        mkdir -p "$WORKER_CODEX_HOME"
+        chown -R worker:worker "$WORKER_CODEX_HOME" 2>/dev/null || true
+        if gosu worker bash -c 'printenv OPENAI_API_KEY | codex login --with-api-key' >/dev/null 2>&1; then
+            echo "Codex: registered OPENAI_API_KEY via 'codex login --with-api-key'"
+        else
+            echo "Warning: 'codex login --with-api-key' failed; worker may fail at first turn" >&2
+        fi
+    fi
 else
     # Claude auth (default)
     if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then

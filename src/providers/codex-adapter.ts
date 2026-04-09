@@ -685,7 +685,22 @@ export class CodexAdapter implements ProviderAdapter {
         ...(config.env ?? {}),
       };
 
-      const codex = new Codex({ env, config: mergedConfig });
+      // The SDK's default `findCodexPath()` does `require.resolve("@openai/codex")`
+      // from the SDK's own module. When agent-swarm runs as a Bun single-file
+      // compiled executable, the bundled SDK can't resolve `@openai/codex` at
+      // runtime because it's not part of the bundle — it lives in a global
+      // install (`/usr/lib/node_modules/@openai/codex` in the Docker worker
+      // image). Honor `CODEX_PATH_OVERRIDE` so Docker can point us at the CLI
+      // wrapper (or native binary) directly. Fall back to undefined so local
+      // dev with `@openai/codex-sdk` installed as a regular node_modules
+      // dependency keeps working via the SDK's own resolver.
+      const codexPathOverride = process.env.CODEX_PATH_OVERRIDE;
+
+      const codex = new Codex({
+        ...(codexPathOverride ? { codexPathOverride } : {}),
+        env,
+        config: mergedConfig,
+      });
 
       const threadOptions: ThreadOptions = {
         workingDirectory: config.cwd,
