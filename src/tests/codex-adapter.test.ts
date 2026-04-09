@@ -15,8 +15,13 @@ import type {
   ThreadEvent,
   ThreadItem,
 } from "@openai/codex-sdk";
-import { CodexAdapter } from "../providers/codex-adapter";
+import { buildCodexConfig, CodexAdapter } from "../providers/codex-adapter";
 import { writeCodexAgentsMd } from "../providers/codex-agents-md";
+import {
+  CODEX_DEFAULT_MODEL,
+  getCodexContextWindow,
+  resolveCodexModel,
+} from "../providers/codex-models";
 import type { ProviderEvent, ProviderResult, ProviderSessionConfig } from "../providers/types";
 
 /**
@@ -382,5 +387,298 @@ stale
     const after = await Bun.file(agentsMd).text();
     expect(after).not.toContain("<swarm_system_prompt>");
     expect(after).toContain("# Project instructions");
+  });
+});
+
+// ─── Phase 3: model catalogue ────────────────────────────────────────────────
+
+describe("resolveCodexModel", () => {
+  test("undefined → CODEX_DEFAULT_MODEL", () => {
+    expect(resolveCodexModel(undefined)).toBe(CODEX_DEFAULT_MODEL);
+  });
+
+  test("empty string → CODEX_DEFAULT_MODEL", () => {
+    expect(resolveCodexModel("")).toBe(CODEX_DEFAULT_MODEL);
+  });
+
+  test("claude shortname 'opus' → gpt-5.4", () => {
+    expect(resolveCodexModel("opus")).toBe("gpt-5.4");
+  });
+
+  test("claude shortname 'sonnet' → gpt-5.4-mini", () => {
+    expect(resolveCodexModel("sonnet")).toBe("gpt-5.4-mini");
+  });
+
+  test("claude shortname 'haiku' → gpt-5.4-mini", () => {
+    expect(resolveCodexModel("haiku")).toBe("gpt-5.4-mini");
+  });
+
+  test("passthrough 'gpt-5.4-mini' → gpt-5.4-mini", () => {
+    expect(resolveCodexModel("gpt-5.4-mini")).toBe("gpt-5.4-mini");
+  });
+
+  test("passthrough 'gpt-5.3-codex' → gpt-5.3-codex", () => {
+    expect(resolveCodexModel("gpt-5.3-codex")).toBe("gpt-5.3-codex");
+  });
+
+  test("passthrough 'gpt-5.2-codex' → gpt-5.2-codex", () => {
+    expect(resolveCodexModel("gpt-5.2-codex")).toBe("gpt-5.2-codex");
+  });
+
+  test("case-insensitive: GPT-5.4 → gpt-5.4", () => {
+    expect(resolveCodexModel("GPT-5.4")).toBe("gpt-5.4");
+  });
+
+  test("unknown model → CODEX_DEFAULT_MODEL", () => {
+    expect(resolveCodexModel("unknown-model")).toBe(CODEX_DEFAULT_MODEL);
+  });
+});
+
+describe("getCodexContextWindow", () => {
+  test("gpt-5.4 → 200_000", () => {
+    expect(getCodexContextWindow("gpt-5.4")).toBe(200_000);
+  });
+
+  test("gpt-5.4-mini → 200_000", () => {
+    expect(getCodexContextWindow("gpt-5.4-mini")).toBe(200_000);
+  });
+
+  test("gpt-5.3-codex → 1_000_000 (1M context)", () => {
+    expect(getCodexContextWindow("gpt-5.3-codex")).toBe(1_000_000);
+  });
+
+  test("gpt-5.2-codex → 200_000", () => {
+    expect(getCodexContextWindow("gpt-5.2-codex")).toBe(200_000);
+  });
+});
+
+// ─── Phase 3: buildCodexConfig ───────────────────────────────────────────────
+
+describe("buildCodexConfig", () => {
+  // Save and restore the global fetch so we don't leak mocks between tests.
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  // Helper: build a ProviderSessionConfig pointed at a mock endpoint.
+  function cfg(overrides: Partial<ProviderSessionConfig> = {}): ProviderSessionConfig {
+    return {
+      prompt: "hello",
+      systemPrompt: "",
+      model: "gpt-5.4",
+      role: "worker",
+      agentId: "agent-mcp-test",
+      taskId: "task-mcp-test",
+      apiUrl: "http://test.invalid",
+      apiKey: "test-key",
+      cwd: "",
+      logFile: `/tmp/codex-mcp-test-${Date.now()}-${Math.random().toString(36).slice(2)}.log`,
+      ...overrides,
+    };
+  }
+
+  // Helper: build a Response-shaped stub for globalThis.fetch.
+  function stubFetch(body: unknown, status = 200): typeof globalThis.fetch {
+    return async (
+      _input: Parameters<typeof globalThis.fetch>[0],
+      _init?: Parameters<typeof globalThis.fetch>[1],
+    ): Promise<Response> => {
+      return new Response(JSON.stringify(body), {
+        status,
+        headers: { "Content-Type": "application/json" },
+      });
+    };
+  }
+
+  test("zero installed MCP servers → only 'agent-swarm' entry", async () => {
+    globalThis.fetch = stubFetch({ servers: [], total: 0 });
+    const emitted: ProviderEvent[] = [];
+    const merged = await buildCodexConfig(cfg(), "gpt-5.4", (e) => emitted.push(e));
+
+    const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
+    expect(Object.keys(mcp)).toEqual(["agent-swarm"]);
+    expect(mcp["agent-swarm"]?.url).toBe("http://test.invalid/mcp");
+    const headers = mcp["agent-swarm"]?.http_headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer test-key");
+    expect(headers["X-Agent-ID"]).toBe("agent-mcp-test");
+    expect(headers["X-Source-Task-Id"]).toBe("task-mcp-test");
+    expect(mcp["agent-swarm"]?.enabled).toBe(true);
+    expect(mcp["agent-swarm"]?.startup_timeout_sec).toBe(30);
+    expect(mcp["agent-swarm"]?.tool_timeout_sec).toBe(120);
+
+    // Baseline overrides are included
+    expect(merged.model).toBe("gpt-5.4");
+    expect(merged.approval_policy).toBe("never");
+    expect(merged.sandbox_mode).toBe("danger-full-access");
+    expect(merged.skip_git_repo_check).toBe(true);
+    expect(merged.show_raw_agent_reasoning).toBe(false);
+
+    // No warnings emitted
+    expect(emitted.filter((e) => e.type === "raw_stderr")).toHaveLength(0);
+  });
+
+  test("one HTTP-transport installed server → both 'agent-swarm' and installed server present", async () => {
+    globalThis.fetch = stubFetch({
+      servers: [
+        {
+          name: "sentry-mcp",
+          transport: "http",
+          isActive: true,
+          isEnabled: true,
+          url: "https://sentry.example.com/mcp",
+          headers: JSON.stringify({ "X-Custom": "static" }),
+          resolvedHeaders: { Authorization: "Bearer sentry-token" },
+        },
+      ],
+      total: 1,
+    });
+
+    const emitted: ProviderEvent[] = [];
+    const merged = await buildCodexConfig(cfg(), "gpt-5.4", (e) => emitted.push(e));
+    const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
+
+    expect(Object.keys(mcp).sort()).toEqual(["agent-swarm", "sentry-mcp"]);
+    expect(mcp["sentry-mcp"]?.url).toBe("https://sentry.example.com/mcp");
+    expect(mcp["sentry-mcp"]?.http_headers).toEqual({
+      "X-Custom": "static",
+      Authorization: "Bearer sentry-token",
+    });
+    expect(mcp["sentry-mcp"]?.enabled).toBe(true);
+    expect(mcp["sentry-mcp"]?.startup_timeout_sec).toBe(30);
+    expect(mcp["sentry-mcp"]?.tool_timeout_sec).toBe(120);
+    expect(mcp["sentry-mcp"]?.command).toBeUndefined();
+  });
+
+  test("one SSE-transport installed server → skipped with warning", async () => {
+    globalThis.fetch = stubFetch({
+      servers: [
+        {
+          name: "legacy-sse",
+          transport: "sse",
+          isActive: true,
+          isEnabled: true,
+          url: "https://legacy.example.com/sse",
+        },
+      ],
+      total: 1,
+    });
+
+    const emitted: ProviderEvent[] = [];
+    const merged = await buildCodexConfig(cfg(), "gpt-5.4", (e) => emitted.push(e));
+    const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
+
+    expect(Object.keys(mcp)).toEqual(["agent-swarm"]);
+    expect(mcp["legacy-sse"]).toBeUndefined();
+
+    const warnings = emitted.filter((e) => e.type === "raw_stderr");
+    expect(warnings).toHaveLength(1);
+    const warn = warnings[0];
+    if (warn && warn.type === "raw_stderr") {
+      expect(warn.content).toContain("legacy-sse");
+      expect(warn.content).toContain("SSE");
+      expect(warn.content).toContain("openai/codex#2129");
+    }
+  });
+
+  test("one stdio-transport installed server → emits command/args/env", async () => {
+    globalThis.fetch = stubFetch({
+      servers: [
+        {
+          name: "filesystem",
+          transport: "stdio",
+          isActive: true,
+          isEnabled: true,
+          command: "/usr/local/bin/mcp-filesystem",
+          args: JSON.stringify(["--root", "/workspace"]),
+          resolvedEnv: { SECRET_KEY: "sk-abc" },
+        },
+      ],
+      total: 1,
+    });
+
+    const emitted: ProviderEvent[] = [];
+    const merged = await buildCodexConfig(cfg(), "gpt-5.4", (e) => emitted.push(e));
+    const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
+
+    expect(Object.keys(mcp).sort()).toEqual(["agent-swarm", "filesystem"]);
+    expect(mcp.filesystem?.command).toBe("/usr/local/bin/mcp-filesystem");
+    expect(mcp.filesystem?.args).toEqual(["--root", "/workspace"]);
+    expect(mcp.filesystem?.env).toEqual({ SECRET_KEY: "sk-abc" });
+    expect(mcp.filesystem?.url).toBeUndefined();
+    expect(mcp.filesystem?.http_headers).toBeUndefined();
+  });
+
+  test("fetch failure → returns config with only 'agent-swarm' and emits warning", async () => {
+    globalThis.fetch = async () => {
+      throw new Error("ECONNREFUSED");
+    };
+
+    const emitted: ProviderEvent[] = [];
+    const merged = await buildCodexConfig(cfg(), "gpt-5.4", (e) => emitted.push(e));
+    const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
+
+    expect(Object.keys(mcp)).toEqual(["agent-swarm"]);
+
+    const warnings = emitted.filter((e) => e.type === "raw_stderr");
+    expect(warnings.length).toBeGreaterThanOrEqual(1);
+    const warn = warnings[0];
+    if (warn && warn.type === "raw_stderr") {
+      expect(warn.content).toContain("Failed to fetch installed MCP servers");
+      expect(warn.content).toContain("ECONNREFUSED");
+    }
+  });
+
+  test("HTTP 500 → returns config with only 'agent-swarm' and emits warning", async () => {
+    globalThis.fetch = stubFetch({ error: "internal server error" }, 500);
+
+    const emitted: ProviderEvent[] = [];
+    const merged = await buildCodexConfig(cfg(), "gpt-5.4", (e) => emitted.push(e));
+    const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
+
+    expect(Object.keys(mcp)).toEqual(["agent-swarm"]);
+
+    const warnings = emitted.filter((e) => e.type === "raw_stderr");
+    expect(warnings.length).toBeGreaterThanOrEqual(1);
+    const warn = warnings[0];
+    if (warn && warn.type === "raw_stderr") {
+      expect(warn.content).toContain("Failed to fetch installed MCP servers");
+      expect(warn.content).toContain("500");
+    }
+  });
+
+  test("inactive/disabled servers are skipped", async () => {
+    globalThis.fetch = stubFetch({
+      servers: [
+        {
+          name: "disabled",
+          transport: "http",
+          isActive: true,
+          isEnabled: false,
+          url: "https://disabled.example.com",
+        },
+        {
+          name: "inactive",
+          transport: "http",
+          isActive: false,
+          isEnabled: true,
+          url: "https://inactive.example.com",
+        },
+      ],
+      total: 2,
+    });
+
+    const emitted: ProviderEvent[] = [];
+    const merged = await buildCodexConfig(cfg(), "gpt-5.4", (e) => emitted.push(e));
+    const mcp = merged.mcp_servers as Record<string, Record<string, unknown>>;
+
+    expect(Object.keys(mcp)).toEqual(["agent-swarm"]);
+  });
+
+  test("model parameter is used in baseline merged config", async () => {
+    globalThis.fetch = stubFetch({ servers: [] });
+    const merged = await buildCodexConfig(cfg(), "gpt-5.3-codex", () => {});
+    expect(merged.model).toBe("gpt-5.3-codex");
   });
 });

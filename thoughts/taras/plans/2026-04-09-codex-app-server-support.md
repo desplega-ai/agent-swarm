@@ -4,7 +4,7 @@ author: taras
 status: in-progress
 issue: https://github.com/desplega-ai/agent-swarm/issues/100
 last_updated: 2026-04-09
-last_updated_by: claude (phase 2)
+last_updated_by: claude (phase 3)
 ---
 
 # Codex Provider Support (App-Server Approach) Implementation Plan
@@ -405,10 +405,10 @@ The adapter calls `resolveCodexModel(config.model)` before passing the model nam
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] Existing pi adapter MCP discovery test (if any) still passes: `bun test src/tests/pi-mono-adapter.test.ts`
-- [ ] New codex adapter MCP-building test: `bun test src/tests/codex-adapter.test.ts` — verifies `buildCodexConfig` produces the expected shape for a mock agent with two installed HTTP servers
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] Existing pi adapter MCP discovery test (if any) still passes: `bun test src/tests/pi-mono-adapter.test.ts`
+- [x] New codex adapter MCP-building test: `bun test src/tests/codex-adapter.test.ts` — verifies `buildCodexConfig` produces the expected shape for a mock agent with two installed HTTP servers
 
 #### Manual Verification:
 - [ ] Smoke script (from Phase 2) now runs a turn where the swarm MCP server is reachable. Ask the agent to call a swarm MCP tool (e.g., `get-agent-info`) and verify it succeeds.
