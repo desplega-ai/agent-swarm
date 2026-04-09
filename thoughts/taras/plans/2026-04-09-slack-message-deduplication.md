@@ -94,7 +94,7 @@ Key files to check:
 
 - **Changing slack-reply behavior** — it continues posting standalone messages via `chat.postMessage`
 - **Embedding reply content in the tree** — tree is status-only, slack-reply is content delivery
-- **Multi-level nesting** — trees show root + direct children only (no grandchildren)
+- ~~**Multi-level nesting**~~ — Updated: trees now flatten all descendants (grandchildren etc.) as children of the root. This was needed to handle "lead awakened on worker finish" review tasks.
 - **Per-message tree** — follow-up user messages create new trees (no infinitely growing trees)
 - **Slack app manifest changes** — existing permissions suffice
 
@@ -762,6 +762,17 @@ kill $(lsof -ti :3013)
 - Brainstorm: `thoughts/taras/brainstorms/2026-04-08-slack-message-deduplication.md`
 - Slack thread follow-up plan: `thoughts/taras/plans/2026-03-12-slack-thread-followup-additive.md`
 - Original Slack integration: `thoughts/shared/plans/2025-12-18-slack-integration.md`
+
+## Post-Plan Fixes (E2E Testing)
+
+_Applied: 2026-04-09 during E2E testing_
+
+- **Batching message reuse**: `thread-buffer.ts` now captures `postMessage` response and registers it as a tree message, so "📡 N follow-up batched" messages get updated in-place with tree status
+- **Child nesting race condition**: Watcher in-progress/completed loops now walk up the `parentTaskId` chain to find ancestor trees, fixing tasks that complete before the 3s poll discovers them
+- **`send-task` parentTaskId auto-default**: `send-task` tool now auto-sets `parentTaskId` from caller's `X-Source-Task-Id` header, ensuring delegated worker tasks are linked to their lead task
+- **Direct assignment code path**: Fixed missed `parentTaskId` → `effectiveParentTaskId` in the direct assignment path (the one actually used by leads)
+- **Descendant discovery**: `buildTreeNodes()` now recursively discovers all descendants (children, grandchildren) and flattens them as children of the root, keeping trees alive for "lead awakened on worker finish" review tasks
+- **Output truncation**: Tree node output truncated to first sentence or 120 chars with ellipsis
 
 ## Review Errata
 
