@@ -1,5 +1,5 @@
 import type { ColDef, ValueSetterParams } from "ag-grid-community";
-import { BarChart3, DollarSign, Key, Search, ShieldAlert, ShieldCheck } from "lucide-react";
+import { BarChart3, DollarSign, Key, Pencil, Search, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useApiKeyCosts, useApiKeyStatuses, useSetApiKeyName } from "@/api/hooks/use-api-keys";
 import type { ApiKeyStatus, ApiKeyStatusType } from "@/api/types";
@@ -137,18 +137,29 @@ export default function ApiKeysPage() {
         field: "name",
         headerName: "Name",
         flex: 1,
-        minWidth: 160,
+        minWidth: 200,
         editable: true,
+        // Single-click enters edit mode (default is double-click) so the cell
+        // is obviously editable. The pencil icon in the renderer reinforces it.
+        singleClickEdit: true,
+        cellEditor: "agTextCellEditor",
+        cellEditorParams: {
+          maxLength: 60,
+        },
         // Pass empty cells through quickFilterText so AG Grid's search matches
         // the row even when the user hasn't labeled the key yet (it falls back
         // to the rest of the columns).
         valueFormatter: (params) => params.value ?? "",
-        cellRenderer: (params: { value: string | null }) =>
-          params.value ? (
-            <span className="text-xs">{params.value}</span>
-          ) : (
-            <span className="text-xs italic text-muted-foreground/60">unnamed</span>
-          ),
+        cellRenderer: (params: { value: string | null }) => (
+          <div className="flex items-center justify-between gap-2 w-full group cursor-text">
+            {params.value ? (
+              <span className="text-xs truncate">{params.value}</span>
+            ) : (
+              <span className="text-xs italic text-muted-foreground/50">click to name…</span>
+            )}
+            <Pencil className="h-3 w-3 text-muted-foreground/40 group-hover:text-muted-foreground shrink-0" />
+          </div>
+        ),
         valueSetter: (params: ValueSetterParams<ApiKeyStatus>) => {
           if (!params.data) return false;
           const trimmed = (params.newValue ?? "").toString().trim();
