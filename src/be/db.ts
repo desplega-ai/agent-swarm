@@ -710,6 +710,7 @@ type AgentTaskRow = {
   slackChannelId: string | null;
   slackThreadTs: string | null;
   slackUserId: string | null;
+  slackReplySent: number;
   vcsProvider: string | null;
   vcsRepo: string | null;
   vcsEventType: string | null;
@@ -768,6 +769,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     slackChannelId: row.slackChannelId ?? undefined,
     slackThreadTs: row.slackThreadTs ?? undefined,
     slackUserId: row.slackUserId ?? undefined,
+    slackReplySent: !!row.slackReplySent,
     vcsProvider: (row.vcsProvider as "github" | "gitlab" | null) ?? undefined,
     vcsRepo: row.vcsRepo ?? undefined,
     vcsEventType: row.vcsEventType ?? undefined,
@@ -966,6 +968,19 @@ export function startTask(taskId: string): AgentTask | null {
 export function getTaskById(id: string): AgentTask | null {
   const row = taskQueries.getById().get(id);
   return row ? rowToAgentTask(row) : null;
+}
+
+export function markTaskSlackReplySent(taskId: string): void {
+  getDb().run(`UPDATE agent_tasks SET slackReplySent = 1 WHERE id = ?`, [taskId]);
+}
+
+export function getChildTasks(parentTaskId: string): AgentTask[] {
+  return getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks WHERE parentTaskId = ? ORDER BY createdAt ASC`,
+    )
+    .all(parentTaskId)
+    .map(rowToAgentTask);
 }
 
 export function updateTaskClaudeSessionId(

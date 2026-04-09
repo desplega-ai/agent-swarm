@@ -102,6 +102,7 @@ export const AgentTaskSchema = z.object({
   slackChannelId: z.string().optional(),
   slackThreadTs: z.string().optional(),
   slackUserId: z.string().optional(),
+  slackReplySent: z.boolean().default(false),
 
   // VCS metadata (GitHub / GitLab — provider-agnostic)
   vcsProvider: z.enum(["github", "gitlab"]).optional(),
