@@ -4,7 +4,7 @@ author: taras
 status: in-progress
 issue: https://github.com/desplega-ai/agent-swarm/issues/100
 last_updated: 2026-04-09
-last_updated_by: claude (phase 4)
+last_updated_by: claude (phase 6)
 ---
 
 # Codex Provider Support (App-Server Approach) Implementation Plan
@@ -668,7 +668,12 @@ cp "$HOME/.claude/skills/$SKILL_NAME/SKILL.md" "$HOME/.codex/skills/$SKILL_NAME/
 - [ ] Baseline config present: `docker run --rm agent-swarm-worker:latest cat /home/worker/.codex/config.toml`
 - [ ] Skills copied: `docker run --rm agent-swarm-worker:latest ls /home/worker/.codex/skills/work-on-task/SKILL.md`
 - [ ] Existing claude/pi workers still build + pass health check: smoke via `scripts/e2e-docker-provider.ts` with `pi` and `claude` providers (script already exists per Grep result)
-- [ ] Shell syntax check: `bash -n docker-entrypoint.sh`
+- [x] Shell syntax check: `bash -n docker-entrypoint.sh`
+- [x] Codex default model guard: `bash scripts/check-codex-default-model.sh`
+- [x] DB boundary check: `bash scripts/check-db-boundary.sh`
+- [x] Type check: `bun run tsc:check`
+- [x] Lint: `bun run lint:fix`
+- [x] Full test suite: `bun test` (2368 pass)
 
 #### Manual Verification:
 - [ ] `HARNESS_PROVIDER=codex` container starts: `docker run --rm -e HARNESS_PROVIDER=codex -e OPENAI_API_KEY=sk-... --env-file .env.docker agent-swarm-worker:latest` logs "Harness Provider: codex" and proceeds past the validation branch.

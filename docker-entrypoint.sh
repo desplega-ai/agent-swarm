@@ -10,6 +10,14 @@ if [ "$HARNESS_PROVIDER" = "pi" ]; then
         echo "Error: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or ~/.pi/agent/auth.json required for pi provider"
         exit 1
     fi
+elif [ "$HARNESS_PROVIDER" = "codex" ]; then
+    # Codex auth: OPENAI_API_KEY env var or pre-seeded ~/.codex/auth.json
+    # (host `codex login` or volume mount). Phase 8 will add a third path that
+    # restores OAuth credentials from the API config store at boot.
+    if [ -z "${OPENAI_API_KEY:-}" ] && [ ! -f "$HOME/.codex/auth.json" ]; then
+        echo "Error: codex provider requires OPENAI_API_KEY or ~/.codex/auth.json"
+        exit 1
+    fi
 else
     # Claude auth (default)
     if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
@@ -23,8 +31,16 @@ if [ -z "$API_KEY" ]; then
     exit 1
 fi
 
-# ---- Verify claude binary is reachable ----
-if [ "$HARNESS_PROVIDER" != "pi" ]; then
+# ---- Verify provider binary is reachable ----
+if [ "$HARNESS_PROVIDER" = "codex" ]; then
+    CODEX_BIN="${CODEX_BINARY:-codex}"
+    if ! command -v "$CODEX_BIN" > /dev/null 2>&1; then
+        echo "FATAL: Codex CLI not found: '$CODEX_BIN'"
+        echo "  PATH=$PATH"
+        exit 1
+    fi
+    echo "Codex CLI: $(command -v "$CODEX_BIN")"
+elif [ "$HARNESS_PROVIDER" != "pi" ]; then
     CLAUDE_BIN="${CLAUDE_BINARY:-claude}"
     if ! command -v "$CLAUDE_BIN" > /dev/null 2>&1; then
         echo "FATAL: Claude CLI not found: '$CLAUDE_BIN'"
@@ -712,6 +728,9 @@ if [ -n "$AGENT_ID" ] && [ -n "$API_KEY" ] && [ -n "$MCP_BASE_URL" ]; then
 
                 mkdir -p "$HOME/.pi/agent/skills/$SKILL_NAME"
                 cp "$HOME/.claude/skills/$SKILL_NAME/SKILL.md" "$HOME/.pi/agent/skills/$SKILL_NAME/SKILL.md"
+
+                mkdir -p "$HOME/.codex/skills/$SKILL_NAME"
+                cp "$HOME/.claude/skills/$SKILL_NAME/SKILL.md" "$HOME/.codex/skills/$SKILL_NAME/SKILL.md"
                 echo "[entrypoint] Synced skill: $SKILL_NAME"
             fi
         done

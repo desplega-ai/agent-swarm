@@ -94,6 +94,26 @@ RUN sudo npm install -g @mariozechner/pi-coding-agent@${PI_CODING_AGENT_VERSION}
     && mkdir -p /home/worker/.pi/agent
 ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@mariozechner/pi-coding-agent
 
+# Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
+# Pinned version must match @openai/codex-sdk in package.json — enforced by
+# scripts/check-codex-default-model.sh and the CI merge gate.
+ARG CODEX_VERSION=0.118.0
+RUN sudo npm install -g @openai/codex@${CODEX_VERSION}
+RUN which codex && codex --version
+
+# Baseline ~/.codex/config.toml for the worker user. The `model` key must stay
+# in sync with CODEX_DEFAULT_MODEL in src/providers/codex-models.ts (enforced by
+# scripts/check-codex-default-model.sh).
+RUN mkdir -p /home/worker/.codex && \
+    printf '%s\n' \
+      'model = "gpt-5.4"' \
+      'approval_policy = "never"' \
+      'sandbox_mode = "danger-full-access"' \
+      'skip_git_repo_check = true' \
+      'show_raw_agent_reasoning = false' \
+      > /home/worker/.codex/config.toml && \
+    chown -R worker:worker /home/worker/.codex
+
 # Install Claude marketplace plugins (build-time cache)
 RUN mkdir -p /home/worker/.claude \
     && claude plugin marketplace add desplega-ai/ai-toolbox || true \
@@ -152,6 +172,19 @@ COPY --chown=worker:worker plugin/skills/ /home/worker/.claude/skills/
 
 # Copy pi-mono skills (used when HARNESS_PROVIDER=pi)
 COPY --chown=worker:worker plugin/pi-skills/ /home/worker/.pi/agent/skills/
+
+# Copy codex skills (used when HARNESS_PROVIDER=codex)
+# Structure: plugin/commands/<name>.md -> ~/.codex/skills/<name>/SKILL.md
+COPY --chown=worker:worker plugin/commands/ /tmp/codex-skills-src/
+RUN mkdir -p /home/worker/.codex/skills && \
+    for f in /tmp/codex-skills-src/*.md; do \
+      [ -e "$f" ] || continue; \
+      name=$(basename "$f" .md); \
+      mkdir -p "/home/worker/.codex/skills/$name"; \
+      cp "$f" "/home/worker/.codex/skills/$name/SKILL.md"; \
+    done && \
+    rm -rf /tmp/codex-skills-src && \
+    chown -R worker:worker /home/worker/.codex/skills
 
 # Create directories and copy entrypoint
 RUN mkdir -p /workspace /logs && chown worker:worker /workspace /logs
