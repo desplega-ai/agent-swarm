@@ -1114,14 +1114,40 @@ Phases 1-7 + 9. Phase 8 (ChatGPT subscription OAuth) was deferred to a follow-up
 
 ### Verify-plan addendum (2026-04-09, Claude)
 
-Post-implementation audit re-ran every automated check and added the Docker round-trip that was originally deferred. Findings:
+Post-implementation audit re-ran every automated check, built the Docker image, and executed the task-completion + cancellation E2E against a local API server. Two real bugs were found and fixed during the pass (commit `b9e97df` — `fix(providers/codex): wire codexPathOverride + bootstrap auth.json`):
 
+**Bug 1 — SDK can't resolve `@openai/codex` inside the Bun-compiled binary.**
+The `@openai/codex-sdk` bundled inside `agent-swarm`'s compiled executable calls `require.resolve("@openai/codex/package.json")` to locate the Codex CLI binary. That resolution fails at runtime because the globally-installed `@openai/codex` package (at `/usr/lib/node_modules/@openai/codex`) is not part of the Bun bundle's virtual module graph, and Node's resolver walks from the bundle's path — never seeing the global install. First E2E task failed with `Unable to locate Codex CLI binaries. Ensure @openai/codex is installed with optional dependencies.`
+
+Fix: `CodexAdapter.createSession` reads `CODEX_PATH_OVERRIDE` from env and forwards it to `new Codex({ codexPathOverride })`. `Dockerfile.worker` sets `ENV CODEX_PATH_OVERRIDE=/usr/bin/codex` so the SDK spawns the global CLI wrapper script (`/usr/lib/node_modules/@openai/codex/bin/codex.js`) directly. Local dev with `@openai/codex-sdk` installed as a regular node_modules dependency continues to work via the SDK's own `findCodexPath` fallback (env var unset → SDK resolves `@openai/codex` from its own `createRequire` context).
+
+**Bug 2 — Codex CLI's `exec --experimental-json` does NOT read `OPENAI_API_KEY` from env.**
+The host-side SDK smoke test during the initial verify-plan run worked because the host's `~/.codex/auth.json` was already populated from a prior `codex login` session — that had masked the real behavior. Inside a fresh container with only `OPENAI_API_KEY` in env, the codex CLI's `exec` subcommand (which the SDK spawns under the hood) 401s at `wss://api.openai.com/v1/responses` because there's no persistent `auth.json` to read credentials from. The Codex CLI's top-level help string is clear in hindsight: `codex login --with-api-key` explicitly reads the key from stdin and stores it in `auth.json`.
+
+Fix: `docker-entrypoint.sh`'s codex branch now bootstraps `~/.codex/auth.json` at boot time by piping `OPENAI_API_KEY` through `codex login --with-api-key`. The bootstrap runs as the worker user (via `gosu worker`) so the resulting `auth.json` is owned by `worker:worker` and readable by the later `gosu worker /usr/local/bin/agent-swarm worker` invocation. Idempotent: skips if `auth.json` already exists (volume-mounted, pre-seeded, or from a previous boot).
+
+**Minor gotcha encountered along the way.** The initial attempt at the auth bootstrap ran as root (before the `gosu worker` privilege drop at the end of the entrypoint), which created `/home/worker/.codex/auth.json` with `root:root` ownership and mode `0600`. The worker process then hit `Permission denied (os error 13)` because it couldn't open its own auth file. Moving the bootstrap inside a `gosu worker bash -c '...'` invocation fixed it.
+
+**E2E scenarios verified end-to-end against a running API server** (`PORT=3994`, fresh DB, single codex worker container, `OPENAI_API_KEY` from `.env`):
+
+1. **Task completion** — `task_id=68114788-ddf0-45e5-b4d6-3e40a83879a3`, prompt `"Reply with only the single word: ok"`. Completed in ~24s. Full event sequence in the container logs: `turn.started → item.completed (agent_message "Using work-on-task...") → item.completed (×3 more) → item.completed (agent_message "DONE") → turn.completed (usage: input_tokens=174949, cached_input_tokens=145152, output_tokens=...)`. Task record persisted `status=completed`, `claudeSessionId=019d73c6-d224-70d3-8c31-0024f14f9fb5` (codex thread_id stored in the `claude_session_id` column — reused for cross-provider session tracking), `peakContextPercent=0.87892`, `totalContextTokensUsed=175784`, `contextWindowSize=200000` (from `codex-models.ts`), `output="Completed the direct response task by producing the required single-word reply: ok"`, `progress="🔧 store-progress"`.
+
+2. **Cancellation** — `task_id=9fd7edf9-4688-40b9-93cb-df6ecd5395d5`, prompt `"Count slowly from 1 to 100, explaining each number in detail"`. Let run 12s, then `POST /api/tasks/{id}/cancel`. Task transitioned to `cancelled` with `failureReason="Cancelled by user"` within **1 second**. Container log: `[worker] Task 9fd7edf9 completed with exit code 130 (trigger: task_assigned)` → `[worker] Detected error for task 9fd7edf9: cancelled` → worker returns to `Polling for triggers`. Abort signal propagates correctly through the adapter's `AbortController.abort()` → `CodexExec` `signal` path (OA3 confirmed in production).
+
+3. **Worker recovery** — immediately after the cancellation, a new task `a7120f11-0e9b-47b7-8f82-58c249f833dc` was submitted to the same worker. Completed successfully, proving the worker survives the cancellation cycle and returns to normal polling.
+
+**Minor finding (non-blocking):** the task record stores `peakContextPercent` and `totalContextTokensUsed` correctly (emitted by the adapter's `context_usage` event forwarded to `POST /api/tasks/{id}/progress`), but `cost`, `inputTokens`, `outputTokens` fields on the task API response were empty. The adapter's `buildCostData()` forwards `input_tokens` / `output_tokens` / `cached_input_tokens` from `turn.completed.usage` into a `ProviderEvent.result.cost` event (`codex-adapter.ts:370-382`). Whether the runner/API persists that into task-level fields for non-claude providers is a follow-up investigation — the event IS emitted; the question is whether the runner's `result`-event handling path writes the cost to the task row for `provider=codex` tasks the same way it does for claude. Not a blocker for the core provider feature; tracked below.
+
+**Plan-level audit summary:**
 - **All automated success criteria pass** — `tsc:check`, `lint:fix`, 2372/2372 tests, db-boundary, codex-default-model guard, `bash -n docker-entrypoint.sh`, full Docker build, in-image probe for `codex --version`/config.toml/skills, claude+pi binary presence regression.
 - **Container-startup smoke passed for all three providers** from the fresh image (`Harness Provider: claude|pi|codex`), and the codex branch fails fast when `OPENAI_API_KEY` is missing.
-- **Codex SDK ↔ OPENAI_API_KEY auth confirmed working end-to-end** — direct `thread.runStreamed()` against `gpt-5.4` returned a complete `thread.started → turn.started → item.completed (agent_message "ok") → turn.completed (18350/21 tokens)` sequence. **Important gotcha logged**: the SDK path (`codex app-server`) reads `OPENAI_API_KEY` from env, but the top-level `codex exec` command does NOT — it requires `printenv OPENAI_API_KEY | codex login --with-api-key` first. Our adapter only uses the SDK path, so no entrypoint change is needed, but this is worth knowing if someone later tries to debug Codex inside the container with `codex exec`.
-- **Review Errata OA1/OA2/OA3 promoted to Applied (I11/I12/I13)** — all three were resolved during implementation per the Deviations log.
+- **Review Errata OA1/OA2/OA3 promoted to Applied (I11/I12/I13)** — all three were resolved during implementation per the Deviations log; OA3 (`AbortController` through `runStreamed()`) also verified in the cancellation E2E above.
 - **Quick Verification Reference file list updated** — added the six files that were added during implementation but missed from the original file map.
-- **Still pending for Taras**: a task-completion E2E against a running API server, cancellation-latency check, and the PR merge-gate CI run.
+- **CI merge-gate** — runs on GitHub (PR: desplega-ai/agent-swarm#321). Status not checked at addendum time.
+
+**Remaining follow-ups** (not blockers for this PR):
+- Investigate whether the runner persists `result.cost` (input/output tokens) onto task-level fields for non-claude providers. Context-usage is already flowing; cost/token totals on the task row may just need one handler path.
+- `scripts/e2e-docker-provider.ts` does not yet support a `codex` test case (only `claude | pi | both`); extending it would give CI smoke coverage for the full task-completion path instead of relying on the manual E2E block in this plan.
 
 ## References
 
