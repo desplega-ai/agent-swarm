@@ -6,6 +6,7 @@ import {
 } from "../be/db";
 import { getSlackApp } from "./app";
 import { buildBufferFlushBlocks } from "./blocks";
+import { registerTreeMessage } from "./watcher";
 
 interface BufferedMessage {
   text: string;
@@ -197,13 +198,21 @@ async function flushBuffer(key: string, immediate = false): Promise<void> {
       : `${buffer.messages.length} follow-up message(s) batched into task`;
 
     try {
-      await app.client.chat.postMessage({
+      const result = await app.client.chat.postMessage({
         channel: buffer.channelId,
         thread_ts: buffer.threadTs,
         text: fallbackText,
         // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
         blocks: blocks as any,
       });
+
+      // Register the batching message as the tree message for this task
+      if (result.ts && task) {
+        registerTreeMessage(task.id, buffer.channelId, buffer.threadTs, result.ts);
+        console.log(
+          `[Slack] Registered batched task ${task.id.slice(0, 8)} tree message from buffer flush`,
+        );
+      }
     } catch (error) {
       console.error("[Slack] Failed to post buffer flush feedback:", error);
     }

@@ -155,10 +155,13 @@ export const registerSendTaskTool = (server: McpServer) => {
 
       const effectiveVcsRepo = vcsRepo;
 
+      // Auto-default parentTaskId to caller's current task for tree tracking
+      const effectiveParentTaskId = parentTaskId ?? requestInfo.sourceTaskId;
+
       // Auto-route to parent's worker if parentTaskId is set and no explicit agentId
       let effectiveAgentId = agentId;
-      if (parentTaskId && !agentId) {
-        const parentTask = getTaskById(parentTaskId);
+      if (effectiveParentTaskId && !agentId) {
+        const parentTask = getTaskById(effectiveParentTaskId);
         if (parentTask?.agentId) {
           effectiveAgentId = parentTask.agentId;
         }
@@ -197,7 +200,7 @@ export const registerSendTaskTool = (server: McpServer) => {
             priority,
             dependsOn,
             dir,
-            parentTaskId,
+            parentTaskId: effectiveParentTaskId,
             vcsRepo: effectiveVcsRepo,
             model,
             slackChannelId,
@@ -248,7 +251,7 @@ export const registerSendTaskTool = (server: McpServer) => {
             priority,
             dependsOn,
             dir,
-            parentTaskId,
+            parentTaskId: effectiveParentTaskId,
             vcsRepo: effectiveVcsRepo,
             model,
             slackChannelId,
@@ -273,7 +276,7 @@ export const registerSendTaskTool = (server: McpServer) => {
           priority,
           dependsOn,
           dir,
-          parentTaskId,
+          parentTaskId: effectiveParentTaskId,
           vcsRepo: effectiveVcsRepo,
           model,
           slackChannelId,

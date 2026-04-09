@@ -297,6 +297,21 @@ All enforced by `.github/workflows/merge-gate.yml`.
 
 </important>
 
+<important if="you are testing Slack integration manually or via E2E">
+
+## Slack testing
+
+**Dev channel:** `#swarm-dev-2` (ID: `C0AR967K0KZ`), **Bot:** `@dev-swarm` (member ID: `U0ALZGQCF96`).
+
+**Via Slack MCP:** Use the `slack_send_message` tool to trigger bot interactions:
+```
+slack_send_message(channel_id: "C0AR967K0KZ", message: "<@U0ALZGQCF96> hi")
+```
+
+This sends a message to `#swarm-dev-2` mentioning the bot, which triggers the Slack handler → task assignment flow.
+
+</important>
+
 ## Related
 
 - [BUSINESS_USE.md](./BUSINESS_USE.md) — Flow diagrams and instrumentation

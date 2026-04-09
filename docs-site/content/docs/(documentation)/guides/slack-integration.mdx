@@ -61,6 +61,8 @@ When you @mention the bot in a thread where a worker is already handling a task,
 
 If the assigned worker is offline or unavailable, the follow-up routes to the lead agent instead of dropping the message. The lead picks up the thread context and continues the conversation, preserving `parentTaskId` continuity for chained tasks.
 
+By default, thread follow-ups route automatically without requiring an @mention. Set `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true` to require an explicit @mention for thread follow-up routing — non-mention thread messages will be silently dropped instead of auto-routing.
+
 ### Slack Context Propagation
 
 Slack metadata (`slackChannelId`, `slackThreadTs`, `slackUserId`) is **auto-inherited** from the creator's current task. When a lead delegates work from a Slack-originated task, workers automatically receive the Slack context and post progress updates to the originating thread — no manual metadata passing needed.
@@ -81,8 +83,26 @@ When enabled via `ADDITIVE_SLACK=true`, thread replies that do NOT @mention the 
 
 - Messages are buffered for a configurable debounce window (`ADDITIVE_SLACK_BUFFER_MS`, default 10s)
 - Buffered messages are flushed into a single task with dependency chaining to the active task
-- Use the `!now` command to flush the buffer immediately without dependency chaining
-- Reactions provide visual feedback: :eyes: for captured, :heavy_plus_sign: for appended, :zap: for `!now`
+- Use the `!now` command to flush the buffer immediately — skips dependency chaining so the task starts right away
+- Reactions provide visual feedback: :eyes: for first captured message, :heavy_plus_sign: for subsequent appended messages, :zap: for `!now`
+- When `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true`, the additive buffer is disabled for non-mention messages
+
+### Tree-Based Status Messages
+
+Tasks that spawn subtasks are rendered as a visual tree in a single evolving Slack message. The tree shows each subtask's status with icons, indentation, and truncated output:
+
+```
+✅ Research phase (3m)
+├─ ✅ Analyze codebase — Found 12 relevant files
+├─ ✅ Review dependencies — All up to date
+└─ 🔄 Write report
+```
+
+Status icons: ⏳ pending, 🔄 in progress, ✅ completed, ❌ failed, 🚫 cancelled. Trees show up to 8 children per node with an overflow indicator for larger task graphs.
+
+### Message Deduplication
+
+When an agent posts its results directly to a Slack thread via the `slack-reply` tool, the task's completion message automatically switches to a minimal one-liner instead of repeating the full output. This prevents duplicate content in threads — the agent's detailed reply appears once, and the status message simply confirms completion.
 
 ### Single Evolving Message
 

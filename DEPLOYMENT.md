@@ -473,6 +473,13 @@ SLACK_DISABLE=true
 # Optional: Filter allowed users
 SLACK_ALLOWED_EMAIL_DOMAINS=company.com,partner.com  # Comma-separated email domains
 SLACK_ALLOWED_USER_IDS=U12345678,U87654321           # Comma-separated user IDs to always allow
+
+# Optional: Additive thread buffering (batch non-mention thread messages)
+# ADDITIVE_SLACK=true
+# ADDITIVE_SLACK_BUFFER_MS=10000
+
+# Optional: Require @mention for thread follow-up routing (default: false)
+# SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true
 ```
 
 ### User Filtering
@@ -527,7 +534,7 @@ GITHUB_APP_PRIVATE_KEY=base64-encoded-key
 
 ### Bot Reactions
 
-If GitHub App credentials are provided, the bot can react to comments/issues to acknowledge receipt.
+If GitHub App credentials are provided, the bot can react to comments/issues to acknowledge receipt. Additionally, a 👀 reaction is automatically added to the originating GitHub entity (comment, issue, PR, or review) when an agent picks up a GitHub-sourced task.
 
 ---
 
