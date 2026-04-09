@@ -154,6 +154,12 @@ async function shutdown() {
   // Stop Slack bot
   await stopSlackApp();
 
+  // Stop OAuth keepalive
+  if (process.env.OAUTH_KEEPALIVE_DISABLE !== "true") {
+    const { stopOAuthKeepalive } = await import("../oauth/keepalive");
+    stopOAuthKeepalive();
+  }
+
   // Close all active transports (SSE connections, etc.)
   for (const [id, transport] of Object.entries(transports)) {
     console.log(`[HTTP] Closing transport ${id}`);
@@ -241,6 +247,12 @@ httpServer
       const { startHeartbeat } = await import("../heartbeat");
       const heartbeatMs = Number(process.env.HEARTBEAT_INTERVAL_MS) || 90000;
       startHeartbeat(heartbeatMs);
+    }
+
+    // Start OAuth token keepalive (proactive refresh to prevent expiry)
+    if (process.env.OAUTH_KEEPALIVE_DISABLE !== "true") {
+      const { startOAuthKeepalive } = await import("../oauth/keepalive");
+      startOAuthKeepalive();
     }
   })
   .on("error", (err) => {

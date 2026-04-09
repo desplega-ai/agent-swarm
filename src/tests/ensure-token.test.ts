@@ -151,6 +151,40 @@ describe("ensureToken", () => {
     expect(tokens?.accessToken).toBe("old-token");
   });
 
+  test("refreshes token when custom bufferMs makes it 'expiring soon'", async () => {
+    storeOAuthTokens("test-provider", {
+      accessToken: "old-token",
+      refreshToken: "refresh-token",
+      expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(), // 12h from now
+    });
+
+    const fetchSpy = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            access_token: "refreshed-token",
+            token_type: "Bearer",
+            expires_in: 3600,
+            refresh_token: "new-refresh-token",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    globalThis.fetch = fetchSpy;
+
+    // With default 5-min buffer, 12h remaining would NOT trigger refresh
+    await ensureToken("test-provider");
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    // With 13h buffer, 12h remaining IS within the buffer → triggers refresh
+    await ensureToken("test-provider", 13 * 60 * 60 * 1000);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    const tokens = getOAuthTokens("test-provider");
+    expect(tokens?.accessToken).toBe("refreshed-token");
+  });
+
   test("handles token with no refresh token", async () => {
     storeOAuthTokens("test-provider", {
       accessToken: "old-token",
