@@ -1,7 +1,7 @@
-import type { ColDef } from "ag-grid-community";
+import type { ColDef, ValueSetterParams } from "ag-grid-community";
 import { BarChart3, DollarSign, Key, Search, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useApiKeyCosts, useApiKeyStatuses } from "@/api/hooks/use-api-keys";
+import { useApiKeyCosts, useApiKeyStatuses, useSetApiKeyName } from "@/api/hooks/use-api-keys";
 import type { ApiKeyStatus, ApiKeyStatusType } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
@@ -50,8 +50,25 @@ function formatKeyType(keyType: string): string {
   if (keyType === "ANTHROPIC_API_KEY") return "Anthropic";
   if (keyType === "CLAUDE_CODE_OAUTH_TOKEN") return "OAuth";
   if (keyType === "OPENROUTER_API_KEY") return "OpenRouter";
+  if (keyType === "OPENAI_API_KEY") return "OpenAI";
   return keyType;
 }
+
+const PROVIDER_LABELS: Record<string, string> = {
+  claude: "Claude",
+  pi: "pi-mono",
+  codex: "Codex",
+};
+
+function formatProvider(provider: string): string {
+  return PROVIDER_LABELS[provider] ?? provider;
+}
+
+const PROVIDER_BADGE_TONE: Record<string, string> = {
+  claude: "text-amber-600 dark:text-amber-400",
+  pi: "text-violet-600 dark:text-violet-400",
+  codex: "text-emerald-600 dark:text-emerald-400",
+};
 
 function formatExpiry(until: string | null): string {
   if (!until) return "-";
@@ -67,9 +84,11 @@ function formatExpiry(until: string | null): string {
 export default function ApiKeysPage() {
   const { data: keys, isLoading } = useApiKeyStatuses();
   const { data: costs } = useApiKeyCosts();
+  const setKeyName = useSetApiKeyName();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [providerFilter, setProviderFilter] = useState<string>("all");
 
   const costMap = useMemo(() => {
     if (!costs) return new Map<string, number>();
@@ -85,14 +104,20 @@ export default function ApiKeysPage() {
     return [...new Set(keys.map((k) => k.keyType))];
   }, [keys]);
 
+  const providers = useMemo(() => {
+    if (!keys) return [];
+    return [...new Set(keys.map((k) => k.provider))].sort();
+  }, [keys]);
+
   const filteredKeys = useMemo(() => {
     if (!keys) return [];
     return keys.filter((k) => {
       if (statusFilter !== "all" && k.status !== statusFilter) return false;
       if (typeFilter !== "all" && k.keyType !== typeFilter) return false;
+      if (providerFilter !== "all" && k.provider !== providerFilter) return false;
       return true;
     });
-  }, [keys, statusFilter, typeFilter]);
+  }, [keys, statusFilter, typeFilter, providerFilter]);
 
   const stats = useMemo(() => {
     const totalCost = costs ? costs.reduce((sum, c) => sum + c.totalCost, 0) : 0;
@@ -108,6 +133,54 @@ export default function ApiKeysPage() {
 
   const columnDefs = useMemo<ColDef<ApiKeyStatus>[]>(
     () => [
+      {
+        field: "name",
+        headerName: "Name",
+        flex: 1,
+        minWidth: 160,
+        editable: true,
+        // Pass empty cells through quickFilterText so AG Grid's search matches
+        // the row even when the user hasn't labeled the key yet (it falls back
+        // to the rest of the columns).
+        valueFormatter: (params) => params.value ?? "",
+        cellRenderer: (params: { value: string | null }) =>
+          params.value ? (
+            <span className="text-xs">{params.value}</span>
+          ) : (
+            <span className="text-xs italic text-muted-foreground/60">unnamed</span>
+          ),
+        valueSetter: (params: ValueSetterParams<ApiKeyStatus>) => {
+          if (!params.data) return false;
+          const trimmed = (params.newValue ?? "").toString().trim();
+          // Avoid no-op patches when the user clicks out of an edit unchanged.
+          if ((params.data.name ?? "") === trimmed) return false;
+          setKeyName.mutate({
+            keyType: params.data.keyType,
+            keySuffix: params.data.keySuffix,
+            scope: params.data.scope,
+            scopeId: params.data.scopeId,
+            name: trimmed.length > 0 ? trimmed : null,
+          });
+          // Optimistic update — react-query invalidates and refetches.
+          params.data.name = trimmed.length > 0 ? trimmed : null;
+          return true;
+        },
+      },
+      {
+        field: "provider",
+        headerName: "Provider",
+        width: 110,
+        cellRenderer: (params: { value: string }) => (
+          <Badge
+            variant="outline"
+            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+          >
+            <span className={cn("font-mono", PROVIDER_BADGE_TONE[params.value])}>
+              {formatProvider(params.value)}
+            </span>
+          </Badge>
+        ),
+      },
       {
         field: "keyType",
         headerName: "Type",
@@ -201,7 +274,7 @@ export default function ApiKeysPage() {
           ),
       },
     ],
-    [costMap],
+    [costMap, setKeyName],
   );
 
   return (
@@ -272,12 +345,25 @@ export default function ApiKeysPage() {
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search keys..."
+            placeholder="Search by name, suffix, type…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
           />
         </div>
+        <Select value={providerFilter} onValueChange={setProviderFilter}>
+          <SelectTrigger className="w-[160px]">
+            <SelectValue placeholder="Provider" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Providers</SelectItem>
+            {providers.map((p) => (
+              <SelectItem key={p} value={p}>
+                {formatProvider(p)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-[160px]">
             <SelectValue placeholder="Status" />

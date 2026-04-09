@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
 
 export function useApiKeyStatuses(keyType?: string) {
@@ -14,5 +14,16 @@ export function useApiKeyCosts(keyType?: string) {
     queryKey: ["api-key-costs", keyType],
     queryFn: () => api.fetchApiKeyCosts(keyType),
     select: (data) => data.costs,
+  });
+}
+
+/** Set or clear the human-friendly label on a pooled credential. */
+export function useSetApiKeyName() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.setApiKeyName.bind(api),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["api-key-statuses"] });
+    },
   });
 }

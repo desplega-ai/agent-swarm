@@ -24,6 +24,28 @@ export const PROVIDER_CREDENTIAL_VARS: Record<string, readonly string[]> = {
   codex: ["OPENAI_API_KEY"],
 };
 
+/**
+ * Derive a canonical harness provider from a credential env var name. Used
+ * by the api_key_status table's `provider` column so the dashboard can
+ * group/filter pooled credentials by harness without re-deriving at every
+ * read site. ANTHROPIC_API_KEY is shared between claude and pi — we default
+ * it to claude (the primary consumer) since the runner overrides on every
+ * usage with the active worker's HARNESS_PROVIDER.
+ */
+export function deriveProviderFromKeyType(keyType: string): string {
+  switch (keyType) {
+    case "CLAUDE_CODE_OAUTH_TOKEN":
+    case "ANTHROPIC_API_KEY":
+      return "claude";
+    case "OPENROUTER_API_KEY":
+      return "pi";
+    case "OPENAI_API_KEY":
+      return "codex";
+    default:
+      return "claude";
+  }
+}
+
 /** Result of credential selection, including tracking info */
 export interface CredentialSelection {
   selected: string;

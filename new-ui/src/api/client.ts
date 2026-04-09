@@ -1152,6 +1152,26 @@ class ApiClient {
     return res.json();
   }
 
+  async setApiKeyName(args: {
+    keyType: string;
+    keySuffix: string;
+    name: string | null;
+    scope?: string;
+    scopeId?: string;
+  }): Promise<{ success: boolean; keyType: string; keySuffix: string; name: string | null }> {
+    const url = `${this.getBaseUrl()}/api/keys/name`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: this.getHeaders(),
+      body: JSON.stringify(args),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to set key name" }));
+      throw new Error(err.error || `Failed to set key name: ${res.status}`);
+    }
+    return res.json();
+  }
+
   async fetchAgentMcpServers(agentId: string): Promise<AgentMcpServersResponse> {
     const url = `${this.getBaseUrl()}/api/agents/${agentId}/mcp-servers`;
     const res = await fetch(url, { headers: this.getHeaders() });
