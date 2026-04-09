@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Slack message deduplication with `slackReplySent` flag — when agents post results via `slack-reply`, the task completion message shows a minimal one-liner instead of duplicating the full output (#314)
+- Tree-based Slack status messages — parent tasks render child task progress in a visual tree with status icons, indentation, and overflow handling (#314)
+- Slack thread buffer (`ADDITIVE_SLACK=true`) — non-mention thread replies are captured, debounced, and batched into a single follow-up task with dependency chaining (#314)
+- `!now` command in Slack threads to flush the additive buffer immediately without dependency chaining (#314)
+- `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION` env var — when `true`, thread follow-up routing and additive buffering require an explicit @mention (#313)
+- `slackChannelId`, `slackThreadTs`, `slackUserId` parameters on `send-task` MCP tool for explicit Slack context propagation (#314)
+- GitHub eyes reaction (👀) automatically added when agents pick up GitHub-sourced tasks — supports issue comments, PR review comments, PR reviews, and issue/PR bodies (#310)
+- Discoverability Optimizer agent template added to `docker-compose.example.yml` (#311)
+
+### Changed
+- Slack completion messages now conditionally show minimal or full output based on whether the agent already posted via `slack-reply` (#314)
+- Buffer flush messages show dependency status ("queued pending completion" vs "batched into task") (#314)
+
 ## [1.59.3] - 2026-04-08
 
 ### Fixed
