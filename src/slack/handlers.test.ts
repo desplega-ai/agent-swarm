@@ -5,6 +5,7 @@ import {
   buildEffectiveText,
   checkUserAccess,
   formatFileSize,
+  isBotMessage,
   type UserFilterConfig,
 } from "./handlers";
 
@@ -274,5 +275,54 @@ describe("buildEffectiveText", () => {
     expect(buildEffectiveText(undefined)).toBe("");
     expect(buildEffectiveText(undefined, [])).toBe("");
     expect(buildEffectiveText("")).toBe("");
+  });
+});
+
+describe("isBotMessage", () => {
+  describe("detects bot messages", () => {
+    test("returns true for subtype bot_message", () => {
+      expect(isBotMessage({ subtype: "bot_message" })).toBe(true);
+    });
+
+    test("returns true when bot_id is present", () => {
+      expect(isBotMessage({ bot_id: "B0123456" })).toBe(true);
+    });
+
+    test("returns true when both subtype and bot_id are present", () => {
+      expect(isBotMessage({ subtype: "bot_message", bot_id: "B0123456" })).toBe(true);
+    });
+  });
+
+  describe("allows human messages", () => {
+    test("returns false for regular user message (no subtype, no bot_id)", () => {
+      expect(isBotMessage({})).toBe(false);
+    });
+
+    test("returns false for message_changed subtype (not a bot message)", () => {
+      expect(isBotMessage({ subtype: "message_changed" })).toBe(false);
+    });
+
+    test("returns false when subtype is undefined and bot_id is undefined", () => {
+      expect(isBotMessage({ subtype: undefined, bot_id: undefined })).toBe(false);
+    });
+  });
+
+  describe("regression: agent completion messages do not re-trigger tasks", () => {
+    test("agent posting via chat.postMessage with bot_id is detected as bot", () => {
+      // When agents post completion messages to Slack threads via chat.postMessage,
+      // the resulting event has bot_id set. This must be filtered to prevent
+      // duplicate task creation (the re-trigger bug).
+      expect(isBotMessage({ bot_id: "B_SWARM_BOT" })).toBe(true);
+    });
+
+    test("agent posting with username override still detected as bot via bot_id", () => {
+      // slack-reply tool posts with username override but bot_id is still present
+      expect(isBotMessage({ bot_id: "B_SWARM_BOT" })).toBe(true);
+    });
+
+    test("human follow-up in same thread is NOT filtered", () => {
+      // Human says "hey lead why did you process this 3 times" — no bot_id, no bot subtype
+      expect(isBotMessage({})).toBe(false);
+    });
   });
 });

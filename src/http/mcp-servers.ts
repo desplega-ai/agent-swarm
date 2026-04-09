@@ -174,14 +174,25 @@ export async function handleMcpServers(
         const resolvedEnv: Record<string, string> = {};
         const resolvedHeaders: Record<string, string> = {};
 
-        // Resolve env config keys (JSON object: {"ENV_VAR": "config-key-name"})
+        // Resolve env config keys
+        // Supports both array format ["KEY_A", "KEY_B"] (key = config key = element)
+        // and object format {"ENV_VAR": "config-key-name"}
         if (server.envConfigKeys) {
           try {
-            const mapping = JSON.parse(server.envConfigKeys) as Record<string, string>;
-            for (const [envVar, configKey] of Object.entries(mapping)) {
-              const value = configMap.get(configKey);
-              if (value !== undefined) {
-                resolvedEnv[envVar] = value;
+            const parsed = JSON.parse(server.envConfigKeys);
+            if (Array.isArray(parsed)) {
+              for (const key of parsed) {
+                const value = configMap.get(key);
+                if (value !== undefined) {
+                  resolvedEnv[key] = value;
+                }
+              }
+            } else {
+              for (const [envVar, configKey] of Object.entries(parsed as Record<string, string>)) {
+                const value = configMap.get(configKey);
+                if (value !== undefined) {
+                  resolvedEnv[envVar] = value;
+                }
               }
             }
           } catch {
@@ -189,14 +200,26 @@ export async function handleMcpServers(
           }
         }
 
-        // Resolve header config keys (JSON object: {"Header-Name": "config-key-name"})
+        // Resolve header config keys
+        // Supports both array format ["Header-A", "Header-B"] and object format {"Header-Name": "config-key-name"}
         if (server.headerConfigKeys) {
           try {
-            const mapping = JSON.parse(server.headerConfigKeys) as Record<string, string>;
-            for (const [headerName, configKey] of Object.entries(mapping)) {
-              const value = configMap.get(configKey);
-              if (value !== undefined) {
-                resolvedHeaders[headerName] = value;
+            const parsed = JSON.parse(server.headerConfigKeys);
+            if (Array.isArray(parsed)) {
+              for (const key of parsed) {
+                const value = configMap.get(key);
+                if (value !== undefined) {
+                  resolvedHeaders[key] = value;
+                }
+              }
+            } else {
+              for (const [headerName, configKey] of Object.entries(
+                parsed as Record<string, string>,
+              )) {
+                const value = configMap.get(configKey);
+                if (value !== undefined) {
+                  resolvedHeaders[headerName] = value;
+                }
               }
             }
           } catch {

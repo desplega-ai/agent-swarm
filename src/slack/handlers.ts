@@ -143,6 +143,7 @@ async function isUserAllowed(client: WebClient, userId: string): Promise<boolean
 interface MessageEvent {
   type: string;
   subtype?: string;
+  bot_id?: string;
   text?: string;
   user?: string;
   channel: string;
@@ -150,6 +151,20 @@ interface MessageEvent {
   thread_ts?: string;
   files?: SlackFile[];
   assistant_thread?: Record<string, unknown>;
+}
+
+/**
+ * Check if a Slack message event is from a bot/agent.
+ * Exported for testing.
+ *
+ * Bot messages can be identified by:
+ * - `subtype === "bot_message"` (traditional Slack API)
+ * - `bot_id` present (newer Slack API, may lack subtype)
+ */
+export function isBotMessage(event: { subtype?: string; bot_id?: string }): boolean {
+  if (event.subtype === "bot_message") return true;
+  if (event.bot_id) return true;
+  return false;
 }
 
 interface ThreadMessage {
@@ -310,15 +325,13 @@ function checkRateLimit(userId: string): boolean {
 export function registerMessageHandler(app: App): void {
   // Handle all message events
   app.event("message", async ({ event, client, say }) => {
-    // Ignore bot messages and message_changed events
-    if (
-      "subtype" in event &&
-      (event.subtype === "bot_message" || event.subtype === "message_changed")
-    ) {
+    const msg = event as MessageEvent;
+
+    // Ignore bot messages (covers both subtype-based and bot_id-based detection)
+    // and message_changed events
+    if (isBotMessage(msg) || msg.subtype === "message_changed") {
       return;
     }
-
-    const msg = event as MessageEvent;
     const hasText = !!msg.text?.trim();
     const hasFiles = !!(msg.files && msg.files.length > 0);
 
