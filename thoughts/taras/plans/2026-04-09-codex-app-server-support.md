@@ -749,11 +749,11 @@ Add comprehensive test coverage. Most tests live in new files; a few are additio
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] All tests pass: `bun test`
-- [ ] Coverage hits new files: `bun test src/tests/codex-adapter.test.ts src/tests/codex-skill-resolver.test.ts src/tests/codex-swarm-events.test.ts src/tests/provider-adapter.test.ts src/tests/provider-command-format.test.ts`
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] DB boundary check: `bash scripts/check-db-boundary.sh`
+- [x] All tests pass: `bun test` (2372 pass, 0 fail across 128 files)
+- [x] Coverage hits new files: `bun test src/tests/codex-adapter.test.ts src/tests/codex-skill-resolver.test.ts src/tests/codex-swarm-events.test.ts src/tests/provider-adapter.test.ts src/tests/provider-command-format.test.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] DB boundary check: `bash scripts/check-db-boundary.sh`
 
 #### Manual Verification:
 - [ ] Run the full suite in watch mode and confirm no flaky tests: `bun test --watch`

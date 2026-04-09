@@ -275,6 +275,125 @@ describe("CodexSession event mapping", () => {
     expect(result.isError).toBe(true);
     expect(result.failureReason).toBe("model unavailable");
   });
+
+  test("abort() resolves the session with cancelled result", async () => {
+    // Patch startThread with a fake whose runStreamed yields a long stream
+    // that respects the AbortSignal — yields one event, awaits, and only
+    // continues if the signal isn't aborted.
+    const sdk = await import("@openai/codex-sdk");
+    const originalStartThread = (
+      sdk.Codex.prototype as unknown as { startThread: (...args: unknown[]) => unknown }
+    ).startThread;
+
+    const fakeThread = {
+      id: null,
+      runStreamed: async (_input: string, opts?: { signal?: AbortSignal }) => {
+        async function* generate(): AsyncGenerator<ThreadEvent> {
+          yield { type: "thread.started", thread_id: "thread-abort" };
+          yield { type: "turn.started" };
+          // Wait until the signal aborts or 5s elapses (test safety net).
+          await new Promise<void>((resolve) => {
+            const onAbort = () => {
+              opts?.signal?.removeEventListener("abort", onAbort);
+              resolve();
+            };
+            if (opts?.signal?.aborted) {
+              resolve();
+              return;
+            }
+            opts?.signal?.addEventListener("abort", onAbort);
+            setTimeout(resolve, 5000);
+          });
+          // Simulate the SDK throwing AbortError when the signal fires.
+          if (opts?.signal?.aborted) {
+            const err = new Error("aborted");
+            err.name = "AbortError";
+            throw err;
+          }
+        }
+        return { events: generate() };
+      },
+    };
+
+    (
+      sdk.Codex.prototype as unknown as { startThread: (...args: unknown[]) => unknown }
+    ).startThread = function startThread(): unknown {
+      return fakeThread as unknown;
+    };
+
+    try {
+      const adapter = new CodexAdapter();
+      const config = testConfig({
+        logFile: join(tmpLogDir, "abort.log"),
+        cwd: "",
+        taskId: "", // skip swarm event handler so we don't fire fetches
+        apiUrl: "",
+        apiKey: "",
+      });
+      const session = await adapter.createSession(config);
+      const emitted: ProviderEvent[] = [];
+      session.onEvent((e) => emitted.push(e));
+
+      // Give the session a tick to start streaming, then abort.
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      await session.abort();
+      const result = await session.waitForCompletion();
+
+      expect(result.isError).toBe(true);
+      expect(result.failureReason).toBe("cancelled");
+      expect(result.exitCode).toBe(130);
+
+      const cancelledResult = emitted.findLast((e) => e.type === "result");
+      expect(cancelledResult).toBeDefined();
+      if (cancelledResult && cancelledResult.type === "result") {
+        expect(cancelledResult.isError).toBe(true);
+        expect(cancelledResult.errorCategory).toBe("cancelled");
+      }
+    } finally {
+      (
+        sdk.Codex.prototype as unknown as { startThread: (...args: unknown[]) => unknown }
+      ).startThread = originalStartThread;
+    }
+  });
+});
+
+describe("CodexAdapter.canResume", () => {
+  test("returns false for empty / non-string session ids", async () => {
+    const adapter = new CodexAdapter();
+    expect(await adapter.canResume("")).toBe(false);
+    // @ts-expect-error: deliberate runtime check for non-string input
+    expect(await adapter.canResume(undefined)).toBe(false);
+  });
+
+  test("returns true when resumeThread succeeds and false when it throws", async () => {
+    const sdk = await import("@openai/codex-sdk");
+    const originalResume = (
+      sdk.Codex.prototype as unknown as { resumeThread: (...args: unknown[]) => unknown }
+    ).resumeThread;
+
+    try {
+      // Success path
+      (
+        sdk.Codex.prototype as unknown as { resumeThread: (...args: unknown[]) => unknown }
+      ).resumeThread = function resumeThread(): unknown {
+        return { id: "thread-resumed" };
+      };
+      const adapter = new CodexAdapter();
+      expect(await adapter.canResume("thread-resumed")).toBe(true);
+
+      // Failure path
+      (
+        sdk.Codex.prototype as unknown as { resumeThread: (...args: unknown[]) => unknown }
+      ).resumeThread = function resumeThread(): unknown {
+        throw new Error("not found");
+      };
+      expect(await adapter.canResume("thread-missing")).toBe(false);
+    } finally {
+      (
+        sdk.Codex.prototype as unknown as { resumeThread: (...args: unknown[]) => unknown }
+      ).resumeThread = originalResume;
+    }
+  });
 });
 
 describe("writeCodexAgentsMd round-trip", () => {
