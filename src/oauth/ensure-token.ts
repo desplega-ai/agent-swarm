@@ -25,9 +25,13 @@ function getOAuthConfig(provider: string): OAuthProviderConfig | null {
  * Ensure a valid OAuth token exists for the given provider.
  * If the token is expiring soon, attempt to refresh it.
  * Call this before any API interaction with an OAuth-protected service.
+ *
+ * @param bufferMs - How far ahead to check for expiry. Default 5 min (reactive use).
+ *                   Keepalive callers should pass a larger value (e.g. 13h) to force
+ *                   a proactive refresh well before the token actually expires.
  */
-export async function ensureToken(provider: string): Promise<void> {
-  if (!isTokenExpiringSoon(provider)) return;
+export async function ensureToken(provider: string, bufferMs?: number): Promise<void> {
+  if (!isTokenExpiringSoon(provider, bufferMs)) return;
 
   const config = getOAuthConfig(provider);
   const tokens = getOAuthTokens(provider);

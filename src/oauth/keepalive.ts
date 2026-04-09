@@ -1,7 +1,8 @@
 import { ensureToken } from "./ensure-token";
 
 const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
-const SLACK_CHANNEL_ID = "C08JCRURPBV";
+const THIRTEEN_HOURS_MS = 13 * 60 * 60 * 1000;
+const SLACK_ALERTS_CHANNEL = process.env.SLACK_ALERTS_CHANNEL || "C08JCRURPBV";
 
 let keepaliveInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -12,7 +13,7 @@ let keepaliveInterval: ReturnType<typeof setInterval> | null = null;
 async function runKeepalive(): Promise<void> {
   console.log("[OAuth Keepalive] Running scheduled token refresh for linear...");
   try {
-    await ensureToken("linear");
+    await ensureToken("linear", THIRTEEN_HOURS_MS);
     console.log("[OAuth Keepalive] linear token check completed successfully");
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -32,7 +33,7 @@ async function notifySlack(text: string): Promise<void> {
       return;
     }
     await app.client.chat.postMessage({
-      channel: SLACK_CHANNEL_ID,
+      channel: SLACK_ALERTS_CHANNEL,
       text,
     });
     console.log("[OAuth Keepalive] Slack notification sent");

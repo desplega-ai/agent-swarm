@@ -154,6 +154,12 @@ async function shutdown() {
   // Stop Slack bot
   await stopSlackApp();
 
+  // Stop OAuth keepalive
+  if (process.env.OAUTH_KEEPALIVE_DISABLE !== "true") {
+    const { stopOAuthKeepalive } = await import("../oauth/keepalive");
+    stopOAuthKeepalive();
+  }
+
   // Close all active transports (SSE connections, etc.)
   for (const [id, transport] of Object.entries(transports)) {
     console.log(`[HTTP] Closing transport ${id}`);
