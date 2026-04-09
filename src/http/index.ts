@@ -242,6 +242,12 @@ httpServer
       const heartbeatMs = Number(process.env.HEARTBEAT_INTERVAL_MS) || 90000;
       startHeartbeat(heartbeatMs);
     }
+
+    // Start OAuth token keepalive (proactive refresh to prevent expiry)
+    if (process.env.OAUTH_KEEPALIVE_DISABLE !== "true") {
+      const { startOAuthKeepalive } = await import("../oauth/keepalive");
+      startOAuthKeepalive();
+    }
   })
   .on("error", (err) => {
     console.error("HTTP Server Error:", err);
