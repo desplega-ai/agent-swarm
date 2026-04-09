@@ -69,3 +69,73 @@ export const CODEX_MODEL_CONTEXT_WINDOWS: Record<CodexModel, number> = {
 export function getCodexContextWindow(model: CodexModel): number {
   return CODEX_MODEL_CONTEXT_WINDOWS[model] ?? 200_000;
 }
+
+/**
+ * Per-model pricing in USD per million tokens, sourced from
+ * https://developers.openai.com/api/docs/pricing on 2026-04-09 (Standard tier,
+ * short-context column — long-context multipliers and Batch / Flex / Priority
+ * tiers exist but the Codex SDK does not expose which tier was used so we
+ * default to the headline rate).
+ *
+ * The Codex SDK does NOT report dollar cost in `Usage`, so this map is what
+ * powers `totalCostUsd` on the `result` event. Update whenever OpenAI changes
+ * the pricing page or adds new models.
+ *
+ * `gpt-5.2-codex` is not on the current pricing page (legacy / retired); it
+ * inherits the `gpt-5.3-codex` rate as a best-effort fallback so old tasks
+ * pinned to it still report a non-zero cost instead of silently $0.
+ */
+export interface CodexModelPricing {
+  /** USD per million input tokens (uncached). */
+  inputPerMillion: number;
+  /** USD per million cached input tokens (typically ~10% of input). */
+  cachedInputPerMillion: number;
+  /** USD per million output tokens. */
+  outputPerMillion: number;
+}
+
+export const CODEX_MODEL_PRICING: Record<CodexModel, CodexModelPricing> = {
+  "gpt-5.4": {
+    inputPerMillion: 2.5,
+    cachedInputPerMillion: 0.25,
+    outputPerMillion: 15.0,
+  },
+  "gpt-5.4-mini": {
+    inputPerMillion: 0.75,
+    cachedInputPerMillion: 0.075,
+    outputPerMillion: 4.5,
+  },
+  "gpt-5.3-codex": {
+    inputPerMillion: 1.75,
+    cachedInputPerMillion: 0.175,
+    outputPerMillion: 14.0,
+  },
+  // Legacy — not on the current pricing page; inherit from gpt-5.3-codex.
+  "gpt-5.2-codex": {
+    inputPerMillion: 1.75,
+    cachedInputPerMillion: 0.175,
+    outputPerMillion: 14.0,
+  },
+};
+
+/**
+ * Compute USD cost from a Codex `Usage` payload. The Codex SDK reports
+ * `input_tokens` as the TOTAL input fed to the model across the turn (cached
+ * + uncached), so we subtract `cached_input_tokens` before billing the
+ * uncached portion at the full rate. Returns 0 for unknown models so we never
+ * inflate cost on a typo.
+ */
+export function computeCodexCostUsd(
+  model: CodexModel,
+  inputTokens: number,
+  cachedInputTokens: number,
+  outputTokens: number,
+): number {
+  const pricing = CODEX_MODEL_PRICING[model];
+  if (!pricing) return 0;
+  const uncachedInput = Math.max(0, inputTokens - cachedInputTokens);
+  const inputCost = (uncachedInput / 1_000_000) * pricing.inputPerMillion;
+  const cachedCost = (cachedInputTokens / 1_000_000) * pricing.cachedInputPerMillion;
+  const outputCost = (outputTokens / 1_000_000) * pricing.outputPerMillion;
+  return inputCost + cachedCost + outputCost;
+}

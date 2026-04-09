@@ -19,6 +19,7 @@ import { buildCodexConfig, CodexAdapter } from "../providers/codex-adapter";
 import { writeCodexAgentsMd } from "../providers/codex-agents-md";
 import {
   CODEX_DEFAULT_MODEL,
+  computeCodexCostUsd,
   getCodexContextWindow,
   resolveCodexModel,
 } from "../providers/codex-models";
@@ -181,11 +182,17 @@ describe("CodexSession event mapping", () => {
       expect(messages[0].content).toBe("Hello from codex");
     }
 
-    // context_usage event fired
+    // context_usage event fired with the *uncached + output* peak proxy
+    // (input=100, cached=25, output=50 → uncached=75 → peak=125)
     const contextUsage = emitted.find((e) => e.type === "context_usage");
     expect(contextUsage).toBeDefined();
+    if (contextUsage && contextUsage.type === "context_usage") {
+      expect(contextUsage.contextUsedTokens).toBe(125);
+      expect(contextUsage.contextTotalTokens).toBe(200_000);
+      expect(contextUsage.contextPercent).toBeCloseTo(125 / 200_000, 6);
+    }
 
-    // result event is final and non-error
+    // result event is final and non-error, with cost computed from token counts
     const resultEvent = emitted.findLast((e) => e.type === "result");
     expect(resultEvent).toBeDefined();
     if (resultEvent && resultEvent.type === "result") {
@@ -195,12 +202,71 @@ describe("CodexSession event mapping", () => {
       expect(resultEvent.cost.cacheReadTokens).toBe(25);
       expect(resultEvent.cost.numTurns).toBe(1);
       expect(resultEvent.cost.model).toBe("gpt-5.4");
+      // gpt-5.4 priced at $2.50 / $0.25 / $15.00 per million.
+      // (75 uncached × $2.50 + 25 cached × $0.25 + 50 output × $15) / 1M
+      // = (187.5 + 6.25 + 750) / 1e6 = 943.75e-6 ≈ $0.0009438
+      expect(resultEvent.cost.totalCostUsd).toBeCloseTo(0.00094375, 8);
     }
 
     // ProviderResult
     expect(result.isError).toBe(false);
     expect(result.exitCode).toBe(0);
     expect(result.sessionId).toBe("thread-abc");
+  });
+
+  test("chatty turn: peakContextPercent uses uncached + output, not raw input_tokens", async () => {
+    // Reproduces the verify-plan finding: a chatty turn where the SDK reports
+    // input_tokens far in excess of the model's context window because the
+    // total represents the SUM of every prompt across all model invocations
+    // in the turn (with cache reuses billed at every roundtrip). Without the
+    // peak-proxy fix this would clamp `contextPercent` to 1.0 even though no
+    // single model call hit the limit. Use realistic numbers from the actual
+    // E2E lead transcript captured during verification.
+    const agentMsg: AgentMessageItem = {
+      id: "msg-1",
+      type: "agent_message",
+      text: "DONE",
+    };
+    const events: ThreadEvent[] = [
+      { type: "thread.started", thread_id: "thread-chatty" },
+      { type: "turn.started" },
+      { type: "item.completed", item: agentMsg as ThreadItem },
+      {
+        type: "turn.completed",
+        usage: {
+          input_tokens: 357142, // total > 200k window — would clamp pre-fix
+          cached_input_tokens: 278912, // most of input is cache reuse
+          output_tokens: 2156,
+        },
+      },
+    ];
+
+    const config = testConfig({
+      logFile: join(tmpLogDir, "chatty.log"),
+      cwd: "",
+    });
+
+    const { emitted } = await runSessionWithFakeThread(events, config);
+
+    const contextUsage = emitted.find((e) => e.type === "context_usage");
+    expect(contextUsage).toBeDefined();
+    if (contextUsage && contextUsage.type === "context_usage") {
+      // peak proxy = (357142 - 278912) + 2156 = 78230 + 2156 = 80386
+      expect(contextUsage.contextUsedTokens).toBe(80386);
+      expect(contextUsage.contextTotalTokens).toBe(200_000);
+      // 80386 / 200000 = 0.40193 — well below 1.0, NOT clamped
+      expect(contextUsage.contextPercent).toBeCloseTo(0.40193, 4);
+      expect(contextUsage.contextPercent).toBeLessThan(1);
+    }
+
+    // Cost still uses the full input_tokens — billing semantics are
+    // preserved (cached portion gets the cached rate, uncached gets full).
+    const resultEvent = emitted.findLast((e) => e.type === "result");
+    if (resultEvent && resultEvent.type === "result") {
+      expect(resultEvent.cost.inputTokens).toBe(357142);
+      expect(resultEvent.cost.cacheReadTokens).toBe(278912);
+      expect(resultEvent.cost.totalCostUsd).toBeGreaterThan(0);
+    }
   });
 
   test("tool_start/tool_end pair for command execution", async () => {
@@ -274,6 +340,42 @@ describe("CodexSession event mapping", () => {
 
     expect(result.isError).toBe(true);
     expect(result.failureReason).toBe("model unavailable");
+  });
+
+  test("turn.failed with context-overflow message rewrites to [context-overflow]", async () => {
+    // The Codex CLI surfaces context-window-exceeded errors with patterns
+    // like "context length exceeded" or "maximum context length". The
+    // adapter detects them and rewrites with a clearer prefix that the
+    // dashboard can flag and that points users at Linear DES-143 for the
+    // long-term auto-compaction follow-up.
+    const events: ThreadEvent[] = [
+      { type: "thread.started", thread_id: "thread-overflow" },
+      { type: "turn.started" },
+      {
+        type: "turn.failed",
+        error: { message: "Request failed: context length exceeded for gpt-5.4" },
+      },
+    ];
+
+    const config = testConfig({
+      logFile: join(tmpLogDir, "overflow.log"),
+      cwd: "",
+    });
+
+    const { emitted, result } = await runSessionWithFakeThread(events, config);
+
+    const errorEvent = emitted.find((e) => e.type === "error");
+    expect(errorEvent).toBeDefined();
+    if (errorEvent && errorEvent.type === "error") {
+      expect(errorEvent.message).toContain("[context-overflow]");
+      expect(errorEvent.message).toContain("gpt-5.4");
+      expect(errorEvent.message).toContain("200,000 tokens");
+      // original error preserved at the end
+      expect(errorEvent.message).toContain("context length exceeded");
+    }
+
+    expect(result.isError).toBe(true);
+    expect(result.failureReason).toContain("[context-overflow]");
   });
 
   test("abort() resolves the session with cancelled result", async () => {
@@ -568,6 +670,60 @@ describe("getCodexContextWindow", () => {
 
   test("gpt-5.2-codex → 200_000", () => {
     expect(getCodexContextWindow("gpt-5.2-codex")).toBe(200_000);
+  });
+});
+
+describe("computeCodexCostUsd", () => {
+  test("gpt-5.4 with 1M uncached input + 1M output = $2.50 + $15 = $17.50", () => {
+    // 1_000_000 input - 0 cached = 1_000_000 uncached × $2.50/M = $2.50
+    // 1_000_000 output × $15.00/M = $15.00
+    const cost = computeCodexCostUsd("gpt-5.4", 1_000_000, 0, 1_000_000);
+    expect(cost).toBeCloseTo(17.5, 4);
+  });
+
+  test("gpt-5.4 with cached input applies the cached discount", () => {
+    // 1M input, 800k cached → 200k uncached.
+    // 200_000 × $2.50/M = $0.50
+    // 800_000 × $0.25/M = $0.20
+    // 100_000 output × $15/M = $1.50
+    // total = $2.20
+    const cost = computeCodexCostUsd("gpt-5.4", 1_000_000, 800_000, 100_000);
+    expect(cost).toBeCloseTo(2.2, 4);
+  });
+
+  test("gpt-5.4-mini is roughly 3x cheaper than gpt-5.4 at the same usage", () => {
+    const fullCost = computeCodexCostUsd("gpt-5.4", 1_000_000, 0, 100_000);
+    const miniCost = computeCodexCostUsd("gpt-5.4-mini", 1_000_000, 0, 100_000);
+    // gpt-5.4: 1M × $2.50 + 100k × $15 = $2.50 + $1.50 = $4.00
+    // gpt-5.4-mini: 1M × $0.75 + 100k × $4.50 = $0.75 + $0.45 = $1.20
+    expect(fullCost).toBeCloseTo(4.0, 4);
+    expect(miniCost).toBeCloseTo(1.2, 4);
+    expect(miniCost).toBeLessThan(fullCost);
+  });
+
+  test("gpt-5.3-codex inherits its own pricing tier", () => {
+    // 1M input × $1.75 + 100k output × $14.00 = $1.75 + $1.40 = $3.15
+    const cost = computeCodexCostUsd("gpt-5.3-codex", 1_000_000, 0, 100_000);
+    expect(cost).toBeCloseTo(3.15, 4);
+  });
+
+  test("legacy gpt-5.2-codex falls back to gpt-5.3-codex pricing (best-effort)", () => {
+    // Same as gpt-5.3-codex calc above so legacy tasks still report a non-zero cost.
+    const cost = computeCodexCostUsd("gpt-5.2-codex", 1_000_000, 0, 100_000);
+    expect(cost).toBeCloseTo(3.15, 4);
+  });
+
+  test("zero usage → zero cost", () => {
+    expect(computeCodexCostUsd("gpt-5.4", 0, 0, 0)).toBe(0);
+  });
+
+  test("cached_input_tokens > input_tokens cannot drive uncached negative", () => {
+    // Defensive: if cached somehow exceeds input we clamp uncached at 0.
+    const cost = computeCodexCostUsd("gpt-5.4", 100, 200, 100);
+    // cached billed at $0.25/M = 200 × $0.25/1M = $0.00005
+    // output 100 × $15/1M = $0.0015
+    // uncached clamped to 0, no input cost
+    expect(cost).toBeCloseTo(0.00005 + 0.0015, 8);
   });
 });
 

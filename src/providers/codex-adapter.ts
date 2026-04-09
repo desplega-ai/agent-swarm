@@ -68,6 +68,7 @@ import { type CodexAgentsMdHandle, writeCodexAgentsMd } from "./codex-agents-md"
 import {
   CODEX_DEFAULT_MODEL,
   type CodexModel,
+  computeCodexCostUsd,
   getCodexContextWindow,
   resolveCodexModel,
 } from "./codex-models";
@@ -369,17 +370,27 @@ class CodexSession implements ProviderSession {
 
   /** Build CostData from the most recent turn usage. */
   private buildCostData(usage: Usage | null, isError: boolean): CostData {
+    const inputTokens = usage?.input_tokens ?? 0;
+    const cachedInputTokens = usage?.cached_input_tokens ?? 0;
+    const outputTokens = usage?.output_tokens ?? 0;
     return {
       // Runner overrides with its own session id.
       sessionId: "",
       taskId: this.config.taskId,
       agentId: this.config.agentId,
-      // Codex SDK does not report dollar cost directly; leave at 0 and let
-      // the backend compute it from token counts + model if/when needed.
-      totalCostUsd: 0,
-      inputTokens: usage?.input_tokens ?? 0,
-      outputTokens: usage?.output_tokens ?? 0,
-      cacheReadTokens: usage?.cached_input_tokens ?? 0,
+      // Codex SDK does not report dollar cost directly. We compute it from
+      // token counts × per-model pricing in `codex-models.ts`. The pricing
+      // table is sourced from developers.openai.com/api/docs/pricing — bump
+      // it whenever OpenAI updates published rates.
+      totalCostUsd: computeCodexCostUsd(
+        this.resolvedModel,
+        inputTokens,
+        cachedInputTokens,
+        outputTokens,
+      ),
+      inputTokens,
+      outputTokens,
+      cacheReadTokens: cachedInputTokens,
       // Codex does not distinguish cache writes in its Usage payload.
       cacheWriteTokens: 0,
       durationMs: Date.now() - this.startedAt,
@@ -465,7 +476,24 @@ class CodexSession implements ProviderSession {
         break;
       }
       case "item.updated": {
-        // UI does not need delta updates today — just keep the raw_log above.
+        // Surface partial agent_message deltas as `custom` events so a future
+        // UI can show streaming tokens. We deliberately use `custom` (instead
+        // of new ProviderEvent variants) to avoid touching the cross-provider
+        // contract — the dashboard can opt-in by listening for the event name.
+        // The full text still flows through `item.completed` → `message`
+        // below, so consumers that don't subscribe to deltas see no behavior
+        // change.
+        const updatedItem = event.item as ThreadItem;
+        if (updatedItem.type === "agent_message") {
+          const msg = updatedItem as AgentMessageItem;
+          if (msg.text) {
+            this.emit({
+              type: "custom",
+              name: "codex.message_delta",
+              data: { itemId: updatedItem.id, text: msg.text },
+            });
+          }
+        }
         break;
       }
       case "item.completed": {
@@ -488,18 +516,41 @@ class CodexSession implements ProviderSession {
             break;
           }
           case "reasoning": {
-            // Surfaced only in raw_log above; skip to avoid double-messaging the UI.
-            void (item as ReasoningItem);
+            // Promote Codex reasoning items to first-class `custom` events so
+            // the dashboard can render them in a separate "thinking" panel
+            // without conflating them with the agent's actual output. Codex
+            // emits these between turns when the model produces an explicit
+            // reasoning trace (gpt-5.x reasoning effort > none).
+            const r = item as ReasoningItem;
+            const text =
+              (r as { text?: string; summary?: string }).text ??
+              (r as { summary?: string }).summary ??
+              "";
+            if (text) {
+              this.emit({
+                type: "custom",
+                name: "codex.reasoning",
+                data: { itemId: r.id, text },
+              });
+            }
             break;
           }
           case "todo_list": {
-            // Codex's todo list has no mapping in ProviderEvent today — raw_log only.
-            void (item as TodoListItem);
+            // Promote Codex todo lists to a `custom` event so a future
+            // dashboard widget can render the checkbox state. The shape of
+            // the items (title, status, etc.) lives in the SDK's
+            // `TodoListItem` and is preserved verbatim.
+            const todo = item as TodoListItem;
+            this.emit({
+              type: "custom",
+              name: "codex.todo_list",
+              data: { itemId: todo.id, items: (todo as { items?: unknown }).items ?? [] },
+            });
             break;
           }
           case "error": {
             const errItem = item as ErrorItem;
-            this.emit({ type: "error", message: errItem.message });
+            this.emit({ type: "error", message: this.formatTerminalError(errItem.message) });
             break;
           }
         }
@@ -508,26 +559,76 @@ class CodexSession implements ProviderSession {
       case "turn.completed": {
         this.lastUsage = event.usage;
         if (event.usage) {
-          const total = event.usage.input_tokens + event.usage.output_tokens;
+          // The Codex SDK reports `input_tokens` as the SUM of every prompt
+          // sent to the model across the entire turn (one `codex exec` call
+          // can fan out to dozens of model invocations as MCP tools roundtrip
+          // back and forth). For chatty turns this number routinely exceeds
+          // the model's context window, even though no single model call did.
+          //
+          // For peak-context reporting we want a proxy for "the largest
+          // single-call prompt". We approximate it as the uncached portion
+          // (cached tokens are reused across calls so they count once toward
+          // the actual peak), plus the output. This isn't perfect — the SDK
+          // would have to expose per-call stats for that — but it's far more
+          // representative than `(input + output) / window` which clamps to
+          // 1.0 the moment a turn makes any meaningful tool history.
+          const uncachedInput = Math.max(
+            0,
+            event.usage.input_tokens - event.usage.cached_input_tokens,
+          );
+          const peakProxy = uncachedInput + event.usage.output_tokens;
           this.emit({
             type: "context_usage",
-            contextUsedTokens: total,
+            contextUsedTokens: peakProxy,
             contextTotalTokens: this.contextWindow,
-            contextPercent: Math.min(1, total / this.contextWindow),
+            contextPercent: Math.min(1, peakProxy / this.contextWindow),
             outputTokens: event.usage.output_tokens,
           });
         }
         break;
       }
       case "turn.failed": {
-        this.emit({ type: "error", message: event.error.message });
+        const message = this.formatTerminalError(event.error.message);
+        this.emit({ type: "error", message });
         break;
       }
       case "error": {
-        this.emit({ type: "error", message: event.message });
+        const message = this.formatTerminalError(event.message);
+        this.emit({ type: "error", message });
         break;
       }
     }
+  }
+
+  /**
+   * Detect context-window-exceeded errors from the Codex CLI / SDK and rewrite
+   * them with a clearer, actionable message. Codex does not auto-compact like
+   * Claude does — when context fills, the next model call hard-fails. We can't
+   * compact retroactively, so we just mark the failure with a recognizable
+   * `[context-overflow]` prefix that the runner can flag in dashboards. See
+   * Linear DES-143 (codex auto-compaction follow-up) for the long-term fix.
+   *
+   * Patterns observed in the wild (case-insensitive):
+   *   - "context length exceeded"
+   *   - "maximum context length"
+   *   - "too many tokens"
+   *   - "input too long"
+   *   - "request too large"
+   */
+  private formatTerminalError(raw: string): string {
+    const normalized = raw.toLowerCase();
+    const overflowPatterns = [
+      "context length exceeded",
+      "maximum context length",
+      "too many tokens",
+      "input too long",
+      "request too large",
+      "context_length_exceeded",
+    ];
+    if (overflowPatterns.some((p) => normalized.includes(p))) {
+      return `[context-overflow] Codex turn exceeded the model's context window for ${this.resolvedModel} (${this.contextWindow.toLocaleString()} tokens). Codex does not auto-compact conversation history like Claude does — start a fresh task or split the work into smaller turns. Original error: ${raw}`;
+    }
+    return raw;
   }
 
   private async runSession(): Promise<void> {
@@ -558,10 +659,10 @@ class CodexSession implements ProviderSession {
             sawTurnCompleted = true;
           }
           if (event.type === "turn.failed" && !terminalError) {
-            terminalError = event.error.message;
+            terminalError = this.formatTerminalError(event.error.message);
           }
           if (event.type === "error" && !terminalError) {
-            terminalError = event.message;
+            terminalError = this.formatTerminalError(event.message);
           }
         }
       } catch (err) {
