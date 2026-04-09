@@ -276,7 +276,7 @@ export const registerSendTaskTool = (server: McpServer) => {
           priority,
           dependsOn,
           dir,
-          parentTaskId,
+          parentTaskId: effectiveParentTaskId,
           vcsRepo: effectiveVcsRepo,
           model,
           slackChannelId,

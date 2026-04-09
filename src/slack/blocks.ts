@@ -280,6 +280,18 @@ const STATUS_ICON: Record<TreeNode["status"], string> = {
 };
 
 const MAX_VISIBLE_CHILDREN = 8;
+const MAX_OUTPUT_LENGTH = 120;
+
+/**
+ * Truncate output to the first sentence or MAX_OUTPUT_LENGTH, whichever is shorter.
+ */
+function truncateOutput(text: string): string {
+  // Find first sentence boundary (. followed by space or end)
+  const sentenceEnd = text.search(/\.\s/);
+  const firstSentence = sentenceEnd !== -1 ? text.slice(0, sentenceEnd + 1) : text;
+  if (firstSentence.length <= MAX_OUTPUT_LENGTH) return firstSentence;
+  return `${text.slice(0, MAX_OUTPUT_LENGTH)}…`;
+}
 
 /**
  * Render a single node line: icon + bold name + task link + optional duration.
@@ -308,7 +320,7 @@ function renderChildDetail(node: TreeNode, indent: string): string[] {
   }
 
   if (node.status === "completed" && !node.slackReplySent && node.output) {
-    lines.push(`${indent}${node.output}`);
+    lines.push(`${indent}${truncateOutput(node.output)}`);
   }
 
   return lines;
@@ -332,7 +344,7 @@ function renderTree(root: TreeNode): string {
       lines.push(`    Error: ${root.failureReason}`);
     }
     if (root.status === "completed" && !root.slackReplySent && root.output) {
-      lines.push(`    ${root.output}`);
+      lines.push(`    ${truncateOutput(root.output)}`);
     }
     return lines.join("\n");
   }
