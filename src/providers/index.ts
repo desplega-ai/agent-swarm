@@ -8,6 +8,7 @@ export type {
 } from "./types";
 
 import { ClaudeAdapter } from "./claude-adapter";
+import { CodexAdapter } from "./codex-adapter";
 import { PiMonoAdapter } from "./pi-mono-adapter";
 import type { ProviderAdapter } from "./types";
 
@@ -18,7 +19,9 @@ export function createProviderAdapter(provider: string): ProviderAdapter {
       return new ClaudeAdapter();
     case "pi":
       return new PiMonoAdapter();
+    case "codex":
+      return new CodexAdapter();
     default:
-      throw new Error(`Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi`);
+      throw new Error(`Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi, codex`);
   }
 }
