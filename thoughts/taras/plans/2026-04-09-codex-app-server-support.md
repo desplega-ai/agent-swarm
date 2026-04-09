@@ -1,10 +1,10 @@
 ---
 date: 2026-04-09
 author: taras
-status: in-progress
+status: completed
 issue: https://github.com/desplega-ai/agent-swarm/issues/100
 last_updated: 2026-04-09
-last_updated_by: claude (phase 6)
+last_updated_by: claude (phase 9)
 ---
 
 # Codex Provider Support (App-Server Approach) Implementation Plan
@@ -950,12 +950,12 @@ Run manual E2E against a real backend. See the "Manual E2E" section below.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Full test suite passes: `bun test`
-- [ ] Full lint/typecheck/db boundary: `bun run lint:fix && bun run tsc:check && bash scripts/check-db-boundary.sh`
-- [ ] Docker build succeeds: `bun run docker:build:worker`
-- [ ] OpenAPI regeneration (if we touched any HTTP handlers — unlikely): `bun run docs:openapi`
-- [ ] pi-skills regeneration if we touched `plugin/commands/*.md` (unlikely for this plan, but CI enforces freshness): `bun run build:pi-skills`
-- [ ] CI merge-gate workflow passes on the PR
+- [x] Full test suite passes: `bun test` (2372 pass)
+- [x] Full lint/typecheck/db boundary: `bun run lint:fix && bun run tsc:check && bash scripts/check-db-boundary.sh`
+- [ ] Docker build succeeds: `bun run docker:build:worker` — deferred to manual verification (slow, requires daemon)
+- [x] OpenAPI regeneration not needed — no HTTP handlers touched in this plan
+- [x] pi-skills regeneration not needed — `plugin/commands/*.md` not modified
+- [ ] CI merge-gate workflow passes on the PR — runs after push
 
 #### Manual Verification:
 - [ ] README example for Codex works end-to-end
@@ -1058,6 +1058,52 @@ kill $(lsof -ti :3013) 2>/dev/null || true
 - **E2E tests** — manual commands documented above; a follow-up PR can add a `scripts/e2e-codex-provider.ts` mirroring `scripts/e2e-provider-test.ts` if we want CI coverage.
 - **Regression tests** — every phase verifies Claude and pi still work identically (docker builds, test suite, smoke E2E).
 - **Type discipline verification** — a code reviewer confirms all SDK-originating types are imported from `@openai/codex-sdk` and no parallel interface was introduced. A simple grep during code review: `grep -nE 'interface (Thread|Turn|Codex|Item|Event)' src/providers/codex-adapter.ts` should return zero user-defined matches (only `extends` / `implements` on our own contracts).
+
+## Outcome
+
+_Completed: 2026-04-09 by Claude (implementing skill, Critical autonomy)._
+
+### What shipped
+
+Phases 1-7 + 9. Phase 8 (ChatGPT subscription OAuth) was deferred to a follow-up PR per Taras's decision so this PR stays focused on core provider support — users authenticate via `OPENAI_API_KEY` env var or a pre-existing `~/.codex/auth.json` (e.g. from `codex login`).
+
+**New files:**
+- `src/providers/codex-adapter.ts` — `CodexAdapter` + `CodexSession` implementing `ProviderAdapter` over `@openai/codex-sdk@0.118.0`
+- `src/providers/codex-agents-md.ts` — `writeCodexAgentsMd()` manages a `<swarm_system_prompt>` block in `AGENTS.md` (reversible cleanup, seeds from `CLAUDE.md` when bootstrapping)
+- `src/providers/codex-models.ts` — typed model catalogue (gpt-5.4 default, gpt-5.4-mini, gpt-5.3-codex with 1M context window, gpt-5.2-codex), shortname resolver, per-model context windows
+- `src/providers/codex-skill-resolver.ts` — `resolveCodexPrompt()` inlines `~/.codex/skills/<name>/SKILL.md` for leading slash-command prompts
+- `src/providers/codex-swarm-events.ts` — `createCodexSwarmEventHandler()` provides adapter-side cancellation polling (lower latency than runner-side), tool-loop detection, heartbeat, activity ping, and context-usage forwarding
+- `scripts/check-codex-default-model.sh` — CI guard asserting Dockerfile baseline matches `CODEX_DEFAULT_MODEL`
+- Test files: `codex-adapter.test.ts` (33 tests), `codex-skill-resolver.test.ts` (9 tests), `codex-swarm-events.test.ts` (9 tests)
+
+**Modified:**
+- `src/providers/index.ts` — factory `case "codex"` + updated error message
+- `src/tests/provider-adapter.test.ts`, `src/tests/provider-command-format.test.ts` — codex factory + command format coverage
+- `src/tests/runner-fallback-output.test.ts` — side-fixed long-standing `pi-mono` typo (silently fell to error path) and added a codex case
+- `Dockerfile.worker` — installs `@openai/codex@0.118.0`, writes baseline `~/.codex/config.toml`, copies `plugin/commands/*.md` → `~/.codex/skills/<name>/SKILL.md`
+- `docker-entrypoint.sh` — codex auth validation branch, codex binary check, skill sync loop extension
+- `docker-compose.example.yml`, `docker-compose.local.yml` — codex-worker service example (gated behind `codex` profile)
+- `README.md`, `CLAUDE.md`, `CHANGELOG.md` — multi-provider docs updated
+- `package.json`, `bun.lock` — `@openai/codex-sdk@^0.118.0`
+
+### Deviations from the plan (and why)
+
+1. **`systemPrompt` handling: AGENTS.md block instead of `baseInstructions`/`developerInstructions`** — Phase 1 discovered the SDK's `ThreadOptions` does NOT expose either field. Taras chose Option B (managed `<swarm_system_prompt>` block in AGENTS.md) which preserves any user-authored AGENTS.md content. This also superseded Phase 4 §3's planned symlink approach — Phase 4 now relies on the Phase 2 helper.
+2. **SDK type extraction simplified** — the plan suggested `Awaited<ReturnType<Thread["runStreamed"]>>` tricks; turns out `@openai/codex-sdk@0.118.0` exports the full tagged union (`ThreadEvent`, `ThreadItem`, all variant types) as named types, so the gymnastics weren't needed.
+3. **`AbortController.signal` works on `runStreamed()` in 0.118.0** — the plan flagged a possible workaround for [openai/codex#5494](https://github.com/openai/codex/issues/5494); the workaround is unnecessary, standard AbortController flow works for both `run()` and `runStreamed()`.
+4. **`CodexOptions.config` accepts structured objects** — confirmed `CodexConfigObject` is recursive, so we pass nested `{ mcp_servers: { foo: { ... } } }` directly without pre-flattening to dotted paths. Resolves OA2 from the plan's review errata.
+5. **`CodexOptions.env` does NOT inherit from `process.env`** — gotcha discovered in Phase 1; Phase 3's `createSession` builds a minimal explicit env (`PATH`, `HOME`, `OPENAI_API_KEY`, `NODE_EXTRA_CA_CERTS`) before constructing `new Codex({ env, config })`.
+6. **Model catalogue uses placeholder names that match the plan's research date** — actual API-addressable Codex models on the day of merge may differ; `src/providers/codex-models.ts` is the single source of truth and should be bumped when OpenAI ships new models.
+7. **Phase 5 swarm event handler is leaner than the plan's draft** — the runner already calls `/api/active-sessions`, `/api/tasks/{id}/finish`, and `/api/tasks/{id}/progress` for any `ProviderSession`. The codex-side handler only adds the *unique* hooks: lower-latency cancellation poll on tool_start, tool-loop detection (via shared `src/hooks/tool-loop-detection.ts`), heartbeat + activity ping, and context-usage forwarding. Avoids duplicate work between runner and adapter layers.
+8. **Phase 8 deferred** — ChatGPT subscription OAuth (port from pi-mono) is intentionally not in this PR. Tracked as a follow-up.
+
+### Open follow-ups
+
+- **Phase 8 (Codex ChatGPT subscription OAuth)** — port pi-mono's flow to allow billing parity with ChatGPT Plus/Pro subscriptions. Tracked separately.
+- **Manual E2E verification** (deferred to Taras): build the worker image with `bun run docker:build:worker`, boot a `HARNESS_PROVIDER=codex` worker, run a trivial task, and verify cancellation latency. See the "Manual E2E" section above for exact commands.
+- **`scripts/e2e-codex-provider.ts`** — could mirror the existing `scripts/e2e-provider-test.ts` for CI smoke coverage. Not blocking.
+- **Streaming deltas** — `item.updated` events currently surface only as `raw_log`. UI streaming-deltas would require new `ProviderEvent` variants. Out of scope for v1.
+- **Codex `plan` / `reasoning` items** — surface as `raw_log` only. Promoting them to first-class UI features is a follow-up.
 
 ## References
 

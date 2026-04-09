@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Codex provider** — Run agents with OpenAI Codex via `HARNESS_PROVIDER=codex`. Wraps `@openai/codex-sdk` 0.118 to drive the `codex app-server` JSON-RPC protocol. Includes per-session MCP config (Streamable HTTP), slash-command skill inlining, AGENTS.md system-prompt injection, AbortController-based cancellation, tool-loop detection, heartbeat/activity reporting, and a typed model catalogue (gpt-5.4 default). Auth via `OPENAI_API_KEY` or `~/.codex/auth.json` (#100)
+- Docker worker image installs the Codex CLI (`@openai/codex@0.118.0`) alongside Claude and pi-mono and ships a baseline `~/.codex/config.toml`; entrypoint validates codex auth and mirrors slash-command skills into `~/.codex/skills/<name>/SKILL.md` (#100)
 - Slack message deduplication with `slackReplySent` flag — when agents post results via `slack-reply`, the task completion message shows a minimal one-liner instead of duplicating the full output (#314)
 - Tree-based Slack status messages — parent tasks render child task progress in a visual tree with status icons, indentation, and overflow handling (#314)
 - Slack thread buffer (`ADDITIVE_SLACK=true`) — non-mention thread replies are captured, debounced, and batched into a single follow-up task with dependency chaining (#314)
