@@ -104,38 +104,50 @@ export function buildTreeNodes(tree: TreeMessageState): TreeNode[] {
       duration = formatDuration(new Date(task.createdAt), new Date(task.finishedAt));
     }
 
-    // Discover children
-    const childTasks = getChildTasks(rootTaskId);
+    // Discover all descendants (children + grandchildren) and flatten as children of root
     const childNodes: TreeNode[] = [];
+    const taskQueue = [rootTaskId];
+    const seen = new Set<string>([rootTaskId]);
 
-    for (const child of childTasks) {
-      // Register discovered children in taskToTree so they're skipped in flat processing
-      if (!taskToTree.has(child.id)) {
-        taskToTree.set(child.id, tree.messageTs);
-        console.log(
-          `[Slack] Discovered child task ${child.id.slice(0, 8)} under root ${rootTaskId.slice(0, 8)}`,
-        );
+    while (taskQueue.length > 0) {
+      const parentId = taskQueue.shift()!;
+      const childTasks = getChildTasks(parentId);
+
+      for (const child of childTasks) {
+        if (seen.has(child.id)) continue;
+        seen.add(child.id);
+
+        // Register discovered descendants in taskToTree so they're skipped in flat processing
+        if (!taskToTree.has(child.id)) {
+          taskToTree.set(child.id, tree.messageTs);
+          console.log(
+            `[Slack] Discovered descendant task ${child.id.slice(0, 8)} under root ${rootTaskId.slice(0, 8)}`,
+          );
+        }
+
+        const childAgent = child.agentId ? getAgentById(child.agentId) : null;
+        const childAgentName = childAgent?.name ?? "Unknown";
+
+        let childDuration: string | undefined;
+        if (child.finishedAt && child.createdAt) {
+          childDuration = formatDuration(new Date(child.createdAt), new Date(child.finishedAt));
+        }
+
+        childNodes.push({
+          taskId: child.id,
+          agentName: childAgentName,
+          status: child.status as TreeNode["status"],
+          progress: child.progress ?? undefined,
+          duration: childDuration,
+          slackReplySent: child.slackReplySent,
+          output: child.output ?? undefined,
+          failureReason: child.failureReason ?? undefined,
+          children: [],
+        });
+
+        // Queue this child to discover its children (grandchildren of root)
+        taskQueue.push(child.id);
       }
-
-      const childAgent = child.agentId ? getAgentById(child.agentId) : null;
-      const childAgentName = childAgent?.name ?? "Unknown";
-
-      let childDuration: string | undefined;
-      if (child.finishedAt && child.createdAt) {
-        childDuration = formatDuration(new Date(child.createdAt), new Date(child.finishedAt));
-      }
-
-      childNodes.push({
-        taskId: child.id,
-        agentName: childAgentName,
-        status: child.status as TreeNode["status"],
-        progress: child.progress ?? undefined,
-        duration: childDuration,
-        slackReplySent: child.slackReplySent,
-        output: child.output ?? undefined,
-        failureReason: child.failureReason ?? undefined,
-        children: [],
-      });
     }
 
     nodes.push({
@@ -426,15 +438,20 @@ export function startTaskWatcher(intervalMs = 3000): void {
       const inProgressTasks = getInProgressSlackTasks();
       const now = Date.now();
       for (const task of inProgressTasks) {
-        // Late-register child tasks into their parent's tree (race condition fix:
-        // child may start before the 3s poll discovers it via buildTreeNodes)
+        // Late-register descendant tasks into their ancestor's tree (walk up parent chain)
         if (!taskToTree.has(task.id) && task.parentTaskId) {
-          const parentTreeMs = taskToTree.get(task.parentTaskId);
-          if (parentTreeMs) {
-            taskToTree.set(task.id, parentTreeMs);
-            console.log(
-              `[Slack] Late-registered in-progress child ${task.id.slice(0, 8)} into parent tree`,
-            );
+          let ancestorId: string | undefined = task.parentTaskId;
+          while (ancestorId) {
+            const treeMs = taskToTree.get(ancestorId);
+            if (treeMs) {
+              taskToTree.set(task.id, treeMs);
+              console.log(
+                `[Slack] Late-registered in-progress descendant ${task.id.slice(0, 8)} into ancestor tree`,
+              );
+              break;
+            }
+            const ancestor = getTaskById(ancestorId);
+            ancestorId = ancestor?.parentTaskId ?? undefined;
           }
         }
 
@@ -537,15 +554,20 @@ export function startTaskWatcher(intervalMs = 3000): void {
       // Check for completed tasks
       const completedTasks = getCompletedSlackTasks();
       for (const task of completedTasks) {
-        // Late-register child tasks into their parent's tree (race condition fix:
-        // child may complete before the 3s poll discovers it via buildTreeNodes)
+        // Late-register descendant tasks into their ancestor's tree (walk up parent chain)
         if (!taskToTree.has(task.id) && task.parentTaskId) {
-          const parentTreeMs = taskToTree.get(task.parentTaskId);
-          if (parentTreeMs) {
-            taskToTree.set(task.id, parentTreeMs);
-            console.log(
-              `[Slack] Late-registered child ${task.id.slice(0, 8)} into parent tree ${task.parentTaskId.slice(0, 8)}`,
-            );
+          let ancestorId: string | undefined = task.parentTaskId;
+          while (ancestorId) {
+            const treeMs = taskToTree.get(ancestorId);
+            if (treeMs) {
+              taskToTree.set(task.id, treeMs);
+              console.log(
+                `[Slack] Late-registered completed descendant ${task.id.slice(0, 8)} into ancestor tree`,
+              );
+              break;
+            }
+            const ancestor = getTaskById(ancestorId);
+            ancestorId = ancestor?.parentTaskId ?? undefined;
           }
         }
 
