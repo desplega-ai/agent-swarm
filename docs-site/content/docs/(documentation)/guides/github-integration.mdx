@@ -74,6 +74,16 @@ These events still emit to the internal `workflowEventBus` for workflow triggers
 
 If GitHub App credentials are provided (`GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`), the bot can react to comments and issues with emoji to acknowledge receipt.
 
+### Eyes Reaction on Task Pickup
+
+When an agent picks up a GitHub-sourced task (transitions to `in_progress`), a 👀 reaction is automatically added to the originating GitHub entity — the comment, issue, PR, or review that triggered the task. This gives immediate visual feedback that work has begun, without requiring the agent to post a comment.
+
+Supported event types:
+- **Issue/PR comments** — 👀 added to the comment
+- **PR review comments** (inline) — 👀 added to the review comment
+- **PR reviews** (body) — 👀 added via GraphQL (REST does not support review reactions)
+- **Issues/PRs** (assigned or labeled) — 👀 added to the issue or PR itself
+
 ## Worker Git Configuration
 
 Workers need git credentials to create PRs and push code:
