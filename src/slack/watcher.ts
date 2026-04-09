@@ -426,6 +426,18 @@ export function startTaskWatcher(intervalMs = 3000): void {
       const inProgressTasks = getInProgressSlackTasks();
       const now = Date.now();
       for (const task of inProgressTasks) {
+        // Late-register child tasks into their parent's tree (race condition fix:
+        // child may start before the 3s poll discovers it via buildTreeNodes)
+        if (!taskToTree.has(task.id) && task.parentTaskId) {
+          const parentTreeMs = taskToTree.get(task.parentTaskId);
+          if (parentTreeMs) {
+            taskToTree.set(task.id, parentTreeMs);
+            console.log(
+              `[Slack] Late-registered in-progress child ${task.id.slice(0, 8)} into parent tree`,
+            );
+          }
+        }
+
         // Skip tasks tracked in a tree — they're rendered by processTreeMessages()
         if (taskToTree.has(task.id)) continue;
         const progressKey = `progress:${task.id}`;
@@ -525,6 +537,18 @@ export function startTaskWatcher(intervalMs = 3000): void {
       // Check for completed tasks
       const completedTasks = getCompletedSlackTasks();
       for (const task of completedTasks) {
+        // Late-register child tasks into their parent's tree (race condition fix:
+        // child may complete before the 3s poll discovers it via buildTreeNodes)
+        if (!taskToTree.has(task.id) && task.parentTaskId) {
+          const parentTreeMs = taskToTree.get(task.parentTaskId);
+          if (parentTreeMs) {
+            taskToTree.set(task.id, parentTreeMs);
+            console.log(
+              `[Slack] Late-registered child ${task.id.slice(0, 8)} into parent tree ${task.parentTaskId.slice(0, 8)}`,
+            );
+          }
+        }
+
         // Skip tasks tracked in a tree — they're rendered by processTreeMessages()
         // But mark as notified to prevent re-processing if tree is cleaned up
         if (taskToTree.has(task.id)) {
