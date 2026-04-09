@@ -4,7 +4,7 @@ author: taras
 status: in-progress
 issue: https://github.com/desplega-ai/agent-swarm/issues/100
 last_updated: 2026-04-09
-last_updated_by: claude (phase 3)
+last_updated_by: claude (phase 4)
 ---
 
 # Codex Provider Support (App-Server Approach) Implementation Plan
@@ -472,10 +472,10 @@ The trade-off vs the symlink approach: we now also deliver the per-session `syst
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] New unit test: `bun test src/tests/codex-skill-resolver.test.ts` — covers: (a) prompt with `/work-on-task abc-123` → inlines SKILL.md, (b) prompt without a slash command → unchanged, (c) unknown skill → unchanged with warning, (d) skill with extra context lines preserved
-- [ ] `formatCommand` test: update `src/tests/provider-command-format.test.ts` to add Codex cases asserting `/<name>` return values
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] New unit test: `bun test src/tests/codex-skill-resolver.test.ts` — covers: (a) prompt with `/work-on-task abc-123` → inlines SKILL.md, (b) prompt without a slash command → unchanged, (c) unknown skill → unchanged with warning, (d) skill with extra context lines preserved
+- [x] `formatCommand` test: update `src/tests/provider-command-format.test.ts` to add Codex cases asserting `/<name>` return values
 
 #### Manual Verification:
 - [ ] Smoke script passes `/work-on-task <id>` to a Codex session and observes the agent reading the skill instructions (check that the agent's first message references skill-specific guidance).

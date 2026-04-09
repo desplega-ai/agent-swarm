@@ -45,6 +45,8 @@
  * `Turn`, events, or items — the SDK already exports them as a tagged union.
  */
 
+import os from "node:os";
+import { join } from "node:path";
 import {
   type AgentMessageItem,
   Codex,
@@ -69,6 +71,7 @@ import {
   getCodexContextWindow,
   resolveCodexModel,
 } from "./codex-models";
+import { resolveCodexPrompt } from "./codex-skill-resolver";
 import type {
   CostData,
   ProviderAdapter,
@@ -241,6 +244,7 @@ class CodexSession implements ProviderSession {
   private readonly agentsMdHandle: CodexAgentsMdHandle;
   private readonly resolvedModel: CodexModel;
   private readonly contextWindow: number;
+  private readonly skillsDir: string;
   private readonly listeners: Array<(event: ProviderEvent) => void> = [];
   private readonly eventQueue: ProviderEvent[] = [];
   private readonly logFileHandle: ReturnType<ReturnType<typeof Bun.file>["writer"]>;
@@ -260,12 +264,18 @@ class CodexSession implements ProviderSession {
     agentsMdHandle: CodexAgentsMdHandle,
     resolvedModel: CodexModel,
     initialEvents: ProviderEvent[] = [],
+    skillsDir?: string,
   ) {
     this.thread = thread;
     this.config = config;
     this.agentsMdHandle = agentsMdHandle;
     this.resolvedModel = resolvedModel;
     this.contextWindow = getCodexContextWindow(resolvedModel);
+    // `CODEX_SKILLS_DIR` lets tests / non-Docker installs point at a custom
+    // tree without polluting `~/.codex/skills` on the host. Fall back to the
+    // runtime default of `${HOME}/.codex/skills`.
+    this.skillsDir =
+      skillsDir ?? process.env.CODEX_SKILLS_DIR ?? join(os.homedir(), ".codex", "skills");
     this.logFileHandle = Bun.file(config.logFile).writer();
 
     this.completionPromise = new Promise<ProviderResult>((resolve) => {
@@ -502,7 +512,15 @@ class CodexSession implements ProviderSession {
     let sawTurnCompleted = false;
 
     try {
-      const streamed = await this.thread.runStreamed(this.config.prompt, {
+      // Inline Codex skills if the prompt starts with a slash command. If the
+      // prompt doesn't begin with a recognized slash command (or the skill
+      // file is missing), this returns the prompt unchanged and emits a
+      // `raw_stderr` warning in the latter case.
+      const resolvedPrompt = await resolveCodexPrompt(this.config.prompt, this.skillsDir, (event) =>
+        this.emit(event),
+      );
+
+      const streamed = await this.thread.runStreamed(resolvedPrompt, {
         signal: this.abortController.signal,
       });
 
@@ -578,6 +596,18 @@ class CodexSession implements ProviderSession {
 export class CodexAdapter implements ProviderAdapter {
   readonly name = "codex";
 
+  /**
+   * Optional override for the skill resolver's skills directory. When unset,
+   * each `CodexSession` falls back to `CODEX_SKILLS_DIR` / `~/.codex/skills`.
+   * Primarily a test hook so unit tests can point the adapter at a temp dir
+   * without mutating `process.env`.
+   */
+  private readonly skillsDir?: string;
+
+  constructor(opts: { skillsDir?: string } = {}) {
+    this.skillsDir = opts.skillsDir;
+  }
+
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
     // Codex ingests per-session instructions via AGENTS.md in the cwd. Write
     // (or refresh) the managed block before we spin up the thread.
@@ -640,7 +670,14 @@ export class CodexAdapter implements ProviderAdapter {
         ? codex.resumeThread(config.resumeSessionId, threadOptions)
         : codex.startThread(threadOptions);
 
-      return new CodexSession(thread, config, agentsMdHandle, resolvedModel, preSessionEvents);
+      return new CodexSession(
+        thread,
+        config,
+        agentsMdHandle,
+        resolvedModel,
+        preSessionEvents,
+        this.skillsDir,
+      );
     } catch (err) {
       // If we failed to construct the thread, clean up the managed AGENTS.md
       // block so we don't leak state on the filesystem.

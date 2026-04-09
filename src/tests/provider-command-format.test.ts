@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { ClaudeAdapter } from "../providers/claude-adapter";
+import { CodexAdapter } from "../providers/codex-adapter";
 import { createProviderAdapter } from "../providers/index";
 import { PiMonoAdapter } from "../providers/pi-mono-adapter";
 
 describe("ProviderAdapter.formatCommand", () => {
   const claude = new ClaudeAdapter();
   const pi = new PiMonoAdapter();
+  const codex = new CodexAdapter();
 
   test("claude formats commands with / prefix", () => {
     expect(claude.formatCommand("work-on-task")).toBe("/work-on-task");
@@ -19,18 +21,32 @@ describe("ProviderAdapter.formatCommand", () => {
     expect(pi.formatCommand("swarm-chat")).toBe("/skill:swarm-chat");
   });
 
+  test("codex formats commands with / prefix (skill resolver inlines SKILL.md at runtime)", () => {
+    // Codex returns the same `/<name>` shape as Claude. The leading slash is
+    // a marker that `resolveCodexPrompt` looks for to inline the matching
+    // SKILL.md from `~/.codex/skills/<name>/SKILL.md` before the prompt
+    // reaches the Codex SDK.
+    expect(codex.formatCommand("work-on-task")).toBe("/work-on-task");
+    expect(codex.formatCommand("review-offered-task")).toBe("/review-offered-task");
+    expect(codex.formatCommand("swarm-chat")).toBe("/swarm-chat");
+  });
+
   test("adapter name matches expected provider", () => {
     expect(claude.name).toBe("claude");
     expect(pi.name).toBe("pi");
+    expect(codex.name).toBe("codex");
   });
 
   test("createProviderAdapter returns adapters that implement formatCommand", () => {
     const claudeAdapter = createProviderAdapter("claude");
     const piAdapter = createProviderAdapter("pi");
+    const codexAdapter = createProviderAdapter("codex");
     expect(typeof claudeAdapter.formatCommand).toBe("function");
     expect(typeof piAdapter.formatCommand).toBe("function");
+    expect(typeof codexAdapter.formatCommand).toBe("function");
     expect(claudeAdapter.formatCommand("work-on-task")).toBe("/work-on-task");
     expect(piAdapter.formatCommand("work-on-task")).toBe("/skill:work-on-task");
+    expect(codexAdapter.formatCommand("work-on-task")).toBe("/work-on-task");
   });
 });
 
