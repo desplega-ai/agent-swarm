@@ -1,11 +1,19 @@
-import type { ColDef, ValueSetterParams } from "ag-grid-community";
+import type { ColDef } from "ag-grid-community";
 import { BarChart3, DollarSign, Key, Pencil, Search, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useApiKeyCosts, useApiKeyStatuses, useSetApiKeyName } from "@/api/hooks/use-api-keys";
 import type { ApiKeyStatus, ApiKeyStatusType } from "@/api/types";
 import { DataGrid } from "@/components/shared/data-grid";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -89,6 +97,26 @@ export default function ApiKeysPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [providerFilter, setProviderFilter] = useState<string>("all");
+  // Dialog state for renaming a single key. Decoupled from AG Grid edit
+  // mode (which has too many gotchas around cell focus / suppressCellFocus
+  // / cellRenderer click forwarding) — clicking the pencil icon opens this
+  // dialog directly and the mutation flows through useSetApiKeyName.
+  const [editingKey, setEditingKey] = useState<ApiKeyStatus | null>(null);
+  const [editingName, setEditingName] = useState("");
+
+  const handleSaveName = () => {
+    if (!editingKey) return;
+    const trimmed = editingName.trim();
+    setKeyName.mutate({
+      keyType: editingKey.keyType,
+      keySuffix: editingKey.keySuffix,
+      scope: editingKey.scope,
+      scopeId: editingKey.scopeId,
+      name: trimmed.length > 0 ? trimmed : null,
+    });
+    setEditingKey(null);
+    setEditingName("");
+  };
 
   const costMap = useMemo(() => {
     if (!costs) return new Map<string, number>();
@@ -138,43 +166,33 @@ export default function ApiKeysPage() {
         headerName: "Name",
         flex: 1,
         minWidth: 200,
-        editable: true,
-        // Single-click enters edit mode (default is double-click) so the cell
-        // is obviously editable. The pencil icon in the renderer reinforces it.
-        singleClickEdit: true,
-        cellEditor: "agTextCellEditor",
-        cellEditorParams: {
-          maxLength: 60,
-        },
         // Pass empty cells through quickFilterText so AG Grid's search matches
         // the row even when the user hasn't labeled the key yet (it falls back
         // to the rest of the columns).
         valueFormatter: (params) => params.value ?? "",
-        cellRenderer: (params: { value: string | null }) => (
-          <div className="flex items-center justify-between gap-2 w-full group cursor-text">
-            {params.value ? (
-              <span className="text-xs truncate">{params.value}</span>
-            ) : (
-              <span className="text-xs italic text-muted-foreground/50">click to name…</span>
-            )}
-            <Pencil className="h-3 w-3 text-muted-foreground/40 group-hover:text-muted-foreground shrink-0" />
-          </div>
-        ),
-        valueSetter: (params: ValueSetterParams<ApiKeyStatus>) => {
-          if (!params.data) return false;
-          const trimmed = (params.newValue ?? "").toString().trim();
-          // Avoid no-op patches when the user clicks out of an edit unchanged.
-          if ((params.data.name ?? "") === trimmed) return false;
-          setKeyName.mutate({
-            keyType: params.data.keyType,
-            keySuffix: params.data.keySuffix,
-            scope: params.data.scope,
-            scopeId: params.data.scopeId,
-            name: trimmed.length > 0 ? trimmed : null,
-          });
-          // Optimistic update — react-query invalidates and refetches.
-          params.data.name = trimmed.length > 0 ? trimmed : null;
-          return true;
+        cellRenderer: (params: { value: string | null; data: ApiKeyStatus | undefined }) => {
+          const handleClick = (e: React.MouseEvent) => {
+            // Stop propagation so the AG Grid row click handler doesn't fire
+            // (the API Keys page doesn't have one today, but defensive).
+            e.stopPropagation();
+            if (!params.data) return;
+            setEditingKey(params.data);
+            setEditingName(params.value ?? "");
+          };
+          return (
+            <button
+              type="button"
+              onClick={handleClick}
+              className="flex items-center justify-between gap-2 w-full text-left hover:bg-muted/40 rounded px-1 -mx-1"
+            >
+              {params.value ? (
+                <span className="text-xs truncate">{params.value}</span>
+              ) : (
+                <span className="text-xs italic text-muted-foreground/50">click to name…</span>
+              )}
+              <Pencil className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+            </button>
+          );
         },
       },
       {
@@ -285,7 +303,7 @@ export default function ApiKeysPage() {
           ),
       },
     ],
-    [costMap, setKeyName],
+    [costMap],
   );
 
   return (
@@ -410,6 +428,69 @@ export default function ApiKeysPage() {
         loading={isLoading}
         emptyMessage="No API keys tracked yet"
       />
+
+      {/* Rename dialog */}
+      <Dialog
+        open={editingKey !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingKey(null);
+            setEditingName("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rename API Key</DialogTitle>
+          </DialogHeader>
+          {editingKey && (
+            <div className="space-y-3 py-2">
+              <div className="text-xs text-muted-foreground space-y-1">
+                <div>
+                  <span className="font-mono uppercase">{formatProvider(editingKey.provider)}</span>
+                  {" · "}
+                  <span className="font-mono">{formatKeyType(editingKey.keyType)}</span>
+                  {" · "}
+                  <span className="font-mono">...{editingKey.keySuffix}</span>
+                </div>
+              </div>
+              <Input
+                autoFocus
+                placeholder="e.g. Personal OAuth, Work Anthropic, …"
+                value={editingName}
+                maxLength={60}
+                onChange={(e) => setEditingName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleSaveName();
+                  } else if (e.key === "Escape") {
+                    setEditingKey(null);
+                    setEditingName("");
+                  }
+                }}
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Leave empty to clear the label. Max 60 characters.
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setEditingKey(null);
+                setEditingName("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSaveName} disabled={setKeyName.isPending}>
+              {setKeyName.isPending ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
