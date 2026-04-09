@@ -232,7 +232,15 @@ async function fetchResolvedEnv(
     }
   }
 
-  const credentialSelections = await resolveCredentialPools(env, { apiUrl, apiKey });
+  const credentialSelections = await resolveCredentialPools(env, {
+    apiUrl,
+    apiKey,
+    // Provider-aware selection: codex tasks should not get a
+    // CLAUDE_CODE_OAUTH_TOKEN stamped on their task record (and vice
+    // versa) just because both env vars happen to be set in the worker
+    // container. See `PROVIDER_CREDENTIAL_VARS` in src/utils/credentials.ts.
+    provider: process.env.HARNESS_PROVIDER,
+  });
 
   return { env, credentialSelections };
 }

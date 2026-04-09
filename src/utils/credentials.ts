@@ -1,5 +1,28 @@
 /** Env vars that may contain comma-separated credential pools */
-export const CREDENTIAL_POOL_VARS = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"] as const;
+export const CREDENTIAL_POOL_VARS = [
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "OPENROUTER_API_KEY",
+  "OPENAI_API_KEY",
+] as const;
+
+/**
+ * Which credential env vars are relevant for each harness provider. The
+ * runner uses this map to filter `CREDENTIAL_POOL_VARS` so a codex worker
+ * doesn't get a `CLAUDE_CODE_OAUTH_TOKEN` stamped on its task record (and
+ * vice versa). Providers are listed in priority order — when both are
+ * present in the env, the runner uses the first match's selection as the
+ * primary credential for tracking.
+ *
+ * Unknown providers (or no provider hint) fall back to ALL pool vars,
+ * preserving backwards compatibility for older code paths.
+ */
+export const PROVIDER_CREDENTIAL_VARS: Record<string, readonly string[]> = {
+  claude: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
+  // pi-mono accepts either router or anthropic keys
+  pi: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"],
+  codex: ["OPENAI_API_KEY"],
+};
 
 /** Result of credential selection, including tracking info */
 export interface CredentialSelection {
@@ -87,9 +110,10 @@ async function fetchAvailableIndices(
   env: Record<string, string | undefined>,
   apiUrl: string,
   apiKey: string,
+  poolVars: readonly string[] = CREDENTIAL_POOL_VARS,
 ): Promise<Record<string, number[]>> {
   const availableIndicesMap: Record<string, number[]> = {};
-  for (const envVar of CREDENTIAL_POOL_VARS) {
+  for (const envVar of poolVars) {
     const val = env[envVar];
     if (val) {
       const totalKeys = val.includes(",") ? val.split(",").filter((s) => s.trim()).length : 1;
@@ -123,16 +147,32 @@ async function fetchAvailableIndices(
  */
 export async function resolveCredentialPools(
   env: Record<string, string | undefined>,
-  opts?: { apiUrl?: string; apiKey?: string; availableIndicesMap?: Record<string, number[]> },
+  opts?: {
+    apiUrl?: string;
+    apiKey?: string;
+    availableIndicesMap?: Record<string, number[]>;
+    /**
+     * Optional `HARNESS_PROVIDER` value (claude, pi, codex). When provided,
+     * only credential env vars relevant to that provider are pooled. This
+     * prevents e.g. a codex worker from stamping a CLAUDE_CODE_OAUTH_TOKEN
+     * on its task record when both env vars happen to be set in the
+     * container env. Defaults to ALL pool vars for backwards compatibility.
+     */
+    provider?: string;
+  },
 ): Promise<CredentialSelection[]> {
+  const providerVars = opts?.provider
+    ? (PROVIDER_CREDENTIAL_VARS[opts.provider] ?? CREDENTIAL_POOL_VARS)
+    : CREDENTIAL_POOL_VARS;
+
   const availableIndicesMap =
     opts?.availableIndicesMap ??
     (opts?.apiUrl && opts?.apiKey
-      ? await fetchAvailableIndices(env, opts.apiUrl, opts.apiKey)
+      ? await fetchAvailableIndices(env, opts.apiUrl, opts.apiKey, providerVars)
       : undefined);
 
   const selections: CredentialSelection[] = [];
-  for (const envVar of CREDENTIAL_POOL_VARS) {
+  for (const envVar of providerVars) {
     const val = env[envVar];
     if (val) {
       const available = availableIndicesMap?.[envVar];
