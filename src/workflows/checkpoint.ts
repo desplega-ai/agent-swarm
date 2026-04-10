@@ -37,6 +37,7 @@ export function checkpointStepFailure(
   error: string,
   retryCount: number,
   retryPolicy?: RetryPolicy,
+  options?: { markRunFailed?: boolean },
 ): { shouldRetry: boolean } {
   const now = new Date().toISOString();
 
@@ -55,7 +56,7 @@ export function checkpointStepFailure(
     return { shouldRetry: true };
   }
 
-  // No retries left — mark step and run failed
+  // No retries left — mark step failed, and optionally the run too
   // Clear nextRetryAt so the poller stops picking this step up
   updateWorkflowRunStep(stepId, {
     status: "failed",
@@ -64,11 +65,14 @@ export function checkpointStepFailure(
     nextRetryAt: null,
   });
 
-  updateWorkflowRun(runId, {
-    status: "failed",
-    error: `Step failed: ${error}`,
-    finishedAt: now,
-  });
+  const markRunFailed = options?.markRunFailed ?? true;
+  if (markRunFailed) {
+    updateWorkflowRun(runId, {
+      status: "failed",
+      error: `Step failed: ${error}`,
+      finishedAt: now,
+    });
+  }
 
   return { shouldRetry: false };
 }

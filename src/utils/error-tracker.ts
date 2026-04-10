@@ -226,7 +226,12 @@ export function parseStderrForErrors(stderr: string, tracker: SessionErrorTracke
   const lower = stderr.toLowerCase();
   const firstLine = stderr.trim().split("\n")[0] ?? stderr.trim();
 
-  if (lower.includes("rate limit") || lower.includes("rate_limit") || lower.includes("429")) {
+  if (
+    lower.includes("rate limit") ||
+    lower.includes("rate_limit") ||
+    lower.includes("429") ||
+    lower.includes("hit your limit")
+  ) {
     tracker.addStderrError(firstLine);
   } else if (
     lower.includes("authentication") ||
