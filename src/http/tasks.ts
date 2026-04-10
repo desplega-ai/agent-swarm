@@ -19,6 +19,7 @@ import {
   updateTaskProgress,
   updateTaskVcs,
 } from "../be/db";
+import { telemetry } from "../telemetry";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -269,6 +270,14 @@ export async function handleTasks(
         },
       });
 
+      telemetry.taskEvent("created", {
+        taskId: task.id,
+        source: task.source,
+        tags: parsed.body.tags ?? [],
+        hasParent: !!task.parentTaskId,
+        priority: task.priority,
+      });
+
       json(res, task, 201);
     } catch (error) {
       console.error("[HTTP] Failed to create task:", error);
@@ -370,6 +379,13 @@ export async function handleTasks(
       });
     }
 
+    telemetry.taskEvent("cancelled", {
+      taskId: parsed.params.id,
+      source: task.source,
+      agentId: task.agentId ?? undefined,
+      previousStatus: task.status,
+    });
+
     if (task.agentId) {
       updateAgentStatusFromCapacity(task.agentId);
     }
@@ -469,6 +485,11 @@ export async function handleTasks(
 
     if (result.task && !("alreadyFinished" in result && result.alreadyFinished)) {
       const finishEventId = parsed.body.status === "completed" ? "completed" : "failed";
+
+      telemetry.taskEvent(finishEventId, {
+        taskId: parsed.params.id,
+        agentId: myAgentId,
+      });
       ensure({
         id: finishEventId,
         flow: "task",

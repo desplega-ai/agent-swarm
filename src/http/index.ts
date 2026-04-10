@@ -8,12 +8,13 @@ import { ensure, initialize } from "@desplega.ai/business-use";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { getEnabledCapabilities, hasCapability } from "@/server";
 import { initAgentMail } from "../agentmail";
-import { closeDb } from "../be/db";
+import { closeDb, getSwarmConfigs, upsertSwarmConfig } from "../be/db";
 import { initGitHub } from "../github";
 import { initGitLab } from "../gitlab";
 import { stopHeartbeat } from "../heartbeat";
 import { initLinear } from "../linear";
 import { startSlackApp, stopSlackApp } from "../slack";
+import { initTelemetry, telemetry } from "../telemetry";
 import { initWorkflows } from "../workflows";
 import { handleActiveSessions } from "./active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
@@ -213,6 +214,16 @@ httpServer
     } catch (e) {
       console.error("Failed to load global swarm configs:", e);
     }
+
+    // Initialize anonymized telemetry (opt-out via ANONYMIZED_TELEMETRY=false)
+    await initTelemetry(
+      "api-server",
+      (key) => getSwarmConfigs({ scope: "global", key })?.[0]?.value,
+      (key, value) => {
+        upsertSwarmConfig({ scope: "global", key, value });
+      },
+    );
+    telemetry.server("started", { port });
 
     // Start Slack bot (if configured)
     await startSlackApp();
