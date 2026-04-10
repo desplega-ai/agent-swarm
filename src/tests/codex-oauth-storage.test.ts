@@ -102,6 +102,15 @@ describe("loadCodexOAuth", () => {
     expect(result).toBeNull();
   });
 
+  it("returns null on network error", async () => {
+    globalThis.fetch = async () => {
+      throw new Error("ConnectionRefused");
+    };
+
+    const result = await loadCodexOAuth(MOCK_API_URL, MOCK_API_KEY);
+    expect(result).toBeNull();
+  });
+
   it("returns null on invalid JSON value", async () => {
     globalThis.fetch = async () =>
       new Response(

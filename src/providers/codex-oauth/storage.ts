@@ -40,12 +40,14 @@ export async function loadCodexOAuth(
   apiUrl: string,
   apiKey: string,
 ): Promise<CodexOAuthCredentials | null> {
-  const res = await fetch(
-    `${apiUrl}/api/config/resolved?includeSecrets=true&key=${CODEX_OAUTH_KEY}`,
-    {
+  let res: Response;
+  try {
+    res = await fetch(`${apiUrl}/api/config/resolved?includeSecrets=true&key=${CODEX_OAUTH_KEY}`, {
       headers: { Authorization: `Bearer ${apiKey}` },
-    },
-  );
+    });
+  } catch {
+    return null;
+  }
 
   if (!res.ok) {
     return null;
