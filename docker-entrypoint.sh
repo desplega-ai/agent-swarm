@@ -11,22 +11,9 @@ if [ "$HARNESS_PROVIDER" = "pi" ]; then
         exit 1
     fi
 elif [ "$HARNESS_PROVIDER" = "codex" ]; then
-    # Codex auth: OPENAI_API_KEY env var or pre-seeded ~/.codex/auth.json
-    # (host `codex login` or volume mount). Phase 8 will add a third path that
-    # restores OAuth credentials from the API config store at boot.
-    if [ -z "${OPENAI_API_KEY:-}" ] && [ ! -f "$HOME/.codex/auth.json" ]; then
-        echo "Error: codex provider requires OPENAI_API_KEY or ~/.codex/auth.json"
-        exit 1
-    fi
-    # The Codex CLI's `exec --experimental-json` command (used by
-    # @openai/codex-sdk under the hood) does NOT read OPENAI_API_KEY from the
-    # environment directly — it requires a persistent ~/.codex/auth.json
-    # created by `codex login --with-api-key`. If we have an OPENAI_API_KEY
-    # but no auth.json yet, bootstrap it now as the worker user so subsequent
-    # codex invocations (which run as worker via `gosu worker` further down)
-    # can read the file. Idempotent: skip if auth.json already exists (e.g.
-    # pre-seeded via volume mount or previous boot).
     WORKER_CODEX_HOME="/home/worker/.codex"
+
+    # Auth path 1: OPENAI_API_KEY → bootstrap via codex login --with-api-key
     if [ -n "${OPENAI_API_KEY:-}" ] && [ ! -f "$WORKER_CODEX_HOME/auth.json" ]; then
         mkdir -p "$WORKER_CODEX_HOME"
         chown -R worker:worker "$WORKER_CODEX_HOME" 2>/dev/null || true
@@ -35,6 +22,52 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
         else
             echo "Warning: 'codex login --with-api-key' failed; worker may fail at first turn" >&2
         fi
+    fi
+
+    # Auth path 2: Restore codex_oauth from config store
+    if [ ! -f "$WORKER_CODEX_HOME/auth.json" ] && [ -n "$API_KEY" ] && [ -n "$MCP_BASE_URL" ]; then
+        CODEX_OAUTH=$(curl -sf -H "Authorization: Bearer ${API_KEY}" \
+            "${MCP_BASE_URL}/api/config/resolved?includeSecrets=true&key=codex_oauth" \
+            2>/dev/null | jq -r '.configs[] | select(.key == "codex_oauth") | .value // empty' 2>/dev/null | head -1)
+        if [ -n "$CODEX_OAUTH" ]; then
+            if ! echo "$CODEX_OAUTH" | jq '.' >/dev/null 2>&1; then
+                echo "Warning: codex_oauth from config store is not valid JSON, skipping" >&2
+            else
+                mkdir -p "$WORKER_CODEX_HOME"
+                if ! echo "$CODEX_OAUTH" | jq '
+                    if .auth_mode == "chatgpt" then
+                      .
+                    elif (.access and .refresh and .accountId and .expires) then
+                      {
+                        auth_mode: "chatgpt",
+                        OPENAI_API_KEY: null,
+                        tokens: {
+                          id_token: .access,
+                          access_token: .access,
+                          refresh_token: .refresh,
+                          account_id: .accountId
+                        },
+                        last_refresh: ((.expires / 1000 | floor) | todateiso8601)
+                      }
+                    else
+                      error("codex_oauth value is neither auth.json format nor flat credential format")
+                    end
+                ' > "$WORKER_CODEX_HOME/auth.json"; then
+                    echo "Warning: codex_oauth from config store could not be converted to auth.json, skipping" >&2
+                    rm -f "$WORKER_CODEX_HOME/auth.json"
+                else
+                chown worker:worker "$WORKER_CODEX_HOME/auth.json" 2>/dev/null || true
+                chmod 600 "$WORKER_CODEX_HOME/auth.json"
+                echo "[entrypoint] Restored codex OAuth credentials from API config store"
+                fi
+            fi
+        fi
+    fi
+
+    # Fail if still no auth
+    if [ ! -f "$WORKER_CODEX_HOME/auth.json" ]; then
+        echo "Error: codex provider requires OPENAI_API_KEY, ~/.codex/auth.json, or codex_oauth in config store"
+        exit 1
     fi
 else
     # Claude auth (default)
@@ -208,7 +241,7 @@ if [ -n "$AGENT_ID" ]; then
         CONFIG_COUNT=$(jq '.configs | length' /tmp/swarm_config.json 2>/dev/null || echo "0")
         if [ "$CONFIG_COUNT" -gt 0 ]; then
             echo "Found $CONFIG_COUNT config entries, exporting as env vars..."
-            jq -r '.configs[] | "\(.key)=" + (.value | @sh)' /tmp/swarm_config.json > /tmp/swarm_config.env 2>/dev/null || true
+            jq -r '.configs[] | select(.key != "codex_oauth") | "\(.key)=" + (.value | @sh)' /tmp/swarm_config.json > /tmp/swarm_config.env 2>/dev/null || true
             if [ -f /tmp/swarm_config.env ]; then
                 set -a
                 . /tmp/swarm_config.env

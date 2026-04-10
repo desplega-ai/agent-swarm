@@ -10,6 +10,7 @@ import {
   generateDefaultToolsMd,
 } from "../prompts/defaults.ts";
 import { configureHttpResolver, resolveTemplateAsync } from "../prompts/resolver.ts";
+import { authJsonToCredentialSelection } from "../providers/codex-oauth/auth-json.js";
 import {
   type CostData,
   createProviderAdapter,
@@ -632,6 +633,33 @@ async function reportKeyUsage(
     });
   } catch {
     // Non-blocking
+  }
+}
+
+async function resolveCodexOAuthCredentialInfo(): Promise<CredentialSelection | null> {
+  try {
+    const home = process.env.HOME;
+    if (!home) return null;
+
+    const authFile = Bun.file(`${home}/.codex/auth.json`);
+    if (!(await authFile.exists())) {
+      return null;
+    }
+
+    const auth = JSON.parse(await authFile.text()) as {
+      auth_mode?: string;
+      tokens?: { account_id?: string };
+    };
+
+    if (auth.auth_mode !== "chatgpt" || !auth.tokens?.account_id) {
+      return null;
+    }
+
+    return authJsonToCredentialSelection(
+      auth as Parameters<typeof authJsonToCredentialSelection>[0],
+    );
+  } catch {
+    return null;
   }
 }
 
@@ -1569,6 +1597,20 @@ async function spawnProviderProcess(
 
   const session = await adapter.createSession(config);
 
+  let oauthSelection: CredentialSelection | undefined;
+  if (adapter.name === "codex" && credentialSelections.length === 0) {
+    oauthSelection = (await resolveCodexOAuthCredentialInfo()) ?? undefined;
+    if (oauthSelection && realTaskId) {
+      reportKeyUsage(
+        opts.apiUrl,
+        opts.apiKey,
+        oauthSelection.keyType,
+        oauthSelection,
+        realTaskId,
+      ).catch(() => {});
+    }
+  }
+
   // Set up log streaming
   const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now(), partialLine: "" };
   const shouldStream = opts.apiUrl && opts.runnerSessionId && opts.iteration;
@@ -1876,7 +1918,7 @@ async function spawnProviderProcess(
   });
 
   // Build credential info for rate limit tracking
-  const primarySelection = credentialSelections[0];
+  const primarySelection = credentialSelections[0] ?? oauthSelection;
   const credentialInfo = primarySelection
     ? {
         keyType: primarySelection.keyType,

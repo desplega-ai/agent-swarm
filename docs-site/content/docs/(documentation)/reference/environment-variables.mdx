@@ -31,7 +31,7 @@ Complete reference for all environment variables used by Agent Swarm.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code) or `pi` (pi-mono). See [Harness Configuration](/docs/guides/harness-configuration) |
+| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code), `codex`, or `pi` (pi-mono). See [Harness Configuration](/docs/guides/harness-configuration) |
 
 ### Credentials
 
@@ -55,6 +55,16 @@ Which credentials you need depends on your selected harness provider:
 | `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key for multi-provider model access |
 
 \* At least one credential source is required (API key or `~/.pi/agent/auth.json`). **Do not** pass `CLAUDE_CODE_OAUTH_TOKEN` when using pi-mono — it will override the configured provider. See [Harness Configuration](/docs/guides/harness-configuration) for details.
+
+**Codex** (`HARNESS_PROVIDER=codex`):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENAI_API_KEY` | Optional | — | Standard OpenAI API key for Codex |
+| `API_KEY` | Yes | — | Swarm API key used to fetch `codex_oauth` from the config store |
+| `MCP_BASE_URL` | Yes | `http://host.docker.internal:3013` | Swarm API URL reachable by the worker |
+
+Codex can also authenticate through `~/.codex/auth.json`, including ChatGPT OAuth restored from the swarm config store. See [Provider Auth: Codex OAuth](/docs/guides/provider-auth/codex-oauth).
 
 ### General Worker Settings
 

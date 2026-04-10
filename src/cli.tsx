@@ -255,6 +255,21 @@ const COMMAND_HELP: Record<
     options: "  -h, --help             Show this help",
     examples: [`  ${binName} artifact serve`, `  ${binName} artifact help`].join("\n"),
   },
+  "codex-login": {
+    usage: `${binName} codex-login [options]`,
+    description:
+      "Authenticate Codex via ChatGPT OAuth (browser or manual paste).\nPrompts interactively for the target API URL and a best-effort masked API key, then stores credentials in the swarm API config store for deployed workers.",
+    options: [
+      "  --api-url <url>    Swarm API URL (default: MCP_BASE_URL or http://localhost:3013)",
+      "  --api-key <key>    Swarm API key (default: API_KEY or 123123)",
+      "  -h, --help         Show this help",
+    ].join("\n"),
+    examples: [
+      `  ${binName} codex-login`,
+      `  ${binName} codex-login --api-url https://swarm.example.com`,
+      `  ${binName} codex-login --api-url https://swarm.example.com --api-key <api-key>`,
+    ].join("\n"),
+  },
 };
 
 function printHelp(command?: string) {
@@ -283,6 +298,7 @@ function printHelp(command?: string) {
     ["hook", "Handle Claude Code hook events (stdin)"],
     ["artifact", "Manage agent artifacts"],
     ["docs", "Open documentation (--open to launch in browser)"],
+    ["codex-login", "Authenticate Codex via ChatGPT OAuth"],
     ["version", "Show version number"],
     ["help", "Show this help message"],
   ];
@@ -535,6 +551,10 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
     port: args.port,
     key: args.key,
   });
+} else if (args.command === "codex-login") {
+  const { runCodexLogin } = await import("./commands/codex-login");
+  const codexLoginArgs = process.argv.slice(process.argv.indexOf("codex-login") + 1);
+  await runCodexLogin(codexLoginArgs);
 } else {
   render(<App args={args} />);
 }
