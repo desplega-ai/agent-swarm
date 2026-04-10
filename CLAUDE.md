@@ -11,7 +11,12 @@ src/
   http.ts       # Main HTTP server + MCP endpoints
   stdio.ts      # Stdio MCP transport
   cli.tsx       # CLI entry point (Ink)
+  commands/
+    codex-login.ts  # Codex ChatGPT OAuth login command
   tools/        # MCP tool definitions
+  providers/
+    codex-oauth/   # Codex OAuth PKCE flow + storage
+    codex-adapter.ts # Codex provider adapter
   be/           # Backend (DB, storage)
     db.ts       # DB init + query functions
     migrations/ # SQL migration files + runner
@@ -44,6 +49,7 @@ If worker-side code needs data from the DB (template resolution, config lookup),
 | `bun run tsc:check` | Type check |
 | `bun test` | Run all unit tests |
 | `bun test src/tests/<file>.test.ts` | Run specific test |
+| `bun run pm2-start` | Start all (API :3013, UI :5274, lead :3201, worker :3202) |
 | `bun run pm2-start` | Start all (API :3013, UI :5274, lead :3201, worker :3202) |
 | `bun run pm2-stop` | Stop all services |
 | `bun run pm2-restart` | Restart all services |
@@ -179,7 +185,7 @@ Uses `@desplega.ai/business-use` to track system invariants. See [BUSINESS_USE.m
 
 **Environment files:** `.env` (API server), `.env.docker` (Docker worker), `.env.docker-lead` (Docker lead).
 
-**Key env vars:** `API_KEY` (auth, default: `123123`), `MCP_BASE_URL` (default: `http://localhost:3013`), `SLACK_DISABLE=true` / `GITHUB_DISABLE=true`, `HARNESS_PROVIDER` (`claude`, `pi`, or `codex` — codex requires `OPENAI_API_KEY` or `~/.codex/auth.json`), `TEMPLATE_ID` (e.g. `official/coder`), `TEMPLATE_REGISTRY_URL` (default: `https://templates.agent-swarm.dev`).
+**Key env vars:** `API_KEY` (auth, default: `123123`), `MCP_BASE_URL` (default: `http://localhost:3013`), `SLACK_DISABLE=true` / `GITHUB_DISABLE=true`, `HARNESS_PROVIDER` (`claude`, `pi`, or `codex` — codex requires `OPENAI_API_KEY` or `~/.codex/auth.json` or ChatGPT OAuth via `codex-login`), `TEMPLATE_ID` (e.g. `official/coder`), `TEMPLATE_REGISTRY_URL` (default: `https://templates.agent-swarm.dev`).
 
 **Testing API locally:**
 ```bash
