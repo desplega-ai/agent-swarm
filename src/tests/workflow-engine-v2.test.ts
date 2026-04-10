@@ -432,7 +432,7 @@ describe("Workflow Engine v2 (Phase 3)", () => {
       expect(steps).toHaveLength(2);
     });
 
-    test("validation halt (mustPass) fails the run", async () => {
+    test("validation halt (mustPass) fails the run when all branches fail", async () => {
       const registry = createTestRegistry();
       const def: WorkflowDefinition = {
         nodes: [
@@ -456,11 +456,107 @@ describe("Workflow Engine v2 (Phase 3)", () => {
 
       const run = getWorkflowRun(runId);
       expect(run!.status).toBe("failed");
-      expect(run!.error).toContain("Validation failed");
+      expect(run!.error).toContain("Failed nodes: step1");
 
       const steps = getWorkflowRunStepsByRunId(runId);
       const nodeIds = steps.map((s) => s.nodeId);
       expect(nodeIds).not.toContain("step2");
+    });
+
+    test("linear workflow: mustPass failure on non-entry node marks run as failed", async () => {
+      // Regression: when the failing mustPass node is NOT the entry node, the
+      // entry node's "completed" status must not count toward hasCompletedSteps,
+      // otherwise the run is incorrectly marked as partial-failure instead of failed.
+      const registry = createTestRegistry();
+      const def: WorkflowDefinition = {
+        nodes: [
+          {
+            id: "trigger",
+            type: "echo",
+            config: { message: "entry node completes" },
+            next: "validator",
+          },
+          {
+            id: "validator",
+            type: "echo",
+            config: { message: "will fail validation" },
+            validation: {
+              executor: "validate",
+              config: { shouldFail: true },
+              mustPass: true,
+            },
+            next: "action",
+          },
+          { id: "action", type: "echo", config: { message: "never reached" } },
+        ],
+      };
+
+      const workflow = makeWorkflow(def);
+      const runId = await startWorkflowExecution(workflow, {}, registry);
+
+      const run = getWorkflowRun(runId);
+      // Run should be failed — the only non-entry completed step is none
+      expect(run!.status).toBe("failed");
+      expect(run!.error).toContain("Failed nodes: validator");
+
+      const steps = getWorkflowRunStepsByRunId(runId);
+      const nodeIds = steps.map((s) => s.nodeId);
+      expect(nodeIds).toContain("trigger");
+      expect(nodeIds).toContain("validator");
+      expect(nodeIds).not.toContain("action");
+    });
+
+    test("mustPass failure cancels only the failed branch, not parallel branches", async () => {
+      const registry = createTestRegistry();
+      const def: WorkflowDefinition = {
+        nodes: [
+          {
+            id: "start",
+            type: "echo",
+            config: { message: "begin" },
+            next: ["branchA", "branchB"],
+          },
+          {
+            id: "branchA",
+            type: "echo",
+            config: { message: "branch A will fail validation" },
+            validation: {
+              executor: "validate",
+              config: { shouldFail: true },
+              mustPass: true,
+            },
+            next: "afterA",
+          },
+          { id: "afterA", type: "echo", config: { message: "after A — should NOT execute" } },
+          {
+            id: "branchB",
+            type: "echo",
+            config: { message: "branch B succeeds" },
+            next: "afterB",
+          },
+          { id: "afterB", type: "echo", config: { message: "after B — should execute" } },
+        ],
+      };
+
+      const workflow = makeWorkflow(def);
+      const runId = await startWorkflowExecution(workflow, {}, registry);
+
+      const run = getWorkflowRun(runId);
+      // Run should complete (not fail) because branchB succeeded
+      expect(run!.status).toBe("completed");
+      // Should note partial failure
+      expect(run!.error).toContain("Partial failure");
+      expect(run!.error).toContain("branchA");
+
+      const steps = getWorkflowRunStepsByRunId(runId);
+      const nodeIds = steps.map((s) => s.nodeId);
+      // branchA's successor should NOT have executed
+      expect(nodeIds).not.toContain("afterA");
+      // branchB's successor SHOULD have executed
+      expect(nodeIds).toContain("afterB");
+      // branchA step should be marked as failed
+      const branchAStep = steps.find((s) => s.nodeId === "branchA");
+      expect(branchAStep!.status).toBe("failed");
     });
 
     test("validation failure without mustPass is advisory (allows completion)", async () => {

@@ -244,13 +244,16 @@ export async function walkGraph(
     // Collect successors and check for errors/pauses
     const nextBatch = new Map<string, WorkflowNode>();
     let hasWaiting = false;
-    let hasFailed = false;
 
     for (let i = 0; i < results.length; i++) {
       const result = results[i]!;
       if (result.outcome === "failed") {
-        hasFailed = true;
-        break;
+        // Check if the run was already marked failed in DB (e.g., executor error).
+        // If so, stop immediately. If not (mustPass validation), skip this
+        // node's successors but continue processing other branches.
+        const currentRun = getWorkflowRun(runId);
+        if (currentRun?.status === "failed") return;
+        continue;
       }
       if (result.outcome === "waiting") {
         hasWaiting = true;
@@ -267,7 +270,6 @@ export async function walkGraph(
       }
     }
 
-    if (hasFailed) return; // Run already marked failed in executeStep
     if (hasWaiting) return; // Run paused, will be resumed by event
 
     // Convergence check — only wait for predecessors with active edges to
@@ -302,16 +304,46 @@ export async function walkGraph(
     const hasPendingRetries = finalSteps.some(
       (s) => s.status === "failed" && s.nextRetryAt != null,
     );
+    const failedSteps = finalSteps.filter((s) => s.status === "failed" && s.nextRetryAt == null);
+    // Exclude entry/trigger nodes when checking for completed steps — a trigger
+    // completing doesn't mean a meaningful branch succeeded. Without this filter,
+    // a linear workflow (trigger → mustPass validator → action) would be marked
+    // as partial-failure instead of failed when the validator fails.
+    const entryNodeIds = new Set(findEntryNodes(def).map((n) => n.id));
+    const hasCompletedSteps = finalSteps.some(
+      (s) => s.status === "completed" && !entryNodeIds.has(s.nodeId),
+    );
 
     if (hasWaitingSteps) {
       // Async tasks still in progress — set back to waiting for next event
       updateWorkflowRun(runId, { status: "waiting" });
     } else if (!hasPendingRetries) {
-      updateWorkflowRun(runId, {
-        status: "completed",
-        context: ctx,
-        finishedAt: new Date().toISOString(),
-      });
+      if (failedSteps.length > 0 && !hasCompletedSteps) {
+        // All branches failed — mark run as failed
+        const failedNodeIds = failedSteps.map((s) => s.nodeId).join(", ");
+        updateWorkflowRun(runId, {
+          status: "failed",
+          error: `All branches failed. Failed nodes: ${failedNodeIds}`,
+          context: ctx,
+          finishedAt: new Date().toISOString(),
+        });
+      } else if (failedSteps.length > 0) {
+        // Partial failure — some branches succeeded, some failed.
+        // Mark as completed with error noting partial failure.
+        const failedNodeIds = failedSteps.map((s) => s.nodeId).join(", ");
+        updateWorkflowRun(runId, {
+          status: "completed",
+          error: `Partial failure: nodes [${failedNodeIds}] failed (mustPass validation), but other branches completed successfully`,
+          context: ctx,
+          finishedAt: new Date().toISOString(),
+        });
+      } else {
+        updateWorkflowRun(runId, {
+          status: "completed",
+          context: ctx,
+          finishedAt: new Date().toISOString(),
+        });
+      }
     }
   }
 }
@@ -532,8 +564,8 @@ async function executeStep(
 
     if (validationResult.outcome === "halt") {
       const errorMsg = "Validation failed (mustPass)";
-      checkpointStepFailure(runId, stepId, errorMsg, 0);
-      throw new Error(errorMsg);
+      checkpointStepFailure(runId, stepId, errorMsg, 0, undefined, { markRunFailed: false });
+      return { outcome: "failed", successors: [] };
     }
 
     if (validationResult.outcome === "retry") {
