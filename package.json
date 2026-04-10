@@ -1,6 +1,6 @@
 {
   "name": "@desplega.ai/agent-swarm",
-  "version": "1.64.0",
+  "version": "1.64.1",
   "description": "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants",
   "license": "MIT",
   "author": "desplega.sh <contact@desplega.sh>",
@@ -23,6 +23,7 @@
   },
   "files": [
     "src/",
+    "tsconfig.json",
     "plugin/commands/",
     "plugin/agents/",
     "plugin/skills/",
