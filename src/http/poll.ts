@@ -18,6 +18,7 @@ import {
   upsertChannelActivityCursor,
 } from "../be/db";
 import { fetchChannelActivity } from "../slack/channel-activity";
+import { telemetry } from "../telemetry";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -145,6 +146,12 @@ export async function handlePoll(
               conditions: [{ timeout_ms: 300_000 }], // 5 min: polling interval + queue wait
             });
 
+            telemetry.taskEvent("started", {
+              taskId: pendingTask.id,
+              source: pendingTask.source,
+              agentId: myAgentId,
+            });
+
             // Resolve requesting user if available
             const requestedByUser = pendingTask.requestedByUserId
               ? getUserById(pendingTask.requestedByUserId)
@@ -199,6 +206,11 @@ export async function handlePoll(
             for (const candidateId of unassignedIds) {
               const claimed = claimTask(candidateId, myAgentId);
               if (claimed) {
+                telemetry.taskEvent("claimed", {
+                  taskId: claimed.id,
+                  source: claimed.source,
+                  agentId: myAgentId,
+                });
                 return {
                   trigger: {
                     type: "task_assigned",
