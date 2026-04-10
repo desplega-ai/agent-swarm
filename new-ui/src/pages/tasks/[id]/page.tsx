@@ -785,14 +785,22 @@ export default function TaskDetailPage() {
               {task.source}
             </Badge>
           )}
-          {task.model && (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center"
-            >
-              {task.model}
-            </Badge>
-          )}
+          {(() => {
+            // Prefer the model recorded on the task row (set at task creation
+            // when explicitly requested), but fall back to whatever the
+            // session_costs entries report — codex tasks don't carry a
+            // task-level model today, so the cost record is the source of
+            // truth for what was actually used.
+            const displayModel = task.model ?? costs?.[0]?.model;
+            return displayModel ? (
+              <Badge
+                variant="outline"
+                className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center"
+              >
+                {displayModel}
+              </Badge>
+            ) : null;
+          })()}
         </div>
         <TaskPrompt text={task.task} />
         <div className="flex items-center gap-2">

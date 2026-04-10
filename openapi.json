@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.62.0",
+    "version": "1.63.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -1673,6 +1673,71 @@
           },
           "401": {
             "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/keys/name": {
+      "patch": {
+        "summary": "Set or clear the human-friendly label on a pooled credential",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "keyType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "keySuffix": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 60
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "scopeId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "keyType",
+                  "keySuffix",
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Name updated"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Key not found"
           }
         }
       }

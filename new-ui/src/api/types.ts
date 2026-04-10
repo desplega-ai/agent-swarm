@@ -755,6 +755,10 @@ export interface ApiKeyStatus {
   lastRateLimitAt: string | null;
   totalUsageCount: number;
   rateLimitCount: number;
+  /** Auto-derived harness provider (claude/pi/codex). */
+  provider: string;
+  /** Optional human-friendly label set from the dashboard. */
+  name: string | null;
   createdAt: string;
   updatedAt: string;
 }

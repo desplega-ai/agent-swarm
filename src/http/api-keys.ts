@@ -6,6 +6,7 @@ import {
   getKeyStatuses,
   markKeyRateLimited,
   recordKeyUsage,
+  setApiKeyName,
 } from "../be/db";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -110,6 +111,29 @@ const getCosts = route({
   auth: { apiKey: true },
 });
 
+const setKeyName = route({
+  method: "patch",
+  path: "/api/keys/name",
+  pattern: ["api", "keys", "name"],
+  summary: "Set or clear the human-friendly label on a pooled credential",
+  tags: ["API Keys"],
+  body: z.object({
+    keyType: z.string().min(1),
+    keySuffix: z.string().min(1).max(10),
+    /** Pass null or empty string to clear the existing label. */
+    name: z.string().max(60).nullable(),
+    scope: z.string().optional(),
+    scopeId: z.string().optional(),
+  }),
+  responses: {
+    200: { description: "Name updated" },
+    400: { description: "Validation error" },
+    401: { description: "Unauthorized" },
+    404: { description: "Key not found" },
+  },
+  auth: { apiKey: true },
+});
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleApiKeys(
@@ -192,6 +216,28 @@ export async function handleApiKeys(
       json(res, { success: true, keys: statuses });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to get key statuses", 500);
+    }
+    return true;
+  }
+
+  // PATCH /api/keys/name
+  if (setKeyName.match(req.method, pathSegments)) {
+    const parsed = await setKeyName.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const { keyType, keySuffix, name, scope, scopeId } = parsed.body;
+    try {
+      // Empty string is treated as "clear the label" so the dashboard's
+      // contenteditable can submit "" without sending an explicit null.
+      const value = name === "" ? null : name;
+      const updated = setApiKeyName(keyType, keySuffix, value, scope, scopeId ?? null);
+      if (!updated) {
+        jsonError(res, `No key matching ${keyType} ...${keySuffix}`, 404);
+        return true;
+      }
+      json(res, { success: true, keyType, keySuffix, name: value });
+    } catch (err) {
+      jsonError(res, err instanceof Error ? err.message : "Failed to set key name", 500);
     }
     return true;
   }

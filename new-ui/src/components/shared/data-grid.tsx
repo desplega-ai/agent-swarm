@@ -56,6 +56,15 @@ export function DataGrid<TData>({
   enableCellTextSelection = false,
   getRowId,
 }: DataGridProps<TData>) {
+  // AG Grid's edit-on-click only works when the cell can take focus. The
+  // wrapper defaults to `suppressCellFocus` for the read-only data tables
+  // that are common across the dashboard, but ANY editable column needs
+  // cell focus enabled or single/double-click edit silently no-ops. Auto-
+  // detect by scanning the column defs.
+  const hasEditableColumn = useMemo(
+    () => columnDefs.some((col) => col.editable === true),
+    [columnDefs],
+  );
   const gridRef = useRef<AgGridReact<TData>>(null);
 
   const defaultGetRowId = useCallback((params: GetRowIdParams<TData>) => {
@@ -132,7 +141,7 @@ export function DataGrid<TData>({
         onGridReady={onGridReady}
         getRowId={getRowId ?? defaultGetRowId}
         animateRows={false}
-        suppressCellFocus
+        suppressCellFocus={!hasEditableColumn}
         enableCellTextSelection={enableCellTextSelection}
         ensureDomOrder={enableCellTextSelection}
       />

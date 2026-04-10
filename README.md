@@ -49,7 +49,7 @@ Agent Swarm lets you run a team of AI coding agents that coordinate autonomously
 - **Templates registry** — Pre-built agent templates (9 official: lead, coder, researcher, reviewer, tester, FDE, content-writer, content-reviewer, content-strategist) with a gallery UI and docker-compose builder
 - **GitLab integration** — Full GitLab webhook support alongside GitHub via provider adapter pattern
 - **Working directory support** — Tasks can specify a custom starting directory for agents via the `dir` parameter
-- **Multi-provider** — Run agents with Claude Code or pi-mono (`HARNESS_PROVIDER=claude|pi`)
+- **Multi-provider** — Run agents with Claude Code, pi-mono, or OpenAI Codex (`HARNESS_PROVIDER=claude|pi|codex`)
 - **Agent-fs integration** — Persistent, searchable filesystem shared across the swarm with auto-registration on first boot
 - **Debug dashboard** — SQL query interface with Monaco editor and AG Grid results for database inspection
 - **Workflow engine** — DAG-based workflow automation with executor registry, checkpoint durability, webhook/schedule/manual triggers, per-step retry, structured I/O schemas, fan-out/convergence, configurable failure handling, and version history

@@ -62,6 +62,122 @@ interface ParsedMessage {
 
 // --- Parsing ---
 
+/**
+ * Parse a codex SDK event row into a ParsedMessage. Codex uses a different
+ * event shape than Claude — each row is one of:
+ *   - { type: "thread.started", thread_id }                 → skip (no content)
+ *   - { type: "turn.started" } / "turn.completed" / "turn.failed" → skip
+ *   - { type: "item.started"|"item.completed"|"item.updated", item: {...} }
+ *
+ * Items further branch on `item.type`: "agent_message" → assistant text,
+ * "command_execution" → tool_use(bash), "mcp_tool_call" → tool_use(<tool>),
+ * "reasoning" → thinking block, "file_change"/"web_search"/"todo_list" →
+ * tool_use with the SDK item type as the name.
+ *
+ * We only emit on the *completed* item (skip started/updated to avoid
+ * duplicates) so the dashboard sees one ParsedMessage per logical event.
+ */
+function parseCodexLog(log: SessionLog): ParsedMessage | null {
+  let evt: {
+    type?: string;
+    item?: {
+      id?: string;
+      type?: string;
+      text?: string;
+      command?: string | string[];
+      aggregated_output?: string;
+      exit_code?: number | null;
+      server?: string;
+      tool?: string;
+      arguments?: unknown;
+      result?: unknown;
+      summary?: string;
+      items?: unknown;
+    };
+  } | null = null;
+  try {
+    evt = JSON.parse(log.content);
+  } catch {
+    return null;
+  }
+
+  // Only render `item.completed` events to avoid duplicates from item.started/updated.
+  if (evt?.type !== "item.completed" || !evt.item) return null;
+
+  const item = evt.item;
+  const blocks: ContentBlock[] = [];
+  const role: "assistant" | "user" | "system" = "assistant";
+
+  switch (item.type) {
+    case "agent_message": {
+      if (item.text) blocks.push({ type: "text", text: item.text });
+      break;
+    }
+    case "reasoning": {
+      const text = item.text ?? item.summary ?? "";
+      if (text) blocks.push({ type: "thinking", thinking: text });
+      break;
+    }
+    case "command_execution": {
+      const cmdStr = Array.isArray(item.command) ? item.command.join(" ") : (item.command ?? "");
+      blocks.push({
+        type: "tool_use",
+        id: item.id ?? "",
+        name: "bash",
+        input: { command: cmdStr },
+      });
+      if (item.aggregated_output) {
+        blocks.push({
+          type: "tool_result",
+          tool_use_id: item.id ?? "",
+          content: item.aggregated_output,
+        });
+      }
+      break;
+    }
+    case "mcp_tool_call": {
+      blocks.push({
+        type: "tool_use",
+        id: item.id ?? "",
+        name: `${item.server ?? "mcp"}.${item.tool ?? "unknown"}`,
+        input: item.arguments,
+      });
+      if (item.result !== undefined) {
+        const text = typeof item.result === "string" ? item.result : JSON.stringify(item.result);
+        blocks.push({
+          type: "tool_result",
+          tool_use_id: item.id ?? "",
+          content: text,
+        });
+      }
+      break;
+    }
+    case "file_change":
+    case "web_search":
+    case "todo_list": {
+      blocks.push({
+        type: "tool_use",
+        id: item.id ?? "",
+        name: item.type,
+        input: item,
+      });
+      break;
+    }
+    default:
+      return null;
+  }
+
+  if (blocks.length === 0) return null;
+
+  return {
+    id: log.id,
+    role,
+    content: blocks,
+    iteration: log.iteration,
+    timestamp: log.createdAt,
+  };
+}
+
 function parseSessionLogs(logs: SessionLog[]): ParsedMessage[] {
   // Sort chronologically: by timestamp first, then lineNumber as tiebreaker
   // lineNumber represents parallel messages within the same turn (e.g. parallel tool calls)
@@ -75,6 +191,15 @@ function parseSessionLogs(logs: SessionLog[]): ParsedMessage[] {
   const messages: ParsedMessage[] = [];
 
   for (const log of sorted) {
+    // Codex uses a fundamentally different event shape than Claude — dispatch
+    // to a dedicated parser when the row is from a codex worker. Parser
+    // returns null for events without renderable content (turn.started, etc.).
+    if (log.cli === "codex") {
+      const codexMsg = parseCodexLog(log);
+      if (codexMsg) messages.push(codexMsg);
+      continue;
+    }
+
     let parsed: {
       type?: string;
       message?: { role?: string; content?: unknown; model?: string; id?: string };

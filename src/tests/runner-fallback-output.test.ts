@@ -238,11 +238,36 @@ describe("ensureTaskFinished", () => {
       outputSchema: { type: "object" },
       logs: [],
     };
-    // Force non-claude adapter via env
+    // Force a non-claude adapter via env. The factory at
+    // src/providers/index.ts accepts "pi" (NOT "pi-mono") — the prior
+    // test value was a typo that silently fell into the unknown-provider
+    // error path instead of exercising the pi branch.
     const origProvider = process.env.HARNESS_PROVIDER;
-    process.env.HARNESS_PROVIDER = "pi-mono";
+    process.env.HARNESS_PROVIDER = "pi";
 
     await ensureTaskFinished(makeConfig(), "worker", "task-12", 0);
+
+    process.env.HARNESS_PROVIDER = origProvider;
+
+    expect(lastFinishBody).toBeTruthy();
+    expect(lastFinishBody!.status).toBe("failed");
+    expect(lastFinishBody!.failureReason).toContain("outputSchema");
+  });
+
+  test("schema-fail fallback also works under HARNESS_PROVIDER=codex", async () => {
+    resetMocks();
+    mockGetTask = {
+      id: "task-12c",
+      task: "Do work",
+      status: "in_progress",
+      output: null,
+      outputSchema: { type: "object" },
+      logs: [],
+    };
+    const origProvider = process.env.HARNESS_PROVIDER;
+    process.env.HARNESS_PROVIDER = "codex";
+
+    await ensureTaskFinished(makeConfig(), "worker", "task-12c", 0);
 
     process.env.HARNESS_PROVIDER = origProvider;
 
