@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.64.0] - 2026-04-10
+
+### Changed
+- Release cut after merging the latest `main`, carrying forward the Codex ChatGPT OAuth support, provider-auth documentation, and telemetry updates already landed on this branch.
+
 ## [1.63.1] - 2026-04-10
 
 ### Added
