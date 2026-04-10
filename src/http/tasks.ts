@@ -384,6 +384,7 @@ export async function handleTasks(
       source: task.source,
       agentId: task.agentId ?? undefined,
       previousStatus: task.status,
+      durationMs: task.createdAt ? Date.now() - new Date(task.createdAt).getTime() : undefined,
     });
 
     if (task.agentId) {
@@ -486,9 +487,14 @@ export async function handleTasks(
     if (result.task && !("alreadyFinished" in result && result.alreadyFinished)) {
       const finishEventId = parsed.body.status === "completed" ? "completed" : "failed";
 
+      const durationMs = result.task.createdAt
+        ? Date.now() - new Date(result.task.createdAt).getTime()
+        : undefined;
+
       telemetry.taskEvent(finishEventId, {
         taskId: parsed.params.id,
         agentId: myAgentId,
+        durationMs,
       });
       ensure({
         id: finishEventId,
