@@ -244,12 +244,10 @@ export async function walkGraph(
     // Collect successors and check for errors/pauses
     const nextBatch = new Map<string, WorkflowNode>();
     let hasWaiting = false;
-    let hasFailed = false;
 
     for (let i = 0; i < results.length; i++) {
       const result = results[i]!;
       if (result.outcome === "failed") {
-        hasFailed = true;
         // Check if the run was already marked failed in DB (e.g., executor error).
         // If so, stop immediately. If not (mustPass validation), skip this
         // node's successors but continue processing other branches.
@@ -307,7 +305,14 @@ export async function walkGraph(
       (s) => s.status === "failed" && s.nextRetryAt != null,
     );
     const failedSteps = finalSteps.filter((s) => s.status === "failed" && s.nextRetryAt == null);
-    const hasCompletedSteps = finalSteps.some((s) => s.status === "completed");
+    // Exclude entry/trigger nodes when checking for completed steps — a trigger
+    // completing doesn't mean a meaningful branch succeeded. Without this filter,
+    // a linear workflow (trigger → mustPass validator → action) would be marked
+    // as partial-failure instead of failed when the validator fails.
+    const entryNodeIds = new Set(findEntryNodes(def).map((n) => n.id));
+    const hasCompletedSteps = finalSteps.some(
+      (s) => s.status === "completed" && !entryNodeIds.has(s.nodeId),
+    );
 
     if (hasWaitingSteps) {
       // Async tasks still in progress — set back to waiting for next event

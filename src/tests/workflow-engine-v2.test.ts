@@ -463,6 +463,49 @@ describe("Workflow Engine v2 (Phase 3)", () => {
       expect(nodeIds).not.toContain("step2");
     });
 
+    test("linear workflow: mustPass failure on non-entry node marks run as failed", async () => {
+      // Regression: when the failing mustPass node is NOT the entry node, the
+      // entry node's "completed" status must not count toward hasCompletedSteps,
+      // otherwise the run is incorrectly marked as partial-failure instead of failed.
+      const registry = createTestRegistry();
+      const def: WorkflowDefinition = {
+        nodes: [
+          {
+            id: "trigger",
+            type: "echo",
+            config: { message: "entry node completes" },
+            next: "validator",
+          },
+          {
+            id: "validator",
+            type: "echo",
+            config: { message: "will fail validation" },
+            validation: {
+              executor: "validate",
+              config: { shouldFail: true },
+              mustPass: true,
+            },
+            next: "action",
+          },
+          { id: "action", type: "echo", config: { message: "never reached" } },
+        ],
+      };
+
+      const workflow = makeWorkflow(def);
+      const runId = await startWorkflowExecution(workflow, {}, registry);
+
+      const run = getWorkflowRun(runId);
+      // Run should be failed — the only non-entry completed step is none
+      expect(run!.status).toBe("failed");
+      expect(run!.error).toContain("Failed nodes: validator");
+
+      const steps = getWorkflowRunStepsByRunId(runId);
+      const nodeIds = steps.map((s) => s.nodeId);
+      expect(nodeIds).toContain("trigger");
+      expect(nodeIds).toContain("validator");
+      expect(nodeIds).not.toContain("action");
+    });
+
     test("mustPass failure cancels only the failed branch, not parallel branches", async () => {
       const registry = createTestRegistry();
       const def: WorkflowDefinition = {
