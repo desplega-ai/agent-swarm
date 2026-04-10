@@ -24,6 +24,16 @@
 
 import type { CodexAuthJson, CodexOAuthCredentials } from "./types.js";
 
+export function authJsonToCredentialSelection(auth: CodexAuthJson) {
+  return {
+    selected: auth.tokens.account_id,
+    index: 0,
+    total: 1,
+    keySuffix: auth.tokens.account_id.slice(-5),
+    keyType: "CODEX_OAUTH",
+  };
+}
+
 export function credentialsToAuthJson(creds: CodexOAuthCredentials): CodexAuthJson {
   return {
     auth_mode: "chatgpt",

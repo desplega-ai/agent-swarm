@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.63.1] - 2026-04-10
+
+### Added
+- `agent-swarm codex-login` now supports an interactive ChatGPT OAuth flow for Codex workers: it prompts for the target swarm API URL, uses best-effort masked API key input, stores credentials as the global `codex_oauth` config entry, and documents the laptop-to-Docker-Compose restore flow for deployed swarms.
+
+### Fixed
+- Codex Docker workers now convert stored `codex_oauth` credentials into the real `~/.codex/auth.json` format expected by the Codex CLI, so ChatGPT OAuth works after container boot without `OPENAI_API_KEY`.
+- Codex tasks authenticated through ChatGPT OAuth now stamp `credentialKeyType=CODEX_OAUTH`, so the API Keys dashboard and cost tracking surfaces show OAuth-backed Codex usage alongside other credential types.
+
 ## [1.63.0] - 2026-04-09
 
 ### Added

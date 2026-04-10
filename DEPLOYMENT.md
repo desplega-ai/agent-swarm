@@ -444,6 +444,31 @@ When a worker starts, it:
 | `OPENAI_API_KEY` | OpenAI key for memory embeddings (optional) | - |
 | `CAPABILITIES` | Comma-separated feature flags | All enabled |
 
+### Codex ChatGPT OAuth
+
+Codex workers support three auth paths:
+
+1. `OPENAI_API_KEY`
+2. Pre-seeded `~/.codex/auth.json`
+3. ChatGPT OAuth stored in the swarm config store as `codex_oauth`
+
+For Docker Compose deployments, the ChatGPT OAuth flow happens on your laptop, not inside the worker container:
+
+```bash
+bun run src/cli.tsx codex-login --api-url https://your-swarm.example.com --api-key <api-key>
+```
+
+That command completes the browser OAuth flow locally and stores the credential in the swarm API config store. Then restart codex workers. On boot, `docker-entrypoint.sh` fetches `codex_oauth` from the API and writes `/home/worker/.codex/auth.json` automatically.
+
+Worker requirements for this path:
+
+- `HARNESS_PROVIDER=codex`
+- `API_KEY=<same swarm API key used by the API server>`
+- `MCP_BASE_URL=<URL the worker container can use to reach the same swarm API>`
+- stable `AGENT_ID`
+
+Your laptop can use a public API URL while containers use an internal one, as long as both point to the same swarm API and database.
+
 ---
 
 ## Slack Integration

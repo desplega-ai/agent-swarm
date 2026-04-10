@@ -34,10 +34,32 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
                 echo "Warning: codex_oauth from config store is not valid JSON, skipping" >&2
             else
                 mkdir -p "$WORKER_CODEX_HOME"
-                echo "$CODEX_OAUTH" | jq '.' > "$WORKER_CODEX_HOME/auth.json"
+                if ! echo "$CODEX_OAUTH" | jq '
+                    if .auth_mode == "chatgpt" then
+                      .
+                    elif (.access and .refresh and .accountId and .expires) then
+                      {
+                        auth_mode: "chatgpt",
+                        OPENAI_API_KEY: null,
+                        tokens: {
+                          id_token: .access,
+                          access_token: .access,
+                          refresh_token: .refresh,
+                          account_id: .accountId
+                        },
+                        last_refresh: ((.expires / 1000 | floor) | todateiso8601)
+                      }
+                    else
+                      error("codex_oauth value is neither auth.json format nor flat credential format")
+                    end
+                ' > "$WORKER_CODEX_HOME/auth.json"; then
+                    echo "Warning: codex_oauth from config store could not be converted to auth.json, skipping" >&2
+                    rm -f "$WORKER_CODEX_HOME/auth.json"
+                else
                 chown worker:worker "$WORKER_CODEX_HOME/auth.json" 2>/dev/null || true
                 chmod 600 "$WORKER_CODEX_HOME/auth.json"
                 echo "[entrypoint] Restored codex OAuth credentials from API config store"
+                fi
             fi
         fi
     fi

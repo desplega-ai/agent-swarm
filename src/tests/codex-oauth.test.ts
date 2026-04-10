@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
+  authJsonToCredentialSelection,
   authJsonToCredentials,
   credentialsToAuthJson,
 } from "../providers/codex-oauth/auth-json.js";
@@ -278,6 +279,24 @@ describe("authJsonToCredentials", () => {
     expect(restored.refresh).toBe(creds.refresh);
     expect(restored.accountId).toBe(creds.accountId);
     expect(Math.abs(restored.expires - creds.expires)).toBeLessThan(1000);
+  });
+});
+
+describe("authJsonToCredentialSelection", () => {
+  it("maps chatgpt auth.json to CODEX_OAUTH tracking info", () => {
+    const creds: CodexOAuthCredentials = {
+      access: "at_123",
+      refresh: "rt_456",
+      expires: Date.now() + 3600000,
+      accountId: "c724a178-3621-41bb-bdb5-7b6ca848c965",
+    };
+
+    const selection = authJsonToCredentialSelection(credentialsToAuthJson(creds));
+    expect(selection.keyType).toBe("CODEX_OAUTH");
+    expect(selection.index).toBe(0);
+    expect(selection.total).toBe(1);
+    expect(selection.keySuffix).toBe("8c965");
+    expect(selection.selected).toBe(creds.accountId);
   });
 });
 

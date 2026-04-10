@@ -258,7 +258,7 @@ const COMMAND_HELP: Record<
   "codex-login": {
     usage: `${binName} codex-login [options]`,
     description:
-      "Authenticate Codex via ChatGPT OAuth (browser or manual paste).\nStores credentials in the swarm API config store for deployed workers.",
+      "Authenticate Codex via ChatGPT OAuth (browser or manual paste).\nPrompts interactively for the target API URL and a best-effort masked API key, then stores credentials in the swarm API config store for deployed workers.",
     options: [
       "  --api-url <url>    Swarm API URL (default: MCP_BASE_URL or http://localhost:3013)",
       "  --api-key <key>    Swarm API key (default: API_KEY or 123123)",
@@ -267,6 +267,7 @@ const COMMAND_HELP: Record<
     examples: [
       `  ${binName} codex-login`,
       `  ${binName} codex-login --api-url https://swarm.example.com`,
+      `  ${binName} codex-login --api-url https://swarm.example.com --api-key <api-key>`,
     ].join("\n"),
   },
 };

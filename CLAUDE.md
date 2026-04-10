@@ -185,7 +185,7 @@ Uses `@desplega.ai/business-use` to track system invariants. See [BUSINESS_USE.m
 
 **Environment files:** `.env` (API server), `.env.docker` (Docker worker), `.env.docker-lead` (Docker lead).
 
-**Key env vars:** `API_KEY` (auth, default: `123123`), `MCP_BASE_URL` (default: `http://localhost:3013`), `SLACK_DISABLE=true` / `GITHUB_DISABLE=true`, `HARNESS_PROVIDER` (`claude`, `pi`, or `codex` — codex requires `OPENAI_API_KEY` or `~/.codex/auth.json` or ChatGPT OAuth via `codex-login`), `TEMPLATE_ID` (e.g. `official/coder`), `TEMPLATE_REGISTRY_URL` (default: `https://templates.agent-swarm.dev`).
+**Key env vars:** `API_KEY` (auth, default: `123123`), `MCP_BASE_URL` (default: `http://localhost:3013`), `SLACK_DISABLE=true` / `GITHUB_DISABLE=true`, `HARNESS_PROVIDER` (`claude`, `pi`, or `codex` — codex requires `OPENAI_API_KEY` or `~/.codex/auth.json` or ChatGPT OAuth via `codex-login`), `TEMPLATE_ID` (e.g. `official/coder`), `TEMPLATE_REGISTRY_URL` (default: `https://templates.agent-swarm.dev`). ChatGPT OAuth is stored server-side as the global `codex_oauth` config entry; codex workers restore it into `~/.codex/auth.json` at boot.
 
 **Testing API locally:**
 ```bash
@@ -193,9 +193,11 @@ curl -H "Authorization: Bearer 123123" http://localhost:3013/api/agents
 curl -H "Authorization: Bearer 123123" -H "X-Agent-ID: <uuid>" http://localhost:3013/mcp
 ```
 
+**Codex ChatGPT OAuth:** Run `bun run src/cli.tsx codex-login` from your laptop or local terminal, not inside the worker container. The command prompts for the swarm API URL and uses masked API key input when the terminal supports raw mode. For a remote Docker Compose swarm, point `--api-url` at the public API URL (or an SSH tunnel), then restart codex workers so the entrypoint can restore `codex_oauth` from the config store.
+
 **Portless:** `bun run dev:http` → `https://api.swarm.localhost:1355`. Set `MCP_BASE_URL` and `APP_URL` in `.env`. Worktrees auto-get `<branch>.api.swarm.localhost:1355` subdomains. Non-portless fallback: `bun run start:http`.
 
-**Docker Compose:** Requires `.env` with `API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` (or `OPENROUTER_API_KEY`). See `docker-compose.example.yml` for production.
+**Docker Compose:** Requires `.env` with `API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` (or `OPENROUTER_API_KEY`). Codex workers can use `OPENAI_API_KEY` or ChatGPT OAuth (`codex-login` + `codex_oauth` in config store). See `docker-compose.example.yml` for production.
 
 </important>
 
