@@ -2008,7 +2008,7 @@ async function checkCompletedProcesses(
         console.log(`[${role}] Detected error for task ${taskId.slice(0, 8)}: ${failureReason}`);
 
         // If rate-limited and we know which key was used, report it
-        if (credentialInfo && /rate.?limit/i.test(failureReason)) {
+        if (credentialInfo && /rate.?limit|hit your limit/i.test(failureReason)) {
           // Try to extract reset time from the error message (e.g. "resets 3pm (UTC)")
           const parsedResetTime = parseRateLimitResetTime(failureReason);
           const defaultCooldownMs = 5 * 60 * 1000;
