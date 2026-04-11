@@ -236,6 +236,12 @@ ANTHROPIC_API_KEY=sk-key1,sk-key2
 
 When a session is spawned, the runner splits the credential value by commas and randomly selects one. Each session gets a single credential, distributing load across subscriptions. A log line indicates which credential index was selected (never the credential itself). Single values (no commas) work unchanged — fully backward compatible.
 
+## Telemetry
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ANONYMIZED_TELEMETRY` | `true` (enabled) | Set to `false` to disable anonymized telemetry. See [Telemetry](/docs/reference/telemetry) for details |
+
 ## Business-Use Instrumentation
 
 Optional integration with [`@desplega.ai/business-use`](https://github.com/desplega-ai/business-use) for tracking system invariants across the distributed API + worker architecture.
