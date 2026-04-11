@@ -331,6 +331,7 @@ The memory system uses provider abstractions (`EmbeddingProvider`, `MemoryStore`
 bun test src/tests/memory-reranker.test.ts   # Reranker unit tests
 bun test src/tests/memory-store.test.ts      # Store integration tests
 bun test src/tests/memory.test.ts            # Legacy compatibility tests
+bun test src/tests/memory-e2e.test.ts        # Full memory E2E lifecycle
 ```
 
 **Key architecture:**
