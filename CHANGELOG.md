@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.64.1] - 2026-04-11
+
+### Added
+- Anonymized telemetry integration — tracks high-level task lifecycle events (created, started, completed, failed, cancelled), server start, and worker session start/end. Opt-out via `ANONYMIZED_TELEMETRY=false` (#325)
+
+### Fixed
+- Rate limit detection now matches "hit your limit" error messages in addition to existing patterns (#324)
+- Workflow `mustPass` validation failures now cancel only the failed branch's downstream nodes instead of the entire workflow run; parallel/sibling branches continue executing (#322)
+- Published package now includes `tsconfig.json`
+
 ## [1.64.0] - 2026-04-10
 
 ### Changed
