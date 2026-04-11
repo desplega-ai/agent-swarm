@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getMemoryById } from "@/be/db";
+import { getMemoryStore } from "@/be/memory";
 import { createToolRegistrar } from "@/tools/utils";
 import { AgentMemorySchema } from "@/types";
 
@@ -24,7 +24,7 @@ export const registerMemoryGetTool = (server: McpServer) => {
       }),
     },
     async ({ memoryId }, requestInfo, _meta) => {
-      const memory = getMemoryById(memoryId);
+      const memory = getMemoryStore().get(memoryId);
 
       if (!memory) {
         return {

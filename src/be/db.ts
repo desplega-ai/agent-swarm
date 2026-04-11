@@ -64,6 +64,11 @@ import { runMigrations } from "./migrations/runner";
 import { seedDefaultTemplates } from "./seed";
 
 let db: Database | null = null;
+let sqliteVecAvailable = false;
+
+export function isSqliteVecAvailable(): boolean {
+  return sqliteVecAvailable;
+}
 
 export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   if (db) {
@@ -87,6 +92,19 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   const database = db;
   database.run("PRAGMA journal_mode = WAL;");
   database.run("PRAGMA foreign_keys = ON;");
+
+  // Load sqlite-vec extension for vector search
+  try {
+    const sqliteVec = require("sqlite-vec");
+    sqliteVec.load(database);
+    sqliteVecAvailable = true;
+    console.log("[db] sqlite-vec loaded");
+  } catch (err) {
+    console.warn(
+      "[db] sqlite-vec not available, falling back to in-memory cosine:",
+      (err as Error).message,
+    );
+  }
 
   // Run database migrations (schema creation + incremental changes)
   runMigrations(database);

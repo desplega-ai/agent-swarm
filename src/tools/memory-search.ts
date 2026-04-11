@@ -1,7 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getAgentById, listMemoriesByAgent, searchMemoriesByVector } from "@/be/db";
-import { getEmbedding } from "@/be/embedding";
+import { getAgentById } from "@/be/db";
+import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
+import { CANDIDATE_SET_MULTIPLIER } from "@/be/memory/constants";
+import { rerank } from "@/be/memory/reranker";
 import { createToolRegistrar } from "@/tools/utils";
 import { AgentMemoryScopeSchema, AgentMemorySourceSchema } from "@/types";
 
@@ -60,17 +62,21 @@ export const registerMemorySearchTool = (server: McpServer) => {
       const isLead = agent?.isLead ?? false;
 
       // Try vector search first
-      const queryEmbedding = await getEmbedding(query);
+      const provider = getEmbeddingProvider();
+      const store = getMemoryStore();
+      const queryEmbedding = await provider.embed(query);
 
       if (queryEmbedding) {
-        const results = searchMemoriesByVector(queryEmbedding, requestInfo.agentId, {
+        const candidateLimit = limit * CANDIDATE_SET_MULTIPLIER;
+        const candidates = store.search(queryEmbedding, requestInfo.agentId, {
           scope: scope as "agent" | "swarm" | "all",
-          limit,
+          limit: candidateLimit,
           source,
           isLead,
         });
+        const ranked = rerank(candidates, { limit });
 
-        const mapped = results.map((r) => ({
+        const mapped = ranked.map((r) => ({
           id: r.id,
           name: r.name,
           summary: r.summary,
@@ -97,7 +103,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
       }
 
       // Fallback: list recent memories (no OPENAI_API_KEY)
-      const recent = listMemoriesByAgent(requestInfo.agentId, {
+      const recent = store.list(requestInfo.agentId, {
         scope: scope as "agent" | "swarm" | "all",
         limit,
         isLead,

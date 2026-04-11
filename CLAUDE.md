@@ -320,6 +320,28 @@ This sends a message to `#swarm-dev-2` mentioning the bot, which triggers the Sl
 
 </important>
 
+<important if="you are modifying memory system code (src/be/memory/, src/be/embedding.ts, src/tools/memory-*.ts, src/http/memory.ts, or src/tools/store-progress.ts memory sections)">
+
+## Memory system
+
+The memory system uses provider abstractions (`EmbeddingProvider`, `MemoryStore`) in `src/be/memory/` with sqlite-vec for vector search and a reranker for scoring.
+
+**When changing memory-related code, always run:**
+```bash
+bun test src/tests/memory-reranker.test.ts   # Reranker unit tests
+bun test src/tests/memory-store.test.ts      # Store integration tests
+bun test src/tests/memory.test.ts            # Legacy compatibility tests
+```
+
+**Key architecture:**
+- `src/be/memory/types.ts` — `EmbeddingProvider` + `MemoryStore` interfaces
+- `src/be/memory/providers/` — Implementations (OpenAI embeddings, SQLite+sqlite-vec store)
+- `src/be/memory/reranker.ts` — Scoring: `similarity × recency_decay × access_boost`
+- `src/be/memory/constants.ts` — Tuning params (env-overridable)
+- `src/be/memory/index.ts` — Singleton getters (`getMemoryStore()`, `getEmbeddingProvider()`)
+
+</important>
+
 ## Related
 
 - [BUSINESS_USE.md](./BUSINESS_USE.md) — Flow diagrams and instrumentation

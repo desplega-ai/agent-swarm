@@ -2387,6 +2387,47 @@
         }
       }
     },
+    "/api/memory/re-embed": {
+      "post": {
+        "summary": "Re-embed all memories using the current embedding provider",
+        "tags": [
+          "Memory"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "agentId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Re-embed only this agent's memories. Omit for all."
+                  },
+                  "batchSize": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 20,
+                    "description": "Memories per batch"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Re-embedding started"
+          }
+        }
+      }
+    },
     "/api/prompt-templates/resolved": {
       "get": {
         "summary": "Resolve a prompt template for a given event type and scope chain",
