@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.65.0] - 2026-04-12
+
+### Added
+- Memory TTL support — memories can now have an `expiresAt` field; expired memories are automatically excluded from search results (#327)
+- Memory staleness management with access tracking — `accessCount` field tracks how often a memory is retrieved, enabling recency-aware reranking (#327)
+- `memory-delete` MCP tool for explicit memory removal (#327)
+- Memory provider abstraction layer (`EmbeddingProvider`, `MemoryStore` interfaces) for pluggable storage and embedding backends (#327)
+- Memory reranker combining vector similarity, recency decay, and access frequency into a unified relevance score (#327)
+
+### Changed
+- Memory system refactored from monolithic `db.ts` functions into modular `src/be/memory/` provider architecture with SQLite+sqlite-vec store and OpenAI embedding provider (#327)
+- `memory-search` now uses the reranker pipeline for improved result quality (#327)
+- `inject-learning` and `store-progress` updated to support new memory metadata fields (#327)
+
 ## [1.64.1] - 2026-04-11
 
 ### Added
