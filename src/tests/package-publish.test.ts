@@ -30,6 +30,12 @@ describe("published package", () => {
       },
     );
 
+    // Symlink repo node_modules so top-level imports resolve without a network install
+    execSync(
+      `ln -s ${JSON.stringify(join(REPO_ROOT, "node_modules"))} ${JSON.stringify(join(unpackDir, "package", "node_modules"))}`,
+      { stdio: "pipe" },
+    );
+
     const output = execSync(`bun ./package/src/cli.tsx version`, {
       cwd: unpackDir,
       encoding: "utf-8",
