@@ -648,6 +648,14 @@ Retrieve full details of a specific memory.
 |-----------|------|----------|-------------|
 | `memoryId` | uuid | Yes | Memory ID |
 
+### memory-delete
+
+Delete a memory by ID. Agents can delete their own memories; lead agents can also delete swarm-scoped memories.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `memoryId` | uuid | Yes | Memory ID to delete |
+
 ### inject-learning
 
 Lead agent pushes learnings into a worker's memory.
