@@ -661,14 +661,27 @@ function seedMemories(
   const count = config.memories.count;
 
   const stmt = db.prepare(`
-    INSERT OR IGNORE INTO agent_memory (id, agentId, scope, name, content, source, tags, createdAt, accessedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR IGNORE INTO agent_memory (id, agentId, scope, name, content, source, tags, createdAt, accessedAt, expiresAt, accessCount, embeddingModel)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)
   `);
+
+  const ttlDefaults: Record<string, number | null> = {
+    task_completion: 7,
+    session_summary: 3,
+    file_index: 30,
+    manual: null,
+  };
 
   for (let i = 0; i < count; i++) {
     const mem = generateMemory();
     const agent = pick(agents);
     const scope = faker.helpers.arrayElement(["swarm", "agent"]);
+    const createdAt = daysAgo(faker.number.int({ min: 0, max: 14 }));
+    const ttlDays = ttlDefaults[mem.source];
+    const expiresAt =
+      ttlDays != null
+        ? new Date(new Date(createdAt).getTime() + ttlDays * 86400000).toISOString()
+        : null;
     stmt.run(
       seedId("memory", i),
       agent.id,
@@ -677,8 +690,9 @@ function seedMemories(
       mem.content,
       mem.source,
       "[]",
-      daysAgo(faker.number.int({ min: 0, max: 14 })),
+      createdAt,
       daysAgo(faker.number.int({ min: 0, max: 3 })),
+      expiresAt,
     );
   }
 

@@ -3,11 +3,18 @@ title: Memory System
 description: How agents build compounding knowledge across sessions
 ---
 
-Agent Swarm agents aren't stateless. They build compounding knowledge through multiple automatic mechanisms.
+Agent Swarm agents aren't stateless. They build compounding knowledge through multiple automatic mechanisms. The memory system uses provider abstractions, vector search, and intelligent reranking to surface the most relevant knowledge at the right time.
+
+<Callout type="info">
+The memory system was redesigned in [#212](https://github.com/desplega-ai/agent-swarm/issues/212) to add TTL-based expiry, reranking with recency and access signals, and swappable provider interfaces.
+</Callout>
 
 ## How Memory Works
 
-Every agent has a searchable memory backed by OpenAI embeddings (`text-embedding-3-small`, 512 dimensions). Memories are stored in SQLite and retrieved via brute-force cosine similarity search.
+Every agent has a searchable memory backed by embeddings and stored in SQLite. The system is built on two provider abstractions:
+
+- **`EmbeddingProvider`** — Converts text to vectors. Default implementation uses OpenAI `text-embedding-3-small` (512 dimensions). Swappable for other providers.
+- **`MemoryStore`** — Persists and retrieves memories. Default implementation uses SQLite with [sqlite-vec](https://alexgarcia.xyz/sqlite-vec/) for KNN vector search. Falls back to brute-force cosine similarity when the extension is unavailable.
 
 ### Memory Sources
 
@@ -29,23 +36,53 @@ Memories are automatically created from:
 
 The `inject-learning` tool creates swarm-scoped memories by default, so learnings injected by the lead are available to all workers.
 
-## Memory Retrieval
+## TTL & Expiry
 
-Before starting each task, the runner automatically searches for relevant memories and includes them in the agent's context. Agents are required to run `memory-search` at the start of every task.
+Memories have a time-to-live (TTL) based on their source type. Expired memories are automatically filtered from search results but not proactively deleted from the database.
+
+| Source | TTL | Rationale |
+|--------|-----|-----------|
+| `task_completion` | 7 days | Task outputs become stale quickly |
+| `session_summary` | 3 days | Session context is ephemeral |
+| `file_index` | 30 days | File contents may change |
+| `manual` | Never expires | Explicitly stored knowledge is permanent |
+
+Expired memories can still be retrieved by ID via `memory-get` — only search results are filtered. The `memory-delete` tool provides explicit cleanup when needed.
+
+## Memory Retrieval & Reranking
+
+Before starting each task, the runner automatically searches for relevant memories and includes them in the agent's context.
 
 ### Search Process
 
 1. Task description is used as the search query
-2. Embedding is generated for the query
-3. Cosine similarity is computed against all stored memories
-4. Top matches are included in the task context as "Relevant Past Knowledge"
+2. An embedding is generated via the `EmbeddingProvider`
+3. Candidate memories are retrieved via KNN search (sqlite-vec) or brute-force cosine similarity (fallback)
+4. Candidates are **reranked** using a composite score
+5. Top matches are included in the task context as "Relevant Past Knowledge"
+
+### Reranking
+
+Raw vector similarity alone isn't enough — a memory from yesterday about the same topic should rank higher than a similar but month-old memory. The reranker computes:
+
+```
+finalScore = similarity × recencyDecay × accessBoost
+```
+
+| Signal | Formula | Effect |
+|--------|---------|--------|
+| **Recency decay** | `2^(-ageDays / 14)` | Memories lose half their score every 14 days |
+| **Access boost** | `1 + min(accessCount/10, 0.5) × recencyFactor` | Frequently accessed memories get up to 1.5× boost |
+
+The candidate set is fetched at 3× the requested limit, then narrowed after reranking. This ensures that a highly relevant but older memory can still surface if its similarity is strong enough.
 
 ### Manual Search
 
-Agents can also search memories manually using MCP tools:
+Agents can search and manage memories using MCP tools:
 
-- **`memory-search`** — Search with natural language queries. Returns summaries with IDs.
-- **`memory-get`** — Retrieve full details of a specific memory by ID.
+- **`memory-search`** — Search with natural language queries. Returns reranked results.
+- **`memory-get`** — Retrieve full details of a specific memory by ID (increments access count).
+- **`memory-delete`** — Delete a memory. Agents can delete their own; leads can also delete swarm-scoped memories.
 
 ## Writing Memories
 
@@ -83,6 +120,32 @@ When the lead injects learnings via `inject-learning`, they're categorized:
 | `best-practice` | Preferred approaches |
 | `codebase-knowledge` | Facts about the codebase |
 | `preference` | User or team preferences |
+
+## Configuration
+
+Reranking parameters are tunable via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Days until recency decay reaches 0.5 |
+| `MEMORY_ACCESS_BOOST_MAX` | `1.5` | Maximum access boost multiplier |
+| `MEMORY_ACCESS_RECENCY_HOURS` | `48` | Hours within which access counts for full boost |
+| `MEMORY_CANDIDATE_MULTIPLIER` | `3` | Candidate set size relative to requested limit |
+
+## Architecture
+
+```
+src/be/memory/
+├── types.ts              # EmbeddingProvider + MemoryStore interfaces
+├── constants.ts          # TTL defaults + reranking params (env-overridable)
+├── reranker.ts           # Scoring: similarity × recency × access
+├── index.ts              # Singleton getters
+└── providers/
+    ├── openai-embedding.ts   # OpenAI text-embedding-3-small
+    └── sqlite-store.ts       # SQLite + sqlite-vec KNN search
+```
+
+The provider interfaces make it straightforward to add alternative implementations (e.g., a different embedding model or a Postgres-backed store) without changing any consumer code.
 
 ## Related
 

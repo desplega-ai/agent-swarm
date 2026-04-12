@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { createMemory, getAgentById, updateMemoryEmbedding } from "@/be/db";
-import { getEmbedding, serializeEmbedding } from "@/be/embedding";
+import { getAgentById } from "@/be/db";
+import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
 import { createToolRegistrar } from "@/tools/utils";
 
 const LearningCategoryEnum = z.enum([
@@ -69,7 +69,8 @@ export const registerInjectLearningTool = (server: McpServer) => {
 
       // Create swarm-scoped memory — lead learnings are organizational knowledge visible to all workers
       const content = `[Lead Feedback — ${category}]\n\n${learning}`;
-      const memory = createMemory({
+      const store = getMemoryStore();
+      const memory = store.store({
         agentId: targetAgentId,
         scope: "swarm",
         name: `Lead feedback: ${category} — ${learning.slice(0, 60)}`,
@@ -79,9 +80,10 @@ export const registerInjectLearningTool = (server: McpServer) => {
 
       // Generate and store embedding (async, best-effort)
       try {
-        const embedding = await getEmbedding(content);
+        const provider = getEmbeddingProvider();
+        const embedding = await provider.embed(content);
         if (embedding) {
-          updateMemoryEmbedding(memory.id, serializeEmbedding(embedding));
+          store.updateEmbedding(memory.id, embedding, provider.name);
         }
       } catch {
         // Non-blocking — memory was created, embedding is optional

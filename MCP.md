@@ -62,6 +62,7 @@
 - [Memory Tools](#memory-tools)
   - [memory-search](#memory-search)
   - [memory-get](#memory-get)
+  - [memory-delete](#memory-delete)
   - [inject-learning](#inject-learning)
 - [Workflows Tools](#workflows-tools)
   - [create-workflow](#create-workflow)
@@ -660,6 +661,16 @@ Retrieve the full content of a specific memory by its ID. Use memory-search to f
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `memoryId` | `uuid` | Yes | - | The ID of the memory to retrieve. |
+
+### memory-delete
+
+**Delete a memory**
+
+Delete a specific memory by its ID. Agents can delete their own memories; lead agents can also delete swarm-scoped memories.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `memoryId` | `uuid` | Yes | - | The ID of the memory to delete. |
 
 ### inject-learning
 

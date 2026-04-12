@@ -4,15 +4,12 @@ import {
   closeDb,
   completeTask,
   createAgent,
-  createMemory,
   createTaskExtended,
   failTask,
   getAgentById,
   initDb,
-  searchMemoriesByVector,
-  updateMemoryEmbedding,
 } from "../be/db";
-import { serializeEmbedding } from "../be/embedding";
+import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 import { getBasePrompt } from "../prompts/base-prompt";
 
 const TEST_DB_PATH = "./test-self-improvement.sqlite";
@@ -21,6 +18,7 @@ describe("Self-Improvement Mechanisms", () => {
   const leadId = "aaaa0000-0000-4000-8000-000000000001";
   const workerId = "bbbb0000-0000-4000-8000-000000000002";
   const otherWorkerId = "cccc0000-0000-4000-8000-000000000003";
+  let store: SqliteMemoryStore;
 
   beforeAll(async () => {
     for (const suffix of ["", "-wal", "-shm"]) {
@@ -33,6 +31,7 @@ describe("Self-Improvement Mechanisms", () => {
 
     closeDb();
     initDb(TEST_DB_PATH);
+    store = new SqliteMemoryStore();
 
     createAgent({ id: leadId, name: "Test Lead", isLead: true, status: "idle" });
     createAgent({ id: workerId, name: "Test Worker", isLead: false, status: "idle" });
@@ -67,7 +66,7 @@ describe("Self-Improvement Mechanisms", () => {
 
       // Simulate what store-progress does: create memory for completed task
       const taskContent = `Task: ${task.task}\n\nOutput:\n${output}`;
-      const memory = createMemory({
+      const memory = store.store({
         agentId: workerId,
         content: taskContent,
         name: `Task: ${task.task.slice(0, 80)}`,
@@ -113,7 +112,7 @@ describe("Self-Improvement Mechanisms", () => {
 
       // Simulate store-progress failed task memory creation
       const taskContent = `Task: ${task.task}\n\nFailure reason:\n${failureReason}\n\nThis task failed. Learn from this to avoid repeating the mistake.`;
-      const memory = createMemory({
+      const memory = store.store({
         agentId: workerId,
         content: taskContent,
         name: `Task: ${task.task.slice(0, 80)}`,
@@ -170,7 +169,7 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldShareWithSwarm).toBe(true);
 
       // Verify swarm memory can be created
-      const swarmMemory = createMemory({
+      const swarmMemory = store.store({
         agentId: workerId,
         scope: "swarm",
         name: `Shared: ${task.task.slice(0, 80)}`,
@@ -266,7 +265,7 @@ describe("Self-Improvement Mechanisms", () => {
       const learning = "Always run lint before committing";
       const content = `[Lead Feedback — ${category}]\n\n${learning}`;
 
-      const memory = createMemory({
+      const memory = store.store({
         agentId: workerId,
         scope: "swarm",
         name: `Lead feedback: ${category} — ${learning.slice(0, 60)}`,
@@ -293,7 +292,7 @@ describe("Self-Improvement Mechanisms", () => {
     test("injected learning is visible to target worker in memory search", () => {
       // Create memory with embedding for searchability
       const content = "[Lead Feedback — mistake-pattern]\n\nNever force-push to main branch";
-      const memory = createMemory({
+      const memory = store.store({
         agentId: workerId,
         scope: "agent",
         name: "Lead feedback: mistake-pattern — Never force-push to main branch",
@@ -302,10 +301,10 @@ describe("Self-Improvement Mechanisms", () => {
       });
 
       const embedding = new Float32Array([0.7, 0.3, 0.0]);
-      updateMemoryEmbedding(memory.id, serializeEmbedding(embedding));
+      store.updateEmbedding(memory.id, embedding, "test-model");
 
       // Worker can find it via search
-      const results = searchMemoriesByVector(new Float32Array([0.7, 0.3, 0.0]), workerId, {
+      const results = store.search(new Float32Array([0.7, 0.3, 0.0]), workerId, {
         isLead: false,
         scope: "agent",
       });
@@ -317,7 +316,7 @@ describe("Self-Improvement Mechanisms", () => {
 
     test("injected learning is NOT visible to other workers", () => {
       const content = "[Lead Feedback — preference]\n\nUse bun instead of npm";
-      const memory = createMemory({
+      const memory = store.store({
         agentId: workerId,
         scope: "agent",
         name: "Lead feedback: preference — Use bun instead of npm",
@@ -326,10 +325,10 @@ describe("Self-Improvement Mechanisms", () => {
       });
 
       const embedding = new Float32Array([0.2, 0.8, 0.1]);
-      updateMemoryEmbedding(memory.id, serializeEmbedding(embedding));
+      store.updateEmbedding(memory.id, embedding, "test-model");
 
       // Other worker should NOT see it
-      const results = searchMemoriesByVector(new Float32Array([0.2, 0.8, 0.1]), otherWorkerId, {
+      const results = store.search(new Float32Array([0.2, 0.8, 0.1]), otherWorkerId, {
         isLead: false,
         scope: "agent",
       });
@@ -355,26 +354,26 @@ describe("Self-Improvement Mechanisms", () => {
   describe("memory search agent ID security", () => {
     test("agent can only search their own memories (not others)", () => {
       // Create private memories for worker and other worker
-      const workerMemory = createMemory({
+      const workerMemory = store.store({
         agentId: workerId,
         scope: "agent",
         name: "Worker Private Secret",
         content: "My secret API key pattern",
         source: "manual",
       });
-      updateMemoryEmbedding(workerMemory.id, serializeEmbedding(new Float32Array([0.5, 0.5, 0.0])));
+      store.updateEmbedding(workerMemory.id, new Float32Array([0.5, 0.5, 0.0]), "test-model");
 
-      const otherMemory = createMemory({
+      const otherMemory = store.store({
         agentId: otherWorkerId,
         scope: "agent",
         name: "Other Worker Secret",
         content: "Other agent's private data",
         source: "manual",
       });
-      updateMemoryEmbedding(otherMemory.id, serializeEmbedding(new Float32Array([0.5, 0.5, 0.0])));
+      store.updateEmbedding(otherMemory.id, new Float32Array([0.5, 0.5, 0.0]), "test-model");
 
       // Worker searching with their own ID should see their memory but not other's
-      const workerResults = searchMemoriesByVector(new Float32Array([0.5, 0.5, 0.0]), workerId, {
+      const workerResults = store.search(new Float32Array([0.5, 0.5, 0.0]), workerId, {
         isLead: false,
         scope: "all",
       });

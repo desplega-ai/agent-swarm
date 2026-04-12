@@ -30,6 +30,7 @@ export const CORE_TOOLS = new Set([
   // Memory (used at session start)
   "memory-search", // recall relevant context
   "memory-get", // retrieve full memory content
+  "memory-delete", // delete own memories
 
   // Swarm awareness
   "get-swarm", // check who's online

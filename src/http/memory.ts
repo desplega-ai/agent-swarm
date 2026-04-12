@@ -1,14 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { chunkContent } from "../be/chunking";
-import {
-  createMemory,
-  deleteMemoriesBySourcePath,
-  getDb,
-  searchMemoriesByVector,
-  updateMemoryEmbedding,
-} from "../be/db";
-import { getEmbedding, serializeEmbedding } from "../be/embedding";
+import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
+import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
+import { rerank } from "../be/memory/reranker";
 import { AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -54,6 +49,26 @@ const searchMemory = route({
   },
 });
 
+const reEmbedMemory = route({
+  method: "post",
+  path: "/api/memory/re-embed",
+  pattern: ["api", "memory", "re-embed"],
+  summary: "Re-embed all memories using the current embedding provider",
+  tags: ["Memory"],
+  auth: { apiKey: true },
+  body: z.object({
+    agentId: z
+      .string()
+      .uuid()
+      .optional()
+      .describe("Re-embed only this agent's memories. Omit for all."),
+    batchSize: z.number().int().min(1).max(100).default(20).describe("Memories per batch"),
+  }),
+  responses: {
+    202: { description: "Re-embedding started" },
+  },
+});
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleMemory(
@@ -68,10 +83,9 @@ export async function handleMemory(
 
     const { agentId, content, name, scope, source, sourceTaskId, sourcePath, tags } = parsed.body;
 
-    // Chunk content and create memories in a transaction (with dedup)
+    // Chunk content and create memories
     const contentChunks = chunkContent(content);
     if (contentChunks.length === 0) {
-      // Content too small to chunk — create a single memory
       contentChunks.push({
         content: content.trim(),
         chunkIndex: 0,
@@ -80,46 +94,45 @@ export async function handleMemory(
       });
     }
 
-    const memoryIds = getDb().transaction(() => {
-      // Delete old chunks if re-indexing same file
-      if (sourcePath && agentId) {
-        deleteMemoriesBySourcePath(sourcePath, agentId);
-      }
+    const store = getMemoryStore();
+    const provider = getEmbeddingProvider();
 
-      const ids: string[] = [];
-      for (const chunk of contentChunks) {
-        const memory = createMemory({
-          agentId: agentId || null,
-          content: chunk.content,
-          name,
-          scope,
-          source,
-          sourcePath: sourcePath || null,
-          sourceTaskId: sourceTaskId || null,
-          chunkIndex: chunk.chunkIndex,
-          totalChunks: chunk.totalChunks,
-          tags: tags || [],
-        });
-        ids.push(memory.id);
-      }
-      return ids;
-    })();
+    // Dedup — delete old chunks for this source path
+    if (sourcePath && agentId) {
+      store.deleteBySourcePath(sourcePath, agentId);
+    }
 
-    // Async embedding — fire and forget
+    // Atomic batch insert — all chunks or none
+    const memories = store.storeBatch(
+      contentChunks.map((chunk) => ({
+        agentId: agentId || null,
+        content: chunk.content,
+        name,
+        scope,
+        source,
+        sourcePath: sourcePath || null,
+        sourceTaskId: sourceTaskId || null,
+        chunkIndex: chunk.chunkIndex,
+        totalChunks: chunk.totalChunks,
+        tags: tags || [],
+      })),
+    );
+
+    // Async batch embed (fire and forget)
     (async () => {
-      for (let i = 0; i < contentChunks.length; i++) {
-        try {
-          const embedding = await getEmbedding(contentChunks[i]!.content);
-          if (embedding) {
-            updateMemoryEmbedding(memoryIds[i]!, serializeEmbedding(embedding));
+      try {
+        const embeddings = await provider.embedBatch(contentChunks.map((c) => c.content));
+        for (let i = 0; i < embeddings.length; i++) {
+          if (embeddings[i]) {
+            store.updateEmbedding(memories[i]!.id, embeddings[i]!, provider.name);
           }
-        } catch (err) {
-          console.error(`[memory] Failed to embed chunk ${memoryIds[i]}:`, (err as Error).message);
         }
+      } catch (err) {
+        console.error("[memory] Batch embedding failed:", (err as Error).message);
       }
     })();
 
-    json(res, { queued: true, memoryIds }, 202);
+    json(res, { queued: true, memoryIds: memories.map((m) => m.id) }, 202);
     return true;
   }
 
@@ -135,20 +148,25 @@ export async function handleMemory(
     const { query, limit } = parsed.body;
 
     try {
-      const queryEmbedding = await getEmbedding(query);
+      const provider = getEmbeddingProvider();
+      const store = getMemoryStore();
+      const queryEmbedding = await provider.embed(query);
+
       if (!queryEmbedding) {
         json(res, { results: [] });
         return true;
       }
 
-      const results = searchMemoriesByVector(queryEmbedding, myAgentId, {
+      const candidateLimit = Math.min(limit, 20) * CANDIDATE_SET_MULTIPLIER;
+      const candidates = store.search(queryEmbedding, myAgentId, {
         scope: "all",
-        limit: Math.min(limit, 20),
+        limit: candidateLimit,
         isLead: false,
       });
+      const ranked = rerank(candidates, { limit: Math.min(limit, 20) });
 
       json(res, {
-        results: results.map((r) => ({
+        results: ranked.map((r) => ({
           id: r.id,
           name: r.name,
           content: r.content,
@@ -161,6 +179,41 @@ export async function handleMemory(
       console.error("[memory-search] Error:", (err as Error).message);
       json(res, { results: [] });
     }
+    return true;
+  }
+
+  if (reEmbedMemory.match(req.method, pathSegments)) {
+    const parsed = await reEmbedMemory.parse(req, res, pathSegments, new URLSearchParams());
+    if (!parsed) return true;
+
+    const { agentId, batchSize } = parsed.body;
+    const store = getMemoryStore();
+    const provider = getEmbeddingProvider();
+    const memories = store.listForReembedding(agentId ? { agentId } : undefined);
+
+    json(res, { started: true, totalMemories: memories.length }, 202);
+
+    // Async re-embed in batches
+    (async () => {
+      for (let i = 0; i < memories.length; i += batchSize) {
+        const batch = memories.slice(i, i + batchSize);
+        try {
+          const embeddings = await provider.embedBatch(batch.map((m) => m.content));
+          for (let j = 0; j < embeddings.length; j++) {
+            if (embeddings[j]) {
+              store.updateEmbedding(batch[j]!.id, embeddings[j]!, provider.name);
+            }
+          }
+          console.log(
+            `[memory] Re-embedded batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(memories.length / batchSize)}`,
+          );
+        } catch (err) {
+          console.error("[memory] Re-embed batch failed:", (err as Error).message);
+        }
+      }
+      console.log(`[memory] Re-embedding complete: ${memories.length} memories`);
+    })();
+
     return true;
   }
 
