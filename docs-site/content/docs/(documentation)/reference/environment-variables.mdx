@@ -18,6 +18,10 @@ Complete reference for all environment variables used by Agent Swarm.
 | `DATABASE_PATH` | `./agent-swarm-db.sqlite` | SQLite database file path |
 | `SCHEDULER_INTERVAL_MS` | `10000` | Polling interval for scheduled tasks (ms) |
 | `OPENAI_API_KEY` | — | OpenAI key for memory embeddings |
+| `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Days until memory recency decay reaches 0.5 |
+| `MEMORY_ACCESS_BOOST_MAX` | `1.5` | Maximum access boost multiplier for reranking |
+| `MEMORY_ACCESS_RECENCY_HOURS` | `48` | Hours within which access counts for full boost |
+| `MEMORY_CANDIDATE_MULTIPLIER` | `3` | Candidate set size relative to requested limit |
 | `CAPABILITIES` | All enabled | Comma-separated feature flags |
 | `HEARTBEAT_INTERVAL_MS` | `90000` | Heartbeat sweep interval (ms) |
 | `HEARTBEAT_DISABLE` | `false` | Set to `true` to disable the heartbeat module |
