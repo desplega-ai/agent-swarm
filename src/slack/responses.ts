@@ -7,6 +7,7 @@ import {
   buildCompletedBlocks,
   buildFailedBlocks,
   buildProgressBlocks,
+  formatDuration,
   markdownToSlack,
 } from "./blocks";
 
@@ -49,11 +50,24 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
     if (task.status === "completed") {
       const output = task.output || "Task completed.";
       const slackOutput = markdownToSlack(output);
-      const blocks = buildCompletedBlocks({ agentName, taskId: task.id, body: slackOutput });
+      const duration =
+        task.finishedAt && task.createdAt
+          ? formatDuration(new Date(task.createdAt), new Date(task.finishedAt))
+          : undefined;
+      console.log(
+        `[Slack] sendTaskResponse: task=${task.id} slackReplySent=${!!task.slackReplySent} minimal=${!!task.slackReplySent}`,
+      );
+      const blocks = buildCompletedBlocks({
+        agentName,
+        taskId: task.id,
+        body: slackOutput,
+        duration,
+        minimal: !!task.slackReplySent,
+      });
       await sendWithPersona(client, {
         channel: task.slackChannelId,
         thread_ts: task.slackThreadTs,
-        text: slackOutput,
+        text: task.slackReplySent ? `✅ ${agentName} completed` : slackOutput,
         username: getAgentDisplayName(agent),
         icon_emoji: getAgentEmoji(agent),
         blocks,
@@ -161,8 +175,21 @@ export async function updateToFinal(task: AgentTask, messageTs: string): Promise
   if (task.status === "completed") {
     const output = task.output || "Task completed.";
     const slackOutput = markdownToSlack(output);
-    blocks = buildCompletedBlocks({ agentName, taskId: task.id, body: slackOutput });
-    text = slackOutput;
+    const duration =
+      task.finishedAt && task.createdAt
+        ? formatDuration(new Date(task.createdAt), new Date(task.finishedAt))
+        : undefined;
+    console.log(
+      `[Slack] updateToFinal: task=${task.id} slackReplySent=${!!task.slackReplySent} minimal=${!!task.slackReplySent}`,
+    );
+    blocks = buildCompletedBlocks({
+      agentName,
+      taskId: task.id,
+      body: slackOutput,
+      duration,
+      minimal: !!task.slackReplySent,
+    });
+    text = task.slackReplySent ? `✅ ${agentName} completed` : slackOutput;
   } else if (task.status === "cancelled") {
     blocks = buildCancelledBlocks({ agentName, taskId: task.id });
     text = "Task cancelled";
@@ -183,6 +210,34 @@ export async function updateToFinal(task: AgentTask, messageTs: string): Promise
     return true;
   } catch (error) {
     console.error(`[Slack] Failed to update task message to final state:`, error);
+    return false;
+  }
+}
+
+/**
+ * Update a tree message directly with pre-built blocks via chat.update.
+ * Used by the watcher's tree rendering loop (Phase 5).
+ */
+export async function updateTreeMessage(
+  channelId: string,
+  messageTs: string,
+  blocks: unknown[],
+  fallbackText: string,
+): Promise<boolean> {
+  const app = getSlackApp();
+  if (!app) return false;
+
+  try {
+    await app.client.chat.update({
+      channel: channelId,
+      ts: messageTs,
+      text: fallbackText,
+      // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
+      blocks: blocks as any,
+    });
+    return true;
+  } catch (error) {
+    console.error(`[Slack] Failed to update tree message:`, error);
     return false;
   }
 }

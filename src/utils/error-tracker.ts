@@ -166,6 +166,58 @@ export function trackErrorFromJson(
 }
 
 /**
+ * Parse a rate limit error message to extract a reset time, returning an ISO datetime string.
+ * Handles patterns like:
+ *   - "resets 3pm (UTC)" / "resets 3:30pm (UTC)"
+ *   - "retry after 60 seconds" / "wait 120 seconds"
+ *   - "retry after 2 minutes"
+ * Returns undefined if no parseable reset time is found.
+ */
+export function parseRateLimitResetTime(errorMessage: string): string | undefined {
+  // Pattern 1: "resets <time> (UTC)" — e.g. "resets 3pm (UTC)", "resets 3:30pm (UTC)"
+  const resetTimeMatch = errorMessage.match(
+    /resets?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(?\s*UTC\s*\)?/i,
+  );
+  if (resetTimeMatch) {
+    let hours = Number.parseInt(resetTimeMatch[1]!, 10);
+    const minutes = resetTimeMatch[2] ? Number.parseInt(resetTimeMatch[2], 10) : 0;
+    const ampm = resetTimeMatch[3]!.toLowerCase();
+    if (ampm === "pm" && hours !== 12) hours += 12;
+    if (ampm === "am" && hours === 12) hours = 0;
+
+    const now = new Date();
+    const resetDate = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), hours, minutes, 0),
+    );
+    // If the parsed time is in the past, assume it's tomorrow
+    if (resetDate.getTime() <= now.getTime()) {
+      resetDate.setUTCDate(resetDate.getUTCDate() + 1);
+    }
+    return resetDate.toISOString();
+  }
+
+  // Pattern 2: "retry after N seconds" / "wait N seconds"
+  const secondsMatch = errorMessage.match(/(?:retry\s+after|wait)\s+(\d+)\s*seconds?/i);
+  if (secondsMatch) {
+    const seconds = Number.parseInt(secondsMatch[1]!, 10);
+    if (seconds > 0 && seconds <= 86400) {
+      return new Date(Date.now() + seconds * 1000).toISOString();
+    }
+  }
+
+  // Pattern 3: "retry after N minutes" / "wait N minutes"
+  const minutesMatch = errorMessage.match(/(?:retry\s+after|wait)\s+(\d+)\s*minutes?/i);
+  if (minutesMatch) {
+    const mins = Number.parseInt(minutesMatch[1]!, 10);
+    if (mins > 0 && mins <= 1440) {
+      return new Date(Date.now() + mins * 60 * 1000).toISOString();
+    }
+  }
+
+  return undefined;
+}
+
+/**
  * Parse stderr text for known error patterns and add them to the tracker.
  */
 export function parseStderrForErrors(stderr: string, tracker: SessionErrorTracker): void {
@@ -174,7 +226,12 @@ export function parseStderrForErrors(stderr: string, tracker: SessionErrorTracke
   const lower = stderr.toLowerCase();
   const firstLine = stderr.trim().split("\n")[0] ?? stderr.trim();
 
-  if (lower.includes("rate limit") || lower.includes("rate_limit") || lower.includes("429")) {
+  if (
+    lower.includes("rate limit") ||
+    lower.includes("rate_limit") ||
+    lower.includes("429") ||
+    lower.includes("hit your limit")
+  ) {
     tracker.addStderrError(firstLine);
   } else if (
     lower.includes("authentication") ||

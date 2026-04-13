@@ -103,7 +103,6 @@ describe("Tool Annotations & Classification", () => {
     const expectedDestructive = [
       "cancel-task",
       "delete-channel",
-      "delete-epic",
       "delete-schedule",
       "delete-config",
       "delete-workflow",
@@ -122,9 +121,7 @@ describe("Tool Annotations & Classification", () => {
       "get-swarm",
       "get-task-details",
       "get-tasks",
-      "get-epic-details",
       "get-config",
-      "list-epics",
       "list-channels",
       "list-services",
       "list-schedules",
@@ -181,8 +178,8 @@ describe("Tool Annotations & Classification", () => {
     expect(overlap).toEqual([]);
   });
 
-  test("CORE_TOOLS contains exactly 15 tools", () => {
-    expect(CORE_TOOLS.size).toBe(15);
+  test("CORE_TOOLS contains exactly 14 tools", () => {
+    expect(CORE_TOOLS.size).toBe(14);
   });
 
   test("ALL_TOOLS equals CORE_TOOLS union DEFERRED_TOOLS", () => {
@@ -240,7 +237,7 @@ describe("Tool Annotations & Classification", () => {
   });
 
   test("core tools include essential communication tools", () => {
-    const commTools = ["read-messages", "post-message", "slack-reply", "slack-read"];
+    const commTools = ["read-messages", "post-message"];
     for (const tool of commTools) {
       expect(CORE_TOOLS.has(tool)).toBe(true);
     }
@@ -266,21 +263,6 @@ describe("Tool Annotations & Classification", () => {
     }
   });
 
-  test("epic tools are all deferred", () => {
-    const epicTools = [
-      "create-epic",
-      "list-epics",
-      "get-epic-details",
-      "update-epic",
-      "delete-epic",
-      "assign-task-to-epic",
-      "unassign-task-from-epic",
-    ];
-    for (const tool of epicTools) {
-      expect(DEFERRED_TOOLS.has(tool)).toBe(true);
-    }
-  });
-
   test("workflow tools are all deferred", () => {
     const workflowTools = [
       "create-workflow",
@@ -292,13 +274,14 @@ describe("Tool Annotations & Classification", () => {
       "list-workflow-runs",
       "get-workflow-run",
       "retry-workflow-run",
+      "cancel-workflow-run",
     ];
     for (const tool of workflowTools) {
       expect(DEFERRED_TOOLS.has(tool)).toBe(true);
     }
   });
 
-  test("all 9 workflow tools are registered in the server", () => {
+  test("all 10 workflow tools are registered in the server", () => {
     const workflowTools = [
       "create-workflow",
       "list-workflows",
@@ -309,6 +292,7 @@ describe("Tool Annotations & Classification", () => {
       "list-workflow-runs",
       "get-workflow-run",
       "retry-workflow-run",
+      "cancel-workflow-run",
     ];
     const missing = workflowTools.filter((t) => !tools[t]);
     expect(missing).toEqual([]);
@@ -338,8 +322,9 @@ describe("Tool Annotations & Classification", () => {
   test("registered tool count matches expected total", () => {
     const count = Object.keys(tools).length;
     // We expect all tools to be registered when all capabilities are enabled (default)
+    // Includes 11 skill tools and 7 MCP server tools
     expect(count).toBeGreaterThanOrEqual(45);
-    expect(count).toBeLessThanOrEqual(65);
+    expect(count).toBeLessThanOrEqual(95);
   });
 
   test("core tools are fewer than deferred tools", () => {

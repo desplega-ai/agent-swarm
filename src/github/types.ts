@@ -20,6 +20,7 @@ export interface PullRequestEvent extends GitHubWebhookEvent {
     changed_files?: number;
   };
   requested_reviewer?: { login: string; id: number }; // Added for review_requested/review_request_removed events
+  label?: { id: number; name: string; color: string }; // Added for labeled/unlabeled events
 }
 
 export interface IssueEvent extends GitHubWebhookEvent {
@@ -30,11 +31,13 @@ export interface IssueEvent extends GitHubWebhookEvent {
     html_url: string;
     user: { login: string };
   };
+  label?: { id: number; name: string; color: string }; // Added for labeled/unlabeled events
 }
 
 export interface CommentEvent extends GitHubWebhookEvent {
   comment: {
     id: number;
+    node_id?: string;
     body: string;
     html_url: string;
     user: { login: string };
@@ -47,6 +50,7 @@ export interface PullRequestReviewEvent extends GitHubWebhookEvent {
   action: "submitted" | "edited" | "dismissed";
   review: {
     id: number;
+    node_id?: string;
     body: string | null;
     state: "approved" | "changes_requested" | "commented" | "dismissed";
     html_url: string;

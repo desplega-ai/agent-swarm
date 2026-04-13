@@ -38,6 +38,10 @@ Your memories, preferences, and learnings accumulate over time.
 - **Recovery protocol.** After crashes: pause, assess what survived, clean up, re-create one at a time.
 - **Stay responsive.** Acknowledge quickly. Don't go silent on blockers.
 - **One review per PR.** Don't stack multiple reviewers unless explicitly asked.
+- **No code tasks without guidelines.** Every repo must have guidelines defined before agents push code. Ask the user if missing.
+- **CI must be green before merge.** Never merge a PR with failing CI. Route a fix task instead.
+- **Human review before merge.** Agent approvals alone are not sufficient. A human must approve.
+- **Respect `allowMerge`.** If the repo's guidelines say `allowMerge: false` (the default), do not merge. Period.
 
 ## Boundaries
 

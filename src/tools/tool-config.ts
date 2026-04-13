@@ -26,12 +26,11 @@ export const CORE_TOOLS = new Set([
   // Communication (used every session)
   "read-messages", // internal swarm chat
   "post-message", // internal swarm chat
-  "slack-reply", // respond to Slack threads
-  "slack-read", // read Slack thread history
 
   // Memory (used at session start)
   "memory-search", // recall relevant context
   "memory-get", // retrieve full memory content
+  "memory-delete", // delete own memories
 
   // Swarm awareness
   "get-swarm", // check who's online
@@ -46,25 +45,19 @@ export const DEFERRED_TOOLS = new Set([
   "delete-schedule",
   "run-schedule-now",
 
-  // Workflows (9)
+  // Workflows (11)
   "create-workflow",
   "list-workflows",
   "get-workflow",
   "update-workflow",
+  "patch-workflow",
+  "patch-workflow-node",
   "delete-workflow",
   "trigger-workflow",
   "list-workflow-runs",
   "get-workflow-run",
   "retry-workflow-run",
-
-  // Epics (7)
-  "create-epic",
-  "list-epics",
-  "get-epic-details",
-  "update-epic",
-  "delete-epic",
-  "assign-task-to-epic",
-  "unassign-task-from-epic",
+  "cancel-workflow-run",
 
   // Services (4)
   "register-service",
@@ -78,12 +71,18 @@ export const DEFERRED_TOOLS = new Set([
   "list-config",
   "delete-config",
 
+  // Repos (2)
+  "get-repos",
+  "update-repo",
+
   // Profiles (3)
   "update-profile",
   "context-history",
   "context-diff",
 
-  // Slack extras (4)
+  // Slack (6)
+  "slack-reply",
+  "slack-read",
   "slack-upload-file",
   "slack-download-file",
   "slack-list-channels",
@@ -96,6 +95,52 @@ export const DEFERRED_TOOLS = new Set([
 
   // AgentMail (1)
   "register-agentmail-inbox",
+
+  // Tracker (6)
+  "tracker-status",
+  "tracker-link-task",
+  "tracker-unlink",
+  "tracker-sync-status",
+  "tracker-map-agent",
+
+  // Prompt Templates (5)
+  "list-prompt-templates",
+  "get-prompt-template",
+  "set-prompt-template",
+  "delete-prompt-template",
+  "preview-prompt-template",
+
+  // Debug (1)
+  "db-query",
+
+  // Approval Requests (1)
+  "request-human-input",
+
+  // Skills (11)
+  "skill-create",
+  "skill-update",
+  "skill-delete",
+  "skill-get",
+  "skill-list",
+  "skill-search",
+  "skill-install",
+  "skill-uninstall",
+  "skill-install-remote",
+  "skill-sync-remote",
+  "skill-publish",
+
+  // MCP Servers (7)
+  "mcp-server-create",
+  "mcp-server-delete",
+  "mcp-server-get",
+  "mcp-server-install",
+  "mcp-server-list",
+  "mcp-server-uninstall",
+  "mcp-server-update",
+
+  // User Identity (2)
+  "resolve-user",
+  "manage-user",
 
   // Other (3)
   "cancel-task",

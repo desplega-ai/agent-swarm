@@ -17,6 +17,7 @@ When someone @mentions the bot in a thread, the router checks whether a worker a
 - Message must be in a thread (`thread_ts` present)
 - An agent must have an active task (`in_progress` or `pending`) linked to that thread via `slackChannelId` + `slackThreadTs`
 - The matched agent must not be `offline`
+- If `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true`, non-mention thread messages are silently dropped instead of routing to the working agent. DM assistant threads are unaffected.
 
 **Why this matters:** Without thread follow-up routing, every @mention in a thread goes to the lead, who then has to re-delegate. This shortcut sends the message directly to the worker already handling that conversation.
 
@@ -89,6 +90,7 @@ When the additive buffer flushes normally (not via `!now`), the created task use
 |------|---------|-------------|
 | `ADDITIVE_SLACK` | `false` | Enables non-mention thread message buffering and batching |
 | `ADDITIVE_SLACK_BUFFER_MS` | `10000` (10s) | Debounce window in milliseconds for the thread buffer |
+| `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION` | `false` | Requires @mention for thread follow-up routing; non-mention thread messages are silently dropped |
 
 Both are read from environment variables. `ADDITIVE_SLACK` must be exactly `"true"` to enable. `ADDITIVE_SLACK_BUFFER_MS` is parsed as a number with fallback to 10000.
 

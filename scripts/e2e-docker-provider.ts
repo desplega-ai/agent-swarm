@@ -4,7 +4,7 @@
  *
  * Builds the Docker worker image, starts a local API server with a clean DB,
  * registers agents, creates tasks, and runs Docker workers against them.
- * Tests both Claude and pi-mono providers with the same image.
+ * Tests Claude, pi-mono, and Codex providers from the same image.
  *
  * Test scenarios (each can be run independently via --test flag):
  *   1. basic      — Worker picks up task, completes it, cost + session recorded
@@ -16,10 +16,12 @@
  * Usage:
  *   bun scripts/e2e-docker-provider.ts --provider claude
  *   bun scripts/e2e-docker-provider.ts --provider pi
- *   bun scripts/e2e-docker-provider.ts --provider both
+ *   bun scripts/e2e-docker-provider.ts --provider codex
+ *   bun scripts/e2e-docker-provider.ts --provider all     # claude+pi+codex
+ *   bun scripts/e2e-docker-provider.ts --provider both    # claude+pi (legacy)
  *   bun scripts/e2e-docker-provider.ts --provider claude --test basic
  *   bun scripts/e2e-docker-provider.ts --provider claude --test basic,cancel
- *   E2E_PORT=13099 bun scripts/e2e-docker-provider.ts --provider both --test basic
+ *   E2E_PORT=13099 bun scripts/e2e-docker-provider.ts --provider all --test basic
  */
 import { $, type Subprocess } from "bun";
 
@@ -46,12 +48,17 @@ const TEST_ARG = parseArg("test", "all");
 const SKIP_BUILD = process.argv.includes("--skip-build");
 const TIMEOUT_MS = Number.parseInt(process.env.E2E_TIMEOUT || "120000", 10); // 2 min per test
 
-if (!["claude", "pi", "both"].includes(PROVIDER_ARG)) {
-  console.error(`Invalid --provider: ${PROVIDER_ARG}. Supported: claude, pi, both`);
+if (!["claude", "pi", "codex", "both", "all"].includes(PROVIDER_ARG)) {
+  console.error(`Invalid --provider: ${PROVIDER_ARG}. Supported: claude, pi, codex, both, all`);
   process.exit(1);
 }
 
-const PROVIDERS = PROVIDER_ARG === "both" ? ["claude", "pi"] : [PROVIDER_ARG];
+const PROVIDERS =
+  PROVIDER_ARG === "all"
+    ? ["claude", "pi", "codex"]
+    : PROVIDER_ARG === "both"
+      ? ["claude", "pi"]
+      : [PROVIDER_ARG];
 const ALL_TESTS = ["basic", "cancel", "resume", "tool-loop", "summarize"];
 const TESTS_TO_RUN = TEST_ARG === "all" ? ALL_TESTS : TEST_ARG.split(",");
 
@@ -188,6 +195,13 @@ async function startWorker(
     if (antKey) envFlags.push("-e", `ANTHROPIC_API_KEY=${antKey}`);
     if (!orKey && !antKey)
       throw new Error("OPENROUTER_API_KEY or ANTHROPIC_API_KEY required for pi provider");
+  } else if (provider === "codex") {
+    // Codex requires OPENAI_API_KEY. The Docker entrypoint bootstraps
+    // ~/.codex/auth.json from this env var via `codex login --with-api-key`
+    // (idempotent — see docker-entrypoint.sh and CodexAdapter for details).
+    const key = process.env.OPENAI_API_KEY;
+    if (!key) throw new Error("OPENAI_API_KEY required for codex provider");
+    envFlags.push("-e", `OPENAI_API_KEY=${key}`);
   }
 
   for (const [k, v] of Object.entries(extraEnv)) {
@@ -366,7 +380,9 @@ async function testBasic(provider: string, portOffset: number) {
   if (diagLines.length > 0) {
     log(`${testName}: Diagnostic log lines:\n${diagLines.join("\n")}`);
   } else {
-    log(`${testName}: DIAG: No diagnostic lines found. Total log lines: ${workerLogs.split("\n").length}`);
+    log(
+      `${testName}: DIAG: No diagnostic lines found. Total log lines: ${workerLogs.split("\n").length}`,
+    );
     // Show last 20 lines for debugging
     const lastLines = workerLogs.split("\n").slice(-20).join("\n");
     log(`${testName}: Last 20 lines:\n${lastLines}`);
@@ -374,21 +390,25 @@ async function testBasic(provider: string, portOffset: number) {
 
   // Poll for cost data (may take time if Stop hook runs summarization)
   let costEntries: Array<{ totalCostUsd: number }> = [];
-  const costFound = await pollUntil(async () => {
-    const costs = await apiSafe("GET", `/api/session-costs?agentId=${agentId}`);
-    costEntries = costs?.costs || [];
-    if (costEntries.length > 0) return true;
-    // Also check unfiltered
-    const allCosts = await apiSafe("GET", "/api/session-costs");
-    const allEntries = allCosts?.costs || [];
-    if (allEntries.length > 0) {
-      log(
-        `${testName}: DIAG: No costs for agentId=${agentId}, but ${allEntries.length} total. Sample: ${JSON.stringify(allEntries[0])}`,
-      );
-      return true; // Cost exists, just wrong agentId filter
-    }
-    return false;
-  }, 30000, 3000);
+  const costFound = await pollUntil(
+    async () => {
+      const costs = await apiSafe("GET", `/api/session-costs?agentId=${agentId}`);
+      costEntries = costs?.costs || [];
+      if (costEntries.length > 0) return true;
+      // Also check unfiltered
+      const allCosts = await apiSafe("GET", "/api/session-costs");
+      const allEntries = allCosts?.costs || [];
+      if (allEntries.length > 0) {
+        log(
+          `${testName}: DIAG: No costs for agentId=${agentId}, but ${allEntries.length} total. Sample: ${JSON.stringify(allEntries[0])}`,
+        );
+        return true; // Cost exists, just wrong agentId filter
+      }
+      return false;
+    },
+    30000,
+    3000,
+  );
 
   if (costEntries.length > 0) {
     const total = costEntries.reduce(

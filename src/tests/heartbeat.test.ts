@@ -4,19 +4,23 @@ import {
   closeDb,
   createAgent,
   createTaskExtended,
+  getActiveSessionForTask,
   getDb,
   getIdleWorkersWithCapacity,
   getStalledInProgressTasks,
   getTaskById,
   getUnassignedPoolTasks,
   initDb,
+  insertActiveSession,
   startTask,
   updateAgentStatus,
 } from "../be/db";
 import {
   codeLevelTriage,
+  getRebootAffectedTasks,
   preflightGate,
   runHeartbeatSweep,
+  runRebootSweep,
   startHeartbeat,
   stopHeartbeat,
 } from "../heartbeat/heartbeat";
@@ -30,6 +34,7 @@ describe("Heartbeat Triage", () => {
     } catch {
       // File doesn't exist
     }
+    closeDb();
     initDb(TEST_DB_PATH);
   });
 
@@ -48,6 +53,7 @@ describe("Heartbeat Triage", () => {
   beforeEach(() => {
     getDb().run("DELETE FROM agent_tasks");
     getDb().run("DELETE FROM agents");
+    getDb().run("DELETE FROM active_sessions");
   });
 
   // ==========================================================================
@@ -64,7 +70,7 @@ describe("Heartbeat Triage", () => {
       createTaskExtended("Completed task", { agentId: agent.id });
       // Manually mark as completed
       getDb().run(
-        "UPDATE agent_tasks SET status = 'completed', finishedAt = datetime('now') WHERE agentId = ?",
+        "UPDATE agent_tasks SET status = 'completed', finishedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE agentId = ?",
         [agent.id],
       );
 
@@ -128,6 +134,29 @@ describe("Heartbeat Triage", () => {
     });
   });
 
+  describe("getActiveSessionForTask", () => {
+    test("returns active session for task", () => {
+      const agent = createAgent({ name: "worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Task", { agentId: agent.id });
+      startTask(task.id);
+
+      insertActiveSession({
+        agentId: agent.id,
+        taskId: task.id,
+        triggerType: "task_assigned",
+      });
+
+      const session = getActiveSessionForTask(task.id);
+      expect(session).not.toBeNull();
+      expect(session!.taskId).toBe(task.id);
+    });
+
+    test("returns null when no session exists", () => {
+      const session = getActiveSessionForTask("non-existent-task-id");
+      expect(session).toBeNull();
+    });
+  });
+
   describe("getIdleWorkersWithCapacity", () => {
     test("returns idle non-lead agents", () => {
       createAgent({ name: "idle-worker", isLead: false, status: "idle" });
@@ -179,18 +208,86 @@ describe("Heartbeat Triage", () => {
   // ==========================================================================
 
   describe("Code-Level Triage", () => {
-    test("detects stalled tasks", async () => {
-      const agent = createAgent({ name: "stall-worker", isLead: false, status: "busy" });
+    test("auto-fails stalled task with no active session", async () => {
+      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
       const task = createTaskExtended("Stalled task", { agentId: agent.id });
       startTask(task.id);
 
-      // Make task stale
-      const oldTime = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+      // Make task stale (10 min — past the 5 min no-session threshold)
+      const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
       getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
 
       const findings = await codeLevelTriage();
+
+      expect(findings.autoFailedTasks.length).toBe(1);
+      expect(findings.autoFailedTasks[0]!.taskId).toBe(task.id);
+      expect(findings.stalledTasks.length).toBe(0);
+
+      // Verify task is actually failed in DB
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("failed");
+      expect(updated?.failureReason).toContain("no active session");
+    });
+
+    test("auto-fails stalled task with stale session heartbeat", async () => {
+      const agent = createAgent({ name: "crashed-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Stalled task", { agentId: agent.id });
+      startTask(task.id);
+
+      // Create an active session with stale heartbeat
+      insertActiveSession({
+        agentId: agent.id,
+        taskId: task.id,
+        triggerType: "task_assigned",
+      });
+      // Make both task and session heartbeat stale (20 min — past the 15 min threshold)
+      const oldTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
+      getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+        oldTime,
+        task.id,
+      ]);
+
+      const findings = await codeLevelTriage();
+
+      expect(findings.autoFailedTasks.length).toBe(1);
+      expect(findings.autoFailedTasks[0]!.taskId).toBe(task.id);
+      expect(findings.stalledTasks.length).toBe(0);
+
+      // Verify task is failed and session is deleted
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("failed");
+      expect(updated?.failureReason).toContain("stale");
+
+      const session = getActiveSessionForTask(task.id);
+      expect(session).toBeNull();
+    });
+
+    test("escalates stalled task with fresh session heartbeat (ambiguous)", async () => {
+      const agent = createAgent({ name: "alive-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Stalled task", { agentId: agent.id });
+      startTask(task.id);
+
+      // Create an active session with fresh heartbeat
+      insertActiveSession({
+        agentId: agent.id,
+        taskId: task.id,
+        triggerType: "task_assigned",
+      });
+
+      // Make task stale (45 min — past the 30 min threshold) but keep session fresh
+      const oldTime = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
+      // Session lastHeartbeatAt stays current (just created)
+
+      const findings = await codeLevelTriage();
+
+      expect(findings.autoFailedTasks.length).toBe(0);
       expect(findings.stalledTasks.length).toBe(1);
-      expect(findings.escalationNeeded).toBe(true);
+      expect(findings.stalledTasks[0]!.id).toBe(task.id);
+      // Task should NOT be failed
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("in_progress");
     });
 
     test("auto-assigns pool tasks to idle workers", async () => {
@@ -257,11 +354,28 @@ describe("Heartbeat Triage", () => {
       ).toBe(true);
     });
 
-    test("no escalation when no stalled tasks", async () => {
+    test("no stalled tasks when workers are healthy", async () => {
       createAgent({ name: "healthy-worker", isLead: false, status: "idle" });
 
       const findings = await codeLevelTriage();
-      expect(findings.escalationNeeded).toBe(false);
+      expect(findings.stalledTasks.length).toBe(0);
+    });
+
+    test("sets agent to idle after auto-failing its only task", async () => {
+      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Stalled task", { agentId: agent.id });
+      startTask(task.id);
+
+      const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
+
+      await codeLevelTriage();
+
+      // Agent should be set to idle since it has no more active tasks
+      const agents = getDb().query("SELECT status FROM agents WHERE id = ?").get(agent.id) as {
+        status: string;
+      };
+      expect(agents.status).toBe("idle");
     });
   });
 
@@ -290,42 +404,18 @@ describe("Heartbeat Triage", () => {
       expect(tasks.length).toBe(1);
     });
 
-    test("creates triage task for lead when stalled tasks found", async () => {
-      const lead = createAgent({ name: "triage-lead", isLead: true, status: "idle" });
-      const worker = createAgent({ name: "stall-worker", isLead: false, status: "busy" });
-      const task = createTaskExtended("Stalled task", { agentId: worker.id });
+    test("auto-fails stalled task with no session during sweep", async () => {
+      const worker = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Stalled no-session", { agentId: worker.id });
       startTask(task.id);
 
-      // Make task stale
-      const oldTime = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+      const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
       getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
 
       await runHeartbeatSweep();
 
-      // Verify triage task was created for lead
-      const triageTasks = getDb()
-        .query("SELECT * FROM agent_tasks WHERE taskType = 'heartbeat' AND agentId = ?")
-        .all(lead.id) as Array<{ id: string; task: string }>;
-      expect(triageTasks.length).toBe(1);
-      expect(triageTasks[0]!.task).toContain("Stalled Tasks");
-    });
-
-    test("does not create duplicate triage tasks for same stalled set", async () => {
-      const lead = createAgent({ name: "triage-lead", isLead: true, status: "idle" });
-      const worker = createAgent({ name: "stall-worker", isLead: false, status: "busy" });
-      const task = createTaskExtended("Stalled task", { agentId: worker.id });
-      startTask(task.id);
-
-      const oldTime = new Date(Date.now() - 45 * 60 * 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
-
-      await runHeartbeatSweep();
-      await runHeartbeatSweep();
-
-      const triageTasks = getDb()
-        .query("SELECT id FROM agent_tasks WHERE taskType = 'heartbeat' AND agentId = ?")
-        .all(lead.id) as Array<{ id: string }>;
-      expect(triageTasks.length).toBe(1);
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("failed");
     });
 
     test("cleans stale sessions even when preflight gate bails", async () => {
@@ -343,6 +433,235 @@ describe("Heartbeat Triage", () => {
         .query("SELECT COUNT(*) as count FROM active_sessions WHERE id = ?")
         .get("test-stale-session") as { count: number };
       expect(remaining.count).toBe(0);
+    });
+  });
+
+  // ==========================================================================
+  // Reboot Sweep
+  // ==========================================================================
+
+  describe("Reboot Sweep", () => {
+    test("no-op when no in_progress tasks exist", async () => {
+      await runRebootSweep();
+
+      const affected = getRebootAffectedTasks();
+      expect(affected.length).toBe(0);
+    });
+
+    test("auto-fails in_progress task with no session and creates retry", async () => {
+      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Interrupted task", { agentId: agent.id });
+      startTask(task.id);
+
+      // Backdate so getStalledInProgressTasks(0) picks it up (avoids same-ms timing issue)
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      // Original task should be failed
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("failed");
+      expect(updated?.failureReason).toContain("reboot sweep");
+
+      // Retry task should exist
+      const affected = getRebootAffectedTasks();
+      expect(affected.length).toBe(1);
+      expect(affected[0]!.original.id).toBe(task.id);
+      expect(affected[0]!.retryTaskId).not.toBeNull();
+
+      // Verify retry task in DB
+      const retryTask = getTaskById(affected[0]!.retryTaskId!);
+      expect(retryTask).not.toBeNull();
+      expect(retryTask!.parentTaskId).toBe(task.id);
+      expect(retryTask!.task).toBe(task.task);
+      // No agentId → goes to pool as "unassigned", auto-assign will route it
+      expect(retryTask!.status).toBe("unassigned");
+
+      // Verify retry has correct tags
+      const retryRow = getDb()
+        .query("SELECT tags FROM agent_tasks WHERE id = ?")
+        .get(affected[0]!.retryTaskId!) as { tags: string };
+      const tags = JSON.parse(retryRow.tags);
+      expect(tags).toContain("reboot-retry");
+      expect(tags).toContain("auto-generated");
+    });
+
+    test("skips in_progress task that has an active session", async () => {
+      const agent = createAgent({ name: "alive-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Active task", { agentId: agent.id });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      // Create an active session — worker is still alive
+      insertActiveSession({
+        agentId: agent.id,
+        taskId: task.id,
+        triggerType: "task_assigned",
+      });
+
+      await runRebootSweep();
+
+      // Task should NOT be failed
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("in_progress");
+
+      // No retry tasks should exist for this task
+      const retries = getDb()
+        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
+        .all(task.id);
+      expect(retries.length).toBe(0);
+    });
+
+    test("retry dedup: does not create second retry when one already exists", async () => {
+      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Interrupted task", { agentId: agent.id });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      // Pre-create a retry task (simulating a previous reboot sweep)
+      createTaskExtended("Retry of interrupted task", { parentTaskId: task.id });
+
+      await runRebootSweep();
+
+      // Should only have the one pre-existing retry, not a second
+      const retries = getDb()
+        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
+        .all(task.id);
+      expect(retries.length).toBe(1);
+    });
+
+    test("does not retry system tasks (heartbeat-checklist)", async () => {
+      const lead = createAgent({ name: "lead", isLead: true, status: "busy" });
+      const task = createTaskExtended("Heartbeat check", {
+        agentId: lead.id,
+        taskType: "heartbeat-checklist",
+      });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      // Task should be failed
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("failed");
+
+      // But no retry should be created
+      const retries = getDb()
+        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
+        .all(task.id);
+      expect(retries.length).toBe(0);
+
+      // Affected list should show null retryTaskId
+      const affected = getRebootAffectedTasks();
+      expect(affected.length).toBe(1);
+      expect(affected[0]!.retryTaskId).toBeNull();
+    });
+
+    test("does not retry system tasks (boot-triage)", async () => {
+      const lead = createAgent({ name: "lead", isLead: true, status: "busy" });
+      const task = createTaskExtended("Boot triage", {
+        agentId: lead.id,
+        taskType: "boot-triage",
+      });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("failed");
+
+      const retries = getDb()
+        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
+        .all(task.id);
+      expect(retries.length).toBe(0);
+    });
+
+    test("does not retry system tasks (heartbeat)", async () => {
+      const agent = createAgent({ name: "worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Heartbeat task", {
+        agentId: agent.id,
+        taskType: "heartbeat",
+      });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      const updated = getTaskById(task.id);
+      expect(updated?.status).toBe("failed");
+
+      const retries = getDb()
+        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
+        .all(task.id);
+      expect(retries.length).toBe(0);
+    });
+
+    test("sets agent to idle after auto-failing its only task", async () => {
+      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Interrupted task", { agentId: agent.id });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      const agentRow = getDb().query("SELECT status FROM agents WHERE id = ?").get(agent.id) as {
+        status: string;
+      };
+      expect(agentRow.status).toBe("idle");
+    });
+
+    test("concurrent calls only process tasks once (dedup guard)", async () => {
+      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("Interrupted task", { agentId: agent.id });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      // Run two sweeps concurrently
+      await Promise.all([runRebootSweep(), runRebootSweep()]);
+
+      // Only one retry should be created
+      const retries = getDb()
+        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
+        .all(task.id);
+      expect(retries.length).toBe(1);
+    });
+
+    test("preserves task priority and source in retry", async () => {
+      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = createTaskExtended("High priority task", {
+        agentId: agent.id,
+        priority: 90,
+        source: "slack",
+      });
+      startTask(task.id);
+
+      const past = new Date(Date.now() - 1000).toISOString();
+      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+
+      await runRebootSweep();
+
+      const affected = getRebootAffectedTasks();
+      expect(affected.length).toBe(1);
+
+      const retryTask = getTaskById(affected[0]!.retryTaskId!);
+      expect(retryTask!.priority).toBe(90);
+      expect(retryTask!.source).toBe("slack");
     });
   });
 

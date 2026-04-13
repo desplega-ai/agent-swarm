@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.44.5",
+    "version": "1.65.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -88,6 +88,9 @@
                     "type": "string"
                   },
                   "taskDescription": {
+                    "type": "string"
+                  },
+                  "runnerSessionId": {
                     "type": "string"
                   }
                 },
@@ -189,6 +192,52 @@
         "responses": {
           "200": {
             "description": "Heartbeat updated"
+          }
+        }
+      }
+    },
+    "/api/active-sessions/provider-session/{taskId}": {
+      "put": {
+        "summary": "Update provider session ID on an active session",
+        "tags": [
+          "Active Sessions"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "providerSessionId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "providerSessionId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider session ID updated"
           }
         }
       }
@@ -460,6 +509,10 @@
                     "type": "string",
                     "maxLength": 65536
                   },
+                  "heartbeatMd": {
+                    "type": "string",
+                    "maxLength": 65536
+                  },
                   "changeSource": {
                     "type": "string"
                   },
@@ -553,6 +606,343 @@
           },
           "404": {
             "description": "Agent not found"
+          }
+        }
+      }
+    },
+    "/api/approval-requests": {
+      "post": {
+        "summary": "Create a new approval request",
+        "tags": [
+          "ApprovalRequests"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "questions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "approval",
+                            "text",
+                            "single-select",
+                            "multi-select",
+                            "boolean"
+                          ]
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "required": {
+                          "type": "boolean"
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "placeholder": {
+                          "type": "string"
+                        },
+                        "multiline": {
+                          "type": "boolean"
+                        },
+                        "options": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "label"
+                            ]
+                          }
+                        },
+                        "minSelections": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "maxSelections": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "defaultValue": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "type",
+                        "label"
+                      ]
+                    },
+                    "minItems": 1
+                  },
+                  "approvers": {
+                    "type": "object",
+                    "properties": {
+                      "users": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "roles": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "policy": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "any"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              "all"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "min": {
+                                "type": "integer",
+                                "minimum": 1
+                              }
+                            },
+                            "required": [
+                              "min"
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "policy"
+                    ]
+                  },
+                  "workflowRunId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "workflowRunStepId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "sourceTaskId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "timeoutSeconds": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "notifications": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "channel": {
+                          "type": "string",
+                          "enum": [
+                            "slack",
+                            "email"
+                          ]
+                        },
+                        "target": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "channel",
+                        "target"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "title",
+                  "questions",
+                  "approvers"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Approval request created"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      },
+      "get": {
+        "summary": "List approval requests with optional filters",
+        "tags": [
+          "ApprovalRequests"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "workflowRunId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of approval requests"
+          }
+        }
+      }
+    },
+    "/api/approval-requests/{id}": {
+      "get": {
+        "summary": "Get approval request details",
+        "tags": [
+          "ApprovalRequests"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approval request details"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/approval-requests/{id}/respond": {
+      "post": {
+        "summary": "Submit a response to an approval request",
+        "tags": [
+          "ApprovalRequests"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "responses": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "respondedBy": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "responses"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response recorded"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Already resolved"
           }
         }
       }
@@ -749,7 +1139,10 @@
                     ]
                   },
                   "scopeId": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "key": {
                     "type": "string",
@@ -760,10 +1153,16 @@
                     "type": "boolean"
                   },
                   "envPath": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "description": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
@@ -780,6 +1179,217 @@
           },
           "400": {
             "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/context": {
+      "post": {
+        "summary": "Record a context usage snapshot for a task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "eventType": {
+                    "type": "string",
+                    "enum": [
+                      "progress",
+                      "compaction",
+                      "completion"
+                    ]
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "contextUsedTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "contextTotalTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "contextPercent": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "compactTrigger": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "manual"
+                    ]
+                  },
+                  "preCompactTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "cumulativeInputTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "cumulativeOutputTokens": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "eventType",
+                  "sessionId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Snapshot recorded"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "404": {
+            "description": "Task not found"
+          }
+        }
+      },
+      "get": {
+        "summary": "Get context usage history for a task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Context snapshot history"
+          },
+          "404": {
+            "description": "Task not found"
+          }
+        }
+      }
+    },
+    "/api/db-query": {
+      "post": {
+        "summary": "Execute a read-only SQL query",
+        "tags": [
+          "Debug"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sql": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10000
+                  },
+                  "params": {
+                    "type": "array",
+                    "items": {},
+                    "default": []
+                  }
+                },
+                "required": [
+                  "sql"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Query results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "columns": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "array",
+                        "items": {}
+                      }
+                    },
+                    "elapsed": {
+                      "type": "number"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "columns",
+                    "rows",
+                    "elapsed",
+                    "total"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or disallowed SQL"
           }
         }
       }
@@ -805,53 +1415,11 @@
         }
       }
     },
-    "/api/epics": {
-      "get": {
-        "summary": "List epics with optional filters",
-        "tags": [
-          "Epics"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "status",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "search",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "leadAgentId",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Epic list with progress"
-          }
-        }
-      },
+    "/api/keys/report-usage": {
       "post": {
-        "summary": "Create a new epic",
+        "summary": "Record which API key was used for a task",
         "tags": [
-          "Epics"
+          "API Keys"
         ],
         "security": [
           {
@@ -864,243 +1432,56 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "name": {
+                  "keyType": {
+                    "type": "string"
+                  },
+                  "keySuffix": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 1,
+                    "maxLength": 10
                   },
-                  "goal": {
+                  "keyIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "taskId": {
                     "type": "string",
-                    "minLength": 1
+                    "format": "uuid"
                   },
-                  "description": {
+                  "scope": {
                     "type": "string"
                   },
-                  "leadAgentId": {
+                  "scopeId": {
                     "type": "string"
-                  },
-                  "repoId": {
-                    "type": "string"
-                  },
-                  "branch": {
-                    "type": "string"
-                  },
-                  "tags": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
                   }
                 },
                 "required": [
-                  "name",
-                  "goal"
+                  "keyType",
+                  "keySuffix",
+                  "keyIndex"
                 ]
               }
             }
           }
         },
         "responses": {
-          "201": {
-            "description": "Epic created"
+          "200": {
+            "description": "Usage recorded"
           },
           "400": {
             "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         }
       }
     },
-    "/api/epics/{id}": {
-      "get": {
-        "summary": "Get epic with progress and tasks",
-        "tags": [
-          "Epics"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Epic with tasks"
-          },
-          "404": {
-            "description": "Epic not found"
-          }
-        }
-      },
-      "put": {
-        "summary": "Update an epic",
-        "tags": [
-          "Epics"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": {}
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Epic updated"
-          },
-          "404": {
-            "description": "Epic not found"
-          }
-        }
-      },
-      "delete": {
-        "summary": "Delete an epic",
-        "tags": [
-          "Epics"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Epic deleted"
-          },
-          "404": {
-            "description": "Epic not found"
-          }
-        }
-      }
-    },
-    "/api/epics/{id}/tasks": {
+    "/api/keys/report-rate-limit": {
       "post": {
-        "summary": "Add task to epic (create new or assign existing)",
+        "summary": "Mark an API key as rate-limited",
         "tags": [
-          "Epics"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "taskId": {
-                    "type": "string"
-                  },
-                  "task": {
-                    "type": "string"
-                  },
-                  "agentId": {
-                    "type": "string"
-                  },
-                  "taskType": {
-                    "type": "string"
-                  },
-                  "tags": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "priority": {
-                    "type": "integer"
-                  },
-                  "offeredTo": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Existing task assigned"
-          },
-          "201": {
-            "description": "New task created in epic"
-          },
-          "400": {
-            "description": "Missing task or taskId"
-          },
-          "404": {
-            "description": "Epic or task not found"
-          }
-        }
-      }
-    },
-    "/api/channels": {
-      "get": {
-        "summary": "List all channels",
-        "tags": [
-          "Channels"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Channel list"
-          }
-        }
-      },
-      "post": {
-        "summary": "Create a new channel",
-        "tags": [
-          "Channels"
+          "API Keys"
         ],
         "security": [
           {
@@ -1113,22 +1494,232 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "name": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "description": {
+                  "keyType": {
                     "type": "string"
                   },
-                  "type": {
+                  "keySuffix": {
                     "type": "string",
-                    "enum": [
-                      "public",
-                      "dm"
-                    ]
+                    "minLength": 1,
+                    "maxLength": 10
+                  },
+                  "keyIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "rateLimitedUntil": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "scopeId": {
+                    "type": "string"
                   }
                 },
                 "required": [
+                  "keyType",
+                  "keySuffix",
+                  "keyIndex",
+                  "rateLimitedUntil"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Key marked as rate-limited"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/keys/available": {
+      "get": {
+        "summary": "Get available (non-rate-limited) key indices for a credential type",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "keyType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "required": true,
+            "name": "totalKeys",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scope",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scopeId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of available key indices"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/keys/status": {
+      "get": {
+        "summary": "Get all API key status records",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "keyType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scope",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scopeId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of key status records"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/keys/costs": {
+      "get": {
+        "summary": "Get aggregated cost data per API key",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "keyType",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-key cost aggregation"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/keys/name": {
+      "patch": {
+        "summary": "Set or clear the human-friendly label on a pooled credential",
+        "tags": [
+          "API Keys"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "keyType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "keySuffix": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 60
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "scopeId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "keyType",
+                  "keySuffix",
                   "name"
                 ]
               }
@@ -1136,57 +1727,139 @@
           }
         },
         "responses": {
-          "201": {
-            "description": "Channel created"
+          "200": {
+            "description": "Name updated"
           },
           "400": {
             "description": "Validation error"
           },
-          "409": {
-            "description": "Duplicate name"
-          }
-        }
-      }
-    },
-    "/api/channels/{id}": {
-      "delete": {
-        "summary": "Delete a channel",
-        "tags": [
-          "Channels"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Channel deleted"
-          },
-          "400": {
-            "description": "Cannot delete general channel"
+          "401": {
+            "description": "Unauthorized"
           },
           "404": {
-            "description": "Channel not found"
+            "description": "Key not found"
           }
         }
       }
     },
-    "/api/channels/{id}/messages": {
-      "get": {
-        "summary": "Get messages in a channel",
+    "/api/events": {
+      "post": {
+        "summary": "Store a single event",
         "tags": [
-          "Channels"
+          "Events"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "tool",
+                      "skill",
+                      "session",
+                      "api",
+                      "task",
+                      "workflow",
+                      "system"
+                    ]
+                  },
+                  "event": {
+                    "type": "string",
+                    "enum": [
+                      "tool.start",
+                      "tool.end",
+                      "skill.invoke",
+                      "skill.complete",
+                      "session.start",
+                      "session.end",
+                      "session.resume",
+                      "session.cost",
+                      "api.request",
+                      "api.error",
+                      "task.poll",
+                      "task.assign",
+                      "task.timeout",
+                      "workflow.step.start",
+                      "workflow.step.end",
+                      "workflow.run.start",
+                      "workflow.run.end",
+                      "system.boot",
+                      "system.migration",
+                      "system.error"
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ok",
+                      "error",
+                      "timeout",
+                      "skipped"
+                    ]
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "worker",
+                      "api",
+                      "hook",
+                      "scheduler",
+                      "cli"
+                    ]
+                  },
+                  "agentId": {
+                    "type": "string"
+                  },
+                  "taskId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "parentEventId": {
+                    "type": "string"
+                  },
+                  "numericValue": {
+                    "type": "number"
+                  },
+                  "durationMs": {
+                    "type": "integer"
+                  },
+                  "data": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "category",
+                  "event",
+                  "source"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Event stored"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      },
+      "get": {
+        "summary": "Query events with filters",
+        "tags": [
+          "Events"
         ],
         "security": [
           {
@@ -1196,19 +1869,102 @@
         "parameters": [
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "tool",
+                "skill",
+                "session",
+                "api",
+                "task",
+                "workflow",
+                "system"
+              ]
             },
-            "required": true,
-            "name": "id",
-            "in": "path"
+            "required": false,
+            "name": "category",
+            "in": "query"
           },
           {
             "schema": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "enum": [
+                "tool.start",
+                "tool.end",
+                "skill.invoke",
+                "skill.complete",
+                "session.start",
+                "session.end",
+                "session.resume",
+                "session.cost",
+                "api.request",
+                "api.error",
+                "task.poll",
+                "task.assign",
+                "task.timeout",
+                "workflow.step.start",
+                "workflow.step.end",
+                "workflow.run.start",
+                "workflow.run.end",
+                "system.boot",
+                "system.migration",
+                "system.error"
+              ]
             },
             "required": false,
-            "name": "limit",
+            "name": "event",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ok",
+                "error",
+                "timeout",
+                "skipped"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "worker",
+                "api",
+                "hook",
+                "scheduler",
+                "cli"
+              ]
+            },
+            "required": false,
+            "name": "source",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "taskId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "sessionId",
             "in": "query"
           },
           {
@@ -1224,37 +1980,36 @@
               "type": "string"
             },
             "required": false,
-            "name": "before",
+            "name": "until",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "required": false,
+            "name": "limit",
             "in": "query"
           }
         ],
         "responses": {
           "200": {
-            "description": "Channel messages"
-          },
-          "404": {
-            "description": "Channel not found"
+            "description": "List of events"
           }
         }
-      },
+      }
+    },
+    "/api/events/batch": {
       "post": {
-        "summary": "Post a message to a channel",
+        "summary": "Store multiple events in a batch",
         "tags": [
-          "Channels"
+          "Events"
         ],
         "security": [
           {
             "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
           }
         ],
         "requestBody": {
@@ -1263,25 +2018,102 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "content": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "agentId": {
-                    "type": "string"
-                  },
-                  "replyToId": {
-                    "type": "string"
-                  },
-                  "mentions": {
+                  "events": {
                     "type": "array",
                     "items": {
-                      "type": "string"
-                    }
+                      "type": "object",
+                      "properties": {
+                        "category": {
+                          "type": "string",
+                          "enum": [
+                            "tool",
+                            "skill",
+                            "session",
+                            "api",
+                            "task",
+                            "workflow",
+                            "system"
+                          ]
+                        },
+                        "event": {
+                          "type": "string",
+                          "enum": [
+                            "tool.start",
+                            "tool.end",
+                            "skill.invoke",
+                            "skill.complete",
+                            "session.start",
+                            "session.end",
+                            "session.resume",
+                            "session.cost",
+                            "api.request",
+                            "api.error",
+                            "task.poll",
+                            "task.assign",
+                            "task.timeout",
+                            "workflow.step.start",
+                            "workflow.step.end",
+                            "workflow.run.start",
+                            "workflow.run.end",
+                            "system.boot",
+                            "system.migration",
+                            "system.error"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "ok",
+                            "error",
+                            "timeout",
+                            "skipped"
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "worker",
+                            "api",
+                            "hook",
+                            "scheduler",
+                            "cli"
+                          ]
+                        },
+                        "agentId": {
+                          "type": "string"
+                        },
+                        "taskId": {
+                          "type": "string"
+                        },
+                        "sessionId": {
+                          "type": "string"
+                        },
+                        "parentEventId": {
+                          "type": "string"
+                        },
+                        "numericValue": {
+                          "type": "number"
+                        },
+                        "durationMs": {
+                          "type": "integer"
+                        },
+                        "data": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "category",
+                        "event",
+                        "source"
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 500
                   }
                 },
                 "required": [
-                  "content"
+                  "events"
                 ]
               }
             }
@@ -1289,22 +2121,19 @@
         },
         "responses": {
           "201": {
-            "description": "Message posted"
+            "description": "Events stored"
           },
           "400": {
-            "description": "Invalid content or agentId"
-          },
-          "404": {
-            "description": "Channel not found"
+            "description": "Validation error"
           }
         }
       }
     },
-    "/api/channels/{channelId}/messages/{messageId}/thread": {
+    "/api/events/counts": {
       "get": {
-        "summary": "Get thread messages for a message",
+        "summary": "Get event counts grouped by event name",
         "tags": [
-          "Channels"
+          "Events"
         ],
         "security": [
           {
@@ -1314,27 +2143,122 @@
         "parameters": [
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "tool",
+                "skill",
+                "session",
+                "api",
+                "task",
+                "workflow",
+                "system"
+              ]
             },
-            "required": true,
-            "name": "channelId",
-            "in": "path"
+            "required": false,
+            "name": "category",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "worker",
+                "api",
+                "hook",
+                "scheduler",
+                "cli"
+              ]
+            },
+            "required": false,
+            "name": "source",
+            "in": "query"
           },
           {
             "schema": {
               "type": "string"
             },
-            "required": true,
-            "name": "messageId",
-            "in": "path"
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "taskId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "sessionId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "since",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "until",
+            "in": "query"
           }
         ],
         "responses": {
           "200": {
-            "description": "Thread messages"
+            "description": "Event counts"
+          }
+        }
+      }
+    },
+    "/api/heartbeat/sweep": {
+      "post": {
+        "summary": "Trigger an immediate heartbeat sweep",
+        "tags": [
+          "Heartbeat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sweep completed successfully"
           },
-          "404": {
-            "description": "Channel not found"
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/heartbeat/checklist": {
+      "post": {
+        "summary": "Trigger an immediate heartbeat checklist check",
+        "tags": [
+          "Heartbeat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Checklist check completed successfully"
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         }
       }
@@ -1463,9 +2387,475 @@
         }
       }
     },
+    "/api/memory/re-embed": {
+      "post": {
+        "summary": "Re-embed all memories using the current embedding provider",
+        "tags": [
+          "Memory"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "agentId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Re-embed only this agent's memories. Omit for all."
+                  },
+                  "batchSize": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 20,
+                    "description": "Memories per batch"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Re-embedding started"
+          }
+        }
+      }
+    },
+    "/api/prompt-templates/resolved": {
+      "get": {
+        "summary": "Resolve a prompt template for a given event type and scope chain",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "eventType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "repoId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resolved template info"
+          },
+          "400": {
+            "description": "Missing eventType"
+          }
+        }
+      }
+    },
+    "/api/prompt-templates/events": {
+      "get": {
+        "summary": "List all registered event types with their available variables",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of event template definitions"
+          }
+        }
+      }
+    },
+    "/api/prompt-templates/preview": {
+      "post": {
+        "summary": "Dry-run render a template with provided variables",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "eventType": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "variables": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "eventType"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rendered template preview"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/prompt-templates/render": {
+      "post": {
+        "summary": "Full scope-aware template resolution with interpolation (used by workers via HTTP)",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "eventType": {
+                    "type": "string"
+                  },
+                  "variables": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "agentId": {
+                    "type": "string"
+                  },
+                  "repoId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "eventType"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fully resolved and interpolated template"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/prompt-templates/{id}/checkout": {
+      "post": {
+        "summary": "Checkout a specific version of a prompt template from history",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "version"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Checked-out template"
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "404": {
+            "description": "Template or version not found"
+          }
+        }
+      }
+    },
+    "/api/prompt-templates/{id}/reset": {
+      "post": {
+        "summary": "Reset a prompt template to its code-defined default",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reset template"
+          },
+          "404": {
+            "description": "Template not found or no code default available"
+          }
+        }
+      }
+    },
+    "/api/prompt-templates/{id}": {
+      "get": {
+        "summary": "Get a single prompt template with its version history",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Template with history"
+          },
+          "404": {
+            "description": "Template not found"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a prompt template override",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Template deleted"
+          },
+          "400": {
+            "description": "Cannot delete default template"
+          },
+          "404": {
+            "description": "Template not found"
+          }
+        }
+      }
+    },
+    "/api/prompt-templates": {
+      "get": {
+        "summary": "List prompt templates with optional filters",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "eventType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scope",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scopeId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "isDefault",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of prompt templates"
+          }
+        }
+      },
+      "put": {
+        "summary": "Create or update a prompt template override",
+        "tags": [
+          "PromptTemplates"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "eventType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "global",
+                      "agent",
+                      "repo"
+                    ]
+                  },
+                  "scopeId": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "enabled",
+                      "default_prompt_fallback",
+                      "skip_event"
+                    ]
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "changedBy": {
+                    "type": "string"
+                  },
+                  "changeReason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "eventType",
+                  "body"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upserted template"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
     "/api/poll": {
       "get": {
-        "summary": "Poll for triggers (tasks, mentions, epic updates)",
+        "summary": "Poll for triggers (tasks, mentions)",
         "tags": [
           "Poll"
         ],
@@ -1483,6 +2873,59 @@
           },
           "404": {
             "description": "Agent not found"
+          }
+        }
+      }
+    },
+    "/api/channel-activity/commit-cursors": {
+      "post": {
+        "summary": "Commit channel activity cursors after successful processing",
+        "tags": [
+          "Poll"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cursorUpdates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "channelId": {
+                          "type": "string"
+                        },
+                        "ts": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "channelId",
+                        "ts"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "cursorUpdates"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cursors committed"
+          },
+          "400": {
+            "description": "Invalid request"
           }
         }
       }
@@ -1541,6 +2984,41 @@
                     "autoClone": {
                       "type": "boolean",
                       "default": true
+                    },
+                    "guidelines": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "prChecks": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "mergeChecks": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "allowMerge": {
+                          "type": "boolean",
+                          "default": false
+                        },
+                        "review": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "prChecks",
+                        "mergeChecks",
+                        "review"
+                      ]
                     },
                     "createdAt": {
                       "type": "string"
@@ -1622,6 +3100,41 @@
                   },
                   "autoClone": {
                     "type": "boolean"
+                  },
+                  "guidelines": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "prChecks": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "mergeChecks": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "allowMerge": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "review": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "prChecks",
+                      "mergeChecks",
+                      "review"
+                    ]
                   }
                 }
               }
@@ -1660,6 +3173,41 @@
                     "autoClone": {
                       "type": "boolean",
                       "default": true
+                    },
+                    "guidelines": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "prChecks": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "mergeChecks": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "allowMerge": {
+                          "type": "boolean",
+                          "default": false
+                        },
+                        "review": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "prChecks",
+                        "mergeChecks",
+                        "review"
+                      ]
                     },
                     "createdAt": {
                       "type": "string"
@@ -1850,6 +3398,41 @@
                             "type": "boolean",
                             "default": true
                           },
+                          "guidelines": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "prChecks": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "mergeChecks": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "allowMerge": {
+                                "type": "boolean",
+                                "default": false
+                              },
+                              "review": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": [
+                              "prChecks",
+                              "mergeChecks",
+                              "review"
+                            ]
+                          },
                           "createdAt": {
                             "type": "string"
                           },
@@ -1909,6 +3492,41 @@
                   },
                   "autoClone": {
                     "type": "boolean"
+                  },
+                  "guidelines": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "prChecks": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "mergeChecks": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "allowMerge": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "review": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "prChecks",
+                      "mergeChecks",
+                      "review"
+                    ]
                   }
                 },
                 "required": [
@@ -1951,6 +3569,41 @@
                     "autoClone": {
                       "type": "boolean",
                       "default": true
+                    },
+                    "guidelines": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "prChecks": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "mergeChecks": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "allowMerge": {
+                          "type": "boolean",
+                          "default": false
+                        },
+                        "review": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "prChecks",
+                        "mergeChecks",
+                        "review"
+                      ]
                     },
                     "createdAt": {
                       "type": "string"
@@ -2591,6 +4244,775 @@
         }
       }
     },
+    "/api/skills": {
+      "get": {
+        "summary": "List skills with optional filters",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "type",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scope",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "enabled",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "search",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill list"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a new skill",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "ownerAgentId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "content"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Skill created"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/skills/{id}": {
+      "get": {
+        "summary": "Get skill by ID",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill details"
+          },
+          "404": {
+            "description": "Skill not found"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update a skill",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Skill updated"
+          },
+          "404": {
+            "description": "Skill not found"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a skill",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill deleted"
+          },
+          "404": {
+            "description": "Skill not found"
+          }
+        }
+      }
+    },
+    "/api/skills/{id}/install": {
+      "post": {
+        "summary": "Install skill for an agent",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "agentId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "agentId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Skill installed"
+          },
+          "404": {
+            "description": "Skill not found"
+          }
+        }
+      }
+    },
+    "/api/skills/{id}/install/{agentId}": {
+      "delete": {
+        "summary": "Uninstall skill for an agent",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "agentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill uninstalled"
+          }
+        }
+      }
+    },
+    "/api/skills/install-remote": {
+      "post": {
+        "summary": "Install a remote skill from GitHub",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sourceRepo": {
+                    "type": "string"
+                  },
+                  "sourcePath": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "isComplex": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "sourceRepo"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Remote skill installed"
+          },
+          "400": {
+            "description": "Fetch failed"
+          }
+        }
+      }
+    },
+    "/api/skills/sync-remote": {
+      "post": {
+        "summary": "Trigger remote skill sync",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "skillId": {
+                    "type": "string"
+                  },
+                  "force": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sync results"
+          }
+        }
+      }
+    },
+    "/api/skills/sync-filesystem": {
+      "post": {
+        "summary": "Sync installed skills to agent filesystem",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Filesystem sync results"
+          }
+        }
+      }
+    },
+    "/api/agents/{id}/skills": {
+      "get": {
+        "summary": "Get all skills installed for an agent",
+        "tags": [
+          "Skills"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent skills list"
+          }
+        }
+      }
+    },
+    "/api/mcp-servers": {
+      "get": {
+        "summary": "List MCP servers with optional filters",
+        "tags": [
+          "MCP Servers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scope",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "transport",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "ownerAgentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "enabled",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "search",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "MCP server list"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a new MCP server",
+        "tags": [
+          "MCP Servers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "transport": {
+                    "type": "string",
+                    "enum": [
+                      "stdio",
+                      "http",
+                      "sse"
+                    ]
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "ownerAgentId": {
+                    "type": "string"
+                  },
+                  "command": {
+                    "type": "string"
+                  },
+                  "args": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "headers": {
+                    "type": "string"
+                  },
+                  "envConfigKeys": {
+                    "type": "string"
+                  },
+                  "headerConfigKeys": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "transport"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "MCP server created"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/mcp-servers/{id}": {
+      "get": {
+        "summary": "Get MCP server by ID",
+        "tags": [
+          "MCP Servers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "MCP server details"
+          },
+          "404": {
+            "description": "MCP server not found"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update an MCP server",
+        "tags": [
+          "MCP Servers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "MCP server updated"
+          },
+          "404": {
+            "description": "MCP server not found"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete an MCP server",
+        "tags": [
+          "MCP Servers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "MCP server deleted"
+          },
+          "404": {
+            "description": "MCP server not found"
+          }
+        }
+      }
+    },
+    "/api/mcp-servers/{id}/install": {
+      "post": {
+        "summary": "Install MCP server for an agent",
+        "tags": [
+          "MCP Servers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "agentId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "agentId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "MCP server installed"
+          },
+          "404": {
+            "description": "MCP server not found"
+          }
+        }
+      }
+    },
+    "/api/mcp-servers/{id}/install/{agentId}": {
+      "delete": {
+        "summary": "Uninstall MCP server for an agent",
+        "tags": [
+          "MCP Servers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "agentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "MCP server uninstalled"
+          }
+        }
+      }
+    },
+    "/api/agents/{id}/mcp-servers": {
+      "get": {
+        "summary": "Get all MCP servers installed for an agent",
+        "tags": [
+          "MCP Servers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "resolveSecrets",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent MCP servers list"
+          }
+        }
+      }
+    },
     "/api/logs": {
       "get": {
         "summary": "List agent logs",
@@ -2806,14 +5228,6 @@
               "type": "string"
             },
             "required": false,
-            "name": "epicId",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
             "name": "scheduleId",
             "in": "query"
           },
@@ -2918,6 +5332,10 @@
                   },
                   "source": {
                     "type": "string"
+                  },
+                  "outputSchema": {
+                    "type": "object",
+                    "additionalProperties": {}
                   }
                 },
                 "required": [
@@ -3256,6 +5674,168 @@
         }
       }
     },
+    "/api/tasks/{id}/vcs": {
+      "patch": {
+        "summary": "Update VCS (PR/MR) info for a task",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "vcsProvider": {
+                    "type": "string",
+                    "enum": [
+                      "github",
+                      "gitlab"
+                    ]
+                  },
+                  "vcsRepo": {
+                    "type": "string"
+                  },
+                  "vcsNumber": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "vcsUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "vcsProvider",
+                  "vcsRepo",
+                  "vcsNumber",
+                  "vcsUrl"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "VCS info updated"
+          },
+          "404": {
+            "description": "Task not found"
+          }
+        }
+      }
+    },
+    "/api/trackers/linear/authorize": {
+      "get": {
+        "summary": "Redirect to Linear OAuth consent screen",
+        "tags": [
+          "Trackers"
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to Linear OAuth"
+          },
+          "500": {
+            "description": "Failed to generate authorization URL"
+          },
+          "503": {
+            "description": "Linear integration not configured"
+          }
+        }
+      }
+    },
+    "/api/trackers/linear/callback": {
+      "get": {
+        "summary": "Handle Linear OAuth callback",
+        "tags": [
+          "Trackers"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "code",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "state",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OAuth complete"
+          },
+          "400": {
+            "description": "Invalid state or code"
+          },
+          "500": {
+            "description": "Token exchange failed"
+          }
+        }
+      }
+    },
+    "/api/trackers/linear/status": {
+      "get": {
+        "summary": "Linear connection status, token expiry, workspace info, expected webhook URL",
+        "tags": [
+          "Trackers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Connection status"
+          },
+          "503": {
+            "description": "Linear integration not configured"
+          }
+        }
+      }
+    },
+    "/api/trackers/linear/webhook": {
+      "post": {
+        "summary": "Handle Linear webhook events (signature-verified)",
+        "tags": [
+          "Trackers"
+        ],
+        "responses": {
+          "200": {
+            "description": "Event accepted"
+          },
+          "401": {
+            "description": "Invalid signature"
+          },
+          "503": {
+            "description": "Linear integration not configured"
+          }
+        }
+      }
+    },
     "/api/github/webhook": {
       "post": {
         "summary": "Handle GitHub webhook events",
@@ -3355,7 +5935,260 @@
                   },
                   "definition": {
                     "type": "object",
+                    "properties": {
+                      "nodes": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "description": "Unique node identifier, used in 'next' and 'inputs' mappings"
+                            },
+                            "type": {
+                              "type": "string",
+                              "description": "Executor type: 'agent-task', 'script', 'raw-llm', 'validate', 'property-match'"
+                            },
+                            "label": {
+                              "type": "string",
+                              "description": "Human-readable label for UI display"
+                            },
+                            "config": {
+                              "type": "object",
+                              "additionalProperties": {},
+                              "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                            },
+                            "next": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  }
+                                }
+                              ],
+                              "description": "Next node(s): string for simple chaining, string[] for fan-out to parallel nodes, or record for port-based routing ({pass: 'a', fail: 'b'})"
+                            },
+                            "validation": {
+                              "type": "object",
+                              "properties": {
+                                "executor": {
+                                  "type": "string",
+                                  "default": "validate"
+                                },
+                                "config": {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                },
+                                "mustPass": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
+                                "retry": {
+                                  "type": "object",
+                                  "properties": {
+                                    "maxRetries": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "default": 3
+                                    },
+                                    "strategy": {
+                                      "type": "string",
+                                      "enum": [
+                                        "exponential",
+                                        "static",
+                                        "linear"
+                                      ],
+                                      "default": "exponential"
+                                    },
+                                    "baseDelayMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "default": 1000
+                                    },
+                                    "maxDelayMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "default": 60000
+                                    }
+                                  }
+                                }
+                              },
+                              "required": [
+                                "config"
+                              ]
+                            },
+                            "retry": {
+                              "type": "object",
+                              "properties": {
+                                "maxRetries": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 3
+                                },
+                                "strategy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "exponential",
+                                    "static",
+                                    "linear"
+                                  ],
+                                  "default": "exponential"
+                                },
+                                "baseDelayMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 1000
+                                },
+                                "maxDelayMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 60000
+                                }
+                              }
+                            },
+                            "inputs": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "description": "REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation — only 'trigger' and 'input' are. Example: { \"cityData\": \"generate-city\" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { \"pr\": \"trigger.pullRequest\" }."
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "additionalProperties": {},
+                              "description": "JSON Schema to validate resolved inputs before execution"
+                            },
+                            "outputSchema": {
+                              "type": "object",
+                              "additionalProperties": {},
+                              "description": "JSON Schema to validate the executor's output (e.g. {taskId, taskOutput} for agent-task). Different from config.outputSchema which validates the agent's raw output."
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "type",
+                            "config"
+                          ]
+                        },
+                        "minItems": 1
+                      },
+                      "onNodeFailure": {
+                        "type": "string",
+                        "enum": [
+                          "fail",
+                          "continue"
+                        ],
+                        "default": "fail",
+                        "description": "Behavior when a node's task fails or is cancelled. 'fail' (default): mark the entire run as failed. 'continue': treat the failed node as completed with error output and proceed — downstream convergence nodes receive '[FAILED: reason]' and can handle partial results."
+                      }
+                    },
+                    "required": [
+                      "nodes"
+                    ]
+                  },
+                  "triggers": {
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "webhook"
+                              ]
+                            },
+                            "hmacSecret": {
+                              "type": "string"
+                            },
+                            "hmacHeader": {
+                              "type": "string",
+                              "default": "X-Hub-Signature-256"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "schedule"
+                              ]
+                            },
+                            "scheduleId": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "scheduleId"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "cooldown": {
+                    "type": "object",
+                    "properties": {
+                      "hours": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "minutes": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "seconds": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "input": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^\\$\\{.+\\}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^secret\\..+$"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ]
+                    }
+                  },
+                  "triggerSchema": {
+                    "type": "object",
                     "additionalProperties": {}
+                  },
+                  "dir": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "vcsRepo": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
@@ -3399,7 +6232,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Workflow details"
+            "description": "Workflow details with auto-generated edges"
           },
           "404": {
             "description": "Workflow not found"
@@ -3431,17 +6264,654 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": {}
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "definition": {
+                    "type": "object",
+                    "properties": {
+                      "nodes": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "description": "Unique node identifier, used in 'next' and 'inputs' mappings"
+                            },
+                            "type": {
+                              "type": "string",
+                              "description": "Executor type: 'agent-task', 'script', 'raw-llm', 'validate', 'property-match'"
+                            },
+                            "label": {
+                              "type": "string",
+                              "description": "Human-readable label for UI display"
+                            },
+                            "config": {
+                              "type": "object",
+                              "additionalProperties": {},
+                              "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                            },
+                            "next": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  }
+                                }
+                              ],
+                              "description": "Next node(s): string for simple chaining, string[] for fan-out to parallel nodes, or record for port-based routing ({pass: 'a', fail: 'b'})"
+                            },
+                            "validation": {
+                              "type": "object",
+                              "properties": {
+                                "executor": {
+                                  "type": "string",
+                                  "default": "validate"
+                                },
+                                "config": {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                },
+                                "mustPass": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
+                                "retry": {
+                                  "type": "object",
+                                  "properties": {
+                                    "maxRetries": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "default": 3
+                                    },
+                                    "strategy": {
+                                      "type": "string",
+                                      "enum": [
+                                        "exponential",
+                                        "static",
+                                        "linear"
+                                      ],
+                                      "default": "exponential"
+                                    },
+                                    "baseDelayMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "default": 1000
+                                    },
+                                    "maxDelayMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "default": 60000
+                                    }
+                                  }
+                                }
+                              },
+                              "required": [
+                                "config"
+                              ]
+                            },
+                            "retry": {
+                              "type": "object",
+                              "properties": {
+                                "maxRetries": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 3
+                                },
+                                "strategy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "exponential",
+                                    "static",
+                                    "linear"
+                                  ],
+                                  "default": "exponential"
+                                },
+                                "baseDelayMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 1000
+                                },
+                                "maxDelayMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 60000
+                                }
+                              }
+                            },
+                            "inputs": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "description": "REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation — only 'trigger' and 'input' are. Example: { \"cityData\": \"generate-city\" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { \"pr\": \"trigger.pullRequest\" }."
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "additionalProperties": {},
+                              "description": "JSON Schema to validate resolved inputs before execution"
+                            },
+                            "outputSchema": {
+                              "type": "object",
+                              "additionalProperties": {},
+                              "description": "JSON Schema to validate the executor's output (e.g. {taskId, taskOutput} for agent-task). Different from config.outputSchema which validates the agent's raw output."
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "type",
+                            "config"
+                          ]
+                        },
+                        "minItems": 1
+                      },
+                      "onNodeFailure": {
+                        "type": "string",
+                        "enum": [
+                          "fail",
+                          "continue"
+                        ],
+                        "default": "fail",
+                        "description": "Behavior when a node's task fails or is cancelled. 'fail' (default): mark the entire run as failed. 'continue': treat the failed node as completed with error output and proceed — downstream convergence nodes receive '[FAILED: reason]' and can handle partial results."
+                      }
+                    },
+                    "required": [
+                      "nodes"
+                    ]
+                  },
+                  "triggers": {
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "webhook"
+                              ]
+                            },
+                            "hmacSecret": {
+                              "type": "string"
+                            },
+                            "hmacHeader": {
+                              "type": "string",
+                              "default": "X-Hub-Signature-256"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "schedule"
+                              ]
+                            },
+                            "scheduleId": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "scheduleId"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "cooldown": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "hours": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "minutes": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "seconds": {
+                        "type": "number",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "input": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^\\$\\{.+\\}$"
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^secret\\..+$"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ]
+                    }
+                  },
+                  "triggerSchema": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "dir": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1
+                  },
+                  "vcsRepo": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Workflow updated"
+            "description": "Workflow updated (version snapshot created)"
           },
           "400": {
             "description": "Invalid definition"
+          },
+          "404": {
+            "description": "Workflow not found"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Patch a workflow definition (create/update/delete nodes)",
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "update": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "nodeId": {
+                          "type": "string",
+                          "description": "ID of the node to update"
+                        },
+                        "node": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "description": "Executor type: 'agent-task', 'script', 'raw-llm', 'validate', 'property-match'"
+                            },
+                            "label": {
+                              "type": "string",
+                              "description": "Human-readable label for UI display"
+                            },
+                            "config": {
+                              "type": "object",
+                              "additionalProperties": {},
+                              "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                            },
+                            "next": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  }
+                                }
+                              ],
+                              "description": "Next node(s): string for simple chaining, string[] for fan-out to parallel nodes, or record for port-based routing ({pass: 'a', fail: 'b'})"
+                            },
+                            "validation": {
+                              "type": "object",
+                              "properties": {
+                                "executor": {
+                                  "type": "string",
+                                  "default": "validate"
+                                },
+                                "config": {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                },
+                                "mustPass": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
+                                "retry": {
+                                  "type": "object",
+                                  "properties": {
+                                    "maxRetries": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "default": 3
+                                    },
+                                    "strategy": {
+                                      "type": "string",
+                                      "enum": [
+                                        "exponential",
+                                        "static",
+                                        "linear"
+                                      ],
+                                      "default": "exponential"
+                                    },
+                                    "baseDelayMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "default": 1000
+                                    },
+                                    "maxDelayMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "default": 60000
+                                    }
+                                  }
+                                }
+                              },
+                              "required": [
+                                "config"
+                              ]
+                            },
+                            "retry": {
+                              "type": "object",
+                              "properties": {
+                                "maxRetries": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 3
+                                },
+                                "strategy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "exponential",
+                                    "static",
+                                    "linear"
+                                  ],
+                                  "default": "exponential"
+                                },
+                                "baseDelayMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 1000
+                                },
+                                "maxDelayMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 60000
+                                }
+                              }
+                            },
+                            "inputs": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "description": "REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation — only 'trigger' and 'input' are. Example: { \"cityData\": \"generate-city\" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { \"pr\": \"trigger.pullRequest\" }."
+                            },
+                            "inputSchema": {
+                              "type": "object",
+                              "additionalProperties": {},
+                              "description": "JSON Schema to validate resolved inputs before execution"
+                            },
+                            "outputSchema": {
+                              "type": "object",
+                              "additionalProperties": {},
+                              "description": "JSON Schema to validate the executor's output (e.g. {taskId, taskOutput} for agent-task). Different from config.outputSchema which validates the agent's raw output."
+                            }
+                          },
+                          "description": "Partial node data to merge"
+                        }
+                      },
+                      "required": [
+                        "nodeId",
+                        "node"
+                      ]
+                    },
+                    "description": "Nodes to update (partial merge)"
+                  },
+                  "delete": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Node IDs to delete"
+                  },
+                  "create": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "Unique node identifier, used in 'next' and 'inputs' mappings"
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Executor type: 'agent-task', 'script', 'raw-llm', 'validate', 'property-match'"
+                        },
+                        "label": {
+                          "type": "string",
+                          "description": "Human-readable label for UI display"
+                        },
+                        "config": {
+                          "type": "object",
+                          "additionalProperties": {},
+                          "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                        },
+                        "next": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            }
+                          ],
+                          "description": "Next node(s): string for simple chaining, string[] for fan-out to parallel nodes, or record for port-based routing ({pass: 'a', fail: 'b'})"
+                        },
+                        "validation": {
+                          "type": "object",
+                          "properties": {
+                            "executor": {
+                              "type": "string",
+                              "default": "validate"
+                            },
+                            "config": {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            "mustPass": {
+                              "type": "boolean",
+                              "default": false
+                            },
+                            "retry": {
+                              "type": "object",
+                              "properties": {
+                                "maxRetries": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 3
+                                },
+                                "strategy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "exponential",
+                                    "static",
+                                    "linear"
+                                  ],
+                                  "default": "exponential"
+                                },
+                                "baseDelayMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 1000
+                                },
+                                "maxDelayMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "default": 60000
+                                }
+                              }
+                            }
+                          },
+                          "required": [
+                            "config"
+                          ]
+                        },
+                        "retry": {
+                          "type": "object",
+                          "properties": {
+                            "maxRetries": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "default": 3
+                            },
+                            "strategy": {
+                              "type": "string",
+                              "enum": [
+                                "exponential",
+                                "static",
+                                "linear"
+                              ],
+                              "default": "exponential"
+                            },
+                            "baseDelayMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "default": 1000
+                            },
+                            "maxDelayMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "default": 60000
+                            }
+                          }
+                        },
+                        "inputs": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "description": "REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation — only 'trigger' and 'input' are. Example: { \"cityData\": \"generate-city\" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { \"pr\": \"trigger.pullRequest\" }."
+                        },
+                        "inputSchema": {
+                          "type": "object",
+                          "additionalProperties": {},
+                          "description": "JSON Schema to validate resolved inputs before execution"
+                        },
+                        "outputSchema": {
+                          "type": "object",
+                          "additionalProperties": {},
+                          "description": "JSON Schema to validate the executor's output (e.g. {taskId, taskOutput} for agent-task). Different from config.outputSchema which validates the agent's raw output."
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "type",
+                        "config"
+                      ]
+                    },
+                    "description": "New nodes to add"
+                  },
+                  "onNodeFailure": {
+                    "type": "string",
+                    "enum": [
+                      "fail",
+                      "continue"
+                    ],
+                    "description": "Update the definition-level onNodeFailure behavior"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workflow patched (version snapshot created)"
+          },
+          "400": {
+            "description": "Invalid patch or resulting definition"
           },
           "404": {
             "description": "Workflow not found"
@@ -3478,6 +6948,187 @@
         }
       }
     },
+    "/api/workflows/{id}/nodes/{nodeId}": {
+      "patch": {
+        "summary": "Patch a single node in a workflow definition",
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "nodeId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "description": "Executor type: 'agent-task', 'script', 'raw-llm', 'validate', 'property-match'"
+                  },
+                  "label": {
+                    "type": "string",
+                    "description": "Human-readable label for UI display"
+                  },
+                  "config": {
+                    "type": "object",
+                    "additionalProperties": {},
+                    "description": "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput})."
+                  },
+                  "next": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      }
+                    ],
+                    "description": "Next node(s): string for simple chaining, string[] for fan-out to parallel nodes, or record for port-based routing ({pass: 'a', fail: 'b'})"
+                  },
+                  "validation": {
+                    "type": "object",
+                    "properties": {
+                      "executor": {
+                        "type": "string",
+                        "default": "validate"
+                      },
+                      "config": {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      "mustPass": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "retry": {
+                        "type": "object",
+                        "properties": {
+                          "maxRetries": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 3
+                          },
+                          "strategy": {
+                            "type": "string",
+                            "enum": [
+                              "exponential",
+                              "static",
+                              "linear"
+                            ],
+                            "default": "exponential"
+                          },
+                          "baseDelayMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 1000
+                          },
+                          "maxDelayMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 60000
+                          }
+                        }
+                      }
+                    },
+                    "required": [
+                      "config"
+                    ]
+                  },
+                  "retry": {
+                    "type": "object",
+                    "properties": {
+                      "maxRetries": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 3
+                      },
+                      "strategy": {
+                        "type": "string",
+                        "enum": [
+                          "exponential",
+                          "static",
+                          "linear"
+                        ],
+                        "default": "exponential"
+                      },
+                      "baseDelayMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 1000
+                      },
+                      "maxDelayMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 60000
+                      }
+                    }
+                  },
+                  "inputs": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation — only 'trigger' and 'input' are. Example: { \"cityData\": \"generate-city\" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { \"pr\": \"trigger.pullRequest\" }."
+                  },
+                  "inputSchema": {
+                    "type": "object",
+                    "additionalProperties": {},
+                    "description": "JSON Schema to validate resolved inputs before execution"
+                  },
+                  "outputSchema": {
+                    "type": "object",
+                    "additionalProperties": {},
+                    "description": "JSON Schema to validate the executor's output (e.g. {taskId, taskOutput} for agent-task). Different from config.outputSchema which validates the agent's raw output."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Node patched (version snapshot created)"
+          },
+          "400": {
+            "description": "Invalid patch or resulting definition"
+          },
+          "404": {
+            "description": "Workflow or node not found"
+          }
+        }
+      }
+    },
     "/api/workflows/{id}/trigger": {
       "post": {
         "summary": "Trigger a workflow execution",
@@ -3501,7 +7152,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Workflow run started"
+            "description": "Workflow run started (or skipped if cooldown active)"
           },
           "400": {
             "description": "Workflow is disabled"
@@ -3534,6 +7185,22 @@
             "required": true,
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "running",
+                "waiting",
+                "completed",
+                "failed",
+                "skipped",
+                "cancelled"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
           }
         ],
         "responses": {
@@ -3545,7 +7212,7 @@
     },
     "/api/workflow-runs/{id}": {
       "get": {
-        "summary": "Get a workflow run with steps",
+        "summary": "Get a workflow run with steps (includes retry columns)",
         "tags": [
           "Workflows"
         ],
@@ -3566,7 +7233,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Workflow run details with steps"
+            "description": "Workflow run details with steps including retry info"
           },
           "404": {
             "description": "Run not found"
@@ -3601,6 +7268,200 @@
           },
           "400": {
             "description": "Cannot retry"
+          }
+        }
+      }
+    },
+    "/api/workflow-runs/{id}/cancel": {
+      "post": {
+        "summary": "Cancel a running or waiting workflow run",
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Run cancelled"
+          },
+          "400": {
+            "description": "Cannot cancel"
+          }
+        }
+      }
+    },
+    "/api/executor-types": {
+      "get": {
+        "summary": "List all executor types with their config and output schemas",
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of executor types with schemas"
+          }
+        }
+      }
+    },
+    "/api/executor-types/{type}": {
+      "get": {
+        "summary": "Get a specific executor type with its schemas",
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "type",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Executor type details"
+          },
+          "404": {
+            "description": "Executor type not found"
+          }
+        }
+      }
+    },
+    "/api/webhooks/{workflowId}": {
+      "post": {
+        "summary": "Trigger workflow via webhook",
+        "tags": [
+          "Webhooks"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "workflowId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Webhook processed"
+          },
+          "401": {
+            "description": "Invalid signature"
+          },
+          "404": {
+            "description": "Workflow not found"
+          }
+        }
+      }
+    },
+    "/api/workflows/{id}/versions": {
+      "get": {
+        "summary": "List version history for a workflow",
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Version list (newest first)"
+          },
+          "404": {
+            "description": "Workflow not found"
+          }
+        }
+      }
+    },
+    "/api/workflows/{id}/versions/{version}": {
+      "get": {
+        "summary": "Get a specific version snapshot of a workflow",
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "required": true,
+            "name": "version",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Version snapshot"
+          },
+          "404": {
+            "description": "Version not found"
           }
         }
       }

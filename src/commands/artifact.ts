@@ -138,7 +138,7 @@ async function artifactServe(args: ArtifactArgs) {
 
 async function artifactList() {
   const apiKey = process.env.API_KEY || "";
-  const mcpBaseUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
+  const mcpBaseUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
   const agentId = process.env.AGENT_ID || "";
 
   try {
@@ -193,7 +193,7 @@ async function artifactStop(args: ArtifactArgs) {
   }
 
   const apiKey = process.env.API_KEY || "";
-  const mcpBaseUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
+  const mcpBaseUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
   const agentId = process.env.AGENT_ID || "";
 
   // 1. Try to stop PM2 process

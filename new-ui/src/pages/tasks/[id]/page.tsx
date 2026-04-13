@@ -1,7 +1,9 @@
 import {
+  Activity,
   AlertTriangle,
   ArrowLeft,
   Ban,
+  Box,
   Calendar,
   CheckCircle2,
   ChevronDown,
@@ -9,10 +11,18 @@ import {
   Clock,
   Cpu,
   DollarSign,
+  ExternalLink,
+  FolderOpen,
   GitBranch,
+  Github,
+  Gitlab,
+  GitPullRequest,
   Hash,
+  Key,
+  Link2,
   Pause,
   Play,
+  Scissors,
   Terminal,
   Timer,
   User,
@@ -20,6 +30,8 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { Streamdown } from "streamdown";
+import "streamdown/styles.css";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useSessionCosts } from "@/api/hooks/use-costs";
 import {
@@ -27,9 +39,11 @@ import {
   usePauseTask,
   useResumeTask,
   useTask,
+  useTaskContext,
   useTaskSessionLogs,
 } from "@/api/hooks/use-tasks";
-import type { AgentLog, SessionCost } from "@/api/types";
+import type { AgentLog, SessionCost, TaskContextResponse } from "@/api/types";
+import { AgentLink } from "@/components/shared/agent-link";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
@@ -45,6 +59,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -174,6 +189,45 @@ function MetaRow({
         <span className="text-xs text-muted-foreground">{label}</span>
       </div>
       <div className="text-sm min-w-0">{children}</div>
+    </div>
+  );
+}
+
+/** Normalize single newlines to double for markdown paragraph breaks, preserving existing double newlines and list/heading markers. */
+function normalizeNewlines(text: string): string {
+  return text.replace(/(?<!\n)\n(?!\n|[-*#>|]|\d+\.)/g, "\n\n");
+}
+
+function TaskPrompt({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = text.length > 120 || text.includes("\n");
+
+  if (!isLong) {
+    return (
+      <div className="text-sm leading-relaxed">
+        <Streamdown>{normalizeNewlines(text)}</Streamdown>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      {expanded ? (
+        <div className="text-sm leading-relaxed max-h-[60vh] overflow-y-auto">
+          <Streamdown>{normalizeNewlines(text)}</Streamdown>
+        </div>
+      ) : (
+        <p className="text-sm leading-relaxed line-clamp-1 text-foreground">
+          {text.split("\n")[0]}
+        </p>
+      )}
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        {expanded ? "Show less" : "Show more"}
+      </button>
     </div>
   );
 }
@@ -325,6 +379,81 @@ function TaskCostSection({
   );
 }
 
+function contextBarColor(percent: number): string {
+  if (percent > 80) return "[&_[data-slot=progress-indicator]]:bg-red-500";
+  if (percent > 50) return "[&_[data-slot=progress-indicator]]:bg-amber-500";
+  return "[&_[data-slot=progress-indicator]]:bg-emerald-500";
+}
+
+function TaskContextSection({
+  context,
+  isLoading,
+}: {
+  context: TaskContextResponse | undefined;
+  isLoading: boolean;
+}) {
+  if (isLoading) {
+    return (
+      <>
+        <Separator className="my-2" />
+        <div className="space-y-1.5">
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+            Context Usage
+          </span>
+          <div className="space-y-2">
+            <Skeleton className="h-2 w-full rounded-full" />
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-3 w-20" />
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  if (!context || context.summary.snapshotCount === 0) return null;
+
+  const { summary } = context;
+  const latestSnapshot = context.snapshots[context.snapshots.length - 1];
+  const currentPercent = latestSnapshot?.contextPercent ?? summary.peakContextPercent ?? 0;
+  const usedTokens = latestSnapshot?.contextUsedTokens ?? summary.totalContextTokensUsed ?? 0;
+  const totalTokens = latestSnapshot?.contextTotalTokens ?? summary.contextWindowSize ?? 0;
+
+  return (
+    <>
+      <Separator className="my-2" />
+      <div className="space-y-1">
+        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+          Context Usage
+        </span>
+        <div className="flex items-center gap-2 py-1">
+          <Progress
+            value={currentPercent}
+            className={cn("h-1.5 flex-1", contextBarColor(currentPercent))}
+          />
+          <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+            {currentPercent.toFixed(0)}%
+          </span>
+        </div>
+        <MetaRow icon={Cpu} label="Used">
+          <span className="text-xs font-mono">
+            {formatTokens(usedTokens)} / {formatTokens(totalTokens)}
+          </span>
+        </MetaRow>
+        {summary.peakContextPercent != null && (
+          <MetaRow icon={Activity} label="Peak">
+            <span className="text-xs font-mono">{summary.peakContextPercent.toFixed(0)}%</span>
+          </MetaRow>
+        )}
+        {summary.compactionCount > 0 && (
+          <MetaRow icon={Scissors} label="Compactions">
+            <span className="text-xs font-mono">{summary.compactionCount}</span>
+          </MetaRow>
+        )}
+      </div>
+    </>
+  );
+}
+
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -332,6 +461,7 @@ export default function TaskDetailPage() {
   const { data: sessionLogs } = useTaskSessionLogs(id!);
   const { data: agents } = useAgents();
   const { data: costs, isLoading: costsLoading } = useSessionCosts({ taskId: id });
+  const { data: contextData, isLoading: contextLoading } = useTaskContext(id!);
   const cancelTask = useCancelTask();
   const pauseTask = usePauseTask();
   const resumeTask = useResumeTask();
@@ -374,6 +504,11 @@ export default function TaskDetailPage() {
           </Link>
         </MetaRow>
       )}
+      {task.creatorAgentId && task.creatorAgentId !== task.agentId && (
+        <MetaRow icon={User} label="Created by">
+          <AgentLink agentId={task.creatorAgentId} />
+        </MetaRow>
+      )}
       <MetaRow icon={Calendar} label="Created">
         <span className="text-xs">{formatSmartTime(task.createdAt)}</span>
       </MetaRow>
@@ -381,6 +516,113 @@ export default function TaskDetailPage() {
         <MetaRow icon={Clock} label="Finished">
           <span className="text-xs">{formatSmartTime(task.finishedAt)}</span>
         </MetaRow>
+      )}
+      {task.parentTaskId && (
+        <MetaRow icon={Link2} label="Parent">
+          <Link
+            to={`/tasks/${task.parentTaskId}`}
+            className="text-primary hover:underline font-mono text-xs"
+          >
+            #{task.parentTaskId.slice(0, 8)}
+          </Link>
+        </MetaRow>
+      )}
+      {task.dir && (
+        <MetaRow icon={FolderOpen} label="Dir">
+          <span className="text-xs font-mono truncate" title={task.dir}>
+            {task.dir}
+          </span>
+        </MetaRow>
+      )}
+      {task.claudeSessionId && (
+        <MetaRow icon={Terminal} label="Session">
+          <span className="text-xs font-mono truncate" title={task.claudeSessionId}>
+            {task.claudeSessionId.slice(0, 12)}...
+          </span>
+        </MetaRow>
+      )}
+      {task.credentialKeySuffix && (
+        <MetaRow icon={Key} label="API Key">
+          <Link to="/keys" className="text-primary hover:underline font-mono text-xs">
+            {task.credentialKeyType === "CLAUDE_CODE_OAUTH_TOKEN"
+              ? "OAuth"
+              : task.credentialKeyType === "ANTHROPIC_API_KEY"
+                ? "Anthropic"
+                : task.credentialKeyType === "OPENROUTER_API_KEY"
+                  ? "OpenRouter"
+                  : (task.credentialKeyType ?? "Key")}{" "}
+            ...{task.credentialKeySuffix}
+          </Link>
+        </MetaRow>
+      )}
+      {task.workflowRunId && (
+        <MetaRow icon={Box} label="Workflow">
+          <Link
+            to={`/workflow-runs/${task.workflowRunId}`}
+            className="text-primary hover:underline font-mono text-xs"
+          >
+            #{task.workflowRunId.slice(0, 8)}
+          </Link>
+        </MetaRow>
+      )}
+
+      {(task.vcsProvider || task.vcsRepo || task.vcsUrl || task.vcsEventType || task.vcsAuthor) && (
+        <>
+          <Separator className="my-2" />
+          <div className="space-y-1.5">
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+              Source Control
+            </span>
+            <div className="rounded-md border border-border/50 px-3 py-2.5 space-y-2">
+              {/* Row 1: Provider icon + repo name */}
+              <div className="flex items-center gap-2">
+                {task.vcsProvider === "github" ? (
+                  <Github className="h-4 w-4 shrink-0" />
+                ) : task.vcsProvider === "gitlab" ? (
+                  <Gitlab className="h-4 w-4 shrink-0" />
+                ) : task.vcsProvider ? (
+                  <Link2 className="h-4 w-4 shrink-0" />
+                ) : null}
+                {task.vcsRepo && (
+                  <span className="text-xs font-mono text-foreground whitespace-nowrap truncate">
+                    {task.vcsRepo}
+                  </span>
+                )}
+                {task.vcsAuthor && (
+                  <span className="text-xs text-muted-foreground flex items-center gap-1 ml-auto">
+                    <User className="h-3 w-3" />
+                    {task.vcsAuthor}
+                  </span>
+                )}
+              </div>
+              {/* Row 2: PR/MR link */}
+              {task.vcsUrl && task.vcsNumber && (
+                <a
+                  href={task.vcsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+                >
+                  <GitPullRequest className="h-3.5 w-3.5 shrink-0" />
+                  <span className="font-mono">#{task.vcsNumber}</span>
+                  <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
+                </a>
+              )}
+              {task.vcsUrl && !task.vcsNumber && (
+                <a
+                  href={task.vcsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs text-primary hover:underline font-mono truncate"
+                >
+                  <Link2 className="h-3.5 w-3.5 shrink-0" />
+                  {task.vcsUrl}
+                  <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
+                </a>
+              )}
+            </div>
+          </div>
+        </>
       )}
 
       {task.dependsOn && task.dependsOn.length > 0 && (
@@ -420,6 +662,8 @@ export default function TaskDetailPage() {
         </>
       )}
 
+      <TaskContextSection context={contextData} isLoading={contextLoading} />
+
       <TaskCostSection costs={costs} isLoading={costsLoading} />
 
       {hasEvents && (
@@ -447,9 +691,9 @@ export default function TaskDetailPage() {
           bgColor="bg-red-500/5"
           defaultOpen
         >
-          <pre className="whitespace-pre-wrap text-xs text-red-300/80 font-mono leading-relaxed max-h-64 overflow-auto">
-            {task.failureReason}
-          </pre>
+          <div className="text-sm text-red-300/80 leading-relaxed max-h-64 overflow-auto">
+            <Streamdown>{normalizeNewlines(task.failureReason ?? "")}</Streamdown>
+          </div>
         </CollapsibleCard>
       )}
 
@@ -462,9 +706,9 @@ export default function TaskDetailPage() {
           bgColor={isCompleted ? "bg-emerald-500/5" : "bg-muted/20"}
           defaultOpen
         >
-          <pre className="whitespace-pre-wrap text-xs font-mono leading-relaxed max-h-[60vh] overflow-auto text-foreground/80">
-            {task.output}
-          </pre>
+          <div className="text-sm leading-relaxed max-h-[60vh] overflow-auto text-foreground/80">
+            <Streamdown>{normalizeNewlines(task.output ?? "")}</Streamdown>
+          </div>
         </CollapsibleCard>
       )}
 
@@ -477,7 +721,11 @@ export default function TaskDetailPage() {
   );
 
   const sessionLogsContent = hasSessionLogs ? (
-    <SessionLogViewer logs={sessionLogs} className="flex-1 min-h-0" />
+    <SessionLogViewer
+      logs={sessionLogs}
+      compactionSnapshots={contextData?.snapshots}
+      className="flex-1 min-h-0"
+    />
   ) : (
     <div className="flex-1 flex items-center justify-center min-h-0">
       <div className="text-center text-muted-foreground">
@@ -529,9 +777,33 @@ export default function TaskDetailPage() {
               {tag}
             </Badge>
           ))}
+          {task.source && (
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+            >
+              {task.source}
+            </Badge>
+          )}
+          {(() => {
+            // Prefer the model recorded on the task row (set at task creation
+            // when explicitly requested), but fall back to whatever the
+            // session_costs entries report — codex tasks don't carry a
+            // task-level model today, so the cost record is the source of
+            // truth for what was actually used.
+            const displayModel = task.model ?? costs?.[0]?.model;
+            return displayModel ? (
+              <Badge
+                variant="outline"
+                className="text-[9px] px-1.5 py-0 h-5 font-mono leading-none items-center"
+              >
+                {displayModel}
+              </Badge>
+            ) : null;
+          })()}
         </div>
+        <TaskPrompt text={task.task} />
         <div className="flex items-center gap-2">
-          <p className="text-sm leading-relaxed line-clamp-3 flex-1">{task.task}</p>
           {(canCancel || canPause || canResume) && (
             <div className="flex items-center gap-1.5 shrink-0">
               {canPause && (
@@ -633,9 +905,9 @@ export default function TaskDetailPage() {
               borderColor="border-red-500/30"
               bgColor="bg-red-500/5"
             >
-              <pre className="whitespace-pre-wrap text-xs text-red-300/80 font-mono leading-relaxed max-h-48 overflow-auto">
-                {task.failureReason}
-              </pre>
+              <div className="text-sm text-red-300/80 leading-relaxed max-h-48 overflow-auto">
+                <Streamdown>{normalizeNewlines(task.failureReason ?? "")}</Streamdown>
+              </div>
             </CollapsibleCard>
           )}
 
@@ -647,14 +919,18 @@ export default function TaskDetailPage() {
               borderColor={isCompleted ? "border-emerald-500/30" : "border-border"}
               bgColor={isCompleted ? "bg-emerald-500/5" : "bg-muted/20"}
             >
-              <pre className="whitespace-pre-wrap text-xs font-mono leading-relaxed max-h-48 overflow-auto text-foreground/80">
-                {task.output}
-              </pre>
+              <div className="text-sm leading-relaxed max-h-48 overflow-auto text-foreground/80">
+                <Streamdown>{normalizeNewlines(task.output ?? "")}</Streamdown>
+              </div>
             </CollapsibleCard>
           )}
 
           {hasSessionLogs ? (
-            <SessionLogViewer logs={sessionLogs} className="flex-1 min-h-0" />
+            <SessionLogViewer
+              logs={sessionLogs}
+              compactionSnapshots={contextData?.snapshots}
+              className="flex-1 min-h-0"
+            />
           ) : (
             <div className="flex-1 flex items-center justify-center min-h-0">
               <div className="text-center text-muted-foreground">

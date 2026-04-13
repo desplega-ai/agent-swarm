@@ -1,4 +1,6 @@
 import { unlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { computeContextUsed, getContextWindowSize } from "../utils/context-window";
 import { validateClaudeCredentials } from "../utils/credentials";
 import {
   parseStderrForErrors,
@@ -39,6 +41,147 @@ async function cleanupTaskFile(pid: number): Promise<void> {
   }
 }
 
+/** Fetch installed MCP servers from the API and return them as .mcp.json-compatible entries */
+async function fetchInstalledMcpServers(
+  apiUrl: string,
+  apiKey: string,
+  agentId: string,
+): Promise<Record<string, Record<string, unknown>> | null> {
+  try {
+    const res = await fetch(`${apiUrl}/api/agents/${agentId}/mcp-servers?resolveSecrets=true`, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Agent-ID": agentId,
+      },
+    });
+    if (!res.ok) return null;
+
+    const data = (await res.json()) as {
+      servers: Array<{
+        name: string;
+        transport: string;
+        isActive: boolean;
+        isEnabled: boolean;
+        command?: string;
+        args?: string;
+        url?: string;
+        headers?: string;
+        resolvedEnv?: Record<string, string>;
+        resolvedHeaders?: Record<string, string>;
+      }>;
+    };
+
+    const entries: Record<string, Record<string, unknown>> = {};
+    for (const srv of data.servers.filter((s) => s.isActive && s.isEnabled)) {
+      if (srv.transport === "stdio" && srv.command) {
+        let args: string[] = [];
+        try {
+          args = srv.args ? JSON.parse(srv.args) : [];
+        } catch {
+          // invalid JSON — use empty args
+        }
+        entries[srv.name] = {
+          command: srv.command,
+          args,
+          env: srv.resolvedEnv || {},
+        };
+      } else if ((srv.transport === "http" || srv.transport === "sse") && srv.url) {
+        let parsedHeaders: Record<string, string> = {};
+        try {
+          parsedHeaders = srv.headers ? JSON.parse(srv.headers) : {};
+        } catch {
+          // invalid JSON — use empty headers
+        }
+        entries[srv.name] = {
+          type: srv.transport,
+          url: srv.url,
+          headers: { ...parsedHeaders, ...(srv.resolvedHeaders || {}) },
+        };
+      }
+    }
+    return Object.keys(entries).length > 0 ? entries : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Create a per-session MCP config file with X-Source-Task-Id header injected
+ * and installed MCP servers merged in.
+ * Each session gets its own copy to avoid race conditions when multiple concurrent
+ * Claude sessions share the same cwd. The session-specific config is passed to
+ * Claude CLI via --mcp-config, so the shared .mcp.json is never modified.
+ * Returns the path to the per-session config, or null if no config exists.
+ */
+async function createSessionMcpConfig(
+  cwd: string,
+  taskId: string,
+  installedServers?: Record<string, Record<string, unknown>> | null,
+): Promise<string | null> {
+  // Walk up from cwd to find .mcp.json (mirrors Claude CLI's project-level config discovery).
+  // In Docker, .mcp.json lives at /workspace/.mcp.json but tasks often run with cwd set to
+  // a subdirectory like /workspace/repos/<repo>, so a single-directory check misses it.
+  let searchDir = cwd;
+  let mcpJsonPath: string | null = null;
+  while (true) {
+    const candidate = join(searchDir, ".mcp.json");
+    if (await Bun.file(candidate).exists()) {
+      mcpJsonPath = candidate;
+      break;
+    }
+    const parent = dirname(searchDir);
+    if (parent === searchDir) break; // reached filesystem root
+    searchDir = parent;
+  }
+
+  if (!mcpJsonPath && !installedServers) return null;
+
+  try {
+    let config: { mcpServers?: Record<string, unknown> } = { mcpServers: {} };
+    if (mcpJsonPath) {
+      const file = Bun.file(mcpJsonPath);
+      config = await file.json();
+    }
+    const servers = config?.mcpServers;
+    if (!servers && !installedServers) return null;
+
+    if (!config.mcpServers) config.mcpServers = {};
+
+    // Find the agent-swarm server entry (could be named "agent-swarm" or similar)
+    const serverKey = Object.keys(config.mcpServers).find(
+      (k) =>
+        k === "agent-swarm" ||
+        ((config.mcpServers![k] as Record<string, unknown>)?.headers &&
+          ((config.mcpServers![k] as Record<string, Record<string, unknown>>).headers?.[
+            "X-Agent-ID"
+          ] as unknown)),
+    );
+    if (serverKey) {
+      const server = config.mcpServers[serverKey] as Record<string, unknown>;
+      if (!server.headers) server.headers = {};
+      (server.headers as Record<string, string>)["X-Source-Task-Id"] = taskId;
+    }
+
+    // Merge installed MCP servers (don't overwrite existing entries)
+    if (installedServers) {
+      for (const [name, serverConfig] of Object.entries(installedServers)) {
+        if (!config.mcpServers[name]) {
+          config.mcpServers[name] = serverConfig;
+        }
+      }
+    }
+
+    // Write per-session config to /tmp — no race, each session has its own file
+    const sessionConfigPath = `/tmp/mcp-${taskId}.json`;
+    await writeFile(sessionConfigPath, JSON.stringify(config, null, 2));
+    return sessionConfigPath;
+  } catch (err) {
+    // Non-fatal — if creation fails, sourceTaskId won't be sent and Slack metadata won't auto-inherit
+    console.warn(`\x1b[33m[claude]\x1b[0m Failed to create session MCP config: ${err}`);
+    return null;
+  }
+}
+
 class ClaudeSession implements ProviderSession {
   private proc: ReturnType<typeof Bun.spawn>;
   private listeners: Array<(event: ProviderEvent) => void> = [];
@@ -47,14 +190,18 @@ class ClaudeSession implements ProviderSession {
   private completionPromise: Promise<ProviderResult>;
   private errorTracker = new SessionErrorTracker();
   private taskFilePid: number;
+  private contextWindowSize: number;
 
   constructor(
     private config: ProviderSessionConfig,
     private model: string,
     taskFilePath: string,
     taskFilePid: number,
+    private sessionMcpConfig: string | null = null,
+    private claudeBinary: string = "claude",
   ) {
     this.taskFilePid = taskFilePid;
+    this.contextWindowSize = getContextWindowSize(model);
     const cmd = this.buildCommand();
 
     console.log(
@@ -76,7 +223,7 @@ class ClaudeSession implements ProviderSession {
 
   private buildCommand(): string[] {
     const cmd = [
-      "claude",
+      this.claudeBinary,
       "--model",
       this.model,
       "--verbose",
@@ -96,6 +243,11 @@ class ClaudeSession implements ProviderSession {
 
     if (this.config.systemPrompt) {
       cmd.push("--append-system-prompt", this.config.systemPrompt);
+    }
+
+    // Use per-session MCP config to avoid race conditions with concurrent sessions
+    if (this.sessionMcpConfig) {
+      cmd.push("--mcp-config", this.sessionMcpConfig, "--strict-mcp-config");
     }
 
     return cmd;
@@ -173,8 +325,15 @@ class ClaudeSession implements ProviderSession {
     await logFileHandle.end();
     const exitCode = await this.proc.exited;
 
-    // Cleanup task file
+    // Cleanup task file and per-session MCP config
     await cleanupTaskFile(this.taskFilePid);
+    if (this.sessionMcpConfig) {
+      try {
+        await unlink(this.sessionMcpConfig);
+      } catch {
+        // ignore — temp file may already be gone
+      }
+    }
 
     if (exitCode !== 0 && stderrOutput) {
       console.error(
@@ -210,6 +369,19 @@ class ClaudeSession implements ProviderSession {
       if (json.type === "system" && json.subtype === "init" && json.session_id) {
         this._sessionId = json.session_id;
         this.emit({ type: "session_init", sessionId: json.session_id });
+        if (json.model) {
+          this.contextWindowSize = getContextWindowSize(json.model);
+        }
+      }
+
+      // Compaction detection
+      if (json.type === "system" && json.subtype === "compact_boundary" && json.compact_metadata) {
+        this.emit({
+          type: "compaction",
+          preCompactTokens: json.compact_metadata.pre_tokens ?? 0,
+          compactTrigger: json.compact_metadata.trigger ?? "auto",
+          contextTotalTokens: this.contextWindowSize,
+        });
       }
 
       // Cost data from result
@@ -243,6 +415,14 @@ class ClaudeSession implements ProviderSession {
           cost,
           isError: json.is_error || false,
         });
+
+        // Update context window size from modelUsage if available
+        if (json.modelUsage) {
+          const modelKey = Object.keys(json.modelUsage)[0];
+          if (modelKey && json.modelUsage[modelKey]?.contextWindow) {
+            this.contextWindowSize = json.modelUsage[modelKey].contextWindow;
+          }
+        }
       }
 
       // Tool use from assistant messages — emit tool_start for auto-progress
@@ -261,6 +441,21 @@ class ClaudeSession implements ProviderSession {
               });
             }
           }
+        }
+
+        // Context usage extraction from assistant message usage
+        if (json.message.usage) {
+          const usage = json.message.usage;
+          const contextUsed = computeContextUsed(usage);
+          const contextTotal = this.contextWindowSize;
+
+          this.emit({
+            type: "context_usage",
+            contextUsedTokens: contextUsed,
+            contextTotalTokens: contextTotal,
+            contextPercent: contextTotal > 0 ? (contextUsed / contextTotal) * 100 : 0,
+            outputTokens: usage.output_tokens ?? 0,
+          });
         }
       }
 
@@ -324,6 +519,8 @@ class ClaudeSession implements ProviderSession {
           this.model,
           taskFilePath,
           this.taskFilePid,
+          null,
+          this.claudeBinary,
         );
 
         // Forward events from retry to our listeners
@@ -352,6 +549,9 @@ export class ClaudeAdapter implements ProviderAdapter {
     const credType = validateClaudeCredentials(config.env || process.env);
     console.log(`\x1b[2m[claude]\x1b[0m Using credential: ${credType}`);
 
+    // Resolve claude binary: CLAUDE_BINARY env var > "claude" (PATH lookup)
+    const claudeBinary = process.env.CLAUDE_BINARY || "claude";
+
     const taskFilePid = process.pid;
     const taskFilePath = await writeTaskFile(taskFilePid, {
       taskId: config.taskId,
@@ -361,10 +561,39 @@ export class ClaudeAdapter implements ProviderAdapter {
 
     console.log(`\x1b[2m[${config.role}]\x1b[0m Task file written: ${taskFilePath}`);
 
-    return new ClaudeSession(config, model, taskFilePath, taskFilePid);
+    // Fetch installed MCP servers from API for this agent
+    const installedServers =
+      config.apiUrl && config.apiKey && config.agentId
+        ? await fetchInstalledMcpServers(config.apiUrl, config.apiKey, config.agentId)
+        : null;
+    if (installedServers) {
+      console.log(
+        `\x1b[2m[${config.role}]\x1b[0m Merging ${Object.keys(installedServers).length} installed MCP server(s) into session config`,
+      );
+    }
+
+    // Create per-session MCP config with X-Source-Task-Id header + installed servers (no shared-file race condition)
+    const sessionMcpConfig = await createSessionMcpConfig(
+      config.cwd,
+      config.taskId,
+      installedServers,
+    );
+
+    return new ClaudeSession(
+      config,
+      model,
+      taskFilePath,
+      taskFilePid,
+      sessionMcpConfig,
+      claudeBinary,
+    );
   }
 
   async canResume(_sessionId: string): Promise<boolean> {
     return true;
+  }
+
+  formatCommand(commandName: string): string {
+    return `/${commandName}`;
   }
 }

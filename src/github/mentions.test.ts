@@ -19,8 +19,8 @@ describe("detectMention", () => {
   });
 
   test("is case-insensitive", () => {
-    expect(detectMention("@Agent-Swarm-Bot help")).toBe(true);
-    expect(detectMention("@AGENT-SWARM-BOT help")).toBe(true);
+    expect(detectMention(`@${GITHUB_BOT_NAME.toLowerCase()} help`)).toBe(true);
+    expect(detectMention(`@${GITHUB_BOT_NAME.toUpperCase()} help`)).toBe(true);
   });
 
   test("returns false for no mention", () => {
@@ -62,7 +62,7 @@ describe("extractMentionContext", () => {
   });
 
   test("is case-insensitive", () => {
-    expect(extractMentionContext("@AGENT-SWARM-BOT help me")).toBe("help me");
+    expect(extractMentionContext(`@${GITHUB_BOT_NAME.toUpperCase()} help me`)).toBe("help me");
   });
 
   test("returns empty string for null or undefined", () => {

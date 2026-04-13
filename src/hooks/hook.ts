@@ -14,6 +14,7 @@ const CLAUDE_MD_BACKUP_PATH = `${process.env.HOME}/.claude/CLAUDE.md.bak`;
 const SOUL_MD_PATH = "/workspace/SOUL.md";
 const IDENTITY_MD_PATH = "/workspace/IDENTITY.md";
 const TOOLS_MD_PATH = "/workspace/TOOLS.md";
+const HEARTBEAT_MD_PATH = "/workspace/HEARTBEAT.md";
 const SETUP_SCRIPT_PATH = "/workspace/start-up.sh";
 
 type McpServerConfig = {
@@ -139,7 +140,7 @@ async function readTaskFile(): Promise<TaskFileData | null> {
 async function fetchTaskDetails(
   taskId: string,
 ): Promise<{ id: string; task: string; progress?: string } | null> {
-  const apiUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
+  const apiUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
   const apiKey = process.env.API_KEY || "";
   const headers: Record<string, string> = {};
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
@@ -354,6 +355,9 @@ export async function handleHook(): Promise<void> {
     }
   };
 
+  // Minimum length for SOUL.md and IDENTITY.md to prevent accidental corruption
+  const IDENTITY_FILE_MIN_LENGTH = 100;
+
   /**
    * Sync SOUL.md and IDENTITY.md content back to the server
    */
@@ -369,7 +373,13 @@ export async function handleHook(): Promise<void> {
     if (await soulFile.exists()) {
       const content = await soulFile.text();
       if (content.trim() && content.length <= 65536) {
-        updates.soulMd = content;
+        if (content.length < IDENTITY_FILE_MIN_LENGTH) {
+          console.error(
+            `[hook] Skipping SOUL.md sync: content too short (${content.length} chars, minimum ${IDENTITY_FILE_MIN_LENGTH}). This prevents accidental profile corruption.`,
+          );
+        } else {
+          updates.soulMd = content;
+        }
       }
     }
 
@@ -377,7 +387,13 @@ export async function handleHook(): Promise<void> {
     if (await identityFile.exists()) {
       const content = await identityFile.text();
       if (content.trim() && content.length <= 65536) {
-        updates.identityMd = content;
+        if (content.length < IDENTITY_FILE_MIN_LENGTH) {
+          console.error(
+            `[hook] Skipping IDENTITY.md sync: content too short (${content.length} chars, minimum ${IDENTITY_FILE_MIN_LENGTH}). This prevents accidental profile corruption.`,
+          );
+        } else {
+          updates.identityMd = content;
+        }
       }
     }
 
@@ -386,6 +402,14 @@ export async function handleHook(): Promise<void> {
       const content = await toolsMdFile.text();
       if (content.trim() && content.length <= 65536) {
         updates.toolsMd = content;
+      }
+    }
+
+    const heartbeatFile = Bun.file(HEARTBEAT_MD_PATH);
+    if (await heartbeatFile.exists()) {
+      const content = await heartbeatFile.text();
+      if (content.length <= 65536) {
+        updates.heartbeatMd = content;
       }
     }
 
@@ -910,7 +934,8 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
             if (
               editedPath === SOUL_MD_PATH ||
               editedPath === IDENTITY_MD_PATH ||
-              editedPath === TOOLS_MD_PATH
+              editedPath === TOOLS_MD_PATH ||
+              editedPath === HEARTBEAT_MD_PATH
             ) {
               await syncIdentityFilesToServer(agentInfo.id, "self_edit");
             }
@@ -932,7 +957,8 @@ ${hasAgentIdHeader() ? `You have a pre-defined agent ID via header: ${mcpConfig?
             editedPath.startsWith("/workspace/shared/memory/"))
         ) {
           try {
-            const apiUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
+            const apiUrl =
+              process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
             const apiKey = process.env.API_KEY || "";
             const fileContent = await Bun.file(editedPath).text();
             const isShared = editedPath.startsWith("/workspace/shared/");
@@ -1102,7 +1128,8 @@ ${transcript}`;
               summary.length > 20 &&
               !summary.trim().toLowerCase().includes("no significant learnings")
             ) {
-              const apiUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
+              const apiUrl =
+                process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
               const apiKey = process.env.API_KEY || "";
 
               await fetch(`${apiUrl}/api/memory/index`, {

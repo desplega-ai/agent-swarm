@@ -1,20 +1,23 @@
 import type { App } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
 import {
-  createTask,
   createTaskExtended,
   getAgentById,
   getAgentWorkingOnThread,
   getLeadAgent,
   getMostRecentTaskInThread,
   getTasksByAgentId,
+  resolveUser,
 } from "../be/db";
+import { resolveTemplate } from "../prompts/resolver";
 import { workflowEventBus } from "../workflows/event-bus";
-import { buildAssignmentSummaryBlocks } from "./blocks";
+import { buildTreeBlocks, type TreeNode } from "./blocks";
 import type { SlackFile } from "./files";
 import { extractTaskFromMessage, routeMessage } from "./router";
+// Side-effect import: registers all Slack event templates in the in-memory registry
+import "./templates";
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
-import { registerTaskMessage } from "./watcher";
+import { registerTreeMessage } from "./watcher";
 
 // User filtering configuration from environment variables
 const allowedEmailDomains = (process.env.SLACK_ALLOWED_EMAIL_DOMAINS || "")
@@ -140,12 +143,28 @@ async function isUserAllowed(client: WebClient, userId: string): Promise<boolean
 interface MessageEvent {
   type: string;
   subtype?: string;
+  bot_id?: string;
   text?: string;
   user?: string;
   channel: string;
   ts: string;
   thread_ts?: string;
   files?: SlackFile[];
+  assistant_thread?: Record<string, unknown>;
+}
+
+/**
+ * Check if a Slack message event is from a bot/agent.
+ * Exported for testing.
+ *
+ * Bot messages can be identified by:
+ * - `subtype === "bot_message"` (traditional Slack API)
+ * - `bot_id` present (newer Slack API, may lack subtype)
+ */
+export function isBotMessage(event: { subtype?: string; bot_id?: string }): boolean {
+  if (event.subtype === "bot_message") return true;
+  if (event.bot_id) return true;
+  return false;
 }
 
 interface ThreadMessage {
@@ -306,15 +325,13 @@ function checkRateLimit(userId: string): boolean {
 export function registerMessageHandler(app: App): void {
   // Handle all message events
   app.event("message", async ({ event, client, say }) => {
-    // Ignore bot messages and message_changed events
-    if (
-      "subtype" in event &&
-      (event.subtype === "bot_message" || event.subtype === "message_changed")
-    ) {
+    const msg = event as MessageEvent;
+
+    // Ignore bot messages (covers both subtype-based and bot_id-based detection)
+    // and message_changed events
+    if (isBotMessage(msg) || msg.subtype === "message_changed") {
       return;
     }
-
-    const msg = event as MessageEvent;
     const hasText = !!msg.text?.trim();
     const hasFiles = !!(msg.files && msg.files.length > 0);
 
@@ -332,6 +349,9 @@ export function registerMessageHandler(app: App): void {
       console.log(`[Slack] Ignoring message from unauthorized user ${msg.user}`);
       return;
     }
+
+    // Resolve canonical user identity (graceful — null if not found)
+    const requestedByUserId = resolveUser({ slackUserId: msg.user })?.id;
 
     // Emit workflow trigger event for Slack messages
     workflowEventBus.emit("slack.message", {
@@ -352,8 +372,16 @@ export function registerMessageHandler(app: App): void {
     // Check if bot was mentioned (in original text only)
     const botMentioned = !!msg.text?.includes(`<@${botUserId}>`);
 
+    // Detect assistant thread context — file_share messages in DM assistant threads
+    // bypass the assistant handler and land here instead. Treat them as implicit mentions
+    // so they route to the lead agent rather than being silently dropped.
+    const isAssistantThread = !!msg.assistant_thread;
+    const isImplicitMention = isAssistantThread && !botMentioned;
+
     // ADDITIVE_SLACK: Check for !now command in threads
     const additiveSlack = process.env.ADDITIVE_SLACK === "true";
+    const requireMentionForThreadFollowup =
+      process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION === "true";
     if (additiveSlack && msg.thread_ts) {
       const stripped = effectiveText.replace(/<@[A-Z0-9]+>/g, "").trim();
       if (stripped.startsWith("!now")) {
@@ -382,7 +410,7 @@ export function registerMessageHandler(app: App): void {
     }
 
     // ADDITIVE_SLACK: Buffer non-mention thread messages
-    if (additiveSlack && !botMentioned && msg.thread_ts) {
+    if (additiveSlack && !botMentioned && msg.thread_ts && !requireMentionForThreadFollowup) {
       // Check if this thread has any swarm activity (existing tasks)
       const hasSwarmActivity = getAgentWorkingOnThread(msg.channel, msg.thread_ts) !== null;
 
@@ -414,12 +442,17 @@ export function registerMessageHandler(app: App): void {
     const routingThreadContext = msg.thread_ts
       ? { channelId: msg.channel, threadTs: msg.thread_ts }
       : undefined;
-    const matches = routeMessage(routingText, botUserId, botMentioned, routingThreadContext);
+    const matches = routeMessage(
+      routingText,
+      botUserId,
+      botMentioned || isImplicitMention,
+      routingThreadContext,
+    );
 
     if (matches.length === 0) {
-      if (!botMentioned) return;
+      if (!botMentioned && !isImplicitMention) return;
 
-      // Bot was mentioned but no online agents matched — queue the request
+      // Bot was mentioned (or message is in assistant thread) but no online agents matched — queue the request
       if (!checkRateLimit(msg.user)) {
         await say({
           text: ":satellite: _You're sending too many requests. Please slow down._",
@@ -428,12 +461,16 @@ export function registerMessageHandler(app: App): void {
         return;
       }
 
-      const taskDescription = extractTaskFromMessage(effectiveText, botUserId);
+      const taskDescription = isImplicitMention
+        ? effectiveText
+        : extractTaskFromMessage(effectiveText, botUserId);
       if (!taskDescription) {
-        await say({
-          text: ":satellite: _Please provide a task description after mentioning an agent._",
-          thread_ts: msg.thread_ts || msg.ts,
-        });
+        if (!isImplicitMention) {
+          await say({
+            text: ":satellite: _Please provide a task description after mentioning an agent._",
+            thread_ts: msg.thread_ts || msg.ts,
+          });
+        }
         return;
       }
 
@@ -445,9 +482,15 @@ export function registerMessageHandler(app: App): void {
         msg.ts,
         botUserId,
       );
-      const fullTaskDescription = threadContext
-        ? `<thread_context>\n${threadContext}\n</thread_context>\n\n${taskDescription}`
-        : taskDescription;
+      let fullTaskDescription: string;
+      if (threadContext) {
+        const ctxResult = resolveTemplate("slack.message.thread_context", {
+          thread_messages: threadContext,
+        });
+        fullTaskDescription = `${ctxResult.text}\n\n${taskDescription}`;
+      } else {
+        fullTaskDescription = taskDescription;
+      }
 
       const lead = getLeadAgent();
       createTaskExtended(fullTaskDescription, {
@@ -456,6 +499,7 @@ export function registerMessageHandler(app: App): void {
         slackChannelId: msg.channel,
         slackThreadTs: threadTs,
         slackUserId: msg.user,
+        requestedByUserId,
       });
 
       await say({
@@ -495,9 +539,15 @@ export function registerMessageHandler(app: App): void {
       msg.ts,
       botUserId,
     );
-    const fullTaskDescription = threadContext
-      ? `<thread_context>\n${threadContext}\n</thread_context>\n\n${taskDescription}`
-      : taskDescription;
+    let fullTaskDescription: string;
+    if (threadContext) {
+      const ctxResult = resolveTemplate("slack.message.thread_context", {
+        thread_messages: threadContext,
+      });
+      fullTaskDescription = `${ctxResult.text}\n\n${taskDescription}`;
+    } else {
+      fullTaskDescription = taskDescription;
+    }
     const results: {
       assigned: Array<{ agentName: string; taskId: string }>;
       queued: Array<{ agentName: string; taskId: string }>;
@@ -522,17 +572,20 @@ export function registerMessageHandler(app: App): void {
             slackThreadTs: threadTs,
             slackUserId: msg.user,
             parentTaskId: latestTask?.id,
+            requestedByUserId,
           });
           results.assigned.push({ agentName: agent.name, taskId: task.id });
           continue;
         }
 
         // Workers receive tasks as before
-        const task = createTask(agent.id, fullTaskDescription, {
+        const task = createTaskExtended(fullTaskDescription, {
+          agentId: agent.id,
           source: "slack",
           slackChannelId: msg.channel,
           slackThreadTs: threadTs,
           slackUserId: msg.user,
+          requestedByUserId,
         });
 
         // Check if agent has an in-progress task in this thread (queued follow-up)
@@ -551,9 +604,40 @@ export function registerMessageHandler(app: App): void {
       }
     }
 
-    // Send consolidated summary with Block Kit
+    // Send consolidated summary as initial tree with Block Kit
     const totalResults = results.assigned.length + results.queued.length + results.failed.length;
     if (totalResults > 0) {
+      // Build initial tree nodes from assignment results
+      const initialNodes: TreeNode[] = results.assigned.map(({ agentName, taskId }) => ({
+        taskId,
+        agentName,
+        status: "in_progress" as const,
+        children: [],
+      }));
+
+      // Add queued tasks
+      for (const q of results.queued) {
+        initialNodes.push({
+          taskId: q.taskId,
+          agentName: q.agentName,
+          status: "pending" as const,
+          children: [],
+        });
+      }
+
+      const blocks = buildTreeBlocks(initialNodes);
+
+      // Append failed assignment lines as context below the tree
+      if (results.failed.length > 0) {
+        const failedLines = results.failed
+          .map((f) => `⚠️ Could not assign to: *${f.agentName}* — ${f.reason}`)
+          .join("\n");
+        blocks.push({
+          type: "context",
+          elements: [{ type: "mrkdwn", text: failedLines }],
+        });
+      }
+
       // Build plain-text fallback
       const parts: string[] = [];
       if (results.assigned.length > 0) {
@@ -569,17 +653,25 @@ export function registerMessageHandler(app: App): void {
         parts.push(`Could not assign to: ${names}`);
       }
 
+      console.log(
+        `[Slack] Posting initial tree message with ${initialNodes.length} node(s)${results.failed.length > 0 ? ` and ${results.failed.length} failed assignment(s)` : ""}`,
+      );
+
       const resp = await say({
         text: parts.join(". "),
-        blocks: buildAssignmentSummaryBlocks(results),
+        blocks,
         thread_ts: msg.thread_ts || msg.ts,
       });
 
-      // Register the assignment message so the watcher can update it in-place
-      // (assignment → progress → completion all in one evolving message)
+      // Register the tree message so the watcher can update it in-place
+      // (assignment → progress → completion all in one evolving tree message)
       if (resp?.ts) {
         for (const { taskId } of results.assigned) {
-          registerTaskMessage(taskId, msg.channel, threadTs, resp.ts);
+          registerTreeMessage(taskId, msg.channel, threadTs, resp.ts);
+        }
+        // Also register queued tasks so they appear in the tree when they start
+        for (const { taskId } of results.queued) {
+          registerTreeMessage(taskId, msg.channel, threadTs, resp.ts);
         }
       }
     }

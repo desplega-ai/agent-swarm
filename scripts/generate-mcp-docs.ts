@@ -47,7 +47,7 @@ async function discoverCategories(): Promise<ToolCategory[]> {
   // Extract core tools (always registered, no capability check)
   const coreTools: string[] = [];
   const coreMatch = serverContent.match(
-    /\/\/ Core tools[\s\S]*?(?=\/\/.*capability|if \(hasCapability)/
+    /\/\/ Core tools[\s\S]*?(?=\/\/.*capability|if \(hasCapability)/,
   );
   if (coreMatch) {
     const registerCalls = coreMatch[0].matchAll(/register(\w+)Tool\(server\)/g);
@@ -66,7 +66,7 @@ async function discoverCategories(): Promise<ToolCategory[]> {
 
   // Extract capability-based tools
   const capabilityBlocks = serverContent.matchAll(
-    /\/\/\s*([\w\s]+)\s*capability[\s\S]*?if\s*\(hasCapability\(["'](\w+(?:-\w+)*)["']\)\)\s*\{([\s\S]*?)\}/g
+    /\/\/\s*([\w\s]+)\s*capability[\s\S]*?if\s*\(hasCapability\(["'](\w+(?:-\w+)*)["']\)\)\s*\{([\s\S]*?)\}/g,
   );
 
   for (const match of capabilityBlocks) {
@@ -200,8 +200,7 @@ function parseSchemaFields(content: string): FieldInfo[] {
     currentField += char;
 
     // Field ends when we hit a comma at depth 0, or end of content
-    const isEndOfField =
-      (char === "," && depth === 0) || j === objectContent.length - 1;
+    const isEndOfField = (char === "," && depth === 0) || j === objectContent.length - 1;
 
     if (isEndOfField && currentField.trim()) {
       const field = parseField(currentField);
@@ -281,10 +280,12 @@ function camelToKebab(str: string): string {
  * Format category name to title
  */
 function formatCategoryTitle(name: string): string {
-  return name
-    .split("-")
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ") + " Tools";
+  return (
+    name
+      .split("-")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ") + " Tools"
+  );
 }
 
 /**
@@ -391,9 +392,7 @@ async function generateDocs() {
 
   // Check for uncategorized tools
   const categorizedTools = new Set(categories.flatMap((c) => c.tools));
-  const uncategorized = [...toolInfoMap.keys()].filter(
-    (name) => !categorizedTools.has(name)
-  );
+  const uncategorized = [...toolInfoMap.keys()].filter((name) => !categorizedTools.has(name));
 
   if (uncategorized.length > 0) {
     markdown += `## Other Tools\n\n`;

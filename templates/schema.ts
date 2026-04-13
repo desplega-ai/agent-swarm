@@ -20,6 +20,7 @@ export interface TemplateConfig {
     identityMd: string | null;
     toolsMd: string | null;
     setupScript: string | null;
+    heartbeatMd: string | null;
   };
 }
 
@@ -31,5 +32,6 @@ export interface TemplateResponse {
     identityMd: string;
     toolsMd: string;
     setupScript: string;
+    heartbeatMd: string;
   };
 }

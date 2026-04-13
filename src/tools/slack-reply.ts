@@ -1,6 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getAgentById, getInboxMessageById, getTaskById, markInboxMessageResponded } from "@/be/db";
+import {
+  getAgentById,
+  getInboxMessageById,
+  getTaskById,
+  markInboxMessageResponded,
+  markTaskSlackReplySent,
+} from "@/be/db";
 import { getSlackApp } from "@/slack/app";
 import { markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar } from "@/tools/utils";
@@ -128,6 +134,12 @@ export const registerSlackReplyTool = (server: McpServer) => {
             },
           ],
         });
+
+        // After successful postMessage, mark task as having a Slack reply
+        if (taskId) {
+          markTaskSlackReplySent(taskId);
+          console.log(`[Slack] Marked slackReplySent=1 for task ${taskId}`);
+        }
 
         return {
           content: [{ type: "text", text: "Reply sent successfully." }],

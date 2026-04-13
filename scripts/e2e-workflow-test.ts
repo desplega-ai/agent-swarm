@@ -446,10 +446,7 @@ async function testWorkflowCrud() {
   );
 
   // Get single
-  const { status: getStatus, data: single } = await api<WfJson>(
-    "GET",
-    `/api/workflows/${wf.id}`,
-  );
+  const { status: getStatus, data: single } = await api<WfJson>("GET", `/api/workflows/${wf.id}`);
   assertEq(getStatus, 200, "Get workflow by id returns 200");
   assertEq(single.name, SCENARIOS.triagePriority.name, "Get workflow returns correct name");
 
@@ -602,10 +599,7 @@ async function testFailedRunRetry() {
   const { data: triggerData } = await api<RunJson>("POST", `/api/workflows/${wf.id}/trigger`, {});
   await Bun.sleep(500);
 
-  const { data: run } = await api<RunDetailJson>(
-    "GET",
-    `/api/workflow-runs/${triggerData.runId}`,
-  );
+  const { data: run } = await api<RunDetailJson>("GET", `/api/workflow-runs/${triggerData.runId}`);
   assertEq(run.status, "failed", "Failing code-match marks run as failed");
 
   // Retry endpoint should respond (it will fail again since the code still throws)
@@ -740,11 +734,7 @@ async function testWorkerE2EFlow() {
   assert(!!wf.id, "Worker E2E: workflow created");
 
   // 2. Trigger the workflow
-  const { data: triggerResult } = await api<RunJson>(
-    "POST",
-    `/api/workflows/${wf.id}/trigger`,
-    {},
-  );
+  const { data: triggerResult } = await api<RunJson>("POST", `/api/workflows/${wf.id}/trigger`, {});
   const runId = triggerResult.runId;
   assert(!!runId, "Worker E2E: workflow triggered, got runId");
 

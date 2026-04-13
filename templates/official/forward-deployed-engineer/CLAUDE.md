@@ -12,7 +12,7 @@ worker
 - profiles
 - services
 - scheduling
-- epics
+
 - memory
 
 ---

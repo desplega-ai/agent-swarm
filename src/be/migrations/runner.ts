@@ -19,7 +19,6 @@ interface AppliedMigration {
 const BASELINE_TABLES = [
   "agents",
   "channels",
-  "epics",
   "agent_tasks",
   "agent_log",
   "channel_messages",
@@ -129,7 +128,7 @@ export function runMigrations(db: Database): void {
     const initialMigration = migrations.find((m) => m.version === 1);
     if (initialMigration) {
       if (shouldBootstrapInitialMigration(db)) {
-        console.log("[migrations] Existing database detected — bootstrapping migration tracking");
+        console.debug("[migrations] Existing database detected — bootstrapping migration tracking");
         db.run(
           "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
           [
@@ -169,6 +168,12 @@ export function runMigrations(db: Database): void {
   }
 
   // 5. Run pending migrations
+  // Disable FK checks for the entire migration pass. Individual migrations
+  // (008, 025, 026) need to DROP + recreate tables, which can violate FKs
+  // mid-transaction. PRAGMA foreign_keys cannot be changed inside a transaction,
+  // so we disable it here, outside any transaction, and re-enable after.
+  db.run("PRAGMA foreign_keys = OFF");
+
   for (const migration of migrations) {
     const existing = applied.get(migration.version);
 
@@ -185,7 +190,7 @@ export function runMigrations(db: Database): void {
     }
 
     // Apply migration in a transaction
-    console.log(`[migrations] Applying: ${migration.name}`);
+    console.debug(`[migrations] Applying: ${migration.name}`);
     const start = performance.now();
 
     db.transaction(() => {
@@ -199,6 +204,8 @@ export function runMigrations(db: Database): void {
     })();
 
     const elapsed = (performance.now() - start).toFixed(1);
-    console.log(`[migrations] Applied: ${migration.name} (${elapsed}ms)`);
+    console.debug(`[migrations] Applied: ${migration.name} (${elapsed}ms)`);
   }
+
+  db.run("PRAGMA foreign_keys = ON");
 }

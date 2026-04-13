@@ -5,7 +5,6 @@ import {
   getActiveTaskCount,
   getAgentById,
   getDb,
-  getEpicById,
   getTaskById,
   hasCapacity,
 } from "@/be/db";
@@ -48,7 +47,6 @@ export const registerSendTaskTool = (server: McpServer) => {
           .optional()
           .describe("Priority 0-100 (default: 50)."),
         dependsOn: z.array(z.uuid()).optional().describe("Task IDs this task depends on."),
-        epicId: z.string().uuid().optional().describe("Epic to associate this task with."),
         parentTaskId: z
           .uuid()
           .optional()
@@ -81,6 +79,19 @@ export const registerSendTaskTool = (server: McpServer) => {
           .describe(
             "If true, skip duplicate detection and create the task even if a similar one exists.",
           ),
+        slackChannelId: z
+          .string()
+          .optional()
+          .describe(
+            "Slack channel ID to post progress updates to. Use this to propagate Slack context when delegating from a Slack thread.",
+          ),
+        slackThreadTs: z
+          .string()
+          .optional()
+          .describe(
+            "Slack thread timestamp. Required with slackChannelId for thread-level updates.",
+          ),
+        slackUserId: z.string().optional().describe("Slack user ID of the original requester."),
       }),
       outputSchema: z.object({
         yourAgentId: z.string().uuid().optional(),
@@ -98,12 +109,14 @@ export const registerSendTaskTool = (server: McpServer) => {
         tags,
         priority,
         dependsOn,
-        epicId,
         dir,
         parentTaskId,
         vcsRepo,
         model,
         allowDuplicate,
+        slackChannelId,
+        slackThreadTs,
+        slackUserId,
       },
       requestInfo,
       _meta,
@@ -140,29 +153,15 @@ export const registerSendTaskTool = (server: McpServer) => {
         };
       }
 
-      // Validate epicId and auto-inherit vcsRepo from epic if not explicitly provided
-      let effectiveVcsRepo = vcsRepo;
-      if (epicId) {
-        const epic = getEpicById(epicId);
-        if (!epic) {
-          return {
-            content: [{ type: "text", text: `Epic not found: ${epicId}` }],
-            structuredContent: {
-              yourAgentId: requestInfo.agentId,
-              success: false,
-              message: `Epic not found: ${epicId}`,
-            },
-          };
-        }
-        if (!vcsRepo && epic.vcsRepo) {
-          effectiveVcsRepo = epic.vcsRepo;
-        }
-      }
+      const effectiveVcsRepo = vcsRepo;
+
+      // Auto-default parentTaskId to caller's current task for tree tracking
+      const effectiveParentTaskId = parentTaskId ?? requestInfo.sourceTaskId;
 
       // Auto-route to parent's worker if parentTaskId is set and no explicit agentId
       let effectiveAgentId = agentId;
-      if (parentTaskId && !agentId) {
-        const parentTask = getTaskById(parentTaskId);
+      if (effectiveParentTaskId && !agentId) {
+        const parentTask = getTaskById(effectiveParentTaskId);
         if (parentTask?.agentId) {
           effectiveAgentId = parentTask.agentId;
         }
@@ -189,22 +188,24 @@ export const registerSendTaskTool = (server: McpServer) => {
       }
 
       const txn = getDb().transaction(() => {
-        // Build tags with epic tag if epicId is provided
-        const finalTags = epicId ? [...(tags || []), `epic:${getEpicById(epicId)?.name}`] : tags;
+        const finalTags = tags;
 
         // If no agentId (and no auto-routed agentId), create an unassigned task for the pool
         if (!effectiveAgentId) {
           const newTask = createTaskExtended(task, {
             creatorAgentId: requestInfo.agentId,
+            sourceTaskId: requestInfo.sourceTaskId,
             taskType,
             tags: finalTags,
             priority,
             dependsOn,
-            epicId,
             dir,
-            parentTaskId,
+            parentTaskId: effectiveParentTaskId,
             vcsRepo: effectiveVcsRepo,
             model,
+            slackChannelId,
+            slackThreadTs,
+            slackUserId,
           });
 
           return {
@@ -244,15 +245,18 @@ export const registerSendTaskTool = (server: McpServer) => {
           const newTask = createTaskExtended(task, {
             offeredTo: effectiveAgentId,
             creatorAgentId: requestInfo.agentId,
+            sourceTaskId: requestInfo.sourceTaskId,
             taskType,
             tags: finalTags,
             priority,
             dependsOn,
-            epicId,
             dir,
-            parentTaskId,
+            parentTaskId: effectiveParentTaskId,
             vcsRepo: effectiveVcsRepo,
             model,
+            slackChannelId,
+            slackThreadTs,
+            slackUserId,
           });
 
           return {
@@ -266,15 +270,18 @@ export const registerSendTaskTool = (server: McpServer) => {
         const newTask = createTaskExtended(task, {
           agentId: effectiveAgentId,
           creatorAgentId: requestInfo.agentId,
+          sourceTaskId: requestInfo.sourceTaskId,
           taskType,
           tags: finalTags,
           priority,
           dependsOn,
-          epicId,
           dir,
-          parentTaskId,
+          parentTaskId: effectiveParentTaskId,
           vcsRepo: effectiveVcsRepo,
           model,
+          slackChannelId,
+          slackThreadTs,
+          slackUserId,
         });
 
         return {

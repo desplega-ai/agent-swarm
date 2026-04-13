@@ -69,9 +69,7 @@ export default function RootLayout({
           {`window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init()`}
         </Script>
       </head>
-      <body
-        className={`${spaceGrotesk.variable} ${spaceMono.variable} antialiased`}
-      >
+      <body className={`${spaceGrotesk.variable} ${spaceMono.variable} antialiased`}>
         {children}
       </body>
     </html>

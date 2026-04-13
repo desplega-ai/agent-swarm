@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     wget \
     curl \
+    jq \
     fuse3 libfuse2 \
     && rm -rf /var/lib/apt/lists/*
 

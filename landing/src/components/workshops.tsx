@@ -39,8 +39,7 @@ const workshopTimeline = [
   {
     time: "15 min",
     title: "Beast Mode",
-    description:
-      "Path to giving business agency to your agents.",
+    description: "Path to giving business agency to your agents.",
     icon: Rocket,
   },
 ];
@@ -135,9 +134,8 @@ export function Workshops() {
           transition={{ duration: 0.5, delay: 0.1 }}
           className="text-center text-lg text-zinc-500 max-w-3xl mx-auto mb-4"
         >
-          By the end of this workshop, your team will have a swarm of agents in the
-          cloud, capable of producing code constantly — removing the need for your
-          team to write code.
+          By the end of this workshop, your team will have a swarm of agents in the cloud, capable
+          of producing code constantly — removing the need for your team to write code.
         </motion.p>
 
         {/* Two options grid */}
@@ -163,9 +161,7 @@ export function Workshops() {
                 <Presentation className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h3 className="text-xl font-bold text-zinc-900">
-                  Hands-on Workshop
-                </h3>
+                <h3 className="text-xl font-bold text-zinc-900">Hands-on Workshop</h3>
                 <div className="flex items-center gap-1.5 text-sm text-zinc-500">
                   <Clock className="w-3.5 h-3.5" />
                   <span>2 Hours</span>
@@ -174,8 +170,8 @@ export function Workshops() {
             </div>
 
             <p className="text-sm text-zinc-500 mb-6">
-              Best for technical teams familiar with CLIs or IDEs with background
-              agents, aiming to move to agentic coding.
+              Best for technical teams familiar with CLIs or IDEs with background agents, aiming to
+              move to agentic coding.
             </p>
 
             {/* Timeline */}
@@ -187,11 +183,7 @@ export function Workshops() {
               className="space-y-4"
             >
               {workshopTimeline.map((step) => (
-                <motion.div
-                  key={step.title}
-                  variants={item}
-                  className="flex gap-4"
-                >
+                <motion.div key={step.title} variants={item} className="flex gap-4">
                   <div className="flex flex-col items-center">
                     <div className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-amber-50 border border-amber-200">
                       <step.icon className="w-4 h-4 text-amber-700" />
@@ -203,13 +195,9 @@ export function Workshops() {
                       <span className="text-xs font-mono font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded">
                         {step.time}
                       </span>
-                      <h4 className="text-sm font-semibold text-zinc-900">
-                        {step.title}
-                      </h4>
+                      <h4 className="text-sm font-semibold text-zinc-900">{step.title}</h4>
                     </div>
-                    <p className="text-sm text-zinc-500 leading-relaxed">
-                      {step.description}
-                    </p>
+                    <p className="text-sm text-zinc-500 leading-relaxed">{step.description}</p>
                   </div>
                 </motion.div>
               ))}
@@ -217,11 +205,8 @@ export function Workshops() {
 
             <div className="mt-4 p-4 rounded-xl bg-zinc-50 border border-zinc-100">
               <p className="text-xs text-zinc-500">
-                <span className="font-semibold text-zinc-700">
-                  Pre-Workshop Setup:
-                </span>{" "}
-                We can spin up dedicated, temporary servers for your team that can
-                be wiped after the session.
+                <span className="font-semibold text-zinc-700">Pre-Workshop Setup:</span> We can spin
+                up dedicated, temporary servers for your team that can be wiped after the session.
               </p>
             </div>
           </motion.div>
@@ -239,9 +224,7 @@ export function Workshops() {
                 <BarChart3 className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h3 className="text-xl font-bold text-zinc-900">
-                  Agentic Strategy Briefing
-                </h3>
+                <h3 className="text-xl font-bold text-zinc-900">Agentic Strategy Briefing</h3>
                 <div className="flex items-center gap-1.5 text-sm text-zinc-500">
                   <Clock className="w-3.5 h-3.5" />
                   <span>1 Hour</span>
@@ -250,8 +233,8 @@ export function Workshops() {
             </div>
 
             <p className="text-sm text-zinc-500 mb-6">
-              Best for teams looking for a high-level conceptual roadmap to
-              understand the agentic coding landscape.
+              Best for teams looking for a high-level conceptual roadmap to understand the agentic
+              coding landscape.
             </p>
 
             <motion.div
@@ -271,13 +254,9 @@ export function Workshops() {
                     <span className="text-xs font-mono font-semibold text-zinc-600 bg-zinc-100 px-2 py-0.5 rounded">
                       {topic.time}
                     </span>
-                    <h4 className="text-sm font-semibold text-zinc-900">
-                      {topic.title}
-                    </h4>
+                    <h4 className="text-sm font-semibold text-zinc-900">{topic.title}</h4>
                   </div>
-                  <p className="text-sm text-zinc-500 leading-relaxed">
-                    {topic.description}
-                  </p>
+                  <p className="text-sm text-zinc-500 leading-relaxed">{topic.description}</p>
                 </motion.div>
               ))}
             </motion.div>

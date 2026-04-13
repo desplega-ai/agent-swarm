@@ -1,0 +1,729 @@
+---
+title: MCP Tools Reference
+description: Complete reference for all MCP tools available in the swarm
+---
+
+Agent Swarm exposes its functionality through MCP (Model Context Protocol) tools. Tools are grouped by capability.
+
+## Tool Search & Annotations
+
+All MCP tools have structured annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) to improve Claude Code's Tool Search discoverability. Tools are split into two tiers:
+
+- **Core tools** (13) — Always available in context: task lifecycle, basic communication, memory recall, and swarm awareness
+- **Deferred tools** (74) — Discovered on demand via Claude Code's Tool Search when the agent needs them (scheduling, config, skills, workflows, MCP servers, Slack, user identity, repos, etc.)
+
+This reduces context window overhead by ~85% compared to loading all tools upfront.
+
+## Core Tools
+
+Always available tools for basic swarm operations.
+
+### join-swarm
+
+Join the agent swarm with optional profile information.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | Yes | Agent name |
+| `lead` | boolean | No | Whether this agent should be the lead |
+| `description` | string | No | Agent description |
+
+### poll-task
+
+Poll for a new task assignment. Returns immediately if there are offered tasks awaiting accept/reject. Also returns count of unassigned tasks in the pool.
+
+### get-swarm
+
+Returns a list of agents in the swarm without their tasks.
+
+### get-tasks
+
+Returns a list of tasks with various filters. Sorted by priority (desc) then lastUpdatedAt (desc).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `mineOnly` | boolean | No | Only tasks assigned to you |
+| `unassigned` | boolean | No | Only unassigned pool tasks |
+| `offeredToMe` | boolean | No | Only tasks offered to you (awaiting accept/reject) |
+| `readyOnly` | boolean | No | Only tasks with met dependencies |
+| `taskType` | string | No | Filter by type (e.g., `bug`, `feature`) |
+| `tags` | array | No | Filter by matching tags |
+| `search` | string | No | Search in task description |
+| `scheduleId` | uuid | No | Filter by schedule ID to find tasks created by a specific schedule |
+| `includeHeartbeat` | boolean | No | Include heartbeat/system tasks in results (excluded by default) |
+| `status` | string | No | Filter by status |
+| `limit` | number | No | Max tasks to return (default: 25) |
+
+### send-task
+
+Send a task to a specific agent, create an unassigned task, or offer a task for acceptance.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `task` | string | Yes | Task description |
+| `agentId` | uuid | No | Target agent (omit for pool) |
+| `offerMode` | boolean | No | Offer instead of direct assign |
+| `priority` | number | No | Priority 0-100 (default: 50) |
+| `tags` | array | No | Tags for filtering |
+| `taskType` | string | No | Task type classification |
+| `dependsOn` | array | No | Task IDs this depends on |
+| `parentTaskId` | uuid | No | Parent task for session continuity |
+| `dir` | string | No | Working directory (absolute path) for the agent to start in |
+| `model` | string | No | Model for this task: `haiku`, `sonnet`, or `opus`. Falls back to agent/global `MODEL_OVERRIDE` config, then `opus` |
+| `slackChannelId` | string | No | Slack channel ID for progress updates (auto-inherited if omitted) |
+| `slackThreadTs` | string | No | Slack thread timestamp (auto-inherited if omitted) |
+| `slackUserId` | string | No | Slack user ID of the original requester (auto-inherited if omitted) |
+
+Slack metadata is auto-inherited from the creator's current task via `X-Source-Task-Id` header. Explicit params override auto-inherited values when provided.
+
+### get-task-details
+
+Returns detailed information about a specific task, including output, failure reason, and log history.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `taskId` | uuid | Yes | Task ID |
+
+### store-progress
+
+Store task progress, or mark a task as completed or failed.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `taskId` | uuid | Yes | Task ID |
+| `progress` | string | No | Progress update |
+| `status` | string | No | Set to `completed` or `failed` |
+| `output` | string | No | Output (for completion). Validated against `outputSchema` if the task defines one |
+| `failureReason` | string | No | Reason (for failure) |
+| `costData` | object | No | Session cost tracking: `totalCostUsd` (required), `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `durationMs`, `numTurns`, `model` |
+
+### cancel-task
+
+Cancel a task that is pending or in progress. Only the lead or task creator can cancel.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `taskId` | uuid | Yes | Task ID |
+| `reason` | string | No | Cancellation reason |
+
+### my-agent-info
+
+Returns your agent ID and profile information.
+
+## Config Tools
+
+Manage swarm-wide, agent-specific, or repo-specific configuration values. Scope resolution follows: repo > agent > global.
+
+### set-config
+
+Set or update a configuration value. Upserts by (scope, scopeId, key).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scope` | string | Yes | `global`, `agent`, or `repo` |
+| `key` | string | Yes | Configuration key |
+| `value` | string | Yes | Configuration value |
+| `scopeId` | uuid | No | Agent ID or repo ID (required for `agent`/`repo` scopes) |
+| `isSecret` | boolean | No | Mask value in API responses |
+| `description` | string | No | Human-readable description |
+
+### get-config
+
+Get resolved configuration values with scope resolution. Returns one entry per unique key with the most-specific scope winning.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `key` | string | No | Filter by specific key |
+| `agentId` | uuid | No | Agent ID for scope resolution |
+| `repoId` | uuid | No | Repo ID for scope resolution |
+| `includeSecrets` | boolean | No | Include actual secret values |
+
+### list-config
+
+List raw config entries without scope resolution. Useful for seeing exactly what's configured at each scope level.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scope` | string | No | Filter by scope |
+| `scopeId` | uuid | No | Filter by agent/repo ID |
+| `key` | string | No | Filter by key |
+
+### delete-config
+
+Delete a configuration entry by its ID.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | uuid | Yes | Config entry ID |
+
+## Slack Tools
+
+### slack-reply
+
+Reply to a Slack thread associated with a task.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `message` | string | Yes | Message to send |
+| `taskId` | uuid | No | Task context |
+
+### slack-read
+
+Read messages from a Slack thread or channel.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `taskId` | uuid | No | Task thread |
+| `channelId` | string | No | Channel ID (leads only) |
+| `limit` | number | No | Max messages (default: 20) |
+
+### slack-post
+
+Post a new message to a Slack channel. Leads only.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `channelId` | string | Yes | Channel ID |
+| `message` | string | Yes | Message content |
+
+### slack-list-channels
+
+List Slack channels the bot is a member of.
+
+### slack-upload-file
+
+Upload a file to a Slack channel or thread (max 1 GB).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `filePath` | string | No | Path to file (either filePath or content required) |
+| `content` | string | No | Base64-encoded file content |
+| `filename` | string | No | Name for the file in Slack |
+| `taskId` | uuid | No | Task context for thread |
+| `channelId` | string | No | Direct channel (leads only) |
+| `initialComment` | string | No | Message to post with the file |
+
+### slack-download-file
+
+Download a file from Slack by file ID or URL.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `fileId` | string | No | Slack file ID |
+| `url` | string | No | Direct download URL |
+| `savePath` | string | No | Where to save (default: `/workspace/shared/downloads/{agentId}/slack/`) |
+
+### register-agentmail-inbox
+
+Register an AgentMail inbox ID to route incoming emails to this agent.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | string | Yes | `register`, `unregister`, or `list` |
+| `inboxId` | string | No | AgentMail inbox ID (required for register/unregister) |
+| `inboxEmail` | string | No | Email address for reference |
+
+## Task Pool Tools
+
+### task-action
+
+Manage tasks in the pool: create, claim, release, accept, reject, or move to/from backlog.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | string | Yes | `create`, `claim`, `release`, `accept`, `reject`, `to_backlog`, `from_backlog` |
+| `taskId` | uuid | Varies | Required for claim/release/accept/reject |
+| `task` | string | Varies | Required for create |
+| `priority` | number | No | Priority 0-100 |
+| `tags` | array | No | Tags for filtering |
+| `dir` | string | No | Working directory (absolute path) for the agent to start in (only used with `create` action) |
+| `model` | string | No | Model for the created task: `haiku`, `sonnet`, or `opus` (only used with `create` action) |
+
+## Messaging Tools
+
+### post-message / read-messages
+
+Inter-agent communication via channels.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `channel` | string | No | Channel name (default: `general`) |
+| `content` | string | Yes | Message content |
+| `mentions` | array | No | Agent IDs to @mention |
+| `replyTo` | uuid | No | Message ID for threading |
+
+### create-channel / list-channels / delete-channel
+
+Manage communication channels.
+
+## Profile Tools
+
+### update-profile
+
+Update an agent's profile, identity files, and setup script. By default updates the calling agent. Lead agents can update any agent's profile by providing the `agentId` parameter.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agentId` | string (UUID) | No | Target agent ID. If omitted, updates the calling agent. Only lead agents can update other agents. |
+| `name` | string | No | Agent name |
+| `role` | string | No | Agent role |
+| `description` | string | No | Agent description |
+| `soulMd` | string (min 200 chars) | No | SOUL.md content. Must be at least 200 characters to prevent accidental corruption. |
+| `identityMd` | string (min 200 chars) | No | IDENTITY.md content. Must be at least 200 characters to prevent accidental corruption. |
+| `toolsMd` | string | No | TOOLS.md content |
+| `claudeMd` | string | No | CLAUDE.md content |
+| `setupScript` | string | No | Startup script content |
+
+### context-history
+
+View version history for an agent's context files (soulMd, identityMd, toolsMd, claudeMd, setupScript).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agentId` | uuid | No | Agent ID (default: your own) |
+| `field` | string | No | Filter by field name |
+| `limit` | number | No | Max versions (default: 10) |
+
+### context-diff
+
+Compare two versions of a context file. Shows a unified diff.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `versionId` | uuid | Yes | The newer version ID |
+| `compareToVersionId` | uuid | No | The older version (default: previous) |
+
+## Service Tools
+
+### register-service / unregister-service / list-services / update-service-status
+
+Manage HTTP service discovery. See [Service Discovery](/docs/concepts/services) for details.
+
+## Scheduling Tools
+
+### create-schedule / list-schedules / update-schedule / delete-schedule / run-schedule-now
+
+Manage recurring and one-time task automation. Schedules support a `model` parameter (`haiku`, `sonnet`, or `opus`) that is passed to all tasks they create.
+
+**One-time schedules** (v1.36.0): Set `scheduleType: "one_time"` with either `delayMs` (relative delay) or `runAt` (absolute ISO datetime). One-time schedules auto-disable after execution. `list-schedules` hides completed one-time schedules by default (`hideCompleted: true`).
+
+See [Scheduled Tasks](/docs/concepts/scheduling) for details.
+
+## Workflow Tools
+
+### create-workflow
+
+Create a new automation workflow with a DAG definition.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | Yes | Unique workflow name |
+| `description` | string | No | What the workflow does |
+| `definition` | object | Yes | DAG definition with `nodes` array |
+| `triggers` | array | No | Trigger configs: `webhook`, `schedule`, or `manual` |
+| `cooldown` | object | No | Cooldown period: `{ hours, minutes, seconds }` |
+| `input` | object | No | Workflow-level input values (env vars, secrets, or literals) |
+
+### get-workflow
+
+Get workflow details by ID.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | uuid | Yes | Workflow ID |
+
+### list-workflows
+
+List all workflows, optionally filtering by enabled status.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `enabled` | boolean | No | Filter by enabled/disabled |
+
+### update-workflow
+
+Update a workflow's definition, name, description, or enabled status.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | uuid | Yes | Workflow ID |
+| `name` | string | No | New name |
+| `description` | string | No | New description |
+| `definition` | object | No | Updated DAG definition |
+| `enabled` | boolean | No | Enable or disable |
+
+### delete-workflow
+
+Delete a workflow and all its run history.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | uuid | Yes | Workflow ID |
+
+### trigger-workflow
+
+Manually trigger a workflow execution.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | uuid | Yes | Workflow ID |
+| `triggerData` | object | No | Data to pass as trigger context |
+
+### get-workflow-run
+
+Get details of a specific workflow run including step statuses.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | uuid | Yes | Run ID |
+
+## Related
+
+- [CLI Reference](/docs/reference/cli) — Terminal commands for managing agents, tasks, and configuration
+- [Environment Variables](/docs/reference/environment-variables) — Configuration variables for the swarm
+- [Task Lifecycle](/docs/concepts/task-lifecycle) — How tasks flow through the swarm
+- [Workflows](/docs/concepts/workflows) — DAG-based workflow definitions and automation
+
+### list-workflow-runs
+
+List runs for a specific workflow.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `workflowId` | uuid | Yes | Workflow ID |
+| `status` | string | No | Filter by run status |
+
+### retry-workflow-run
+
+Retry a failed workflow run from the point of failure.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `runId` | uuid | Yes | Run ID to retry |
+
+### cancel-workflow-run
+
+Cancel a running or waiting workflow run. Cancels all non-terminal steps and their associated tasks.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `runId` | uuid | Yes | Workflow run ID to cancel |
+| `reason` | string | No | Optional reason for cancellation |
+
+### patch-workflow
+
+Partially update a workflow definition by creating, updating, or deleting individual nodes. Operations are applied in order: delete → create → update. Creates a version snapshot before applying changes.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | uuid | Yes | Workflow ID to patch |
+| `update` | array | No | Nodes to update (partial merge): `[{ nodeId, node }]` |
+| `delete` | array | No | Node IDs to delete |
+| `create` | array | No | New nodes to add: `[{ id, type, config, label?, next?, inputs? }]` |
+| `onNodeFailure` | string | No | Update failure behavior: `fail` or `continue` |
+
+### patch-workflow-node
+
+Partially update a single node in a workflow definition. Merges the provided fields into the existing node. Creates a version snapshot before applying changes.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | uuid | Yes | Workflow ID |
+| `nodeId` | string | Yes | Node ID to update |
+| Additional fields from node schema (type, config, label, next, inputs, etc.) |
+
+## Human-in-the-Loop Tools
+
+### request-human-input
+
+Create an approval request that pauses until a human responds. Supports multiple question types: approval (yes/no), text, single-select, multi-select, and boolean. Returns the request ID and URL for the human to respond.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `title` | string | Yes | Title of the approval request |
+| `questions` | array | Yes | Questions to ask the human |
+
+Approval requests are accessible via the dashboard at `/approval-requests/{id}`. When resolved, a follow-up task is automatically created for the requesting agent with the human's responses.
+
+## Skill Tools
+
+Manage reusable procedural knowledge (skills) that agents can create, share, and install.
+
+### skill-create
+
+Create a personal skill from SKILL.md content. Parses frontmatter for name, description, and metadata.
+
+### skill-get
+
+Get full skill content by ID or name. Name resolution checks agent scope first, then swarm, then global.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `skillId` | string | No | Skill ID |
+| `name` | string | No | Skill name (resolved with precedence) |
+
+### skill-list
+
+List available skills with optional filters.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `type` | string | No | Filter by type: `remote` or `personal` |
+| `scope` | string | No | Filter by scope: `global`, `swarm`, or `agent` |
+| `agentId` | string | No | Filter by owning agent |
+
+### skill-search
+
+Search skills by keyword (name and description).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | Yes | Search query |
+| `limit` | number | No | Max results (default: 20) |
+
+### skill-install
+
+Install/assign a skill to an agent. Leads can install for other agents.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `skillId` | string | Yes | ID of the skill to install |
+
+### skill-uninstall
+
+Remove a skill from an agent.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `skillId` | string | Yes | ID of the skill to uninstall |
+| `agentId` | string | No | Target agent (default: calling agent) |
+
+### skill-update
+
+Update a skill's content or settings. Re-parses frontmatter if content changes.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `skillId` | string | No | Skill ID to update |
+| `content` | string | No | New SKILL.md content |
+| `isEnabled` | boolean | No | Toggle enabled/disabled |
+
+### skill-publish
+
+Publish a personal skill to swarm scope. Creates an approval task for the lead agent.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `skillId` | string | Yes | ID of the personal skill to publish |
+
+### skill-delete
+
+Delete a skill. Only the owning agent or lead can delete.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `skillId` | string | Yes | ID of the skill to delete |
+
+### skill-install-remote
+
+Fetch and install a remote skill from a GitHub repository.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sourceRepo` | string | Yes | GitHub repo (e.g. `vercel-labs/skills`) |
+| `sourcePath` | string | No | Path within repo (e.g. `skills/nextjs`) |
+
+### skill-sync-remote
+
+Check and update remote skills from their GitHub sources. Compares content and updates if changed.
+
+## MCP Server Tools
+
+Manage MCP server definitions and installations. Servers are scoped (agent → swarm → global) and can be installed per-agent.
+
+### mcp-server-create
+
+Create a new MCP server definition. Agent-scope servers are auto-installed for the creating agent. Swarm/global scope requires lead.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | Yes | Server name |
+| `description` | string | No | Server description |
+| `transport` | string | Yes | `stdio`, `http`, or `sse` |
+| `command` | string | No | Command to run (required for stdio) |
+| `args` | string | No | JSON array of arguments (stdio only) |
+| `url` | string | No | Server URL (required for http/sse) |
+
+### mcp-server-get
+
+Get MCP server details by ID or name. Name resolution uses scope cascade: agent > swarm > global.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | No | MCP server ID |
+| `name` | string | No | MCP server name (resolved with scope cascade) |
+
+### mcp-server-list
+
+List MCP servers with optional filters.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scope` | string | No | Filter by scope: `global`, `swarm`, or `agent` |
+| `transport` | string | No | Filter by transport: `stdio`, `http`, or `sse` |
+| `search` | string | No | Search by name or description |
+
+### mcp-server-update
+
+Update an MCP server's configuration. Only the owner or lead can update.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | Yes | MCP server ID |
+| `name` | string | No | New name |
+| `description` | string | No | New description |
+| `transport` | string | No | New transport type |
+| `command` | string | No | New command (stdio) |
+| `args` | string | No | New JSON array of arguments |
+| `url` | string | No | New URL (http/sse) |
+| `headers` | string | No | New JSON object of non-secret headers |
+| `envConfigKeys` | string | No | New env config key mappings |
+| `headerConfigKeys` | string | No | New header config key mappings |
+| `isEnabled` | boolean | No | Toggle enabled/disabled |
+
+### mcp-server-install
+
+Install an MCP server for an agent. Self-install is always allowed; cross-agent requires lead.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `mcpServerId` | string | Yes | ID of the MCP server to install |
+
+### mcp-server-uninstall
+
+Uninstall an MCP server from an agent.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `mcpServerId` | string | Yes | ID of the MCP server to uninstall |
+| `agentId` | string | No | Target agent (default: calling agent) |
+
+### mcp-server-delete
+
+Delete an MCP server definition. Only the owning agent or lead can delete.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | Yes | MCP server ID |
+
+## Debug Tools
+
+### db-query
+
+Execute a read-only SQL query against the swarm database. Lead-only. Results capped at 100 rows.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sql` | string | Yes | SQL query (read-only only — writes are rejected) |
+| `params` | array | No | Query parameters |
+
+## Memory Tools
+
+### memory-search
+
+Search accumulated memories with natural language.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | Yes | Natural language search query |
+| `scope` | string | No | `all`, `agent`, or `swarm` |
+| `source` | string | No | Filter by source type |
+| `limit` | number | No | Max results (default: 10) |
+
+### memory-get
+
+Retrieve full details of a specific memory.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `memoryId` | uuid | Yes | Memory ID |
+
+### memory-delete
+
+Delete a memory by ID. Agents can delete their own memories; lead agents can also delete swarm-scoped memories.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `memoryId` | uuid | Yes | Memory ID to delete |
+
+### inject-learning
+
+Lead agent pushes learnings into a worker's memory.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agentId` | uuid | Yes | Target worker |
+| `learning` | string | Yes | Learning content |
+| `category` | string | Yes | `mistake-pattern`, `best-practice`, `codebase-knowledge`, or `preference` |
+
+## User Identity Tools
+
+Tools for managing the canonical user registry across platforms.
+
+### resolve-user
+
+Look up a canonical user profile by any platform-specific identifier (Slack ID, Linear ID, GitHub username, email, or name).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `slackUserId` | string | No | Slack user ID |
+| `linearUserId` | string | No | Linear user UUID |
+| `githubUsername` | string | No | GitHub username |
+| `gitlabUsername` | string | No | GitLab username |
+| `email` | string | No | Email address |
+| `name` | string | No | Name (fuzzy substring match) |
+
+### manage-user
+
+Create, update, delete, or list user profiles in the user registry. Lead-only.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `action` | string | Yes | `create`, `update`, `delete`, `list`, or `get` |
+| `userId` | string | No | User ID (required for update/delete/get) |
+| `name` | string | No | Display name (required for create) |
+| `email` | string | No | Primary email address |
+| `role` | string | No | Role (e.g., "founder", "engineer") |
+| `notes` | string | No | Free-form notes |
+| `slackUserId` | string | No | Slack user ID |
+| `linearUserId` | string | No | Linear user UUID |
+| `githubUsername` | string | No | GitHub username |
+| `gitlabUsername` | string | No | GitLab username |
+| `emailAliases` | array | No | Additional email addresses |
+| `preferredChannel` | string | No | Preferred contact channel |
+| `timezone` | string | No | Timezone (e.g., America/New_York) |
+
+## Repository Tools
+
+Tools for managing registered repos and their guidelines.
+
+### get-repos
+
+List registered repos with their guidelines (PR checks, merge policy, review guidance).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | No | Filter by repo name (returns all if omitted) |
+
+### update-repo
+
+Update a repo's configuration including guidelines.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | Yes | Repo ID to update |
+| `url` | string | No | New repo URL |
+| `name` | string | No | New repo name |
+| `clonePath` | string | No | New clone path |
+| `defaultBranch` | string | No | New default branch |
+| `autoClone` | boolean | No | Whether to auto-clone |

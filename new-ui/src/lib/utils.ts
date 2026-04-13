@@ -9,11 +9,23 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
+ * Parse a date string as UTC, handling both ISO 8601 (with T/Z) and bare
+ * SQLite format (YYYY-MM-DD HH:MM:SS). The bare format is ambiguous —
+ * browsers parse it as local time — so we append 'Z' to force UTC.
+ */
+export function parseUTCDate(dateStr: string): Date {
+  if (dateStr.includes("T") || dateStr.endsWith("Z")) {
+    return new Date(dateStr);
+  }
+  return new Date(`${dateStr.replace(" ", "T")}Z`);
+}
+
+/**
  * Format a date as relative time (e.g., "2 minutes ago", "just now")
  */
 export function formatRelativeTime(date: string | Date): string {
   const now = Date.now();
-  const then = new Date(date).getTime();
+  const then = typeof date === "string" ? parseUTCDate(date).getTime() : date.getTime();
   const diff = now - then;
 
   const seconds = Math.floor(diff / 1000);
@@ -34,12 +46,46 @@ export function formatRelativeTime(date: string | Date): string {
 }
 
 /**
- * Format a date as smart time - relative for recent, absolute for older
+ * Format a date as smart time - relative for recent, absolute for older.
+ * Handles both past and future dates.
  */
 export function formatSmartTime(dateStr: string): string {
-  const date = new Date(dateStr);
+  const date = parseUTCDate(dateStr);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
+
+  // Future dates
+  if (diffMs < 0) {
+    const futureMins = Math.floor(-diffMs / 60000);
+    const futureHours = Math.floor(futureMins / 60);
+    const futureDays = Math.floor(futureHours / 24);
+
+    if (futureMins < 1) return "in <1m";
+    if (futureMins < 60) return `in ${futureMins}m`;
+    if (futureHours < 6) return `in ${futureHours}h`;
+    if (futureDays < 1) {
+      const isToday = date.toDateString() === now.toDateString();
+      if (isToday) {
+        return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+      }
+      return date.toLocaleDateString([], {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "UTC",
+      });
+    }
+    return date.toLocaleDateString([], {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "UTC",
+    });
+  }
+
+  // Past dates
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMins / 60);
 
@@ -60,6 +106,20 @@ export function formatSmartTime(dateStr: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/**
+ * Format a date string as UTC time (e.g., "Mar 31, 04:00 UTC")
+ */
+export function formatUTCTime(dateStr: string): string {
+  const date = parseUTCDate(dateStr);
+  return `${date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+  })} UTC`;
 }
 
 /**
@@ -102,8 +162,8 @@ export function formatDuration(ms: number): string {
  * Returns compact string like "2m", "1h 23m", "3d 4h".
  */
 export function formatElapsed(start: string, end?: string | null): string {
-  const startMs = new Date(start).getTime();
-  const endMs = end ? new Date(end).getTime() : Date.now();
+  const startMs = parseUTCDate(start).getTime();
+  const endMs = end ? parseUTCDate(end).getTime() : Date.now();
   const diffMs = endMs - startMs;
   if (diffMs < 0) return "—";
 
@@ -114,6 +174,7 @@ export function formatElapsed(start: string, end?: string | null): string {
 
   if (days > 0) return `${days}d ${hours % 24}h`;
   if (hours > 0) return `${hours}h ${minutes % 60}m`;
-  if (minutes > 0) return `${minutes}m`;
-  return `${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+  if (seconds > 0) return `${seconds}s`;
+  return `${diffMs}ms`;
 }

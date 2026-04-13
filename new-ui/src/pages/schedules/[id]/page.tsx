@@ -1,4 +1,5 @@
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
+import cronstrue from "cronstrue";
 import { ArrowLeft, Clock, ListTodo, Pencil, Play, Timer, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -47,7 +48,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { formatElapsed, formatSmartTime } from "@/lib/utils";
+import { formatElapsed, formatSmartTime, formatUTCTime } from "@/lib/utils";
+
+function describeCron(expr: string): string {
+  try {
+    return cronstrue.toString(expr, { use24HourTimeFormat: true });
+  } catch {
+    return expr;
+  }
+}
 
 function formatInterval(ms: number): string {
   const seconds = ms / 1000;
@@ -279,16 +288,22 @@ export default function ScheduleDetailPage() {
                         <Timer className="h-4 w-4 text-muted-foreground" />
                         <span className="text-sm">
                           {schedule.lastRunAt
-                            ? formatSmartTime(schedule.lastRunAt)
+                            ? formatUTCTime(schedule.lastRunAt)
                             : schedule.nextRunAt
-                              ? formatSmartTime(schedule.nextRunAt)
+                              ? formatUTCTime(schedule.nextRunAt)
                               : "—"}
                         </span>
                       </>
                     ) : schedule.cronExpression ? (
                       <>
                         <Clock className="h-4 w-4 text-muted-foreground" />
-                        <code className="text-sm font-mono">{schedule.cronExpression}</code>
+                        <div className="space-y-0.5">
+                          <code className="text-sm font-mono">{schedule.cronExpression}</code>
+                          <p className="text-xs text-muted-foreground">
+                            {describeCron(schedule.cronExpression)}
+                            <span className="ml-1 opacity-60">({schedule.timezone || "UTC"})</span>
+                          </p>
+                        </div>
                       </>
                     ) : schedule.intervalMs ? (
                       <>
@@ -301,12 +316,12 @@ export default function ScheduleDetailPage() {
                   </div>
                 </div>
 
-                {schedule.timezone && (
+                {schedule.cronExpression && (
                   <div>
                     <span className="text-xs text-muted-foreground uppercase tracking-wide">
                       Timezone
                     </span>
-                    <p className="text-sm">{schedule.timezone}</p>
+                    <p className="text-sm">{schedule.timezone || "UTC"}</p>
                   </div>
                 )}
 
@@ -366,17 +381,31 @@ export default function ScheduleDetailPage() {
                   <span className="text-xs text-muted-foreground uppercase tracking-wide">
                     Next Run
                   </span>
-                  <p className="text-sm">
-                    {schedule.nextRunAt ? formatSmartTime(schedule.nextRunAt) : "—"}
-                  </p>
+                  {schedule.nextRunAt ? (
+                    <div>
+                      <p className="text-sm">{formatSmartTime(schedule.nextRunAt)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatUTCTime(schedule.nextRunAt)}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-sm">—</p>
+                  )}
                 </div>
                 <div>
                   <span className="text-xs text-muted-foreground uppercase tracking-wide">
                     Last Run
                   </span>
-                  <p className="text-sm">
-                    {schedule.lastRunAt ? formatSmartTime(schedule.lastRunAt) : "Never"}
-                  </p>
+                  {schedule.lastRunAt ? (
+                    <div>
+                      <p className="text-sm">{formatSmartTime(schedule.lastRunAt)}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatUTCTime(schedule.lastRunAt)}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-sm">Never</p>
+                  )}
                 </div>
                 <div>
                   <span className="text-xs text-muted-foreground uppercase tracking-wide">

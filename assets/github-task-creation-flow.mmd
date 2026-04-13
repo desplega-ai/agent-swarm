@@ -1,0 +1,51 @@
+%%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '13px', 'nodeSpacing': 30, 'rankSpacing': 40}}}%%
+flowchart TB
+    subgraph ENTRY["1. GitHub Webhook Entry Points"]
+        direction LR
+        E1["Issue<br/>opened/edited"]
+        E2["PR<br/>opened/edited"]
+        E3["Comment<br/>created"]
+        E4["Bot Assigned<br/>to Issue/PR"]
+        E5["Review Requested<br/>from Bot"]
+    end
+
+    subgraph GATE["2. Trigger Gate"]
+        M{"@agent-swarm<br/>mention?"}
+        A{"Bot is<br/>assignee?"}
+        D{"Duplicate?<br/>60s TTL"}
+    end
+
+    subgraph CREATE["3. Task Creation"]
+        LEAD["Find Lead Agent<br/>(online > offline > none)"]
+        TPL["resolveTemplate()"]
+        TASK["createTaskExtended()"]
+    end
+
+    subgraph OUT["4. Output"]
+        ASSIGN["Task assigned<br/>to Lead"]
+        POOL["Task in pool<br/>(no lead)"]
+        REACT["eyes reaction<br/>on GitHub"]
+    end
+
+    E1 & E2 & E3 --> M
+    E4 & E5 --> A
+
+    M -->|Yes| D
+    A -->|Yes| D
+    M & A -->|No| DROP1(("skip"))
+
+    D -->|New| LEAD
+    D -->|Dup| DROP2(("skip"))
+
+    LEAD --> TPL --> TASK
+
+    TASK -->|lead found| ASSIGN
+    TASK -.->|no lead| POOL
+    TASK --> REACT
+
+    style ENTRY fill:#1a1a2e,stroke:#e94560,color:#fff
+    style GATE fill:#16213e,stroke:#0f3460,color:#fff
+    style CREATE fill:#0f3460,stroke:#48c9b0,color:#fff
+    style OUT fill:#1a1a2e,stroke:#2ecc71,color:#fff
+    style DROP1 fill:#e74c3c,color:#fff
+    style DROP2 fill:#e74c3c,color:#fff

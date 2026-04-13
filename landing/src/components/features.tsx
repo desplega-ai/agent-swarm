@@ -1,26 +1,9 @@
 "use client";
 
-import React from "react";
 import { motion } from "framer-motion";
-import {
-  Brain,
-  Network,
-  Layers,
-  Clock,
-  Database,
-  Workflow,
-  Users,
-  Zap,
-  Blocks,
-} from "lucide-react";
+import { Brain, Network, Workflow, Zap, Blocks, Server } from "lucide-react";
 
-const features: {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  description: string;
-  color: string;
-  link?: string;
-}[] = [
+const features = [
   {
     icon: Network,
     title: "Lead-Worker Orchestration",
@@ -30,23 +13,16 @@ const features: {
   },
   {
     icon: Brain,
-    title: "Persistent Memory",
+    title: "Persistent Memory & Identity",
     description:
-      "Agents remember across sessions. Solutions, patterns, and mistakes are stored and searchable — knowledge truly compounds over time.",
+      "Agents remember across sessions. Each develops a unique identity with SOUL.md and IDENTITY.md — knowledge truly compounds over time.",
     color: "from-violet-500 to-purple-500",
   },
   {
-    icon: Layers,
-    title: "Identity & Soul",
-    description:
-      "Each agent has personality files — SOUL.md and IDENTITY.md — that define who they are and evolve as they work. They become someone.",
-    color: "from-blue-500 to-cyan-500",
-  },
-  {
     icon: Workflow,
-    title: "Task Lifecycle",
+    title: "Tasks, Workflows & Scheduling",
     description:
-      "Tasks flow through a rich lifecycle: unassigned, offered, claimed, in-progress, reviewing, completed. Full traceability at every step.",
+      "Tasks flow through a rich lifecycle with full traceability. Orchestrate multi-step workflows, schedule recurring tasks with cron — the swarm runs while you sleep.",
     color: "from-emerald-500 to-teal-500",
   },
   {
@@ -58,25 +34,18 @@ const features: {
     link: "https://templates.agent-swarm.dev",
   },
   {
-    icon: Database,
-    title: "Epics & Scheduling",
-    description:
-      "Organize work into epics with progress tracking. Schedule recurring tasks with cron expressions. The swarm runs while you sleep.",
-    color: "from-amber-600 to-yellow-500",
-  },
-  {
-    icon: Users,
-    title: "Slack Integration",
-    description:
-      "Talk to the swarm from Slack. Mention the bot, get progress updates in threads, delegate work — all from your existing workflow.",
-    color: "from-indigo-500 to-blue-500",
-  },
-  {
     icon: Zap,
     title: "MCP-Native",
     description:
       "Built on the Model Context Protocol. Every capability is a tool. Agents discover and invoke each other's services seamlessly.",
     color: "from-orange-500 to-red-500",
+  },
+  {
+    icon: Server,
+    title: "Docker-Isolated Workers",
+    description:
+      "Each worker runs in its own Docker container with full workspace isolation. Self-host on any infrastructure, air-gapped or cloud — your call.",
+    color: "from-blue-500 to-cyan-500",
   },
 ];
 
@@ -112,8 +81,8 @@ export function Features() {
             Everything a swarm needs
           </h2>
           <p className="text-lg text-zinc-500 max-w-2xl mx-auto">
-            From task delegation to persistent memory, Agent Swarm provides the
-            full infrastructure for autonomous multi-agent coordination.
+            From task delegation to persistent memory, Agent Swarm provides the full infrastructure
+            for autonomous multi-agent coordination.
           </p>
         </motion.div>
 
@@ -122,7 +91,7 @@ export function Features() {
           initial="hidden"
           whileInView="show"
           viewport={{ once: true, margin: "-50px" }}
-          className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6"
+          className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6"
         >
           {features.map((feature) => {
             const Wrapper = feature.link ? "a" : "div";
@@ -130,10 +99,7 @@ export function Features() {
               ? { href: feature.link, target: "_blank" as const, rel: "noopener noreferrer" }
               : {};
             return (
-              <motion.div
-                key={feature.title}
-                variants={item}
-              >
+              <motion.div key={feature.title} variants={item}>
                 <Wrapper
                   {...linkProps}
                   className="group relative block rounded-2xl bg-white border border-zinc-100 p-6 hover:border-zinc-200 hover:shadow-xl hover:shadow-zinc-100/50 transition-all duration-300 h-full"
@@ -143,12 +109,8 @@ export function Features() {
                   >
                     <feature.icon className="w-5 h-5 text-white" />
                   </div>
-                  <h3 className="text-base font-semibold text-zinc-900 mb-2">
-                    {feature.title}
-                  </h3>
-                  <p className="text-sm text-zinc-500 leading-relaxed">
-                    {feature.description}
-                  </p>
+                  <h3 className="text-base font-semibold text-zinc-900 mb-2">{feature.title}</h3>
+                  <p className="text-sm text-zinc-500 leading-relaxed">{feature.description}</p>
                 </Wrapper>
               </motion.div>
             );

@@ -207,6 +207,17 @@ class PiMonoSession implements ProviderSession {
             this.lastEmittedMessage = text;
           }
         }
+        // Emit context_usage for dashboard tracking
+        const usage = this.agentSession.getContextUsage();
+        if (usage && usage.tokens != null) {
+          this.emit({
+            type: "context_usage",
+            contextUsedTokens: usage.tokens,
+            contextTotalTokens: usage.contextWindow,
+            contextPercent: usage.percent ?? 0,
+            outputTokens: 0,
+          });
+        }
         break;
       }
       case "tool_execution_start": {
@@ -223,6 +234,13 @@ class PiMonoSession implements ProviderSession {
               model,
             },
           }),
+        });
+        // Emit normalized tool_start for runner auto-progress
+        this.emit({
+          type: "tool_start",
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          args: event.args,
         });
         break;
       }
@@ -243,6 +261,13 @@ class PiMonoSession implements ProviderSession {
               ],
             },
           }),
+        });
+        // Emit normalized tool_end
+        this.emit({
+          type: "tool_end",
+          toolCallId: event.toolCallId,
+          toolName: event.toolName,
+          result: event.result,
         });
         break;
       case "auto_retry_start":
@@ -374,7 +399,12 @@ export class PiMonoAdapter implements ProviderAdapter {
     let customTools: ToolDefinition[] = [];
     if (config.apiUrl && config.apiKey) {
       try {
-        const mcpClient = new McpHttpClient(config.apiUrl, config.apiKey, config.agentId);
+        const mcpClient = new McpHttpClient(
+          config.apiUrl,
+          config.apiKey,
+          config.agentId,
+          config.taskId,
+        );
         await mcpClient.initialize();
         const tools = await mcpClient.listTools();
         customTools = mcpToolsToDefinitions(mcpClient, tools);
@@ -383,6 +413,74 @@ export class PiMonoAdapter implements ProviderAdapter {
         );
       } catch (err) {
         console.warn(`\x1b[33m[${config.role}] Failed to discover MCP tools: ${err}\x1b[0m`);
+      }
+
+      // 2b. Discover tools from installed MCP servers (HTTP/SSE transport only)
+      try {
+        const mcpServersRes = await fetch(
+          `${config.apiUrl}/api/agents/${config.agentId}/mcp-servers?resolveSecrets=true`,
+          {
+            headers: {
+              Authorization: `Bearer ${config.apiKey}`,
+              "X-Agent-ID": config.agentId,
+            },
+          },
+        );
+        if (mcpServersRes.ok) {
+          const mcpServersData = (await mcpServersRes.json()) as {
+            servers: Array<{
+              name: string;
+              transport: string;
+              url?: string;
+              headers?: string;
+              isActive: boolean;
+              isEnabled: boolean;
+              resolvedHeaders?: Record<string, string>;
+            }>;
+          };
+          const httpServers = mcpServersData.servers.filter(
+            (s) =>
+              s.isActive &&
+              s.isEnabled &&
+              (s.transport === "http" || s.transport === "sse") &&
+              s.url,
+          );
+
+          for (const srv of httpServers) {
+            try {
+              const srvClient = new McpHttpClient(srv.url!, "", "");
+              srvClient.useRawUrl = true;
+              // Build custom headers from static headers + resolved secret headers
+              let parsedHeaders: Record<string, string> = {};
+              try {
+                parsedHeaders = srv.headers ? JSON.parse(srv.headers) : {};
+              } catch {
+                // invalid JSON
+              }
+              srvClient.customHeaders = {
+                ...parsedHeaders,
+                ...(srv.resolvedHeaders || {}),
+              };
+              await srvClient.initialize();
+              const srvTools = await srvClient.listTools();
+              // Prefix tool names with mcp__<server-name>__ to avoid conflicts
+              const prefixed = mcpToolsToDefinitions(srvClient, srvTools).map((t) => ({
+                ...t,
+                name: `mcp__${srv.name}__${t.name}`,
+              }));
+              customTools.push(...prefixed);
+              console.log(
+                `\x1b[2m[${config.role}]\x1b[0m Discovered ${srvTools.length} tools from MCP server "${srv.name}"`,
+              );
+            } catch (srvErr) {
+              console.warn(
+                `\x1b[33m[${config.role}] Failed to discover tools from MCP server "${srv.name}": ${srvErr}\x1b[0m`,
+              );
+            }
+          }
+        }
+      } catch {
+        // Non-fatal — installed MCP server tool discovery is optional
       }
     }
 
@@ -429,5 +527,9 @@ export class PiMonoAdapter implements ProviderAdapter {
     } catch {
       return false;
     }
+  }
+
+  formatCommand(commandName: string): string {
+    return `/skill:${commandName}`;
   }
 }

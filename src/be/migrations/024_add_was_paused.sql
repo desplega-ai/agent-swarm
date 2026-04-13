@@ -1,0 +1,1 @@
+ALTER TABLE agent_tasks ADD COLUMN was_paused INTEGER NOT NULL DEFAULT 0;

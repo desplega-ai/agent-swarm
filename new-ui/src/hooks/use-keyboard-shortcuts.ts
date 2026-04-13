@@ -5,13 +5,12 @@ const NAV_SHORTCUTS: Record<string, string> = {
   "1": "/",
   "2": "/agents",
   "3": "/tasks",
-  "4": "/epics",
-  "5": "/chat",
-  "6": "/schedules",
-  "7": "/usage",
-  "8": "/config",
-  "9": "/repos",
-  "0": "/services",
+  "4": "/chat",
+  "5": "/schedules",
+  "6": "/usage",
+  "7": "/config",
+  "8": "/repos",
+  "9": "/services",
 };
 
 export function useKeyboardShortcuts() {

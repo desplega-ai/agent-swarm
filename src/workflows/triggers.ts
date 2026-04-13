@@ -1,108 +1,124 @@
-import { listWorkflows } from "../be/db";
-import type { WorkflowNode } from "../types";
-import { findEntryNodes, startWorkflowExecution } from "./engine";
+import crypto from "node:crypto";
+import { getWorkflow, getWorkflowsByScheduleId } from "../be/db";
+import type { ScheduledTask, TriggerConfig } from "../types";
+import { startWorkflowExecution } from "./engine";
+import type { ExecutorRegistry } from "./executors/registry";
 
-export function evaluateWorkflowTriggers(eventType: string, eventData: unknown): void {
-  const workflows = listWorkflows({ enabled: true });
-  for (const workflow of workflows) {
-    const entryNodes = findEntryNodes(workflow.definition);
-    for (const node of entryNodes) {
-      if (matchTriggerNode(node, eventType, eventData)) {
-        startWorkflowExecution(workflow, eventData).catch((err) => {
-          console.error(`[workflows] Failed to start workflow ${workflow.name}:`, err);
-        });
-      }
+/**
+ * Handle an incoming webhook trigger for a workflow.
+ *
+ * 1. Loads the workflow and finds a webhook trigger in `triggers[]`
+ * 2. If `hmacSecret` is set, verifies HMAC-SHA256 signature
+ * 3. Starts the workflow execution with the webhook payload
+ */
+export async function handleWebhookTrigger(
+  workflowId: string,
+  payload: unknown,
+  signature: string | undefined,
+  signatureHeader: string | undefined,
+  registry: ExecutorRegistry,
+): Promise<{ runId: string }> {
+  const workflow = getWorkflow(workflowId);
+  if (!workflow) {
+    throw new WebhookError("Workflow not found", 404);
+  }
+
+  if (!workflow.enabled) {
+    throw new WebhookError("Workflow is disabled", 400);
+  }
+
+  // Find webhook trigger in triggers[]
+  const webhookTrigger = workflow.triggers.find((t: TriggerConfig) => t.type === "webhook");
+
+  // If the workflow has a webhook trigger with an hmacSecret, verify the signature
+  if (webhookTrigger && webhookTrigger.type === "webhook" && webhookTrigger.hmacSecret) {
+    if (!signature && !signatureHeader) {
+      throw new WebhookError("Missing signature", 401);
+    }
+
+    const rawSignature = signatureHeader || signature || "";
+    const isValid = verifyHmacSignature(
+      webhookTrigger.hmacSecret,
+      typeof payload === "string" ? payload : JSON.stringify(payload),
+      rawSignature,
+    );
+
+    if (!isValid) {
+      throw new WebhookError("Invalid signature", 401);
     }
   }
+
+  const runId = await startWorkflowExecution(workflow, payload, registry);
+  return { runId };
 }
 
-function matchTriggerNode(node: WorkflowNode, eventType: string, eventData: unknown): boolean {
-  const data = eventData as Record<string, unknown>;
+/**
+ * Handle a schedule trigger: find workflows linked to this schedule and execute them.
+ * Returns an array of workflow run IDs. Empty array means no workflows matched
+ * (caller should fall through to standalone task creation).
+ */
+export async function handleScheduleTrigger(
+  scheduleId: string,
+  schedule: ScheduledTask,
+  registry: ExecutorRegistry,
+): Promise<string[]> {
+  const workflows = getWorkflowsByScheduleId(scheduleId);
+  if (workflows.length === 0) return [];
 
-  switch (node.type) {
-    case "trigger-new-task":
-      if (eventType !== "task.created") return false;
-      // Don't trigger on tasks created by workflows (prevent infinite loops)
-      if (data.workflowRunId) return false;
-      return matchTaskFilters(node.config as Record<string, unknown>, data);
-
-    case "trigger-task-completed":
-      if (eventType !== "task.completed") return false;
-      return matchTaskFilters(node.config as Record<string, unknown>, data);
-
-    case "trigger-github-event":
-      if (!eventType.startsWith("github.")) return false;
-      return matchEventFilters(node.config as Record<string, unknown>, eventType, "github", data);
-
-    case "trigger-gitlab-event":
-      if (!eventType.startsWith("gitlab.")) return false;
-      return matchEventFilters(node.config as Record<string, unknown>, eventType, "gitlab", data);
-
-    case "trigger-slack-message":
-      if (eventType !== "slack.message") return false;
-      return matchSlackFilters(node.config as Record<string, unknown>, data);
-
-    case "trigger-email":
-      if (eventType !== "agentmail.message.received") return false;
-      return matchEmailFilters(node.config as Record<string, unknown>, data);
-
-    case "trigger-webhook":
-      return false; // Webhooks are triggered via HTTP, not event bus
-
-    default:
-      return false;
+  const runIds: string[] = [];
+  for (const workflow of workflows) {
+    const triggerData = {
+      scheduleId,
+      scheduleName: schedule.name,
+      firedAt: new Date().toISOString(),
+    };
+    const runId = await startWorkflowExecution(workflow, triggerData, registry);
+    runIds.push(runId);
+    console.log(
+      `[Triggers] Schedule "${schedule.name}" triggered workflow "${workflow.name}" (run: ${runId})`,
+    );
   }
+  return runIds;
 }
 
-function matchTaskFilters(config: Record<string, unknown>, data: Record<string, unknown>): boolean {
-  if (config.matchTags && Array.isArray(config.matchTags)) {
-    const taskTags = (data.tags as string[]) ?? [];
-    if (!config.matchTags.every((t: string) => taskTags.includes(t))) return false;
-  }
-  if (config.matchSource && data.source !== config.matchSource) return false;
-  if (config.matchTaskType && data.taskType !== config.matchTaskType) return false;
-  if (config.matchAgentId && data.agentId !== config.matchAgentId) return false;
-  return true;
-}
-
-function matchEventFilters(
-  config: Record<string, unknown>,
-  eventType: string,
-  provider: "github" | "gitlab",
-  data: Record<string, unknown>,
+/**
+ * Verify HMAC-SHA256 signature.
+ * Supports both `sha256=<hex>` format and raw hex.
+ */
+export function verifyHmacSignature(
+  secret: string,
+  body: string,
+  providedSignature: string,
 ): boolean {
-  if (config.matchEventType) {
-    const expectedEvent = `${provider}.${config.matchEventType}`;
-    if (eventType !== expectedEvent) return false;
+  const hmac = crypto.createHmac("sha256", secret);
+  hmac.update(body);
+  const expectedHex = hmac.digest("hex");
+
+  // Support "sha256=<hex>" format (GitHub-style)
+  const normalizedProvided = providedSignature.startsWith("sha256=")
+    ? providedSignature.slice(7)
+    : providedSignature;
+
+  // Constant-time comparison
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(normalizedProvided, "hex"),
+      Buffer.from(expectedHex, "hex"),
+    );
+  } catch {
+    return false;
   }
-  if (config.matchRepo && data.repo !== config.matchRepo) return false;
-  // Filter by allowed actions (e.g., actions: ["opened", "closed"])
-  if (config.actions && Array.isArray(config.actions)) {
-    if (!config.actions.includes(data.action)) return false;
-  }
-  return true;
 }
 
-function matchSlackFilters(
-  config: Record<string, unknown>,
-  data: Record<string, unknown>,
-): boolean {
-  if (config.matchChannel && data.channel !== config.matchChannel) return false;
-  if (config.matchPattern) {
-    const text = String(data.text ?? "");
-    if (!new RegExp(config.matchPattern as string, "i").test(text)) return false;
+/**
+ * Error class for webhook-specific errors with HTTP status codes.
+ */
+export class WebhookError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: number,
+  ) {
+    super(message);
+    this.name = "WebhookError";
   }
-  return true;
-}
-
-function matchEmailFilters(
-  config: Record<string, unknown>,
-  data: Record<string, unknown>,
-): boolean {
-  if (config.matchInbox && data.inboxId !== config.matchInbox) return false;
-  if (config.matchSenderDomain) {
-    const from = String(data.from ?? "");
-    if (!from.endsWith(`@${config.matchSenderDomain}`)) return false;
-  }
-  return true;
 }

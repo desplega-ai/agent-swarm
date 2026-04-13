@@ -5,7 +5,7 @@
 //   WTS_WORKTREE_PATH - path to the new worktree (also the working directory)
 //   WTS_GIT_ROOT      - path to the main repository root
 
-import { exists, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { exists, readFile, writeFile } from "node:fs/promises";
 import { join, basename } from "node:path";
 
 const worktreePath = process.env.WTS_WORKTREE_PATH!;
@@ -14,59 +14,91 @@ const worktreeName = basename(worktreePath);
 
 console.log(`Setting up worktree "${worktreeName}" at ${worktreePath}...`);
 
-// Generate a unique port based on worktree index
-// Main repo uses 3013, worktrees use 3014+
-async function getUniquePort(): Promise<number> {
-  const basePort = 3013;
-  try {
-    // Count existing worktrees to determine port offset
-    const worktreesDir = join(gitRoot, ".worktrees");
-    if (await exists(worktreesDir)) {
-      const worktrees = await readdir(worktreesDir);
-      return basePort + worktrees.length;
-    }
-  } catch {
-    // Fallback: use a hash of the worktree name
-    let hash = 0;
-    for (const char of worktreeName) {
-      hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
-    }
-    return basePort + 1 + (Math.abs(hash) % 100);
+// Pick a random available port in 3100-3999
+async function getRandomPort(maxAttempts = 10): Promise<number> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const port = 3100 + Math.floor(Math.random() * 900);
+    const available = await isPortAvailable(port);
+    if (available) return port;
   }
-  return basePort + 1;
+  // Final fallback: hash-based port from worktree name
+  let hash = 0;
+  for (const char of worktreeName) {
+    hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+  }
+  return 3100 + (Math.abs(hash) % 900);
 }
 
-const port = await getUniquePort();
-const uiPort = port + 1000; // UI on a different port to avoid conflicts
-
-console.log(`Using port ${port} for this worktree`);
+async function isPortAvailable(port: number): Promise<boolean> {
+  try {
+    const result = await Bun.$`lsof -i :${port} -t`.quiet();
+    // If lsof returns output, port is in use
+    return result.stdout.toString().trim() === "";
+  } catch {
+    // lsof exits non-zero when nothing found — port is available
+    return true;
+  }
+}
 
 // --- Copy and configure .env ---
 const mainEnv = join(gitRoot, ".env");
 const envExample = join(worktreePath, ".env.example");
 const targetEnv = join(worktreePath, ".env");
 
-if (await exists(mainEnv)) {
-  console.log("Copying .env from main repo...");
-  let envContent = await readFile(mainEnv, "utf-8");
+// Read main .env to detect portless mode
+const mainEnvContent = (await exists(mainEnv))
+  ? await readFile(mainEnv, "utf-8")
+  : (await exists(envExample))
+    ? await readFile(envExample, "utf-8")
+    : "";
 
-  // Update PORT to the unique port
-  envContent = envContent.replace(/^PORT=\d+/m, `PORT=${port}`);
-  // Replace ":{PORT}" too
-  envContent = envContent.replace(/:\d+/g, `:${port}`);
-  // Change APP_URL=http://localhost:{baseUiPort} to use {uiPort}
-  envContent = envContent.replace(/APP_URL=http:\/\/localhost:\d+/m, `APP_URL=http://localhost:${uiPort}`);
+const isPortless = mainEnvContent.includes("localhost:1355");
+const slug = worktreeName.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
 
-  await writeFile(targetEnv, envContent);
-} else if (await exists(envExample)) {
-  console.log("Creating .env from .env.example...");
-  let envContent = await readFile(envExample, "utf-8");
+if (isPortless) {
+  console.log(`Portless mode: using ${slug}.api.swarm.localhost:1355`);
+} else {
+  console.log(`Port mode: allocating unique port`);
+}
 
-  envContent = envContent.replace(/^PORT=\d+/m, `PORT=${port}`);
-  // Replace ":{PORT}" too
-  envContent = envContent.replace(/:\d+/g, `:${port}`);
-  // Change APP_URL=http://localhost:{baseUiPort} to use {uiPort}
-  envContent = envContent.replace(/APP_URL=http:\/\/localhost:\d+/m, `APP_URL=http://localhost:${uiPort}`);
+const port = isPortless ? 0 : await getRandomPort();
+const uiPort = isPortless ? 0 : port + 1000;
+
+if (!isPortless) {
+  console.log(`Using port ${port} for this worktree`);
+}
+
+if (mainEnvContent) {
+  console.log(
+    (await exists(mainEnv))
+      ? "Copying .env from main repo..."
+      : "Creating .env from .env.example...",
+  );
+  let envContent = mainEnvContent;
+
+  if (isPortless) {
+    // Rewrite portless URLs with worktree subdomain
+    envContent = envContent.replace(
+      /(MCP_BASE_URL=https?:\/\/)([\w.-]*)(api\.swarm\.localhost:1355)/m,
+      `$1${slug}.$3`,
+    );
+    envContent = envContent.replace(
+      /(APP_URL=https?:\/\/)([\w.-]*)(ui\.swarm\.localhost:1355)/m,
+      `$1${slug}.$3`,
+    );
+    envContent = envContent.replace(
+      /(LINEAR_REDIRECT_URI=https?:\/\/)([\w.-]*)(api\.swarm\.localhost:1355)/m,
+      `$1${slug}.$3`,
+    );
+  } else {
+    // Port-based rewriting (existing logic)
+    envContent = envContent.replace(/^PORT=\d+/m, `PORT=${port}`);
+    envContent = envContent.replace(/:\d+/g, `:${port}`);
+    envContent = envContent.replace(
+      /APP_URL=http:\/\/localhost:\d+/m,
+      `APP_URL=http://localhost:${uiPort}`,
+    );
+  }
 
   await writeFile(targetEnv, envContent);
 }
@@ -76,10 +108,18 @@ const mainMcp = join(gitRoot, ".mcp.json");
 const targetMcp = join(worktreePath, ".mcp.json");
 
 if (await exists(mainMcp)) {
-  console.log("Copying .mcp.json with updated port...");
+  console.log("Copying .mcp.json with updated URL...");
   let mcpContent = await readFile(mainMcp, "utf-8");
-  // Update the port in the MCP URL
-  mcpContent = mcpContent.replace(/localhost:\d+/g, `localhost:${port}`);
+
+  if (isPortless) {
+    mcpContent = mcpContent.replace(
+      /https?:\/\/[\w.-]*api\.swarm\.localhost:1355/g,
+      `https://${slug}.api.swarm.localhost:1355`,
+    );
+  } else {
+    mcpContent = mcpContent.replace(/localhost:\d+/g, `localhost:${port}`);
+  }
+
   await writeFile(targetMcp, mcpContent);
 }
 
@@ -98,12 +138,16 @@ const targetClaude = join(worktreePath, ".claude");
 
 if (await exists(mainClaude)) {
   console.log("Copying .claude directory...");
-  await mkdir(targetClaude, { recursive: true });
-  const files = await readdir(mainClaude);
-  for (const file of files) {
-    const content = await readFile(join(mainClaude, file));
-    await writeFile(join(targetClaude, file), content);
-  }
+  await Bun.$`rm -rf ${targetClaude} && cp -r ${mainClaude} ${targetClaude}`;
+}
+
+// --- Copy .business-use directory (BU config + DB) ---
+const mainBu = join(gitRoot, ".business-use");
+const targetBu = join(worktreePath, ".business-use");
+
+if (await exists(mainBu)) {
+  console.log("Copying .business-use directory...");
+  await Bun.$`cp -r ${mainBu} ${targetBu}`;
 }
 
 // --- Copy docker env files if they exist ---
@@ -121,5 +165,11 @@ for (const envFile of dockerEnvFiles) {
 console.log("Installing dependencies...");
 await Bun.$`bun install`;
 
-console.log(`\nSetup complete! Worktree running on port ${port}`);
+if (isPortless) {
+  console.log(`\nSetup complete! Worktree using portless subdomain: ${slug}`);
+  console.log(`API: https://${slug}.api.swarm.localhost:1355`);
+  console.log(`UI:  https://${slug}.ui.swarm.localhost:1355`);
+} else {
+  console.log(`\nSetup complete! Worktree running on port ${port}`);
+}
 console.log(`Start the server with: bun run dev:http`);

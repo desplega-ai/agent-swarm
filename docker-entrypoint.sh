@@ -10,6 +10,65 @@ if [ "$HARNESS_PROVIDER" = "pi" ]; then
         echo "Error: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or ~/.pi/agent/auth.json required for pi provider"
         exit 1
     fi
+elif [ "$HARNESS_PROVIDER" = "codex" ]; then
+    WORKER_CODEX_HOME="/home/worker/.codex"
+
+    # Auth path 1: OPENAI_API_KEY → bootstrap via codex login --with-api-key
+    if [ -n "${OPENAI_API_KEY:-}" ] && [ ! -f "$WORKER_CODEX_HOME/auth.json" ]; then
+        mkdir -p "$WORKER_CODEX_HOME"
+        chown -R worker:worker "$WORKER_CODEX_HOME" 2>/dev/null || true
+        if gosu worker bash -c 'printenv OPENAI_API_KEY | codex login --with-api-key' >/dev/null 2>&1; then
+            echo "Codex: registered OPENAI_API_KEY via 'codex login --with-api-key'"
+        else
+            echo "Warning: 'codex login --with-api-key' failed; worker may fail at first turn" >&2
+        fi
+    fi
+
+    # Auth path 2: Restore codex_oauth from config store
+    if [ ! -f "$WORKER_CODEX_HOME/auth.json" ] && [ -n "$API_KEY" ] && [ -n "$MCP_BASE_URL" ]; then
+        CODEX_OAUTH=$(curl -sf -H "Authorization: Bearer ${API_KEY}" \
+            "${MCP_BASE_URL}/api/config/resolved?includeSecrets=true&key=codex_oauth" \
+            2>/dev/null | jq -r '.configs[] | select(.key == "codex_oauth") | .value // empty' 2>/dev/null | head -1)
+        if [ -n "$CODEX_OAUTH" ]; then
+            if ! echo "$CODEX_OAUTH" | jq '.' >/dev/null 2>&1; then
+                echo "Warning: codex_oauth from config store is not valid JSON, skipping" >&2
+            else
+                mkdir -p "$WORKER_CODEX_HOME"
+                if ! echo "$CODEX_OAUTH" | jq '
+                    if .auth_mode == "chatgpt" then
+                      .
+                    elif (.access and .refresh and .accountId and .expires) then
+                      {
+                        auth_mode: "chatgpt",
+                        OPENAI_API_KEY: null,
+                        tokens: {
+                          id_token: .access,
+                          access_token: .access,
+                          refresh_token: .refresh,
+                          account_id: .accountId
+                        },
+                        last_refresh: ((.expires / 1000 | floor) | todateiso8601)
+                      }
+                    else
+                      error("codex_oauth value is neither auth.json format nor flat credential format")
+                    end
+                ' > "$WORKER_CODEX_HOME/auth.json"; then
+                    echo "Warning: codex_oauth from config store could not be converted to auth.json, skipping" >&2
+                    rm -f "$WORKER_CODEX_HOME/auth.json"
+                else
+                chown worker:worker "$WORKER_CODEX_HOME/auth.json" 2>/dev/null || true
+                chmod 600 "$WORKER_CODEX_HOME/auth.json"
+                echo "[entrypoint] Restored codex OAuth credentials from API config store"
+                fi
+            fi
+        fi
+    fi
+
+    # Fail if still no auth
+    if [ ! -f "$WORKER_CODEX_HOME/auth.json" ]; then
+        echo "Error: codex provider requires OPENAI_API_KEY, ~/.codex/auth.json, or codex_oauth in config store"
+        exit 1
+    fi
 else
     # Claude auth (default)
     if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
@@ -21,6 +80,30 @@ fi
 if [ -z "$API_KEY" ]; then
     echo "Error: API_KEY environment variable is required"
     exit 1
+fi
+
+# ---- Verify provider binary is reachable ----
+if [ "$HARNESS_PROVIDER" = "codex" ]; then
+    CODEX_BIN="${CODEX_BINARY:-codex}"
+    if ! command -v "$CODEX_BIN" > /dev/null 2>&1; then
+        echo "FATAL: Codex CLI not found: '$CODEX_BIN'"
+        echo "  PATH=$PATH"
+        exit 1
+    fi
+    echo "Codex CLI: $(command -v "$CODEX_BIN")"
+elif [ "$HARNESS_PROVIDER" != "pi" ]; then
+    CLAUDE_BIN="${CLAUDE_BINARY:-claude}"
+    if ! command -v "$CLAUDE_BIN" > /dev/null 2>&1; then
+        echo "FATAL: Claude CLI not found: '$CLAUDE_BIN'"
+        echo "  PATH=$PATH"
+        for loc in /usr/local/bin/claude /usr/bin/claude; do
+            if [ -f "$loc" ]; then
+                echo "  Found at $loc (not in PATH) — set CLAUDE_BINARY=$loc"
+            fi
+        done
+        exit 1
+    fi
+    echo "Claude CLI: $(command -v "$CLAUDE_BIN")"
 fi
 
 # ---- Archil disk mounts ----
@@ -158,7 +241,7 @@ if [ -n "$AGENT_ID" ]; then
         CONFIG_COUNT=$(jq '.configs | length' /tmp/swarm_config.json 2>/dev/null || echo "0")
         if [ "$CONFIG_COUNT" -gt 0 ]; then
             echo "Found $CONFIG_COUNT config entries, exporting as env vars..."
-            jq -r '.configs[] | "\(.key)=" + (.value | @sh)' /tmp/swarm_config.json > /tmp/swarm_config.env 2>/dev/null || true
+            jq -r '.configs[] | select(.key != "codex_oauth") | "\(.key)=" + (.value | @sh)' /tmp/swarm_config.json > /tmp/swarm_config.env 2>/dev/null || true
             if [ -f /tmp/swarm_config.env ]; then
                 set -a
                 . /tmp/swarm_config.env
@@ -172,6 +255,89 @@ if [ -n "$AGENT_ID" ]; then
     fi
 fi
 # ---- End swarm config fetch ----
+
+# ---- agent-fs registration ----
+if [ -n "$AGENT_FS_API_URL" ] && [ -n "$AGENT_ID" ]; then
+  if [ -z "$AGENT_FS_API_KEY" ]; then
+    echo "[agent-fs] Registering with agent-fs at $AGENT_FS_API_URL..."
+    AF_EMAIL="${AGENT_EMAIL:-${AGENT_ID}@swarm.local}"
+
+    AF_RESULT=$(curl -s -X POST "${AGENT_FS_API_URL}/auth/register" \
+      -H "Content-Type: application/json" \
+      -d "{\"email\": \"$AF_EMAIL\"}" 2>/dev/null) || true
+
+    AF_API_KEY=$(echo "$AF_RESULT" | jq -r '.apiKey // empty')
+
+    if [ -n "$AF_API_KEY" ]; then
+      echo "[agent-fs] Registered successfully, storing API key..."
+      # Store as agent-scoped secret
+      curl -s -X PUT "${MCP_URL}/api/config" \
+        -H "Authorization: Bearer ${API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{
+          \"scope\": \"agent\",
+          \"scopeId\": \"${AGENT_ID}\",
+          \"key\": \"AGENT_FS_API_KEY\",
+          \"value\": \"${AF_API_KEY}\",
+          \"isSecret\": true,
+          \"description\": \"agent-fs API key for ${AF_EMAIL}\"
+        }" > /dev/null 2>&1 || true
+
+      export AGENT_FS_API_KEY="$AF_API_KEY"
+      echo "[agent-fs] API key stored and exported"
+    else
+      echo "[agent-fs] Registration failed or already registered: $(echo "$AF_RESULT" | jq -r '.error // .message // "unknown error"')"
+    fi
+  else
+    echo "[agent-fs] Already registered (API key present)"
+  fi
+
+  # Lead-specific: create shared org
+  if [ "$AGENT_ROLE" = "lead" ] && [ -n "$AGENT_FS_API_KEY" ]; then
+    if [ -z "$AGENT_FS_SHARED_ORG_ID" ]; then
+      echo "[agent-fs] Lead: Creating shared org..."
+      AF_ORG_RESULT=$(curl -s -X POST "${AGENT_FS_API_URL}/orgs" \
+        -H "Authorization: Bearer ${AGENT_FS_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d '{"name": "swarm"}' 2>/dev/null) || true
+
+      AF_SHARED_ORG_ID=$(echo "$AF_ORG_RESULT" | jq -r '.orgId // .id // empty')
+
+      if [ -n "$AF_SHARED_ORG_ID" ]; then
+        echo "[agent-fs] Shared org created: $AF_SHARED_ORG_ID"
+        # Store as global config so all agents see it
+        curl -s -X PUT "${MCP_URL}/api/config" \
+          -H "Authorization: Bearer ${API_KEY}" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"scope\": \"global\",
+            \"key\": \"AGENT_FS_SHARED_ORG_ID\",
+            \"value\": \"${AF_SHARED_ORG_ID}\",
+            \"isSecret\": false,
+            \"description\": \"agent-fs shared org ID for the swarm\"
+          }" > /dev/null 2>&1 || true
+
+        export AGENT_FS_SHARED_ORG_ID="$AF_SHARED_ORG_ID"
+
+        # Create a one-time task for the lead to invite workers
+        echo "[agent-fs] Creating invitation task for lead..."
+        curl -s -X POST "${MCP_URL}/api/tasks" \
+          -H "Authorization: Bearer ${API_KEY}" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"task\": \"Invite workers to agent-fs shared org (${AF_SHARED_ORG_ID}). For each worker: check their AGENT_EMAIL config (or default to {agentId}@swarm.local), then run: agent-fs --org ${AF_SHARED_ORG_ID} org invite --email <worker-email> --role editor. Skip any already invited.\",
+            \"agentId\": \"${AGENT_ID}\",
+            \"source\": \"system\"
+          }" > /dev/null 2>&1 || true
+      else
+        echo "[agent-fs] Failed to create shared org: $(echo "$AF_ORG_RESULT" | jq -r '.error // .message // "unknown"')"
+      fi
+    else
+      echo "[agent-fs] Shared org already exists: $AGENT_FS_SHARED_ORG_ID"
+    fi
+  fi
+fi
+# ---- End agent-fs registration ----
 
 # Create .mcp.json in /workspace (project-level config)
 echo "Creating MCP config in /workspace..."
@@ -193,7 +359,56 @@ if [ -n "$AGENTMAIL_API_KEY" ]; then
       '.mcpServers.agentmail = {command: "npx", args: ["-y", "agentmail-mcp"], env: {AGENTMAIL_API_KEY: $key}}')
 fi
 
+# === Installed MCP servers (from API) ===
+MCP_SERVERS_RESPONSE=""
+SERVER_COUNT=0
+if [ -n "$AGENT_ID" ] && [ -n "$API_KEY" ]; then
+  echo "Fetching installed MCP servers..."
+  MCP_SERVERS_RESPONSE=$(curl -sf -H "Authorization: Bearer $API_KEY" \
+    "${MCP_URL}/api/agents/${AGENT_ID}/mcp-servers?resolveSecrets=true" 2>/dev/null) || true
+
+  if [ -n "$MCP_SERVERS_RESPONSE" ]; then
+    SERVER_COUNT=$(echo "$MCP_SERVERS_RESPONSE" | jq '.servers | length' 2>/dev/null || echo "0")
+    if [ "$SERVER_COUNT" -gt 0 ]; then
+      echo "Merging $SERVER_COUNT installed MCP server(s) into .mcp.json"
+      MCP_JSON=$(echo "$MCP_SERVERS_RESPONSE" | jq --argjson base "$MCP_JSON" '
+        reduce .servers[] as $srv ($base;
+          if $srv.transport == "stdio" then
+            .mcpServers[$srv.name] = {
+              command: $srv.command,
+              args: (if $srv.args then ($srv.args | fromjson) else [] end),
+              env: ($srv.resolvedEnv // {})
+            }
+          elif ($srv.transport == "http" or $srv.transport == "sse") then
+            .mcpServers[$srv.name] = {
+              type: $srv.transport,
+              url: $srv.url,
+              headers: ((if $srv.headers then ($srv.headers | fromjson) else {} end) * ($srv.resolvedHeaders // {}))
+            }
+          else . end
+        )
+      ')
+    fi
+  fi
+fi
+
 echo "$MCP_JSON" > /workspace/.mcp.json
+
+# === Update settings.json with MCP server permissions ===
+if [ -n "$MCP_SERVERS_RESPONSE" ] && [ "$SERVER_COUNT" -gt 0 ]; then
+  SETTINGS_FILE="$HOME/.claude/settings.json"
+  if [ -f "$SETTINGS_FILE" ]; then
+    echo "Adding MCP server permission patterns to settings.json"
+    UPDATED_SETTINGS=$(echo "$MCP_SERVERS_RESPONSE" | jq --slurpfile settings "$SETTINGS_FILE" '
+      [.servers[].name] |
+      map("mcp__" + . + "__*") |
+      . as $new_perms |
+      $settings[0] |
+      .permissions.allow = (.permissions.allow + $new_perms | unique)
+    ')
+    echo "$UPDATED_SETTINGS" > "$SETTINGS_FILE"
+  fi
+fi
 
 # Configure GitHub authentication if token is provided
 echo ""
@@ -542,6 +757,50 @@ if [ -n "$AGENT_ID" ]; then
 fi
 
 echo "==============================="
+echo ""
+
+# --- Skill sync ---
+echo "=== Skill Sync ==="
+if [ -n "$AGENT_ID" ] && [ -n "$API_KEY" ] && [ -n "$MCP_BASE_URL" ]; then
+    echo "[entrypoint] Syncing skills to filesystem..."
+    SKILLS_RESPONSE=$(curl -s -f -H "Authorization: Bearer ${API_KEY}" \
+        -H "X-Agent-ID: ${AGENT_ID}" \
+        "${MCP_BASE_URL}/api/agents/${AGENT_ID}/skills" 2>/dev/null) || true
+
+    if [ -n "$SKILLS_RESPONSE" ]; then
+        # Write simple skills to ~/.claude/skills/ and ~/.pi/agent/skills/
+        echo "$SKILLS_RESPONSE" | jq -r '.skills[] | select(.isComplex == false) | select(.content != "") | @base64' 2>/dev/null | while read -r skill_b64; do
+            SKILL_NAME=$(echo "$skill_b64" | base64 -d | jq -r '.name')
+            SKILL_CONTENT=$(echo "$skill_b64" | base64 -d | jq -r '.content')
+
+            if [ -n "$SKILL_NAME" ] && [ "$SKILL_NAME" != "null" ]; then
+                mkdir -p "$HOME/.claude/skills/$SKILL_NAME"
+                echo "$SKILL_CONTENT" > "$HOME/.claude/skills/$SKILL_NAME/SKILL.md"
+
+                mkdir -p "$HOME/.pi/agent/skills/$SKILL_NAME"
+                cp "$HOME/.claude/skills/$SKILL_NAME/SKILL.md" "$HOME/.pi/agent/skills/$SKILL_NAME/SKILL.md"
+
+                mkdir -p "$HOME/.codex/skills/$SKILL_NAME"
+                cp "$HOME/.claude/skills/$SKILL_NAME/SKILL.md" "$HOME/.codex/skills/$SKILL_NAME/SKILL.md"
+                echo "[entrypoint] Synced skill: $SKILL_NAME"
+            fi
+        done
+
+        # Install complex remote skills via npx
+        echo "$SKILLS_RESPONSE" | jq -r '.skills[] | select(.isComplex == true) | .sourceRepo // empty' 2>/dev/null | while read -r repo; do
+            if [ -n "$repo" ]; then
+                npx skills add "$repo" -a claude-code -a pi -g -y 2>&1 || echo "[entrypoint] Warning: failed to install complex skill from $repo"
+            fi
+        done
+
+        echo "[entrypoint] Skill sync complete"
+    else
+        echo "[entrypoint] No skills response from API (server may still be booting)"
+    fi
+else
+    echo "[entrypoint] Skipping skill sync (missing AGENT_ID, API_KEY, or MCP_BASE_URL)"
+fi
+
 echo ""
 
 # Run the agent using compiled binary

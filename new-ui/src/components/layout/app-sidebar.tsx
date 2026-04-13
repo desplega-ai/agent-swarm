@@ -1,11 +1,16 @@
 import {
   BarChart3,
+  BookOpen,
+  Bug,
+  Cable,
+  ClipboardCheck,
   Clock,
+  FileText,
   GitBranch,
+  Key,
   LayoutDashboard,
   ListTodo,
   MessageSquare,
-  Milestone,
   Server,
   Settings,
   Users,
@@ -26,6 +31,7 @@ import {
   SidebarRail,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { SwarmSwitcher } from "./swarm-switcher";
 
 const navGroups = [
   {
@@ -34,12 +40,16 @@ const navGroups = [
       { title: "Dashboard", path: "/", icon: LayoutDashboard },
       { title: "Agents", path: "/agents", icon: Users },
       { title: "Tasks", path: "/tasks", icon: ListTodo },
-      { title: "Epics", path: "/epics", icon: Milestone },
+      { title: "Skills", path: "/skills", icon: BookOpen },
+      { title: "MCP Servers", path: "/mcp-servers", icon: Cable },
     ],
   },
   {
     label: "Communication",
-    items: [{ title: "Chat", path: "/chat", icon: MessageSquare }],
+    items: [
+      { title: "Chat", path: "/chat", icon: MessageSquare },
+      { title: "Templates", path: "/templates", icon: FileText },
+    ],
   },
   {
     label: "Operations",
@@ -47,6 +57,7 @@ const navGroups = [
       { title: "Services", path: "/services", icon: Server },
       { title: "Schedules", path: "/schedules", icon: Clock },
       { title: "Workflows", path: "/workflows", icon: Workflow },
+      { title: "Approvals", path: "/approval-requests", icon: ClipboardCheck },
       { title: "Usage", path: "/usage", icon: BarChart3 },
     ],
   },
@@ -55,6 +66,8 @@ const navGroups = [
     items: [
       { title: "Config", path: "/config", icon: Settings },
       { title: "Repos", path: "/repos", icon: GitBranch },
+      { title: "API Keys", path: "/keys", icon: Key },
+      { title: "Debug", path: "/debug", icon: Bug },
     ],
   },
 ];
@@ -64,10 +77,10 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="h-14 justify-center border-b border-sidebar-border">
+      <SidebarHeader className="border-b border-sidebar-border">
         <NavLink
           to="/"
-          className="flex items-center gap-2 group-data-[collapsible=icon]:justify-center"
+          className="flex h-10 items-center gap-2 group-data-[collapsible=icon]:justify-center"
         >
           <img
             src="/logo.png"
@@ -78,6 +91,9 @@ export function AppSidebar() {
             Agent Swarm
           </span>
         </NavLink>
+        <div className="group-data-[collapsible=icon]:hidden">
+          <SwarmSwitcher />
+        </div>
       </SidebarHeader>
 
       <SidebarContent>

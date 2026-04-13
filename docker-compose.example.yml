@@ -29,6 +29,10 @@ services:
       - MCP_BASE_URL=${MCP_BASE_URL}
       - APP_URL=${APP_URL}
 
+      # Optional: Business-Use instrumentation
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
+
       # Optional: Enable Slack integration
       - SLACK_DISABLE=${SLACK_DISABLE:-false}
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-}
@@ -48,7 +52,11 @@ services:
       - swarm_api:/app
 
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3013/health || wget -q --spider http://localhost:3013/health || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "curl -f http://localhost:3013/health || wget -q --spider http://localhost:3013/health || exit 1",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -80,6 +88,9 @@ services:
       # - MCP_BASE_URL=${MCP_BASE_URL:-http://api:3013}
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
+
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
 
       - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
@@ -120,6 +131,9 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
 
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
+
       - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
@@ -158,6 +172,9 @@ services:
       # - MCP_BASE_URL=${MCP_BASE_URL:-http://api:3013}
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
+
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
 
       - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
@@ -199,6 +216,9 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
 
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
+
       - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
@@ -226,21 +246,26 @@ services:
         condition: service_healthy
 
     environment:
-      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - API_KEY=${API_KEY}
       # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
       - AGENT_ID=fc637423-24db-418a-ad03-a64e17c7b10a
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/content-reviewer
-      - MODEL_OVERRIDE=sonnet
       - CAPABILITIES=core,task-pool,messaging,profiles,services,scheduling,epics,memory,content-review
-      # Content reviewer uses Gemini via OpenRouter
+      # Content reviewer uses pi-mono via OpenRouter
       - HARNESS_PROVIDER=pi
+      - MODEL_OVERRIDE=moonshotai/kimi-k2.5
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # In the pi case we MUST NOT pass the claude creds as these will
+      # be used instead and the harness won't be correctly configure
+      # - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
 
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
+
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
 
       - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
@@ -282,6 +307,9 @@ services:
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
 
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
+
       - YOLO=true
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_EMAIL=${GITHUB_EMAIL:-}
@@ -295,6 +323,91 @@ services:
       - swarm_logs:/logs
       - swarm_shared:/workspace/shared
       - swarm_content_strategist:/workspace/personal
+
+    restart: unless-stopped
+
+  worker-ux-principles:
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    platform: linux/amd64
+    pull_policy: always
+    stop_grace_period: 60s
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    environment:
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - API_KEY=${API_KEY}
+      # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
+      - AGENT_ID=22d30bc3-c72f-4cb4-bcb3-f5709b535961
+      - AGENT_ROLE=worker
+      # Template for initial profile (fetched on first boot)
+      - TEMPLATE_ID=official/ux-principles
+      - MODEL_OVERRIDE=sonnet
+      - CAPABILITIES=core,task-pool,messaging,profiles,services,scheduling,memory,ux-analysis
+
+      # If in the same Docker network, use the service name
+      - MCP_BASE_URL=http://api:3013
+
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
+
+      - YOLO=true
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_EMAIL=${GITHUB_EMAIL:-}
+      - GITHUB_NAME=${GITHUB_NAME:-}
+      - SWARM_URL=${SWARM_URL:-localhost}
+
+    ports:
+      - "${UX_PRINCIPLES_PORT:-3029}:3000"
+
+    volumes:
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_ux_principles:/workspace/personal
+
+    restart: unless-stopped
+
+  worker-discoverability-optimizer:
+    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+    platform: linux/amd64
+    pull_policy: always
+    stop_grace_period: 60s
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    environment:
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - API_KEY=${API_KEY}
+      # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
+      - AGENT_ID=3794020f-4bab-4d7e-a1e3-f9e2f2be33ce
+      - AGENT_ROLE=worker
+      # Template for initial profile (fetched on first boot)
+      - TEMPLATE_ID=official/discoverability-optimizer
+      - CAPABILITIES=core,task-pool,messaging,profiles,services,scheduling,memory,seo,aeo,discoverability
+
+      # If in the same Docker network, use the service name
+      - MCP_BASE_URL=http://api:3013
+
+      - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
+      - BUSINESS_USE_URL=${BUSINESS_USE_URL:-}
+
+      - YOLO=true
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_EMAIL=${GITHUB_EMAIL:-}
+      - GITHUB_NAME=${GITHUB_NAME:-}
+      - SWARM_URL=${SWARM_URL:-localhost}
+
+    ports:
+      - "${DISCOVERABILITY_OPTIMIZER_PORT:-3030}:3000"
+
+    volumes:
+      - swarm_logs:/logs
+      - swarm_shared:/workspace/shared
+      - swarm_discoverability_optimizer:/workspace/personal
 
     restart: unless-stopped
 
@@ -314,9 +427,15 @@ services:
   #
   #   environment:
   #     - HARNESS_PROVIDER=pi
+  #     # Set the model as defined in Anthropic API
+  #     # https://platform.claude.com/docs/en/about-claude/models/overview
+  #     - MODEL_OVERRIDE=claude-sonnet-4-6
   #     - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
   #     # Or use OpenRouter instead:
   #     # - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+  #     # Set the model as defined in Openrouter UI
+  #     # https://openrouter.ai/models
+  #     # - MODEL_OVERRIDE=moonshotai/kimi-k2.5
   #     - API_KEY=${API_KEY}
   #     # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
   #     - AGENT_ID=b2a3c4d5-6789-01ef-abcd-234567890abc
@@ -342,6 +461,60 @@ services:
   #
   #   restart: unless-stopped
 
+  # Example: Codex worker (uses HARNESS_PROVIDER=codex instead of Claude)
+  # Uncomment to add a Codex powered worker to the swarm.
+  # Requires OPENAI_API_KEY, a pre-seeded ~/.codex/auth.json volume mount,
+  # or ChatGPT OAuth credentials stored via `agent-swarm codex-login`.
+  # For OAuth, run `agent-swarm codex-login` from your laptop against the same
+  # swarm API that this worker uses. The entrypoint restores `codex_oauth`
+  # from the config store into /home/worker/.codex/auth.json at boot, so
+  # OPENAI_API_KEY is not needed for that path.
+  #
+  # codex-worker:
+  #   image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+  #   platform: linux/amd64
+  #   pull_policy: always
+  #   stop_grace_period: 60s
+  #
+  #   depends_on:
+  #     api:
+  #       condition: service_healthy
+  #
+  #   environment:
+  #     - HARNESS_PROVIDER=codex
+  #     # Codex model — see src/providers/codex-models.ts for the full catalogue.
+  #     # Default baked into the image: gpt-5.4
+  #     # - MODEL_OVERRIDE=gpt-5.4
+  #     # Optional when using standard OpenAI API billing.
+  #     # Omit when using ChatGPT OAuth via `agent-swarm codex-login`.
+  #     - OPENAI_API_KEY=${OPENAI_API_KEY}
+  #     - API_KEY=${API_KEY}
+  #     # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
+  #     - AGENT_ID=c3b4d5e6-7890-12fa-bcde-345678901bcd
+  #     - AGENT_ROLE=worker
+  #
+  #     # Worker-side API URL. Your laptop can use a different public URL when
+  #     # running `agent-swarm codex-login`, as long as both hit the same API.
+  #     - MCP_BASE_URL=http://api:3013
+  #
+  #     - YOLO=true
+  #     - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+  #     - GITHUB_EMAIL=${GITHUB_EMAIL:-}
+  #     - GITHUB_NAME=${GITHUB_NAME:-}
+  #     - SWARM_URL=${SWARM_URL:-localhost}
+  #
+  #   ports:
+  #     - "${CODEX_WORKER_PORT:-3024}:3000"
+  #
+  #   volumes:
+  #     - swarm_logs:/logs
+  #     - swarm_shared:/workspace/shared
+  #     - swarm_codex_worker:/workspace/personal
+  #     # Persist codex auth/session files across restarts
+  #     - swarm_codex_agent:/home/worker/.codex
+  #
+  #   restart: unless-stopped
+
 volumes:
   swarm_api:
   swarm_logs:
@@ -352,6 +525,11 @@ volumes:
   swarm_content_writer:
   swarm_content_reviewer:
   swarm_content_strategist:
+  swarm_ux_principles:
+  swarm_discoverability_optimizer:
   # Uncomment if using the pi-worker service above
   # swarm_pi_worker:
   # swarm_pi_agent:
+  # Uncomment if using the codex-worker service above
+  # swarm_codex_worker:
+  # swarm_codex_agent:

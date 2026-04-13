@@ -2,6 +2,8 @@
 
 New dashboard UI built with Vite 6 + React 19 + react-router v7 + shadcn/ui + Tailwind CSS v4 + AG Grid.
 
+**Thoughts directory**: All research, plans, and brainstorm documents go in the **root** `thoughts/` directory (`/thoughts/taras/plans/`, `/thoughts/shared/research/`, etc.), NOT inside `new-ui/thoughts/`. The `new-ui/` project does not have its own thoughts directory.
+
 ## Quick Start
 
 ```bash
@@ -20,6 +22,7 @@ pnpm preview      # Preview production build
 - **Data Fetching**: @tanstack/react-query (5s auto-polling)
 - **Data Grid**: AG Grid Community (Quartz theme)
 - **Charts**: Recharts
+- **Markdown**: Streamdown (`streamdown`) — use `<Streamdown>{text}</Streamdown>` for all markdown rendering. Do NOT use `react-markdown` (removed).
 - **Icons**: Lucide React
 
 ## Project Structure

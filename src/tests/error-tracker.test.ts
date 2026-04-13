@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  parseRateLimitResetTime,
   parseStderrForErrors,
   SessionErrorTracker,
   trackErrorFromJson,
@@ -294,6 +295,24 @@ describe("parseStderrForErrors", () => {
     expect(tracker.hasErrors()).toBe(true);
   });
 
+  test("detects 'hit your limit' as rate limit error", () => {
+    const tracker = new SessionErrorTracker();
+    parseStderrForErrors("You've hit your limit for the day", tracker);
+
+    expect(tracker.hasErrors()).toBe(true);
+    expect(tracker.getErrors()).toHaveLength(1);
+    expect(tracker.getErrors()[0]!.type).toBe("stderr_error");
+    expect(tracker.getErrors()[0]!.message).toBe("You've hit your limit for the day");
+  });
+
+  test("detects 'hit your limit' case-insensitively", () => {
+    const tracker = new SessionErrorTracker();
+    parseStderrForErrors("Hit Your Limit · resets 3pm (UTC)", tracker);
+
+    expect(tracker.hasErrors()).toBe(true);
+    expect(tracker.getErrors()[0]!.message).toBe("Hit Your Limit · resets 3pm (UTC)");
+  });
+
   test("detects authentication errors", () => {
     const tracker = new SessionErrorTracker();
     parseStderrForErrors("Authentication failed: invalid key", tracker);
@@ -364,5 +383,94 @@ describe("parseStderrForErrors", () => {
     parseStderrForErrors("Debugger attached.\nWaiting for connections...", tracker);
 
     expect(tracker.hasErrors()).toBe(false);
+  });
+});
+
+describe("rate limit detection regex (runner)", () => {
+  // This regex is used in runner.ts to detect rate-limited failures from credential errors
+  const rateLimitRegex = /rate.?limit|hit your limit/i;
+
+  test("matches 'rate limit' with space", () => {
+    expect(rateLimitRegex.test("Rate limit hit: Too many requests")).toBe(true);
+  });
+
+  test("matches 'rate_limit' with underscore", () => {
+    expect(rateLimitRegex.test("rate_limit exceeded")).toBe(true);
+  });
+
+  test("matches 'ratelimit' without separator", () => {
+    expect(rateLimitRegex.test("ratelimit error")).toBe(true);
+  });
+
+  test("matches 'hit your limit' message", () => {
+    expect(rateLimitRegex.test("You've hit your limit · resets 3pm (UTC)")).toBe(true);
+  });
+
+  test("matches 'Hit Your Limit' case-insensitively", () => {
+    expect(rateLimitRegex.test("Hit Your Limit")).toBe(true);
+  });
+
+  test("does not match unrelated errors", () => {
+    expect(rateLimitRegex.test("Authentication failed")).toBe(false);
+    expect(rateLimitRegex.test("Server error 500")).toBe(false);
+    expect(rateLimitRegex.test("Connection timeout")).toBe(false);
+  });
+});
+
+describe("parseRateLimitResetTime", () => {
+  test("parses 'resets 3pm (UTC)' format", () => {
+    const result = parseRateLimitResetTime(
+      "Rate limit hit: You've hit your limit · resets 3pm (UTC)",
+    );
+    expect(result).toBeDefined();
+    const parsed = new Date(result!);
+    expect(parsed.getUTCHours()).toBe(15);
+    expect(parsed.getUTCMinutes()).toBe(0);
+  });
+
+  test("parses 'resets 3:30pm (UTC)' format with minutes", () => {
+    const result = parseRateLimitResetTime("resets 3:30pm (UTC)");
+    expect(result).toBeDefined();
+    const parsed = new Date(result!);
+    expect(parsed.getUTCHours()).toBe(15);
+    expect(parsed.getUTCMinutes()).toBe(30);
+  });
+
+  test("parses 'resets 12am (UTC)' as midnight", () => {
+    const result = parseRateLimitResetTime("resets 12am (UTC)");
+    expect(result).toBeDefined();
+    const parsed = new Date(result!);
+    expect(parsed.getUTCHours()).toBe(0);
+  });
+
+  test("parses 'retry after N seconds'", () => {
+    const before = Date.now();
+    const result = parseRateLimitResetTime("Rate limited. retry after 60 seconds");
+    expect(result).toBeDefined();
+    const parsed = new Date(result!).getTime();
+    expect(parsed).toBeGreaterThanOrEqual(before + 59_000);
+    expect(parsed).toBeLessThanOrEqual(before + 62_000);
+  });
+
+  test("parses 'wait N minutes'", () => {
+    const before = Date.now();
+    const result = parseRateLimitResetTime("Please wait 5 minutes before retrying");
+    expect(result).toBeDefined();
+    const parsed = new Date(result!).getTime();
+    expect(parsed).toBeGreaterThanOrEqual(before + 4 * 60_000);
+    expect(parsed).toBeLessThanOrEqual(before + 6 * 60_000);
+  });
+
+  test("returns undefined for unparseable messages", () => {
+    expect(parseRateLimitResetTime("Rate limit exceeded")).toBeUndefined();
+    expect(parseRateLimitResetTime("Too many requests")).toBeUndefined();
+    expect(parseRateLimitResetTime("")).toBeUndefined();
+  });
+
+  test("rejects unreasonable durations", () => {
+    // More than 24 hours in seconds
+    expect(parseRateLimitResetTime("retry after 100000 seconds")).toBeUndefined();
+    // More than 24 hours in minutes
+    expect(parseRateLimitResetTime("wait 2000 minutes")).toBeUndefined();
   });
 });

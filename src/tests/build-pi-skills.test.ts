@@ -23,7 +23,7 @@ describe("build-pi-skills", () => {
     .map((d) => d.name);
 
   test("build script runs successfully", () => {
-    expect(buildOutput).toContain("Converted 12 skills");
+    expect(buildOutput).toContain("Converted 13 skills");
   });
 
   test("every command has a corresponding pi-skill", () => {

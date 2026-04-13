@@ -4,29 +4,41 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import { ensure, initialize } from "@desplega.ai/business-use";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { hasCapability } from "@/server";
+import { getEnabledCapabilities, hasCapability } from "@/server";
 import { initAgentMail } from "../agentmail";
-import { closeDb } from "../be/db";
+import { closeDb, getSwarmConfigs, upsertSwarmConfig } from "../be/db";
 import { initGitHub } from "../github";
 import { initGitLab } from "../gitlab";
 import { stopHeartbeat } from "../heartbeat";
+import { initLinear } from "../linear";
 import { startSlackApp, stopSlackApp } from "../slack";
+import { initTelemetry, telemetry } from "../telemetry";
 import { initWorkflows } from "../workflows";
 import { handleActiveSessions } from "./active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
+import { handleApiKeys } from "./api-keys";
+import { handleApprovalRequests } from "./approval-requests";
 import { handleConfig } from "./config";
+import { handleContext } from "./context";
 import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
+import { handleDbQuery } from "./db-query";
 import { handleEcosystem } from "./ecosystem";
-import { handleEpics } from "./epics";
+import { handleEvents } from "./events";
+import { handleHeartbeat } from "./heartbeat";
 import { handleMcp } from "./mcp";
+import { handleMcpServers } from "./mcp-servers";
 import { handleMemory } from "./memory";
 import { handlePoll } from "./poll";
+import { handlePromptTemplates } from "./prompt-templates";
 import { handleRepos } from "./repos";
 import { handleSchedules } from "./schedules";
 import { handleSessionData } from "./session-data";
+import { handleSkills } from "./skills";
 import { handleStats } from "./stats";
 import { handleTasks } from "./tasks";
+import { handleTrackers } from "./trackers";
 import { getPathSegments, parseQueryParams, setCorsHeaders } from "./utils";
 import { handleWebhooks } from "./webhooks";
 import { handleWorkflows } from "./workflows";
@@ -39,6 +51,7 @@ const globalState = globalThis as typeof globalThis & {
   __httpServer?: Server<typeof IncomingMessage, typeof ServerResponse>;
   __transports?: Record<string, StreamableHTTPServerTransport>;
   __sigintRegistered?: boolean;
+  __runId?: string;
 };
 
 // Clean up previous server on hot reload
@@ -88,20 +101,29 @@ const httpServer = createHttpServer(async (req, res) => {
   // ── Route handlers (order matters — first match wins) ──
   const handlers: (() => Promise<boolean>)[] = [
     () => handleAgentRegister(req, res, pathSegments, myAgentId),
-    () => handlePoll(req, res, pathSegments, myAgentId),
+    () => handlePoll(req, res, pathSegments, queryParams, myAgentId),
     () => handleSessionData(req, res, pathSegments, queryParams, myAgentId),
     () => handleEcosystem(req, res, pathSegments, myAgentId),
+    () => handleTrackers(req, res, pathSegments),
     () => handleWebhooks(req, res, pathSegments),
     () => handleAgentsRest(req, res, pathSegments, queryParams, myAgentId),
+    () => handleContext(req, res, pathSegments, queryParams, myAgentId),
     () => handleTasks(req, res, pathSegments, queryParams, myAgentId),
     () => handleStats(req, res, pathSegments, queryParams),
     () => handleActiveSessions(req, res, pathSegments, queryParams, myAgentId),
-    () => handleEpics(req, res, pathSegments, queryParams, myAgentId),
     () => handleSchedules(req, res, pathSegments, queryParams, myAgentId),
     () => handleWorkflows(req, res, pathSegments, queryParams, myAgentId),
+    () => handleApprovalRequests(req, res, pathSegments, queryParams),
     () => handleConfig(req, res, pathSegments, queryParams),
+    () => handlePromptTemplates(req, res, pathSegments, queryParams),
+    () => handleDbQuery(req, res, pathSegments, queryParams),
     () => handleRepos(req, res, pathSegments, queryParams),
+    () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
+    () => handleMcpServers(req, res, pathSegments, queryParams),
     () => handleMemory(req, res, pathSegments, myAgentId),
+    () => handleApiKeys(req, res, pathSegments, queryParams),
+    () => handleHeartbeat(req, res, pathSegments),
+    () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
     () => handleMcp(req, res, transports),
   ];
 
@@ -133,6 +155,12 @@ async function shutdown() {
   // Stop Slack bot
   await stopSlackApp();
 
+  // Stop OAuth keepalive
+  if (process.env.OAUTH_KEEPALIVE_DISABLE !== "true") {
+    const { stopOAuthKeepalive } = await import("../oauth/keepalive");
+    stopOAuthKeepalive();
+  }
+
   // Close all active transports (SSE connections, etc.)
   for (const [id, transport] of Object.entries(transports)) {
     console.log(`[HTTP] Closing transport ${id}`);
@@ -156,9 +184,25 @@ if (!globalState.__sigintRegistered) {
   process.on("SIGTERM", shutdown);
 }
 
+if (!globalState.__runId) {
+  globalState.__runId = `run_${Date.now()}`;
+}
+
+// business-use initialization (no-op if envs not set)
+initialize();
+
 httpServer
   .listen(port, async () => {
     console.log(`MCP HTTP server running on http://localhost:${port}/mcp`);
+
+    ensure({
+      id: "listen",
+      flow: "api",
+      runId: globalState.__runId!,
+      data: {
+        capabilities: getEnabledCapabilities(),
+      },
+    });
 
     // Load global swarm configs into process.env (so integrations can read them)
     // Infrastructure-level env vars take precedence — only missing keys are filled.
@@ -170,6 +214,16 @@ httpServer
     } catch (e) {
       console.error("Failed to load global swarm configs:", e);
     }
+
+    // Initialize anonymized telemetry (opt-out via ANONYMIZED_TELEMETRY=false)
+    await initTelemetry(
+      "api-server",
+      (key) => getSwarmConfigs({ scope: "global", key })?.[0]?.value,
+      (key, value) => {
+        upsertSwarmConfig({ scope: "global", key, value });
+      },
+    );
+    telemetry.server("started", { port });
 
     // Start Slack bot (if configured)
     await startSlackApp();
@@ -183,14 +237,20 @@ httpServer
     // Initialize AgentMail webhook handler (if configured)
     initAgentMail();
 
+    // Initialize Linear tracker integration (if configured)
+    initLinear();
+
     // Initialize workflow engine (trigger subscriptions + resume listener)
     initWorkflows();
 
     // Start scheduler (if enabled)
     if (hasCapability("scheduling")) {
       const { startScheduler } = await import("../scheduler");
+      const { getExecutorRegistry } = await import("../workflows");
       const intervalMs = Number(process.env.SCHEDULER_INTERVAL_MS) || 10000;
-      startScheduler(intervalMs);
+      startScheduler(getExecutorRegistry(), intervalMs, {
+        runId: globalState.__runId!,
+      });
     }
 
     // Start heartbeat triage (unless disabled)
@@ -198,6 +258,12 @@ httpServer
       const { startHeartbeat } = await import("../heartbeat");
       const heartbeatMs = Number(process.env.HEARTBEAT_INTERVAL_MS) || 90000;
       startHeartbeat(heartbeatMs);
+    }
+
+    // Start OAuth token keepalive (proactive refresh to prevent expiry)
+    if (process.env.OAUTH_KEEPALIVE_DISABLE !== "true") {
+      const { startOAuthKeepalive } = await import("../oauth/keepalive");
+      startOAuthKeepalive();
     }
   })
   .on("error", (err) => {

@@ -1,6 +1,6 @@
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import { ChevronLeft, ChevronRight, Clock, GitBranch, Plus, Search, X } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
 import { useScheduledTasks } from "@/api/hooks/use-schedules";
@@ -279,12 +279,13 @@ export default function TasksPage() {
 
   const { data: agents } = useAgents();
   const { data: schedules } = useScheduledTasks();
-  const agentMap = useMemo(() => {
+  const agentMapRef = useRef(new Map<string, string>());
+  useMemo(() => {
     const m = new Map<string, string>();
     agents?.forEach((a) => {
       m.set(a.id, a.name);
     });
-    return m;
+    agentMapRef.current = m;
   }, [agents]);
 
   const filters = useMemo(() => {
@@ -359,6 +360,46 @@ export default function TasksPage() {
         cellRenderer: (params: { value: AgentTaskStatus }) => <StatusBadge status={params.value} />,
       },
       {
+        field: "source",
+        headerName: "Source",
+        width: 95,
+        cellRenderer: (params: { value: string | undefined }) =>
+          params.value ? (
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+            >
+              {params.value}
+            </Badge>
+          ) : null,
+      },
+      {
+        field: "priority",
+        headerName: "Priority",
+        width: 70,
+        cellRenderer: (params: { value: number | undefined }) => {
+          const v = params.value;
+          if (!v) return null;
+          const color =
+            v >= 80 ? "text-amber-500" : v >= 60 ? "text-foreground" : "text-muted-foreground";
+          return <span className={`text-xs font-medium ${color}`}>{v}</span>;
+        },
+      },
+      {
+        field: "model",
+        headerName: "Model",
+        width: 80,
+        cellRenderer: (params: { value: string | undefined }) =>
+          params.value ? (
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+            >
+              {params.value}
+            </Badge>
+          ) : null,
+      },
+      {
         field: "taskType",
         headerName: "Type",
         width: 110,
@@ -378,7 +419,7 @@ export default function TasksPage() {
         width: 150,
         valueFormatter: (params) =>
           params.value
-            ? (agentMap.get(params.value) ?? `${params.value.slice(0, 8)}...`)
+            ? (agentMapRef.current.get(params.value) ?? `${params.value.slice(0, 8)}...`)
             : "Unassigned",
       },
       {
@@ -444,7 +485,7 @@ export default function TasksPage() {
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
     ],
-    [agentMap],
+    [],
   );
 
   const onRowClicked = useCallback(

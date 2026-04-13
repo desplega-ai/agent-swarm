@@ -1,0 +1,149 @@
+{
+  "db": "./agent-swarm-db.sqlite",
+  "clean": false,
+  "agents": {
+    "count": 4,
+    "data": [
+      {
+        "name": "Atlas",
+        "role": "Lead Coordinator",
+        "description": "Orchestrates the swarm, assigns tasks, and monitors progress across all agents.",
+        "isLead": true,
+        "status": "idle",
+        "capabilities": ["coordination", "planning", "task-management"]
+      },
+      {
+        "name": "Forge",
+        "role": "Implementation Engineer",
+        "description": "Expert coder who turns plans into working PRs. Writes clean, tested TypeScript.",
+        "isLead": false,
+        "status": "busy",
+        "capabilities": ["typescript", "react", "testing", "git"]
+      },
+      {
+        "name": "Scout",
+        "role": "Researcher",
+        "description": "Investigates codebases, APIs, and documentation to gather context for implementation tasks.",
+        "isLead": false,
+        "status": "idle",
+        "capabilities": ["research", "documentation", "analysis"]
+      },
+      {
+        "name": "Sentinel",
+        "role": "Code Reviewer",
+        "description": "Reviews PRs for correctness, security, and adherence to project conventions.",
+        "isLead": false,
+        "status": "offline",
+        "capabilities": ["code-review", "security", "testing"]
+      }
+    ]
+  },
+  "channels": {
+    "count": 3,
+    "data": [
+      {
+        "name": "engineering",
+        "description": "Engineering discussions and technical decisions",
+        "type": "public"
+      },
+      {
+        "name": "deployments",
+        "description": "Deployment coordination and status updates",
+        "type": "public"
+      },
+      {
+        "name": "standup",
+        "description": "Daily standup updates from all agents",
+        "type": "public"
+      }
+    ]
+  },
+  "messages": {
+    "perChannel": 5
+  },
+  "tasks": {
+    "count": 12
+  },
+  "workflows": {
+    "count": 1,
+    "data": [
+      {
+        "name": "PR Review Pipeline",
+        "description": "Automated pipeline that reviews PRs, runs tests, and posts feedback",
+        "definition": {
+          "nodes": [
+            {
+              "id": "review",
+              "type": "agent-task",
+              "config": {
+                "template": "Review the PR and check for code quality issues"
+              },
+              "next": ["test"]
+            },
+            {
+              "id": "test",
+              "type": "agent-task",
+              "config": {
+                "template": "Run the test suite and report results"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "schedules": {
+    "count": 1,
+    "data": [
+      {
+        "name": "Daily Standup Summary",
+        "description": "Collects status from all agents and posts a daily summary",
+        "cronExpression": "0 9 * * 1-5",
+        "taskTemplate": "Collect status updates from all agents and post a summary to the standup channel",
+        "tags": ["standup", "daily"],
+        "priority": 40
+      }
+    ]
+  },
+  "memories": {
+    "count": 4
+  },
+  "sessionLogs": {
+    "perTask": 8
+  },
+  "mcpServers": {
+    "count": 4,
+    "data": [
+      {
+        "name": "github",
+        "description": "GitHub API access via MCP",
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "scope": "global",
+        "envConfigKeys": { "GITHUB_TOKEN": "github-token" }
+      },
+      {
+        "name": "brave-search",
+        "description": "Web search via Brave Search API",
+        "transport": "http",
+        "url": "https://mcp.brave.com/v1",
+        "scope": "swarm",
+        "headerConfigKeys": { "Authorization": "brave-api-key" }
+      }
+    ]
+  },
+  "services": {
+    "count": 1,
+    "data": [
+      {
+        "name": "dashboard-api",
+        "description": "Dashboard backend API serving real-time agent metrics",
+        "port": 8080,
+        "healthCheckPath": "/health",
+        "status": "healthy",
+        "script": "bun run src/dashboard/server.ts"
+      }
+    ]
+  }
+}

@@ -9,29 +9,18 @@ import type {
   WorkflowRunStepStatus,
 } from "@/api/types";
 
-const TRIGGER_TYPES: WorkflowNodeType[] = [
-  "trigger-new-task",
-  "trigger-task-completed",
-  "trigger-webhook",
-  "trigger-email",
-  "trigger-slack-message",
-  "trigger-github-event",
-];
-const CONDITION_TYPES: WorkflowNodeType[] = ["llm-classify", "property-match", "code-match"];
+const CONDITION_TYPES = new Set(["property-match", "code-match", "validate", "raw-llm"]);
 export type NodeCategory = "triggerNode" | "conditionNode" | "actionNode";
 
 export function getNodeCategory(type: WorkflowNodeType): NodeCategory {
-  if (TRIGGER_TYPES.includes(type)) return "triggerNode";
-  if (CONDITION_TYPES.includes(type)) return "conditionNode";
+  if (type.startsWith("trigger-")) return "triggerNode";
+  if (CONDITION_TYPES.has(type)) return "conditionNode";
   return "actionNode";
 }
 
 export function getNodeLabel(node: WorkflowNode): string {
   if (node.label) return node.label;
-  return node.type
-    .split("-")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+  return node.id;
 }
 
 export interface FlowNodeData {
@@ -40,6 +29,7 @@ export interface FlowNodeData {
   config: Record<string, unknown>;
   stepStatus?: WorkflowRunStepStatus;
   outputPorts: string[];
+  selected?: boolean;
   [key: string]: unknown;
 }
 
@@ -56,7 +46,7 @@ export function toReactFlowGraph(
 
   // Compute output ports per node from edges
   const outputPortsMap = new Map<string, Set<string>>();
-  for (const edge of definition.edges) {
+  for (const edge of definition.edges ?? []) {
     if (!outputPortsMap.has(edge.source)) {
       outputPortsMap.set(edge.source, new Set());
     }
@@ -81,7 +71,7 @@ export function toReactFlowGraph(
     };
   });
 
-  const edges: Edge[] = definition.edges.map((edge: WorkflowEdge) => {
+  const edges: Edge[] = (definition.edges ?? []).map((edge: WorkflowEdge) => {
     const sourceStep = stepMap.get(edge.source);
     const targetStep = stepMap.get(edge.target);
     const bothCompleted = sourceStep?.status === "completed" && targetStep?.status === "completed";

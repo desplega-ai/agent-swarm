@@ -2,7 +2,7 @@ import { Loader2 } from "lucide-react";
 import type {
   AgentStatus,
   AgentTaskStatus,
-  EpicStatus,
+  ApprovalRequestStatus,
   ServiceStatus,
   WorkflowRunStatus,
   WorkflowRunStepStatus,
@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 type Status =
   | AgentStatus
   | AgentTaskStatus
-  | EpicStatus
+  | ApprovalRequestStatus
   | ServiceStatus
   | WorkflowRunStatus
   | WorkflowRunStepStatus;
@@ -62,15 +62,6 @@ const statusConfig: Record<string, StatusConfig> = {
   failed: { label: "FAILED", dot: "bg-red-500", text: "text-red-600 dark:text-red-400" },
   cancelled: { label: "CANCELLED", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
 
-  // Epic statuses
-  draft: { label: "DRAFT", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
-  active: {
-    label: "ACTIVE",
-    dot: "bg-amber-500",
-    text: "text-amber-600 dark:text-amber-400",
-    spinner: true,
-  },
-
   // Service statuses
   starting: {
     label: "STARTING",
@@ -96,6 +87,15 @@ const statusConfig: Record<string, StatusConfig> = {
 
   // Workflow step statuses
   skipped: { label: "SKIPPED", dot: "bg-zinc-400", text: "text-zinc-500 dark:text-zinc-400" },
+
+  // Approval request statuses
+  approved: {
+    label: "APPROVED",
+    dot: "bg-emerald-500",
+    text: "text-emerald-600 dark:text-emerald-400",
+  },
+  rejected: { label: "REJECTED", dot: "bg-red-500", text: "text-red-600 dark:text-red-400" },
+  timeout: { label: "TIMEOUT", dot: "bg-orange-500", text: "text-orange-600 dark:text-orange-400" },
 } satisfies Record<string, StatusConfig>;
 
 interface StatusBadgeProps {

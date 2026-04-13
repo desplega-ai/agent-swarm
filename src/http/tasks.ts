@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { ensure } from "@desplega.ai/business-use";
 import { z } from "zod";
 import {
   cancelTask,
@@ -16,7 +17,9 @@ import {
   updateAgentStatusFromCapacity,
   updateTaskClaudeSessionId,
   updateTaskProgress,
+  updateTaskVcs,
 } from "../be/db";
+import { telemetry } from "../telemetry";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -31,7 +34,6 @@ const listTasks = route({
   query: z.object({
     status: z.string().optional(),
     agentId: z.string().optional(),
-    epicId: z.string().optional(),
     scheduleId: z.string().optional(),
     search: z.string().optional(),
     includeHeartbeat: z.enum(["true", "false"]).optional(),
@@ -60,6 +62,7 @@ const createTask = route({
     dir: z.string().optional(),
     parentTaskId: z.string().optional(),
     source: z.string().optional(),
+    outputSchema: z.record(z.string(), z.unknown()).optional(),
   }),
   responses: {
     201: { description: "Task created" },
@@ -185,6 +188,26 @@ const resumeTaskRoute = route({
   },
 });
 
+const updateTaskVcsRoute = route({
+  method: "patch",
+  path: "/api/tasks/{id}/vcs",
+  pattern: ["api", "tasks", null, "vcs"],
+  summary: "Update VCS (PR/MR) info for a task",
+  tags: ["Tasks"],
+  params: z.object({ id: z.string() }),
+  body: z.object({
+    vcsProvider: z.enum(["github", "gitlab"]),
+    vcsRepo: z.string(),
+    vcsNumber: z.number().int().positive(),
+    vcsUrl: z.string().url(),
+  }),
+  responses: {
+    200: { description: "VCS info updated" },
+    404: { description: "Task not found" },
+  },
+  auth: { apiKey: true },
+});
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleTasks(
@@ -200,7 +223,6 @@ export async function handleTasks(
     const filters = {
       status: (parsed.query.status as import("../types").AgentTaskStatus) || undefined,
       agentId: parsed.query.agentId || undefined,
-      epicId: parsed.query.epicId || undefined,
       scheduleId: parsed.query.scheduleId || undefined,
       search: parsed.query.search || undefined,
       includeHeartbeat: parsed.query.includeHeartbeat === "true" || undefined,
@@ -229,7 +251,33 @@ export async function handleTasks(
         dir: parsed.body.dir || undefined,
         parentTaskId: parsed.body.parentTaskId || undefined,
         source: (parsed.body.source as import("../types").AgentTaskSource) || "api",
+        outputSchema: parsed.body.outputSchema || undefined,
       });
+
+      ensure({
+        id: "created",
+        flow: "task",
+        runId: task.id,
+        data: {
+          taskId: task.id,
+          agentId: task.agentId,
+          source: parsed.body.source || "api",
+          status: task.status,
+          task: task.task.slice(0, 200),
+          priority: task.priority,
+          tags: task.tags,
+          parentTaskId: task.parentTaskId,
+        },
+      });
+
+      telemetry.taskEvent("created", {
+        taskId: task.id,
+        source: task.source,
+        tags: parsed.body.tags ?? [],
+        hasParent: !!task.parentTaskId,
+        priority: task.priority,
+      });
+
       json(res, task, 201);
     } catch (error) {
       console.error("[HTTP] Failed to create task:", error);
@@ -288,6 +336,56 @@ export async function handleTasks(
       jsonError(res, "Failed to cancel task", 500);
       return true;
     }
+
+    if (task.status === "pending") {
+      ensure({
+        id: "cancelled_pending",
+        flow: "task",
+        runId: parsed.params.id,
+        depIds: ["created"],
+        data: {
+          taskId: parsed.params.id,
+          agentId: task.agentId,
+          previousStatus: task.status,
+          reason,
+        },
+        validator: (data) => data.previousStatus === "pending",
+        // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+        filter: ({}, ctx) => ctx.deps.length > 0,
+        conditions: [{ timeout_ms: 86_400_000 }], // 1 day: task may sit pending for a long time
+      });
+    } else {
+      ensure({
+        id: "cancelled_in_progress",
+        flow: "task",
+        runId: parsed.params.id,
+        depIds:
+          task.status === "paused"
+            ? ["started", "paused"]
+            : task.wasPaused
+              ? ["started", "resumed"]
+              : ["started"],
+        data: {
+          taskId: parsed.params.id,
+          agentId: task.agentId,
+          previousStatus: task.status,
+          reason,
+        },
+        validator: (data) =>
+          data.previousStatus === "in_progress" || data.previousStatus === "paused",
+        // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+        filter: ({}, ctx) => ctx.deps.length > 0,
+        conditions: [{ timeout_ms: 3_600_000 }], // 1 hour: task running time
+      });
+    }
+
+    telemetry.taskEvent("cancelled", {
+      taskId: parsed.params.id,
+      source: task.source,
+      agentId: task.agentId ?? undefined,
+      previousStatus: task.status,
+      durationMs: task.createdAt ? Date.now() - new Date(task.createdAt).getTime() : undefined,
+    });
 
     if (task.agentId) {
       updateAgentStatusFromCapacity(task.agentId);
@@ -351,6 +449,8 @@ export async function handleTasks(
         return { task, alreadyFinished: true };
       }
 
+      const wasPaused = task.wasPaused;
+
       let updatedTask: typeof task;
       if (parsed.body.status === "completed") {
         const result = completeTask(
@@ -376,12 +476,44 @@ export async function handleTasks(
         updateAgentStatusFromCapacity(task.agentId);
       }
 
-      return { task: updatedTask };
+      return { task: updatedTask, wasPaused };
     })();
 
     if ("error" in result && result.error) {
       jsonError(res, result.error, (result as { status?: number }).status ?? 500);
       return true;
+    }
+
+    if (result.task && !("alreadyFinished" in result && result.alreadyFinished)) {
+      const finishEventId = parsed.body.status === "completed" ? "completed" : "failed";
+
+      const durationMs = result.task.createdAt
+        ? Date.now() - new Date(result.task.createdAt).getTime()
+        : undefined;
+
+      telemetry.taskEvent(finishEventId, {
+        taskId: parsed.params.id,
+        agentId: myAgentId,
+        durationMs,
+      });
+      ensure({
+        id: finishEventId,
+        flow: "task",
+        runId: parsed.params.id,
+        depIds: result.wasPaused ? ["started", "resumed"] : ["started"],
+        data: {
+          taskId: parsed.params.id,
+          agentId: myAgentId,
+          previousStatus: "in_progress",
+          ...(finishEventId === "completed"
+            ? { hasOutput: !!parsed.body.output }
+            : { failureReason: parsed.body.failureReason }),
+        },
+        validator: (data) => data.previousStatus === "in_progress",
+        // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+        filter: ({}, ctx) => ctx.deps.length > 0,
+        conditions: [{ timeout_ms: 3_600_000 }], // 1 hour: task running time
+      });
     }
 
     json(res, {
@@ -428,7 +560,35 @@ export async function handleTasks(
       return true;
     }
 
+    ensure({
+      id: "paused",
+      flow: "task",
+      runId: parsed.params.id,
+      depIds: ["started"],
+      data: {
+        taskId: parsed.params.id,
+        agentId: task.agentId,
+        previousStatus: task.status,
+      },
+      validator: (data) => data.previousStatus === "in_progress",
+      // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+      filter: ({}, ctx) => ctx.deps.length > 0,
+      conditions: [{ timeout_ms: 3_600_000 }], // 1 hour
+    });
+
     json(res, { success: true, task: pausedTask });
+    return true;
+  }
+
+  if (updateTaskVcsRoute.match(req.method, pathSegments)) {
+    const parsed = await updateTaskVcsRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const task = updateTaskVcs(parsed.params.id, parsed.body);
+    if (!task) {
+      jsonError(res, "Task not found", 404);
+      return true;
+    }
+    json(res, task);
     return true;
   }
 
@@ -457,6 +617,22 @@ export async function handleTasks(
       jsonError(res, "Failed to resume task", 500);
       return true;
     }
+
+    ensure({
+      id: "resumed",
+      flow: "task",
+      runId: parsed.params.id,
+      depIds: ["paused"],
+      data: {
+        taskId: parsed.params.id,
+        agentId: task.agentId,
+        previousStatus: task.status,
+      },
+      validator: (data) => data.previousStatus === "paused",
+      // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+      filter: ({}, ctx) => ctx.deps.length > 0,
+      conditions: [{ timeout_ms: 86_400_000 }], // 1 day: tasks may stay paused for extended periods
+    });
 
     json(res, { success: true, task: resumedTask });
     return true;

@@ -1,33 +1,47 @@
 import { getConfig } from "@/lib/config";
 import type {
+  AgentMcpServersResponse,
+  AgentSkillsResponse,
   AgentsResponse,
   AgentWithTasks,
+  ApiKeyStatusResponse,
+  ApprovalRequest,
+  ApprovalRequestsResponse,
   ChannelMessage,
   ChannelsResponse,
   DashboardCostResponse,
-  Epic,
-  EpicsResponse,
-  EpicWithTasks,
+  EventDefinition,
   LogsResponse,
+  McpServer,
+  McpServersResponse,
   MessagesResponse,
+  PreviewResponse,
+  PromptTemplate,
+  PromptTemplateHistory,
   ScheduledTask,
   ScheduledTasksResponse,
   ServicesResponse,
   SessionCostsResponse,
   SessionLog,
   SessionLogsResponse,
+  Skill,
+  SkillsResponse,
   Stats,
   SwarmConfig,
   SwarmConfigsResponse,
   SwarmRepo,
   SwarmReposResponse,
+  TaskContextResponse,
   TasksResponse,
   TaskWithLogs,
+  UpsertPromptTemplateInput,
   UsageSummaryResponse,
   Workflow,
   WorkflowRun,
+  WorkflowRunStep,
   WorkflowRunWithSteps,
   WorkflowsResponse,
+  WorkflowVersion,
 } from "./types";
 
 class ApiClient {
@@ -89,6 +103,7 @@ class ApiClient {
       identityMd?: string;
       toolsMd?: string;
       setupScript?: string;
+      heartbeatMd?: string;
     },
   ): Promise<AgentWithTasks> {
     const url = `${this.getBaseUrl()}/api/agents/${id}/profile`;
@@ -107,7 +122,6 @@ class ApiClient {
   async fetchTasks(filters?: {
     status?: string;
     agentId?: string;
-    epicId?: string;
     scheduleId?: string;
     search?: string;
     includeHeartbeat?: boolean;
@@ -117,7 +131,6 @@ class ApiClient {
     const params = new URLSearchParams();
     if (filters?.status) params.set("status", filters.status);
     if (filters?.agentId) params.set("agentId", filters.agentId);
-    if (filters?.epicId) params.set("epicId", filters.epicId);
     if (filters?.scheduleId) params.set("scheduleId", filters.scheduleId);
     if (filters?.search) params.set("search", filters.search);
     if (filters?.includeHeartbeat) params.set("includeHeartbeat", "true");
@@ -204,6 +217,13 @@ class ApiClient {
     if (!res.ok) throw new Error(`Failed to fetch session logs: ${res.status}`);
     const data = (await res.json()) as SessionLogsResponse;
     return data.logs;
+  }
+
+  async fetchTaskContext(taskId: string): Promise<TaskContextResponse> {
+    const url = `${this.getBaseUrl()}/api/tasks/${taskId}/context`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch task context: ${res.status}`);
+    return res.json();
   }
 
   async fetchLogs(limit = 100, agentId?: string): Promise<LogsResponse> {
@@ -458,91 +478,6 @@ class ApiClient {
     return res.json();
   }
 
-  async fetchEpics(filters?: {
-    status?: string;
-    search?: string;
-    leadAgentId?: string;
-  }): Promise<EpicsResponse> {
-    const params = new URLSearchParams();
-    if (filters?.status) params.set("status", filters.status);
-    if (filters?.search) params.set("search", filters.search);
-    if (filters?.leadAgentId) params.set("leadAgentId", filters.leadAgentId);
-    const queryString = params.toString();
-    const url = `${this.getBaseUrl()}/api/epics${queryString ? `?${queryString}` : ""}`;
-    const res = await fetch(url, { headers: this.getHeaders() });
-    if (!res.ok) throw new Error(`Failed to fetch epics: ${res.status}`);
-    return res.json();
-  }
-
-  async fetchEpic(id: string): Promise<EpicWithTasks> {
-    const url = `${this.getBaseUrl()}/api/epics/${id}`;
-    const res = await fetch(url, { headers: this.getHeaders() });
-    if (!res.ok) throw new Error(`Failed to fetch epic: ${res.status}`);
-    return res.json();
-  }
-
-  async createEpic(data: {
-    name: string;
-    goal: string;
-    description?: string;
-    priority?: number;
-    tags?: string[];
-    leadAgentId?: string;
-  }): Promise<Epic> {
-    const url = `${this.getBaseUrl()}/api/epics`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { ...this.getHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `Failed to create epic: ${res.status}`);
-    }
-    return res.json();
-  }
-
-  async updateEpic(id: string, data: Partial<Epic>): Promise<Epic> {
-    const url = `${this.getBaseUrl()}/api/epics/${id}`;
-    const res = await fetch(url, {
-      method: "PUT",
-      headers: { ...this.getHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `Failed to update epic: ${res.status}`);
-    }
-    return res.json();
-  }
-
-  async deleteEpic(id: string): Promise<{ success: boolean }> {
-    const url = `${this.getBaseUrl()}/api/epics/${id}`;
-    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `Failed to delete epic: ${res.status}`);
-    }
-    return res.json();
-  }
-
-  async assignTaskToEpic(
-    epicId: string,
-    data: { taskId?: string; task?: string },
-  ): Promise<TaskWithLogs> {
-    const url = `${this.getBaseUrl()}/api/epics/${epicId}/tasks`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { ...this.getHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `Failed to assign task to epic: ${res.status}`);
-    }
-    return res.json();
-  }
-
   async fetchConfigs(filters?: {
     scope?: string;
     scopeId?: string;
@@ -585,10 +520,11 @@ class ApiClient {
     description?: string | null;
   }): Promise<SwarmConfig> {
     const url = `${this.getBaseUrl()}/api/config?includeSecrets=true`;
+    const cleaned = Object.fromEntries(Object.entries(data).filter(([_, v]) => v !== null));
     const res = await fetch(url, {
       method: "PUT",
       headers: this.getHeaders(),
-      body: JSON.stringify(data),
+      body: JSON.stringify(cleaned),
     });
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: "Failed to upsert config" }));
@@ -601,6 +537,13 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/config/${id}`;
     const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to delete config: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchRepo(id: string): Promise<SwarmRepo> {
+    const url = `${this.getBaseUrl()}/api/repos/${id}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch repo: ${res.status}`);
     return res.json();
   }
 
@@ -642,6 +585,7 @@ class ApiClient {
       clonePath: string;
       defaultBranch: string;
       autoClone: boolean;
+      guidelines: import("./types").RepoGuidelines | null;
     }>,
   ): Promise<SwarmRepo> {
     const url = `${this.getBaseUrl()}/api/repos/${id}`;
@@ -668,14 +612,31 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/workflows`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch workflows: ${res.status}`);
-    return { workflows: await res.json() };
+    const workflows = (await res.json()) as Workflow[];
+    // List endpoint doesn't include auto-generated edges — ensure the field exists
+    for (const w of workflows) {
+      if (!w.definition.edges) {
+        w.definition.edges = [];
+      }
+    }
+    return { workflows };
   }
 
   async fetchWorkflow(id: string): Promise<Workflow> {
     const url = `${this.getBaseUrl()}/api/workflows/${id}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch workflow: ${res.status}`);
-    return res.json();
+    const data = await res.json();
+    // API returns { ...workflow, edges } with edges at top level.
+    // Nest edges into definition for UI convenience.
+    if (data.edges && !data.definition.edges) {
+      data.definition.edges = data.edges;
+    }
+    // Ensure edges array exists even if not returned
+    if (!data.definition.edges) {
+      data.definition.edges = [];
+    }
+    return data as Workflow;
   }
 
   async updateWorkflow(
@@ -735,7 +696,17 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/workflow-runs/${id}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch workflow run: ${res.status}`);
-    return res.json();
+    const data = (await res.json()) as { run: WorkflowRun; steps: WorkflowRunStep[] };
+    // Reshape { run, steps } into WorkflowRunWithSteps
+    return { ...data.run, steps: data.steps };
+  }
+
+  async fetchWorkflowVersions(workflowId: string): Promise<WorkflowVersion[]> {
+    const url = `${this.getBaseUrl()}/api/workflows/${workflowId}/versions`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch workflow versions: ${res.status}`);
+    const data = (await res.json()) as { versions: WorkflowVersion[] };
+    return data.versions;
   }
 
   async retryWorkflowRun(id: string): Promise<{ success: boolean }> {
@@ -747,6 +718,473 @@ class ApiClient {
     if (!res.ok) throw new Error(`Failed to retry workflow run: ${res.status}`);
     return res.json();
   }
+
+  async fetchExecutorTypes(): Promise<ExecutorTypeInfo[]> {
+    const url = `${this.getBaseUrl()}/api/executor-types`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.executorTypes ?? [];
+  }
+
+  async fetchExecutorType(type: string): Promise<ExecutorTypeInfo | null> {
+    const url = `${this.getBaseUrl()}/api/executor-types/${encodeURIComponent(type)}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) return null;
+    return res.json();
+  }
+
+  async dbQuery(sql: string, params?: unknown[]): Promise<import("./types").DbQueryResponse> {
+    const url = `${this.getBaseUrl()}/api/db-query`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ sql, params }),
+    });
+    if (!res.ok) throw new Error(`Failed to execute query: ${res.status}`);
+    return res.json();
+  }
+
+  // Prompt Templates
+
+  async fetchPromptTemplates(filters?: {
+    eventType?: string;
+    scope?: string;
+    isDefault?: boolean;
+  }): Promise<{ templates: PromptTemplate[] }> {
+    const params = new URLSearchParams();
+    if (filters?.eventType) params.set("eventType", filters.eventType);
+    if (filters?.scope) params.set("scope", filters.scope);
+    if (filters?.isDefault !== undefined) params.set("isDefault", String(filters.isDefault));
+    const queryString = params.toString();
+    const url = `${this.getBaseUrl()}/api/prompt-templates${queryString ? `?${queryString}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch prompt templates: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchPromptTemplate(
+    id: string,
+  ): Promise<{ template: PromptTemplate; history: PromptTemplateHistory[] }> {
+    const url = `${this.getBaseUrl()}/api/prompt-templates/${id}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch prompt template: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchPromptTemplateEvents(): Promise<{ events: EventDefinition[] }> {
+    const url = `${this.getBaseUrl()}/api/prompt-templates/events`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch prompt template events: ${res.status}`);
+    return res.json();
+  }
+
+  async previewPromptTemplate(data: {
+    eventType: string;
+    body?: string;
+    variables?: Record<string, unknown>;
+  }): Promise<PreviewResponse> {
+    const url = `${this.getBaseUrl()}/api/prompt-templates/preview`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to preview template" }));
+      throw new Error(error.error || `Failed to preview template: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async renderPromptTemplate(data: {
+    eventType: string;
+    variables?: Record<string, unknown>;
+    agentId?: string;
+    repoId?: string;
+  }): Promise<import("./types").RenderResponse> {
+    const url = `${this.getBaseUrl()}/api/prompt-templates/render`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to render prompt template: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async upsertPromptTemplate(data: UpsertPromptTemplateInput): Promise<PromptTemplate> {
+    const url = `${this.getBaseUrl()}/api/prompt-templates`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to upsert prompt template" }));
+      throw new Error(error.error || `Failed to upsert prompt template: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async checkoutPromptTemplate(id: string, version: number): Promise<PromptTemplate> {
+    const url = `${this.getBaseUrl()}/api/prompt-templates/${id}/checkout`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ version }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to checkout prompt template" }));
+      throw new Error(error.error || `Failed to checkout prompt template: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async resetPromptTemplate(id: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/prompt-templates/${id}/reset`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to reset prompt template" }));
+      throw new Error(error.error || `Failed to reset prompt template: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async deletePromptTemplate(id: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/prompt-templates/${id}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to delete prompt template" }));
+      throw new Error(error.error || `Failed to delete prompt template: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  // Approval Requests
+
+  async fetchApprovalRequests(filters?: {
+    status?: string;
+    workflowRunId?: string;
+    limit?: number;
+  }): Promise<ApprovalRequestsResponse> {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.workflowRunId) params.set("workflowRunId", filters.workflowRunId);
+    if (filters?.limit != null) params.set("limit", String(filters.limit));
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/approval-requests${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch approval requests: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchApprovalRequest(id: string): Promise<{ approvalRequest: ApprovalRequest }> {
+    const url = `${this.getBaseUrl()}/api/approval-requests/${id}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch approval request: ${res.status}`);
+    return res.json();
+  }
+
+  async respondToApprovalRequest(
+    id: string,
+    responses: Record<string, unknown>,
+    respondedBy?: string,
+  ): Promise<{ approvalRequest: ApprovalRequest }> {
+    const url = `${this.getBaseUrl()}/api/approval-requests/${id}/respond`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ responses, respondedBy }),
+    });
+    if (!res.ok) throw new Error(`Failed to respond to approval request: ${res.status}`);
+    return res.json();
+  }
+
+  // Skills
+  async fetchSkills(filters?: {
+    type?: string;
+    scope?: string;
+    agentId?: string;
+    enabled?: string;
+    search?: string;
+  }): Promise<SkillsResponse> {
+    const params = new URLSearchParams();
+    if (filters?.type) params.set("type", filters.type);
+    if (filters?.scope) params.set("scope", filters.scope);
+    if (filters?.agentId) params.set("agentId", filters.agentId);
+    if (filters?.enabled) params.set("enabled", filters.enabled);
+    if (filters?.search) params.set("search", filters.search);
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/skills${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch skills: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchSkill(id: string): Promise<Skill> {
+    const url = `${this.getBaseUrl()}/api/skills/${id}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch skill: ${res.status}`);
+    return res.json();
+  }
+
+  async createSkill(data: {
+    content: string;
+    type?: string;
+    scope?: string;
+    ownerAgentId?: string;
+  }): Promise<{ skill: Skill }> {
+    const url = `${this.getBaseUrl()}/api/skills`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to create skill" }));
+      throw new Error(error.error || `Failed to create skill: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async updateSkill(id: string, data: Record<string, unknown>): Promise<{ skill: Skill }> {
+    const url = `${this.getBaseUrl()}/api/skills/${id}`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to update skill" }));
+      throw new Error(error.error || `Failed to update skill: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async deleteSkill(id: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/skills/${id}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to delete skill: ${res.status}`);
+    return res.json();
+  }
+
+  async installSkill(skillId: string, agentId: string): Promise<unknown> {
+    const url = `${this.getBaseUrl()}/api/skills/${skillId}/install`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ agentId }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to install skill" }));
+      throw new Error(error.error || `Failed to install skill: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async uninstallSkill(skillId: string, agentId: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/skills/${skillId}/install/${agentId}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to uninstall skill: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchAgentSkills(agentId: string): Promise<AgentSkillsResponse> {
+    const url = `${this.getBaseUrl()}/api/agents/${agentId}/skills`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch agent skills: ${res.status}`);
+    return res.json();
+  }
+
+  async installRemoteSkill(data: {
+    sourceRepo: string;
+    sourcePath?: string;
+    scope?: string;
+    isComplex?: boolean;
+  }): Promise<{ skill: Skill }> {
+    const url = `${this.getBaseUrl()}/api/skills/install-remote`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to install remote skill" }));
+      throw new Error(error.error || `Failed to install remote skill: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async syncRemoteSkills(options?: {
+    skillId?: string;
+    force?: boolean;
+  }): Promise<{ updated: number; checked: number; errors: string[] }> {
+    const url = `${this.getBaseUrl()}/api/skills/sync-remote`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(options || {}),
+    });
+    if (!res.ok) throw new Error(`Failed to sync remote skills: ${res.status}`);
+    return res.json();
+  }
+
+  // ─── MCP Servers ──────────────────────────────────────────────────────────
+
+  async fetchMcpServers(filters?: {
+    scope?: string;
+    transport?: string;
+    ownerAgentId?: string;
+    enabled?: string;
+    search?: string;
+  }): Promise<McpServersResponse> {
+    const params = new URLSearchParams();
+    if (filters?.scope) params.set("scope", filters.scope);
+    if (filters?.transport) params.set("transport", filters.transport);
+    if (filters?.ownerAgentId) params.set("ownerAgentId", filters.ownerAgentId);
+    if (filters?.enabled) params.set("enabled", filters.enabled);
+    if (filters?.search) params.set("search", filters.search);
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/mcp-servers${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch MCP servers: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchMcpServer(id: string): Promise<McpServer> {
+    const url = `${this.getBaseUrl()}/api/mcp-servers/${id}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch MCP server: ${res.status}`);
+    return res.json();
+  }
+
+  async createMcpServer(data: {
+    name: string;
+    transport: string;
+    description?: string;
+    scope?: string;
+    ownerAgentId?: string;
+    command?: string;
+    args?: string;
+    url?: string;
+    headers?: string;
+    envConfigKeys?: string;
+    headerConfigKeys?: string;
+  }): Promise<{ server: McpServer }> {
+    const url = `${this.getBaseUrl()}/api/mcp-servers`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to create MCP server" }));
+      throw new Error(error.error || `Failed to create MCP server: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async updateMcpServer(id: string, data: Record<string, unknown>): Promise<{ server: McpServer }> {
+    const url = `${this.getBaseUrl()}/api/mcp-servers/${id}`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to update MCP server" }));
+      throw new Error(error.error || `Failed to update MCP server: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async deleteMcpServer(id: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/mcp-servers/${id}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to delete MCP server: ${res.status}`);
+    return res.json();
+  }
+
+  async installMcpServer(serverId: string, agentId: string): Promise<unknown> {
+    const url = `${this.getBaseUrl()}/api/mcp-servers/${serverId}/install`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ agentId }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to install MCP server" }));
+      throw new Error(error.error || `Failed to install MCP server: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async uninstallMcpServer(serverId: string, agentId: string): Promise<{ success: boolean }> {
+    const url = `${this.getBaseUrl()}/api/mcp-servers/${serverId}/install/${agentId}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to uninstall MCP server: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchApiKeyStatuses(keyType?: string): Promise<ApiKeyStatusResponse> {
+    const params = new URLSearchParams();
+    if (keyType) params.set("keyType", keyType);
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/keys/status${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch API key statuses: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchApiKeyCosts(keyType?: string): Promise<import("./types").KeyCostResponse> {
+    const params = new URLSearchParams();
+    if (keyType) params.set("keyType", keyType);
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/keys/costs${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch API key costs: ${res.status}`);
+    return res.json();
+  }
+
+  async setApiKeyName(args: {
+    keyType: string;
+    keySuffix: string;
+    name: string | null;
+    scope?: string;
+    scopeId?: string;
+  }): Promise<{ success: boolean; keyType: string; keySuffix: string; name: string | null }> {
+    const url = `${this.getBaseUrl()}/api/keys/name`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: this.getHeaders(),
+      body: JSON.stringify(args),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to set key name" }));
+      throw new Error(err.error || `Failed to set key name: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async fetchAgentMcpServers(agentId: string): Promise<AgentMcpServersResponse> {
+    const url = `${this.getBaseUrl()}/api/agents/${agentId}/mcp-servers`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch agent MCP servers: ${res.status}`);
+    return res.json();
+  }
+}
+
+export interface ExecutorTypeInfo {
+  type: string;
+  mode: "instant" | "async";
+  configSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
 }
 
 export const api = new ApiClient();

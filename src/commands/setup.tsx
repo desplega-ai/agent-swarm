@@ -2,10 +2,13 @@
 import { Spinner, TextInput } from "@inkjs/ui";
 import { Box, Text, useApp } from "ink";
 import { useCallback, useEffect, useRef, useState } from "react";
-import pkg from "../../package.json";
+import {
+  createDefaultMcpJson,
+  createDefaultSettingsLocal,
+  createHooksConfig,
+  SERVER_NAME,
+} from "./shared/client-config.ts";
 
-const SERVER_NAME = (pkg as { config?: { name?: string } }).config?.name ?? "agent-swarm";
-const PKG_NAME = pkg.name;
 const DEFAULT_MCP_BASE_URL = "https://agent-swarm-mcp.desplega.sh";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -39,41 +42,6 @@ interface SetupState {
   logs: string[];
   isGitRepo: boolean;
 }
-
-const createDefaultSettingsLocal = () => ({
-  permissions: {
-    allow: [],
-  },
-  enableAllProjectMcpServers: false,
-  enabledMcpjsonServers: [],
-  hooks: {},
-});
-
-const createDefaultMcpJson = () => ({
-  mcpServers: {},
-});
-
-const createHooksConfig = () => {
-  const hookCommand = `bunx ${PKG_NAME}@latest hook`;
-  const hookEntry = {
-    matcher: "*",
-    hooks: [
-      {
-        type: "command",
-        command: hookCommand,
-      },
-    ],
-  };
-
-  return {
-    SessionStart: [hookEntry],
-    UserPromptSubmit: [hookEntry],
-    PreToolUse: [hookEntry],
-    PostToolUse: [hookEntry],
-    PreCompact: [hookEntry],
-    Stop: [hookEntry],
-  };
-};
 
 export function Setup({ dryRun = false, restore = false, yes = false }: SetupProps) {
   const { exit } = useApp();
@@ -269,6 +237,23 @@ export function Setup({ dryRun = false, restore = false, yes = false }: SetupPro
         }
       } catch {
         // Ignore errors reading existing config
+      }
+
+      // Try to read API_KEY from .env if not already found
+      if (!existingToken) {
+        try {
+          const envFile = Bun.file(`${cwd}/.env`);
+          if (await envFile.exists()) {
+            const envContent = await envFile.text();
+            const match = envContent.match(/^API_KEY=(.+)$/m);
+            if (match?.[1]) {
+              existingToken = match[1].trim();
+              addLog("Found API_KEY in .env");
+            }
+          }
+        } catch {
+          // Ignore errors reading .env
+        }
       }
 
       // In non-interactive mode (yes=true), skip prompts and go directly to updating

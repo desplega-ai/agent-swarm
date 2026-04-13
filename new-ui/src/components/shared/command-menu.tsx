@@ -4,7 +4,6 @@ import {
   ClipboardList,
   Clock,
   FolderGit2,
-  Hexagon,
   LayoutDashboard,
   MessageSquare,
   Server,
@@ -13,7 +12,6 @@ import {
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgents } from "@/api/hooks/use-agents";
-import { useEpics } from "@/api/hooks/use-epics";
 import { useTasks } from "@/api/hooks/use-tasks";
 import {
   CommandDialog,
@@ -29,13 +27,12 @@ const NAV_ITEMS = [
   { label: "Dashboard", path: "/", icon: LayoutDashboard, shortcut: "1" },
   { label: "Agents", path: "/agents", icon: Bot, shortcut: "2" },
   { label: "Tasks", path: "/tasks", icon: ClipboardList, shortcut: "3" },
-  { label: "Epics", path: "/epics", icon: Hexagon, shortcut: "4" },
-  { label: "Chat", path: "/chat", icon: MessageSquare, shortcut: "5" },
-  { label: "Schedules", path: "/schedules", icon: Clock, shortcut: "6" },
-  { label: "Usage", path: "/usage", icon: BarChart3, shortcut: "7" },
-  { label: "Config", path: "/config", icon: Settings, shortcut: "8" },
-  { label: "Repos", path: "/repos", icon: FolderGit2, shortcut: "9" },
-  { label: "Services", path: "/services", icon: Server, shortcut: "0" },
+  { label: "Chat", path: "/chat", icon: MessageSquare, shortcut: "4" },
+  { label: "Schedules", path: "/schedules", icon: Clock, shortcut: "5" },
+  { label: "Usage", path: "/usage", icon: BarChart3, shortcut: "6" },
+  { label: "Config", path: "/config", icon: Settings, shortcut: "7" },
+  { label: "Repos", path: "/repos", icon: FolderGit2, shortcut: "8" },
+  { label: "Services", path: "/services", icon: Server, shortcut: "9" },
 ];
 
 export function CommandMenu() {
@@ -44,10 +41,7 @@ export function CommandMenu() {
 
   const { data: agents } = useAgents();
   const { data: tasksData } = useTasks();
-  const { data: epicsData } = useEpics();
-
   const tasks = tasksData?.tasks;
-  const epics = epicsData?.epics;
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -67,7 +61,7 @@ export function CommandMenu() {
 
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
-      <CommandInput placeholder="Search agents, tasks, epics..." />
+      <CommandInput placeholder="Search agents, tasks..." />
       <CommandList>
         <CommandEmpty>No results found.</CommandEmpty>
 
@@ -106,20 +100,6 @@ export function CommandMenu() {
                 <CommandItem key={task.id} onSelect={() => handleSelect(`/tasks/${task.id}`)}>
                   <ClipboardList className="h-4 w-4" />
                   <span className="truncate max-w-[300px]">{task.task}</span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-          </>
-        )}
-
-        {epics && epics.length > 0 && (
-          <>
-            <CommandSeparator />
-            <CommandGroup heading="Epics">
-              {epics.slice(0, 5).map((epic) => (
-                <CommandItem key={epic.id} onSelect={() => handleSelect(`/epics/${epic.id}`)}>
-                  <Hexagon className="h-4 w-4" />
-                  <span>{epic.name}</span>
                 </CommandItem>
               ))}
             </CommandGroup>

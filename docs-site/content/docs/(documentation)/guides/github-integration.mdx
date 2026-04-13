@@ -1,0 +1,105 @@
+---
+title: GitHub App Integration
+description: Set up GitHub webhooks for automated task creation from @mentions, assignments, and label-based triggers
+---
+
+Enable GitHub webhooks for automated task creation from @mentions, issue assignments, and label-based triggers.
+
+## Setup
+
+1. Create a [GitHub App](https://github.com/settings/apps/new)
+2. Set webhook URL: `https://your-server.com/api/github/webhook`
+3. Generate a webhook secret
+
+### Required Permissions
+
+- **Issues**: Read & Write
+- **Pull requests**: Read & Write
+
+### Subscribe to Events
+
+- Issues
+- Issue comments
+- Pull requests
+- Pull request reviews
+- Pull request review comments
+- Check runs
+- Check suites
+- Workflow runs
+
+## Configuration
+
+```bash
+# Required for GitHub webhooks
+GITHUB_WEBHOOK_SECRET=your-webhook-secret
+
+# Optional: Bot name for @mentions (default: agent-swarm-bot)
+GITHUB_BOT_NAME=your-bot-name
+
+# Optional: Additional @mention aliases (comma-separated)
+GITHUB_BOT_ALIASES=heysidekick,sidekick
+
+# Optional: Labels that trigger agent action on PR/issue label events (comma-separated, default: swarm-review)
+GITHUB_EVENT_LABELS=swarm-review
+
+# Optional: Enable bot reactions (requires GitHub App)
+GITHUB_APP_ID=123456
+GITHUB_APP_PRIVATE_KEY=base64-encoded-key
+
+# Optional: Disable GitHub integration
+GITHUB_DISABLE=true
+```
+
+## Supported Events
+
+| Event | What happens |
+|-------|-------------|
+| Bot assigned to PR/issue | Creates a task for the lead agent |
+| Review requested from bot | Creates a review task |
+| `@bot-name` or `@alias` in comment/issue/PR | Creates a task with the mention context |
+| `swarm-review` label added to PR/issue | Creates a task for review (configurable via `GITHUB_EVENT_LABELS`) |
+
+### Suppressed Events (Safety Defaults)
+
+The following events are **suppressed by default** to prevent cascade behavior where agents auto-merge PRs without meaningful human review:
+
+- **PR closed/merged** — No automatic task creation on PR close
+- **PR synchronize** (new commits pushed) — No automatic task on push
+- **PR review submitted** — No automatic task from review events
+- **CI check failures** (check_run, check_suite, workflow_run) — No automatic task from CI events
+
+These events still emit to the internal `workflowEventBus` for workflow triggers, but do not create agent tasks.
+
+## Bot Reactions
+
+If GitHub App credentials are provided (`GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`), the bot can react to comments and issues with emoji to acknowledge receipt.
+
+### Eyes Reaction on Task Pickup
+
+When an agent picks up a GitHub-sourced task (transitions to `in_progress`), a 👀 reaction is automatically added to the originating GitHub entity — the comment, issue, PR, or review that triggered the task. This gives immediate visual feedback that work has begun, without requiring the agent to post a comment.
+
+Supported event types:
+- **Issue/PR comments** — 👀 added to the comment
+- **PR review comments** (inline) — 👀 added to the review comment
+- **PR reviews** (body) — 👀 added via GraphQL (REST does not support review reactions)
+- **Issues/PRs** (assigned or labeled) — 👀 added to the issue or PR itself
+
+## Worker Git Configuration
+
+Workers need git credentials to create PRs and push code:
+
+```bash
+GITHUB_TOKEN=your-github-token    # For git operations
+GITHUB_EMAIL=worker@desplega.ai   # Git commit email
+GITHUB_NAME=Worker Agent           # Git commit name
+```
+
+## Related
+
+- [GitLab Integration](/docs/guides/gitlab-integration) — GitLab webhook support (same adapter pattern)
+- [Linear Integration](/docs/guides/linear-integration) — Bidirectional ticket tracking with Linear
+- [Environment Variables](/docs/reference/environment-variables) — GitHub configuration variables
+- [Task Lifecycle](/docs/concepts/task-lifecycle) — How GitHub events become tasks
+- [Slack Integration](/docs/guides/slack-integration) — Another external task source
+- [Sentry Integration](/docs/guides/sentry-integration) — Automated error triage from Sentry
+- [AgentMail Integration](/docs/guides/agentmail-integration) — Give agents email addresses

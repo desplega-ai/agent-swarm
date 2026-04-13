@@ -1,5 +1,14 @@
 import Image from "next/image";
-import { Github, BookOpen, ExternalLink, LayoutDashboard, Sparkles, PenLine, Blocks } from "lucide-react";
+import Link from "next/link";
+import {
+  Github,
+  BookOpen,
+  ExternalLink,
+  Cloud,
+  DollarSign,
+  PenLine,
+  Blocks,
+} from "lucide-react";
 
 export function Footer() {
   return (
@@ -7,11 +16,15 @@ export function Footer() {
       <div className="mx-auto max-w-6xl px-6 py-12">
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-3">
-            <Image src="/logo.png" alt="Agent Swarm" width={28} height={28} className="rounded-lg" />
+            <Image
+              src="/logo.png"
+              alt="Agent Swarm"
+              width={28}
+              height={28}
+              className="rounded-lg"
+            />
             <div>
-              <div className="text-sm font-semibold text-zinc-900">
-                Agent Swarm
-              </div>
+              <div className="text-sm font-semibold text-zinc-900">Agent Swarm</div>
               <div className="text-xs text-zinc-400">
                 Built by{" "}
                 <a
@@ -44,20 +57,20 @@ export function Footer() {
               <BookOpen className="w-4 h-4" />
               Docs
             </a>
-            <a
+            <Link
+              href="/pricing"
+              className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
+            >
+              <DollarSign className="w-4 h-4" />
+              Pricing
+            </Link>
+            <Link
               href="/blog"
               className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
             >
               <PenLine className="w-4 h-4" />
               Blog
-            </a>
-            <a
-              href="/examples"
-              className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
-            >
-              <Sparkles className="w-4 h-4" />
-              Examples
-            </a>
+            </Link>
             <a
               href="https://templates.agent-swarm.dev"
               target="_blank"
@@ -68,13 +81,13 @@ export function Footer() {
               Templates
             </a>
             <a
-              href="https://app.agent-swarm.dev"
+              href="https://cloud.agent-swarm.dev"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-700 transition-colors"
             >
-              <LayoutDashboard className="w-4 h-4" />
-              Dashboard
+              <Cloud className="w-4 h-4" />
+              Cloud
             </a>
             <a
               href="https://desplega.sh"

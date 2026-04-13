@@ -23,6 +23,14 @@ export const metadata: Metadata = {
     "developer tools",
   ],
   metadataBase: new URL("https://docs.agent-swarm.dev"),
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+    },
+  },
   openGraph: {
     title: "Agent Swarm Documentation",
     description:
@@ -42,6 +50,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
+    site: "@desplegalabs",
+    creator: "@desplegalabs",
     title: "Agent Swarm Documentation",
     description:
       "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants.",
@@ -95,10 +105,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             }),
           }}
         />
-        <script
-          async
-          src="https://plausible.io/js/pa-N5qqdwlGhd8el6aPC8pJ7.js"
-        />
+        <script async src="https://plausible.io/js/pa-N5qqdwlGhd8el6aPC8pJ7.js" />
         <script
           dangerouslySetInnerHTML={{
             __html: `window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init()`,

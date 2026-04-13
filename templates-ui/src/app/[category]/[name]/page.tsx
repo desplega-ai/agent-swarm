@@ -3,11 +3,7 @@ import { notFound } from "next/navigation";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
 import { TemplateDetail } from "@/components/template-detail";
-import {
-  getAllTemplates,
-  getTemplate,
-  getTemplateConfig,
-} from "@/lib/templates";
+import { getAllTemplates, getTemplate, getTemplateConfig } from "@/lib/templates";
 
 interface PageProps {
   params: Promise<{ category: string; name: string }>;

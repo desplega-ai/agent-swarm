@@ -1,13 +1,16 @@
 import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { ensure, initialize } from "@desplega.ai/business-use";
 import type { TemplateResponse } from "../../templates/schema.ts";
+import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt.ts";
 import {
   generateDefaultClaudeMd,
   generateDefaultIdentityMd,
   generateDefaultSoulMd,
   generateDefaultToolsMd,
-} from "../be/db.ts";
-import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt.ts";
+} from "../prompts/defaults.ts";
+import { configureHttpResolver, resolveTemplateAsync } from "../prompts/resolver.ts";
+import { authJsonToCredentialSelection } from "../providers/codex-oauth/auth-json.js";
 import {
   type CostData,
   createProviderAdapter,
@@ -15,10 +18,16 @@ import {
   type ProviderSession,
   type ProviderSessionConfig,
 } from "../providers/index.ts";
-import { resolveCredentialPools } from "../utils/credentials.ts";
+import { initTelemetry, telemetry } from "../telemetry.ts";
+import type { RepoGuidelines } from "../types.ts";
+import { getContextWindowSize } from "../utils/context-window.ts";
+import { type CredentialSelection, resolveCredentialPools } from "../utils/credentials.ts";
+import { parseRateLimitResetTime } from "../utils/error-tracker.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
 import { interpolate } from "../workflows/template.ts";
+// Side-effect import: registers runner trigger/resumption templates
+import "./templates.ts";
 
 /** Save PM2 process list for persistence across container restarts */
 async function savePm2State(role: string): Promise<void> {
@@ -36,7 +45,13 @@ async function fetchRepoConfig(
   apiUrl: string,
   apiKey: string,
   vcsRepo: string,
-): Promise<{ url: string; name: string; clonePath: string; defaultBranch: string } | null> {
+): Promise<{
+  url: string;
+  name: string;
+  clonePath: string;
+  defaultBranch: string;
+  guidelines?: RepoGuidelines | null;
+} | null> {
   try {
     const repoName = vcsRepo.split("/").pop() || vcsRepo;
     const resp = await fetch(`${apiUrl}/api/repos?name=${encodeURIComponent(repoName)}`, {
@@ -44,7 +59,13 @@ async function fetchRepoConfig(
     });
     if (!resp.ok) return null;
     const data = (await resp.json()) as {
-      repos: Array<{ url: string; name: string; clonePath: string; defaultBranch: string }>;
+      repos: Array<{
+        url: string;
+        name: string;
+        clonePath: string;
+        defaultBranch: string;
+        guidelines?: RepoGuidelines | null;
+      }>;
     };
     return data.repos.find((r) => r.url.includes(vcsRepo)) ?? data.repos[0] ?? null;
   } catch {
@@ -89,6 +110,10 @@ async function ensureRepoForTask(
       } else {
         await Bun.$`git clone --branch ${defaultBranch} --single-branch ${url} ${clonePath}`.quiet();
       }
+      // Validate the clone actually created the directory
+      if (!existsSync(clonePath)) {
+        throw new Error(`Clone command succeeded but directory ${clonePath} does not exist`);
+      }
       console.log(`[${role}] Cloned ${name}`);
     } else {
       console.log(`[${role}] Repo ${name} already cloned at ${clonePath}`);
@@ -111,12 +136,14 @@ async function ensureRepoForTask(
     const errorMsg = (err as Error).message;
     console.warn(`[${role}] Error setting up repo ${name}: ${errorMsg}`);
     const warning = `Failed to clone/setup repo "${name}" at ${clonePath}: ${errorMsg}. The repo may not be available. You may need to clone it manually.`;
-    return { clonePath, claudeMd: null, warning };
+    // Only return clonePath if the directory actually exists (clone may have failed)
+    const cloneExists = existsSync(clonePath);
+    return { clonePath: cloneExists ? clonePath : "", claudeMd: null, warning };
   }
 }
 
 /** API configuration for ping/close */
-interface ApiConfig {
+export interface ApiConfig {
   apiUrl: string;
   apiKey: string;
   agentId: string;
@@ -167,12 +194,17 @@ async function closeAgent(config: ApiConfig, role: string): Promise<void> {
  * Falls back to baseEnv on any error (network, parse, etc).
  * Credential env vars with comma-separated values get one randomly selected.
  */
+interface ResolvedEnvResult {
+  env: Record<string, string | undefined>;
+  credentialSelections: CredentialSelection[];
+}
+
 async function fetchResolvedEnv(
   apiUrl: string,
   apiKey: string,
   agentId: string,
   baseEnv: Record<string, string | undefined> = process.env,
-): Promise<Record<string, string | undefined>> {
+): Promise<ResolvedEnvResult> {
   const env: Record<string, string | undefined> = { ...baseEnv };
 
   if (apiUrl && agentId) {
@@ -202,14 +234,107 @@ async function fetchResolvedEnv(
     }
   }
 
-  resolveCredentialPools(env);
-  return env;
+  const credentialSelections = await resolveCredentialPools(env, {
+    apiUrl,
+    apiKey,
+    // Provider-aware selection: codex tasks should not get a
+    // CLAUDE_CODE_OAUTH_TOKEN stamped on their task record (and vice
+    // versa) just because both env vars happen to be set in the worker
+    // container. See `PROVIDER_CREDENTIAL_VARS` in src/utils/credentials.ts.
+    provider: process.env.HARNESS_PROVIDER,
+  });
+
+  return { env, credentialSelections };
+}
+
+/** Tools that produce noise — skip auto-progress for these */
+const SKIP_PROGRESS_TOOLS = new Set(["ToolSearch", "TodoRead", "TodoWrite"]);
+
+/** Pretty labels for agent-swarm MCP tools. null = skip (meta/noise). */
+const SWARM_TOOL_LABELS: Record<string, string | null> = {
+  "store-progress": null,
+  "get-task-details": "📋 Reviewing task details",
+  "get-tasks": "📋 Checking task list",
+  "poll-task": "📡 Polling for tasks",
+  "send-task": "📤 Delegating task",
+  "task-action": "⚡ Performing task action",
+  "join-swarm": "🔗 Joining swarm",
+  "my-agent-info": "🪪 Checking agent info",
+  "get-swarm": "👥 Checking swarm status",
+  "post-message": "💬 Sending message",
+  "read-messages": "💬 Reading messages",
+  "request-human-input": "🙋 Requesting human input",
+  "cancel-task": "🚫 Cancelling task",
+  "db-query": "🗃️ Querying database",
+  "inject-learning": "🧠 Storing learning",
+  "memory-search": "🧠 Searching memory",
+  "memory-get": "🧠 Retrieving memory",
+  "update-profile": "🪪 Updating profile",
+  // Slack
+  "slack-post": "💬 Posting to Slack",
+  "slack-reply": "💬 Replying in Slack",
+  "slack-read": "💬 Reading Slack",
+  "slack-list-channels": "💬 Listing Slack channels",
+  "slack-download-file": "📥 Downloading from Slack",
+  "slack-upload-file": "📤 Uploading to Slack",
+  // Tracker
+  "tracker-status": "📊 Checking tracker status",
+  "tracker-sync-status": "📊 Syncing tracker status",
+  "tracker-link-task": "🔗 Linking task to tracker",
+  "tracker-unlink": "🔗 Unlinking from tracker",
+  "tracker-map-agent": "🔗 Mapping agent to tracker",
+  // Workflows
+  "trigger-workflow": "⚙️ Triggering workflow",
+  "get-workflow": "⚙️ Checking workflow",
+  "list-workflows": "⚙️ Listing workflows",
+  "create-workflow": "⚙️ Creating workflow",
+  // Skills
+  "skill-search": "🔎 Searching skills",
+  "skill-install": "📦 Installing skill",
+  "skill-install-remote": "📦 Installing remote skill",
+  "skill-get": "📦 Getting skill details",
+  "skill-list": "📦 Listing skills",
+  // Config
+  "get-config": "⚙️ Reading config",
+  "set-config": "⚙️ Setting config",
+  "list-config": "⚙️ Listing config",
+  // Schedules
+  "create-schedule": "📅 Creating schedule",
+  "list-schedules": "📅 Listing schedules",
+  "run-schedule-now": "📅 Running schedule",
+  // Context
+  "context-diff": "📜 Viewing context diff",
+  "context-history": "📜 Viewing context history",
+  // Channels
+  "create-channel": "📢 Creating channel",
+  "list-channels": "📢 Listing channels",
+  "delete-channel": "📢 Deleting channel",
+  // Services
+  "register-service": "🔌 Registering service",
+  "list-services": "🔌 Listing services",
+  "unregister-service": "🔌 Unregistering service",
+  "update-service-status": "🔌 Updating service status",
+};
+
+/** Convert kebab-case to sentence case: "get-task-details" → "Get task details" */
+export function humanizeToolName(name: string): string {
+  if (!name) return name;
+  return name.charAt(0).toUpperCase() + name.slice(1).replaceAll("-", " ");
 }
 
 /**
  * Convert a tool call into a human-readable progress description.
+ * Returns null for noisy/meta tools that should be skipped.
  */
-function toolCallToProgress(toolName: string, args: unknown): string {
+export function toolCallToProgress(toolName: string, args: unknown): string | null {
+  if (SKIP_PROGRESS_TOOLS.has(toolName)) return null;
+
+  // Normalize: pi-mono uses lowercase ("read"), Claude uses PascalCase ("Read")
+  const normalized =
+    toolName.startsWith("mcp__") || toolName.includes("_")
+      ? toolName
+      : toolName.charAt(0).toUpperCase() + toolName.slice(1);
+
   const a = args as Record<string, unknown>;
   const shortPath = (p: unknown) => {
     if (typeof p !== "string") return "";
@@ -218,32 +343,45 @@ function toolCallToProgress(toolName: string, args: unknown): string {
     return parts.length > 2 ? parts.slice(-2).join("/") : p;
   };
 
-  switch (toolName) {
+  switch (normalized) {
     case "Read":
-      return `Reading ${shortPath(a.file_path)}`;
+      return `📖 Reading ${shortPath(a.file_path)}`;
     case "Edit":
     case "MultiEdit":
-      return `Editing ${shortPath(a.file_path)}`;
+      return `✏️ Editing ${shortPath(a.file_path)}`;
     case "Write":
-      return `Writing ${shortPath(a.file_path)}`;
+      return `📝 Writing ${shortPath(a.file_path)}`;
     case "Bash":
-      return a.description ? `${a.description}` : "Running shell command";
+      return a.description ? `⚡ ${a.description}` : "⚡ Running shell command";
     case "Grep":
-      return `Searching for "${a.pattern}"`;
+      return `🔍 Searching for "${a.pattern}"`;
     case "Glob":
-      return `Finding files matching ${a.pattern}`;
+      return `📁 Finding files matching ${a.pattern}`;
     case "Agent":
     case "Task":
-      return a.description ? `${a.description}` : "Delegating sub-task";
+      return a.description ? `🤖 ${a.description}` : "🤖 Delegating sub-task";
     case "Skill":
-      return `Running /${a.skill}`;
+      return `⚙️ Running /${a.skill}`;
     default: {
-      // MCP tools: mcp__server__tool → "server:tool"
+      // MCP tools: mcp__server__tool
       if (toolName.startsWith("mcp__")) {
         const parts = toolName.split("__");
-        return parts.length >= 3 ? `Using ${parts[1]}:${parts[2]}` : `Using ${toolName}`;
+        if (parts.length >= 3) {
+          const server = parts[1];
+          const tool = parts.slice(2).join("__");
+          // Agent-swarm tools get pretty labels
+          if (server === "agent-swarm") {
+            const label = SWARM_TOOL_LABELS[tool];
+            if (label === null) return null; // skip
+            if (label) return label;
+            return `🔌 ${humanizeToolName(tool)}`;
+          }
+          // Other MCP servers: "🔌 server: Humanized tool"
+          return `🔌 ${server}: ${humanizeToolName(tool)}`;
+        }
+        return `🔌 ${toolName}`;
       }
-      return `Using ${toolName}`;
+      return `🔧 ${toolName}`;
     }
   }
 }
@@ -279,7 +417,110 @@ async function updateProgressViaAPI(
  * The API is idempotent - if the agent already marked the task as completed/failed,
  * this call will succeed without changing anything.
  */
-async function ensureTaskFinished(
+/**
+ * Attempt to extract structured output from a task's progress history
+ * when the agent session ends without calling store-progress with valid output.
+ *
+ * - Claude adapter: runs a fallback extraction via `claude -p --json-schema`
+ * - Pi-mono adapter: returns an error (no fallback available)
+ */
+export type FallbackResult =
+  | { kind: "extracted"; output: string }
+  | { kind: "already-has-output" }
+  | { kind: "no-schema"; lastProgress?: string }
+  | { kind: "schema-fail"; failReason: string }
+  | { kind: "fetch-error"; error: string };
+
+export async function handleStructuredOutputFallback(
+  config: ApiConfig,
+  taskId: string,
+  adapterType: string,
+): Promise<FallbackResult> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (config.apiKey) {
+    headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+
+  try {
+    // Fetch the task to check for outputSchema
+    const taskRes = await fetch(`${config.apiUrl}/api/tasks/${taskId}`, { headers });
+    if (!taskRes.ok) return { kind: "fetch-error", error: `HTTP ${taskRes.status}` };
+
+    // Response is a flat spread of task fields + logs (see src/http/tasks.ts)
+    const taskData = (await taskRes.json()) as {
+      id?: string;
+      task?: string;
+      status?: string;
+      output?: string;
+      progress?: string;
+      outputSchema?: Record<string, unknown>;
+      logs?: Array<{ eventType: string; newValue?: string; createdAt?: string }>;
+    };
+
+    if (!taskData.outputSchema) {
+      // No structured output required — extract last progress as context
+      const lastProgressLog = (taskData.logs ?? [])
+        .filter((l) => l.eventType === "task_progress")
+        .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""))[0];
+      const lastProgress = lastProgressLog?.newValue ?? taskData.progress;
+      return { kind: "no-schema", lastProgress: lastProgress || undefined };
+    }
+
+    if (taskData.output) return { kind: "already-has-output" };
+
+    if (adapterType !== "claude") {
+      return {
+        kind: "schema-fail",
+        failReason:
+          "Structured output required by outputSchema but not provided via store-progress",
+      };
+    }
+
+    // Claude adapter fallback: extract structured data from progress history
+    const progressLogs = (taskData.logs ?? [])
+      .filter((l) => l.eventType === "task_progress")
+      .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
+
+    const progressEntries = progressLogs
+      .map((log, i) => `${i + 1}. [${log.createdAt}] ${log.newValue}`)
+      .join("\n");
+
+    const extractionPrompt = `Extract structured data from this task's execution history.
+
+## Task Description
+${taskData.task || "(no description)"}
+
+## Progress Updates (chronological)
+${progressEntries || "(no progress recorded)"}
+
+## Required Output Schema
+${JSON.stringify(taskData.outputSchema, null, 2)}
+
+Extract the structured data from the progress updates above. Return ONLY valid JSON matching the schema.`;
+
+    const schemaJson = JSON.stringify(taskData.outputSchema);
+    const result =
+      await Bun.$`claude -p ${extractionPrompt} --json-schema ${schemaJson} --output-format json --model sonnet`
+        .json()
+        .catch(() => null);
+
+    if (result && typeof result === "object") {
+      return { kind: "extracted", output: JSON.stringify(result) };
+    }
+
+    return {
+      kind: "schema-fail",
+      failReason: "Structured output extraction fallback failed — could not produce valid JSON",
+    };
+  } catch (err) {
+    console.warn(`[runner] Structured output fallback failed for task ${taskId}: ${err}`);
+    return { kind: "fetch-error", error: String(err) };
+  }
+}
+
+export async function ensureTaskFinished(
   config: ApiConfig,
   role: string,
   taskId: string,
@@ -296,14 +537,42 @@ async function ensureTaskFinished(
 
   // Determine status and reason based on exit code
   // Exit code 0 = success, non-zero = failure
-  const status = exitCode === 0 ? "completed" : "failed";
+  let status = exitCode === 0 ? "completed" : "failed";
   const body: Record<string, string> = { status };
 
   if (status === "failed") {
     body.failureReason = failureReason || `Claude process exited with code ${exitCode}`;
   } else {
-    body.output =
-      "Process completed (runner wrapper fallback - agent may have provided explicit output)";
+    // Try structured output fallback if the task has an outputSchema
+    const adapterType = process.env.HARNESS_PROVIDER || "claude";
+    const fallback = await handleStructuredOutputFallback(config, taskId, adapterType);
+
+    console.log(`[${role}] Task ${taskId.slice(0, 8)} fallback result: ${fallback.kind}`);
+
+    switch (fallback.kind) {
+      case "extracted":
+        body.output = fallback.output;
+        break;
+      case "already-has-output":
+        body.output = "Process completed successfully";
+        break;
+      case "no-schema": {
+        if (fallback.lastProgress) {
+          body.output = fallback.lastProgress.slice(0, 2000);
+        } else {
+          body.output = "Process completed successfully (no output captured)";
+        }
+        break;
+      }
+      case "schema-fail":
+        status = "failed";
+        body.status = "failed";
+        body.failureReason = fallback.failReason;
+        break;
+      case "fetch-error":
+        body.output = `Process completed (could not verify task state: ${fallback.error})`;
+        break;
+    }
   }
 
   try {
@@ -337,6 +606,91 @@ async function ensureTaskFinished(
     }
   } catch (err) {
     console.warn(`[${role}] Error finishing task ${taskId.slice(0, 8)}: ${err}`);
+  }
+}
+
+/** Report key usage to the API (fire-and-forget) */
+async function reportKeyUsage(
+  apiUrl: string,
+  apiKey: string,
+  keyType: string,
+  selection: CredentialSelection,
+  taskId?: string,
+): Promise<void> {
+  try {
+    await fetch(`${apiUrl}/api/keys/report-usage`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        keyType,
+        keySuffix: selection.keySuffix,
+        keyIndex: selection.index,
+        taskId,
+      }),
+    });
+  } catch {
+    // Non-blocking
+  }
+}
+
+async function resolveCodexOAuthCredentialInfo(): Promise<CredentialSelection | null> {
+  try {
+    const home = process.env.HOME;
+    if (!home) return null;
+
+    const authFile = Bun.file(`${home}/.codex/auth.json`);
+    if (!(await authFile.exists())) {
+      return null;
+    }
+
+    const auth = JSON.parse(await authFile.text()) as {
+      auth_mode?: string;
+      tokens?: { account_id?: string };
+    };
+
+    if (auth.auth_mode !== "chatgpt" || !auth.tokens?.account_id) {
+      return null;
+    }
+
+    return authJsonToCredentialSelection(
+      auth as Parameters<typeof authJsonToCredentialSelection>[0],
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Report a rate-limited key to the API (fire-and-forget) */
+async function reportKeyRateLimit(
+  apiUrl: string,
+  apiKey: string,
+  keyType: string,
+  keySuffix: string,
+  keyIndex: number,
+  rateLimitedUntil: string,
+): Promise<void> {
+  try {
+    await fetch(`${apiUrl}/api/keys/report-rate-limit`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        keyType,
+        keySuffix,
+        keyIndex,
+        rateLimitedUntil,
+      }),
+    });
+    console.log(
+      `[credentials] Reported key ...${keySuffix} as rate-limited until ${rateLimitedUntil}`,
+    );
+  } catch {
+    // Non-blocking
   }
 }
 
@@ -452,31 +806,26 @@ async function resumeTaskViaAPI(config: ApiConfig, taskId: string): Promise<bool
 }
 
 /** Build prompt for a resumed task */
-function buildResumePrompt(task: { id: string; task: string; progress?: string }): string {
-  let prompt = `/work-on-task ${task.id}
-
-**RESUMED TASK** - This task was interrupted during a deployment and is being resumed.
-
-Task: "${task.task}"`;
-
+async function buildResumePrompt(
+  task: { id: string; task: string; progress?: string },
+  fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
+): Promise<string> {
   if (task.progress) {
-    prompt += `
-
-Previous Progress:
-${task.progress}
-
-Continue from where you left off. Review the progress above and complete the remaining work.`;
-  } else {
-    prompt += `
-
-No progress was saved before the interruption. Start the task fresh but be aware files may have been partially modified.`;
+    const result = await resolveTemplateAsync("task.resumption.with_progress", {
+      work_on_task_cmd: fmt("work-on-task"),
+      task_id: task.id,
+      task_description: task.task,
+      progress: task.progress,
+    });
+    return result.text;
   }
 
-  prompt += `
-
-When done, use \`store-progress\` with status: "completed" and include your output.`;
-
-  return prompt;
+  const result = await resolveTemplateAsync("task.resumption.no_progress", {
+    work_on_task_cmd: fmt("work-on-task"),
+    task_id: task.id,
+    task_description: task.task,
+  });
+  return result.text;
 }
 
 /** Setup signal handlers for graceful shutdown */
@@ -528,6 +877,7 @@ function setupShutdownHandlers(
     }
 
     if (apiConfig) {
+      telemetry.session("ended", { agentId: apiConfig.agentId });
       await closeAgent(apiConfig, role);
     }
     await savePm2State(role);
@@ -571,6 +921,16 @@ interface RunningTask {
   triggerType?: string;
   /** Set when the promise resolves, enabling non-blocking completion checks */
   result: ProviderResult | null;
+  /** Deferred cursor updates for channel_activity triggers — committed after success */
+  cursorUpdates?: Array<{ channelId: string; ts: string }>;
+  /** Resolved working directory for VCS detection */
+  workingDir?: string;
+  /** Credential tracking: which key was used for this task */
+  credentialInfo?: {
+    keyType: string;
+    keySuffix: string;
+    keyIndex: number;
+  };
 }
 
 /** Runner state for tracking concurrent tasks */
@@ -681,6 +1041,106 @@ async function saveProviderSessionId(
   });
 }
 
+/** Cache of tasks that already have VCS linked — prevents repeated gh pr list calls */
+const vcsDetectedTasks = new Set<string>();
+
+/** Throttle timestamps for periodic VCS checks per task */
+const vcsCheckTimestamps = new Map<string, number>();
+const VCS_CHECK_INTERVAL = 60_000; // 60 seconds
+
+/**
+ * Detect if the task's working directory has an open PR for the current branch.
+ * If found, report VCS info to the API so webhook events can link back to this task.
+ */
+async function detectVcsForTask(
+  apiUrl: string,
+  apiKey: string,
+  taskId: string,
+  workingDir: string,
+): Promise<void> {
+  try {
+    // 1. Check if inside a git repo
+    const isGit = await Bun.$`git -C ${workingDir} rev-parse --is-inside-work-tree`.quiet().text();
+    if (isGit.trim() !== "true") return;
+
+    // 2. Get current branch
+    const branch = (await Bun.$`git -C ${workingDir} branch --show-current`.quiet().text()).trim();
+    if (!branch || branch === "main" || branch === "master") return;
+
+    // 3. Get remote URL to determine provider and repo
+    const remoteUrl = (
+      await Bun.$`git -C ${workingDir} remote get-url origin`.quiet().text()
+    ).trim();
+
+    // 4. Detect provider and check for PR/MR
+    let vcsProvider: "github" | "gitlab";
+    let prJson: string;
+
+    if (remoteUrl.includes("github.com") || remoteUrl.includes("github")) {
+      vcsProvider = "github";
+      prJson = (
+        await Bun.$`gh pr list --head ${branch} --json number,url --limit 1`.quiet().text()
+      ).trim();
+    } else if (remoteUrl.includes("gitlab")) {
+      vcsProvider = "gitlab";
+      prJson = (
+        await Bun.$`glab mr list --source-branch ${branch} --json iid,web_url --per-page 1`
+          .quiet()
+          .text()
+      ).trim();
+    } else {
+      return; // Unknown provider
+    }
+
+    // 5. Parse result
+    const prs = JSON.parse(prJson);
+    if (!Array.isArray(prs) || prs.length === 0) return;
+
+    const pr = prs[0];
+    const vcsNumber = pr.number ?? pr.iid;
+    const vcsUrl = pr.url ?? pr.web_url;
+    if (!vcsNumber || !vcsUrl) return;
+
+    // 6. Extract repo from remote URL
+    const repoMatch = remoteUrl.match(/[:/]([^/]+\/[^/.]+?)(?:\.git)?$/);
+    if (!repoMatch) return;
+    const vcsRepo = repoMatch[1];
+
+    // 7. Report to API
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+    await fetch(`${apiUrl}/api/tasks/${taskId}/vcs`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ vcsProvider, vcsRepo, vcsNumber, vcsUrl }),
+    });
+
+    vcsDetectedTasks.add(taskId);
+    console.log(
+      `[VCS] Linked task ${taskId.slice(0, 8)} to ${vcsProvider} ${vcsRepo}#${vcsNumber}`,
+    );
+  } catch {
+    // Fire-and-forget — detection failure should never block task execution
+  }
+}
+
+/** Save provider session ID on the active session (for pool tasks where realTaskId is unknown) */
+async function saveProviderSessionIdOnActiveSession(
+  apiUrl: string,
+  apiKey: string,
+  effectiveTaskId: string,
+  providerSessionId: string,
+): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  await fetch(`${apiUrl}/api/active-sessions/provider-session/${effectiveTaskId}`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ providerSessionId }),
+  });
+}
+
 /** Fetch Claude session ID for a task (for --resume) */
 async function fetchProviderSessionId(
   apiUrl: string,
@@ -706,6 +1166,7 @@ async function registerActiveSession(
     taskId: string;
     triggerType: string;
     taskDescription?: string;
+    runnerSessionId?: string;
   },
 ): Promise<void> {
   const headers: Record<string, string> = {
@@ -722,6 +1183,7 @@ async function registerActiveSession(
         taskId: session.taskId,
         triggerType: session.triggerType,
         taskDescription: session.taskDescription,
+        runnerSessionId: session.runnerSessionId,
       }),
     });
   } catch {
@@ -761,6 +1223,25 @@ async function cleanupActiveSessions(config: ApiConfig): Promise<void> {
   }
 }
 
+/** Trigger a heartbeat sweep via the API (lead startup self-check) */
+async function triggerHeartbeatSweep(config: ApiConfig): Promise<boolean> {
+  try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "X-Agent-ID": config.agentId,
+    };
+    if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
+    const resp = await fetch(`${config.apiUrl}/api/heartbeat/sweep`, {
+      method: "POST",
+      headers,
+    });
+    return resp.ok;
+  } catch (err) {
+    console.warn(`[runner] Failed to trigger heartbeat sweep: ${(err as Error).message}`);
+    return false;
+  }
+}
+
 /** Trigger types returned by the poll API */
 interface Trigger {
   type:
@@ -768,7 +1249,7 @@ interface Trigger {
     | "task_offered"
     | "unread_mentions"
     | "pool_tasks_available"
-    | "epic_progress_changed";
+    | "channel_activity";
   taskId?: string;
   task?: unknown;
   mentionsCount?: number;
@@ -785,8 +1266,14 @@ interface Trigger {
   messages?: Array<{
     id: string;
     content: string;
+    channelId?: string;
+    channelName?: string;
+    ts?: string;
+    user?: string;
+    text?: string;
   }>;
-  epics?: unknown; // Epic progress updates for lead
+  cursorUpdates?: Array<{ channelId: string; ts: string }>; // Deferred cursor commits for channel_activity
+  requestedBy?: { name: string; email?: string };
 }
 
 /** Options for polling */
@@ -880,7 +1367,11 @@ async function pollForTrigger(opts: PollOptions): Promise<Trigger | null> {
 }
 
 /** Build prompt based on trigger type */
-function buildPromptForTrigger(trigger: Trigger, defaultPrompt: string): string {
+async function buildPromptForTrigger(
+  trigger: Trigger,
+  defaultPrompt: string,
+  fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
+): Promise<string> {
   switch (trigger.type) {
     case "task_assigned": {
       // Use the work-on-task command with task ID and description
@@ -888,12 +1379,31 @@ function buildPromptForTrigger(trigger: Trigger, defaultPrompt: string): string 
         trigger.task && typeof trigger.task === "object" && "task" in trigger.task
           ? (trigger.task as { task: string }).task
           : null;
-      let prompt = `/work-on-task ${trigger.taskId}`;
-      if (taskDesc) {
-        prompt += `\n\nTask: "${taskDesc}"`;
+      const taskDescSection = taskDesc ? `\n\nTask: "${taskDesc}"` : "";
+
+      // Build output instructions — use outputSchema if present, otherwise generic
+      const taskObj = trigger.task as Record<string, unknown> | undefined;
+      let outputInstructions: string;
+      if (taskObj?.outputSchema && typeof taskObj.outputSchema === "object") {
+        outputInstructions = `\n\n**Required Output Format**: When completing this task, you MUST call store-progress with output that is valid JSON conforming to this schema:\n\`\`\`json\n${JSON.stringify(taskObj.outputSchema, null, 2)}\n\`\`\`\nCall store-progress with status "completed" and your JSON output. If your output doesn't match the schema, the tool call will fail and you should fix and retry.`;
+      } else {
+        outputInstructions =
+          '\n\nWhen done, use `store-progress` with status: "completed" and include your output.';
       }
-      prompt += `\n\nWhen done, use \`store-progress\` with status: "completed" and include your output.`;
-      return prompt;
+
+      // Include requesting user info if available from the poll trigger
+      const requestedBy = trigger.requestedBy;
+      const requestedBySection = requestedBy
+        ? `\n\nRequested by: ${requestedBy.name}${requestedBy.email ? ` (${requestedBy.email})` : ""}`
+        : "";
+
+      const result = await resolveTemplateAsync("task.trigger.assigned", {
+        work_on_task_cmd: fmt("work-on-task"),
+        task_id: trigger.taskId,
+        task_desc_section: taskDescSection + requestedBySection,
+        output_instructions: outputInstructions,
+      });
+      return result.text;
     }
 
     case "task_offered": {
@@ -902,129 +1412,52 @@ function buildPromptForTrigger(trigger: Trigger, defaultPrompt: string): string 
         trigger.task && typeof trigger.task === "object" && "task" in trigger.task
           ? (trigger.task as { task: string }).task
           : null;
-      let prompt = `/review-offered-task ${trigger.taskId}`;
-      if (taskDesc) {
-        prompt += `\n\nA task has been offered to you:\n"${taskDesc}"`;
-      }
-      prompt += `\n\nAccept if you have capacity and skills. Reject with a reason if you cannot handle it.`;
-      return prompt;
+      const taskDescSection = taskDesc ? `\n\nA task has been offered to you:\n"${taskDesc}"` : "";
+      const result = await resolveTemplateAsync("task.trigger.offered", {
+        review_offered_task_cmd: fmt("review-offered-task"),
+        task_id: trigger.taskId,
+        task_desc_section: taskDescSection,
+      });
+      return result.text;
     }
 
-    case "unread_mentions":
-      // Check messages - numbered steps for clarity
-      return `You have ${trigger.count || "unread"} mention(s) in chat channels.
+    case "unread_mentions": {
+      const result = await resolveTemplateAsync("task.trigger.unread_mentions", {
+        mention_count: trigger.count || "unread",
+      });
+      return result.text;
+    }
 
-1. Use \`read-messages\` with unreadOnly: true to see them
-2. Respond to questions or requests directed at you
-3. If a message requires work, create a task using \`send-task\``;
+    case "pool_tasks_available": {
+      const result = await resolveTemplateAsync("task.trigger.pool_available", {
+        task_count: trigger.count,
+      });
+      return result.text;
+    }
 
-    case "pool_tasks_available":
-      // Worker: claim a task from the pool - numbered steps for clarity
-      return `${trigger.count} task(s) available in the pool.
-
-1. Run \`get-tasks\` with unassigned: true to browse
-2. Pick one matching your skills
-3. Run \`task-action\` with action: "claim" and taskId: "<id>"
-
-Note: Claims are first-come-first-serve. If claim fails, pick another.`;
-
-    case "epic_progress_changed": {
-      // Lead: Epic progress updated - tasks completed or failed for an active epic
-      // This is similar to ralph loop - keep the epic progressing until done
-      const epics = trigger.epics as Array<{
-        epic: {
-          id: string;
-          name: string;
-          goal: string;
-          plan?: string;
-          prd?: string;
-          nextSteps?: string;
-          status: string;
-          progress: number;
-          taskStats: {
-            total: number;
-            completed: number;
-            failed: number;
-            inProgress: number;
-            pending: number;
-          };
-        };
-        finishedTasks: Array<{
-          id: string;
-          task: string;
-          status: string;
-          output?: string;
-          failureReason?: string;
-          agentId?: string;
-        }>;
+    case "channel_activity": {
+      const msgs = (trigger.messages || []) as Array<{
+        channelId?: string;
+        channelName?: string;
+        ts?: string;
+        user?: string;
+        text?: string;
       }>;
-
-      if (!epics || epics.length === 0) {
-        return "Epic progress was updated but no details available. Use `list-epics` to check status.";
+      if (msgs.length === 0) {
+        return "New Slack channel activity detected but no message details available. Use `slack-read` to check recent messages.";
       }
 
-      let prompt = `## Epic Progress Update\n\n${trigger.count} epic(s) have progress updates:\n\n`;
-
-      for (const { epic, finishedTasks } of epics) {
-        prompt += `### Epic: "${epic.name}" (${epic.id.slice(0, 8)})\n`;
-        prompt += `**Goal:** ${epic.goal}\n`;
-        prompt += `**Progress:** ${epic.progress}% complete (${epic.taskStats.completed}/${epic.taskStats.total} tasks)\n`;
-        prompt += `**Status:** ${epic.status}\n\n`;
-
-        if (epic.plan) {
-          prompt += `**Plan:**\n${epic.plan.slice(0, 2000)}\n\n`;
-        }
-        if (epic.prd) {
-          prompt += `**PRD:**\n${epic.prd.slice(0, 1000)}\n\n`;
-        }
-
-        // Show finished tasks
-        const completed = finishedTasks.filter((t) => t.status === "completed");
-        const failed = finishedTasks.filter((t) => t.status === "failed");
-
-        if (completed.length > 0) {
-          prompt += "**Recently Completed:**\n";
-          for (const t of completed) {
-            const agentName = t.agentId ? `Agent ${t.agentId.slice(0, 8)}` : "Unknown";
-            const output = t.output ? t.output.slice(0, 150) : "(no output)";
-            prompt += `- Task ${t.id.slice(0, 8)} by ${agentName}: "${t.task.slice(0, 80)}"\n`;
-            prompt += `  Output: ${output}${t.output && t.output.length > 150 ? "..." : ""}\n`;
-          }
-        }
-
-        if (failed.length > 0) {
-          prompt += "\n**Recently Failed:**\n";
-          for (const t of failed) {
-            const agentName = t.agentId ? `Agent ${t.agentId.slice(0, 8)}` : "Unknown";
-            prompt += `- Task ${t.id.slice(0, 8)} by ${agentName}: "${t.task.slice(0, 80)}"\n`;
-            prompt += `  Reason: ${t.failureReason || "(no reason)"}\n`;
-          }
-        }
-
-        // Show remaining work
-        const { inProgress, pending } = epic.taskStats;
-        if (inProgress > 0 || pending > 0) {
-          prompt += `\n**Remaining:** ${inProgress} in progress, ${pending} pending\n`;
-        }
-
-        prompt += "\n---\n\n";
+      let messagesDetail = "";
+      for (const msg of msgs) {
+        const channel = msg.channelName ? `#${msg.channelName}` : msg.channelId || "unknown";
+        messagesDetail += `- **${channel}** (user: ${msg.user || "unknown"}): ${msg.text?.slice(0, 200) || "(no text)"}\n`;
       }
 
-      prompt += `## Your Task: Plan Next Steps
-
-For each epic:
-1. **Review** the completed work and any failures
-2. **Determine** if the epic goal is met (progress = 100% and all tasks succeeded)
-3. **If complete:** Use \`update-epic\` to mark status as "completed"
-4. **If not complete:**
-   - Retry failed tasks with \`send-task\` (reassign or modify)
-   - Create new tasks for remaining work with \`send-task\` (include epicId)
-   - Keep the epic progressing until the goal is achieved
-
-This is an iterative process - you'll be notified again when more tasks finish.
-The epic should keep progressing until 100% complete and the goal is achieved.`;
-
-      return prompt;
+      const result = await resolveTemplateAsync("task.trigger.channel_activity", {
+        message_count: trigger.count || msgs.length,
+        messages_detail: messagesDetail,
+      });
+      return result.text;
     }
 
     default:
@@ -1072,60 +1505,33 @@ async function fetchRelevantMemories(
   }
 }
 
-async function fetchEpicNameAndGoal(
-  apiUrl: string,
-  apiKey: string,
-  epicId: string,
-): Promise<{ name: string; goal: string } | null> {
-  try {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-
-    const response = await fetch(`${apiUrl}/api/epics/${epicId}`, { headers });
-    if (!response.ok) return null;
-
-    const data = (await response.json()) as { name: string; goal: string };
-    return { name: data.name, goal: data.goal };
-  } catch {
-    return null;
-  }
-}
-
-async function fetchEpicTaskContext(
-  apiUrl: string,
-  apiKey: string,
-  epicId: string,
-  currentTaskId: string,
-): Promise<string | null> {
-  try {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-
-    const response = await fetch(`${apiUrl}/api/tasks?epicId=${epicId}&status=completed&limit=5`, {
-      headers,
-    });
-    if (!response.ok) return null;
-
-    const data = (await response.json()) as {
-      tasks: Array<{ id: string; task: string; output?: string }>;
-    };
-    const tasks = data.tasks || [];
-
-    const relevant = tasks.filter((t) => t.id !== currentTaskId);
-    if (relevant.length === 0) return null;
-
-    let context = "\n\n### Recent Epic Task Completions\n\n";
-    context += "These tasks were recently completed in the same epic:\n\n";
-    for (const t of relevant.slice(0, 5)) {
-      context += `- **${t.task.slice(0, 100)}**: ${(t.output || "no output").slice(0, 200)}\n`;
-    }
-    return context;
-  } catch {
-    return null;
-  }
-}
-
 /** Spawn a provider session without blocking - returns immediately with tracking info */
+/**
+ * Extract a key field from tool arguments for event tracking.
+ * Returns a single-entry record with the most identifying arg for the tool.
+ */
+function extractToolKey(toolName: string, args: unknown): Record<string, string | undefined> {
+  const a = args as Record<string, unknown>;
+  switch (toolName) {
+    case "Read":
+    case "Edit":
+    case "Write":
+      return { filePath: a.file_path as string | undefined };
+    case "Bash":
+      return { description: a.description as string | undefined };
+    case "Grep":
+      return { pattern: a.pattern as string | undefined };
+    case "Glob":
+      return { pattern: a.pattern as string | undefined };
+    case "Skill":
+      return { skillName: a.skill as string | undefined };
+    case "Agent":
+      return { description: a.description as string | undefined };
+    default:
+      return {};
+  }
+}
+
 async function spawnProviderProcess(
   adapter: ReturnType<typeof createProviderAdapter>,
   opts: {
@@ -1152,7 +1558,25 @@ async function spawnProviderProcess(
   const effectiveTaskId = realTaskId || crypto.randomUUID();
 
   // Resolve env first so we can use MODEL_OVERRIDE from config
-  const freshEnv = await fetchResolvedEnv(opts.apiUrl, opts.apiKey, opts.agentId);
+  const { env: freshEnv, credentialSelections } = await fetchResolvedEnv(
+    opts.apiUrl,
+    opts.apiKey,
+    opts.agentId,
+  );
+
+  // Report which key was selected for this task (fire-and-forget)
+  if (credentialSelections.length > 0 && realTaskId) {
+    for (const sel of credentialSelections) {
+      reportKeyUsage(opts.apiUrl, opts.apiKey, sel.keyType, sel, realTaskId).catch(() => {});
+    }
+  }
+
+  // Propagate agent-fs config to process.env so getBasePrompt() can read them
+  // (fetchResolvedEnv returns a new object, doesn't update process.env)
+  if (freshEnv.AGENT_FS_SHARED_ORG_ID) {
+    process.env.AGENT_FS_SHARED_ORG_ID = freshEnv.AGENT_FS_SHARED_ORG_ID as string;
+  }
+
   const model = opts.model || (freshEnv.MODEL_OVERRIDE as string) || "";
 
   const config: ProviderSessionConfig = {
@@ -1173,13 +1597,78 @@ async function spawnProviderProcess(
 
   const session = await adapter.createSession(config);
 
+  let oauthSelection: CredentialSelection | undefined;
+  if (adapter.name === "codex" && credentialSelections.length === 0) {
+    oauthSelection = (await resolveCodexOAuthCredentialInfo()) ?? undefined;
+    if (oauthSelection && realTaskId) {
+      reportKeyUsage(
+        opts.apiUrl,
+        opts.apiKey,
+        oauthSelection.keyType,
+        oauthSelection,
+        realTaskId,
+      ).catch(() => {});
+    }
+  }
+
   // Set up log streaming
   const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now(), partialLine: "" };
   const shouldStream = opts.apiUrl && opts.runnerSessionId && opts.iteration;
 
+  // Event buffer (flushes to API periodically)
+  interface BufferedEvent {
+    category: string;
+    event: string;
+    status?: string;
+    source: string;
+    agentId?: string;
+    taskId?: string;
+    sessionId?: string;
+    parentEventId?: string;
+    numericValue?: number;
+    durationMs?: number;
+    data?: Record<string, unknown>;
+  }
+
+  const eventBuffer: BufferedEvent[] = [];
+  const EVENT_FLUSH_INTERVAL_MS = 5000;
+  const EVENT_BUFFER_MAX = 50;
+
+  function bufferEvent(evt: BufferedEvent) {
+    eventBuffer.push(evt);
+    if (eventBuffer.length >= EVENT_BUFFER_MAX) {
+      flushEvents();
+    }
+  }
+
+  async function flushEvents() {
+    if (eventBuffer.length === 0) return;
+    const batch = eventBuffer.splice(0);
+    try {
+      await fetch(`${opts.apiUrl}/api/events/batch`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${opts.apiKey}`,
+          "X-Agent-ID": opts.agentId,
+        },
+        body: JSON.stringify({ events: batch }),
+      });
+    } catch {
+      // Non-blocking — event loss is acceptable
+    }
+  }
+
+  const eventFlushTimer = setInterval(flushEvents, EVENT_FLUSH_INTERVAL_MS);
+  const sessionStartTime = Date.now();
+
   // Auto-progress throttle: don't update more than once per 3 seconds
   let lastProgressTime = 0;
   const PROGRESS_THROTTLE_MS = 3000;
+
+  // Context usage throttle: max 1 snapshot per 30 seconds
+  let lastContextPostTime = 0;
+  const CONTEXT_THROTTLE_MS = 30_000;
 
   session.onEvent((event) => {
     switch (event.type) {
@@ -1188,15 +1677,73 @@ async function spawnProviderProcess(
           saveProviderSessionId(opts.apiUrl, opts.apiKey, realTaskId, event.sessionId).catch(
             (err) => console.warn(`[runner] Failed to save session ID: ${err}`),
           );
+        } else {
+          // Pool task: save provider session ID on active session so it can be
+          // propagated to the real task when the agent claims one
+          saveProviderSessionIdOnActiveSession(
+            opts.apiUrl,
+            opts.apiKey,
+            effectiveTaskId,
+            event.sessionId,
+          ).catch((err) =>
+            console.warn(`[runner] Failed to save provider session on active session: ${err}`),
+          );
         }
+
+        // Buffer session start event
+        bufferEvent({
+          category: "session",
+          event: "session.start",
+          source: "worker",
+          agentId: opts.agentId,
+          taskId: effectiveTaskId,
+          sessionId: event.sessionId,
+        });
         break;
       case "tool_start": {
         // Auto-progress: report tool activity as task progress (throttled)
         const now = Date.now();
         if (effectiveTaskId && opts.apiUrl && now - lastProgressTime >= PROGRESS_THROTTLE_MS) {
-          lastProgressTime = now;
           const progress = toolCallToProgress(event.toolName, event.args);
-          updateProgressViaAPI(opts.apiUrl, opts.apiKey, effectiveTaskId, progress).catch(() => {});
+          if (progress) {
+            lastProgressTime = now;
+            updateProgressViaAPI(opts.apiUrl, opts.apiKey, effectiveTaskId, progress).catch(
+              () => {},
+            );
+          }
+        }
+
+        // Buffer tool event
+        bufferEvent({
+          category: "tool",
+          event: "tool.start",
+          source: "worker",
+          agentId: opts.agentId,
+          taskId: effectiveTaskId,
+          sessionId: opts.runnerSessionId,
+          data: {
+            toolName: event.toolName,
+            toolCallId: event.toolCallId,
+            ...extractToolKey(event.toolName, event.args),
+            clientTimestamp: new Date().toISOString(),
+          },
+        });
+
+        // Also emit skill event when tool is Skill
+        if (event.toolName === "Skill") {
+          const args = event.args as Record<string, unknown>;
+          bufferEvent({
+            category: "skill",
+            event: "skill.invoke",
+            source: "worker",
+            agentId: opts.agentId,
+            taskId: effectiveTaskId,
+            sessionId: opts.runnerSessionId,
+            data: {
+              skillName: args.skill as string,
+              clientTimestamp: new Date().toISOString(),
+            },
+          });
         }
         break;
       }
@@ -1204,7 +1751,66 @@ async function spawnProviderProcess(
         // Cost save is handled in waitForCompletion().then() to ensure
         // it completes before the process exits (fire-and-forget here
         // races with container shutdown).
+
+        // Buffer session end event
+        bufferEvent({
+          category: "session",
+          event: "session.end",
+          source: "worker",
+          agentId: opts.agentId,
+          taskId: effectiveTaskId,
+          sessionId: opts.runnerSessionId,
+          status: event.isError ? "error" : "ok",
+          durationMs: Date.now() - sessionStartTime,
+          data: {
+            model: event.cost.model,
+            totalCostUsd: event.cost.totalCostUsd,
+            inputTokens: event.cost.inputTokens,
+            outputTokens: event.cost.outputTokens,
+          },
+        });
         break;
+      case "context_usage": {
+        const now2 = Date.now();
+        if (now2 - lastContextPostTime >= CONTEXT_THROTTLE_MS) {
+          lastContextPostTime = now2;
+          fetch(`${opts.apiUrl}/api/tasks/${realTaskId}/context`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Agent-ID": opts.agentId,
+              Authorization: `Bearer ${opts.apiKey}`,
+            },
+            body: JSON.stringify({
+              eventType: "progress",
+              sessionId: opts.runnerSessionId,
+              contextUsedTokens: event.contextUsedTokens,
+              contextTotalTokens: event.contextTotalTokens,
+              contextPercent: event.contextPercent,
+            }),
+          }).catch(() => {});
+        }
+        break;
+      }
+      case "compaction": {
+        // Always record compaction events (no throttle)
+        fetch(`${opts.apiUrl}/api/tasks/${realTaskId}/context`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Agent-ID": opts.agentId,
+            Authorization: `Bearer ${opts.apiKey}`,
+          },
+          body: JSON.stringify({
+            eventType: "compaction",
+            sessionId: opts.runnerSessionId,
+            preCompactTokens: event.preCompactTokens,
+            compactTrigger: event.compactTrigger,
+            contextTotalTokens: event.contextTotalTokens,
+          }),
+        }).catch(() => {});
+        break;
+      }
       case "raw_log":
         prettyPrintLine(event.content, opts.role);
         if (shouldStream) {
@@ -1233,6 +1839,10 @@ async function spawnProviderProcess(
 
   // Create promise that handles completion
   const promise: Promise<ProviderResult> = session.waitForCompletion().then(async (result) => {
+    // Stop event flush timer and do a final flush
+    clearInterval(eventFlushTimer);
+    await flushEvents();
+
     // Final log flush
     if (shouldStream && logBuffer.lines.length > 0) {
       await flushLogBuffer(logBuffer, {
@@ -1285,8 +1895,37 @@ async function spawnProviderProcess(
       }
     }
 
+    // Post completion context usage snapshot
+    if (result.cost && realTaskId) {
+      fetch(`${opts.apiUrl}/api/tasks/${realTaskId}/context`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Agent-ID": opts.agentId,
+          Authorization: `Bearer ${opts.apiKey}`,
+        },
+        body: JSON.stringify({
+          eventType: "completion",
+          sessionId: opts.runnerSessionId,
+          cumulativeInputTokens: result.cost.inputTokens ?? 0,
+          cumulativeOutputTokens: result.cost.outputTokens ?? 0,
+          contextTotalTokens: getContextWindowSize(result.cost.model || "default"),
+        }),
+      }).catch(() => {});
+    }
+
     return result;
   });
+
+  // Build credential info for rate limit tracking
+  const primarySelection = credentialSelections[0] ?? oauthSelection;
+  const credentialInfo = primarySelection
+    ? {
+        keyType: primarySelection.keyType,
+        keySuffix: primarySelection.keySuffix,
+        keyIndex: primarySelection.index,
+      }
+    : undefined;
 
   const runningTask: RunningTask = {
     taskId: effectiveTaskId,
@@ -1295,6 +1934,7 @@ async function spawnProviderProcess(
     startTime: new Date(),
     promise,
     result: null,
+    credentialInfo,
   };
 
   // Non-blocking completion tracking
@@ -1325,7 +1965,7 @@ async function runProviderIteration(
     cwd?: string;
   },
 ): Promise<ProviderResult> {
-  const freshEnv = await fetchResolvedEnv(opts.apiUrl, opts.apiKey, opts.agentId);
+  const { env: freshEnv } = await fetchResolvedEnv(opts.apiUrl, opts.apiKey, opts.agentId);
   const model = (freshEnv.MODEL_OVERRIDE as string) || "";
 
   const config: ProviderSessionConfig = {
@@ -1368,6 +2008,9 @@ async function checkCompletedProcesses(
     taskId: string;
     result: ProviderResult;
     triggerType?: string;
+    cursorUpdates?: Array<{ channelId: string; ts: string }>;
+    workingDir?: string;
+    credentialInfo?: RunningTask["credentialInfo"];
   }> = [];
 
   for (const [taskId, task] of state.activeTasks) {
@@ -1380,16 +2023,24 @@ async function checkCompletedProcesses(
         taskId,
         result: task.result,
         triggerType: task.triggerType,
+        cursorUpdates: task.cursorUpdates,
+        workingDir: task.workingDir,
+        credentialInfo: task.credentialInfo,
       });
     }
   }
 
   // Remove completed tasks from the map and ensure they're marked as finished
-  for (const { taskId, result } of completedTasks) {
+  for (const { taskId, result, cursorUpdates, workingDir, credentialInfo } of completedTasks) {
     state.activeTasks.delete(taskId);
 
     if (apiConfig) {
       removeActiveSession(apiConfig, taskId);
+    }
+
+    // Detect VCS before finishing — last chance to link a PR
+    if (apiConfig && workingDir && !vcsDetectedTasks.has(taskId)) {
+      await detectVcsForTask(apiConfig.apiUrl, apiConfig.apiKey, taskId, workingDir);
     }
 
     // Call the finish API to ensure task status is updated
@@ -1399,8 +2050,68 @@ async function checkCompletedProcesses(
       if (result.exitCode !== 0 && result.failureReason) {
         failureReason = result.failureReason;
         console.log(`[${role}] Detected error for task ${taskId.slice(0, 8)}: ${failureReason}`);
+
+        // If rate-limited and we know which key was used, report it
+        if (credentialInfo && /rate.?limit|hit your limit/i.test(failureReason)) {
+          // Try to extract reset time from the error message (e.g. "resets 3pm (UTC)")
+          const parsedResetTime = parseRateLimitResetTime(failureReason);
+          const defaultCooldownMs = 5 * 60 * 1000;
+          const rateLimitedUntil =
+            parsedResetTime ?? new Date(Date.now() + defaultCooldownMs).toISOString();
+          if (parsedResetTime) {
+            console.log(
+              `[credentials] Parsed rate limit reset time from error: ${parsedResetTime}`,
+            );
+          }
+          reportKeyRateLimit(
+            apiConfig.apiUrl,
+            apiConfig.apiKey,
+            credentialInfo.keyType,
+            credentialInfo.keySuffix,
+            credentialInfo.keyIndex,
+            rateLimitedUntil,
+          ).catch(() => {});
+        }
       }
       await ensureTaskFinished(apiConfig, role, taskId, result.exitCode, failureReason);
+
+      ensure({
+        id: "worker_process_finished",
+        flow: "task",
+        runId: taskId,
+        depIds: ["worker_process_spawned"],
+        data: {
+          taskId,
+          agentId: apiConfig.agentId,
+          role,
+          exitCode: result.exitCode,
+          success: result.exitCode === 0,
+          failureReason,
+        },
+        validator: (data) => data.exitCode === 0,
+        // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+        filter: ({}, ctx) => ctx.deps.length > 0,
+        conditions: [{ timeout_ms: 3_600_000 }], // 1 hour: process runtime
+      });
+
+      // Commit channel activity cursors after successful processing
+      // If the task failed, cursors stay uncommitted so messages are re-seen on next poll
+      if (cursorUpdates && cursorUpdates.length > 0 && result.exitCode === 0) {
+        try {
+          const headers: Record<string, string> = { "Content-Type": "application/json" };
+          if (apiConfig.apiKey) headers.Authorization = `Bearer ${apiConfig.apiKey}`;
+          await fetch(`${apiConfig.apiUrl}/api/channel-activity/commit-cursors`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ cursorUpdates }),
+          });
+          console.log(
+            `[${role}] Committed ${cursorUpdates.length} channel activity cursor(s) for task ${taskId.slice(0, 8)}`,
+          );
+        } catch (err) {
+          console.warn(`[${role}] Failed to commit channel activity cursors: ${err}`);
+        }
+      }
     }
   }
 }
@@ -1469,6 +2180,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   const { defaultPrompt, metadataType } = config;
   let role = config.role;
 
+  // Initialize Business-Use SDK for worker-side instrumentation
+  initialize();
+
   // Create provider adapter based on HARNESS_PROVIDER env var (default: claude)
   const adapter = createProviderAdapter(process.env.HARNESS_PROVIDER || "claude");
 
@@ -1484,8 +2198,53 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // Get agent identity and swarm URL for base prompt
   const agentId = process.env.AGENT_ID || "unknown";
 
-  const apiUrl = process.env.MCP_BASE_URL || "http://localhost:3013";
+  const apiUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
   const swarmUrl = process.env.SWARM_URL || "localhost";
+
+  // Configure HTTP-based template resolution (workers resolve via API, not local DB)
+  if (process.env.API_KEY) {
+    configureHttpResolver(apiUrl, process.env.API_KEY);
+  }
+
+  // Initialize anonymized telemetry (opt-out via ANONYMIZED_TELEMETRY=false)
+  // Workers use HTTP-based config access (cannot import DB directly)
+  {
+    const telemetryApiKey = process.env.API_KEY;
+    await initTelemetry(
+      "worker",
+      async (key) => {
+        if (!telemetryApiKey) return undefined;
+        try {
+          const resp = await fetch(`${apiUrl}/api/config?scope=global&includeSecrets=true`, {
+            headers: { Authorization: `Bearer ${telemetryApiKey}` },
+            signal: AbortSignal.timeout(5_000),
+          });
+          if (!resp.ok) return undefined;
+          const data = (await resp.json()) as { configs: { key: string; value: string }[] };
+          return data.configs.find((c) => c.key === key)?.value;
+        } catch {
+          return undefined;
+        }
+      },
+      async (key, value) => {
+        if (!telemetryApiKey) return;
+        try {
+          await fetch(`${apiUrl}/api/config`, {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${telemetryApiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ scope: "global", key, value }),
+            signal: AbortSignal.timeout(5_000),
+          });
+        } catch {
+          // Silently ignore — telemetry is best-effort
+        }
+      },
+    );
+  }
+  telemetry.session("started", { agentId });
 
   let capabilities = config.capabilities;
 
@@ -1495,14 +2254,19 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let agentSetupScript: string | undefined;
   let agentToolsMd: string | undefined;
   let agentClaudeMd: string | undefined;
+  let agentHeartbeatMd: string | undefined;
   let agentProfileName: string | undefined;
   let agentDescription: string | undefined;
+  let agentSkillsSummary: { name: string; description: string }[] | undefined;
+  let agentMcpServersSummary: string | undefined;
 
   // Per-task repo context — set when processing a task with githubRepo
   let currentRepoContext: BasePromptArgs["repoContext"] | undefined;
+  // Slack context for current task (gates Slack instructions in prompt)
+  let currentTaskSlackContext: BasePromptArgs["slackContext"] | undefined;
 
   // Generate base prompt (identity fields injected after profile fetch below)
-  const buildSystemPrompt = () => {
+  const buildSystemPrompt = async () => {
     return getBasePrompt({
       role,
       agentId,
@@ -1515,10 +2279,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       toolsMd: agentToolsMd,
       claudeMd: agentClaudeMd,
       repoContext: currentRepoContext,
+      slackContext: currentTaskSlackContext,
+      skillsSummary: agentSkillsSummary,
+      mcpServersSummary: agentMcpServersSummary,
     });
   };
 
-  let basePrompt = buildSystemPrompt();
+  let basePrompt = await buildSystemPrompt();
 
   // Resolve additional system prompt: CLI flag > env var
   let additionalSystemPrompt: string | undefined;
@@ -1670,6 +2437,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           claudeMd?: string;
           setupScript?: string;
           toolsMd?: string;
+          heartbeatMd?: string;
           name?: string;
           description?: string;
         };
@@ -1678,12 +2446,19 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         agentSetupScript = profile.setupScript;
         agentToolsMd = profile.toolsMd;
         agentClaudeMd = profile.claudeMd;
+        agentHeartbeatMd = profile.heartbeatMd;
         agentProfileName = profile.name;
         agentDescription = profile.description;
 
         // Generate default templates if missing (runner registers via POST /api/agents
         // which doesn't generate templates like join-swarm does)
-        if (!agentSoulMd || !agentIdentityMd || !agentToolsMd || !agentClaudeMd) {
+        if (
+          !agentSoulMd ||
+          !agentIdentityMd ||
+          !agentToolsMd ||
+          !agentClaudeMd ||
+          !agentHeartbeatMd
+        ) {
           // Use already-fetched template (from pre-registration step)
           if (cachedTemplate) {
             const ctx = {
@@ -1694,13 +2469,16 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
                 capabilities: (capabilities || []).join(", "),
               },
             };
-            if (!agentSoulMd) agentSoulMd = interpolate(cachedTemplate.files.soulMd, ctx);
+            if (!agentSoulMd) agentSoulMd = interpolate(cachedTemplate.files.soulMd, ctx).result;
             if (!agentIdentityMd)
-              agentIdentityMd = interpolate(cachedTemplate.files.identityMd, ctx);
-            if (!agentToolsMd) agentToolsMd = interpolate(cachedTemplate.files.toolsMd, ctx);
-            if (!agentClaudeMd) agentClaudeMd = interpolate(cachedTemplate.files.claudeMd, ctx);
+              agentIdentityMd = interpolate(cachedTemplate.files.identityMd, ctx).result;
+            if (!agentToolsMd) agentToolsMd = interpolate(cachedTemplate.files.toolsMd, ctx).result;
+            if (!agentClaudeMd)
+              agentClaudeMd = interpolate(cachedTemplate.files.claudeMd, ctx).result;
             if (!agentSetupScript)
-              agentSetupScript = interpolate(cachedTemplate.files.setupScript, ctx);
+              agentSetupScript = interpolate(cachedTemplate.files.setupScript, ctx).result;
+            if (!agentHeartbeatMd)
+              agentHeartbeatMd = interpolate(cachedTemplate.files.heartbeatMd, ctx).result;
             console.log(`[${role}] Applied template: ${templateId}`);
           }
 
@@ -1725,6 +2503,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             if (!profile.claudeMd && agentClaudeMd) profileUpdate.claudeMd = agentClaudeMd;
             if (!profile.setupScript && agentSetupScript)
               profileUpdate.setupScript = agentSetupScript;
+            if (!profile.heartbeatMd && agentHeartbeatMd)
+              profileUpdate.heartbeatMd = agentHeartbeatMd;
 
             await fetch(`${apiUrl}/api/agents/${agentId}/profile`, {
               method: "PUT",
@@ -1741,8 +2521,72 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
         }
 
+        // Fetch installed skills for system prompt
+        try {
+          const skillsResp = await fetch(`${apiUrl}/api/agents/${agentId}/skills`, {
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "X-Agent-ID": agentId,
+            },
+          });
+          if (skillsResp.ok) {
+            const skillsData = (await skillsResp.json()) as {
+              skills: {
+                name: string;
+                description: string;
+                isActive: boolean;
+                isEnabled: boolean;
+              }[];
+            };
+            agentSkillsSummary = skillsData.skills
+              .filter((s) => s.isActive && s.isEnabled)
+              .map((s) => ({ name: s.name, description: s.description }));
+            if (agentSkillsSummary.length > 0) {
+              console.log(`[${role}] Loaded ${agentSkillsSummary.length} skills for system prompt`);
+            }
+          }
+        } catch {
+          // Non-fatal — skills are optional
+        }
+
+        // Fetch installed MCP servers for system prompt
+        try {
+          const mcpServersResp = await fetch(`${apiUrl}/api/agents/${agentId}/mcp-servers`, {
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "X-Agent-ID": agentId,
+            },
+          });
+          if (mcpServersResp.ok) {
+            const mcpServersData = (await mcpServersResp.json()) as {
+              servers: {
+                name: string;
+                transport: string;
+                description: string | null;
+                isActive: boolean;
+                isEnabled: boolean;
+              }[];
+            };
+            const activeMcpServers = mcpServersData.servers.filter(
+              (s) => s.isActive && s.isEnabled,
+            );
+            if (activeMcpServers.length > 0) {
+              agentMcpServersSummary = activeMcpServers
+                .map(
+                  (s) => `- **${s.name}** (${s.transport}): ${s.description || "No description"}`,
+                )
+                .join("\n");
+              console.log(
+                `[${role}] Loaded ${activeMcpServers.length} MCP servers for system prompt`,
+              );
+            }
+          }
+        } catch {
+          // Non-fatal — MCP servers are optional
+        }
+
         // Rebuild system prompt with identity
-        basePrompt = buildSystemPrompt();
+        basePrompt = await buildSystemPrompt();
         resolvedSystemPrompt = additionalSystemPrompt
           ? `${basePrompt}\n\n${additionalSystemPrompt}`
           : basePrompt;
@@ -1799,6 +2643,16 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       }
     }
 
+    // Write HEARTBEAT.md to workspace (lead's periodic checklist)
+    if (agentHeartbeatMd) {
+      try {
+        await Bun.write("/workspace/HEARTBEAT.md", agentHeartbeatMd);
+        console.log(`[${role}] Wrote HEARTBEAT.md to workspace`);
+      } catch (err) {
+        console.warn(`[${role}] Could not write HEARTBEAT.md: ${(err as Error).message}`);
+      }
+    }
+
     // Write CLAUDE.md to workspace (agent-level instructions)
     if (agentClaudeMd) {
       try {
@@ -1807,6 +2661,37 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       } catch (err) {
         console.warn(`[${role}] Could not write CLAUDE.md: ${(err as Error).message}`);
       }
+    }
+
+    // ========== Sync skills to filesystem ==========
+    try {
+      console.log(`[${role}] Syncing skills to filesystem...`);
+      const syncHeaders: Record<string, string> = {
+        "Content-Type": "application/json",
+        "X-Agent-ID": agentId,
+      };
+      if (apiKey) syncHeaders.Authorization = `Bearer ${apiKey}`;
+      const syncRes = await fetch(`${swarmUrl}/api/skills/sync-filesystem`, {
+        method: "POST",
+        headers: syncHeaders,
+      });
+      if (syncRes.ok) {
+        const syncResult = (await syncRes.json()) as {
+          synced: number;
+          removed: number;
+          errors: string[];
+        };
+        console.log(
+          `[${role}] Skills synced: ${syncResult.synced} written, ${syncResult.removed} removed`,
+        );
+        if (syncResult.errors.length > 0) {
+          console.warn(`[${role}] Skill sync errors: ${syncResult.errors.join(", ")}`);
+        }
+      } else {
+        console.warn(`[${role}] Skill sync failed: HTTP ${syncRes.status}`);
+      }
+    } catch (err) {
+      console.warn(`[${role}] Skill sync failed: ${(err as Error).message}`);
     }
 
     // ========== Resume paused tasks with PRIORITY ==========
@@ -1847,7 +2732,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
 
           // Build prompt with resume context + memory injection
-          let resumePrompt = buildResumePrompt(task);
+          let resumePrompt = await buildResumePrompt(task, adapter.formatCommand.bind(adapter));
 
           // Inject relevant memories for resumed tasks
           const resumeMemoryContext = await fetchRelevantMemories(
@@ -1929,32 +2814,46 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             }
           }
 
-          const runningTask = await spawnProviderProcess(
-            adapter,
-            {
-              prompt: resumePrompt,
-              logFile,
-              systemPrompt: resolvedSystemPrompt,
-              additionalArgs: resumeAdditionalArgs,
-              role,
-              apiUrl,
-              apiKey,
-              agentId,
-              runnerSessionId: sessionId,
-              iteration,
-              taskId: task.id,
-              model: (task as { model?: string }).model,
-              cwd: resumeCwd,
-            },
-            logDir,
-            isYolo,
-          );
+          // Per-task runner session ID so session logs are scoped to this task
+          const resumeRunnerSessionId = crypto.randomUUID();
+
+          let runningTask: RunningTask;
+          try {
+            runningTask = await spawnProviderProcess(
+              adapter,
+              {
+                prompt: resumePrompt,
+                logFile,
+                systemPrompt: resolvedSystemPrompt,
+                additionalArgs: resumeAdditionalArgs,
+                role,
+                apiUrl,
+                apiKey,
+                agentId,
+                runnerSessionId: resumeRunnerSessionId,
+                iteration,
+                taskId: task.id,
+                model: (task as { model?: string }).model,
+                cwd: resumeCwd,
+              },
+              logDir,
+              isYolo,
+            );
+          } catch (spawnErr) {
+            const errMsg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
+            console.error(
+              `[${role}] Failed to spawn process for resumed task ${task.id.slice(0, 8)}: ${errMsg}`,
+            );
+            await ensureTaskFinished(apiConfig, role, task.id, 1, `Spawn failed: ${errMsg}`);
+            continue;
+          }
 
           state.activeTasks.set(task.id, runningTask);
           registerActiveSession(apiConfig, {
             taskId: task.id,
             triggerType: "task_resumed",
             taskDescription: task.task?.slice(0, 200),
+            runnerSessionId: resumeRunnerSessionId,
           });
           console.log(
             `[${role}] Resumed task ${task.id.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active)`,
@@ -1971,6 +2870,17 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     }
     // ========== END: Resume paused tasks ==========
 
+    // ========== Lead startup self-check ==========
+    if (isLead) {
+      console.log(`[${role}] Running startup heartbeat sweep...`);
+      const swept = await triggerHeartbeatSweep(apiConfig);
+      if (swept) {
+        console.log(`[${role}] Startup heartbeat sweep completed`);
+      } else {
+        console.warn(`[${role}] Startup heartbeat sweep failed (non-fatal)`);
+      }
+    }
+
     // Track last finished task check for leads (to avoid re-processing)
     while (true) {
       // Ping server on each iteration to keep status updated
@@ -1978,6 +2888,18 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
       // Check for completed processes first and ensure tasks are marked as finished
       await checkCompletedProcesses(state, role, apiConfig);
+
+      // Periodic VCS detection for running tasks (fire-and-forget, throttled per task)
+      const now = Date.now();
+      for (const [taskId, task] of state.activeTasks) {
+        if (vcsDetectedTasks.has(taskId)) continue;
+        const lastCheck = vcsCheckTimestamps.get(taskId) ?? 0;
+        if (now - lastCheck < VCS_CHECK_INTERVAL) continue;
+        if (!task.workingDir) continue;
+
+        vcsCheckTimestamps.set(taskId, now);
+        detectVcsForTask(apiUrl, apiKey, taskId, task.workingDir);
+      }
 
       // Check for cancelled tasks and signal their subprocesses
       if (state.activeTasks.size > 0) {
@@ -2031,62 +2953,46 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         if (trigger) {
           console.log(`[${role}] Trigger received: ${trigger.type}`);
 
+          if (
+            trigger.taskId &&
+            (trigger.type === "task_assigned" || trigger.type === "task_offered")
+          ) {
+            ensure({
+              id: "worker_received",
+              flow: "task",
+              runId: trigger.taskId,
+              depIds: ["started"],
+              data: {
+                taskId: trigger.taskId,
+                agentId,
+                triggerType: trigger.type,
+                role,
+              },
+              // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+              filter: ({}, ctx) => ctx.deps.length > 0,
+              conditions: [{ timeout_ms: 60_000 }], // 1 min: immediate after poll
+            });
+          }
+
           // Build prompt based on trigger
-          let triggerPrompt = buildPromptForTrigger(trigger, prompt);
+          let triggerPrompt = await buildPromptForTrigger(
+            trigger,
+            prompt,
+            adapter.formatCommand.bind(adapter),
+          );
 
           // Enrich prompt with relevant memories from past sessions
           if (trigger.type === "task_assigned" || trigger.type === "task_offered") {
             const task =
               trigger.task && typeof trigger.task === "object" && "task" in trigger.task
-                ? (trigger.task as { task: string; epicId?: string; id?: string })
+                ? (trigger.task as { task: string; id?: string })
                 : null;
             if (task?.task) {
-              // Enrich search query with epic context for better memory retrieval
-              let searchQuery = task.task;
-              if (task.epicId) {
-                const epicContext = await fetchEpicNameAndGoal(apiUrl, apiKey, task.epicId);
-                if (epicContext) {
-                  searchQuery = `[Epic: ${epicContext.name}] ${epicContext.goal}\n\n${task.task}`;
-                }
-              }
-
-              const memoryContext = await fetchRelevantMemories(
-                apiUrl,
-                apiKey,
-                agentId,
-                searchQuery,
-              );
+              const memoryContext = await fetchRelevantMemories(apiUrl, apiKey, agentId, task.task);
               if (memoryContext) {
                 triggerPrompt += memoryContext;
                 console.log(`[${role}] Injected relevant memories into task prompt`);
               }
-
-              // Inject recent completed task summaries from the same epic
-              if (task.epicId && task.id) {
-                const epicTaskContext = await fetchEpicTaskContext(
-                  apiUrl,
-                  apiKey,
-                  task.epicId,
-                  task.id,
-                );
-                if (epicTaskContext) {
-                  triggerPrompt += epicTaskContext;
-                  console.log(`[${role}] Injected epic task context into prompt`);
-                }
-              }
-            }
-          }
-
-          // For epic progress triggers, search memories related to the epic goals
-          if (trigger.type === "epic_progress_changed" && trigger.epics) {
-            const epics = trigger.epics as Array<{
-              epic: { name: string; goal: string };
-            }>;
-            const epicQueries = epics.map((e) => `${e.epic.name}: ${e.epic.goal}`).join("\n");
-            const memoryContext = await fetchRelevantMemories(apiUrl, apiKey, agentId, epicQueries);
-            if (memoryContext) {
-              triggerPrompt += memoryContext;
-              console.log(`[${role}] Injected memories into epic progress prompt`);
             }
           }
 
@@ -2112,6 +3018,15 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           // Extract model from task data for per-task model selection
           const taskModel = (trigger.task as { model?: string } | undefined)?.model;
 
+          // Detect Slack context for conditional prompt sections
+          const taskSlackChannelId = (trigger.task as { slackChannelId?: string } | undefined)
+            ?.slackChannelId;
+          const taskSlackThreadTs = (trigger.task as { slackThreadTs?: string } | undefined)
+            ?.slackThreadTs;
+          currentTaskSlackContext = taskSlackChannelId
+            ? { channelId: taskSlackChannelId, threadTs: taskSlackThreadTs }
+            : undefined;
+
           // Handle repo context for tasks with vcsRepo (GitHub/GitLab)
           const taskVcsRepo = (trigger.task as { vcsRepo?: string } | undefined)?.vcsRepo;
           if (taskVcsRepo && apiUrl) {
@@ -2123,7 +3038,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               clonePath: `/workspace/repos/${taskVcsRepo.split("/").pop() || taskVcsRepo}`,
               defaultBranch: "main",
             };
-            currentRepoContext = await ensureRepoForTask(effectiveConfig, role);
+            const repoResult = await ensureRepoForTask(effectiveConfig, role);
+            currentRepoContext = {
+              ...repoResult,
+              guidelines: repoConfig?.guidelines ?? null,
+            };
           } else {
             currentRepoContext = undefined;
           }
@@ -2171,7 +3090,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
 
           // Rebuild system prompt with per-task repo context
-          const taskBasePrompt = buildSystemPrompt();
+          const taskBasePrompt = await buildSystemPrompt();
           const taskSystemPrompt =
             (additionalSystemPrompt
               ? `${taskBasePrompt}\n\n${additionalSystemPrompt}`
@@ -2200,30 +3119,76 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           };
           await Bun.write(logFile, `${JSON.stringify(metadata)}\n`);
 
+          // Per-task runner session ID so session logs are scoped to this task
+          const taskRunnerSessionId = crypto.randomUUID();
+
           // Spawn without blocking (await to set up session, but process runs async)
-          const runningTask = await spawnProviderProcess(
-            adapter,
-            {
-              prompt: triggerPrompt,
-              logFile,
-              systemPrompt: taskSystemPrompt,
-              additionalArgs: effectiveAdditionalArgs,
-              role,
-              apiUrl,
-              apiKey,
+          let runningTask: RunningTask;
+          try {
+            runningTask = await spawnProviderProcess(
+              adapter,
+              {
+                prompt: triggerPrompt,
+                logFile,
+                systemPrompt: taskSystemPrompt,
+                additionalArgs: effectiveAdditionalArgs,
+                role,
+                apiUrl,
+                apiKey,
+                agentId,
+                runnerSessionId: taskRunnerSessionId,
+                iteration,
+                taskId: trigger.taskId,
+                model: taskModel,
+                cwd: effectiveCwd,
+              },
+              logDir,
+              isYolo,
+            );
+          } catch (spawnErr) {
+            const errMsg = spawnErr instanceof Error ? spawnErr.message : String(spawnErr);
+            console.error(
+              `[${role}] Failed to spawn process for task ${trigger.taskId?.slice(0, 8) || "unknown"}: ${errMsg}`,
+            );
+            if (trigger.taskId) {
+              await ensureTaskFinished(
+                apiConfig,
+                role,
+                trigger.taskId,
+                1,
+                `Spawn failed: ${errMsg}`,
+              );
+            }
+            continue;
+          }
+
+          ensure({
+            id: "worker_process_spawned",
+            flow: "task",
+            runId: runningTask.taskId,
+            depIds: ["worker_received"],
+            data: {
+              taskId: runningTask.taskId,
               agentId,
-              runnerSessionId: sessionId,
-              iteration,
-              taskId: trigger.taskId,
+              role,
               model: taskModel,
-              cwd: effectiveCwd,
             },
-            logDir,
-            isYolo,
-          );
+            // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+            filter: ({}, ctx) => ctx.deps.length > 0,
+            conditions: [{ timeout_ms: 60_000 }], // 1 min: process startup
+          });
 
           // Attach trigger metadata for logging
           runningTask.triggerType = trigger.type;
+          runningTask.workingDir = effectiveCwd;
+
+          // Attach deferred cursor updates for channel_activity triggers
+          if (trigger.type === "channel_activity" && trigger.cursorUpdates) {
+            runningTask.cursorUpdates = trigger.cursorUpdates as Array<{
+              channelId: string;
+              ts: string;
+            }>;
+          }
 
           state.activeTasks.set(runningTask.taskId, runningTask);
 
@@ -2236,6 +3201,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             taskId: runningTask.taskId,
             triggerType: trigger.type,
             taskDescription: taskDesc,
+            runnerSessionId: taskRunnerSessionId,
           });
 
           console.log(

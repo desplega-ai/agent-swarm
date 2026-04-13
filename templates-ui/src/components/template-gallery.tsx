@@ -44,18 +44,14 @@ export function TemplateGallery({ templates }: TemplateGalleryProps) {
         ],
         threshold: 0.4,
       }),
-    [templates]
+    [templates],
   );
 
   const filtered = useMemo(() => {
-    let results = query
-      ? fuse.search(query).map((r) => r.item)
-      : [...templates];
+    let results = query ? fuse.search(query).map((r) => r.item) : [...templates];
 
     if (categoryFilter !== "All") {
-      results = results.filter(
-        (t) => t.category === categoryFilter.toLowerCase()
-      );
+      results = results.filter((t) => t.category === categoryFilter.toLowerCase());
     }
 
     if (typeFilter !== "All") {
@@ -68,7 +64,7 @@ export function TemplateGallery({ templates }: TemplateGalleryProps) {
 
     if (selectedCaps.size > 0) {
       results = results.filter((t) =>
-        t.agentDefaults.capabilities.some((c) => selectedCaps.has(c))
+        t.agentDefaults.capabilities.some((c) => selectedCaps.has(c)),
       );
     }
 
@@ -149,9 +145,7 @@ export function TemplateGallery({ templates }: TemplateGalleryProps) {
       </div>
 
       {filtered.length === 0 && (
-        <p className="text-center text-muted-foreground">
-          No templates match your filters.
-        </p>
+        <p className="text-center text-muted-foreground">No templates match your filters.</p>
       )}
     </div>
   );
@@ -194,9 +188,7 @@ function CapabilityMultiSelect({
         className="flex w-full items-center justify-between rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground hover:bg-accent/50 transition-colors"
       >
         <span className="truncate text-muted-foreground">
-          {selected.size === 0
-            ? "Filter by capabilities..."
-            : `${selected.size} selected`}
+          {selected.size === 0 ? "Filter by capabilities..." : `${selected.size} selected`}
         </span>
         <ChevronDown className="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
       </button>
@@ -214,11 +206,7 @@ function CapabilityMultiSelect({
               <X className="h-3 w-3" />
             </Badge>
           ))}
-          <Badge
-            variant="outline"
-            className="cursor-pointer text-xs"
-            onClick={onClear}
-          >
+          <Badge variant="outline" className="cursor-pointer text-xs" onClick={onClear}>
             Clear all
           </Badge>
         </div>
@@ -238,9 +226,7 @@ function CapabilityMultiSelect({
           </div>
           <div className="max-h-48 overflow-y-auto p-1">
             {filtered.length === 0 && (
-              <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                No capabilities found.
-              </p>
+              <p className="px-2 py-1.5 text-xs text-muted-foreground">No capabilities found.</p>
             )}
             {filtered.map((cap) => (
               <button

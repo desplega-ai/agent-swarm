@@ -1,13 +1,18 @@
+import type { Metadata } from "next";
 import { Navbar } from "@/components/navbar";
 import { Hero } from "@/components/hero";
 import { Features } from "@/components/features";
-import { WhyChoose } from "@/components/why-choose";
 import { HowItWorks } from "@/components/how-it-works";
-import { Architecture } from "@/components/architecture";
 import { Workshops } from "@/components/workshops";
+import { PricingSection } from "@/components/pricing-section";
 import { CTA } from "@/components/cta";
-import { Waitlist } from "@/components/waitlist";
 import { Footer } from "@/components/footer";
+
+export const metadata: Metadata = {
+  alternates: {
+    canonical: "/",
+  },
+};
 
 export default function Home() {
   return (
@@ -15,12 +20,10 @@ export default function Home() {
       <Navbar />
       <Hero />
       <Features />
-      <WhyChoose />
       <HowItWorks />
-      <Architecture />
       <Workshops />
+      <PricingSection compact />
       <CTA />
-      <Waitlist />
       <Footer />
     </main>
   );

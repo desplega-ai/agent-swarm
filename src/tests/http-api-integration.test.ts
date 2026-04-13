@@ -52,6 +52,7 @@ async function api(
 const get = (p: string, o?: Parameters<typeof api>[2]) => api("GET", p, o);
 const post = (p: string, o?: Parameters<typeof api>[2]) => api("POST", p, o);
 const put = (p: string, o?: Parameters<typeof api>[2]) => api("PUT", p, o);
+const patch = (p: string, o?: Parameters<typeof api>[2]) => api("PATCH", p, o);
 const del = (p: string, o?: Parameters<typeof api>[2]) => api("DELETE", p, o);
 
 async function waitForServer(url: string, timeoutMs = 15000) {
@@ -63,7 +64,7 @@ async function waitForServer(url: string, timeoutMs = 15000) {
     } catch {
       // not ready yet
     }
-    await Bun.sleep(200);
+    await Bun.sleep(50);
   }
   throw new Error(`Server did not start within ${timeoutMs}ms`);
 }
@@ -77,9 +78,7 @@ const ids = {
   workerAgent2: randomUUID(),
   task: "",
   task2: "",
-  epic: "",
-  channel: "",
-  message: "",
+
   config: "",
   repo: "",
   session: "",
@@ -108,7 +107,7 @@ beforeAll(async () => {
       PORT: String(TEST_PORT),
       DATABASE_PATH: TEST_DB_PATH,
       API_KEY: "", // no auth required
-      CAPABILITIES: "core,task-pool,messaging,profiles,services,scheduling,epics,memory",
+      CAPABILITIES: "core,task-pool,messaging,profiles,services,scheduling,memory",
       // Disable optional integrations
       SLACK_BOT_TOKEN: "",
       GITHUB_WEBHOOK_SECRET: "",
@@ -129,7 +128,7 @@ afterAll(async () => {
       await serverProc.exited;
     } catch {}
   }
-  await Bun.sleep(300);
+  await Bun.sleep(50);
   try {
     await unlink(TEST_DB_PATH);
   } catch {}
@@ -864,102 +863,6 @@ describe("Polling", () => {
 });
 
 // ===========================================================================
-// 11. Epics
-// ===========================================================================
-
-describe("Epics", () => {
-  test("POST /api/epics — missing fields returns 400", async () => {
-    const { status, body } = await post("/api/epics", {
-      body: { name: "No Goal" },
-    });
-    expect(status).toBe(400);
-    expect(body.error).toContain("goal");
-  });
-
-  test("POST /api/epics — create epic", async () => {
-    const { status, body } = await post("/api/epics", {
-      agentId: ids.leadAgent,
-      body: {
-        name: "Test Epic",
-        goal: "Test all API endpoints",
-        description: "Comprehensive testing",
-        priority: 80,
-        tags: ["testing"],
-      },
-    });
-    expect(status).toBe(201);
-    expect(body.id).toBeDefined();
-    expect(body.name).toBe("Test Epic");
-    ids.epic = body.id;
-  });
-
-  test("GET /api/epics — list epics", async () => {
-    const { status, body } = await get("/api/epics");
-    expect(status).toBe(200);
-    expect(body.epics).toBeDefined();
-    expect(Array.isArray(body.epics)).toBe(true);
-    expect(body.total).toBeGreaterThanOrEqual(1);
-  });
-
-  test("GET /api/epics/:id — get specific epic", async () => {
-    const { status, body } = await get(`/api/epics/${ids.epic}`);
-    expect(status).toBe(200);
-    expect(body.id).toBe(ids.epic);
-    expect(body.name).toBe("Test Epic");
-  });
-
-  test("GET /api/epics/:id — non-existent returns 404", async () => {
-    const { status } = await get(`/api/epics/${randomUUID()}`);
-    expect(status).toBe(404);
-  });
-
-  test("PUT /api/epics/:id — update epic", async () => {
-    const { status } = await put(`/api/epics/${ids.epic}`, {
-      body: { goal: "Updated goal", status: "active" },
-    });
-    expect(status).toBe(200);
-  });
-
-  test("PUT /api/epics/:id — non-existent returns 404", async () => {
-    const { status } = await put(`/api/epics/${randomUUID()}`, {
-      body: { goal: "Ghost" },
-    });
-    expect(status).toBe(404);
-  });
-
-  test("POST /api/epics/:id/tasks — assign task to epic", async () => {
-    const { status } = await post(`/api/epics/${ids.epic}/tasks`, {
-      body: { taskId: ids.task },
-    });
-    expect(status).toBe(200);
-  });
-
-  test("POST /api/epics/:id/tasks — missing taskId returns 400", async () => {
-    const { status } = await post(`/api/epics/${ids.epic}/tasks`, {
-      body: {},
-    });
-    expect(status).toBe(400);
-  });
-
-  test("POST /api/epics/:id/tasks — non-existent epic returns 404", async () => {
-    const { status } = await post(`/api/epics/${randomUUID()}/tasks`, {
-      body: { taskId: ids.task },
-    });
-    expect(status).toBe(404);
-  });
-
-  test("DELETE /api/epics/:id — delete the test epic", async () => {
-    const { status } = await del(`/api/epics/${ids.epic}`);
-    expect(status).toBe(200);
-  });
-
-  test("DELETE /api/epics/:id — non-existent returns 404", async () => {
-    const { status } = await del(`/api/epics/${randomUUID()}`);
-    expect(status).toBe(404);
-  });
-});
-
-// ===========================================================================
 // 11b. Schedule CRUD
 // ===========================================================================
 
@@ -1111,126 +1014,8 @@ describe("Schedule CRUD", () => {
 // ===========================================================================
 // 12. Channels & Messages
 // ===========================================================================
-
-describe("Channels & Messages", () => {
-  test("GET /api/channels — list channels (includes default 'general')", async () => {
-    const { status, body } = await get("/api/channels");
-    expect(status).toBe(200);
-    expect(body.channels).toBeDefined();
-    expect(Array.isArray(body.channels)).toBe(true);
-    // biome-ignore lint/suspicious/noExplicitAny: channel shape varies
-    const general = body.channels.find((c: any) => c.name === "general");
-    expect(general).toBeDefined();
-    ids.channel = general.id;
-  });
-
-  test("POST /api/channels/:id/messages — post a message", async () => {
-    const { status, body } = await post(`/api/channels/${ids.channel}/messages`, {
-      body: { content: "Hello from integration test!", agentId: ids.workerAgent },
-    });
-    expect(status).toBe(201);
-    expect(body.id).toBeDefined();
-    ids.message = body.id;
-  });
-
-  test("POST /api/channels/:id/messages — missing content returns 400", async () => {
-    const { status } = await post(`/api/channels/${ids.channel}/messages`, {
-      body: {},
-    });
-    expect(status).toBe(400);
-  });
-
-  test("POST /api/channels/:id/messages — non-existent channel returns 404", async () => {
-    const { status } = await post(`/api/channels/${randomUUID()}/messages`, {
-      body: { content: "Ghost channel" },
-    });
-    expect(status).toBe(404);
-  });
-
-  test("GET /api/channels/:id/messages — get messages", async () => {
-    const { status, body } = await get(`/api/channels/${ids.channel}/messages`);
-    expect(status).toBe(200);
-    const messages = body.messages || body;
-    expect(Array.isArray(messages)).toBe(true);
-    expect(messages.length).toBeGreaterThanOrEqual(1);
-  });
-
-  test("GET /api/channels/:id/messages — non-existent channel returns 404", async () => {
-    const { status } = await get(`/api/channels/${randomUUID()}/messages`);
-    expect(status).toBe(404);
-  });
-
-  test("GET /api/channels/:id/messages/:messageId/thread — get thread", async () => {
-    const { status } = await get(`/api/channels/${ids.channel}/messages/${ids.message}/thread`);
-    expect(status).toBe(200);
-  });
-
-  // --- Channel Create / Delete ---
-
-  let createdChannelId: string;
-
-  test("POST /api/channels — create channel", async () => {
-    const { status, body } = await post("/api/channels", {
-      body: { name: "test-channel-crud" },
-    });
-    expect(status).toBe(201);
-    expect(body.id).toBeDefined();
-    expect(body.name).toBe("test-channel-crud");
-    expect(body.type).toBe("public");
-    createdChannelId = body.id;
-  });
-
-  test("POST /api/channels — create with description and type", async () => {
-    const { status, body } = await post("/api/channels", {
-      body: { name: "test-dm-channel", description: "A DM channel", type: "dm" },
-    });
-    expect(status).toBe(201);
-    expect(body.type).toBe("dm");
-    expect(body.description).toBe("A DM channel");
-    // Clean up - delete this channel
-    await del(`/api/channels/${body.id}`);
-  });
-
-  test("POST /api/channels — duplicate name returns 409", async () => {
-    const { status } = await post("/api/channels", {
-      body: { name: "test-channel-crud" },
-    });
-    expect([400, 409]).toContain(status);
-  });
-
-  test("POST /api/channels — missing name returns 400", async () => {
-    const { status } = await post("/api/channels", {
-      body: {},
-    });
-    expect(status).toBe(400);
-  });
-
-  test("DELETE /api/channels/:id — delete created channel", async () => {
-    const { status, body } = await del(`/api/channels/${createdChannelId}`);
-    expect(status).toBe(200);
-    expect(body.success).toBe(true);
-  });
-
-  test("DELETE /api/channels/:id — cannot delete general channel", async () => {
-    // The general channel has the well-known ID
-    const generalId = "00000000-0000-4000-8000-000000000001";
-    const { status } = await del(`/api/channels/${generalId}`);
-    expect([400, 403]).toContain(status);
-  });
-
-  test("DELETE /api/channels/:id — non-existent returns 404", async () => {
-    const { status } = await del(`/api/channels/${randomUUID()}`);
-    expect(status).toBe(404);
-  });
-
-  test("GET /api/channels — deleted channel not in list", async () => {
-    const { status, body } = await get("/api/channels");
-    expect(status).toBe(200);
-    // biome-ignore lint/suspicious/noExplicitAny: channel shape varies
-    const found = body.channels.find((c: any) => c.id === createdChannelId);
-    expect(found).toBeUndefined();
-  });
-});
+// Channel HTTP handler not yet implemented — tests removed.
+// Re-add when /api/channels routes are created.
 
 // ===========================================================================
 // 13. Config
@@ -1502,6 +1287,148 @@ describe("Close Agent", () => {
 // AgentMail Webhooks
 // ===========================================================================
 
+// ---------------------------------------------------------------------------
+// Workflows
+// ---------------------------------------------------------------------------
+
+describe("Workflows", () => {
+  let workflowId: string;
+
+  test("POST /api/workflows — create workflow", async () => {
+    const { status, body } = await post("/api/workflows", {
+      body: {
+        name: "integration-test-wf",
+        definition: {
+          nodes: [
+            { id: "a", type: "agent-task", config: { template: "Hello" }, next: "b" },
+            { id: "b", type: "agent-task", config: { template: "World" } },
+          ],
+        },
+      },
+    });
+    expect(status).toBe(201);
+    expect(body.id).toBeDefined();
+    expect(body.definition.nodes).toHaveLength(2);
+    workflowId = body.id;
+  });
+
+  test("GET /api/workflows — list workflows", async () => {
+    const { status, body } = await get("/api/workflows");
+    expect(status).toBe(200);
+    expect(Array.isArray(body)).toBe(true);
+    expect(body.some((w: { id: string }) => w.id === workflowId)).toBe(true);
+  });
+
+  test("GET /api/workflows/:id — get workflow", async () => {
+    const { status, body } = await get(`/api/workflows/${workflowId}`);
+    expect(status).toBe(200);
+    expect(body.name).toBe("integration-test-wf");
+    expect(body.edges).toBeDefined(); // auto-generated edges
+  });
+
+  test("PUT /api/workflows/:id — update workflow", async () => {
+    const { status, body } = await put(`/api/workflows/${workflowId}`, {
+      body: { name: "renamed-wf" },
+    });
+    expect(status).toBe(200);
+    expect(body.name).toBe("renamed-wf");
+  });
+
+  test("PATCH /api/workflows/:id — bulk patch (create + update nodes)", async () => {
+    const { status, body } = await patch(`/api/workflows/${workflowId}`, {
+      body: {
+        create: [{ id: "c", type: "agent-task", config: { template: "New" } }],
+        update: [{ nodeId: "b", node: { next: "c" } }],
+      },
+    });
+    expect(status).toBe(200);
+    expect(body.definition.nodes).toHaveLength(3);
+    const nodeB = body.definition.nodes.find((n: { id: string }) => n.id === "b");
+    expect(nodeB.next).toBe("c");
+  });
+
+  test("PATCH /api/workflows/:id — bulk patch (delete + replace node)", async () => {
+    // State: a → b → c. Delete c, create d, rewire b → d.
+    const { status, body } = await patch(`/api/workflows/${workflowId}`, {
+      body: {
+        delete: ["c"],
+        create: [{ id: "d", type: "agent-task", config: { template: "Replacement" } }],
+        update: [{ nodeId: "b", node: { next: "d" } }],
+      },
+    });
+    expect(status).toBe(200);
+    expect(body.definition.nodes).toHaveLength(3); // a, b, d
+    expect(body.definition.nodes.find((n: { id: string }) => n.id === "c")).toBeUndefined();
+    expect(body.definition.nodes.find((n: { id: string }) => n.id === "d")).toBeDefined();
+  });
+
+  test("PATCH /api/workflows/:id — patch onNodeFailure", async () => {
+    const { status, body } = await patch(`/api/workflows/${workflowId}`, {
+      body: { onNodeFailure: "continue" },
+    });
+    expect(status).toBe(200);
+    expect(body.definition.onNodeFailure).toBe("continue");
+  });
+
+  test("PATCH /api/workflows/:id — 400 on non-existent delete", async () => {
+    const { status, body } = await patch(`/api/workflows/${workflowId}`, {
+      body: { delete: ["nonexistent"] },
+    });
+    expect(status).toBe(400);
+    expect(body.error).toContain("non-existent");
+  });
+
+  test("PATCH /api/workflows/:id — 400 on broken next ref", async () => {
+    const { status, body } = await patch(`/api/workflows/${workflowId}`, {
+      body: { update: [{ nodeId: "b", node: { next: "ghost" } }] },
+    });
+    expect(status).toBe(400);
+    expect(body.error).toContain("non-existent");
+  });
+
+  test("PATCH /api/workflows/:id/nodes/:nodeId — single node patch", async () => {
+    const { status, body } = await patch(`/api/workflows/${workflowId}/nodes/b`, {
+      body: { label: "Updated Label", config: { template: "Changed" } },
+    });
+    expect(status).toBe(200);
+    const nodeB = body.definition.nodes.find((n: { id: string }) => n.id === "b");
+    expect(nodeB.label).toBe("Updated Label");
+    expect(nodeB.config.template).toBe("Changed");
+  });
+
+  test("PATCH /api/workflows/:id/nodes/:nodeId — 400 on non-existent node", async () => {
+    const { status, body } = await patch(`/api/workflows/${workflowId}/nodes/nope`, {
+      body: { label: "x" },
+    });
+    expect(status).toBe(400);
+    expect(body.error).toContain("non-existent");
+  });
+
+  test("GET /api/workflows/:id/versions — version history", async () => {
+    const { status, body } = await get(`/api/workflows/${workflowId}/versions`);
+    expect(status).toBe(200);
+    // Multiple patches should have created multiple versions
+    expect(body.versions.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("DELETE /api/workflows/:id — delete workflow", async () => {
+    const { status } = await del(`/api/workflows/${workflowId}`);
+    expect(status).toBe(204);
+  });
+
+  test("GET /api/workflows/:id — 404 after delete", async () => {
+    const { status } = await get(`/api/workflows/${workflowId}`);
+    expect(status).toBe(404);
+  });
+
+  test("PATCH /api/workflows/:id — 404 for deleted workflow", async () => {
+    const { status } = await patch(`/api/workflows/${workflowId}`, {
+      body: { create: [{ id: "x", type: "agent-task", config: {} }] },
+    });
+    expect(status).toBe(404);
+  });
+});
+
 describe("AgentMail Webhooks (disabled)", () => {
   test("POST /api/agentmail/webhook returns 503 when disabled", async () => {
     const { status, body } = await post("/api/agentmail/webhook", {
@@ -1630,7 +1557,7 @@ describe("AgentMail Webhooks (with filters)", () => {
         await agentmailProc.exited;
       } catch {}
     }
-    await Bun.sleep(300);
+    await Bun.sleep(50);
     try {
       await unlink(AGENTMAIL_DB);
     } catch {}

@@ -18,9 +18,7 @@ function getTemplatesDir(): string {
   if (fs.existsSync(buildPath)) return buildPath;
   if (fs.existsSync(localPath)) return localPath;
 
-  throw new Error(
-    "Templates directory not found. Expected at ../templates or src/data/templates"
-  );
+  throw new Error("Templates directory not found. Expected at ../templates or src/data/templates");
 }
 
 export function getCategories(): string[] {
@@ -40,15 +38,12 @@ export function getTemplateNames(category: string): string[] {
     .map((d) => d.name);
 }
 
-export function getTemplateConfig(
-  category: string,
-  name: string
-): TemplateConfig {
+export function getTemplateConfig(category: string, name: string): TemplateConfig {
   const configPath = path.join(
     getTemplatesDir(),
     sanitizePathComponent(category),
     sanitizePathComponent(name),
-    "config.json"
+    "config.json",
   );
   const raw = fs.readFileSync(configPath, "utf-8");
   return JSON.parse(raw) as TemplateConfig;
@@ -59,45 +54,36 @@ function readFileOrEmpty(filePath: string): string {
   return fs.readFileSync(filePath, "utf-8");
 }
 
-export function getTemplateFiles(
-  category: string,
-  name: string
-): TemplateResponse["files"] {
+export function getTemplateFiles(category: string, name: string): TemplateResponse["files"] {
   const config = getTemplateConfig(category, name);
-  const dir = path.join(getTemplatesDir(), sanitizePathComponent(category), sanitizePathComponent(name));
+  const dir = path.join(
+    getTemplatesDir(),
+    sanitizePathComponent(category),
+    sanitizePathComponent(name),
+  );
 
   return {
-    claudeMd: config.files.claudeMd
-      ? readFileOrEmpty(path.join(dir, config.files.claudeMd))
-      : "",
-    soulMd: config.files.soulMd
-      ? readFileOrEmpty(path.join(dir, config.files.soulMd))
-      : "",
+    claudeMd: config.files.claudeMd ? readFileOrEmpty(path.join(dir, config.files.claudeMd)) : "",
+    soulMd: config.files.soulMd ? readFileOrEmpty(path.join(dir, config.files.soulMd)) : "",
     identityMd: config.files.identityMd
       ? readFileOrEmpty(path.join(dir, config.files.identityMd))
       : "",
-    toolsMd: config.files.toolsMd
-      ? readFileOrEmpty(path.join(dir, config.files.toolsMd))
-      : "",
+    toolsMd: config.files.toolsMd ? readFileOrEmpty(path.join(dir, config.files.toolsMd)) : "",
+    heartbeatMd: config.files.heartbeatMd ? readFileOrEmpty(path.join(dir, config.files.heartbeatMd)) : "",
     setupScript: config.files.setupScript
       ? readFileOrEmpty(path.join(dir, config.files.setupScript))
       : "",
   };
 }
 
-export function getTemplate(
-  category: string,
-  name: string
-): TemplateResponse {
+export function getTemplate(category: string, name: string): TemplateResponse {
   return {
     config: getTemplateConfig(category, name),
     files: getTemplateFiles(category, name),
   };
 }
 
-export function getAllTemplates(): Array<
-  TemplateConfig & { category: string }
-> {
+export function getAllTemplates(): Array<TemplateConfig & { category: string }> {
   const templates: Array<TemplateConfig & { category: string }> = [];
 
   for (const category of getCategories()) {

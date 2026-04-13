@@ -8,6 +8,7 @@ import {
   getActiveSessions,
   heartbeatActiveSession,
   insertActiveSession,
+  updateActiveSessionProviderSessionId,
 } from "../be/db";
 import { route } from "./route-def";
 import { json } from "./utils";
@@ -40,6 +41,7 @@ const createActiveSession = route({
     triggerType: z.string().min(1),
     inboxMessageId: z.string().optional(),
     taskDescription: z.string().optional(),
+    runnerSessionId: z.string().optional(),
   }),
   responses: {
     201: { description: "Session created" },
@@ -80,6 +82,19 @@ const heartbeatSession = route({
   params: z.object({ taskId: z.string() }),
   responses: {
     200: { description: "Heartbeat updated" },
+  },
+});
+
+const updateProviderSession = route({
+  method: "put",
+  path: "/api/active-sessions/provider-session/{taskId}",
+  pattern: ["api", "active-sessions", "provider-session", null],
+  summary: "Update provider session ID on an active session",
+  tags: ["Active Sessions"],
+  params: z.object({ taskId: z.string() }),
+  body: z.object({ providerSessionId: z.string().min(1) }),
+  responses: {
+    200: { description: "Provider session ID updated" },
   },
 });
 
@@ -126,6 +141,7 @@ export async function handleActiveSessions(
       triggerType: parsed.body.triggerType,
       inboxMessageId: parsed.body.inboxMessageId,
       taskDescription: parsed.body.taskDescription,
+      runnerSessionId: parsed.body.runnerSessionId,
     });
     json(res, { session }, 201);
     return true;
@@ -151,6 +167,17 @@ export async function handleActiveSessions(
     const parsed = await heartbeatSession.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const updated = heartbeatActiveSession(parsed.params.taskId);
+    json(res, { updated });
+    return true;
+  }
+
+  if (updateProviderSession.match(req.method, pathSegments)) {
+    const parsed = await updateProviderSession.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const updated = updateActiveSessionProviderSessionId(
+      parsed.params.taskId,
+      parsed.body.providerSessionId,
+    );
     json(res, { updated });
     return true;
   }

@@ -2,21 +2,32 @@ import {
   claimTask,
   cleanupStaleSessions,
   createTaskExtended,
+  deleteActiveSession,
+  failTask,
+  getActiveSessionForTask,
   getActiveTaskCount,
   getAllAgents,
   getDb,
   getIdleWorkersWithCapacity,
   getLeadAgent,
+  getRecentCompletedCount,
+  getRecentFailedCount,
+  getRecentFailedTasks,
   getStalledInProgressTasks,
   getTaskStats,
+  getTasksByStatus,
   getUnassignedPoolTasks,
   releaseStaleMentionProcessing,
   releaseStaleProcessingInbox,
   releaseStaleReviewingTasks,
   updateAgentStatus,
 } from "../be/db";
+import { resolveTemplate } from "../prompts/resolver";
 import type { AgentTask } from "../types";
-import { recoverStuckWorkflowRuns } from "../workflows/recovery";
+import { getExecutorRegistry } from "../workflows";
+import { recoverIncompleteRuns } from "../workflows/recovery";
+// Side-effect import: registers heartbeat event templates in the in-memory registry
+import "./templates";
 
 // ============================================================================
 // Configuration (env var overrides)
@@ -25,8 +36,14 @@ import { recoverStuckWorkflowRuns } from "../workflows/recovery";
 /** Default heartbeat interval: 90 seconds */
 const DEFAULT_INTERVAL_MS = Number(process.env.HEARTBEAT_INTERVAL_MS) || 90_000;
 
-/** Stall threshold: tasks in_progress with no update for this many minutes */
+/** Stall threshold: tasks with fresh worker heartbeat but no task update for this many minutes */
 const STALL_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALL_THRESHOLD_MIN) || 30;
+
+/** Stall threshold: tasks with no active session (worker clearly dead) */
+const STALL_THRESHOLD_NO_SESSION_MIN = Number(process.env.HEARTBEAT_STALL_NO_SESSION_MIN) || 5;
+
+/** Stall threshold: tasks with stale worker heartbeat */
+const STALL_THRESHOLD_STALE_HEARTBEAT_MIN = Number(process.env.HEARTBEAT_STALL_STALE_HB_MIN) || 15;
 
 /** Stale resource cleanup threshold (minutes) */
 const STALE_CLEANUP_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALE_CLEANUP_MIN) || 30;
@@ -34,7 +51,12 @@ const STALE_CLEANUP_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALE_CLEAN
 /** Max pool tasks to auto-assign per sweep */
 const MAX_AUTO_ASSIGN_PER_SWEEP = Number(process.env.HEARTBEAT_MAX_AUTO_ASSIGN) || 5;
 
-const HEARTBEAT_ESCALATION_MARKER = "[heartbeat-escalation]";
+/** Heartbeat checklist interval: how often to check HEARTBEAT.md (default: 30 min) */
+const HEARTBEAT_CHECKLIST_INTERVAL_MS =
+  Number(process.env.HEARTBEAT_CHECKLIST_INTERVAL_MS) || 30 * 60 * 1000;
+
+/** Whether to disable the heartbeat checklist entirely */
+const HEARTBEAT_CHECKLIST_DISABLE = Boolean(process.env.HEARTBEAT_CHECKLIST_DISABLE);
 
 // ============================================================================
 // Types
@@ -42,6 +64,7 @@ const HEARTBEAT_ESCALATION_MARKER = "[heartbeat-escalation]";
 
 export interface HeartbeatFindings {
   stalledTasks: AgentTask[];
+  autoFailedTasks: Array<{ taskId: string; agentId: string; reason: string }>;
   workerHealthFixes: Array<{ agentId: string; oldStatus: string; newStatus: string }>;
   autoAssigned: Array<{ taskId: string; agentId: string }>;
   staleCleanup: {
@@ -51,8 +74,6 @@ export interface HeartbeatFindings {
     inboxProcessing: number;
     workflowRuns: number;
   };
-  escalationNeeded: boolean;
-  escalationReason?: string;
 }
 
 // ============================================================================
@@ -60,7 +81,11 @@ export interface HeartbeatFindings {
 // ============================================================================
 
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+let checklistInterval: ReturnType<typeof setInterval> | null = null;
 let isSweeping = false;
+
+/** Tasks auto-failed during the reboot sweep, consumed by boot triage */
+let rebootAffectedTasks: Array<{ original: AgentTask; retryTaskId: string | null }> = [];
 
 // ============================================================================
 // Tier 1: Preflight Gate
@@ -102,6 +127,7 @@ export function preflightGate(): boolean {
 export async function codeLevelTriage(): Promise<HeartbeatFindings> {
   const findings: HeartbeatFindings = {
     stalledTasks: [],
+    autoFailedTasks: [],
     workerHealthFixes: [],
     autoAssigned: [],
     staleCleanup: {
@@ -111,11 +137,10 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
       inboxProcessing: 0,
       workflowRuns: 0,
     },
-    escalationNeeded: false,
   };
 
-  // 1. Detect stalled tasks
-  detectStalledTasks(findings);
+  // 1. Detect and remediate stalled tasks (tiered: auto-fail dead workers)
+  detectAndRemediateStalledTasks(findings);
 
   // 2. Check and fix worker health
   checkWorkerHealth(findings);
@@ -126,18 +151,172 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
   // 4. Cleanup stale resources (including workflow run recovery)
   await cleanupStaleResources(findings);
 
-  // 5. Determine if escalation is needed
-  evaluateEscalation(findings);
-
   return findings;
 }
 
 /**
- * Detect in_progress tasks that haven't been updated in a while.
+ * Tiered stall detection and auto-remediation.
+ *
+ * Cross-checks stalled tasks with active_sessions to determine severity:
+ * - No active session → worker is dead → auto-fail (5 min threshold)
+ * - Stale session heartbeat → worker likely crashed → auto-fail (15 min threshold)
+ * - Fresh session heartbeat → worker alive but task stale → escalate to lead (30 min threshold)
  */
-function detectStalledTasks(findings: HeartbeatFindings): void {
-  const stalled = getStalledInProgressTasks(STALL_THRESHOLD_MINUTES);
-  findings.stalledTasks = stalled;
+function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
+  // Use the shortest threshold to catch all potentially stalled tasks
+  const candidates = getStalledInProgressTasks(STALL_THRESHOLD_NO_SESSION_MIN);
+
+  for (const task of candidates) {
+    if (!task.agentId) continue; // Unassigned tasks can't be stalled
+
+    const session = getActiveSessionForTask(task.id);
+    const taskAgeMs = Date.now() - new Date(task.lastUpdatedAt).getTime();
+
+    if (!session) {
+      // Case A: No active session — worker is dead
+      if (taskAgeMs >= STALL_THRESHOLD_NO_SESSION_MIN * 60 * 1000) {
+        const reason =
+          "Auto-failed by heartbeat: worker session not found (no active session for task)";
+        const failed = failTask(task.id, reason);
+        if (failed) {
+          findings.autoFailedTasks.push({ taskId: task.id, agentId: task.agentId, reason });
+          console.log(`[Heartbeat] Auto-failed task ${task.id.slice(0, 8)} — no active session`);
+
+          // Fix agent status if no other active tasks
+          const remaining = getActiveTaskCount(task.agentId);
+          if (remaining === 0) {
+            updateAgentStatus(task.agentId, "idle");
+          }
+        }
+      }
+    } else {
+      const sessionHeartbeatAgeMs = Date.now() - new Date(session.lastHeartbeatAt).getTime();
+      const isStaleHeartbeat =
+        sessionHeartbeatAgeMs >= STALL_THRESHOLD_STALE_HEARTBEAT_MIN * 60 * 1000;
+
+      if (isStaleHeartbeat) {
+        // Case B: Session exists but heartbeat is stale — worker likely crashed
+        if (taskAgeMs >= STALL_THRESHOLD_STALE_HEARTBEAT_MIN * 60 * 1000) {
+          const reason =
+            "Auto-failed by heartbeat: worker session heartbeat is stale (likely crashed)";
+          const failed = failTask(task.id, reason);
+          if (failed) {
+            findings.autoFailedTasks.push({ taskId: task.id, agentId: task.agentId, reason });
+            deleteActiveSession(task.id);
+            console.log(
+              `[Heartbeat] Auto-failed task ${task.id.slice(0, 8)} — stale session heartbeat`,
+            );
+
+            const remaining = getActiveTaskCount(task.agentId);
+            if (remaining === 0) {
+              updateAgentStatus(task.agentId, "idle");
+            }
+          }
+        }
+      } else {
+        // Case C: Session exists and heartbeat is fresh — ambiguous
+        if (taskAgeMs >= STALL_THRESHOLD_MINUTES * 60 * 1000) {
+          findings.stalledTasks.push(task);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Aggressive sweep that runs once after server restart.
+ * Ignores age thresholds — any in_progress task with no active session is auto-failed.
+ * Creates exactly one retry task per failed task via parentTaskId.
+ */
+export async function runRebootSweep(): Promise<void> {
+  if (isSweeping) {
+    console.log("[Heartbeat] Reboot sweep skipped — another sweep is running");
+    return;
+  }
+  isSweeping = true;
+
+  try {
+    // Always reset — previous sweep data is stale after a new sweep starts
+    rebootAffectedTasks = [];
+
+    // Get ALL in_progress tasks (threshold=0 means cutoff=now, effectively all)
+    const allInProgress = getStalledInProgressTasks(0);
+    if (allInProgress.length === 0) {
+      console.log("[Heartbeat] Reboot sweep: no in-progress tasks found");
+      return;
+    }
+    const reason = "Auto-failed by reboot sweep: worker session not found after server restart";
+
+    for (const task of allInProgress) {
+      if (!task.agentId) {
+        console.warn(
+          `[Heartbeat] Reboot sweep: skipping task ${task.id} — in_progress with no agentId`,
+        );
+        continue;
+      }
+
+      const session = getActiveSessionForTask(task.id);
+      if (session) continue; // Session exists — worker might still be alive, skip
+
+      // Auto-fail the task
+      const failed = failTask(task.id, reason);
+      if (!failed) continue;
+
+      // Fix agent status
+      if (getActiveTaskCount(task.agentId) === 0) {
+        updateAgentStatus(task.agentId, "idle");
+      }
+
+      // Don't retry system-generated heartbeat tasks
+      const skipRetryTypes = ["heartbeat-checklist", "boot-triage", "heartbeat"];
+      if (skipRetryTypes.includes(task.taskType ?? "")) {
+        rebootAffectedTasks.push({ original: failed, retryTaskId: null });
+        continue;
+      }
+
+      // Auto-retry: create a replacement task with parentTaskId
+      let retryTaskId: string | null = null;
+
+      // Guard: only retry if parent doesn't already have a retry child
+      const existingRetry = getDb()
+        .prepare<{ id: string }, [string]>(
+          `SELECT id FROM agent_tasks
+           WHERE parentTaskId = ?
+             AND status NOT IN ('completed', 'failed', 'cancelled')
+           LIMIT 1`,
+        )
+        .get(task.id);
+
+      if (!existingRetry) {
+        try {
+          const retryTask = createTaskExtended(task.task, {
+            parentTaskId: task.id,
+            tags: ["reboot-retry", "auto-generated"],
+            priority: task.priority,
+            source: task.source,
+            taskType: task.taskType ?? undefined,
+          });
+          retryTaskId = retryTask.id;
+          console.log(`[Heartbeat] Reboot retry created: ${retryTaskId} (parent: ${task.id})`);
+        } catch (err) {
+          console.error(`[Heartbeat] Failed to create retry task for ${task.id}:`, err);
+        }
+      }
+
+      rebootAffectedTasks.push({ original: failed, retryTaskId });
+    }
+
+    console.log(
+      `[Heartbeat] Reboot sweep complete: ${rebootAffectedTasks.length} task(s) auto-failed and retried`,
+    );
+  } finally {
+    isSweeping = false;
+  }
+}
+
+/** Get tasks affected by the most recent reboot sweep */
+export function getRebootAffectedTasks() {
+  return rebootAffectedTasks;
 }
 
 /**
@@ -214,94 +393,266 @@ async function cleanupStaleResources(findings: HeartbeatFindings): Promise<void>
   findings.staleCleanup.inboxProcessing = releaseStaleProcessingInbox(
     STALE_CLEANUP_THRESHOLD_MINUTES,
   );
-  findings.staleCleanup.workflowRuns = await recoverStuckWorkflowRuns();
-}
-
-// ============================================================================
-// Tier 3: Escalation
-// ============================================================================
-
-/**
- * Evaluate whether findings require escalation to a Claude session (lead agent).
- * Only escalate for truly ambiguous situations that need human-level reasoning.
- */
-function evaluateEscalation(findings: HeartbeatFindings): void {
-  // Stalled tasks are ambiguous — the task might be actively worked on
-  // but the worker just hasn't called store-progress recently
-  if (findings.stalledTasks.length > 0) {
-    findings.escalationNeeded = true;
-    const taskIds = findings.stalledTasks.map((t) => t.id.slice(0, 8)).join(", ");
-    findings.escalationReason = `${findings.stalledTasks.length} task(s) stalled (no update for ${STALL_THRESHOLD_MINUTES}+ min): ${taskIds}`;
+  try {
+    findings.staleCleanup.workflowRuns = await recoverIncompleteRuns(getExecutorRegistry());
+  } catch {
+    // Workflow engine may not be initialized yet — skip recovery
+    findings.staleCleanup.workflowRuns = 0;
   }
 }
 
+// ============================================================================
+// Heartbeat Checklist (HEARTBEAT.md-based periodic check)
+// ============================================================================
+
 /**
- * Create a triage task for the lead agent to investigate ambiguous findings.
+ * Check if content is effectively empty (only headers, comments, empty items).
+ * Returns true if there are no actionable items — the checklist should be skipped.
  */
-function escalateToLead(findings: HeartbeatFindings): void {
-  const lead = getLeadAgent();
-  if (!lead) {
-    console.log("[Heartbeat] No lead agent found — skipping escalation");
-    return;
+export function isEffectivelyEmpty(content: string): boolean {
+  const lines = content.split("\n");
+  let inComment = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Track multi-line HTML comments
+    if (inComment) {
+      if (trimmed.includes("-->")) {
+        inComment = false;
+      }
+      continue;
+    }
+
+    if (trimmed.startsWith("<!--")) {
+      if (!trimmed.includes("-->")) {
+        inComment = true;
+      }
+      continue;
+    }
+
+    // Skip blank lines
+    if (trimmed === "") continue;
+
+    // Skip markdown headers
+    if (/^#{1,6}\s/.test(trimmed)) continue;
+
+    // Skip empty list items (just a marker with no text)
+    if (/^[-*+]\s*\[\s*\]\s*$/.test(trimmed)) continue;
+    if (/^[-*+]\s*$/.test(trimmed)) continue;
+
+    // If we get here, there's real content
+    return false;
   }
 
-  const escalationKey = buildEscalationKey(findings);
-  if (hasActiveEscalationTask(lead.id, escalationKey)) {
-    return;
-  }
+  return true;
+}
 
-  const sections: string[] = [
-    "Task Type: Triage\nGoal: Investigate heartbeat findings that need human reasoning\n",
-  ];
+/**
+ * Gather current system status as a markdown string for the lead's checklist task.
+ */
+export function gatherSystemStatus(options?: { isBootTriage?: boolean }): string {
+  const stats = getTaskStats();
+  const stalledTasks = getStalledInProgressTasks(STALL_THRESHOLD_MINUTES);
+  const agents = getAllAgents();
+  const idleWorkers = getIdleWorkersWithCapacity();
+  const poolTasks = getUnassignedPoolTasks(10);
+  const recentCompleted = getRecentCompletedCount(24);
+  const recentFailedCount = getRecentFailedCount(24);
 
-  if (findings.stalledTasks.length > 0) {
-    sections.push("## Stalled Tasks");
-    for (const task of findings.stalledTasks) {
+  const sections: string[] = [];
+
+  // Task overview (with real 24h filtering)
+  sections.push("## Task Overview [auto-generated]");
+  sections.push(`- In Progress: ${stats.in_progress ?? 0}`);
+  sections.push(`- Pending: ${stats.pending ?? 0}`);
+  sections.push(`- Unassigned: ${stats.unassigned ?? 0}`);
+  sections.push(`- Completed (24h): ${recentCompleted}`);
+  sections.push(`- Failed (24h): ${recentFailedCount}`);
+
+  // Stalled tasks
+  if (stalledTasks.length > 0) {
+    sections.push("");
+    sections.push("## Stalled Tasks [auto-generated]");
+    for (const task of stalledTasks) {
       const agentSlice = task.agentId?.slice(0, 8) ?? "unassigned";
       sections.push(
-        `- Task ${task.id.slice(0, 8)} (agent: ${agentSlice}): last updated ${task.lastUpdatedAt}`,
+        `- [${task.id.slice(0, 8)}] "${task.task.slice(0, 60)}" — assigned to ${agentSlice}, last update: ${task.lastUpdatedAt}`,
       );
     }
-    sections.push(
-      "\nCheck if these tasks are genuinely stuck or just working without calling store-progress. " +
-        "If stuck, consider cancelling and reassigning.",
-    );
   }
 
-  sections.push(`\n${HEARTBEAT_ESCALATION_MARKER} ${escalationKey}`);
+  // Recent failures with reasons and pattern detection (last 6 hours)
+  const recentFailures = getRecentFailedTasks(6);
+  if (recentFailures.length > 0) {
+    sections.push("");
+    sections.push("## Recent Failures (last 6h) [auto-generated]");
 
-  const taskDescription = sections.join("\n");
+    // Group by similar failure reasons for pattern detection
+    const reasonGroups = new Map<string, typeof recentFailures>();
+    for (const task of recentFailures) {
+      const key = (task.failureReason ?? "unknown").slice(0, 80).toLowerCase().trim();
+      const group = reasonGroups.get(key) ?? [];
+      group.push(task);
+      reasonGroups.set(key, group);
+    }
 
-  createTaskExtended(taskDescription, {
-    agentId: lead.id,
-    taskType: "heartbeat",
-    tags: ["heartbeat", "triage", "auto-generated"],
-    priority: 70,
-  });
+    // Show patterns first (groups with 2+ failures)
+    const patterns = [...reasonGroups.entries()].filter(([, tasks]) => tasks.length >= 2);
+    if (patterns.length > 0) {
+      sections.push("");
+      sections.push("**Failure patterns detected:**");
+      for (const [reason, tasks] of patterns) {
+        const agentIds = [...new Set(tasks.map((t) => t.agentId?.slice(0, 8) ?? "?"))].join(", ");
+        sections.push(`- ${tasks.length}x: "${reason}" (agents: ${agentIds})`);
+      }
+    }
 
-  console.log(`[Heartbeat] Created triage task for lead ${lead.name}`);
+    // List individual failures (max 10)
+    sections.push("");
+    for (const task of recentFailures.slice(0, 10)) {
+      const agentSlice = task.agentId?.slice(0, 8) ?? "unassigned";
+      const reason = task.failureReason?.slice(0, 100) ?? "no reason";
+      sections.push(
+        `- [${task.id.slice(0, 8)}] "${task.task.slice(0, 50)}" — agent: ${agentSlice}, reason: ${reason}, at: ${task.finishedAt}`,
+      );
+    }
+    if (recentFailures.length > 10) {
+      sections.push(`- ... and ${recentFailures.length - 10} more`);
+    }
+  }
+
+  // Agent status
+  const idle = agents.filter((a) => a.status === "idle");
+  const busy = agents.filter((a) => a.status === "busy");
+  const offline = agents.filter((a) => a.status === "offline");
+  sections.push("");
+  sections.push("## Agent Status [auto-generated]");
+  sections.push(
+    `- Online: ${idle.length + busy.length} (${idle.length} idle, ${busy.length} busy), Offline: ${offline.length}`,
+  );
+
+  // Available work
+  if (poolTasks.length > 0 || idleWorkers.length > 0) {
+    sections.push("");
+    sections.push("## Available Work [auto-generated]");
+    if (poolTasks.length > 0) {
+      sections.push(`- ${poolTasks.length} unassigned pool task(s) waiting`);
+    }
+    if (idleWorkers.length > 0) {
+      sections.push(`- ${idleWorkers.length} idle worker(s) with capacity`);
+    }
+  }
+
+  // Reboot-interrupted work (boot triage only)
+  if (options?.isBootTriage) {
+    const rebootTasks = getRebootAffectedTasks();
+
+    if (rebootTasks.length > 0) {
+      sections.push("");
+      sections.push("## Reboot-Interrupted Work [auto-generated, ACTION REQUIRED]");
+      sections.push(
+        "The following tasks were in-progress before the restart. Their workers are no longer active.",
+      );
+      sections.push("Each has been auto-failed and a retry task created where applicable.");
+      sections.push("");
+
+      for (const { original, retryTaskId } of rebootTasks) {
+        const agentName = original.agentId
+          ? (agents.find((a) => a.id === original.agentId)?.name ?? original.agentId)
+          : "unassigned";
+        const retryNote = retryTaskId
+          ? `→ retry created: ${retryTaskId}`
+          : "→ no retry (system task)";
+        sections.push(
+          `- [${original.id}] "${original.task.slice(0, 100)}" — was on ${agentName} ${retryNote}`,
+        );
+      }
+
+      sections.push("");
+      sections.push("**You MUST triage each task above:**");
+      sections.push("- Verify the retry task is progressing (check via `get-task-details`)");
+      sections.push("- If the retry failed or the work is no longer needed, cancel it");
+      sections.push("- Do NOT mark this boot triage as complete until all items are triaged");
+    }
+
+    // Orphaned pending/offered tasks (assigned to workers with no active session)
+    const orphanedTasks: AgentTask[] = [];
+
+    for (const status of ["pending", "offered"] as const) {
+      const tasks = getTasksByStatus(status);
+
+      for (const task of tasks) {
+        if (!task.agentId) continue;
+        const agent = agents.find((a) => a.id === task.agentId);
+        if (!agent || agent.status === "offline") {
+          orphanedTasks.push(task);
+        }
+      }
+    }
+
+    if (orphanedTasks.length > 0) {
+      sections.push("");
+      sections.push("## Orphaned Tasks [auto-generated, NEEDS ATTENTION]");
+      sections.push("These tasks are pending/offered but assigned to workers that are offline:");
+      for (const task of orphanedTasks) {
+        const agentName = agents.find((a) => a.id === task.agentId)?.name ?? task.agentId ?? "?";
+        sections.push(
+          `- [${task.id}] "${task.task.slice(0, 100)}" — status: ${task.status}, assigned to: ${agentName}`,
+        );
+      }
+      sections.push("");
+      sections.push("Consider re-assigning or cancelling these tasks.");
+      sections.push(
+        "Note: Some workers may appear offline briefly while re-registering after the restart. Wait a few minutes before acting on these — auto-assign will handle re-routing once workers come online.",
+      );
+    }
+  }
+
+  return sections.join("\n");
 }
 
-function buildEscalationKey(findings: HeartbeatFindings): string {
-  const stalledTaskIds = findings.stalledTasks
-    .map((task) => task.id)
-    .sort((a, b) => a.localeCompare(b));
-  return `stalled:${stalledTaskIds.join(",")}`;
-}
+/**
+ * Check HEARTBEAT.md content and create a checklist task for the lead if needed.
+ */
+export async function checkHeartbeatChecklist(): Promise<void> {
+  const lead = getLeadAgent();
+  if (!lead) return;
 
-function hasActiveEscalationTask(leadAgentId: string, escalationKey: string): boolean {
+  const heartbeatMd = lead.heartbeatMd;
+  if (!heartbeatMd) return;
+
+  if (isEffectivelyEmpty(heartbeatMd)) return;
+
+  // Dedup: skip if lead already has an active heartbeat-checklist task
   const existing = getDb()
-    .prepare<{ id: string }, [string, string]>(
+    .prepare<{ id: string }, [string]>(
       `SELECT id FROM agent_tasks
        WHERE agentId = ?
-         AND taskType = 'heartbeat'
+         AND taskType = 'heartbeat-checklist'
          AND status NOT IN ('completed', 'failed', 'cancelled')
-         AND task LIKE ?
        LIMIT 1`,
     )
-    .get(leadAgentId, `%${HEARTBEAT_ESCALATION_MARKER} ${escalationKey}%`);
+    .get(lead.id);
+  if (existing) return;
 
-  return Boolean(existing);
+  const systemStatus = gatherSystemStatus();
+
+  const result = resolveTemplate("heartbeat.checklist", {
+    system_status: systemStatus,
+    heartbeat_content: heartbeatMd,
+  });
+
+  if (result.skipped) return;
+
+  createTaskExtended(result.text, {
+    agentId: lead.id,
+    taskType: "heartbeat-checklist",
+    tags: ["checklist", "auto-generated"],
+    priority: 60,
+  });
+
+  console.log(`[Heartbeat] Checklist task created for lead ${lead.name}`);
 }
 
 // ============================================================================
@@ -309,7 +660,7 @@ function hasActiveEscalationTask(leadAgentId: string, escalationKey: string): bo
 // ============================================================================
 
 /**
- * Run a single heartbeat sweep (Tier 1 → Tier 2 → Tier 3).
+ * Run a single heartbeat sweep (Tier 1 → Tier 2).
  */
 export async function runHeartbeatSweep(): Promise<void> {
   if (isSweeping) {
@@ -322,6 +673,7 @@ export async function runHeartbeatSweep(): Promise<void> {
     if (!preflightGate()) {
       const cleanupOnlyFindings: HeartbeatFindings = {
         stalledTasks: [],
+        autoFailedTasks: [],
         workerHealthFixes: [],
         autoAssigned: [],
         staleCleanup: {
@@ -331,7 +683,6 @@ export async function runHeartbeatSweep(): Promise<void> {
           inboxProcessing: 0,
           workflowRuns: 0,
         },
-        escalationNeeded: false,
       };
       await cleanupStaleResources(cleanupOnlyFindings);
       logFindings(cleanupOnlyFindings);
@@ -343,11 +694,6 @@ export async function runHeartbeatSweep(): Promise<void> {
 
     // Log findings summary
     logFindings(findings);
-
-    // Tier 3: Escalate if needed
-    if (findings.escalationNeeded) {
-      escalateToLead(findings);
-    }
   } finally {
     isSweeping = false;
   }
@@ -359,6 +705,9 @@ export async function runHeartbeatSweep(): Promise<void> {
 function logFindings(findings: HeartbeatFindings): void {
   const parts: string[] = [];
 
+  if (findings.autoFailedTasks.length > 0) {
+    parts.push(`auto_failed=${findings.autoFailedTasks.length}`);
+  }
   if (findings.stalledTasks.length > 0) {
     parts.push(`stalled=${findings.stalledTasks.length}`);
   }
@@ -398,12 +747,18 @@ export function startHeartbeat(intervalMs = DEFAULT_INTERVAL_MS): void {
 
   console.log(`[Heartbeat] Starting with ${intervalMs}ms interval`);
 
-  // Run initial sweep after a short delay (let server fully start)
-  setTimeout(() => runHeartbeatSweep(), 5000);
+  // Run aggressive reboot sweep first (no thresholds), then normal sweep cycle
+  setTimeout(async () => {
+    await runRebootSweep();
+    runHeartbeatSweep();
+  }, 5000);
 
   heartbeatInterval = setInterval(() => {
     runHeartbeatSweep();
   }, intervalMs);
+
+  // Also start the checklist interval
+  startHeartbeatChecklist();
 }
 
 /**
@@ -415,5 +770,83 @@ export function stopHeartbeat(): void {
     heartbeatInterval = null;
     isSweeping = false;
     console.log("[Heartbeat] Stopped");
+  }
+  stopHeartbeatChecklist();
+}
+
+/**
+ * Create a one-off boot triage task for the lead after a server restart.
+ * Uses the same HEARTBEAT.md content but with reboot-specific context prepended.
+ */
+export async function createBootTriageTask(): Promise<void> {
+  const lead = getLeadAgent();
+  if (!lead) return;
+
+  const heartbeatMd = lead.heartbeatMd ?? "";
+
+  // Dedup: skip if lead already has an active boot-triage task
+  const existing = getDb()
+    .prepare<{ id: string }, [string]>(
+      `SELECT id FROM agent_tasks
+       WHERE agentId = ?
+         AND taskType = 'boot-triage'
+         AND status NOT IN ('completed', 'failed', 'cancelled')
+       LIMIT 1`,
+    )
+    .get(lead.id);
+  if (existing) return;
+
+  const systemStatus = gatherSystemStatus({ isBootTriage: true });
+
+  const result = resolveTemplate("heartbeat.boot-triage", {
+    system_status: systemStatus,
+    heartbeat_content: isEffectivelyEmpty(heartbeatMd)
+      ? "_No standing orders configured._"
+      : heartbeatMd,
+  });
+
+  if (result.skipped) return;
+
+  createTaskExtended(result.text, {
+    agentId: lead.id,
+    taskType: "boot-triage",
+    tags: ["boot", "triage", "auto-generated"],
+    priority: 70, // Higher than regular checklist (60)
+  });
+
+  console.log(`[Heartbeat] Boot triage task created for lead ${lead.name}`);
+}
+
+/**
+ * Start the heartbeat checklist polling loop (separate from the infrastructure sweep).
+ */
+export function startHeartbeatChecklist(intervalMs = HEARTBEAT_CHECKLIST_INTERVAL_MS): void {
+  if (HEARTBEAT_CHECKLIST_DISABLE) {
+    console.log("[Heartbeat] Checklist disabled via HEARTBEAT_CHECKLIST_DISABLE");
+    return;
+  }
+  if (checklistInterval) {
+    return; // Already running
+  }
+
+  console.log(`[Heartbeat] Checklist starting with ${intervalMs}ms interval`);
+
+  // Boot triage at T+90s — after reboot sweep (T+5s) has completed and results are available
+  setTimeout(() => createBootTriageTask(), 90_000);
+
+  // Recurring checklist starts from the second interval onward
+  checklistInterval = setInterval(() => {
+    checkHeartbeatChecklist();
+  }, intervalMs);
+}
+
+/**
+ * Stop the heartbeat checklist polling loop.
+ */
+export function stopHeartbeatChecklist(): void {
+  if (checklistInterval) {
+    clearInterval(checklistInterval);
+    checklistInterval = null;
+    console.log("[Heartbeat] Checklist stopped");
   }
 }

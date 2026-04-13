@@ -21,6 +21,8 @@ export function routeMessage(
   threadContext?: ThreadContext,
 ): AgentMatch[] {
   const matches: AgentMatch[] = [];
+  const requireMentionForThreadFollowup =
+    process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION === "true";
   const agents = getAllAgents().filter((a) => a.status !== "offline");
 
   // Check for explicit swarm#<id> syntax
@@ -45,7 +47,7 @@ export function routeMessage(
   }
 
   // Thread follow-up — route to agent already working in this thread
-  if (matches.length === 0 && threadContext) {
+  if (matches.length === 0 && threadContext && (!requireMentionForThreadFollowup || botMentioned)) {
     const workingAgent = getAgentWorkingOnThread(threadContext.channelId, threadContext.threadTs);
     if (workingAgent && workingAgent.status !== "offline") {
       console.log(

@@ -3,7 +3,7 @@
 # Multi-stage build: compiles to standalone binary with full dev environment
 
 # Stage 1: Build the binary
-FROM oven/bun:1.3.9 AS builder
+FROM oven/bun:1.3.11 AS builder
 WORKDIR /build
 COPY package.json bun.lock* ./
 RUN bun install --frozen-lockfile
@@ -70,31 +70,69 @@ WORKDIR /home/worker
 ENV HOME=/home/worker
 ENV BUN_INSTALL="/home/worker/.bun"
 
+# Redirect corepack home to user-writable directory (default /usr/lib/node_modules/
+# requires root and causes "operation rejected by your operating system" errors)
+ENV COREPACK_HOME=/home/worker/.corepack
+RUN mkdir -p /home/worker/.corepack
+
 # Install Bun for worker user (need to set HOME explicitly in RUN)
 RUN HOME=/home/worker BUN_INSTALL=/home/worker/.bun curl -fsSL https://bun.sh/install | bash
 ENV PATH="/home/worker/.bun/bin:$PATH"
 
-# Install Claude CLI using official installer
-RUN HOME=/home/worker curl -fsSL https://claude.ai/install.sh | bash
+# Install Claude CLI (pinned version — bump ARG to update)
+ARG CLAUDE_CODE_VERSION=2.1.87
+RUN sudo npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+# Verify claude binary is findable after install
+RUN which claude && claude --version
 ENV PATH="/home/worker/.local/bin:$PATH"
 
 # Install pi-mono CLI (alternative harness, selected via HARNESS_PROVIDER=pi)
 # PI_PACKAGE_DIR tells pi-mono where to find its package.json at runtime
 # (needed because bun --compile makes process.execPath resolve to the binary location)
-RUN sudo npm install -g @mariozechner/pi-coding-agent \
+ARG PI_CODING_AGENT_VERSION=0.64.0
+RUN sudo npm install -g @mariozechner/pi-coding-agent@${PI_CODING_AGENT_VERSION} \
     && mkdir -p /home/worker/.pi/agent
 ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@mariozechner/pi-coding-agent
+
+# Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
+# Pinned version must match @openai/codex-sdk in package.json — enforced by
+# scripts/check-codex-default-model.sh and the CI merge gate.
+ARG CODEX_VERSION=0.118.0
+RUN sudo npm install -g @openai/codex@${CODEX_VERSION}
+RUN which codex && codex --version
+
+# The @openai/codex-sdk bundled inside the compiled agent-swarm binary cannot
+# resolve `require.resolve("@openai/codex")` at runtime because the globally-
+# installed package is not part of the Bun bundle. Point the SDK at the global
+# Codex CLI wrapper via CODEX_PATH_OVERRIDE so `src/providers/codex-adapter.ts`
+# forwards it to `new Codex({ codexPathOverride })`. The wrapper is a node
+# shebang script that resolves the platform-specific native binary itself.
+ENV CODEX_PATH_OVERRIDE=/usr/bin/codex
+
+# Baseline ~/.codex/config.toml for the worker user. The `model` key must stay
+# in sync with CODEX_DEFAULT_MODEL in src/providers/codex-models.ts (enforced by
+# scripts/check-codex-default-model.sh).
+RUN mkdir -p /home/worker/.codex && \
+    printf '%s\n' \
+      'model = "gpt-5.4"' \
+      'approval_policy = "never"' \
+      'sandbox_mode = "danger-full-access"' \
+      'skip_git_repo_check = true' \
+      'show_raw_agent_reasoning = false' \
+      > /home/worker/.codex/config.toml && \
+    chown -R worker:worker /home/worker/.codex
 
 # Install Claude marketplace plugins (build-time cache)
 RUN mkdir -p /home/worker/.claude \
     && claude plugin marketplace add desplega-ai/ai-toolbox || true \
     && claude plugin install desplega@desplega-ai-toolbox --scope user || true \
-    && claude plugin install agent-swarm@desplega-ai-toolbox --scope user || true \
     && claude plugin install wts@desplega-ai-toolbox --scope user || true \
     && claude plugin marketplace add desplega-ai/qa-use || true \
     && claude plugin install qa-use@desplega.ai --scope user || true \
     && claude plugin marketplace add mksglu/claude-context-mode || true \
-    && claude plugin install context-mode@claude-context-mode --scope user || true
+    && claude plugin install context-mode@context-mode --scope user || true \
+    && claude plugin marketplace add desplega-ai/agent-fs || true \
+    && claude plugin install agent-fs@agent-fs --scope user || true
 
 # Configure wts for agent mode (no tmux, no auto-Claude)
 RUN mkdir -p /home/worker/.wts \
@@ -121,10 +159,11 @@ RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
 USER root
 RUN npm install -g \
     pm2@6.0.14 \
-    @sentry/cli@3.3.0 \
-    @desplega.ai/wts@0.2.2 \
+    @sentry/cli@3.3.4 \
+    @desplega.ai/wts@0.2.3 \
     @desplega.ai/localtunnel@2.2.0 \
-    @desplega.ai/qa-use@2.8.7 \
+    @desplega.ai/qa-use@2.11.0 \
+    @desplega.ai/agent-fs@0.4.0 \
     && qa-use install-deps
 
 # Install archil CLI for FUSE/R2-backed disk mounts
@@ -141,6 +180,19 @@ COPY --chown=worker:worker plugin/skills/ /home/worker/.claude/skills/
 
 # Copy pi-mono skills (used when HARNESS_PROVIDER=pi)
 COPY --chown=worker:worker plugin/pi-skills/ /home/worker/.pi/agent/skills/
+
+# Copy codex skills (used when HARNESS_PROVIDER=codex)
+# Structure: plugin/commands/<name>.md -> ~/.codex/skills/<name>/SKILL.md
+COPY --chown=worker:worker plugin/commands/ /tmp/codex-skills-src/
+RUN mkdir -p /home/worker/.codex/skills && \
+    for f in /tmp/codex-skills-src/*.md; do \
+      [ -e "$f" ] || continue; \
+      name=$(basename "$f" .md); \
+      mkdir -p "/home/worker/.codex/skills/$name"; \
+      cp "$f" "/home/worker/.codex/skills/$name/SKILL.md"; \
+    done && \
+    rm -rf /tmp/codex-skills-src && \
+    chown -R worker:worker /home/worker/.codex/skills
 
 # Create directories and copy entrypoint
 RUN mkdir -p /workspace /logs && chown worker:worker /workspace /logs

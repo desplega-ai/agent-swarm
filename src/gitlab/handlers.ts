@@ -8,9 +8,12 @@
  * - Detects bot mentions
  */
 
-import { createTaskExtended, failTask, findTaskByVcs, getAllAgents } from "../be/db";
+import { createTaskExtended, failTask, findTaskByVcs, getAllAgents, resolveUser } from "../be/db";
+import { resolveTemplate } from "../prompts/resolver";
 import { GITLAB_BOT_NAME } from "./auth";
 import { addGitLabNoteReaction, addGitLabReaction } from "./reactions";
+// Side-effect import: registers all GitLab event templates in the in-memory registry
+import "./templates";
 import type { IssueEvent, MergeRequestEvent, NoteEvent, PipelineEvent } from "./types";
 
 // ── Dedup cache (same pattern as GitHub) ──
@@ -30,9 +33,6 @@ function isDuplicate(key: string): boolean {
 
 // ── Helpers ──
 
-const DELEGATION_INSTRUCTION =
-  "\n\n**Delegation instruction:** As the lead agent, analyze this and decide whether to handle it yourself or delegate to a worker agent. Use `send-task` to delegate with clear instructions.";
-
 function detectMention(text: string | null | undefined): boolean {
   if (!text) return false;
   return new RegExp(`@${GITLAB_BOT_NAME}\\b`, "i").test(text);
@@ -51,17 +51,6 @@ function findLeadAgent() {
   );
 }
 
-function getCommandSuggestions(type: string): string {
-  switch (type) {
-    case "mr":
-      return "Suggested commands: `/review-pr` to review the MR, `/implement-issue` to implement changes.";
-    case "issue":
-      return "Suggested commands: `/implement-issue` to implement, `/close-issue` to close.";
-    default:
-      return "";
-  }
-}
-
 // ── Event Handlers ──
 
 export async function handleMergeRequest(
@@ -70,6 +59,9 @@ export async function handleMergeRequest(
   const { user, project, object_attributes: mr } = event;
   const action = mr.action;
   const repo = project.path_with_namespace;
+
+  // Resolve canonical user from GitLab sender
+  const requestedByUserId = resolveUser({ gitlabUsername: user.username })?.id;
 
   console.log(`[GitLab] MR #${mr.iid} ${action} by ${user.username} in ${repo}`);
 
@@ -91,9 +83,23 @@ export async function handleMergeRequest(
       }
 
       const context = mr.description ? extractMentionContext(mr.description) : "";
-      const taskDesc = `[GitLab MR #${mr.iid}] ${mr.title}\n\nRepo: ${repo}\nAuthor: @${user.username}\nBranch: ${mr.source_branch} → ${mr.target_branch}\nURL: ${mr.url}\n\n${context ? `Context: ${context}\n\n` : ""}${getCommandSuggestions("mr")}${DELEGATION_INSTRUCTION}`;
+      const contextSection = context ? `Context: ${context}\n\n` : "";
+      const result = resolveTemplate("gitlab.merge_request.opened", {
+        mr_iid: mr.iid,
+        mr_title: mr.title,
+        repo,
+        username: user.username,
+        source_branch: mr.source_branch,
+        target_branch: mr.target_branch,
+        mr_url: mr.url,
+        context_section: contextSection,
+      });
 
-      const task = createTaskExtended(taskDesc, {
+      if (result.skipped) {
+        return { created: false };
+      }
+
+      const task = createTaskExtended(result.text, {
         agentId: lead?.id ?? null,
         source: "gitlab",
         vcsProvider: "gitlab",
@@ -102,6 +108,7 @@ export async function handleMergeRequest(
         vcsEventType: "merge_request",
         vcsNumber: mr.iid,
         vcsAuthor: user.username,
+        requestedByUserId,
         vcsUrl: mr.url,
       });
 
@@ -148,6 +155,9 @@ export async function handleIssue(
   const action = issue.action;
   const repo = project.path_with_namespace;
 
+  // Resolve canonical user from GitLab sender
+  const requestedByUserId = resolveUser({ gitlabUsername: user.username })?.id;
+
   console.log(`[GitLab] Issue #${issue.iid} ${action} by ${user.username} in ${repo}`);
 
   const dedupKey = `gitlab-issue-${repo}-${issue.iid}-${action}-${user.username}`;
@@ -172,9 +182,21 @@ export async function handleIssue(
       }
 
       const context = issue.description ? extractMentionContext(issue.description) : "";
-      const taskDesc = `[GitLab Issue #${issue.iid}] ${issue.title}\n\nRepo: ${repo}\nAuthor: @${user.username}\nURL: ${issue.url}\n\n${context ? `Context: ${context}\n\n` : ""}${getCommandSuggestions("issue")}${DELEGATION_INSTRUCTION}`;
+      const contextSection = context ? `Context: ${context}\n\n` : "";
+      const result = resolveTemplate("gitlab.issue.assigned", {
+        issue_iid: issue.iid,
+        issue_title: issue.title,
+        repo,
+        username: user.username,
+        issue_url: issue.url,
+        context_section: contextSection,
+      });
 
-      const task = createTaskExtended(taskDesc, {
+      if (result.skipped) {
+        return { created: false };
+      }
+
+      const task = createTaskExtended(result.text, {
         agentId: lead?.id ?? null,
         source: "gitlab",
         vcsProvider: "gitlab",
@@ -183,6 +205,7 @@ export async function handleIssue(
         vcsEventType: "issue",
         vcsNumber: issue.iid,
         vcsAuthor: user.username,
+        requestedByUserId,
         vcsUrl: issue.url,
       });
 
@@ -210,6 +233,9 @@ export async function handleIssue(
 export async function handleNote(event: NoteEvent): Promise<{ created: boolean; taskId?: string }> {
   const { user, project, object_attributes: note } = event;
   const repo = project.path_with_namespace;
+
+  // Resolve canonical user from GitLab sender
+  const requestedByUserId = resolveUser({ gitlabUsername: user.username })?.id;
 
   // Only handle comments with bot mentions
   if (!detectMention(note.note)) {
@@ -250,9 +276,24 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
   // Check if there's already an active task for this entity
   const existingTask = targetNumber ? findTaskByVcs(repo, targetNumber) : null;
 
-  const taskDesc = `[GitLab Comment on ${entityLabel}] @${user.username} mentioned bot\n\nRepo: ${repo}\nURL: ${targetUrl}\n\nComment:\n${context}${existingTask ? `\n\n_Note: There's an active task (${existingTask.id}) for this ${entityLabel}._` : ""}${DELEGATION_INSTRUCTION}`;
+  const existingTaskNote = existingTask
+    ? `\n\n_Note: There's an active task (${existingTask.id}) for this ${entityLabel}._`
+    : "";
 
-  const task = createTaskExtended(taskDesc, {
+  const noteResult = resolveTemplate("gitlab.comment.mentioned", {
+    entity_label: entityLabel,
+    username: user.username,
+    repo,
+    target_url: targetUrl,
+    context,
+    existing_task_note: existingTaskNote,
+  });
+
+  if (noteResult.skipped) {
+    return { created: false };
+  }
+
+  const task = createTaskExtended(noteResult.text, {
     agentId: lead?.id ?? null,
     source: "gitlab",
     vcsProvider: "gitlab",
@@ -308,9 +349,20 @@ export async function handlePipeline(
   }
 
   const lead = findLeadAgent();
-  const taskDesc = `[GitLab CI Failed] Pipeline #${pipeline.id} failed for MR #${mrIid}\n\nRepo: ${repo}\nMR: ${event.merge_request.title}\nURL: ${event.merge_request.url}\nBranch: ${event.merge_request.source_branch}\n\nThe CI pipeline has failed. Please investigate and fix the issues.${DELEGATION_INSTRUCTION}`;
+  const pipelineResult = resolveTemplate("gitlab.pipeline.failed", {
+    pipeline_id: pipeline.id,
+    mr_iid: mrIid,
+    repo,
+    mr_title: event.merge_request.title,
+    mr_url: event.merge_request.url,
+    source_branch: event.merge_request.source_branch,
+  });
 
-  const task = createTaskExtended(taskDesc, {
+  if (pipelineResult.skipped) {
+    return { created: false };
+  }
+
+  const task = createTaskExtended(pipelineResult.text, {
     agentId: lead?.id ?? null,
     source: "gitlab",
     vcsProvider: "gitlab",

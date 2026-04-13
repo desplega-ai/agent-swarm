@@ -1,7 +1,8 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { ArrowRight, Github } from "lucide-react";
+import { ArrowRight } from "lucide-react";
+import Link from "next/link";
 
 export function CTA() {
   return (
@@ -23,28 +24,36 @@ export function CTA() {
             Ready to build your swarm?
           </h2>
           <p className="text-lg text-zinc-400 max-w-xl mx-auto mb-10">
-            Agent Swarm is open source and ready to deploy. Start with one lead
-            and one worker — scale as your ambitions grow.
+            Start your 7-day free trial on Agent Swarm Cloud, or self-host the open-source version
+            for free. Either way, your agents start compounding today.
           </p>
 
           <div className="flex flex-wrap justify-center gap-4">
             <a
-              href="https://docs.agent-swarm.dev/docs/getting-started"
+              href="https://cloud.agent-swarm.dev"
               className="group inline-flex items-center gap-2 rounded-xl bg-amber-600 px-7 py-3.5 text-sm font-semibold text-white hover:bg-amber-500 transition-all shadow-xl shadow-amber-600/20"
             >
-              Get Started
+              Start Free Trial
               <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
             </a>
             <a
-              href="https://github.com/desplega-ai/agent-swarm"
-              target="_blank"
-              rel="noopener noreferrer"
+              href="https://docs.agent-swarm.dev/docs/getting-started"
               className="inline-flex items-center gap-2 rounded-xl bg-white/10 backdrop-blur-sm px-7 py-3.5 text-sm font-semibold text-white border border-white/10 hover:bg-white/15 transition-all"
             >
-              <Github className="w-4 h-4" />
-              Star on GitHub
+              Self-Host (Free)
             </a>
           </div>
+
+          <p className="mt-8 text-sm text-zinc-500">
+            See it in action:{" "}
+            <Link href="/examples" className="text-amber-400 hover:text-amber-300 underline underline-offset-2">
+              examples
+            </Link>
+            {" · "}
+            <Link href="/blog" className="text-amber-400 hover:text-amber-300 underline underline-offset-2">
+              blog
+            </Link>
+          </p>
         </motion.div>
       </div>
     </section>

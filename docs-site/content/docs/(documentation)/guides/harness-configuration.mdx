@@ -1,0 +1,266 @@
+---
+title: Harness Configuration
+description: Configure the AI provider (Claude Code, Codex, or pi-mono) that powers your agents
+---
+
+Agent Swarm uses a **harness** abstraction to decouple task execution from the underlying AI provider. Each worker runs one harness — the harness spawns sessions, manages credentials, and normalizes events so the rest of the system doesn't care which provider is underneath.
+
+## Supported Providers
+
+| Provider | `HARNESS_PROVIDER` | Description |
+|----------|-------------------|-------------|
+| **Claude Code** | `claude` (default) | Anthropic's Claude Code CLI. Recommended for most use cases |
+| **Codex** | `codex` | OpenAI Codex CLI with API-key or ChatGPT OAuth authentication |
+| **pi-mono** | `pi` | Open-source coding agent by [@badlogic](https://github.com/badlogic/pi-mono). Supports multiple model backends |
+
+## How It Works
+
+The `HARNESS_PROVIDER` environment variable selects which provider adapter is used. The runner creates the adapter at startup:
+
+```
+HARNESS_PROVIDER=claude  →  ClaudeAdapter  →  spawns `claude` CLI process
+HARNESS_PROVIDER=codex   →  CodexAdapter   →  spawns `codex` CLI process
+HARNESS_PROVIDER=pi      →  PiMonoAdapter  →  creates in-process pi-mono session
+```
+
+Both adapters implement the same `ProviderAdapter` interface, producing normalized `ProviderEvent` streams (session init, tool calls, cost data, context usage, etc.) that the runner consumes identically.
+
+---
+
+## Claude Code (Default)
+
+Claude Code is the default and recommended harness. It spawns the `claude` CLI as a subprocess with `--output-format stream-json` for structured event streaming.
+
+### Authentication Methods
+
+Claude Code supports two authentication methods, checked in priority order:
+
+| Method | Env Var | How to Get It |
+|--------|---------|---------------|
+| **OAuth token** (recommended) | `CLAUDE_CODE_OAUTH_TOKEN` | Run `claude setup-token` in your terminal |
+| **API key** | `ANTHROPIC_API_KEY` | From [console.anthropic.com](https://console.anthropic.com) |
+
+OAuth is preferred because it uses your Claude Code subscription (Pro/Max/Team) with its included usage, rather than consuming pay-per-token API credits.
+
+### Getting an OAuth Token
+
+```bash
+# Interactive — opens browser for OAuth flow
+claude setup-token
+
+# The output contains a token like: sk-ant-oat01-...
+# Copy this value into your .env file
+```
+
+Or use the onboard wizard which runs this automatically:
+
+```bash
+bunx @desplega.ai/agent-swarm onboard
+```
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `CLAUDE_CODE_OAUTH_TOKEN` | Yes* | — | OAuth token from `claude setup-token`. Supports [multi-credential pools](#multi-credential-pools) |
+| `ANTHROPIC_API_KEY` | Alt* | — | Anthropic API key (alternative to OAuth). Also supports multi-credential pools |
+| `CLAUDE_BINARY` | No | `claude` | Path to the Claude CLI binary (if not in `$PATH`) |
+
+\* One of `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` is required.
+
+### Model Selection
+
+The Claude adapter passes the model string directly to the `claude` CLI via `--model`. Common values:
+
+| Model | Description |
+|-------|-------------|
+| `opus` | Claude Opus (highest capability) |
+| `sonnet` | Claude Sonnet (balanced) |
+| `haiku` | Claude Haiku (fastest) |
+
+Models can be set per-task via the API or per-agent via the agent profile. See the [Anthropic models overview](https://platform.claude.com/docs/en/about-claude/models/overview) for all available model IDs.
+
+---
+
+## Codex
+
+Codex runs through the `codex` CLI and supports both direct OpenAI API keys and ChatGPT OAuth.
+
+### Authentication Methods
+
+Codex checks credentials in this order:
+
+| Method | Source | Notes |
+|--------|--------|-------|
+| **OpenAI API key** | `OPENAI_API_KEY` | Standard API billing |
+| **Auth file** | `~/.codex/auth.json` | Native Codex CLI auth file |
+| **ChatGPT OAuth via config store** | `codex_oauth` | Restored automatically at worker boot |
+
+For ChatGPT OAuth setup, see [Provider Auth: Codex OAuth](/docs/guides/provider-auth/codex-oauth).
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `HARNESS_PROVIDER` | Yes | — | Must be set to `codex` |
+| `OPENAI_API_KEY` | No | — | Optional when using direct OpenAI API access |
+| `API_KEY` | Yes | — | Swarm API key used to fetch `codex_oauth` from the config store |
+| `MCP_BASE_URL` | Yes | `http://host.docker.internal:3013` | Swarm API URL reachable by the worker |
+| `AGENT_ID` | Recommended | Auto-generated | Keep stable across restarts for task resume |
+
+### Model Selection
+
+The default model baked into the worker image is `gpt-5.4`. You can override it with `MODEL_OVERRIDE` if needed.
+
+---
+
+## pi-mono
+
+[pi-mono](https://github.com/badlogic/pi-mono) is an open-source coding agent that runs as a library (no external CLI process). It supports multiple LLM backends through a provider/model system. See the [coding agent README](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/README.md) for detailed configuration and usage.
+
+### Authentication
+
+pi-mono supports several authentication methods depending on which model provider you use:
+
+| Provider | Env Var | Description |
+|----------|---------|-------------|
+| **Anthropic** | `ANTHROPIC_API_KEY` | Direct Anthropic API access |
+| **OpenRouter** | `OPENROUTER_API_KEY` | Access 100+ models via OpenRouter |
+| **Auth file** | `~/.pi/agent/auth.json` | Pre-configured auth file |
+
+At least one of these must be available. The Docker entrypoint validates this on startup.
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `HARNESS_PROVIDER` | Yes | — | Must be set to `pi` |
+| `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models |
+| `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key for multi-provider access |
+
+\* At least one credential source is required (API key or `~/.pi/agent/auth.json`).
+
+<Callout type="warn">
+**Do not pass `CLAUDE_CODE_OAUTH_TOKEN`** when using `HARNESS_PROVIDER=pi`. If Claude credentials are present in the environment, the harness will attempt to use them instead of the configured pi-mono provider, causing misconfiguration. Only pass the credentials relevant to your selected provider (`OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`).
+</Callout>
+
+### Model Selection
+
+pi-mono resolves models using a `provider/model-id` format. Set the model via `MODEL_OVERRIDE` in your environment:
+
+| Format | Example | Model Reference |
+|--------|---------|-----------------|
+| Shortname | `opus`, `sonnet`, `haiku` | Maps to Anthropic Claude models |
+| Provider/model | `anthropic/claude-sonnet-4-6` | [Anthropic model IDs](https://platform.claude.com/docs/en/about-claude/models/overview) |
+| OpenRouter | `moonshotai/kimi-k2.5` | [OpenRouter model catalog](https://openrouter.ai/models) |
+
+### pi-mono Specifics
+
+- **AGENTS.md symlink**: pi-mono reads `AGENTS.md` for project instructions (equivalent to Claude's `CLAUDE.md`). The adapter automatically creates a symlink `AGENTS.md → CLAUDE.md` during sessions so your existing project instructions work with both providers.
+- **MCP tool discovery**: pi-mono discovers swarm MCP tools at session creation via HTTP and registers them as custom tools. This is handled automatically — no `.mcp.json` needed for the swarm connection (though installed MCP servers are also discovered).
+- **Skills sync**: The Docker entrypoint syncs skills to both `~/.claude/skills/` and `~/.pi/agent/skills/` so skills work regardless of provider.
+
+---
+
+## Choosing a Provider
+
+| Consideration | Claude Code | Codex | pi-mono |
+|---------------|-------------|-------|---------|
+| **Setup complexity** | Minimal — install CLI + OAuth token | Minimal — CLI plus API key or OAuth bootstrap | Requires API key(s) |
+| **Billing model** | Uses Claude Pro/Max/Team subscription | OpenAI API billing or ChatGPT OAuth | Pay-per-token via API |
+| **Model flexibility** | Claude models only | Codex/OpenAI models | Any provider via OpenRouter |
+| **Session resume** | Built-in `--resume` support | Native CLI session support | Session persistence via SessionManager |
+| **MCP integration** | Native (`.mcp.json` config) | Native (`~/.codex/config.toml`) | HTTP-based tool discovery |
+| **Maturity** | Production-grade, well-tested | Production-grade, well-tested | Community project, actively developed |
+
+**Recommendation**: Use Claude Code with OAuth for most setups. Use Codex when you specifically want the OpenAI/Codex toolchain or ChatGPT OAuth-backed workers. Consider pi-mono when you need access to non-Claude models through OpenRouter or want a library-based open-source runner.
+
+---
+
+## Multi-Credential Pools
+
+Both `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` support comma-separated values for load balancing across multiple subscriptions:
+
+```bash
+# Multiple OAuth tokens — one is randomly selected per session
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-token1,sk-ant-oat-token2,sk-ant-oat-token3
+
+# Also works with API keys
+ANTHROPIC_API_KEY=sk-ant-api-key1,sk-ant-api-key2
+```
+
+Each session randomly selects one credential from the pool. A log line indicates the selected index (never the credential itself). Single values work unchanged.
+
+This is useful when running multiple concurrent workers that would otherwise hit rate limits on a single subscription.
+
+---
+
+## Docker Configuration Examples
+
+### Claude Code Worker
+
+```bash
+# .env.docker
+HARNESS_PROVIDER=claude              # Optional — claude is the default
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-...
+API_KEY=your-api-key
+MCP_BASE_URL=http://host.docker.internal:3013
+AGENT_ID=your-worker-uuid
+GITHUB_TOKEN=ghp_...
+```
+
+### pi-mono Worker
+
+```bash
+# .env.docker
+HARNESS_PROVIDER=pi
+OPENROUTER_API_KEY=sk-or-...         # Or ANTHROPIC_API_KEY
+MODEL_OVERRIDE=moonshotai/kimi-k2.5  # See https://openrouter.ai/models
+API_KEY=your-api-key
+MCP_BASE_URL=http://host.docker.internal:3013
+AGENT_ID=your-worker-uuid
+GITHUB_TOKEN=ghp_...
+# Do NOT include CLAUDE_CODE_OAUTH_TOKEN — it will override the pi provider
+```
+
+### Mixed Swarm
+
+You can run different providers for different agents in the same swarm. For example, a Claude Code lead with pi-mono workers:
+
+```bash
+# .env.docker-lead
+HARNESS_PROVIDER=claude
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-...
+AGENT_ROLE=lead
+
+# .env.docker-worker
+HARNESS_PROVIDER=pi
+OPENROUTER_API_KEY=sk-or-...
+```
+
+---
+
+## Troubleshooting
+
+### Claude Code: "No Claude credentials found"
+
+The adapter checks for `CLAUDE_CODE_OAUTH_TOKEN` first, then `ANTHROPIC_API_KEY`. Ensure at least one is set in your `.env.docker` file.
+
+### Claude Code: "Claude CLI not found"
+
+The `claude` binary must be in `$PATH` inside the Docker container. The worker Docker image includes it by default. If using a custom image, set `CLAUDE_BINARY=/path/to/claude`.
+
+### pi-mono: credential validation error
+
+The Docker entrypoint requires at least one pi-mono credential (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, or `~/.pi/agent/auth.json`). Set the appropriate key in your `.env.docker` file.
+
+### Wrong provider selected
+
+Check the startup logs — the entrypoint prints `Harness Provider: <value>`. If it says `claude` when you expected `pi`, ensure `HARNESS_PROVIDER=pi` is in your env file and not being overridden.
+
+## Related
+
+- [Environment Variables](/docs/reference/environment-variables) — Full reference for all configuration variables including auth credentials
+- [Deployment Guide](/docs/guides/deployment) — Deploy agents to production with Docker Compose
+- [Getting Started](/docs/getting-started) — Initial setup including credential configuration
+- [Architecture Overview](/docs/architecture/overview) — How harnesses fit into the overall system

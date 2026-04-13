@@ -211,3 +211,12 @@ body {
 .prose-chat h3 {
   font-size: 0.95em;
 }
+
+/* Session log prose — tighter than chat */
+.prose-session-log {
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.prose-session-log pre {
+  max-height: 24rem;
+}

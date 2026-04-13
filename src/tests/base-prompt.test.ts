@@ -12,25 +12,25 @@ const minimalArgs: BasePromptArgs = {
 // Basic fields
 // ---------------------------------------------------------------------------
 describe("getBasePrompt — basic fields", () => {
-  test("includes role and agentId", () => {
-    const result = getBasePrompt(minimalArgs);
+  test("includes role and agentId", async () => {
+    const result = await getBasePrompt(minimalArgs);
     expect(result).toContain("worker");
     expect(result).toContain("agent-abc-123");
   });
 
-  test("lead role gets lead prompt", () => {
-    const result = getBasePrompt({ ...minimalArgs, role: "lead" });
+  test("lead role gets lead prompt", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, role: "lead" });
     expect(result).toContain("lead agent");
     expect(result).toContain("coordinator");
   });
 
-  test("worker role gets worker prompt", () => {
-    const result = getBasePrompt(minimalArgs);
+  test("worker role gets worker prompt", async () => {
+    const result = await getBasePrompt(minimalArgs);
     expect(result).toContain("worker agent");
   });
 
-  test("includes swarmUrl and agentId in services section", () => {
-    const result = getBasePrompt(minimalArgs);
+  test("includes swarmUrl and agentId in services section", async () => {
+    const result = await getBasePrompt(minimalArgs);
     expect(result).toContain("swarm.example.com");
     expect(result).toContain(`https://agent-abc-123.swarm.example.com`);
   });
@@ -40,13 +40,13 @@ describe("getBasePrompt — basic fields", () => {
 // Identity fields (name, description, soulMd, identityMd)
 // ---------------------------------------------------------------------------
 describe("getBasePrompt — identity fields", () => {
-  test("includes name when provided", () => {
-    const result = getBasePrompt({ ...minimalArgs, name: "TestAgent" });
+  test("includes name when provided", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, name: "TestAgent" });
     expect(result).toContain("**Name:** TestAgent");
   });
 
-  test("includes description when name provided", () => {
-    const result = getBasePrompt({
+  test("includes description when name provided", async () => {
+    const result = await getBasePrompt({
       ...minimalArgs,
       name: "TestAgent",
       description: "A helpful agent",
@@ -54,16 +54,16 @@ describe("getBasePrompt — identity fields", () => {
     expect(result).toContain("**Description:** A helpful agent");
   });
 
-  test("does not include description without name", () => {
-    const result = getBasePrompt({
+  test("does not include description without name", async () => {
+    const result = await getBasePrompt({
       ...minimalArgs,
       description: "A helpful agent",
     });
     expect(result).not.toContain("**Description:**");
   });
 
-  test("includes soulMd content", () => {
-    const result = getBasePrompt({
+  test("includes soulMd content", async () => {
+    const result = await getBasePrompt({
       ...minimalArgs,
       soulMd: "I am a creative soul.",
     });
@@ -71,8 +71,8 @@ describe("getBasePrompt — identity fields", () => {
     expect(result).toContain("I am a creative soul.");
   });
 
-  test("includes identityMd content", () => {
-    const result = getBasePrompt({
+  test("includes identityMd content", async () => {
+    const result = await getBasePrompt({
       ...minimalArgs,
       identityMd: "Identity content here.",
     });
@@ -80,8 +80,8 @@ describe("getBasePrompt — identity fields", () => {
     expect(result).toContain("Identity content here.");
   });
 
-  test("no identity section when none provided", () => {
-    const result = getBasePrompt(minimalArgs);
+  test("no identity section when none provided", async () => {
+    const result = await getBasePrompt(minimalArgs);
     expect(result).not.toContain("## Your Identity");
   });
 });
@@ -90,8 +90,8 @@ describe("getBasePrompt — identity fields", () => {
 // claudeMd and toolsMd injection
 // ---------------------------------------------------------------------------
 describe("getBasePrompt — claudeMd and toolsMd injection", () => {
-  test("includes claudeMd under Agent Instructions", () => {
-    const result = getBasePrompt({
+  test("includes claudeMd under Agent Instructions", async () => {
+    const result = await getBasePrompt({
       ...minimalArgs,
       claudeMd: "Follow these rules.",
     });
@@ -99,8 +99,8 @@ describe("getBasePrompt — claudeMd and toolsMd injection", () => {
     expect(result).toContain("Follow these rules.");
   });
 
-  test("includes toolsMd under Tools & Capabilities", () => {
-    const result = getBasePrompt({
+  test("includes toolsMd under Tools & Capabilities", async () => {
+    const result = await getBasePrompt({
       ...minimalArgs,
       toolsMd: "You can use curl.",
     });
@@ -108,8 +108,8 @@ describe("getBasePrompt — claudeMd and toolsMd injection", () => {
     expect(result).toContain("You can use curl.");
   });
 
-  test("both claudeMd and toolsMd coexist", () => {
-    const result = getBasePrompt({
+  test("both claudeMd and toolsMd coexist", async () => {
+    const result = await getBasePrompt({
       ...minimalArgs,
       claudeMd: "Agent instructions content",
       toolsMd: "Tools content",
@@ -120,8 +120,8 @@ describe("getBasePrompt — claudeMd and toolsMd injection", () => {
     expect(result).toContain("Tools content");
   });
 
-  test("neither present when not provided", () => {
-    const result = getBasePrompt(minimalArgs);
+  test("neither present when not provided", async () => {
+    const result = await getBasePrompt(minimalArgs);
     expect(result).not.toContain("## Agent Instructions");
     expect(result).not.toContain("## Your Tools & Capabilities");
   });
@@ -131,8 +131,8 @@ describe("getBasePrompt — claudeMd and toolsMd injection", () => {
 // repoContext
 // ---------------------------------------------------------------------------
 describe("getBasePrompt — repoContext", () => {
-  test("includes repo claudeMd with clone path", () => {
-    const result = getBasePrompt({
+  test("includes repo claudeMd with clone path", async () => {
+    const result = await getBasePrompt({
       ...minimalArgs,
       repoContext: {
         claudeMd: "Repo-specific rules here.",
@@ -144,8 +144,8 @@ describe("getBasePrompt — repoContext", () => {
     expect(result).toContain("Repo-specific rules here.");
   });
 
-  test("shows warning when provided", () => {
-    const result = getBasePrompt({
+  test("shows warning when provided", async () => {
+    const result = await getBasePrompt({
       ...minimalArgs,
       repoContext: {
         claudeMd: "Rules",
@@ -156,8 +156,8 @@ describe("getBasePrompt — repoContext", () => {
     expect(result).toContain("WARNING: Repo is stale");
   });
 
-  test("shows 'no CLAUDE.md' message when claudeMd is null and no warning", () => {
-    const result = getBasePrompt({
+  test("shows 'no CLAUDE.md' message when claudeMd is null and no warning", async () => {
+    const result = await getBasePrompt({
       ...minimalArgs,
       repoContext: {
         claudeMd: null,
@@ -166,27 +166,99 @@ describe("getBasePrompt — repoContext", () => {
     });
     expect(result).toContain("but has no CLAUDE.md file");
   });
+
+  test("shows warning when guidelines is null", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      repoContext: {
+        claudeMd: "Rules",
+        clonePath: "/workspace/my-repo",
+        guidelines: null,
+      },
+    });
+    expect(result).toContain("No repository guidelines defined");
+    expect(result).toContain("ask the lead or user to define guidelines");
+  });
+
+  test("renders PR checks, merge policy, and review guidance when guidelines has content", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      repoContext: {
+        claudeMd: "Rules",
+        clonePath: "/workspace/my-repo",
+        guidelines: {
+          prChecks: ["bun test", "bun run lint"],
+          mergeChecks: ["all CI checks pass"],
+          allowMerge: false,
+          review: ["check README.md"],
+        },
+      },
+    });
+    expect(result).toContain("Repository Guidelines (MANDATORY)");
+    expect(result).toContain("`bun test`");
+    expect(result).toContain("`bun run lint`");
+    expect(result).toContain("Auto-merge: Not allowed (default)");
+    expect(result).toContain("all CI checks pass");
+    expect(result).toContain("check README.md");
+    expect(result).toContain("Do NOT push code with failing checks");
+  });
+
+  test("renders nothing when guidelines has all empty arrays", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      repoContext: {
+        claudeMd: "Rules",
+        clonePath: "/workspace/my-repo",
+        guidelines: {
+          prChecks: [],
+          mergeChecks: [],
+          allowMerge: false,
+          review: [],
+        },
+      },
+    });
+    expect(result).not.toContain("Repository Guidelines (MANDATORY)");
+    expect(result).not.toContain("No repository guidelines defined");
+  });
+
+  test("renders merge policy when allowMerge is true even with empty arrays", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      repoContext: {
+        claudeMd: "Rules",
+        clonePath: "/workspace/my-repo",
+        guidelines: {
+          prChecks: [],
+          mergeChecks: [],
+          allowMerge: true,
+          review: [],
+        },
+      },
+    });
+    expect(result).toContain("Repository Guidelines (MANDATORY)");
+    expect(result).toContain("Auto-merge: Allowed");
+  });
 });
 
 // ---------------------------------------------------------------------------
 // Capabilities
 // ---------------------------------------------------------------------------
 describe("getBasePrompt — capabilities", () => {
-  test("services section included by default", () => {
-    const result = getBasePrompt(minimalArgs);
+  test("services section included by default", async () => {
+    const result = await getBasePrompt(minimalArgs);
     expect(result).toContain("Service Registry");
   });
 
-  test("services section excluded when capabilities don't include services", () => {
-    const result = getBasePrompt({
+  test("services section excluded when capabilities don't include services", async () => {
+    const result = await getBasePrompt({
       ...minimalArgs,
       capabilities: ["artifacts"],
     });
     expect(result).not.toContain("Service Registry");
   });
 
-  test("capabilities list rendered", () => {
-    const result = getBasePrompt({
+  test("capabilities list rendered", async () => {
+    const result = await getBasePrompt({
       ...minimalArgs,
       capabilities: ["services", "artifacts"],
     });
@@ -202,8 +274,8 @@ describe("getBasePrompt — capabilities", () => {
 describe("getBasePrompt — truncation", () => {
   const bigString = (n: number) => "x".repeat(n);
 
-  test("claudeMd truncated when exceeding per-section limit (20k chars)", () => {
-    const result = getBasePrompt({
+  test("claudeMd truncated when exceeding per-section limit (20k chars)", async () => {
+    const result = await getBasePrompt({
       ...minimalArgs,
       claudeMd: bigString(25_000),
     });
@@ -212,8 +284,8 @@ describe("getBasePrompt — truncation", () => {
     expect(result).not.toContain(bigString(25_000));
   });
 
-  test("toolsMd truncated when exceeding per-section limit", () => {
-    const result = getBasePrompt({
+  test("toolsMd truncated when exceeding per-section limit", async () => {
+    const result = await getBasePrompt({
       ...minimalArgs,
       toolsMd: bigString(25_000),
     });
@@ -221,18 +293,18 @@ describe("getBasePrompt — truncation", () => {
     expect(result).not.toContain(bigString(25_000));
   });
 
-  test("total budget respected — tools truncated before claudeMd", () => {
+  test("total budget respected — tools truncated before claudeMd", async () => {
     // Use soulMd to eat up most of the 150k total budget so that
     // truncatable sections (claudeMd, toolsMd) must compete for the remainder.
     // soulMd is part of `prompt` which counts toward protectedLength.
-    const baseResult = getBasePrompt(minimalArgs);
+    const baseResult = await getBasePrompt(minimalArgs);
     const staticLength = baseResult.length; // ~12-13k for static content
 
     // Leave exactly enough budget for claudeMd but not toolsMd.
     // Total budget = 150k - protectedLength.
     // We want: protectedLength ≈ 150k - 18k = 132k, so claudeMd (15k) fits but toolsMd doesn't.
     const soulSize = 132_000 - staticLength;
-    const result = getBasePrompt({
+    const result = await getBasePrompt({
       ...minimalArgs,
       soulMd: bigString(Math.max(0, soulSize)),
       claudeMd: bigString(15_000),
@@ -248,9 +320,9 @@ describe("getBasePrompt — truncation", () => {
     expect(hasToolsTruncation || !hasToolsHeader).toBe(true);
   });
 
-  test("repo context never truncated", () => {
+  test("repo context never truncated", async () => {
     const hugeRepoClaudeMd = bigString(30_000);
-    const result = getBasePrompt({
+    const result = await getBasePrompt({
       ...minimalArgs,
       repoContext: {
         claudeMd: hugeRepoClaudeMd,

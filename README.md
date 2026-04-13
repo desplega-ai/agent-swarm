@@ -49,7 +49,17 @@ Agent Swarm lets you run a team of AI coding agents that coordinate autonomously
 - **Templates registry** — Pre-built agent templates (9 official: lead, coder, researcher, reviewer, tester, FDE, content-writer, content-reviewer, content-strategist) with a gallery UI and docker-compose builder
 - **GitLab integration** — Full GitLab webhook support alongside GitHub via provider adapter pattern
 - **Working directory support** — Tasks can specify a custom starting directory for agents via the `dir` parameter
-- **Multi-provider** — Run agents with Claude Code or pi-mono (`HARNESS_PROVIDER=claude|pi`)
+- **Multi-provider** — Run agents with Claude Code, pi-mono, or OpenAI Codex (`HARNESS_PROVIDER=claude|pi|codex`)
+- **Agent-fs integration** — Persistent, searchable filesystem shared across the swarm with auto-registration on first boot
+- **Debug dashboard** — SQL query interface with Monaco editor and AG Grid results for database inspection
+- **Workflow engine** — DAG-based workflow automation with executor registry, checkpoint durability, webhook/schedule/manual triggers, per-step retry, structured I/O schemas, fan-out/convergence, configurable failure handling, and version history
+- **Linear integration** — Bidirectional ticket tracker sync via OAuth + webhooks with AgentSession lifecycle and generic tracker abstraction
+- **Portless local dev** — Friendly URLs for local development (`api.swarm.localhost:1355`) via portless proxy
+- **Onboarding wizard** — Interactive CLI wizard (`agent-swarm onboard`) to set up a new swarm from scratch with presets, credential collection, and docker-compose generation
+- **Skill system** — Reusable procedural knowledge: create, install, publish, and sync skills from GitHub with scope resolution (agent → swarm → global)
+- **Human-in-the-Loop** — Workflow nodes that pause for human approval or input, with a dashboard UI for reviewing and responding to requests
+- **MCP server management** — Register, install, and manage MCP servers for agents with scope cascade (agent → swarm → global) and auto-injection into worker containers
+- **Context usage tracking** — Monitor context window utilization and compaction events per task with visual indicators in the dashboard
 
 ## Quick Start
 
@@ -75,6 +85,8 @@ docker compose -f docker-compose.example.yml --env-file .env up -d
 ```
 
 The API runs on port `3013`. The dashboard is available separately (see [Dashboard](#dashboard)).
+
+The API includes interactive documentation at `http://localhost:3013/docs` (Scalar UI) and a machine-readable OpenAPI 3.1 spec at `http://localhost:3013/openapi.json`.
 
 ### Option B: Local API + Docker Workers
 
@@ -108,7 +120,7 @@ Use Claude Code directly as the lead agent — no Docker required for the lead.
 
 ```bash
 # After starting the API server (Option B, step 1):
-bunx @desplega.ai/agent-swarm setup
+bunx @desplega.ai/agent-swarm connect
 ```
 
 This configures Claude Code to connect to the swarm. Start Claude Code and tell it:
@@ -254,6 +266,135 @@ GITHUB_APP_PRIVATE_KEY=base64-encoded-key
 | PR review submitted (on bot's PR) | Creates a notification task with review feedback |
 | CI failure (on PRs with existing tasks) | Creates a CI notification task |
 
+<details>
+<summary><strong>Flow Diagrams</strong> (click to expand)</summary>
+
+#### Task Creation Flow
+
+How GitHub events become tasks in the swarm:
+
+```mermaid
+%%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '13px', 'nodeSpacing': 30, 'rankSpacing': 40}}}%%
+flowchart TB
+    subgraph ENTRY["1. GitHub Webhook Entry Points"]
+        direction LR
+        E1["Issue<br/>opened/edited"]
+        E2["PR<br/>opened/edited"]
+        E3["Comment<br/>created"]
+        E4["Bot Assigned<br/>to Issue/PR"]
+        E5["Review Requested<br/>from Bot"]
+    end
+
+    subgraph GATE["2. Trigger Gate"]
+        M{"@agent-swarm<br/>mention?"}
+        A{"Bot is<br/>assignee?"}
+        D{"Duplicate?<br/>60s TTL"}
+    end
+
+    subgraph CREATE["3. Task Creation"]
+        LEAD["Find Lead Agent<br/>(online > offline > none)"]
+        TPL["resolveTemplate()"]
+        TASK["createTaskExtended()"]
+    end
+
+    subgraph OUT["4. Output"]
+        ASSIGN["Task assigned<br/>to Lead"]
+        POOL["Task in pool<br/>(no lead)"]
+        REACT["eyes reaction<br/>on GitHub"]
+    end
+
+    E1 & E2 & E3 --> M
+    E4 & E5 --> A
+
+    M -->|Yes| D
+    A -->|Yes| D
+    M & A -->|No| DROP1(("skip"))
+
+    D -->|New| LEAD
+    D -->|Dup| DROP2(("skip"))
+
+    LEAD --> TPL --> TASK
+
+    TASK -->|lead found| ASSIGN
+    TASK -.->|no lead| POOL
+    TASK --> REACT
+```
+
+[PNG fallback](assets/github-task-creation-flow.png)
+
+#### Follow-up Flows
+
+Events that create secondary tasks when an active task already exists for a PR:
+
+```mermaid
+%%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '13px'}}}%%
+flowchart TB
+    subgraph EVENTS["GitHub Follow-up Events (require existing active task)"]
+        direction LR
+        F1["PR Closed<br/>(merged/closed)"]
+        F2["PR Synchronize<br/>(new commits)"]
+        F3["Review Submitted<br/>(approved/changes_requested)"]
+        F4["Check Run Failed"]
+        F5["Check Suite Failed"]
+        F6["Workflow Run Failed"]
+    end
+
+    FIND{"findTaskByVcs()<br/>Active task for<br/>repo + PR number?"}
+
+    EVENTS --> FIND
+
+    FIND -->|No task| SKIP(("skip"))
+
+    subgraph FOLLOWUP["Follow-up Task Created (assigned to Lead)"]
+        direction LR
+        T1["github-pr-status<br/>PR merged/closed"]
+        T2["github-pr-update<br/>New commits pushed"]
+        T3["github-review<br/>Review feedback"]
+        T4["github-ci<br/>CI failure alert"]
+    end
+
+    F1 --> FIND -->|task found| T1
+    F2 --> FIND -->|task found| T2
+    F3 --> FIND -->|task found| T3
+    F4 & F5 & F6 --> FIND -->|task found| T4
+
+    NOTE["All follow-up tasks reference<br/>the original task ID for routing"]
+
+    FOLLOWUP --> NOTE
+```
+
+[PNG fallback](assets/github-followup-flows.png)
+
+#### Cancellation Flows
+
+How unassigning the bot cancels active tasks:
+
+```mermaid
+%%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '13px'}}}%%
+flowchart TB
+    subgraph EVENTS["Cancellation Events"]
+        direction LR
+        C1["Bot Unassigned<br/>from Issue"]
+        C2["Bot Unassigned<br/>from PR"]
+        C3["Review Request<br/>Removed from Bot"]
+    end
+
+    BOT{"isBotAssignee()"}
+    FIND{"findTaskByVcs()<br/>Active task?"}
+    CANCEL["failTask()<br/>Cancel with reason"]
+    NOOP(("no-op"))
+
+    EVENTS --> BOT
+    BOT -->|Not bot| NOOP
+    BOT -->|Is bot| FIND
+    FIND -->|No task| NOOP
+    FIND -->|Task found| CANCEL
+```
+
+[PNG fallback](assets/github-cancellation-flows.png)
+
+</details>
+
 ### GitLab
 
 Set up a GitLab webhook to receive events when the bot is @mentioned or assigned to issues/MRs.
@@ -300,7 +441,7 @@ Workers can investigate Sentry issues directly with the `/investigate-sentry-iss
 A React-based monitoring dashboard for real-time visibility into your swarm.
 
 ```bash
-cd ui && pnpm install && pnpm run dev
+cd new-ui && pnpm install && pnpm run dev
 ```
 
 Opens at `http://localhost:5173`. See [UI.md](./UI.md) for details.
@@ -313,10 +454,14 @@ bunx @desplega.ai/agent-swarm <command>
 
 | Command | Description |
 |---------|-------------|
-| `setup` | Configure Claude Code to connect to the swarm |
-| `mcp`   | Start the MCP API server |
+| `onboard` | Set up a new swarm from scratch (Docker Compose wizard) |
+| `connect` | Connect this project to an existing swarm |
+| `api`   | Start the API + MCP HTTP server |
+| `claude` | Run Claude CLI with optional message and headless mode |
 | `worker` | Run a worker agent |
 | `lead`  | Run a lead agent |
+| `docs`  | Open documentation (`--open` to launch in browser) |
+| `artifact` | Manage agent artifacts |
 
 ## Deployment
 
@@ -334,7 +479,7 @@ For production deployments, see [DEPLOYMENT.md](./DEPLOYMENT.md) which covers:
 | [docs.agent-swarm.dev](https://docs.agent-swarm.dev) | Full documentation site |
 | [app.agent-swarm.dev](https://app.agent-swarm.dev) | Hosted dashboard — connect your deployed swarm |
 | [DEPLOYMENT.md](./DEPLOYMENT.md) | Production deployment guide |
-| [docs/ENVS.md](./docs/ENVS.md) | Complete environment variables reference |
+| [Environment Variables](https://docs.agent-swarm.dev/docs/reference/environment-variables) | Complete environment variables reference |
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Development setup and project structure |
 | [UI.md](./UI.md) | Dashboard UI overview |
 | [MCP.md](./MCP.md) | MCP tools reference (auto-generated) |

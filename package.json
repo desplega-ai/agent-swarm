@@ -1,6 +1,6 @@
 {
   "name": "@desplega.ai/agent-swarm",
-  "version": "1.44.5",
+  "version": "1.65.0",
   "description": "Multi-agent orchestration for Claude Code, Codex, Gemini CLI, and other AI coding assistants",
   "license": "MIT",
   "author": "desplega.sh <contact@desplega.sh>",
@@ -21,6 +21,16 @@
   "publishConfig": {
     "access": "public"
   },
+  "files": [
+    "src/",
+    "tsconfig.json",
+    "plugin/commands/",
+    "plugin/agents/",
+    "plugin/skills/",
+    "plugin/pi-skills/",
+    "templates/",
+    "openapi.json"
+  ],
   "module": "src/http.ts",
   "type": "module",
   "bin": {
@@ -33,6 +43,7 @@
   "scripts": {
     "build:pi-skills": "bun run plugin/build-pi-skills.ts",
     "tsc:check": "bun tsc --noEmit",
+    "check:db-boundary": "bash scripts/check-db-boundary.sh",
     "cli": "bun src/cli.tsx",
     "hook": "bun src/hooks/hook.ts",
     "claude": "bun src/cli.tsx claude",
@@ -42,11 +53,12 @@
     "lead": "bun src/cli.tsx lead",
     "lead:yolo": "bun src/cli.tsx lead --yolo",
     "dev": "bun --hot src/stdio.ts",
-    "dev:http": "bun --hot src/http.ts",
+    "dev:http": "portless api.swarm bun --hot src/http.ts",
     "start": "bun src/stdio.ts",
     "start:http": "bun src/http.ts",
+    "start:portless": "portless api.swarm bun src/http.ts",
     "inspector": "bunx @modelcontextprotocol/inspector --transport stdio bun src/stdio.ts",
-    "inspector:http": "bunx @modelcontextprotocol/inspector --transport http http://localhost:3013/mcp",
+    "inspector:http": "bunx @modelcontextprotocol/inspector --transport http https://api.swarm.localhost:1355/mcp",
     "lint": "biome check src",
     "lint:fix": "biome check --write src",
     "format": "biome format --write src",
@@ -63,14 +75,18 @@
     "e2e:workflows:docker": "bun scripts/e2e-workflow-test.ts --with-docker",
     "docs:mcp": "bun scripts/generate-mcp-docs.ts",
     "docs:openapi": "bun scripts/generate-openapi.ts",
+    "docs:business-use": "bun scripts/generate-business-use-docs.ts",
     "pm2-start": "pm2 start ecosystem.config.cjs",
     "pm2-stop": "pm2 stop ecosystem.config.cjs",
     "pm2-restart": "pm2 restart ecosystem.config.cjs",
     "pm2-logs": "pm2 logs swarm-api swarm-ui swarm-lead swarm-worker",
-    "pm2-status": "pm2 status swarm-api swarm-ui swarm-lead swarm-worker"
+    "pm2-status": "pm2 status swarm-api swarm-ui swarm-lead swarm-worker",
+    "seed": "bun scripts/seed.ts",
+    "seed:clean": "bun scripts/seed.ts --clean"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.10",
+    "@faker-js/faker": "^10.4.0",
     "@types/bun": "latest"
   },
   "peerDependencies": {
@@ -82,12 +98,15 @@
   "dependencies": {
     "@ai-sdk/openai": "^3.0.41",
     "@asteasolutions/zod-to-openapi": "^8.0.0",
+    "@desplega.ai/business-use": "^0.4.2",
     "@desplega.ai/localtunnel": "^2.2.0",
     "@inkjs/ui": "^2.0.0",
+    "@linear/sdk": "^77.0.0",
     "@mariozechner/pi-agent-core": "^0.57.1",
     "@mariozechner/pi-ai": "^0.57.1",
     "@mariozechner/pi-coding-agent": "^0.57.1",
     "@modelcontextprotocol/sdk": "^1.25.1",
+    "@openai/codex-sdk": "^0.118.0",
     "@openfort/openfort-node": "^0.9.1",
     "@slack/bolt": "^4.6.0",
     "@types/react": "^19.2.7",
@@ -99,9 +118,11 @@
     "date-fns": "^4.1.0",
     "hono": "^4.12.3",
     "ink": "^6.5.1",
+    "oauth4webapi": "^3.8.5",
     "openai": "^6.22.0",
     "react": "^19.2.3",
     "react-devtools-core": "^7.0.1",
+    "sqlite-vec": "^0.1.9",
     "svix": "^1.62.0",
     "viem": "^2.46.3",
     "zod": "^4.2.1",

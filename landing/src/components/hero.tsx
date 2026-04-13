@@ -14,15 +14,21 @@ function SwarmVisualization() {
   ];
 
   const connections = [
-    [0, 1], [0, 2], [0, 3], [0, 4], [0, 5],
-    [1, 2], [3, 4], [4, 5],
+    [0, 1],
+    [0, 2],
+    [0, 3],
+    [0, 4],
+    [0, 5],
+    [1, 2],
+    [3, 4],
+    [4, 5],
   ];
 
   return (
     <div className="relative w-full aspect-square max-w-lg mx-auto">
       <div className="absolute inset-0 rounded-full bg-gradient-to-br from-amber-100/50 to-amber-50/20 blur-3xl" />
 
-      <svg viewBox="0 0 100 100" className="relative w-full h-full">
+      <svg viewBox="0 0 100 100" className="relative w-full h-full" role="img" aria-label="Agent Swarm network visualization showing interconnected AI agents">
         {connections.map(([from, to], i) => (
           <motion.line
             key={i}
@@ -119,7 +125,10 @@ export function Hero() {
 
       {/* Gradient orbs */}
       <div className="absolute top-20 -left-40 w-96 h-96 rounded-full bg-amber-200/20 blur-[100px] animate-pulse-glow" />
-      <div className="absolute bottom-20 -right-40 w-96 h-96 rounded-full bg-amber-300/15 blur-[100px] animate-pulse-glow" style={{ animationDelay: "1.5s" }} />
+      <div
+        className="absolute bottom-20 -right-40 w-96 h-96 rounded-full bg-amber-300/15 blur-[100px] animate-pulse-glow"
+        style={{ animationDelay: "1.5s" }}
+      />
 
       <div className="relative mx-auto max-w-6xl px-6 pt-32 pb-20 w-full">
         <div className="grid lg:grid-cols-2 gap-16 items-center">
@@ -142,8 +151,7 @@ export function Hero() {
               transition={{ duration: 0.6, delay: 0.1 }}
               className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight leading-[1.05] mb-6"
             >
-              Intelligence that{" "}
-              <span className="gradient-text">compounds</span>
+              Intelligence that <span className="gradient-text">compounds</span>
             </motion.h1>
 
             <motion.p
@@ -152,9 +160,9 @@ export function Hero() {
               transition={{ duration: 0.6, delay: 0.2 }}
               className="text-lg sm:text-xl text-zinc-500 leading-relaxed mb-10 max-w-xl"
             >
-              Orchestrate autonomous AI agents that learn, remember, and get
-              smarter with every session. A lead coordinates workers. Memory
-              persists. Knowledge compounds.
+              Orchestrate autonomous AI agents that learn, remember, and get smarter with every
+              session. A lead coordinates workers. Memory persists. Knowledge compounds.{" "}
+              <strong className="text-zinc-700">Deploy in minutes with Agent Swarm Cloud, or self-host for free.</strong>
             </motion.p>
 
             <motion.div
@@ -164,10 +172,10 @@ export function Hero() {
               className="flex flex-wrap gap-4"
             >
               <a
-                href="https://docs.agent-swarm.dev/docs/getting-started"
-                className="group inline-flex items-center gap-2 rounded-xl bg-zinc-900 px-6 py-3 text-sm font-semibold text-white hover:bg-zinc-800 transition-all shadow-xl shadow-zinc-900/20 hover:shadow-zinc-900/30"
+                href="https://cloud.agent-swarm.dev"
+                className="group inline-flex items-center gap-2 rounded-xl bg-amber-600 px-6 py-3 text-sm font-semibold text-white hover:bg-amber-500 transition-all shadow-xl shadow-amber-600/20 hover:shadow-amber-600/30"
               >
-                Get Started
+                Start Free Trial
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
               </a>
               <a
@@ -192,11 +200,17 @@ export function Hero() {
                 TypeScript
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" style={{ animationDelay: "0.5s" }} />
+                <div
+                  className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"
+                  style={{ animationDelay: "0.5s" }}
+                />
                 MCP Protocol
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" style={{ animationDelay: "1s" }} />
+                <div
+                  className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"
+                  style={{ animationDelay: "1s" }}
+                />
                 Claude Code
               </div>
             </motion.div>

@@ -69,12 +69,12 @@ const upsertConfig = route({
   tags: ["Config"],
   body: z.object({
     scope: z.enum(["global", "agent", "repo"]),
-    scopeId: z.string().optional(),
+    scopeId: z.string().nullish(),
     key: z.string().min(1),
     value: z.unknown(),
     isSecret: z.boolean().optional(),
-    envPath: z.string().optional(),
-    description: z.string().optional(),
+    envPath: z.string().nullish(),
+    description: z.string().nullish(),
   }),
   responses: {
     200: { description: "Config entry upserted" },

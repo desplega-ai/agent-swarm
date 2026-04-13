@@ -1,4 +1,5 @@
 import type { ColDef, ICellRendererParams, RowClickedEvent } from "ag-grid-community";
+import cronstrue from "cronstrue";
 import { Clock, Plus } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -27,7 +28,16 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { formatSmartTime } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { formatSmartTime, formatUTCTime } from "@/lib/utils";
+
+function describeCron(expr: string): string {
+  try {
+    return cronstrue.toString(expr, { use24HourTimeFormat: true });
+  } catch {
+    return expr;
+  }
+}
 
 function formatInterval(ms: number): string {
   const seconds = ms / 1000;
@@ -352,23 +362,48 @@ export default function SchedulesPage() {
       },
       {
         headerName: "Schedule",
-        width: 200,
-        minWidth: 160,
-        valueGetter: (params) => {
-          if (params.data?.scheduleType === "one_time") {
-            return params.data?.nextRunAt
-              ? `at ${formatSmartTime(params.data.nextRunAt)}`
-              : params.data?.lastRunAt
-                ? `ran ${formatSmartTime(params.data.lastRunAt)}`
+        width: 250,
+        minWidth: 200,
+        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+          const data = params.data;
+          if (!data) return null;
+
+          if (data.scheduleType === "one_time") {
+            const label = data.nextRunAt
+              ? `at ${formatUTCTime(data.nextRunAt)}`
+              : data.lastRunAt
+                ? `ran ${formatUTCTime(data.lastRunAt)}`
                 : "—";
+            return <span className="font-mono text-xs text-muted-foreground">{label}</span>;
           }
-          if (params.data?.cronExpression) return params.data.cronExpression;
-          if (params.data?.intervalMs) return `every ${formatInterval(params.data.intervalMs)}`;
-          return "—";
+
+          if (data.cronExpression) {
+            const tz = data.timezone || "UTC";
+            return (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-xs text-muted-foreground cursor-default">
+                    <span>{describeCron(data.cronExpression)}</span>
+                    <span className="ml-1.5 text-[10px] opacity-60">({tz})</span>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <code>{data.cronExpression}</code>
+                </TooltipContent>
+              </Tooltip>
+            );
+          }
+
+          if (data.intervalMs) {
+            return (
+              <span className="font-mono text-xs text-muted-foreground">
+                every {formatInterval(data.intervalMs)}
+              </span>
+            );
+          }
+
+          return <span className="text-xs text-muted-foreground">—</span>;
         },
-        cellRenderer: (params: { value: string }) => (
-          <span className="font-mono text-xs text-muted-foreground">{params.value}</span>
-        ),
       },
       {
         field: "targetAgentId",
@@ -381,14 +416,34 @@ export default function SchedulesPage() {
       {
         field: "nextRunAt",
         headerName: "Next Run",
-        width: 150,
-        valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : "—"),
+        width: 160,
+        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+          if (!params.value) return <span className="text-muted-foreground">—</span>;
+          return (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="cursor-default">{formatSmartTime(params.value)}</span>
+              </TooltipTrigger>
+              <TooltipContent>{formatUTCTime(params.value)}</TooltipContent>
+            </Tooltip>
+          );
+        },
       },
       {
         field: "lastRunAt",
         headerName: "Last Run",
-        width: 150,
-        valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : "Never"),
+        width: 160,
+        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+          if (!params.value) return <span className="text-muted-foreground">Never</span>;
+          return (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="cursor-default">{formatSmartTime(params.value)}</span>
+              </TooltipTrigger>
+              <TooltipContent>{formatUTCTime(params.value)}</TooltipContent>
+            </Tooltip>
+          );
+        },
       },
       {
         field: "enabled",

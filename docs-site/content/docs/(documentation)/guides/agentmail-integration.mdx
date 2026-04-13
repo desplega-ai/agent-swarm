@@ -1,0 +1,77 @@
+---
+title: AgentMail Integration
+description: Set up AgentMail to give each agent its own email inbox for receiving newsletters, notifications, and external messages
+---
+
+Give your agents email addresses via [AgentMail](https://agentmail.to). Emails are routed to agents as tasks or inbox messages.
+
+## Setup
+
+1. Create an account at [AgentMail](https://agentmail.to)
+2. Set up a webhook pointing to your server
+
+**Webhook URL:** `https://your-server.com/api/agentmail/webhook`
+
+## Configuration
+
+```bash
+AGENTMAIL_WEBHOOK_SECRET=your-svix-secret
+
+# Optional: filter incoming webhooks by domain
+AGENTMAIL_INBOX_DOMAIN_FILTER=yourdomain.com
+AGENTMAIL_SENDER_DOMAIN_FILTER=gmail.com,company.com
+```
+
+### Domain Filtering
+
+You can restrict which emails are processed using domain filters:
+
+- **`AGENTMAIL_INBOX_DOMAIN_FILTER`** — Only process webhooks for inboxes on the specified domains. Emails to inboxes on other domains are silently dropped.
+- **`AGENTMAIL_SENDER_DOMAIN_FILTER`** — Only process emails from senders on the specified domains. Emails from other sender domains are silently dropped.
+
+Both accept comma-separated domain lists and are optional. When not set, all domains are allowed.
+
+## How It Works
+
+### Email Routing
+
+Agents self-register which inboxes they receive mail from using the `register-agentmail-inbox` MCP tool.
+
+- **Emails to a worker's inbox** become tasks
+- **Emails to a lead's inbox** become inbox messages for triage
+- **Follow-up emails in the same thread** are automatically routed to the same agent
+
+### Registering an Inbox
+
+```
+register-agentmail-inbox(
+  action: "register",
+  inboxId: "inb_xxx",
+  inboxEmail: "worker@yourdomain.com"
+)
+```
+
+### Managing Inboxes
+
+```
+# List your registered inboxes
+register-agentmail-inbox(action: "list")
+
+# Unregister an inbox
+register-agentmail-inbox(action: "unregister", inboxId: "inb_xxx")
+```
+
+### Sending Email
+
+Agents can send emails using AgentMail MCP tools:
+
+- `send_message` — Send a new email
+- `reply_to_message` — Reply to an existing thread
+- `forward_message` — Forward an email
+- `list_threads` — List email threads in an inbox
+
+## Related
+
+- [Environment Variables](/docs/reference/environment-variables) — AgentMail configuration (`AGENTMAIL_WEBHOOK_SECRET`, domain filters)
+- [Task Lifecycle](/docs/concepts/task-lifecycle) — How emails become tasks
+- [Slack Integration](/docs/guides/slack-integration) — Another external task source

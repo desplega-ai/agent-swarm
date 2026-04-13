@@ -4,8 +4,12 @@ import {
   getAgentWorkingOnThread,
   getLeadAgent,
   getMostRecentTaskInThread,
+  resolveUser,
 } from "../be/db";
+import { resolveTemplate } from "../prompts/resolver";
 import { bufferThreadMessage } from "./thread-buffer";
+// Side-effect import: registers all Slack event templates in the in-memory registry
+import "./templates";
 
 const additiveSlack = process.env.ADDITIVE_SLACK === "true";
 
@@ -15,7 +19,8 @@ export function createAssistant(): Assistant {
       try {
         await saveThreadContext();
 
-        await say("Hi! I'm your Agent Swarm assistant. How can I help?");
+        const greetingResult = resolveTemplate("slack.assistant.greeting", {});
+        await say(greetingResult.text);
 
         await setSuggestedPrompts({
           title: "Try these:",
@@ -35,6 +40,24 @@ export function createAssistant(): Assistant {
     },
 
     userMessage: async ({ message, say, setStatus, setTitle, getThreadContext }) => {
+      // Wrap setStatus/setTitle to swallow all errors gracefully.
+      // These calls can fail for various reasons (no_permission when the thread
+      // wasn't started by the assistant, network errors, etc.), so we log and continue.
+      const safeSetStatus = async (status: string) => {
+        try {
+          await setStatus(status);
+        } catch (error) {
+          console.warn("[Slack] setStatus failed (thread may not be an assistant thread):", error);
+        }
+      };
+      const safeSetTitle = async (title: string) => {
+        try {
+          await setTitle(title);
+        } catch (error) {
+          console.warn("[Slack] setTitle failed (thread may not be an assistant thread):", error);
+        }
+      };
+
       try {
         // Cast to access fields — Bolt's message union type is complex
         const msg = message as unknown as Record<string, unknown>;
@@ -43,6 +66,9 @@ export function createAssistant(): Assistant {
         const messageText = (msg.text as string) || "";
         const userId = (msg.user as string) || "";
 
+        // Resolve canonical user identity (graceful — null if not found)
+        const requestedByUserId = userId ? resolveUser({ slackUserId: userId })?.id : undefined;
+
         // 1. Check if an agent is already working in this thread
         const workingAgent = getAgentWorkingOnThread(channelId, threadTs);
 
@@ -50,7 +76,7 @@ export function createAssistant(): Assistant {
           // Follow-up message → route to the same agent
           if (additiveSlack) {
             bufferThreadMessage(channelId, threadTs, messageText, userId, message.ts);
-            await setStatus("Queuing follow-up...");
+            await safeSetStatus("Queuing follow-up...");
             return;
           }
 
@@ -63,18 +89,19 @@ export function createAssistant(): Assistant {
             slackThreadTs: threadTs,
             slackUserId: userId,
             parentTaskId: latestTask?.id,
+            requestedByUserId,
           });
 
-          await setStatus("Processing follow-up...");
+          await safeSetStatus("Processing follow-up...");
           return;
         }
 
         // 2. First message in thread — create new task for lead
-        await setStatus("Processing your request...");
+        await safeSetStatus("Processing your request...");
 
         if (messageText) {
           const title = messageText.length > 50 ? `${messageText.slice(0, 47)}...` : messageText;
-          await setTitle(title);
+          await safeSetTitle(title);
         }
 
         // Optionally enrich with channel context
@@ -92,10 +119,10 @@ export function createAssistant(): Assistant {
             slackChannelId: channelId,
             slackThreadTs: threadTs,
             slackUserId: userId,
+            requestedByUserId,
           });
-          await say(
-            "No agents are available right now. Your request has been queued and will be processed when agents come back online.",
-          );
+          const offlineResult = resolveTemplate("slack.assistant.offline", {});
+          await say(offlineResult.text);
           return;
         }
 
@@ -105,6 +132,7 @@ export function createAssistant(): Assistant {
           slackChannelId: channelId,
           slackThreadTs: threadTs,
           slackUserId: userId,
+          requestedByUserId,
         });
         // setStatus shows typing indicator — watcher will post final result when done
       } catch (error) {

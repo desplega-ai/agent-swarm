@@ -2,7 +2,7 @@
 date: 2026-03-11T12:00:00Z
 topic: "Archil Shared Disk Write Access Strategies"
 author: "Claude (research for Taras)"
-status: "Research complete, awaiting decision"
+status: complete
 tags: [research, archil, shared-disk, multi-agent, ownership, concurrency, fly-io]
 ---
 

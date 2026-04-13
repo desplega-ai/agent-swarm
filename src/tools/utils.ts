@@ -18,22 +18,31 @@ type Meta = RequestHandlerExtra<ServerRequest, ServerNotification>;
 export type RequestInfo = {
   sessionId: string | undefined;
   agentId: string | undefined;
+  sourceTaskId: string | undefined;
 };
 
 export const getRequestInfo = (req: Meta): RequestInfo => {
   const agentIdHeader = req.requestInfo?.headers?.["x-agent-id"];
+  const sourceTaskIdHeader = req.requestInfo?.headers?.["x-source-task-id"];
 
   let agentId: string | undefined;
-
   if (Array.isArray(agentIdHeader)) {
     agentId = agentIdHeader?.[0];
   } else if (typeof agentIdHeader === "string") {
     agentId = agentIdHeader;
   }
 
+  let sourceTaskId: string | undefined;
+  if (Array.isArray(sourceTaskIdHeader)) {
+    sourceTaskId = sourceTaskIdHeader?.[0];
+  } else if (typeof sourceTaskIdHeader === "string") {
+    sourceTaskId = sourceTaskIdHeader;
+  }
+
   return {
     sessionId: req.sessionId || undefined,
     agentId,
+    sourceTaskId,
   };
 };
 
@@ -92,17 +101,19 @@ export const createToolRegistrar = (server: McpServer) => {
     config: ToolConfig<InputArgs, OutputArgs>,
     cb: ToolCallbackWithInfo<InputArgs>,
   ) => {
-    return server.registerTool(name, config, ((args: InferInput<InputArgs>, meta: Meta) => {
-      const requestInfo = getRequestInfo(meta);
-
-      // Handle zero-argument case
-      if (config.inputSchema === undefined) {
+    // When inputSchema is undefined, the MCP SDK calls handler(extra) with a single arg.
+    // When inputSchema is defined, it calls handler(args, extra) with two args.
+    if (config.inputSchema === undefined) {
+      return server.registerTool(name, config, ((meta: Meta) => {
+        const requestInfo = getRequestInfo(meta);
         return (
           cb as (requestInfo: RequestInfo, meta: Meta) => CallToolResult | Promise<CallToolResult>
         )(requestInfo, meta);
-      }
+      }) as Parameters<typeof server.registerTool>[2]);
+    }
 
-      // Handle with-arguments case
+    return server.registerTool(name, config, ((args: InferInput<InputArgs>, meta: Meta) => {
+      const requestInfo = getRequestInfo(meta);
       return (
         cb as (
           args: InferInput<InputArgs>,

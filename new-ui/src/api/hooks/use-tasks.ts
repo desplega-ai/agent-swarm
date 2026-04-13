@@ -4,7 +4,6 @@ import { api } from "../client";
 export interface TaskFilters {
   status?: string;
   agentId?: string;
-  epicId?: string;
   scheduleId?: string;
   search?: string;
   includeHeartbeat?: boolean;
@@ -34,6 +33,15 @@ export function useTaskSessionLogs(taskId: string) {
     queryFn: () => api.fetchTaskSessionLogs(taskId),
     enabled: !!taskId,
     refetchInterval: 5000,
+  });
+}
+
+export function useTaskContext(taskId: string) {
+  return useQuery({
+    queryKey: ["task", taskId, "context"],
+    queryFn: () => api.fetchTaskContext(taskId),
+    enabled: !!taskId,
+    refetchInterval: 10000,
   });
 }
 

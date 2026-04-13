@@ -17,7 +17,14 @@ export {
   handlePullRequestReview,
   handleWorkflowRun,
 } from "./handlers";
-export { detectMention, extractMentionContext, GITHUB_BOT_NAME, isBotAssignee } from "./mentions";
+export {
+  detectMention,
+  extractMentionContext,
+  GITHUB_BOT_NAME,
+  GITHUB_EVENT_LABELS,
+  isBotAssignee,
+  isSwarmLabel,
+} from "./mentions";
 export type { ReactionType } from "./reactions";
 export { addIssueReaction, addReaction, postComment } from "./reactions";
 export type {

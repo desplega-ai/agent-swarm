@@ -1,0 +1,15 @@
+{
+  "title": "Guides",
+  "pages": [
+    "deployment",
+    "harness-configuration",
+    "provider-auth",
+    "slack-integration",
+    "github-integration",
+    "gitlab-integration",
+    "agentmail-integration",
+    "sentry-integration",
+    "linear-integration",
+    "x402-payments"
+  ]
+}

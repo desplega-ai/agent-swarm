@@ -110,9 +110,7 @@ export function generateCompose(config: ComposeConfig): string {
   lines.push("      - swarm_api:/app");
   lines.push("");
   lines.push("    healthcheck:");
-  lines.push(
-    '      test: ["CMD-SHELL", "curl -f http://localhost:3013/health || exit 1"]'
-  );
+  lines.push('      test: ["CMD-SHELL", "curl -f http://localhost:3013/health || exit 1"]');
   lines.push("      interval: 30s");
   lines.push("      timeout: 10s");
   lines.push("      retries: 3");

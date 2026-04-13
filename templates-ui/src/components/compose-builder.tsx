@@ -67,19 +67,13 @@ function makeDefaultWorkers(templates: TemplateWithCategory[]): ServiceEntry[] {
 
 export function ComposeBuilder({ templates }: ComposeBuilderProps) {
   const [leadService, setLeadService] = useState<ServiceEntry>(() =>
-    makeLeadEntry(templates.find((t) => t.name === "lead"))
+    makeLeadEntry(templates.find((t) => t.name === "lead")),
   );
-  const [workers, setWorkers] = useState<ServiceEntry[]>(() =>
-    makeDefaultWorkers(templates)
-  );
+  const [workers, setWorkers] = useState<ServiceEntry[]>(() => makeDefaultWorkers(templates));
 
   const services = useMemo(() => [leadService, ...workers], [leadService, workers]);
-  const [apiImage, setApiImage] = useState(
-    "ghcr.io/desplega-ai/agent-swarm:latest"
-  );
-  const [workerImage, setWorkerImage] = useState(
-    "ghcr.io/desplega-ai/agent-swarm-worker:latest"
-  );
+  const [apiImage, setApiImage] = useState("ghcr.io/desplega-ai/agent-swarm:latest");
+  const [workerImage, setWorkerImage] = useState("ghcr.io/desplega-ai/agent-swarm-worker:latest");
   const [startingPort, setStartingPort] = useState(3020);
   const [integrations, setIntegrations] = useState({
     slack: false,
@@ -96,7 +90,7 @@ export function ComposeBuilder({ templates }: ComposeBuilderProps) {
       startingPort,
       integrations,
     }),
-    [services, apiImage, workerImage, startingPort, integrations]
+    [services, apiImage, workerImage, startingPort, integrations],
   );
 
   const compose = useMemo(() => generateCompose(config), [config]);
@@ -104,7 +98,13 @@ export function ComposeBuilder({ templates }: ComposeBuilderProps) {
 
   const changeLeadTemplate = (templateKey: string | null) => {
     if (!templateKey) {
-      setLeadService({ template: "", displayName: "Lead Agent", count: 1, role: "Lead", isLead: true });
+      setLeadService({
+        template: "",
+        displayName: "Lead Agent",
+        count: 1,
+        role: "Lead",
+        isLead: true,
+      });
       return;
     }
     const t = templates.find((tpl) => `${tpl.category}/${tpl.name}` === templateKey);
@@ -129,7 +129,7 @@ export function ComposeBuilder({ templates }: ComposeBuilderProps) {
     setWorkers(
       workers
         .map((s, i) => (i === idx ? { ...s, count: Math.max(0, s.count + delta) } : s))
-        .filter((s) => s.count > 0)
+        .filter((s) => s.count > 0),
     );
   };
 
@@ -141,8 +141,8 @@ export function ComposeBuilder({ templates }: ComposeBuilderProps) {
     if (!templateKey) {
       setWorkers(
         workers.map((s, i) =>
-          i === idx ? { ...s, template: "", displayName: "Worker", role: "Worker" } : s
-        )
+          i === idx ? { ...s, template: "", displayName: "Worker", role: "Worker" } : s,
+        ),
       );
       return;
     }
@@ -158,8 +158,8 @@ export function ComposeBuilder({ templates }: ComposeBuilderProps) {
               role: t.agentDefaults.role,
               isLead: false,
             }
-          : s
-      )
+          : s,
+      ),
     );
   };
 
@@ -171,9 +171,7 @@ export function ComposeBuilder({ templates }: ComposeBuilderProps) {
         <div>
           <h2 className="text-lg font-semibold mb-3">Integrations</h2>
           <div className="flex flex-wrap gap-3">
-            {(
-              Object.keys(integrations) as Array<keyof typeof integrations>
-            ).map((key) => (
+            {(Object.keys(integrations) as Array<keyof typeof integrations>).map((key) => (
               <label key={key} className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
@@ -221,48 +219,43 @@ export function ComposeBuilder({ templates }: ComposeBuilderProps) {
                 const tpl = svc.template
                   ? templates.find((t) => `${t.category}/${t.name}` === svc.template)
                   : null;
-                const WorkerIcon = tpl ? iconMap[tpl.icon] ?? Bot : Bot;
+                const WorkerIcon = tpl ? (iconMap[tpl.icon] ?? Bot) : Bot;
                 return (
-                <div
-                  key={idx}
-                  className="rounded-lg border border-border p-3 space-y-2"
-                >
-                  <div className="flex items-center gap-3">
-                    <WorkerIcon className="h-5 w-5 text-muted-foreground shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <TemplateDropdown
-                        templates={templates}
-                        value={svc.template}
-                        isLead={false}
-                        onChange={(key) => changeWorkerTemplate(idx, key)}
-                      />
+                  <div key={idx} className="rounded-lg border border-border p-3 space-y-2">
+                    <div className="flex items-center gap-3">
+                      <WorkerIcon className="h-5 w-5 text-muted-foreground shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <TemplateDropdown
+                          templates={templates}
+                          value={svc.template}
+                          isLead={false}
+                          onChange={(key) => changeWorkerTemplate(idx, key)}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={() => updateWorkerCount(idx, -1)}
+                        className="rounded-md p-1 hover:bg-accent transition-colors"
+                      >
+                        <Minus className="h-4 w-4" />
+                      </button>
+                      <span className="w-8 text-center text-sm font-mono">{svc.count}</span>
+                      <button
+                        onClick={() => updateWorkerCount(idx, 1)}
+                        className="rounded-md p-1 hover:bg-accent transition-colors"
+                        disabled={svc.count >= 10}
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => removeWorker(idx)}
+                        className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors ml-1"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center justify-end gap-1">
-                    <button
-                      onClick={() => updateWorkerCount(idx, -1)}
-                      className="rounded-md p-1 hover:bg-accent transition-colors"
-                    >
-                      <Minus className="h-4 w-4" />
-                    </button>
-                    <span className="w-8 text-center text-sm font-mono">
-                      {svc.count}
-                    </span>
-                    <button
-                      onClick={() => updateWorkerCount(idx, 1)}
-                      className="rounded-md p-1 hover:bg-accent transition-colors"
-                      disabled={svc.count >= 10}
-                    >
-                      <Plus className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => removeWorker(idx)}
-                      className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors ml-1"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
                 );
               })}
             </div>
@@ -289,9 +282,7 @@ export function ComposeBuilder({ templates }: ComposeBuilderProps) {
               />
             </div>
             <div>
-              <label className="text-sm text-muted-foreground">
-                Worker Image
-              </label>
+              <label className="text-sm text-muted-foreground">Worker Image</label>
               <input
                 type="text"
                 value={workerImage}
@@ -354,21 +345,17 @@ function TemplateDropdown({
   }, []);
 
   // Filter templates by type (lead vs worker) to match the current service
-  const relevantTemplates = templates.filter(
-    (t) => !!t.agentDefaults.isLead === isLead
-  );
+  const relevantTemplates = templates.filter((t) => !!t.agentDefaults.isLead === isLead);
 
   const filtered = search
     ? relevantTemplates.filter(
         (t) =>
           t.displayName.toLowerCase().includes(search.toLowerCase()) ||
-          t.name.toLowerCase().includes(search.toLowerCase())
+          t.name.toLowerCase().includes(search.toLowerCase()),
       )
     : relevantTemplates;
 
-  const current = templates.find(
-    (t) => `${t.category}/${t.name}` === value
-  );
+  const current = templates.find((t) => `${t.category}/${t.name}` === value);
 
   return (
     <div ref={ref} className="relative">
@@ -430,9 +417,7 @@ function TemplateDropdown({
               );
             })}
             {filtered.length === 0 && (
-              <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                No templates found.
-              </p>
+              <p className="px-2 py-1.5 text-xs text-muted-foreground">No templates found.</p>
             )}
           </div>
         </div>

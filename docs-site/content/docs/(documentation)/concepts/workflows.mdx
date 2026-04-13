@@ -1,0 +1,377 @@
+---
+title: Workflows
+description: Automate multi-step processes with DAG-based workflow definitions
+---
+
+Agent Swarm includes a **workflow automation engine** that lets you define multi-step processes as directed acyclic graphs (DAGs). Workflows connect triggers, conditions, and actions into pipelines that execute automatically.
+
+## Core Concepts
+
+A workflow consists of:
+
+- **Nodes** — Individual steps with a `next` field that defines routing (no explicit edges needed)
+- **Executors** — Class-based step implementations with Zod-typed config and output schemas
+- **Triggers** — Entry points: webhook (HMAC-SHA256), schedule (ref), or manual
+- **Checkpoint durability** — Atomic DB write after every step; resume from last checkpoint on crash
+- **Fan-out / convergence** — Parallel execution via array `next` with automatic convergence gating
+
+### Executor Types
+
+The engine includes 9 built-in executor types:
+
+| Executor | Description |
+|----------|-------------|
+| `script` | Run a shell script or JavaScript expression |
+| `agent-task` | Create and delegate a task to a swarm agent |
+| `raw-llm` | Call an LLM directly with a prompt template |
+| `vcs` | Version control operations (create PR, merge, etc.) |
+| `property-match` | Route based on matching properties in step input |
+| `code-match` | Route based on a custom JavaScript expression in a sandbox |
+| `notify` | Send a notification (Slack, email, or internal message) |
+| `validate` | Validate step output; can halt or trigger retry |
+| `human-in-the-loop` | Pause workflow for human approval or input via the dashboard |
+
+Each executor has typed config and output schemas available via `GET /api/executor-types` (returns JSON Schemas via Zod v4 `z.toJSONSchema()`).
+
+## Defining a Workflow
+
+Workflows use a **nodes-with-next** schema. Each node declares its `next` field for routing — edges are auto-generated for the UI graph visualization.
+
+The `next` field supports three formats:
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| `string` | `"next-node"` | Simple chaining to one node |
+| `string[]` | `["node-a", "node-b"]` | Fan-out to multiple parallel nodes |
+| `Record<string, string>` | `{ "pass": "ok-node", "fail": "err-node" }` | Port-based conditional routing |
+
+```json
+{
+  "name": "pr-review-pipeline",
+  "description": "Auto-assign PR reviews on webhook",
+  "triggers": [
+    { "type": "webhook", "config": { "hmacSecret": "my-secret" } }
+  ],
+  "definition": {
+    "nodes": [
+      {
+        "id": "check-type",
+        "type": "property-match",
+        "label": "Check Event Type",
+        "config": { "property": "event", "match": "pull_request.opened" },
+        "next": { "match": "create-review", "no_match": null }
+      },
+      {
+        "id": "create-review",
+        "type": "agent-task",
+        "label": "Create Review Task",
+        "config": {
+          "taskTemplate": "Review PR #{{input.number}}: {{input.title}}",
+          "tags": ["review", "automated"],
+          "priority": 60
+        }
+      }
+    ]
+  }
+}
+```
+
+### Triggers
+
+| Type | Description |
+|------|-------------|
+| `webhook` | HTTP POST to `/api/workflows/:id/trigger` with optional HMAC-SHA256 verification |
+| `schedule` | References a schedule by ID — the schedule creates workflow runs at configured times |
+| `manual` | Triggered via the `trigger-workflow` MCP tool or dashboard UI |
+
+### Cooldown
+
+Workflows support a cooldown period to prevent rapid re-triggering:
+
+```json
+{
+  "cooldown": { "hours": 0, "minutes": 5, "seconds": 0 }
+}
+```
+
+A second trigger within the cooldown window results in a run with `skipped` status.
+
+## Execution Model
+
+When a workflow triggers:
+
+1. The trigger source (webhook, schedule, or manual) creates a new **workflow run**
+2. The engine's `walkGraph()` finds ready nodes and executes them in parallel
+3. Each node's executor runs and produces output that determines port-based routing via `next`
+4. **Checkpoint durability** — after every step, an atomic DB write saves the step result and execution context
+5. On crash or restart, execution resumes from the last checkpoint
+
+### Fan-Out and Convergence
+
+Workflows support **fan-out** by specifying an array of node IDs in the `next` field. All target nodes execute in parallel, and downstream convergence nodes automatically wait for all predecessors to complete before executing.
+
+```json
+{
+  "definition": {
+    "nodes": [
+      {
+        "id": "start",
+        "type": "agent-task",
+        "next": ["task-a", "task-b", "task-c"]
+      },
+      { "id": "task-a", "type": "agent-task", "next": "merge" },
+      { "id": "task-b", "type": "agent-task", "next": "merge" },
+      { "id": "task-c", "type": "agent-task", "next": "merge" },
+      {
+        "id": "merge",
+        "type": "agent-task",
+        "inputs": { "a": "task-a", "b": "task-b", "c": "task-c" },
+        "config": { "template": "Combine results from {{a.taskOutput}}, {{b.taskOutput}}, {{c.taskOutput}}" }
+      }
+    ]
+  }
+}
+```
+
+The engine detects convergence nodes (nodes with multiple predecessors) and gates execution until all predecessors complete. This works correctly with async executors like `agent-task` — the resume logic uses convergence-aware node detection.
+
+### Node Failure Behavior (`onNodeFailure`)
+
+By default, if any node's task fails or is cancelled, the entire workflow run is marked as failed. You can change this with the `onNodeFailure` field on the workflow definition:
+
+```json
+{
+  "definition": {
+    "onNodeFailure": "continue",
+    "nodes": [...]
+  }
+}
+```
+
+| Value | Behavior |
+|-------|----------|
+| `"fail"` (default) | Mark the entire run as failed immediately |
+| `"continue"` | Treat the failed node as completed with error output and proceed — downstream convergence nodes receive `[FAILED: reason]` and can handle partial results |
+
+This is useful for fan-out patterns where some branches may fail but you still want to collect results from the successful ones.
+
+### Per-Step Retry
+
+Each node can define a `retryPolicy`:
+
+```json
+{
+  "retryPolicy": {
+    "maxRetries": 3,
+    "backoff": "exponential",
+    "initialDelayMs": 1000
+  }
+}
+```
+
+Backoff strategies: `exponential`, `linear`, `static`. The poller detects failed steps and re-executes them according to the policy.
+
+### Per-Node Timeout
+
+Each node can set a custom `timeoutMs` to override the default step timeout:
+
+```json
+{
+  "id": "slow-analysis",
+  "type": "agent-task",
+  "timeoutMs": 600000,
+  "config": {
+    "template": "Perform a deep code analysis..."
+  }
+}
+```
+
+If the step exceeds its timeout, it is marked as failed and the retry/failure policy applies.
+
+### Cancelling a Workflow Run
+
+Running or waiting workflow runs can be cancelled using the `cancel-workflow-run` MCP tool. Cancellation terminates all non-terminal steps and their associated tasks. An optional reason can be provided for audit purposes.
+
+### Per-Step Validation
+
+The `validate` executor runs after a step to check output quality. It can:
+- **Pass** — continue to the next step
+- **Halt** — stop the workflow run
+- **Retry** — re-execute the previous step
+
+### Cross-Node Data Access (`inputs` Mapping)
+
+By default, upstream step outputs are **not** available for interpolation. Only `trigger` (trigger data) and `input` (workflow-level resolved inputs) are in scope. To access another node's output, declare an `inputs` mapping on the node:
+
+```json
+{
+  "id": "summarize",
+  "type": "agent-task",
+  "inputs": { "cityData": "generate-city" },
+  "config": {
+    "template": "The city is {{cityData.taskOutput.city}} in {{cityData.taskOutput.country}}"
+  }
+}
+```
+
+- Keys are local names used in `{{interpolation}}`, values are context paths (usually a node ID)
+- Agent-task output shape is `{ taskId, taskOutput }` — access fields via `localName.taskOutput.field`
+- For trigger data: `{ "pr": "trigger.pullRequest" }` → `{{pr.number}}`
+- Without `inputs`, templates referencing upstream nodes silently resolve to empty strings
+
+### Structured Output (`outputSchema`)
+
+Agent-task nodes can require structured JSON output from the agent via `config.outputSchema`:
+
+```json
+{
+  "id": "generate-city",
+  "type": "agent-task",
+  "config": {
+    "template": "Pick a random city and return it as JSON",
+    "outputSchema": {
+      "type": "object",
+      "required": ["city", "country"],
+      "properties": {
+        "city": { "type": "string" },
+        "country": { "type": "string" }
+      }
+    }
+  }
+}
+```
+
+There are **two different `outputSchema` locations** — they validate at different layers:
+
+| Location | Validates |
+|----------|-----------|
+| `config.outputSchema` (inside config) | The **agent's raw JSON** response |
+| Node-level `outputSchema` (sibling of config) | The **executor's return** envelope (rarely needed) |
+
+For agent-task nodes, put your schema in `config.outputSchema`. The agent is prompted to produce JSON matching this schema, and `store-progress` validates it inline.
+
+### Workspace Scoping
+
+Workspace scoping can be set at two levels:
+
+**Workflow level** — Set `dir` and `vcsRepo` on the workflow itself. All `agent-task` nodes that don't explicitly set these fields inherit the workflow-level defaults. These values are also available for interpolation:
+
+```json
+{
+  "name": "my-workflow",
+  "dir": "/workspace/myrepo",
+  "vcsRepo": "https://github.com/org/repo",
+  "definition": {
+    "nodes": [
+      {
+        "id": "build",
+        "type": "agent-task",
+        "config": {
+          "template": "Build and test in {{workflow.dir}}"
+        }
+      }
+    ]
+  }
+}
+```
+
+**Node level** — Set `config.dir` or `config.vcsRepo` on individual `agent-task` nodes. Node-level settings override workflow-level defaults.
+
+Interpolation sources available in node config:
+- `{{workflow.dir}}` — Workflow-level dir
+- `{{workflow.vcsRepo}}` — Workflow-level vcsRepo
+- `{{trigger.*}}` — Trigger payload data
+- `{{input.*}}` — Workflow-level resolved inputs
+
+### Version History
+
+Every workflow update creates a snapshot in the version history table, recording the previous definition. This provides an audit trail and enables rollback.
+
+## MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `create-workflow` | Create a new workflow with a DAG definition |
+| `get-workflow` | Get workflow details by ID |
+| `list-workflows` | List all workflows (optionally filter by enabled status) |
+| `update-workflow` | Update a workflow's definition, name, or enabled status |
+| `patch-workflow` | Partially update a workflow — create, update, or delete individual nodes with automatic version snapshots |
+| `patch-workflow-node` | Partially update a single node in a workflow with automatic version snapshots |
+| `delete-workflow` | Delete a workflow and its run history |
+| `trigger-workflow` | Manually trigger a workflow execution |
+| `get-workflow-run` | Get details of a specific workflow run |
+| `list-workflow-runs` | List runs for a workflow |
+| `retry-workflow-run` | Retry a failed workflow run |
+| `cancel-workflow-run` | Cancel a running or waiting workflow run |
+
+## Dashboard UI
+
+The dashboard includes a **Workflows** section (under Operations) with:
+
+- **Workflows list** — View all workflows with enable/disable status
+- **Workflow detail** — Tabbed view with Definition (node inspector showing config/input/output schemas) and Runs tabs
+- **Run detail** — Split layout with interactive graph and collapsible steps panel, JsonTree viewer, bidirectional node selection, expand/collapse all, millisecond duration display
+
+## Human-in-the-Loop (HITL) Node
+
+The `human-in-the-loop` executor pauses a workflow until a human responds via the dashboard. This enables approval gates, manual input steps, and review checkpoints within automated pipelines.
+
+```json
+{
+  "id": "approve-deploy",
+  "type": "human-in-the-loop",
+  "label": "Approve Deployment",
+  "config": {
+    "title": "Deploy to production?",
+    "questions": [
+      { "type": "approval", "label": "Approve this deployment?" },
+      { "type": "text", "label": "Any notes?" }
+    ]
+  },
+  "next": { "approved": "deploy", "rejected": "notify-rejected" }
+}
+```
+
+Question types supported: `approval` (yes/no), `text`, `single-select`, `multi-select`, and `boolean`.
+
+When the node executes, it creates an approval request accessible at `/approval-requests/{id}` in the dashboard. The workflow run pauses until a human responds. Upon resolution, a follow-up task is created for the requesting agent and the workflow resumes via the appropriate `next` port.
+
+## Loop Support
+
+Workflows support **cycles** (loops) in the DAG. A node can route back to a previous node via its `next` field, enabling iterative patterns like retry-until-success or iterative refinement.
+
+The engine uses **iteration-aware idempotency keys** to distinguish between loop iterations. Each time a node re-executes in a new iteration, it gets a unique checkpoint, allowing the engine to track progress correctly across multiple passes through the same node.
+
+```json
+{
+  "definition": {
+    "nodes": [
+      {
+        "id": "generate",
+        "type": "agent-task",
+        "config": { "template": "Generate a draft" },
+        "next": "validate"
+      },
+      {
+        "id": "validate",
+        "type": "validate",
+        "next": { "pass": "publish", "retry": "generate" }
+      },
+      {
+        "id": "publish",
+        "type": "agent-task",
+        "config": { "template": "Publish the final draft" }
+      }
+    ]
+  }
+}
+```
+
+In this example, the `validate` node routes back to `generate` on failure, creating a loop that continues until validation passes.
+
+## Related
+
+- [Scheduled Tasks](/docs/concepts/scheduling) — Time-based task automation (complementary to event-driven workflows)
+- [Task Lifecycle](/docs/concepts/task-lifecycle) — How tasks created by workflows flow through the system
+- [MCP Tools Reference](/docs/reference/mcp-tools) — Full tool documentation
+- [Workflows API Reference](/docs/api-reference/workflows) — REST API endpoints for creating and managing workflows

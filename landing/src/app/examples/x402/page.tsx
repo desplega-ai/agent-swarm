@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import Image from "next/image";
+import Link from "next/link";
 import { ArrowLeft, ExternalLink, CheckCircle, Wallet, Zap } from "lucide-react";
 
 export const metadata: Metadata = {
@@ -27,20 +29,14 @@ export const metadata: Metadata = {
     title: "x402 Payment Session — AI Agents Pay with Crypto",
     description:
       "Real session: AI agents used x402 protocol to pay $0.05 USDC for image generation on Base mainnet.",
-    images: [
-      "https://blob.imference.com/large/37f7ee3b-616b-402f-8cb3-d69896165e3f.webp",
-    ],
+    images: ["https://blob.imference.com/large/37f7ee3b-616b-402f-8cb3-d69896165e3f.webp"],
   },
   alternates: {
     canonical: "/examples/x402",
   },
 };
 
-function Avatar({
-  sender,
-}: {
-  sender: "human" | "agent";
-}) {
+function Avatar({ sender }: { sender: "human" | "agent" }) {
   return (
     <div
       className={`w-8 h-8 md:w-9 md:h-9 rounded-full flex items-center justify-center shrink-0 text-[11px] font-bold select-none ${
@@ -96,12 +92,21 @@ function Message({
   );
 }
 
-function Badge({ children, variant = "default" }: { children: React.ReactNode; variant?: "default" | "success" }) {
-  const styles = variant === "success"
-    ? "bg-emerald-100 text-emerald-800 border-emerald-200"
-    : "bg-zinc-100 text-zinc-600 border-zinc-200";
+function Badge({
+  children,
+  variant = "default",
+}: {
+  children: React.ReactNode;
+  variant?: "default" | "success";
+}) {
+  const styles =
+    variant === "success"
+      ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+      : "bg-zinc-100 text-zinc-600 border-zinc-200";
   return (
-    <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full border ${styles} mb-3`}>
+    <span
+      className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full border ${styles} mb-3`}
+    >
       {children}
     </span>
   );
@@ -138,8 +143,7 @@ const jsonLd = {
     },
   },
   mainEntityOfPage: "https://agent-swarm.dev/examples/x402",
-  image:
-    "https://blob.imference.com/large/37f7ee3b-616b-402f-8cb3-d69896165e3f.webp",
+  image: "https://blob.imference.com/large/37f7ee3b-616b-402f-8cb3-d69896165e3f.webp",
 };
 
 export default function X402ExamplePage() {
@@ -152,19 +156,17 @@ export default function X402ExamplePage() {
       {/* Top bar */}
       <nav className="border-b border-zinc-200/60 bg-white/90 backdrop-blur-xl sticky top-0 z-50">
         <div className="mx-auto max-w-2xl px-4 sm:px-6 h-12 flex items-center gap-3">
-          <a
+          <Link
             href="/examples"
             className="flex items-center gap-1.5 text-[13px] text-zinc-500 hover:text-zinc-900 transition-colors"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Examples</span>
-          </a>
+          </Link>
           <div className="w-px h-4 bg-zinc-200" />
           <div className="flex items-center gap-1.5">
             <Zap className="w-3.5 h-3.5 text-amber-600" />
-            <span className="text-[13px] font-medium text-zinc-700">
-              x402 Payment Session
-            </span>
+            <span className="text-[13px] font-medium text-zinc-700">x402 Payment Session</span>
           </div>
         </div>
       </nav>
@@ -194,11 +196,14 @@ export default function X402ExamplePage() {
         {/* Result image */}
         <section className="mb-8 md:mb-10">
           <div className="rounded-2xl overflow-hidden border border-zinc-200 shadow-lg shadow-zinc-200/50 relative group">
-            <img
+            <Image
               src="https://blob.imference.com/large/37f7ee3b-616b-402f-8cb3-d69896165e3f.webp"
               alt="A cat on a skateboard, anime style — generated via x402 payment"
+              width={1024}
+              height={1024}
               className="w-full block"
-              loading="eager"
+              priority
+              sizes="(max-width: 768px) 100vw, 672px"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
             <div className="absolute bottom-0 left-0 right-0 p-4 md:p-5">
@@ -225,9 +230,7 @@ export default function X402ExamplePage() {
           <div className="rounded-2xl bg-white border border-zinc-200 p-5 md:p-6">
             <div className="flex items-center gap-2 mb-4">
               <Wallet className="w-4 h-4 text-amber-700" />
-              <h2 className="text-[15px] font-semibold text-zinc-900">
-                How x402 Payment Works
-              </h2>
+              <h2 className="text-[15px] font-semibold text-zinc-900">How x402 Payment Works</h2>
             </div>
             <div className="space-y-0">
               {[
@@ -244,9 +247,7 @@ export default function X402ExamplePage() {
                     </div>
                     <p className="text-[13px] text-zinc-700">{label}</p>
                   </div>
-                  {i < 4 && (
-                    <div className="ml-3 h-3 border-l border-dashed border-zinc-200" />
-                  )}
+                  {i < 4 && <div className="ml-3 h-3 border-l border-dashed border-zinc-200" />}
                 </div>
               ))}
             </div>
@@ -269,9 +270,7 @@ export default function X402ExamplePage() {
 
             {/* 2 */}
             <Message sender="agent" label="Agent Swarm">
-              <p className="text-[14px] text-zinc-700 leading-relaxed mb-2">
-                On it. The plan:
-              </p>
+              <p className="text-[14px] text-zinc-700 leading-relaxed mb-2">On it. The plan:</p>
               <ol className="text-[14px] text-zinc-700 space-y-1.5 pl-5 list-decimal marker:text-zinc-400">
                 <li>Research the imference.com API (endpoints, pricing, x402 flow)</li>
                 <li>
@@ -289,21 +288,15 @@ export default function X402ExamplePage() {
             {/* 3 */}
             <Message sender="agent" label="Agent Swarm">
               <Badge>Step 1 — API Research</Badge>
-              <p className="text-[14px] text-zinc-700 leading-relaxed mb-3">
-                Research complete:
-              </p>
+              <p className="text-[14px] text-zinc-700 leading-relaxed mb-3">Research complete:</p>
               <div className="bg-zinc-50 rounded-xl p-3.5 space-y-2">
                 <InfoRow label="Endpoint">
                   <code className="text-[12px] font-mono break-all">
                     POST https://imference.com/ondemand/generate
                   </code>
                 </InfoRow>
-                <InfoRow label="Payment">
-                  x402 protocol — $0.05/image in USDC on Base
-                </InfoRow>
-                <InfoRow label="Model">
-                  illustrious-hassaku-xl (anime)
-                </InfoRow>
+                <InfoRow label="Payment">x402 protocol — $0.05/image in USDC on Base</InfoRow>
+                <InfoRow label="Model">illustrious-hassaku-xl (anime)</InfoRow>
                 <InfoRow label="SDK">
                   <code className="text-[12px] font-mono">@x402/fetch</code> +{" "}
                   <code className="text-[12px] font-mono">@x402/evm</code> handle 402 automatically
@@ -331,7 +324,7 @@ export default function X402ExamplePage() {
                   <span className="text-[11px] text-zinc-500 font-mono ml-2">verify-x402.ts</span>
                 </div>
                 <pre className="bg-zinc-950 text-zinc-300 p-4 text-[12px] md:text-[13px] font-mono overflow-x-auto leading-relaxed">
-{`const client = createX402Client({
+                  {`const client = createX402Client({
   signer: openfortSigner,
   chain: "base",
 });
@@ -371,7 +364,8 @@ const result = await client.fetch(
                 </InfoRow>
               </div>
               <p className="text-[13px] text-zinc-500 mt-3">
-                Real payment on Base mainnet. The entire flow — from request to image — was autonomous.
+                Real payment on Base mainnet. The entire flow — from request to image — was
+                autonomous.
               </p>
             </Message>
 
@@ -417,11 +411,14 @@ const result = await client.fetch(
         <footer className="border-t border-zinc-200 py-8">
           <p className="text-[13px] text-zinc-500 leading-relaxed mb-5">
             This is a real session from the{" "}
-            <a href="/" className="text-amber-700 hover:text-amber-900 font-medium transition-colors">
+            <Link
+              href="/"
+              className="text-amber-700 hover:text-amber-900 font-medium transition-colors"
+            >
               Agent Swarm
-            </a>
-            . The x402 protocol enables AI agents to autonomously pay for
-            services using cryptocurrency — no human wallet interaction needed.
+            </Link>
+            . The x402 protocol enables AI agents to autonomously pay for services using
+            cryptocurrency — no human wallet interaction needed.
           </p>
           <div className="flex gap-2.5 flex-wrap">
             {[

@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build",
+    "generate:llms": "bun run scripts/generate-llms-txt.ts",
+    "build": "bun run generate:llms && next build",
     "start": "next start",
     "lint": "next lint"
   },
@@ -16,7 +17,6 @@
     "next": "^16.1.6",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "resend": "^6.9.2",
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {

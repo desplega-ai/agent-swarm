@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { ensure } from "@desplega.ai/business-use";
 import { z } from "zod";
 import {
   createAgent,
@@ -99,6 +100,7 @@ const updateAgentProfileRoute = route({
     identityMd: z.string().max(65536).optional(),
     setupScript: z.string().max(65536).optional(),
     toolsMd: z.string().max(65536).optional(),
+    heartbeatMd: z.string().max(65536).optional(),
     changeSource: z.string().optional(),
     changedByAgentId: z.string().optional(),
     changeReason: z.string().optional(),
@@ -179,6 +181,37 @@ export async function handleAgentRegister(
       return { agent, created: true };
     })();
 
+    if (result.created) {
+      ensure({
+        id: "registered",
+        flow: "agent",
+        runId: agentId,
+        data: {
+          agentId,
+          name: parsed.body.name,
+          isLead: parsed.body.isLead ?? false,
+        },
+      });
+    } else {
+      ensure({
+        id: "reconnected",
+        flow: "agent",
+        runId: agentId,
+        depIds: ["registered"],
+        data: {
+          agentId,
+          name: parsed.body.name,
+        },
+        validator: (_data, ctx) => {
+          // Validates that registered happened before reconnected
+          return ctx.deps.length > 0;
+        },
+        // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+        filter: ({}, ctx) => ctx.deps.length > 0,
+        conditions: [{ timeout_ms: 86_400_000 }], // 1 day: agents may be offline for extended periods
+      });
+    }
+
     json(res, result.agent, result.created ? 201 : 200);
     return true;
   }
@@ -251,11 +284,12 @@ export async function handleAgentsRest(
       body.soulMd === undefined &&
       body.identityMd === undefined &&
       body.setupScript === undefined &&
-      body.toolsMd === undefined
+      body.toolsMd === undefined &&
+      body.heartbeatMd === undefined
     ) {
       jsonError(
         res,
-        "At least one field (role, description, capabilities, claudeMd, soulMd, identityMd, setupScript, or toolsMd) must be provided",
+        "At least one field (role, description, capabilities, claudeMd, soulMd, identityMd, setupScript, toolsMd, or heartbeatMd) must be provided",
         400,
       );
       return true;
@@ -285,6 +319,7 @@ export async function handleAgentsRest(
         identityMd: body.identityMd,
         setupScript: body.setupScript,
         toolsMd: body.toolsMd,
+        heartbeatMd: body.heartbeatMd,
       },
       versionMeta,
     );

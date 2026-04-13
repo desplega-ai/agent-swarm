@@ -166,6 +166,81 @@ describe("Swarm Repos", () => {
     });
   });
 
+  describe("Guidelines", () => {
+    test("should create a repo with guidelines", () => {
+      const repo = createSwarmRepo({
+        url: "https://github.com/desplega-ai/guidelines-repo",
+        name: "guidelines-repo",
+        guidelines: {
+          prChecks: ["bun test", "bun run lint"],
+          mergeChecks: ["all CI checks pass"],
+          allowMerge: false,
+          review: ["check README.md"],
+        },
+      });
+
+      expect(repo.guidelines).not.toBeNull();
+      expect(repo.guidelines?.prChecks).toEqual(["bun test", "bun run lint"]);
+      expect(repo.guidelines?.mergeChecks).toEqual(["all CI checks pass"]);
+      expect(repo.guidelines?.allowMerge).toBe(false);
+      expect(repo.guidelines?.review).toEqual(["check README.md"]);
+    });
+
+    test("should return parsed guidelines (not raw string) from getSwarmRepoById", () => {
+      const repo = getSwarmRepoByName("guidelines-repo");
+      expect(repo).not.toBeNull();
+
+      const fetched = getSwarmRepoById(repo!.id);
+      expect(fetched).not.toBeNull();
+      expect(typeof fetched?.guidelines).toBe("object");
+      expect(Array.isArray(fetched?.guidelines?.prChecks)).toBe(true);
+      expect(fetched?.guidelines?.prChecks).toEqual(["bun test", "bun run lint"]);
+    });
+
+    test("should create a repo without guidelines (null)", () => {
+      const repo = createSwarmRepo({
+        url: "https://github.com/desplega-ai/no-guidelines-repo",
+        name: "no-guidelines-repo",
+      });
+
+      expect(repo.guidelines).toBeNull();
+    });
+
+    test("should update guidelines on a repo", () => {
+      const repo = getSwarmRepoByName("no-guidelines-repo");
+      expect(repo?.guidelines).toBeNull();
+
+      const updated = updateSwarmRepo(repo!.id, {
+        guidelines: {
+          prChecks: ["npm test"],
+          mergeChecks: [],
+          allowMerge: true,
+          review: [],
+        },
+      });
+
+      expect(updated?.guidelines).not.toBeNull();
+      expect(updated?.guidelines?.prChecks).toEqual(["npm test"]);
+      expect(updated?.guidelines?.allowMerge).toBe(true);
+    });
+
+    test("should clear guidelines by setting to null", () => {
+      const repo = getSwarmRepoByName("no-guidelines-repo");
+      expect(repo?.guidelines).not.toBeNull();
+
+      const updated = updateSwarmRepo(repo!.id, { guidelines: null });
+      expect(updated?.guidelines).toBeNull();
+    });
+
+    test("should round-trip null vs configured distinction", () => {
+      const withGuidelines = getSwarmRepoByName("guidelines-repo");
+      const withoutGuidelines = getSwarmRepoByName("no-guidelines-repo");
+
+      expect(withGuidelines?.guidelines).not.toBeNull();
+      expect(withoutGuidelines?.guidelines).toBeNull();
+    });
+  });
+
   describe("Uniqueness Constraints", () => {
     test("should reject duplicate URL", () => {
       expect(() =>

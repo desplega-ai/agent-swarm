@@ -53,6 +53,22 @@ export default function AgentsPage() {
         cellRenderer: (params: { value: AgentStatus }) => <StatusBadge status={params.value} />,
       },
       {
+        headerName: "Capacity",
+        width: 90,
+        valueGetter: (params) => {
+          const agent = params.data;
+          if (!agent) return "";
+          if (agent.capacity) return `${agent.capacity.current}/${agent.capacity.max}`;
+          if (agent.maxTasks != null) return `–/${agent.maxTasks}`;
+          return "–";
+        },
+        cellRenderer: (params: { value: string; data: AgentWithTasks | undefined }) => {
+          const agent = params.data;
+          const atCapacity = agent?.capacity && agent.capacity.available === 0;
+          return <span className={atCapacity ? "text-red-400" : ""}>{params.value}</span>;
+        },
+      },
+      {
         field: "capabilities",
         headerName: "Capabilities",
         flex: 1,

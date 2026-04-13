@@ -25,9 +25,10 @@ const PORT = process.env.E2E_PORT || "13098";
 const API_KEY = process.env.API_KEY || "123123";
 const BASE_URL = `http://localhost:${PORT}`;
 const DB_PATH = `/tmp/e2e-provider-${Date.now()}.sqlite`;
-const HARNESS_ARG = process.argv.find((a) => a.startsWith("--harness="))?.split("=")[1]
-  || process.argv[process.argv.indexOf("--harness") + 1]
-  || "claude";
+const HARNESS_ARG =
+  process.argv.find((a) => a.startsWith("--harness="))?.split("=")[1] ||
+  process.argv[process.argv.indexOf("--harness") + 1] ||
+  "claude";
 
 if (!["claude", "pi", "both"].includes(HARNESS_ARG)) {
   console.error(`Invalid --harness value: ${HARNESS_ARG}. Supported: claude, pi, both`);
@@ -100,8 +101,14 @@ async function cleanup() {
   }
 }
 
-process.on("SIGINT", async () => { await cleanup(); process.exit(1); });
-process.on("SIGTERM", async () => { await cleanup(); process.exit(1); });
+process.on("SIGINT", async () => {
+  await cleanup();
+  process.exit(1);
+});
+process.on("SIGTERM", async () => {
+  await cleanup();
+  process.exit(1);
+});
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 async function main() {

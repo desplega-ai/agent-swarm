@@ -1,0 +1,23 @@
+%%{init: {'theme': 'dark', 'themeVariables': {'fontSize': '13px'}}}%%
+flowchart TB
+    subgraph EVENTS["Cancellation Events"]
+        direction LR
+        C1["Bot Unassigned<br/>from Issue"]
+        C2["Bot Unassigned<br/>from PR"]
+        C3["Review Request<br/>Removed from Bot"]
+    end
+
+    BOT{"isBotAssignee()"}
+    FIND{"findTaskByVcs()<br/>Active task?"}
+    CANCEL["failTask()<br/>Cancel with reason"]
+    NOOP(("no-op"))
+
+    EVENTS --> BOT
+    BOT -->|Not bot| NOOP
+    BOT -->|Is bot| FIND
+    FIND -->|No task| NOOP
+    FIND -->|Task found| CANCEL
+
+    style EVENTS fill:#1a1a2e,stroke:#e74c3c,color:#fff
+    style CANCEL fill:#c0392b,stroke:#e74c3c,color:#fff
+    style NOOP fill:#555,color:#fff

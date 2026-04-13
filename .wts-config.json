@@ -1,4 +1,4 @@
 {
-  "autoTmux": true,
+  "autoTmux": false,
   "setupScript": ".wts-setup.ts"
 }

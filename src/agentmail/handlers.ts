@@ -4,9 +4,23 @@ import {
   getAgentById,
   getAgentMailInboxMapping,
   getAllAgents,
+  resolveUser,
 } from "../be/db";
+import { resolveTemplate } from "../prompts/resolver";
 import { workflowEventBus } from "../workflows/event-bus";
+// Side-effect import: registers all AgentMail event templates in the in-memory registry
+import "./templates";
 import type { AgentMailMessage, AgentMailWebhookPayload } from "./types";
+
+/**
+ * Extract bare email address from a from_ field like "Taras Yarema <t@desplega.ai>" or "t@desplega.ai".
+ */
+function extractEmailFromField(from: string): string | undefined {
+  const angleMatch = from.match(/<([^>]+@[^>]+)>/);
+  if (angleMatch?.[1]) return angleMatch[1].toLowerCase();
+  const bareMatch = from.match(/[\w.+-]+@[\w.-]+\.\w+/);
+  return bareMatch?.[0]?.toLowerCase();
+}
 
 /**
  * Check if an inbox domain is allowed by the filter.
@@ -93,6 +107,10 @@ export async function handleMessageReceived(
     (Array.isArray(message.from_) ? message.from_.join(", ") : message.from_) || "unknown";
   const subject = message.subject || "(no subject)";
   const body = message.text || message.html || "";
+
+  // Resolve canonical user from sender email
+  const senderEmail = extractEmailFromField(from);
+  const requestedByUserId = senderEmail ? resolveUser({ email: senderEmail })?.id : undefined;
   const preview = body.length > 500 ? `${body.substring(0, 500)}...` : body;
 
   // Emit workflow trigger event
@@ -109,9 +127,19 @@ export async function handleMessageReceived(
   const existingTask = findTaskByAgentMailThread(thread_id);
   if (existingTask) {
     // Create a follow-up task with parentTaskId to continue the session
-    const taskDescription = `[AgentMail] Follow-up email in thread\n\nFrom: ${from}\nSubject: ${subject}\nInbox: ${inbox_id}\nThread: ${thread_id}\n\n${preview}`;
+    const followupResult = resolveTemplate("agentmail.email.followup", {
+      from,
+      subject,
+      inbox_id,
+      thread_id,
+      preview,
+    });
 
-    const task = createTaskExtended(taskDescription, {
+    if (followupResult.skipped) {
+      return { created: false };
+    }
+
+    const task = createTaskExtended(followupResult.text, {
       agentId: existingTask.agentId,
       source: "agentmail",
       taskType: "agentmail-reply",
@@ -119,6 +147,7 @@ export async function handleMessageReceived(
       agentmailMessageId: message_id,
       agentmailThreadId: thread_id,
       parentTaskId: existingTask.id,
+      requestedByUserId,
     });
 
     console.log(
@@ -135,15 +164,27 @@ export async function handleMessageReceived(
     if (agent) {
       if (agent.isLead) {
         // Route to lead as task
-        const taskDescription = `[AgentMail] New email received\n\nFrom: ${from}\nSubject: ${subject}\nInbox: ${inbox_id}\nThread: ${thread_id}\nMessage: ${message_id}\n\n${preview}`;
+        const leadResult = resolveTemplate("agentmail.email.mapped_lead", {
+          from,
+          subject,
+          inbox_id,
+          thread_id,
+          message_id,
+          preview,
+        });
 
-        const task = createTaskExtended(taskDescription, {
+        if (leadResult.skipped) {
+          return { created: false };
+        }
+
+        const task = createTaskExtended(leadResult.text, {
           agentId: agent.id,
           source: "agentmail",
           taskType: "agentmail-message",
           agentmailInboxId: inbox_id,
           agentmailMessageId: message_id,
           agentmailThreadId: thread_id,
+          requestedByUserId,
         });
 
         console.log(
@@ -153,15 +194,26 @@ export async function handleMessageReceived(
       }
 
       // Route to worker as task
-      const taskDescription = `[AgentMail] New email received\n\nFrom: ${from}\nSubject: ${subject}\nInbox: ${inbox_id}\nThread: ${thread_id}\n\n${preview}`;
+      const workerResult = resolveTemplate("agentmail.email.mapped_worker", {
+        from,
+        subject,
+        inbox_id,
+        thread_id,
+        preview,
+      });
 
-      const task = createTaskExtended(taskDescription, {
+      if (workerResult.skipped) {
+        return { created: false };
+      }
+
+      const task = createTaskExtended(workerResult.text, {
         agentId: agent.id,
         source: "agentmail",
         taskType: "agentmail-message",
         agentmailInboxId: inbox_id,
         agentmailMessageId: message_id,
         agentmailThreadId: thread_id,
+        requestedByUserId,
       });
 
       console.log(
@@ -174,15 +226,27 @@ export async function handleMessageReceived(
   // No mapping found - route to lead as task
   const lead = findLeadAgent();
   if (lead) {
-    const taskDescription = `[AgentMail] New email received (unmapped inbox)\n\nFrom: ${from}\nSubject: ${subject}\nInbox: ${inbox_id}\nThread: ${thread_id}\nMessage: ${message_id}\n\n${preview}`;
+    const unmappedResult = resolveTemplate("agentmail.email.unmapped", {
+      from,
+      subject,
+      inbox_id,
+      thread_id,
+      message_id,
+      preview,
+    });
 
-    const task = createTaskExtended(taskDescription, {
+    if (unmappedResult.skipped) {
+      return { created: false };
+    }
+
+    const task = createTaskExtended(unmappedResult.text, {
       agentId: lead.id,
       source: "agentmail",
       taskType: "agentmail-message",
       agentmailInboxId: inbox_id,
       agentmailMessageId: message_id,
       agentmailThreadId: thread_id,
+      requestedByUserId,
     });
 
     console.log(
@@ -192,14 +256,25 @@ export async function handleMessageReceived(
   }
 
   // No lead available - create unassigned task
-  const taskDescription = `[AgentMail] New email received (no agent available)\n\nFrom: ${from}\nSubject: ${subject}\nInbox: ${inbox_id}\nThread: ${thread_id}\n\n${preview}`;
+  const noAgentResult = resolveTemplate("agentmail.email.no_agent", {
+    from,
+    subject,
+    inbox_id,
+    thread_id,
+    preview,
+  });
 
-  const task = createTaskExtended(taskDescription, {
+  if (noAgentResult.skipped) {
+    return { created: false };
+  }
+
+  const task = createTaskExtended(noAgentResult.text, {
     source: "agentmail",
     taskType: "agentmail-message",
     agentmailInboxId: inbox_id,
     agentmailMessageId: message_id,
     agentmailThreadId: thread_id,
+    requestedByUserId,
   });
 
   console.log(`[AgentMail] Created unassigned task ${task.id} (no lead or mapping available)`);

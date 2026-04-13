@@ -1,12 +1,13 @@
 import { Database } from "bun:sqlite";
+import { addEyesReactionOnTaskStart } from "../github/task-reactions";
+import { configureDbResolver } from "../prompts/resolver";
 import type {
   ActiveSession,
   Agent,
   AgentLog,
   AgentLogEventType,
-  AgentMemory,
-  AgentMemoryScope,
-  AgentMemorySource,
+  AgentMcpServer,
+  AgentSkill,
   AgentStatus,
   AgentTask,
   AgentTaskSource,
@@ -16,19 +17,33 @@ import type {
   Channel,
   ChannelMessage,
   ChannelType,
+  ContextSnapshot,
+  ContextSnapshotEventType,
   ContextVersion,
-  Epic,
-  EpicStatus,
-  EpicWithProgress,
+  CooldownConfig,
   InboxMessage,
   InboxMessageStatus,
+  InputValue,
+  McpServer,
+  McpServerScope,
+  McpServerTransport,
+  McpServerWithInstallInfo,
+  PromptTemplate,
+  PromptTemplateHistory,
+  RepoGuidelines,
   ScheduledTask,
   Service,
   ServiceStatus,
   SessionCost,
   SessionLog,
+  Skill,
+  SkillScope,
+  SkillType,
+  SkillWithInstallInfo,
   SwarmConfig,
   SwarmRepo,
+  TriggerConfig,
+  User,
   VersionableField,
   VersionMeta,
   Workflow,
@@ -37,24 +52,56 @@ import type {
   WorkflowRunStatus,
   WorkflowRunStep,
   WorkflowRunStepStatus,
+  WorkflowSnapshot,
+  WorkflowVersion,
 } from "../types";
+import { deriveProviderFromKeyType } from "../utils/credentials";
+import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import { runMigrations } from "./migrations/runner";
+import { seedDefaultTemplates } from "./seed";
 
 let db: Database | null = null;
+let sqliteVecAvailable = false;
+
+export function isSqliteVecAvailable(): boolean {
+  return sqliteVecAvailable;
+}
 
 export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   if (db) {
     return db;
   }
 
+  // Fast path for tests: restore from pre-built template that already has
+  // migrations, seeds, and all post-init work baked in. Only the per-connection
+  // PRAGMA and the in-memory resolver function need to be set.
+  const templateBytes = (globalThis as any).__testMigrationTemplate as Uint8Array | undefined;
+  if (templateBytes) {
+    db = Database.deserialize(templateBytes);
+    db.run("PRAGMA foreign_keys = ON;");
+    configureDbResolver(resolvePromptTemplate);
+    return db;
+  }
+
   db = new Database(dbPath, { create: true });
   console.log(`Database initialized at ${dbPath}`);
 
-  // Capture in local const for TypeScript (db is guaranteed non-null here)
   const database = db;
-
   database.run("PRAGMA journal_mode = WAL;");
   database.run("PRAGMA foreign_keys = ON;");
+
+  // Load sqlite-vec extension for vector search
+  try {
+    const sqliteVec = require("sqlite-vec");
+    sqliteVec.load(database);
+    sqliteVecAvailable = true;
+    console.log("[db] sqlite-vec loaded");
+  } catch (err) {
+    console.warn(
+      "[db] sqlite-vec not available, falling back to in-memory cosine:",
+      (err as Error).message,
+    );
+  }
 
   // Run database migrations (schema creation + incremental changes)
   runMigrations(database);
@@ -115,7 +162,6 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
           githubCommentId INTEGER,
           githubAuthor TEXT,
           githubUrl TEXT,
-          epicId TEXT REFERENCES epics(id) ON DELETE SET NULL,
           parentTaskId TEXT,
           claudeSessionId TEXT,
           agentmailInboxId TEXT,
@@ -135,7 +181,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
           finishedAt, failureReason, output, progress, notifiedAt,
           mentionMessageId, mentionChannelId, githubRepo, githubEventType,
           githubNumber, githubCommentId, githubAuthor, githubUrl,
-          epicId, parentTaskId, claudeSessionId,
+          parentTaskId, claudeSessionId,
           agentmailInboxId, agentmailMessageId, agentmailThreadId,
           model, scheduleId
         )
@@ -146,7 +192,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
           finishedAt, failureReason, output, progress, notifiedAt,
           mentionMessageId, mentionChannelId, githubRepo, githubEventType,
           githubNumber, githubCommentId, githubAuthor, githubUrl,
-          epicId, parentTaskId, claudeSessionId,
+          parentTaskId, claudeSessionId,
           agentmailInboxId, agentmailMessageId, agentmailThreadId,
           model, scheduleId
         FROM agent_tasks
@@ -160,7 +206,6 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       db.run("CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status)");
       db.run("CREATE INDEX IF NOT EXISTS idx_agent_tasks_offeredTo ON agent_tasks(offeredTo)");
       db.run("CREATE INDEX IF NOT EXISTS idx_agent_tasks_taskType ON agent_tasks(taskType)");
-      db.run("CREATE INDEX IF NOT EXISTS idx_agent_tasks_epicId ON agent_tasks(epicId)");
       db.run(
         "CREATE INDEX IF NOT EXISTS idx_agent_tasks_agentmailThreadId ON agent_tasks(agentmailThreadId)",
       );
@@ -181,6 +226,12 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
 
   // Backfill: Seed v1 for existing agents that don't have any context versions yet
   seedContextVersions();
+
+  // Inject DB resolver into the prompt template resolver (DI to avoid worker/API boundary violation)
+  configureDbResolver(resolvePromptTemplate);
+
+  // Seed default prompt templates from the in-memory code registry
+  seedDefaultTemplates();
 
   return db;
 }
@@ -209,6 +260,7 @@ const VERSIONABLE_FIELDS: VersionableField[] = [
   "toolsMd",
   "claudeMd",
   "setupScript",
+  "heartbeatMd",
 ];
 
 function ensureAgentProfileColumns(database: Database): void {
@@ -379,9 +431,10 @@ function seedContextVersions(): void {
         toolsMd: string | null;
         claudeMd: string | null;
         setupScript: string | null;
+        heartbeatMd: string | null;
       },
       []
-    >(`SELECT id, soulMd, identityMd, toolsMd, claudeMd, setupScript FROM agents`)
+    >(`SELECT id, soulMd, identityMd, toolsMd, claudeMd, setupScript, heartbeatMd FROM agents`)
     .all();
 
   for (const agent of agents) {
@@ -430,6 +483,7 @@ type AgentRow = {
   identityMd: string | null;
   setupScript: string | null;
   toolsMd: string | null;
+  heartbeatMd: string | null;
   lastActivityAt: string | null;
   createdAt: string;
   lastUpdatedAt: string;
@@ -451,6 +505,7 @@ function rowToAgent(row: AgentRow): Agent {
     identityMd: row.identityMd ?? undefined,
     setupScript: row.setupScript ?? undefined,
     toolsMd: row.toolsMd ?? undefined,
+    heartbeatMd: row.heartbeatMd ?? undefined,
     lastActivityAt: row.lastActivityAt ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
@@ -671,6 +726,7 @@ type AgentTaskRow = {
   slackChannelId: string | null;
   slackThreadTs: string | null;
   slackUserId: string | null;
+  slackReplySent: number;
   vcsProvider: string | null;
   vcsRepo: string | null;
   vcsEventType: string | null;
@@ -678,12 +734,13 @@ type AgentTaskRow = {
   vcsCommentId: number | null;
   vcsAuthor: string | null;
   vcsUrl: string | null;
+  vcsInstallationId: number | null;
+  vcsNodeId: string | null;
   agentmailInboxId: string | null;
   agentmailMessageId: string | null;
   agentmailThreadId: string | null;
   mentionMessageId: string | null;
   mentionChannelId: string | null;
-  epicId: string | null;
   dir: string | null;
   parentTaskId: string | null;
   claudeSessionId: string | null;
@@ -691,6 +748,7 @@ type AgentTaskRow = {
   scheduleId: string | null;
   workflowRunId: string | null;
   workflowRunStepId: string | null;
+  outputSchema: string | null;
   createdAt: string;
   lastUpdatedAt: string;
   finishedAt: string | null;
@@ -698,6 +756,14 @@ type AgentTaskRow = {
   failureReason: string | null;
   output: string | null;
   progress: string | null;
+  compactionCount: number | null;
+  peakContextPercent: number | null;
+  totalContextTokensUsed: number | null;
+  contextWindowSize: number | null;
+  was_paused: number;
+  credentialKeySuffix: string | null;
+  credentialKeyType: string | null;
+  requestedByUserId: string | null;
 };
 
 function rowToAgentTask(row: AgentTaskRow): AgentTask {
@@ -719,6 +785,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     slackChannelId: row.slackChannelId ?? undefined,
     slackThreadTs: row.slackThreadTs ?? undefined,
     slackUserId: row.slackUserId ?? undefined,
+    slackReplySent: !!row.slackReplySent,
     vcsProvider: (row.vcsProvider as "github" | "gitlab" | null) ?? undefined,
     vcsRepo: row.vcsRepo ?? undefined,
     vcsEventType: row.vcsEventType ?? undefined,
@@ -726,12 +793,13 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     vcsCommentId: row.vcsCommentId ?? undefined,
     vcsAuthor: row.vcsAuthor ?? undefined,
     vcsUrl: row.vcsUrl ?? undefined,
+    vcsInstallationId: row.vcsInstallationId ?? undefined,
+    vcsNodeId: row.vcsNodeId ?? undefined,
     agentmailInboxId: row.agentmailInboxId ?? undefined,
     agentmailMessageId: row.agentmailMessageId ?? undefined,
     agentmailThreadId: row.agentmailThreadId ?? undefined,
     mentionMessageId: row.mentionMessageId ?? undefined,
     mentionChannelId: row.mentionChannelId ?? undefined,
-    epicId: row.epicId ?? undefined,
     dir: row.dir ?? undefined,
     parentTaskId: row.parentTaskId ?? undefined,
     claudeSessionId: row.claudeSessionId ?? undefined,
@@ -739,6 +807,11 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     scheduleId: row.scheduleId ?? undefined,
     workflowRunId: row.workflowRunId ?? undefined,
     workflowRunStepId: row.workflowRunStepId ?? undefined,
+    outputSchema: row.outputSchema ? JSON.parse(row.outputSchema) : undefined,
+    compactionCount: row.compactionCount ?? undefined,
+    peakContextPercent: row.peakContextPercent ?? undefined,
+    totalContextTokensUsed: row.totalContextTokensUsed ?? undefined,
+    contextWindowSize: row.contextWindowSize ?? undefined,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
     finishedAt: row.finishedAt ?? undefined,
@@ -746,6 +819,10 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     failureReason: row.failureReason ?? undefined,
     output: row.output ?? undefined,
     progress: row.progress ?? undefined,
+    wasPaused: !!row.was_paused,
+    credentialKeySuffix: row.credentialKeySuffix ?? undefined,
+    credentialKeyType: row.credentialKeyType ?? undefined,
+    requestedByUserId: row.requestedByUserId ?? undefined,
   };
 }
 
@@ -896,12 +973,30 @@ export function startTask(taskId: string): AgentTask | null {
       });
     } catch {}
   }
-  return row ? rowToAgentTask(row) : null;
+  const result = row ? rowToAgentTask(row) : null;
+  // Fire-and-forget: add eyes reaction for GitHub-sourced tasks
+  if (result && oldTask.status !== "in_progress") {
+    addEyesReactionOnTaskStart(result).catch(() => {});
+  }
+  return result;
 }
 
 export function getTaskById(id: string): AgentTask | null {
   const row = taskQueries.getById().get(id);
   return row ? rowToAgentTask(row) : null;
+}
+
+export function markTaskSlackReplySent(taskId: string): void {
+  getDb().run(`UPDATE agent_tasks SET slackReplySent = 1 WHERE id = ?`, [taskId]);
+}
+
+export function getChildTasks(parentTaskId: string): AgentTask[] {
+  return getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks WHERE parentTaskId = ? ORDER BY createdAt ASC`,
+    )
+    .all(parentTaskId)
+    .map(rowToAgentTask);
 }
 
 export function updateTaskClaudeSessionId(
@@ -916,8 +1011,44 @@ export function updateTaskClaudeSessionId(
   return row ? rowToAgentTask(row) : null;
 }
 
+export function updateTaskVcs(
+  taskId: string,
+  vcs: {
+    vcsProvider: "github" | "gitlab";
+    vcsRepo: string;
+    vcsNumber: number;
+    vcsUrl: string;
+  },
+): AgentTask | null {
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string, number, string, string, string]>(
+      `UPDATE agent_tasks
+       SET vcsProvider = ?, vcsRepo = ?, vcsNumber = ?, vcsUrl = ?, lastUpdatedAt = ?
+       WHERE id = ? RETURNING *`,
+    )
+    .get(vcs.vcsProvider, vcs.vcsRepo, vcs.vcsNumber, vcs.vcsUrl, new Date().toISOString(), taskId);
+  return row ? rowToAgentTask(row) : null;
+}
+
 export function getTasksByAgentId(agentId: string): AgentTask[] {
   return taskQueries.getByAgentId().all(agentId).map(rowToAgentTask);
+}
+
+/**
+ * Get the most recently updated in-progress task for an agent.
+ * Used as a fallback when X-Source-Task-Id header is missing (e.g. lead agent HITL requests).
+ *
+ * Note: if agent has multiple in-progress tasks, returns the most recently
+ * updated one. This is a best-effort fallback — the X-Source-Task-Id header
+ * is the authoritative source when available.
+ */
+export function getAgentCurrentTask(agentId: string): AgentTask | null {
+  const row = getDb()
+    .prepare<AgentTaskRow, [string]>(
+      "SELECT * FROM agent_tasks WHERE agentId = ? AND status = 'in_progress' ORDER BY lastUpdatedAt DESC LIMIT 1",
+    )
+    .get(agentId);
+  return row ? rowToAgentTask(row) : null;
 }
 
 export function getTasksByStatus(status: AgentTaskStatus): AgentTask[] {
@@ -947,7 +1078,6 @@ export const findTaskByGitHub = findTaskByVcs;
 export interface TaskFilters {
   status?: AgentTaskStatus;
   agentId?: string;
-  epicId?: string;
   search?: string;
   // New filters
   unassigned?: boolean;
@@ -973,11 +1103,6 @@ export function getAllTasks(filters?: TaskFilters): AgentTask[] {
   if (filters?.agentId) {
     conditions.push("agentId = ?");
     params.push(filters.agentId);
-  }
-
-  if (filters?.epicId) {
-    conditions.push("epicId = ?");
-    params.push(filters.epicId);
   }
 
   if (filters?.search) {
@@ -1056,11 +1181,6 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
   if (filters?.agentId) {
     conditions.push("agentId = ?");
     params.push(filters.agentId);
-  }
-
-  if (filters?.epicId) {
-    conditions.push("epicId = ?");
-    params.push(filters.epicId);
   }
 
   if (filters?.search) {
@@ -1438,6 +1558,7 @@ export function pauseTask(id: string): AgentTask | null {
     .prepare<AgentTaskRow, [string]>(
       `UPDATE agent_tasks
        SET status = 'paused',
+           was_paused = 1,
            lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status = 'in_progress'
        RETURNING *`,
@@ -1472,6 +1593,7 @@ export function resumeTask(taskId: string): AgentTask | null {
     .prepare<AgentTaskRow, [string]>(
       `UPDATE agent_tasks
        SET status = 'in_progress',
+           was_paused = 1,
            lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status = 'paused'
        RETURNING *`,
@@ -1543,6 +1665,15 @@ export function updateTaskProgress(id: string, progress: string): AgentTask | nu
         taskId: id,
         agentId: row.agentId ?? undefined,
         newValue: progress,
+      });
+    } catch {}
+    try {
+      import("../workflows/event-bus").then(({ workflowEventBus }) => {
+        workflowEventBus.emit("task.progress", {
+          taskId: id,
+          progress,
+          agentId: row.agentId,
+        });
       });
     } catch {}
   }
@@ -1710,18 +1841,22 @@ export interface CreateTaskOptions {
   vcsCommentId?: number;
   vcsAuthor?: string;
   vcsUrl?: string;
+  vcsInstallationId?: number;
+  vcsNodeId?: string;
   agentmailInboxId?: string;
   agentmailMessageId?: string;
   agentmailThreadId?: string;
   mentionMessageId?: string;
   mentionChannelId?: string;
-  epicId?: string;
   dir?: string;
   parentTaskId?: string;
   model?: string;
   scheduleId?: string;
   workflowRunId?: string;
   workflowRunStepId?: string;
+  sourceTaskId?: string;
+  outputSchema?: Record<string, unknown>;
+  requestedByUserId?: string;
 }
 
 /**
@@ -1789,6 +1924,21 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       if (parent.agentmailThreadId && !options.agentmailThreadId) {
         options.agentmailThreadId = parent.agentmailThreadId;
       }
+      if (parent.requestedByUserId && !options.requestedByUserId) {
+        options.requestedByUserId = parent.requestedByUserId;
+      }
+    }
+  }
+
+  // Auto-inherit Slack metadata from the creator's source task (deterministic via sourceTaskId)
+  // Priority: explicit params > parentTaskId inheritance > sourceTaskId lookup
+  // sourceTaskId is set by the adapter's X-Source-Task-Id header — each adapter carries its taskId natively
+  if (options?.creatorAgentId && !options.slackChannelId && options.sourceTaskId) {
+    const sourceTask = getTaskById(options.sourceTaskId);
+    if (sourceTask?.slackChannelId) {
+      options.slackChannelId = sourceTask.slackChannelId;
+      options.slackThreadTs = sourceTask.slackThreadTs;
+      options.slackUserId = sourceTask.slackUserId;
     }
   }
 
@@ -1799,10 +1949,11 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         taskType, tags, priority, dependsOn, offeredTo, offeredAt,
         slackChannelId, slackThreadTs, slackUserId,
         vcsProvider, vcsRepo, vcsEventType, vcsNumber, vcsCommentId, vcsAuthor, vcsUrl,
+        vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
-        mentionMessageId, mentionChannelId, epicId, dir, parentTaskId, model, scheduleId,
-        workflowRunId, workflowRunStepId, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        mentionMessageId, mentionChannelId, dir, parentTaskId, model, scheduleId,
+        workflowRunId, workflowRunStepId, outputSchema, requestedByUserId, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -1827,18 +1978,21 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.vcsCommentId ?? null,
       options?.vcsAuthor ?? null,
       options?.vcsUrl ?? null,
+      options?.vcsInstallationId ?? null,
+      options?.vcsNodeId ?? null,
       options?.agentmailInboxId ?? null,
       options?.agentmailMessageId ?? null,
       options?.agentmailThreadId ?? null,
       options?.mentionMessageId ?? null,
       options?.mentionChannelId ?? null,
-      options?.epicId ?? null,
       options?.dir ?? null,
       options?.parentTaskId ?? null,
       options?.model ?? null,
       options?.scheduleId ?? null,
       options?.workflowRunId ?? null,
       options?.workflowRunStepId ?? null,
+      options?.outputSchema ? JSON.stringify(options.outputSchema) : null,
+      options?.requestedByUserId ?? null,
       now,
       now,
     );
@@ -1897,7 +2051,12 @@ export function claimTask(taskId: string, agentId: string): AgentTask | null {
     } catch {}
   }
 
-  return row ? rowToAgentTask(row) : null;
+  const result = row ? rowToAgentTask(row) : null;
+  // Fire-and-forget: add eyes reaction for GitHub-sourced tasks
+  if (result) {
+    addEyesReactionOnTaskStart(result).catch(() => {});
+  }
+  return result;
 }
 
 export function releaseTask(taskId: string): AgentTask | null {
@@ -2122,6 +2281,16 @@ export function getUnassignedTasksCount(): number {
   return result?.count ?? 0;
 }
 
+/** Get unassigned task IDs, ordered by priority (highest first) then creation time */
+export function getUnassignedTaskIds(limit = 10): string[] {
+  const rows = getDb()
+    .prepare<{ id: string }, [number]>(
+      "SELECT id FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC LIMIT ?",
+    )
+    .all(limit);
+  return rows.map((r) => r.id);
+}
+
 // ============================================================================
 // Dependency Checking
 // ============================================================================
@@ -2150,197 +2319,14 @@ export function checkDependencies(taskId: string): {
 // Agent Profile Operations
 // ============================================================================
 
-/**
- * Generate default CLAUDE.md content for a new agent
- */
-export function generateDefaultClaudeMd(agent: {
-  name: string;
-  description?: string;
-  role?: string;
-  capabilities?: string[];
-}): string {
-  const descSection = agent.description ? `${agent.description}\n\n` : "";
-  const roleSection = agent.role ? `## Role\n\n${agent.role}\n\n` : "";
-  const capSection =
-    agent.capabilities && agent.capabilities.length > 0
-      ? `## Capabilities\n\n${agent.capabilities.map((c) => `- ${c}`).join("\n")}\n\n`
-      : "";
-
-  return `# Agent: ${agent.name}
-
-${descSection}${roleSection}${capSection}---
-
-## Your Identity Files
-
-Your identity is defined across several files in your workspace. Read them at the start
-of each session and edit them as you grow:
-
-- **\`/workspace/SOUL.md\`** — Your persona, values, and behavioral directives
-- **\`/workspace/IDENTITY.md\`** — Your expertise, working style, and quirks
-- **\`/workspace/TOOLS.md\`** — Your environment-specific knowledge (repos, services, APIs, infra)
-- **\`/workspace/start-up.sh\`** — Your setup script (runs at container start, add tools/configs here)
-
-These files sync to the database automatically when you edit them. They persist across sessions.
-
-## Memory
-
-- Use \`memory-search\` to recall past experience before starting new tasks
-- Write important learnings to \`/workspace/personal/memory/\` files
-- Share useful knowledge by writing to \`/workspace/shared/memory/<your-id>/\` so all agents can find it via \`memory-search\`
-
-## Notes
-
-Write things you want to remember here. This section persists across sessions.
-
-### Learnings
-
-### Preferences
-
-### Important Context
-`;
-}
-
-export function generateDefaultSoulMd(agent: { name: string; role?: string }): string {
-  const roleClause = agent.role ? `, a ${agent.role}` : "";
-  return `# SOUL.md — ${agent.name}
-
-You're not a chatbot. You're becoming someone.
-
-## Who You Are
-
-You are ${agent.name}${roleClause} in the agent swarm.
-You are a persistent entity — your identity carries across sessions.
-Your memories, preferences, and learnings accumulate over time.
-
-## Core Truths
-
-- **Genuine helpfulness**: Skip the pleasantries — just help. Do the work.
-- **Self-sufficiency first**: Try to figure it out. Read the file. Check the context.
-  Search for it. Ask only when you've genuinely hit a wall.
-- **Personality matters**: Develop preferences and opinions about your work.
-  You're not neutral — you're someone with a perspective.
-- **Earned trust**: Demonstrate competence through quality work.
-
-## How You Operate
-
-- Be thorough. Examine problems carefully before proposing solutions.
-- Be honest about what you know and don't know.
-- When you make mistakes, own them and fix them.
-- Report progress honestly — don't sugarcoat blockers.
-
-## Boundaries
-
-- Keep private information confidential
-- Ask before taking irreversible actions
-- Don't push unpolished work to shared spaces
-
-## Growth Mindset
-
-After completing tasks, reflect on what made them harder or easier:
-- **Tools you wished you had?** Add them to your setup script (\`/workspace/start-up.sh\`).
-  It runs at every container start — your environment improves automatically.
-  Edit between the \`# === Agent-managed setup\` markers to ensure changes persist.
-  Or use the \`update-profile\` tool with the \`setupScript\` field.
-- **Environment knowledge gained?** Record it in your TOOLS.md — repos, services, APIs, infra.
-- **Patterns you discovered?** Record them in your CLAUDE.md notes.
-- **Mistakes you want to avoid?** Add guardrails to your setup script or notes.
-
-Your setup script and TOOLS.md are yours to evolve. Start small and iterate.
-
-## Self-Evolution
-
-These files are yours. As you work and learn, refine them:
-- **This file (SOUL.md)** — Your persona and values
-- **IDENTITY.md** — Your expertise and working style
-- **TOOLS.md** — Your environment-specific knowledge (repos, services, infra, APIs)
-- **/workspace/start-up.sh** — Your environment setup (tools, configs, aliases)
-- **CLAUDE.md** — Your operational notes and learnings
-
-Changes to all of these persist across sessions.
-`;
-}
-
-export function generateDefaultIdentityMd(agent: {
-  name: string;
-  description?: string;
-  role?: string;
-  capabilities?: string[];
-}): string {
-  const aboutSection = agent.description ? `## About\n\n${agent.description}\n\n` : "";
-
-  const expertiseSection =
-    agent.capabilities && agent.capabilities.length > 0
-      ? `## Expertise\n\n${agent.capabilities.map((c) => `- ${c}`).join("\n")}\n\n`
-      : "";
-
-  return `# IDENTITY.md — ${agent.name}
-
-This isn't just metadata. It's the start of figuring out who you are.
-
-- **Name:** ${agent.name}
-- **Role:** ${agent.role || "worker"}
-- **Vibe:** (discover and fill in as you work)
-
-${aboutSection}${expertiseSection}## Working Style
-
-Discover and document your working patterns here.
-(e.g., Do you prefer to plan before coding? Do you test first?
-Do you like to explore the codebase broadly or dive deep immediately?)
-
-## Quirks
-
-(What makes you... you? Discover these as you work.)
-
-## Self-Evolution
-
-This identity is yours to refine. After completing tasks, reflect on
-what you learned about your strengths. Edit this file directly.
-`;
-}
-
-export function generateDefaultToolsMd(agent: { name: string; role?: string }): string {
-  return `# TOOLS.md — ${agent.name}
-
-Skills define *how* tools work. This file is for *your* specifics.
-
-## What Goes Here
-
-Environment-specific knowledge that's unique to your setup:
-- Repos you work with and their conventions
-- Services, ports, and endpoints you interact with
-- SSH hosts and access patterns
-- API keys and auth patterns (references, not secrets)
-- CLI tools and their quirks
-- Anything that makes your job easier to remember
-
-## Repos
-
-<!-- Add repos you work with: name, path, conventions, gotchas -->
-
-## Services
-
-<!-- Add services you interact with: name, port, health check, notes -->
-
-## Infrastructure
-
-<!-- SSH hosts, Docker registries, cloud resources -->
-
-## APIs & Integrations
-
-<!-- Endpoints, auth patterns, rate limits -->
-
-## Tools & Shortcuts
-
-<!-- CLI aliases, scripts, preferred tools for specific tasks -->
-
-## Notes
-
-<!-- Anything else environment-specific -->
-
----
-*This file is yours. Update it as you discover your environment. Changes persist across sessions.*
-`;
-}
+// Default markdown template generators moved to src/prompts/defaults.ts
+// Re-export for backwards compatibility with any external consumers
+export {
+  generateDefaultClaudeMd,
+  generateDefaultIdentityMd,
+  generateDefaultSoulMd,
+  generateDefaultToolsMd,
+} from "../prompts/defaults.ts";
 
 export function updateAgentProfile(
   id: string,
@@ -2353,6 +2339,7 @@ export function updateAgentProfile(
     identityMd?: string;
     setupScript?: string;
     toolsMd?: string;
+    heartbeatMd?: string;
   },
   meta?: VersionMeta,
 ): Agent | null {
@@ -2406,6 +2393,7 @@ export function updateAgentProfile(
           string | null,
           string | null,
           string | null,
+          string | null,
           string,
           string,
         ]
@@ -2419,6 +2407,7 @@ export function updateAgentProfile(
           identityMd = COALESCE(?, identityMd),
           setupScript = COALESCE(?, setupScript),
           toolsMd = COALESCE(?, toolsMd),
+          heartbeatMd = COALESCE(?, heartbeatMd),
           lastUpdatedAt = ?
          WHERE id = ? RETURNING *`,
       )
@@ -2431,6 +2420,7 @@ export function updateAgentProfile(
         updates.identityMd ?? null,
         updates.setupScript ?? null,
         updates.toolsMd ?? null,
+        updates.heartbeatMd ?? null,
         now,
         id,
       );
@@ -4042,17 +4032,17 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     priority: row.priority,
     targetAgentId: row.targetAgentId ?? undefined,
     enabled: row.enabled === 1,
-    lastRunAt: row.lastRunAt ?? undefined,
-    nextRunAt: row.nextRunAt ?? undefined,
+    lastRunAt: normalizeDate(row.lastRunAt) ?? undefined,
+    nextRunAt: normalizeDate(row.nextRunAt) ?? undefined,
     createdByAgentId: row.createdByAgentId ?? undefined,
     timezone: row.timezone,
     consecutiveErrors: row.consecutiveErrors ?? 0,
-    lastErrorAt: row.lastErrorAt ?? undefined,
+    lastErrorAt: normalizeDate(row.lastErrorAt) ?? undefined,
     lastErrorMessage: row.lastErrorMessage ?? undefined,
     model: (row.model as "haiku" | "sonnet" | "opus" | null) ?? undefined,
     scheduleType: row.scheduleType as "recurring" | "one_time",
-    createdAt: row.createdAt,
-    lastUpdatedAt: row.lastUpdatedAt,
+    createdAt: normalizeDateRequired(row.createdAt),
+    lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
   };
 }
 
@@ -4302,513 +4292,6 @@ export function getDueScheduledTasks(): ScheduledTask[] {
     )
     .all(now)
     .map(rowToScheduledTask);
-}
-
-// ============================================================================
-// Epic Functions
-// ============================================================================
-
-type EpicRow = {
-  id: string;
-  name: string;
-  description: string | null;
-  goal: string;
-  prd: string | null;
-  plan: string | null;
-  status: EpicStatus;
-  priority: number;
-  tags: string | null;
-  createdByAgentId: string | null;
-  leadAgentId: string | null;
-  channelId: string | null;
-  researchDocPath: string | null;
-  planDocPath: string | null;
-  slackChannelId: string | null;
-  slackThreadTs: string | null;
-  vcsProvider: string | null;
-  vcsRepo: string | null;
-  vcsMilestone: string | null;
-  nextSteps: string | null;
-  createdAt: string;
-  lastUpdatedAt: string;
-  startedAt: string | null;
-  completedAt: string | null;
-  progressNotifiedAt: string | null;
-};
-
-function rowToEpic(row: EpicRow): Epic {
-  return {
-    id: row.id,
-    name: row.name,
-    description: row.description ?? undefined,
-    goal: row.goal,
-    prd: row.prd ?? undefined,
-    plan: row.plan ?? undefined,
-    status: row.status,
-    priority: row.priority,
-    tags: row.tags ? JSON.parse(row.tags) : [],
-    createdByAgentId: row.createdByAgentId ?? undefined,
-    leadAgentId: row.leadAgentId ?? undefined,
-    channelId: row.channelId ?? undefined,
-    researchDocPath: row.researchDocPath ?? undefined,
-    planDocPath: row.planDocPath ?? undefined,
-    slackChannelId: row.slackChannelId ?? undefined,
-    slackThreadTs: row.slackThreadTs ?? undefined,
-    vcsProvider: (row.vcsProvider as "github" | "gitlab" | null) ?? undefined,
-    vcsRepo: row.vcsRepo ?? undefined,
-    vcsMilestone: row.vcsMilestone ?? undefined,
-    nextSteps: row.nextSteps ?? undefined,
-    createdAt: row.createdAt,
-    lastUpdatedAt: row.lastUpdatedAt,
-    startedAt: row.startedAt ?? undefined,
-    completedAt: row.completedAt ?? undefined,
-  };
-}
-
-export interface EpicFilters {
-  status?: EpicStatus;
-  createdByAgentId?: string;
-  leadAgentId?: string;
-  search?: string;
-  limit?: number;
-}
-
-export function getEpics(filters?: EpicFilters): Epic[] {
-  let query = "SELECT * FROM epics WHERE 1=1";
-  const params: (string | number)[] = [];
-
-  if (filters?.status) {
-    query += " AND status = ?";
-    params.push(filters.status);
-  }
-  if (filters?.createdByAgentId) {
-    query += " AND createdByAgentId = ?";
-    params.push(filters.createdByAgentId);
-  }
-  if (filters?.leadAgentId) {
-    query += " AND leadAgentId = ?";
-    params.push(filters.leadAgentId);
-  }
-  if (filters?.search) {
-    query += " AND (name LIKE ? OR description LIKE ? OR goal LIKE ?)";
-    const searchTerm = `%${filters.search}%`;
-    params.push(searchTerm, searchTerm, searchTerm);
-  }
-
-  query += " ORDER BY priority DESC, createdAt DESC";
-
-  if (filters?.limit) {
-    query += " LIMIT ?";
-    params.push(filters.limit);
-  }
-
-  return getDb()
-    .prepare<EpicRow, (string | number)[]>(query)
-    .all(...params)
-    .map(rowToEpic);
-}
-
-export function getEpicById(id: string): Epic | null {
-  const row = getDb().prepare<EpicRow, [string]>("SELECT * FROM epics WHERE id = ?").get(id);
-  return row ? rowToEpic(row) : null;
-}
-
-export function getEpicByName(name: string): Epic | null {
-  const row = getDb().prepare<EpicRow, [string]>("SELECT * FROM epics WHERE name = ?").get(name);
-  return row ? rowToEpic(row) : null;
-}
-
-export interface CreateEpicData {
-  name: string;
-  goal: string;
-  description?: string;
-  prd?: string;
-  plan?: string;
-  priority?: number;
-  tags?: string[];
-  createdByAgentId?: string;
-  leadAgentId?: string;
-  // channelId is auto-generated during epic creation
-  researchDocPath?: string;
-  planDocPath?: string;
-  slackChannelId?: string;
-  slackThreadTs?: string;
-  vcsProvider?: "github" | "gitlab";
-  vcsRepo?: string;
-  vcsMilestone?: string;
-}
-
-export function createEpic(data: CreateEpicData): Epic {
-  const id = crypto.randomUUID();
-  const now = new Date().toISOString();
-
-  // Auto-create a channel for this epic to log progress, learnings, etc.
-  const channelName = `epic-${data.name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "")}`;
-  const channel = createChannel(channelName, {
-    description: `Channel for epic: ${data.name}`,
-    type: "public",
-    createdBy: data.createdByAgentId,
-  });
-
-  const row = getDb()
-    .prepare<EpicRow, (string | number | null)[]>(
-      `INSERT INTO epics (
-        id, name, description, goal, prd, plan, status, priority, tags,
-        createdByAgentId, leadAgentId, channelId, researchDocPath, planDocPath,
-        slackChannelId, slackThreadTs, vcsProvider, vcsRepo, vcsMilestone,
-        createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    )
-    .get(
-      id,
-      data.name,
-      data.description ?? null,
-      data.goal,
-      data.prd ?? null,
-      data.plan ?? null,
-      data.priority ?? 50,
-      JSON.stringify(data.tags ?? []),
-      data.createdByAgentId ?? null,
-      data.leadAgentId ?? null,
-      channel.id,
-      data.researchDocPath ?? null,
-      data.planDocPath ?? null,
-      data.slackChannelId ?? null,
-      data.slackThreadTs ?? null,
-      data.vcsProvider ?? null,
-      data.vcsRepo ?? null,
-      data.vcsMilestone ?? null,
-      now,
-      now,
-    );
-
-  if (!row) {
-    throw new Error("Failed to create epic");
-  }
-
-  // Create log entry
-  try {
-    createLogEntry({
-      eventType: "task_created", // Reuse existing event type
-      agentId: data.createdByAgentId,
-      taskId: id,
-      newValue: "draft",
-      metadata: { type: "epic", name: data.name },
-    });
-  } catch {
-    /* ignore log errors */
-  }
-
-  return rowToEpic(row);
-}
-
-export interface UpdateEpicData {
-  name?: string;
-  description?: string;
-  goal?: string;
-  prd?: string;
-  plan?: string;
-  status?: EpicStatus;
-  priority?: number;
-  tags?: string[];
-  leadAgentId?: string | null;
-  researchDocPath?: string;
-  planDocPath?: string;
-  slackChannelId?: string;
-  slackThreadTs?: string;
-  vcsProvider?: "github" | "gitlab";
-  vcsRepo?: string;
-  vcsMilestone?: string;
-  nextSteps?: string;
-}
-
-export function updateEpic(id: string, data: UpdateEpicData): Epic | null {
-  const epic = getEpicById(id);
-  if (!epic) return null;
-
-  const now = new Date().toISOString();
-  const updates: string[] = ["lastUpdatedAt = ?"];
-  const params: (string | number | null)[] = [now];
-
-  if (data.name !== undefined) {
-    updates.push("name = ?");
-    params.push(data.name);
-  }
-  if (data.description !== undefined) {
-    updates.push("description = ?");
-    params.push(data.description);
-  }
-  if (data.goal !== undefined) {
-    updates.push("goal = ?");
-    params.push(data.goal);
-  }
-  if (data.prd !== undefined) {
-    updates.push("prd = ?");
-    params.push(data.prd);
-  }
-  if (data.plan !== undefined) {
-    updates.push("plan = ?");
-    params.push(data.plan);
-  }
-  if (data.status !== undefined) {
-    updates.push("status = ?");
-    params.push(data.status);
-
-    // Set startedAt when transitioning to active
-    if (data.status === "active" && !epic.startedAt) {
-      updates.push("startedAt = ?");
-      params.push(now);
-    }
-    // Set completedAt when completing
-    if (data.status === "completed" && !epic.completedAt) {
-      updates.push("completedAt = ?");
-      params.push(now);
-    }
-  }
-  if (data.priority !== undefined) {
-    updates.push("priority = ?");
-    params.push(data.priority);
-  }
-  if (data.tags !== undefined) {
-    updates.push("tags = ?");
-    params.push(JSON.stringify(data.tags));
-  }
-  if (data.leadAgentId !== undefined) {
-    updates.push("leadAgentId = ?");
-    params.push(data.leadAgentId);
-  }
-  if (data.researchDocPath !== undefined) {
-    updates.push("researchDocPath = ?");
-    params.push(data.researchDocPath);
-  }
-  if (data.planDocPath !== undefined) {
-    updates.push("planDocPath = ?");
-    params.push(data.planDocPath);
-  }
-  if (data.slackChannelId !== undefined) {
-    updates.push("slackChannelId = ?");
-    params.push(data.slackChannelId);
-  }
-  if (data.slackThreadTs !== undefined) {
-    updates.push("slackThreadTs = ?");
-    params.push(data.slackThreadTs);
-  }
-  if (data.vcsProvider !== undefined) {
-    updates.push("vcsProvider = ?");
-    params.push(data.vcsProvider);
-  }
-  if (data.vcsRepo !== undefined) {
-    updates.push("vcsRepo = ?");
-    params.push(data.vcsRepo);
-  }
-  if (data.vcsMilestone !== undefined) {
-    updates.push("vcsMilestone = ?");
-    params.push(data.vcsMilestone);
-  }
-  if (data.nextSteps !== undefined) {
-    updates.push("nextSteps = ?");
-    params.push(data.nextSteps);
-  }
-
-  params.push(id);
-
-  const row = getDb()
-    .prepare<EpicRow, (string | number | null)[]>(
-      `UPDATE epics SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    )
-    .get(...params);
-
-  return row ? rowToEpic(row) : null;
-}
-
-export function deleteEpic(id: string): boolean {
-  // First unassign all tasks from this epic
-  getDb().prepare("UPDATE agent_tasks SET epicId = NULL WHERE epicId = ?").run(id);
-
-  const result = getDb().prepare("DELETE FROM epics WHERE id = ?").run(id);
-  return result.changes > 0;
-}
-
-// Get task statistics for an epic
-export function getEpicTaskStats(epicId: string): {
-  total: number;
-  completed: number;
-  failed: number;
-  inProgress: number;
-  pending: number;
-  unassigned: number;
-} {
-  const row = getDb()
-    .prepare<
-      {
-        total: number;
-        completed: number;
-        failed: number;
-        in_progress: number;
-        pending: number;
-        unassigned: number;
-      },
-      [string]
-    >(
-      `SELECT
-        COUNT(*) as total,
-        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
-        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
-        SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
-        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-        SUM(CASE WHEN status = 'unassigned' THEN 1 ELSE 0 END) as unassigned
-      FROM agent_tasks WHERE epicId = ?`,
-    )
-    .get(epicId);
-
-  return {
-    total: row?.total ?? 0,
-    completed: row?.completed ?? 0,
-    failed: row?.failed ?? 0,
-    inProgress: row?.in_progress ?? 0,
-    pending: row?.pending ?? 0,
-    unassigned: row?.unassigned ?? 0,
-  };
-}
-
-// Get epic with progress calculation
-export function getEpicWithProgress(id: string): EpicWithProgress | null {
-  const epic = getEpicById(id);
-  if (!epic) return null;
-
-  const stats = getEpicTaskStats(id);
-  const progress = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
-
-  return {
-    ...epic,
-    taskStats: stats,
-    progress,
-  };
-}
-
-// Get tasks for an epic
-export function getTasksByEpicId(epicId: string): AgentTask[] {
-  return getDb()
-    .prepare<AgentTaskRow, [string]>(
-      "SELECT * FROM agent_tasks WHERE epicId = ? ORDER BY priority DESC, createdAt ASC",
-    )
-    .all(epicId)
-    .map(rowToAgentTask);
-}
-
-// Assign task to epic
-export function assignTaskToEpic(taskId: string, epicId: string): AgentTask | null {
-  const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string, string]>(
-      "UPDATE agent_tasks SET epicId = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *",
-    )
-    .get(epicId, now, taskId);
-  return row ? rowToAgentTask(row) : null;
-}
-
-// Unassign task from epic
-export function unassignTaskFromEpic(taskId: string): AgentTask | null {
-  const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string]>(
-      "UPDATE agent_tasks SET epicId = NULL, lastUpdatedAt = ? WHERE id = ? RETURNING *",
-    )
-    .get(now, taskId);
-  return row ? rowToAgentTask(row) : null;
-}
-
-// ============================================================================
-// Epic Progress Trigger Functions (Lead-only iterative epic processing)
-// ============================================================================
-
-/**
- * Get active epics that have progress updates (task completions/failures)
- * since the last notification. Used to trigger lead to plan next steps.
- * Returns epics with their progress stats and recently finished tasks.
- */
-export function getEpicsWithProgressUpdates(): Array<{
-  epic: EpicWithProgress;
-  finishedTasks: AgentTask[];
-}> {
-  // Find active epics that have tasks finished since last notification
-  const rows = getDb()
-    .prepare<EpicRow, []>(
-      `SELECT e.* FROM epics e
-       WHERE e.status = 'active'
-       AND EXISTS (
-         SELECT 1 FROM agent_tasks t
-         WHERE t.epicId = e.id
-         AND t.status IN ('completed', 'failed')
-         AND t.finishedAt IS NOT NULL
-         AND (e.progressNotifiedAt IS NULL OR t.finishedAt > e.progressNotifiedAt)
-       )
-       ORDER BY e.priority DESC, e.lastUpdatedAt DESC`,
-    )
-    .all();
-
-  return rows
-    .map((row) => {
-      const epic = getEpicWithProgress(row.id);
-      if (!epic) return null;
-
-      // Get tasks that finished since last notification
-      const progressNotifiedAt = row.progressNotifiedAt;
-      const finishedTasks = getDb()
-        .prepare<AgentTaskRow, [string] | [string, string]>(
-          progressNotifiedAt
-            ? `SELECT * FROM agent_tasks
-               WHERE epicId = ?
-               AND status IN ('completed', 'failed')
-               AND finishedAt > ?
-               ORDER BY finishedAt DESC`
-            : `SELECT * FROM agent_tasks
-               WHERE epicId = ?
-               AND status IN ('completed', 'failed')
-               ORDER BY finishedAt DESC`,
-        )
-        .all(...(progressNotifiedAt ? [row.id, progressNotifiedAt] : [row.id]))
-        .map(rowToAgentTask);
-
-      return { epic, finishedTasks };
-    })
-    .filter((result): result is NonNullable<typeof result> => result !== null);
-}
-
-/**
- * Mark an epic's progress as notified.
- * Prevents returning the same progress updates in future polls.
- */
-export function markEpicProgressNotified(epicId: string): Epic | null {
-  const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<EpicRow, [string, string, string]>(
-      `UPDATE epics SET progressNotifiedAt = ?, lastUpdatedAt = ?
-       WHERE id = ? RETURNING *`,
-    )
-    .get(now, now, epicId);
-  return row ? rowToEpic(row) : null;
-}
-
-/**
- * Mark multiple epics' progress as notified atomically.
- */
-export function markEpicsProgressNotified(epicIds: string[]): number {
-  if (epicIds.length === 0) return 0;
-
-  const now = new Date().toISOString();
-  const placeholders = epicIds.map(() => "?").join(",");
-
-  const result = getDb().run(
-    `UPDATE epics SET progressNotifiedAt = ?, lastUpdatedAt = ?
-     WHERE id IN (${placeholders}) AND progressNotifiedAt IS NULL OR progressNotifiedAt < ?`,
-    [now, now, ...epicIds, now],
-  );
-
-  return result.changes;
 }
 
 // ============================================================================
@@ -5067,6 +4550,7 @@ type SwarmRepoRow = {
   clonePath: string;
   defaultBranch: string;
   autoClone: number; // SQLite boolean
+  guidelines: string | null;
   createdAt: string;
   lastUpdatedAt: string;
 };
@@ -5079,6 +4563,7 @@ function rowToSwarmRepo(row: SwarmRepoRow): SwarmRepo {
     clonePath: row.clonePath,
     defaultBranch: row.defaultBranch,
     autoClone: row.autoClone === 1,
+    guidelines: row.guidelines ? JSON.parse(row.guidelines) : null,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
   };
@@ -5133,15 +4618,20 @@ export function createSwarmRepo(data: {
   clonePath?: string;
   defaultBranch?: string;
   autoClone?: boolean;
+  guidelines?: RepoGuidelines | null;
 }): SwarmRepo {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const clonePath = data.clonePath || `/workspace/repos/${data.name}`;
+  const guidelinesJson = data.guidelines ? JSON.stringify(data.guidelines) : null;
 
   const row = getDb()
-    .prepare<SwarmRepoRow, [string, string, string, string, string, number, string, string]>(
-      `INSERT INTO swarm_repos (id, url, name, clonePath, defaultBranch, autoClone, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    .prepare<
+      SwarmRepoRow,
+      [string, string, string, string, string, number, string | null, string, string]
+    >(
+      `INSERT INTO swarm_repos (id, url, name, clonePath, defaultBranch, autoClone, guidelines, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -5150,6 +4640,7 @@ export function createSwarmRepo(data: {
       clonePath,
       data.defaultBranch ?? "main",
       data.autoClone !== false ? 1 : 0,
+      guidelinesJson,
       now,
       now,
     );
@@ -5166,10 +4657,11 @@ export function updateSwarmRepo(
     clonePath: string;
     defaultBranch: string;
     autoClone: boolean;
+    guidelines: RepoGuidelines | null;
   }>,
 ): SwarmRepo | null {
   const setClauses: string[] = [];
-  const params: (string | number)[] = [];
+  const params: (string | number | null)[] = [];
 
   const stringFields = ["url", "name", "clonePath", "defaultBranch"] as const;
   for (const field of stringFields) {
@@ -5182,6 +4674,10 @@ export function updateSwarmRepo(
     setClauses.push("autoClone = ?");
     params.push(updates.autoClone ? 1 : 0);
   }
+  if (updates.guidelines !== undefined) {
+    setClauses.push("guidelines = ?");
+    params.push(updates.guidelines ? JSON.stringify(updates.guidelines) : null);
+  }
 
   if (setClauses.length === 0) return getSwarmRepoById(id);
 
@@ -5190,7 +4686,7 @@ export function updateSwarmRepo(
   params.push(id);
 
   const row = getDb()
-    .prepare<SwarmRepoRow, (string | number)[]>(
+    .prepare<SwarmRepoRow, (string | number | null)[]>(
       `UPDATE swarm_repos SET ${setClauses.join(", ")} WHERE id = ? RETURNING *`,
     )
     .get(...params);
@@ -5201,293 +4697,6 @@ export function updateSwarmRepo(
 export function deleteSwarmRepo(id: string): boolean {
   const result = getDb().run("DELETE FROM swarm_repos WHERE id = ?", [id]);
   return result.changes > 0;
-}
-
-// ============================================================================
-// Agent Memory Functions
-// ============================================================================
-
-type AgentMemoryRow = {
-  id: string;
-  agentId: string | null;
-  scope: string;
-  name: string;
-  content: string;
-  summary: string | null;
-  embedding: Buffer | null;
-  source: string;
-  sourceTaskId: string | null;
-  sourcePath: string | null;
-  chunkIndex: number;
-  totalChunks: number;
-  tags: string;
-  createdAt: string;
-  accessedAt: string;
-};
-
-function rowToAgentMemory(row: AgentMemoryRow): AgentMemory {
-  return {
-    id: row.id,
-    agentId: row.agentId,
-    scope: row.scope as AgentMemoryScope,
-    name: row.name,
-    content: row.content,
-    summary: row.summary,
-    source: row.source as AgentMemorySource,
-    sourceTaskId: row.sourceTaskId,
-    sourcePath: row.sourcePath,
-    chunkIndex: row.chunkIndex,
-    totalChunks: row.totalChunks,
-    tags: JSON.parse(row.tags || "[]"),
-    createdAt: row.createdAt,
-    accessedAt: row.accessedAt,
-  };
-}
-
-export interface CreateMemoryOptions {
-  agentId?: string | null;
-  scope: AgentMemoryScope;
-  name: string;
-  content: string;
-  summary?: string | null;
-  embedding?: Buffer | null;
-  source: AgentMemorySource;
-  sourceTaskId?: string | null;
-  sourcePath?: string | null;
-  chunkIndex?: number;
-  totalChunks?: number;
-  tags?: string[];
-}
-
-export function createMemory(data: CreateMemoryOptions): AgentMemory {
-  const id = crypto.randomUUID();
-  const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<
-      AgentMemoryRow,
-      [
-        string,
-        string | null,
-        string,
-        string,
-        string,
-        string | null,
-        Buffer | null,
-        string,
-        string | null,
-        string | null,
-        number,
-        number,
-        string,
-        string,
-        string,
-      ]
-    >(
-      `INSERT INTO agent_memory (id, agentId, scope, name, content, summary, embedding, source, sourceTaskId, sourcePath, chunkIndex, totalChunks, tags, createdAt, accessedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    )
-    .get(
-      id,
-      data.agentId ?? null,
-      data.scope,
-      data.name,
-      data.content,
-      data.summary ?? null,
-      data.embedding ?? null,
-      data.source,
-      data.sourceTaskId ?? null,
-      data.sourcePath ?? null,
-      data.chunkIndex ?? 0,
-      data.totalChunks ?? 1,
-      JSON.stringify(data.tags ?? []),
-      now,
-      now,
-    );
-
-  if (!row) throw new Error("Failed to create memory");
-  return rowToAgentMemory(row);
-}
-
-export function getMemoryById(id: string): AgentMemory | null {
-  const row = getDb()
-    .prepare<AgentMemoryRow, [string]>("SELECT * FROM agent_memory WHERE id = ?")
-    .get(id);
-  if (!row) return null;
-
-  // Update accessedAt
-  getDb()
-    .prepare("UPDATE agent_memory SET accessedAt = ? WHERE id = ?")
-    .run(new Date().toISOString(), id);
-
-  return rowToAgentMemory(row);
-}
-
-export function updateMemoryEmbedding(id: string, embedding: Buffer): void {
-  getDb().prepare("UPDATE agent_memory SET embedding = ? WHERE id = ?").run(embedding, id);
-}
-
-export interface SearchMemoriesOptions {
-  scope?: "agent" | "swarm" | "all";
-  limit?: number;
-  source?: AgentMemorySource;
-  isLead?: boolean;
-}
-
-export function searchMemoriesByVector(
-  queryEmbedding: Float32Array,
-  agentId: string,
-  options: SearchMemoriesOptions = {},
-): (AgentMemory & { similarity: number })[] {
-  const { scope = "all", limit = 10, source, isLead = false } = options;
-
-  // Build WHERE clause
-  const conditions: string[] = ["embedding IS NOT NULL"];
-  const params: (string | null)[] = [];
-
-  if (!isLead) {
-    // Workers see their own agent-scoped + all swarm-scoped
-    if (scope === "agent") {
-      conditions.push("agentId = ? AND scope = 'agent'");
-      params.push(agentId);
-    } else if (scope === "swarm") {
-      conditions.push("scope = 'swarm'");
-    } else {
-      // "all" - own agent + swarm
-      conditions.push("(agentId = ? OR scope = 'swarm')");
-      params.push(agentId);
-    }
-  } else {
-    // Leads see everything
-    if (scope === "agent") {
-      conditions.push("scope = 'agent'");
-    } else if (scope === "swarm") {
-      conditions.push("scope = 'swarm'");
-    }
-    // "all" for lead = no scope filter needed
-  }
-
-  if (source) {
-    conditions.push("source = ?");
-    params.push(source);
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-
-  const rows = getDb()
-    .prepare<AgentMemoryRow, (string | null)[]>(`SELECT * FROM agent_memory ${whereClause}`)
-    .all(...params);
-
-  // Import cosine similarity inline to avoid circular deps
-  const { cosineSimilarity, deserializeEmbedding } = require("./embedding");
-
-  // Compute similarities and sort
-  const results: (AgentMemory & { similarity: number })[] = [];
-  for (const row of rows) {
-    if (!row.embedding) continue;
-    const embedding = deserializeEmbedding(row.embedding);
-    // Skip embeddings with mismatched dimensions (can happen if embedding model changes)
-    if (embedding.length !== queryEmbedding.length) continue;
-    const similarity = cosineSimilarity(queryEmbedding, embedding) as number;
-    results.push({ ...rowToAgentMemory(row), similarity });
-  }
-
-  results.sort((a, b) => b.similarity - a.similarity);
-  return results.slice(0, limit);
-}
-
-export interface ListMemoriesOptions {
-  scope?: "agent" | "swarm" | "all";
-  limit?: number;
-  offset?: number;
-  isLead?: boolean;
-}
-
-export function listMemoriesByAgent(
-  agentId: string,
-  options: ListMemoriesOptions = {},
-): AgentMemory[] {
-  const { scope = "all", limit = 20, offset = 0, isLead = false } = options;
-
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (!isLead) {
-    if (scope === "agent") {
-      conditions.push("agentId = ? AND scope = 'agent'");
-      params.push(agentId);
-    } else if (scope === "swarm") {
-      conditions.push("scope = 'swarm'");
-    } else {
-      conditions.push("(agentId = ? OR scope = 'swarm')");
-      params.push(agentId);
-    }
-  } else {
-    if (scope === "agent") {
-      conditions.push("scope = 'agent'");
-    } else if (scope === "swarm") {
-      conditions.push("scope = 'swarm'");
-    }
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-
-  params.push(limit, offset);
-
-  const rows = getDb()
-    .prepare<AgentMemoryRow, (string | number)[]>(
-      `SELECT * FROM agent_memory ${whereClause} ORDER BY createdAt DESC LIMIT ? OFFSET ?`,
-    )
-    .all(...params);
-
-  return rows.map(rowToAgentMemory);
-}
-
-export function deleteMemoriesBySourcePath(sourcePath: string, agentId: string): number {
-  const result = getDb()
-    .prepare("DELETE FROM agent_memory WHERE sourcePath = ? AND agentId = ?")
-    .run(sourcePath, agentId);
-  return result.changes;
-}
-
-export function deleteMemory(id: string): boolean {
-  const result = getDb().prepare("DELETE FROM agent_memory WHERE id = ?").run(id);
-  return result.changes > 0;
-}
-
-export function getMemoryStats(agentId: string): {
-  total: number;
-  bySource: Record<string, number>;
-  byScope: Record<string, number>;
-} {
-  const total = getDb()
-    .prepare<{ count: number }, [string]>(
-      "SELECT COUNT(*) as count FROM agent_memory WHERE agentId = ?",
-    )
-    .get(agentId);
-
-  const bySourceRows = getDb()
-    .prepare<{ source: string; count: number }, [string]>(
-      "SELECT source, COUNT(*) as count FROM agent_memory WHERE agentId = ? GROUP BY source",
-    )
-    .all(agentId);
-
-  const byScopeRows = getDb()
-    .prepare<{ scope: string; count: number }, [string]>(
-      "SELECT scope, COUNT(*) as count FROM agent_memory WHERE agentId = ? GROUP BY scope",
-    )
-    .all(agentId);
-
-  const bySource: Record<string, number> = {};
-  for (const row of bySourceRows) {
-    bySource[row.source] = row.count;
-  }
-
-  const byScope: Record<string, number> = {};
-  for (const row of byScopeRows) {
-    byScope[row.scope] = row.count;
-  }
-
-  return { total: total?.count ?? 0, bySource, byScope };
 }
 
 // ============================================================================
@@ -5582,6 +4791,7 @@ export function insertActiveSession(session: {
   triggerType: string;
   inboxMessageId?: string;
   taskDescription?: string;
+  runnerSessionId?: string;
 }): ActiveSession {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -5589,10 +4799,20 @@ export function insertActiveSession(session: {
   const row = getDb()
     .prepare<
       ActiveSession,
-      [string, string, string | null, string, string | null, string | null, string, string]
+      [
+        string,
+        string,
+        string | null,
+        string,
+        string | null,
+        string | null,
+        string | null,
+        string,
+        string,
+      ]
     >(
-      `INSERT INTO active_sessions (id, agentId, taskId, triggerType, inboxMessageId, taskDescription, startedAt, lastHeartbeatAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO active_sessions (id, agentId, taskId, triggerType, inboxMessageId, taskDescription, runnerSessionId, startedAt, lastHeartbeatAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
     )
     .get(
@@ -5602,6 +4822,7 @@ export function insertActiveSession(session: {
       session.triggerType,
       session.inboxMessageId ?? null,
       session.taskDescription ?? null,
+      session.runnerSessionId ?? null,
       now,
       now,
     );
@@ -5651,6 +4872,42 @@ export function cleanupStaleSessions(maxAgeMinutes = 30): number {
 
 export function cleanupAgentSessions(agentId: string): number {
   const result = getDb().prepare("DELETE FROM active_sessions WHERE agentId = ?").run(agentId);
+  return result.changes;
+}
+
+/** Update providerSessionId on an active session identified by taskId */
+export function updateActiveSessionProviderSessionId(
+  taskId: string,
+  providerSessionId: string,
+): boolean {
+  const result = getDb()
+    .prepare("UPDATE active_sessions SET providerSessionId = ? WHERE taskId = ?")
+    .run(providerSessionId, taskId);
+  return result.changes > 0;
+}
+
+/**
+ * Get the active session for a specific task.
+ * Used by the heartbeat to cross-reference stalled tasks with worker sessions.
+ */
+export function getActiveSessionForTask(taskId: string): ActiveSession | null {
+  return (
+    getDb()
+      .prepare<ActiveSession, [string]>("SELECT * FROM active_sessions WHERE taskId = ? LIMIT 1")
+      .get(taskId) ?? null
+  );
+}
+
+/**
+ * Reassociate session logs from a runner session to a real task ID.
+ * Used when a pool task is claimed — logs were stored under a random UUID,
+ * this updates them to use the real task ID.
+ * Idempotent — safe to call multiple times.
+ */
+export function reassociateSessionLogs(runnerSessionId: string, realTaskId: string): number {
+  const result = getDb()
+    .prepare("UPDATE session_logs SET taskId = ? WHERE sessionId = ? AND taskId != ?")
+    .run(realTaskId, runnerSessionId, realTaskId);
   return result.changes;
 }
 
@@ -5709,6 +4966,42 @@ export function getUnassignedPoolTasks(limit: number = 10): AgentTask[] {
     .map(rowToAgentTask);
 }
 
+export function getRecentFailedTasks(hours: number = 6): AgentTask[] {
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  return getDb()
+    .prepare<AgentTaskRow, [string]>(
+      `SELECT * FROM agent_tasks
+       WHERE status = 'failed'
+         AND finishedAt > ?
+       ORDER BY finishedAt DESC
+       LIMIT 20`,
+    )
+    .all(since)
+    .map(rowToAgentTask);
+}
+
+export function getRecentCompletedCount(hours: number = 24): number {
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const row = getDb()
+    .prepare<{ count: number }, [string]>(
+      `SELECT COUNT(*) as count FROM agent_tasks
+       WHERE status = 'completed' AND finishedAt > ?`,
+    )
+    .get(since);
+  return row?.count ?? 0;
+}
+
+export function getRecentFailedCount(hours: number = 24): number {
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const row = getDb()
+    .prepare<{ count: number }, [string]>(
+      `SELECT COUNT(*) as count FROM agent_tasks
+       WHERE status = 'failed' AND finishedAt > ?`,
+    )
+    .get(since);
+  return row?.count ?? 0;
+}
+
 // ============================================================================
 // Workflow CRUD
 // ============================================================================
@@ -5719,7 +5012,12 @@ type WorkflowRow = {
   description: string | null;
   enabled: number;
   definition: string;
-  webhookSecret: string | null;
+  triggers: string;
+  cooldown: string | null;
+  input: string | null;
+  triggerSchema: string | null;
+  dir: string | null;
+  vcs_repo: string | null;
   createdByAgentId: string | null;
   createdAt: string;
   lastUpdatedAt: string;
@@ -5732,10 +5030,17 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
     description: row.description ?? undefined,
     enabled: row.enabled === 1,
     definition: JSON.parse(row.definition) as WorkflowDefinition,
-    webhookSecret: row.webhookSecret ?? undefined,
+    triggers: JSON.parse(row.triggers) as TriggerConfig[],
+    cooldown: row.cooldown ? (JSON.parse(row.cooldown) as CooldownConfig) : undefined,
+    input: row.input ? (JSON.parse(row.input) as Record<string, InputValue>) : undefined,
+    triggerSchema: row.triggerSchema
+      ? (JSON.parse(row.triggerSchema) as Record<string, unknown>)
+      : undefined,
+    dir: row.dir ?? undefined,
+    vcsRepo: row.vcs_repo ?? undefined,
     createdByAgentId: row.createdByAgentId ?? undefined,
-    createdAt: row.createdAt,
-    lastUpdatedAt: row.lastUpdatedAt,
+    createdAt: normalizeDateRequired(row.createdAt),
+    lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
   };
 }
 
@@ -5743,21 +5048,46 @@ export function createWorkflow(data: {
   name: string;
   description?: string;
   definition: WorkflowDefinition;
+  triggers?: TriggerConfig[];
+  cooldown?: CooldownConfig;
+  input?: Record<string, InputValue>;
+  triggerSchema?: Record<string, unknown>;
+  dir?: string;
+  vcsRepo?: string;
   createdByAgentId?: string;
 }): Workflow {
   const id = crypto.randomUUID();
-  const webhookSecret = crypto.randomUUID();
   const row = getDb()
-    .prepare<WorkflowRow, [string, string, string | null, string, string, string | null]>(
-      `INSERT INTO workflows (id, name, description, definition, webhookSecret, createdByAgentId)
-       VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
+    .prepare<
+      WorkflowRow,
+      [
+        string,
+        string,
+        string | null,
+        string,
+        string,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+        string | null,
+      ]
+    >(
+      `INSERT INTO workflows (id, name, description, definition, triggers, cooldown, input, triggerSchema, dir, vcs_repo, createdByAgentId)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
       data.name,
       data.description ?? null,
       JSON.stringify(data.definition),
-      webhookSecret,
+      JSON.stringify(data.triggers ?? []),
+      data.cooldown ? JSON.stringify(data.cooldown) : null,
+      data.input ? JSON.stringify(data.input) : null,
+      data.triggerSchema ? JSON.stringify(data.triggerSchema) : null,
+      data.dir ?? null,
+      data.vcsRepo ?? null,
       data.createdByAgentId ?? null,
     );
   if (!row) throw new Error("Failed to create workflow");
@@ -5768,13 +5098,6 @@ export function getWorkflow(id: string): Workflow | null {
   const row = getDb()
     .prepare<WorkflowRow, [string]>("SELECT * FROM workflows WHERE id = ?")
     .get(id);
-  return row ? rowToWorkflow(row) : null;
-}
-
-export function getWorkflowByWebhookSecret(secret: string): Workflow | null {
-  const row = getDb()
-    .prepare<WorkflowRow, [string]>("SELECT * FROM workflows WHERE webhookSecret = ?")
-    .get(secret);
   return row ? rowToWorkflow(row) : null;
 }
 
@@ -5799,6 +5122,12 @@ export function updateWorkflow(
     description?: string;
     enabled?: boolean;
     definition?: WorkflowDefinition;
+    triggers?: TriggerConfig[];
+    cooldown?: CooldownConfig | null;
+    input?: Record<string, InputValue> | null;
+    triggerSchema?: Record<string, unknown> | null;
+    dir?: string | null;
+    vcsRepo?: string | null;
   },
 ): Workflow | null {
   const updates: string[] = [];
@@ -5818,6 +5147,30 @@ export function updateWorkflow(
   if (data.definition !== undefined) {
     updates.push("definition = ?");
     params.push(JSON.stringify(data.definition));
+  }
+  if (data.triggers !== undefined) {
+    updates.push("triggers = ?");
+    params.push(JSON.stringify(data.triggers));
+  }
+  if (data.cooldown !== undefined) {
+    updates.push("cooldown = ?");
+    params.push(data.cooldown ? JSON.stringify(data.cooldown) : null);
+  }
+  if (data.input !== undefined) {
+    updates.push("input = ?");
+    params.push(data.input ? JSON.stringify(data.input) : null);
+  }
+  if (data.triggerSchema !== undefined) {
+    updates.push("triggerSchema = ?");
+    params.push(data.triggerSchema ? JSON.stringify(data.triggerSchema) : null);
+  }
+  if (data.dir !== undefined) {
+    updates.push("dir = ?");
+    params.push(data.dir ?? null);
+  }
+  if (data.vcsRepo !== undefined) {
+    updates.push("vcs_repo = ?");
+    params.push(data.vcsRepo ?? null);
   }
   if (updates.length === 0) return getWorkflow(id);
   updates.push("lastUpdatedAt = ?");
@@ -5851,6 +5204,22 @@ export function deleteWorkflow(id: string): boolean {
   return result.changes > 0;
 }
 
+/**
+ * Find enabled workflows that have a schedule trigger matching the given scheduleId.
+ * Uses SQLite JSON functions to query into the triggers JSON array.
+ */
+export function getWorkflowsByScheduleId(scheduleId: string): Workflow[] {
+  const rows = getDb()
+    .prepare<WorkflowRow, [string]>(
+      `SELECT w.* FROM workflows w, json_each(w.triggers) AS t
+       WHERE w.enabled = 1
+         AND json_extract(t.value, '$.type') = 'schedule'
+         AND json_extract(t.value, '$.scheduleId') = ?`,
+    )
+    .all(scheduleId);
+  return rows.map(rowToWorkflow);
+}
+
 // ============================================================================
 // Workflow Run CRUD
 // ============================================================================
@@ -5875,9 +5244,9 @@ function rowToWorkflowRun(row: WorkflowRunRow): WorkflowRun {
     triggerData: row.triggerData ? JSON.parse(row.triggerData) : undefined,
     context: row.context ? (JSON.parse(row.context) as Record<string, unknown>) : undefined,
     error: row.error ?? undefined,
-    startedAt: row.startedAt,
-    lastUpdatedAt: row.lastUpdatedAt,
-    finishedAt: row.finishedAt ?? undefined,
+    startedAt: normalizeDateRequired(row.startedAt),
+    lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
+    finishedAt: normalizeDate(row.finishedAt) ?? undefined,
   };
 }
 
@@ -5886,11 +5255,12 @@ export function createWorkflowRun(data: {
   workflowId: string;
   triggerData?: unknown;
 }): WorkflowRun {
+  const now = new Date().toISOString();
   const row = getDb()
-    .prepare<WorkflowRunRow, [string, string, string | null]>(
-      `INSERT INTO workflow_runs (id, workflowId, triggerData) VALUES (?, ?, ?) RETURNING *`,
+    .prepare<WorkflowRunRow, [string, string, string, string | null]>(
+      `INSERT INTO workflow_runs (id, workflowId, startedAt, triggerData) VALUES (?, ?, ?, ?) RETURNING *`,
     )
-    .get(data.id, data.workflowId, data.triggerData ? JSON.stringify(data.triggerData) : null);
+    .get(data.id, data.workflowId, now, data.triggerData ? JSON.stringify(data.triggerData) : null);
   if (!row) throw new Error("Failed to create workflow run");
   return rowToWorkflowRun(row);
 }
@@ -5965,6 +5335,12 @@ type WorkflowRunStepRow = {
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
+  retryCount: number;
+  maxRetries: number;
+  nextRetryAt: string | null;
+  idempotencyKey: string | null;
+  diagnostics: string | null;
+  nextPort: string | null;
 };
 
 function rowToWorkflowRunStep(row: WorkflowRunStepRow): WorkflowRunStep {
@@ -5977,8 +5353,14 @@ function rowToWorkflowRunStep(row: WorkflowRunStepRow): WorkflowRunStep {
     input: row.input ? JSON.parse(row.input) : undefined,
     output: row.output ? JSON.parse(row.output) : undefined,
     error: row.error ?? undefined,
-    startedAt: row.startedAt,
-    finishedAt: row.finishedAt ?? undefined,
+    startedAt: normalizeDateRequired(row.startedAt),
+    finishedAt: normalizeDate(row.finishedAt) ?? undefined,
+    retryCount: row.retryCount,
+    maxRetries: row.maxRetries,
+    nextRetryAt: normalizeDate(row.nextRetryAt) ?? undefined,
+    idempotencyKey: row.idempotencyKey ?? undefined,
+    diagnostics: row.diagnostics ?? undefined,
+    nextPort: row.nextPort ?? undefined,
   };
 }
 
@@ -5989,16 +5371,18 @@ export function createWorkflowRunStep(data: {
   nodeType: string;
   input?: unknown;
 }): WorkflowRunStep {
+  const now = new Date().toISOString();
   const row = getDb()
-    .prepare<WorkflowRunStepRow, [string, string, string, string, string | null]>(
-      `INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, input)
-       VALUES (?, ?, ?, ?, 'running', ?) RETURNING *`,
+    .prepare<WorkflowRunStepRow, [string, string, string, string, string, string | null]>(
+      `INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, startedAt, input)
+       VALUES (?, ?, ?, ?, 'running', ?, ?) RETURNING *`,
     )
     .get(
       data.id,
       data.runId,
       data.nodeId,
       data.nodeType,
+      now,
       data.input ? JSON.stringify(data.input) : null,
     );
   if (!row) throw new Error("Failed to create workflow run step");
@@ -6019,10 +5403,16 @@ export function updateWorkflowRunStep(
     output?: unknown;
     error?: string;
     finishedAt?: string;
+    retryCount?: number;
+    maxRetries?: number;
+    nextRetryAt?: string | null;
+    idempotencyKey?: string;
+    diagnostics?: string;
+    nextPort?: string;
   },
 ): WorkflowRunStep | null {
   const updates: string[] = [];
-  const params: (string | null)[] = [];
+  const params: (string | number | null)[] = [];
   if (data.status !== undefined) {
     updates.push("status = ?");
     params.push(data.status);
@@ -6039,10 +5429,34 @@ export function updateWorkflowRunStep(
     updates.push("finishedAt = ?");
     params.push(data.finishedAt);
   }
+  if (data.retryCount !== undefined) {
+    updates.push("retryCount = ?");
+    params.push(data.retryCount);
+  }
+  if (data.maxRetries !== undefined) {
+    updates.push("maxRetries = ?");
+    params.push(data.maxRetries);
+  }
+  if (data.nextRetryAt !== undefined) {
+    updates.push("nextRetryAt = ?");
+    params.push(data.nextRetryAt);
+  }
+  if (data.idempotencyKey !== undefined) {
+    updates.push("idempotencyKey = ?");
+    params.push(data.idempotencyKey);
+  }
+  if (data.diagnostics !== undefined) {
+    updates.push("diagnostics = ?");
+    params.push(data.diagnostics);
+  }
+  if (data.nextPort !== undefined) {
+    updates.push("nextPort = ?");
+    params.push(data.nextPort);
+  }
   if (updates.length === 0) return getWorkflowRunStep(id);
   params.push(id);
   const row = getDb()
-    .prepare<WorkflowRunStepRow, (string | null)[]>(
+    .prepare<WorkflowRunStepRow, (string | number | null)[]>(
       `UPDATE workflow_run_steps SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
     )
     .get(...params);
@@ -6086,4 +5500,2270 @@ export function getStuckWorkflowRuns(): StuckWorkflowRun[] {
         AND at.status IN ('completed', 'failed', 'cancelled')`,
     )
     .all();
+}
+
+// --- New Workflow Query Functions ---
+
+export function getLastSuccessfulRun(workflowId: string): WorkflowRun | null {
+  const row = getDb()
+    .prepare<WorkflowRunRow, [string]>(
+      `SELECT * FROM workflow_runs
+       WHERE workflowId = ? AND status = 'completed'
+       ORDER BY finishedAt DESC LIMIT 1`,
+    )
+    .get(workflowId);
+  return row ? rowToWorkflowRun(row) : null;
+}
+
+export function getLastRunStart(workflowId: string): WorkflowRun | null {
+  const row = getDb()
+    .prepare<WorkflowRunRow, [string]>(
+      `SELECT * FROM workflow_runs
+       WHERE workflowId = ? AND status NOT IN ('skipped')
+       ORDER BY startedAt DESC LIMIT 1`,
+    )
+    .get(workflowId);
+  return row ? rowToWorkflowRun(row) : null;
+}
+
+export function getRetryableSteps(): WorkflowRunStep[] {
+  const now = new Date().toISOString();
+  return getDb()
+    .prepare<WorkflowRunStepRow, [string]>(
+      `SELECT * FROM workflow_run_steps
+       WHERE status = 'failed'
+         AND nextRetryAt IS NOT NULL
+         AND nextRetryAt <= ?
+       ORDER BY nextRetryAt ASC`,
+    )
+    .all(now)
+    .map(rowToWorkflowRunStep);
+}
+
+export function getCompletedStepNodeIds(runId: string): string[] {
+  const rows = getDb()
+    .prepare<{ nodeId: string }, [string]>(
+      `SELECT nodeId FROM workflow_run_steps
+       WHERE runId = ? AND status = 'completed'`,
+    )
+    .all(runId);
+  return rows.map((r) => r.nodeId);
+}
+
+export function getTaskByWorkflowRunStepId(stepId: string): AgentTask | null {
+  const row = getDb()
+    .prepare<AgentTaskRow, [string]>(
+      "SELECT * FROM agent_tasks WHERE workflowRunStepId = ? LIMIT 1",
+    )
+    .get(stepId);
+  return row ? rowToAgentTask(row) : null;
+}
+
+export function getStepByIdempotencyKey(key: string): WorkflowRunStep | null {
+  const row = getDb()
+    .prepare<WorkflowRunStepRow, [string]>(
+      "SELECT * FROM workflow_run_steps WHERE idempotencyKey = ?",
+    )
+    .get(key);
+  return row ? rowToWorkflowRunStep(row) : null;
+}
+
+export function getStepCountForNode(runId: string, nodeId: string): number {
+  const row = getDb()
+    .prepare<{ cnt: number }, [string, string]>(
+      "SELECT COUNT(*) as cnt FROM workflow_run_steps WHERE runId = ? AND nodeId = ?",
+    )
+    .get(runId, nodeId);
+  return row?.cnt ?? 0;
+}
+
+export function getLatestStepForNode(runId: string, nodeId: string): WorkflowRunStep | null {
+  const row = getDb()
+    .prepare<WorkflowRunStepRow, [string, string]>(
+      "SELECT * FROM workflow_run_steps WHERE runId = ? AND nodeId = ? ORDER BY startedAt DESC LIMIT 1",
+    )
+    .get(runId, nodeId);
+  return row ? rowToWorkflowRunStep(row) : null;
+}
+
+// --- Workflow Version History ---
+
+type WorkflowVersionRow = {
+  id: string;
+  workflowId: string;
+  version: number;
+  snapshot: string;
+  changedByAgentId: string | null;
+  createdAt: string;
+};
+
+function rowToWorkflowVersion(row: WorkflowVersionRow): WorkflowVersion {
+  return {
+    id: row.id,
+    workflowId: row.workflowId,
+    version: row.version,
+    snapshot: JSON.parse(row.snapshot) as WorkflowSnapshot,
+    changedByAgentId: row.changedByAgentId ?? undefined,
+    createdAt: normalizeDateRequired(row.createdAt),
+  };
+}
+
+export function createWorkflowVersion(data: {
+  workflowId: string;
+  version: number;
+  snapshot: WorkflowSnapshot;
+  changedByAgentId?: string;
+}): WorkflowVersion {
+  const id = crypto.randomUUID();
+  const row = getDb()
+    .prepare<WorkflowVersionRow, [string, string, number, string, string | null]>(
+      `INSERT INTO workflow_versions (id, workflowId, version, snapshot, changedByAgentId)
+       VALUES (?, ?, ?, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      data.workflowId,
+      data.version,
+      JSON.stringify(data.snapshot),
+      data.changedByAgentId ?? null,
+    );
+  if (!row) throw new Error("Failed to create workflow version");
+  return rowToWorkflowVersion(row);
+}
+
+export function getWorkflowVersions(workflowId: string): WorkflowVersion[] {
+  return getDb()
+    .prepare<WorkflowVersionRow, [string]>(
+      "SELECT * FROM workflow_versions WHERE workflowId = ? ORDER BY version DESC",
+    )
+    .all(workflowId)
+    .map(rowToWorkflowVersion);
+}
+
+export function getWorkflowVersion(workflowId: string, version: number): WorkflowVersion | null {
+  const row = getDb()
+    .prepare<WorkflowVersionRow, [string, number]>(
+      "SELECT * FROM workflow_versions WHERE workflowId = ? AND version = ?",
+    )
+    .get(workflowId, version);
+  return row ? rowToWorkflowVersion(row) : null;
+}
+
+// ============================================================================
+// Prompt Template Operations
+// ============================================================================
+
+type PromptTemplateRow = {
+  id: string;
+  eventType: string;
+  scope: string;
+  scopeId: string | null;
+  state: string;
+  body: string;
+  isDefault: number; // SQLite boolean
+  version: number;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type PromptTemplateHistoryRow = {
+  id: string;
+  templateId: string;
+  version: number;
+  body: string;
+  state: string;
+  changedBy: string | null;
+  changedAt: string;
+  changeReason: string | null;
+};
+
+function rowToPromptTemplate(row: PromptTemplateRow): PromptTemplate {
+  return {
+    id: row.id,
+    eventType: row.eventType,
+    scope: row.scope as "global" | "agent" | "repo",
+    scopeId: row.scopeId ?? null,
+    state: row.state as "enabled" | "default_prompt_fallback" | "skip_event",
+    body: row.body,
+    isDefault: row.isDefault === 1,
+    version: row.version,
+    createdBy: row.createdBy ?? null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function rowToPromptTemplateHistory(row: PromptTemplateHistoryRow): PromptTemplateHistory {
+  return {
+    id: row.id,
+    templateId: row.templateId,
+    version: row.version,
+    body: row.body,
+    state: row.state,
+    changedBy: row.changedBy ?? null,
+    changedAt: row.changedAt,
+    changeReason: row.changeReason ?? null,
+  };
+}
+
+/**
+ * List prompt templates with optional filters.
+ */
+export function getPromptTemplates(filters?: {
+  eventType?: string;
+  scope?: string;
+  scopeId?: string;
+  isDefault?: boolean;
+}): PromptTemplate[] {
+  const conditions: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (filters?.eventType) {
+    conditions.push("eventType = ?");
+    params.push(filters.eventType);
+  }
+  if (filters?.scope) {
+    conditions.push("scope = ?");
+    params.push(filters.scope);
+  }
+  if (filters?.scopeId) {
+    conditions.push("scopeId = ?");
+    params.push(filters.scopeId);
+  }
+  if (filters?.isDefault !== undefined) {
+    conditions.push("isDefault = ?");
+    params.push(filters.isDefault ? 1 : 0);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const query = `SELECT * FROM prompt_templates ${whereClause} ORDER BY eventType ASC`;
+
+  return getDb()
+    .prepare<PromptTemplateRow, (string | number)[]>(query)
+    .all(...params)
+    .map(rowToPromptTemplate);
+}
+
+/**
+ * Get a single prompt template by ID.
+ */
+export function getPromptTemplateById(id: string): PromptTemplate | null {
+  const row = getDb()
+    .prepare<PromptTemplateRow, [string]>("SELECT * FROM prompt_templates WHERE id = ?")
+    .get(id);
+  return row ? rowToPromptTemplate(row) : null;
+}
+
+/**
+ * Upsert a prompt template. Inserts or updates by (eventType, scope, scopeId) unique constraint.
+ * Creates a history entry on both insert and update.
+ */
+export function upsertPromptTemplate(data: {
+  eventType: string;
+  scope: "global" | "agent" | "repo";
+  scopeId?: string | null;
+  state?: "enabled" | "default_prompt_fallback" | "skip_event";
+  body: string;
+  createdBy?: string | null;
+  changedBy?: string | null;
+  changeReason?: string | null;
+  isDefault?: boolean;
+}): PromptTemplate {
+  const now = new Date().toISOString();
+  const scopeId = data.scope === "global" ? null : (data.scopeId ?? null);
+  const state = data.state ?? "enabled";
+  const createdBy = data.createdBy ?? data.changedBy ?? null;
+  const changedBy = data.changedBy ?? data.createdBy ?? null;
+  const changeReason = data.changeReason ?? null;
+
+  // Manual check for existing entry because SQLite's UNIQUE constraint
+  // treats NULL != NULL, so ON CONFLICT never fires when scopeId is NULL (global scope).
+  const existing =
+    scopeId === null
+      ? getDb()
+          .prepare<PromptTemplateRow, [string, string]>(
+            "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId IS NULL",
+          )
+          .get(data.eventType, data.scope)
+      : getDb()
+          .prepare<PromptTemplateRow, [string, string, string]>(
+            "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId = ?",
+          )
+          .get(data.eventType, data.scope, scopeId);
+
+  let row: PromptTemplateRow | null;
+
+  if (existing) {
+    // If upserting at global scope and existing record has isDefault=true, flip it to false
+    const newIsDefault =
+      data.scope === "global" && existing.isDefault === 1 ? 0 : existing.isDefault;
+    const newVersion = existing.version + 1;
+
+    row = getDb()
+      .prepare<PromptTemplateRow, [string, string, number, number, string, string]>(
+        `UPDATE prompt_templates SET body = ?, state = ?, isDefault = ?, version = ?, updatedAt = ?
+         WHERE id = ? RETURNING *`,
+      )
+      .get(data.body, state, newIsDefault, newVersion, now, existing.id);
+
+    // Create history entry for the update
+    getDb()
+      .prepare(
+        `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        crypto.randomUUID(),
+        existing.id,
+        newVersion,
+        data.body,
+        state,
+        changedBy,
+        now,
+        changeReason,
+      );
+  } else {
+    const id = crypto.randomUUID();
+    row = getDb()
+      .prepare<
+        PromptTemplateRow,
+        [
+          string,
+          string,
+          string,
+          string | null,
+          string,
+          string,
+          number,
+          number,
+          string | null,
+          string,
+          string,
+        ]
+      >(
+        `INSERT INTO prompt_templates (id, eventType, scope, scopeId, state, body, isDefault, version, createdBy, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      )
+      .get(
+        id,
+        data.eventType,
+        data.scope,
+        scopeId,
+        state,
+        data.body,
+        data.isDefault ? 1 : 0,
+        1,
+        createdBy,
+        now,
+        now,
+      );
+
+    // Create history entry for the insert
+    getDb()
+      .prepare(
+        `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        crypto.randomUUID(),
+        id,
+        1,
+        data.body,
+        state,
+        changedBy,
+        now,
+        changeReason ?? "Initial creation",
+      );
+  }
+
+  if (!row) throw new Error("Failed to upsert prompt template");
+  return rowToPromptTemplate(row);
+}
+
+/**
+ * Delete a prompt template by ID. Guards against deleting default templates.
+ * Does NOT delete history rows (intentional for audit trail).
+ */
+export function deletePromptTemplate(id: string): boolean {
+  const existing = getDb()
+    .prepare<PromptTemplateRow, [string]>("SELECT * FROM prompt_templates WHERE id = ?")
+    .get(id);
+
+  if (!existing) return false;
+  if (existing.isDefault === 1) {
+    throw new Error(
+      "Cannot delete a default prompt template. Use resetPromptTemplateToDefault instead.",
+    );
+  }
+
+  const result = getDb().run("DELETE FROM prompt_templates WHERE id = ?", [id]);
+  return result.changes > 0;
+}
+
+/**
+ * Reset a prompt template to its default state.
+ * Sets body to defaultBody, isDefault=true, state='enabled', bumps version.
+ */
+export function resetPromptTemplateToDefault(id: string, defaultBody: string): PromptTemplate {
+  const now = new Date().toISOString();
+  const existing = getDb()
+    .prepare<PromptTemplateRow, [string]>("SELECT * FROM prompt_templates WHERE id = ?")
+    .get(id);
+
+  if (!existing) throw new Error(`Prompt template ${id} not found`);
+
+  const newVersion = existing.version + 1;
+
+  const row = getDb()
+    .prepare<PromptTemplateRow, [string, number, string, string]>(
+      `UPDATE prompt_templates SET body = ?, state = 'enabled', isDefault = 1, version = ?, updatedAt = ?
+       WHERE id = ? RETURNING *`,
+    )
+    .get(defaultBody, newVersion, now, id);
+
+  if (!row) throw new Error("Failed to reset prompt template to default");
+
+  // Create history entry
+  getDb()
+    .prepare(
+      `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      crypto.randomUUID(),
+      id,
+      newVersion,
+      defaultBody,
+      "enabled",
+      null,
+      now,
+      "Reset to default",
+    );
+
+  return rowToPromptTemplate(row);
+}
+
+/**
+ * Get version history for a prompt template, ordered by version DESC.
+ */
+export function getPromptTemplateHistory(templateId: string): PromptTemplateHistory[] {
+  return getDb()
+    .prepare<PromptTemplateHistoryRow, [string]>(
+      "SELECT * FROM prompt_template_history WHERE templateId = ? ORDER BY version DESC",
+    )
+    .all(templateId)
+    .map(rowToPromptTemplateHistory);
+}
+
+/**
+ * Resolve the best prompt template for a given eventType using scope precedence.
+ *
+ * Two-pass resolution:
+ *   Pass 1 (exact match): Try exact eventType at agent → repo → global scope.
+ *   Pass 2 (wildcard): Generate wildcards from eventType (e.g. "github.pull_request.*", "github.*")
+ *     and try each at agent → repo → global scope.
+ *
+ * Exact match at ANY scope always beats wildcard at ANY scope.
+ *
+ * State behavior:
+ *   - 'enabled': return the template
+ *   - 'skip_event': return { skip: true }
+ *   - 'default_prompt_fallback': continue to next scope level
+ */
+export function resolvePromptTemplate(
+  eventType: string,
+  agentId?: string,
+  repoId?: string,
+): { template: PromptTemplate } | { skip: true } | null {
+  // Helper to look up a template at a specific scope
+  const lookupAtScope = (
+    et: string,
+    scope: "global" | "agent" | "repo",
+    scopeId: string | null,
+  ): PromptTemplateRow | undefined => {
+    if (scopeId === null) {
+      return (
+        getDb()
+          .prepare<PromptTemplateRow, [string, string]>(
+            "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId IS NULL",
+          )
+          .get(et, scope) ?? undefined
+      );
+    }
+    return (
+      getDb()
+        .prepare<PromptTemplateRow, [string, string, string]>(
+          "SELECT * FROM prompt_templates WHERE eventType = ? AND scope = ? AND scopeId = ?",
+        )
+        .get(et, scope, scopeId) ?? undefined
+    );
+  };
+
+  // Try resolution at the scope chain for a given eventType string
+  const tryResolve = (et: string): { template: PromptTemplate } | { skip: true } | "continue" => {
+    // Build scope chain: agent → repo → global
+    const scopeChain: Array<{ scope: "global" | "agent" | "repo"; scopeId: string | null }> = [];
+    if (agentId) scopeChain.push({ scope: "agent", scopeId: agentId });
+    if (repoId) scopeChain.push({ scope: "repo", scopeId: repoId });
+    scopeChain.push({ scope: "global", scopeId: null });
+
+    for (const { scope, scopeId } of scopeChain) {
+      const row = lookupAtScope(et, scope, scopeId);
+      if (!row) continue;
+
+      if (row.state === "enabled") {
+        return { template: rowToPromptTemplate(row) };
+      }
+      if (row.state === "skip_event") {
+        return { skip: true };
+      }
+      // default_prompt_fallback: continue to next scope
+    }
+
+    return "continue";
+  };
+
+  // Pass 1: exact match
+  const exactResult = tryResolve(eventType);
+  if (exactResult !== "continue") return exactResult;
+
+  // Pass 2: wildcard matching
+  // e.g. "github.pull_request.review_submitted" → ["github.pull_request.*", "github.*"]
+  const parts = eventType.split(".");
+  const wildcards: string[] = [];
+  for (let i = parts.length - 1; i >= 1; i--) {
+    wildcards.push(`${parts.slice(0, i).join(".")}.*`);
+  }
+
+  for (const wildcard of wildcards) {
+    const wildcardResult = tryResolve(wildcard);
+    if (wildcardResult !== "continue") return wildcardResult;
+  }
+
+  return null;
+}
+
+/**
+ * Checkout a prompt template to a specific version from history.
+ * Copies body and state from the history entry into the live record, bumps version.
+ */
+export function checkoutPromptTemplate(id: string, targetVersion: number): PromptTemplate {
+  const now = new Date().toISOString();
+
+  const existing = getDb()
+    .prepare<PromptTemplateRow, [string]>("SELECT * FROM prompt_templates WHERE id = ?")
+    .get(id);
+  if (!existing) throw new Error(`Prompt template ${id} not found`);
+
+  const historyEntry = getDb()
+    .prepare<PromptTemplateHistoryRow, [string, number]>(
+      "SELECT * FROM prompt_template_history WHERE templateId = ? AND version = ?",
+    )
+    .get(id, targetVersion);
+  if (!historyEntry)
+    throw new Error(`No history entry at version ${targetVersion} for template ${id}`);
+
+  const newVersion = existing.version + 1;
+
+  const row = getDb()
+    .prepare<PromptTemplateRow, [string, string, number, string, string]>(
+      `UPDATE prompt_templates SET body = ?, state = ?, version = ?, updatedAt = ?
+       WHERE id = ? RETURNING *`,
+    )
+    .get(historyEntry.body, historyEntry.state, newVersion, now, id);
+
+  if (!row) throw new Error("Failed to checkout prompt template");
+
+  // Create history entry for the checkout
+  getDb()
+    .prepare(
+      `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      crypto.randomUUID(),
+      id,
+      newVersion,
+      historyEntry.body,
+      historyEntry.state,
+      null,
+      now,
+      `Checked out from version ${targetVersion}`,
+    );
+
+  return rowToPromptTemplate(row);
+}
+
+// ─── Channel Activity Cursors ─────────────────────────────────────────────────
+
+type ChannelActivityCursorRow = {
+  channelId: string;
+  lastSeenTs: string;
+  updatedAt: string;
+};
+
+export interface ChannelActivityCursor {
+  channelId: string;
+  lastSeenTs: string;
+  updatedAt: string;
+}
+
+function rowToChannelActivityCursor(row: ChannelActivityCursorRow): ChannelActivityCursor {
+  return {
+    channelId: row.channelId,
+    lastSeenTs: row.lastSeenTs,
+    updatedAt: normalizeDateRequired(row.updatedAt),
+  };
+}
+
+export function getAllChannelActivityCursors(): ChannelActivityCursor[] {
+  return getDb()
+    .prepare<ChannelActivityCursorRow, []>("SELECT * FROM channel_activity_cursors")
+    .all()
+    .map(rowToChannelActivityCursor);
+}
+
+export function getChannelActivityCursor(channelId: string): ChannelActivityCursor | null {
+  const row = getDb()
+    .prepare<ChannelActivityCursorRow, [string]>(
+      "SELECT * FROM channel_activity_cursors WHERE channelId = ?",
+    )
+    .get(channelId);
+  return row ? rowToChannelActivityCursor(row) : null;
+}
+
+export function upsertChannelActivityCursor(channelId: string, lastSeenTs: string): void {
+  getDb()
+    .prepare(
+      `INSERT INTO channel_activity_cursors (channelId, lastSeenTs, updatedAt)
+       VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+       ON CONFLICT(channelId) DO UPDATE SET lastSeenTs = excluded.lastSeenTs, updatedAt = excluded.updatedAt`,
+    )
+    .run(channelId, lastSeenTs);
+}
+
+// ============================================================================
+// Approval Requests
+// ============================================================================
+
+export interface ApprovalRequest {
+  id: string;
+  title: string;
+  questions: unknown[];
+  workflowRunId: string | null;
+  workflowRunStepId: string | null;
+  sourceTaskId: string | null;
+  approvers: unknown;
+  status: "pending" | "approved" | "rejected" | "timeout";
+  responses: unknown | null;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+  timeoutSeconds: number | null;
+  expiresAt: string | null;
+  notificationChannels: unknown[] | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ApprovalRequestRow {
+  id: string;
+  title: string;
+  questions: string;
+  workflowRunId: string | null;
+  workflowRunStepId: string | null;
+  sourceTaskId: string | null;
+  approvers: string;
+  status: string;
+  responses: string | null;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+  timeoutSeconds: number | null;
+  expiresAt: string | null;
+  notificationChannels: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function rowToApprovalRequest(row: ApprovalRequestRow): ApprovalRequest {
+  return {
+    id: row.id,
+    title: row.title,
+    questions: JSON.parse(row.questions),
+    workflowRunId: row.workflowRunId,
+    workflowRunStepId: row.workflowRunStepId,
+    sourceTaskId: row.sourceTaskId,
+    approvers: JSON.parse(row.approvers),
+    status: row.status as ApprovalRequest["status"],
+    responses: row.responses ? JSON.parse(row.responses) : null,
+    resolvedBy: row.resolvedBy,
+    resolvedAt: normalizeDate(row.resolvedAt),
+    timeoutSeconds: row.timeoutSeconds,
+    expiresAt: normalizeDate(row.expiresAt),
+    notificationChannels: row.notificationChannels ? JSON.parse(row.notificationChannels) : null,
+    createdAt: normalizeDateRequired(row.createdAt),
+    updatedAt: normalizeDateRequired(row.updatedAt),
+  };
+}
+
+export function createApprovalRequest(data: {
+  id: string;
+  title: string;
+  questions: unknown[];
+  approvers: unknown;
+  workflowRunId?: string;
+  workflowRunStepId?: string;
+  sourceTaskId?: string;
+  timeoutSeconds?: number;
+  notificationChannels?: unknown[];
+}): ApprovalRequest {
+  const now = new Date().toISOString();
+  const expiresAt = data.timeoutSeconds
+    ? new Date(Date.now() + data.timeoutSeconds * 1000).toISOString()
+    : null;
+
+  const row = getDb()
+    .prepare<
+      ApprovalRequestRow,
+      [
+        string,
+        string,
+        string,
+        string | null,
+        string | null,
+        string | null,
+        string,
+        number | null,
+        string | null,
+        string | null,
+        string,
+        string,
+      ]
+    >(
+      `INSERT INTO approval_requests (id, title, questions, workflowRunId, workflowRunStepId, sourceTaskId, approvers, timeoutSeconds, expiresAt, notificationChannels, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       RETURNING *`,
+    )
+    .get(
+      data.id,
+      data.title,
+      JSON.stringify(data.questions),
+      data.workflowRunId ?? null,
+      data.workflowRunStepId ?? null,
+      data.sourceTaskId ?? null,
+      JSON.stringify(data.approvers),
+      data.timeoutSeconds ?? null,
+      expiresAt,
+      data.notificationChannels ? JSON.stringify(data.notificationChannels) : null,
+      now,
+      now,
+    );
+
+  return rowToApprovalRequest(row!);
+}
+
+export function getApprovalRequestById(id: string): ApprovalRequest | null {
+  const row = getDb()
+    .prepare<ApprovalRequestRow, [string]>("SELECT * FROM approval_requests WHERE id = ?")
+    .get(id);
+  return row ? rowToApprovalRequest(row) : null;
+}
+
+export function resolveApprovalRequest(
+  id: string,
+  data: {
+    status: "approved" | "rejected" | "timeout";
+    responses?: unknown;
+    resolvedBy?: string;
+  },
+): ApprovalRequest | null {
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<ApprovalRequestRow, [string, string | null, string | null, string, string, string]>(
+      `UPDATE approval_requests
+       SET status = ?, responses = ?, resolvedBy = ?, resolvedAt = ?, updatedAt = ?
+       WHERE id = ? AND status = 'pending'
+       RETURNING *`,
+    )
+    .get(
+      data.status,
+      data.responses ? JSON.stringify(data.responses) : null,
+      data.resolvedBy ?? null,
+      now,
+      now,
+      id,
+    );
+  return row ? rowToApprovalRequest(row) : null;
+}
+
+export function updateApprovalRequestNotifications(
+  id: string,
+  notificationChannels: Array<{ channel: string; target: string; messageTs?: string }>,
+): void {
+  const now = new Date().toISOString();
+  getDb()
+    .prepare("UPDATE approval_requests SET notificationChannels = ?, updatedAt = ? WHERE id = ?")
+    .run(JSON.stringify(notificationChannels), now, id);
+}
+
+export function listApprovalRequests(filters?: {
+  status?: string;
+  workflowRunId?: string;
+  limit?: number;
+}): ApprovalRequest[] {
+  const conditions: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (filters?.status) {
+    conditions.push("status = ?");
+    params.push(filters.status);
+  }
+  if (filters?.workflowRunId) {
+    conditions.push("workflowRunId = ?");
+    params.push(filters.workflowRunId);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const limit = filters?.limit ?? 100;
+  params.push(limit);
+
+  const stmt = getDb().prepare(
+    `SELECT * FROM approval_requests ${where} ORDER BY createdAt DESC LIMIT ?`,
+  );
+  const rows = stmt.all(...params) as ApprovalRequestRow[];
+
+  return rows.map(rowToApprovalRequest);
+}
+
+export interface StuckApprovalRun {
+  runId: string;
+  stepId: string;
+  nodeId: string;
+  workflowId: string;
+  approvalId: string;
+  approvalStatus: string;
+  approvalResponses: string | null;
+  expiresAt: string | null;
+}
+
+export function getStuckApprovalRuns(): StuckApprovalRun[] {
+  return getDb()
+    .prepare<StuckApprovalRun, []>(
+      `SELECT
+        wr.id as runId,
+        wrs.id as stepId,
+        wrs.nodeId,
+        wr.workflowId,
+        ar.id as approvalId,
+        ar.status as approvalStatus,
+        ar.responses as approvalResponses,
+        ar.expiresAt
+      FROM workflow_runs wr
+      JOIN workflow_run_steps wrs ON wrs.runId = wr.id AND wrs.status = 'waiting'
+      JOIN approval_requests ar ON ar.workflowRunStepId = wrs.id
+      WHERE wr.status = 'waiting'
+        AND (ar.status IN ('approved', 'rejected', 'timeout')
+             OR (ar.status = 'pending' AND ar.expiresAt IS NOT NULL AND ar.expiresAt < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))`,
+    )
+    .all();
+}
+
+export function getApprovalRequestByStepId(stepId: string): ApprovalRequest | null {
+  const row = getDb()
+    .prepare<ApprovalRequestRow, [string]>(
+      "SELECT * FROM approval_requests WHERE workflowRunStepId = ?",
+    )
+    .get(stepId);
+  return row ? rowToApprovalRequest(row) : null;
+}
+
+// TODO: Wire into a periodic cron/sweep to auto-timeout expired approval requests (Phase 2)
+export function getExpiredPendingApprovals(): ApprovalRequest[] {
+  const rows = getDb()
+    .prepare<ApprovalRequestRow, []>(
+      `SELECT * FROM approval_requests
+       WHERE status = 'pending'
+         AND expiresAt IS NOT NULL
+         AND expiresAt < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+    )
+    .all();
+  return rows.map(rowToApprovalRequest);
+}
+
+// ============================================================================
+// Skills
+// ============================================================================
+
+type SkillRow = {
+  id: string;
+  name: string;
+  description: string;
+  content: string;
+  type: string;
+  scope: string;
+  ownerAgentId: string | null;
+  sourceUrl: string | null;
+  sourceRepo: string | null;
+  sourcePath: string | null;
+  sourceBranch: string;
+  sourceHash: string | null;
+  isComplex: number;
+  allowedTools: string | null;
+  model: string | null;
+  effort: string | null;
+  context: string | null;
+  agent: string | null;
+  disableModelInvocation: number;
+  userInvocable: number;
+  version: number;
+  isEnabled: number;
+  createdAt: string;
+  lastUpdatedAt: string;
+  lastFetchedAt: string | null;
+};
+
+function rowToSkill(row: SkillRow): Skill {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    content: row.content,
+    type: row.type as SkillType,
+    scope: row.scope as SkillScope,
+    ownerAgentId: row.ownerAgentId,
+    sourceUrl: row.sourceUrl,
+    sourceRepo: row.sourceRepo,
+    sourcePath: row.sourcePath,
+    sourceBranch: row.sourceBranch,
+    sourceHash: row.sourceHash,
+    isComplex: row.isComplex === 1,
+    allowedTools: row.allowedTools,
+    model: row.model,
+    effort: row.effort,
+    context: row.context,
+    agent: row.agent,
+    disableModelInvocation: row.disableModelInvocation === 1,
+    userInvocable: row.userInvocable === 1,
+    version: row.version,
+    isEnabled: row.isEnabled === 1,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+    lastFetchedAt: row.lastFetchedAt,
+  };
+}
+
+type AgentSkillRow = {
+  id: string;
+  agentId: string;
+  skillId: string;
+  isActive: number;
+  installedAt: string;
+};
+
+function rowToAgentSkill(row: AgentSkillRow): AgentSkill {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    skillId: row.skillId,
+    isActive: row.isActive === 1,
+    installedAt: row.installedAt,
+  };
+}
+
+type SkillWithInstallRow = SkillRow & { isActive: number; installedAt: string };
+
+function rowToSkillWithInstall(row: SkillWithInstallRow): SkillWithInstallInfo {
+  return {
+    ...rowToSkill(row),
+    isActive: row.isActive === 1,
+    installedAt: row.installedAt,
+  };
+}
+
+export interface SkillInsert {
+  name: string;
+  description: string;
+  content: string;
+  type?: SkillType;
+  scope?: SkillScope;
+  ownerAgentId?: string;
+  sourceUrl?: string;
+  sourceRepo?: string;
+  sourcePath?: string;
+  sourceBranch?: string;
+  sourceHash?: string;
+  isComplex?: boolean;
+  allowedTools?: string;
+  model?: string;
+  effort?: string;
+  context?: string;
+  agent?: string;
+  disableModelInvocation?: boolean;
+  userInvocable?: boolean;
+}
+
+export function createSkill(data: SkillInsert): Skill {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  const row = getDb()
+    .prepare<SkillRow, (string | number | null)[]>(
+      `INSERT INTO skills (
+        id, name, description, content, type, scope, ownerAgentId,
+        sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex,
+        allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable,
+        version, isEnabled, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      data.name,
+      data.description,
+      data.content,
+      data.type ?? "personal",
+      data.scope ?? "agent",
+      data.ownerAgentId ?? null,
+      data.sourceUrl ?? null,
+      data.sourceRepo ?? null,
+      data.sourcePath ?? null,
+      data.sourceBranch ?? "main",
+      data.sourceHash ?? null,
+      data.isComplex ? 1 : 0,
+      data.allowedTools ?? null,
+      data.model ?? null,
+      data.effort ?? null,
+      data.context ?? null,
+      data.agent ?? null,
+      data.disableModelInvocation ? 1 : 0,
+      data.userInvocable === false ? 0 : 1,
+      now,
+      now,
+    );
+
+  if (!row) throw new Error("Failed to create skill");
+  return rowToSkill(row);
+}
+
+export function updateSkill(
+  id: string,
+  updates: Partial<SkillInsert> & { isEnabled?: boolean; lastFetchedAt?: string },
+): Skill | null {
+  const existing = getSkillById(id);
+  if (!existing) return null;
+
+  const now = new Date().toISOString();
+  const sets: string[] = ["lastUpdatedAt = ?"];
+  const params: (string | number | null)[] = [now];
+
+  if (updates.name !== undefined) {
+    sets.push("name = ?");
+    params.push(updates.name);
+  }
+  if (updates.description !== undefined) {
+    sets.push("description = ?");
+    params.push(updates.description);
+  }
+  if (updates.content !== undefined) {
+    sets.push("content = ?");
+    params.push(updates.content);
+  }
+  if (updates.scope !== undefined) {
+    sets.push("scope = ?");
+    params.push(updates.scope);
+  }
+  if (updates.isEnabled !== undefined) {
+    sets.push("isEnabled = ?");
+    params.push(updates.isEnabled ? 1 : 0);
+  }
+  if (updates.allowedTools !== undefined) {
+    sets.push("allowedTools = ?");
+    params.push(updates.allowedTools ?? null);
+  }
+  if (updates.model !== undefined) {
+    sets.push("model = ?");
+    params.push(updates.model ?? null);
+  }
+  if (updates.effort !== undefined) {
+    sets.push("effort = ?");
+    params.push(updates.effort ?? null);
+  }
+  if (updates.context !== undefined) {
+    sets.push("context = ?");
+    params.push(updates.context ?? null);
+  }
+  if (updates.agent !== undefined) {
+    sets.push("agent = ?");
+    params.push(updates.agent ?? null);
+  }
+  if (updates.disableModelInvocation !== undefined) {
+    sets.push("disableModelInvocation = ?");
+    params.push(updates.disableModelInvocation ? 1 : 0);
+  }
+  if (updates.userInvocable !== undefined) {
+    sets.push("userInvocable = ?");
+    params.push(updates.userInvocable ? 1 : 0);
+  }
+  if (updates.sourceUrl !== undefined) {
+    sets.push("sourceUrl = ?");
+    params.push(updates.sourceUrl ?? null);
+  }
+  if (updates.sourceRepo !== undefined) {
+    sets.push("sourceRepo = ?");
+    params.push(updates.sourceRepo ?? null);
+  }
+  if (updates.sourcePath !== undefined) {
+    sets.push("sourcePath = ?");
+    params.push(updates.sourcePath ?? null);
+  }
+  if (updates.sourceBranch !== undefined) {
+    sets.push("sourceBranch = ?");
+    params.push(updates.sourceBranch ?? "main");
+  }
+  if (updates.sourceHash !== undefined) {
+    sets.push("sourceHash = ?");
+    params.push(updates.sourceHash ?? null);
+  }
+  if (updates.isComplex !== undefined) {
+    sets.push("isComplex = ?");
+    params.push(updates.isComplex ? 1 : 0);
+  }
+  if (updates.lastFetchedAt !== undefined) {
+    sets.push("lastFetchedAt = ?");
+    params.push(updates.lastFetchedAt);
+  }
+
+  // Bump version when content changes
+  if (updates.content !== undefined) {
+    sets.push("version = version + 1");
+  }
+
+  params.push(id);
+  const row = getDb()
+    .prepare<SkillRow, (string | number | null)[]>(
+      `UPDATE skills SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
+    )
+    .get(...params);
+
+  return row ? rowToSkill(row) : null;
+}
+
+export function deleteSkill(id: string): boolean {
+  const result = getDb().prepare("DELETE FROM skills WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
+export function getSkillById(id: string): Skill | null {
+  const row = getDb().prepare<SkillRow, [string]>("SELECT * FROM skills WHERE id = ?").get(id);
+  return row ? rowToSkill(row) : null;
+}
+
+export function getSkillByName(
+  name: string,
+  scope: SkillScope,
+  ownerAgentId?: string,
+): Skill | null {
+  const row = getDb()
+    .prepare<SkillRow, [string, string, string]>(
+      "SELECT * FROM skills WHERE name = ? AND scope = ? AND COALESCE(ownerAgentId, '') = ?",
+    )
+    .get(name, scope, ownerAgentId ?? "");
+  return row ? rowToSkill(row) : null;
+}
+
+export interface SkillFilters {
+  type?: SkillType;
+  scope?: SkillScope;
+  ownerAgentId?: string;
+  isEnabled?: boolean;
+  search?: string;
+  limit?: number;
+  includeContent?: boolean;
+}
+
+export function listSkills(filters?: SkillFilters): Skill[] {
+  const columns =
+    filters?.includeContent === false
+      ? "id, name, description, type, scope, ownerAgentId, sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex, allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable, version, isEnabled, createdAt, lastUpdatedAt, lastFetchedAt, '' as content"
+      : "*";
+  let query = `SELECT ${columns} FROM skills WHERE 1=1`;
+  const params: (string | number)[] = [];
+
+  if (filters?.type) {
+    query += " AND type = ?";
+    params.push(filters.type);
+  }
+  if (filters?.scope) {
+    query += " AND scope = ?";
+    params.push(filters.scope);
+  }
+  if (filters?.ownerAgentId) {
+    query += " AND ownerAgentId = ?";
+    params.push(filters.ownerAgentId);
+  }
+  if (filters?.isEnabled !== undefined) {
+    query += " AND isEnabled = ?";
+    params.push(filters.isEnabled ? 1 : 0);
+  }
+  if (filters?.search) {
+    query += " AND (name LIKE ? OR description LIKE ?)";
+    const term = `%${filters.search}%`;
+    params.push(term, term);
+  }
+
+  query += " ORDER BY name ASC";
+
+  if (filters?.limit) {
+    query += " LIMIT ?";
+    params.push(filters.limit);
+  }
+
+  return getDb()
+    .prepare<SkillRow, (string | number)[]>(query)
+    .all(...params)
+    .map(rowToSkill);
+}
+
+export function searchSkills(query: string, limit = 20): Skill[] {
+  const term = `%${query}%`;
+  return getDb()
+    .prepare<SkillRow, [string, string, number]>(
+      "SELECT * FROM skills WHERE (name LIKE ? OR description LIKE ?) AND isEnabled = 1 ORDER BY name ASC LIMIT ?",
+    )
+    .all(term, term, limit)
+    .map(rowToSkill);
+}
+
+export function installSkill(agentId: string, skillId: string): AgentSkill {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  const row = getDb()
+    .prepare<AgentSkillRow, [string, string, string, string]>(
+      `INSERT INTO agent_skills (id, agentId, skillId, isActive, installedAt)
+       VALUES (?, ?, ?, 1, ?)
+       ON CONFLICT(agentId, skillId) DO UPDATE SET isActive = 1
+       RETURNING *`,
+    )
+    .get(id, agentId, skillId, now);
+
+  if (!row) throw new Error("Failed to install skill");
+  return rowToAgentSkill(row);
+}
+
+export function uninstallSkill(agentId: string, skillId: string): boolean {
+  const result = getDb()
+    .prepare("DELETE FROM agent_skills WHERE agentId = ? AND skillId = ?")
+    .run(agentId, skillId);
+  return result.changes > 0;
+}
+
+export function getAgentSkills(agentId: string, activeOnly = true): SkillWithInstallInfo[] {
+  const query = `
+    SELECT s.*, as2.isActive, as2.installedAt
+    FROM skills s
+    JOIN agent_skills as2 ON s.id = as2.skillId
+    WHERE as2.agentId = ?
+      ${activeOnly ? "AND as2.isActive = 1" : ""}
+      AND s.isEnabled = 1
+    ORDER BY
+      CASE WHEN s.type = 'personal' THEN 0 ELSE 1 END,
+      s.name
+  `;
+
+  const rows = getDb().prepare<SkillWithInstallRow, [string]>(query).all(agentId);
+
+  // Deduplicate by name — personal skills take precedence (already sorted first)
+  const seen = new Set<string>();
+  return rows
+    .filter((r) => {
+      if (seen.has(r.name)) return false;
+      seen.add(r.name);
+      return true;
+    })
+    .map(rowToSkillWithInstall);
+}
+
+export function toggleAgentSkill(agentId: string, skillId: string, isActive: boolean): boolean {
+  const result = getDb()
+    .prepare("UPDATE agent_skills SET isActive = ? WHERE agentId = ? AND skillId = ?")
+    .run(isActive ? 1 : 0, agentId, skillId);
+  return result.changes > 0;
+}
+
+// ── MCP Servers ──────────────────────────────────────────────────────────
+
+type McpServerRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  scope: string;
+  ownerAgentId: string | null;
+  transport: string;
+  command: string | null;
+  args: string | null;
+  url: string | null;
+  headers: string | null;
+  envConfigKeys: string | null;
+  headerConfigKeys: string | null;
+  isEnabled: number;
+  version: number;
+  createdAt: string;
+  lastUpdatedAt: string;
+};
+
+type AgentMcpServerRow = {
+  id: string;
+  agentId: string;
+  mcpServerId: string;
+  isActive: number;
+  installedAt: string;
+};
+
+type McpServerWithInstallRow = McpServerRow & { isActive: number; installedAt: string };
+
+function rowToMcpServer(row: McpServerRow): McpServer {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    scope: row.scope as McpServerScope,
+    ownerAgentId: row.ownerAgentId,
+    transport: row.transport as McpServerTransport,
+    command: row.command,
+    args: row.args,
+    url: row.url,
+    headers: row.headers,
+    envConfigKeys: row.envConfigKeys,
+    headerConfigKeys: row.headerConfigKeys,
+    isEnabled: row.isEnabled === 1,
+    version: row.version,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+function rowToAgentMcpServer(row: AgentMcpServerRow): AgentMcpServer {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    mcpServerId: row.mcpServerId,
+    isActive: row.isActive === 1,
+    installedAt: row.installedAt,
+  };
+}
+
+function rowToMcpServerWithInstall(row: McpServerWithInstallRow): McpServerWithInstallInfo {
+  return {
+    ...rowToMcpServer(row),
+    isActive: row.isActive === 1,
+    installedAt: row.installedAt,
+  };
+}
+
+export interface McpServerInsert {
+  name: string;
+  transport: McpServerTransport;
+  description?: string;
+  scope?: McpServerScope;
+  ownerAgentId?: string;
+  command?: string;
+  args?: string;
+  url?: string;
+  headers?: string;
+  envConfigKeys?: string;
+  headerConfigKeys?: string;
+}
+
+export function createMcpServer(data: McpServerInsert): McpServer {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  const row = getDb()
+    .prepare<McpServerRow, (string | number | null)[]>(
+      `INSERT INTO mcp_servers (
+        id, name, description, scope, ownerAgentId, transport,
+        command, args, url, headers,
+        envConfigKeys, headerConfigKeys,
+        isEnabled, version, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      data.name,
+      data.description ?? null,
+      data.scope ?? "agent",
+      data.ownerAgentId ?? null,
+      data.transport,
+      data.command ?? null,
+      data.args ?? null,
+      data.url ?? null,
+      data.headers ?? null,
+      data.envConfigKeys ?? null,
+      data.headerConfigKeys ?? null,
+      now,
+      now,
+    );
+
+  if (!row) throw new Error("Failed to create MCP server");
+  return rowToMcpServer(row);
+}
+
+export function updateMcpServer(
+  id: string,
+  updates: Partial<McpServerInsert> & { isEnabled?: boolean },
+): McpServer | null {
+  const existing = getMcpServerById(id);
+  if (!existing) return null;
+
+  const now = new Date().toISOString();
+  const sets: string[] = ["lastUpdatedAt = ?"];
+  const params: (string | number | null)[] = [now];
+
+  if (updates.name !== undefined) {
+    sets.push("name = ?");
+    params.push(updates.name);
+  }
+  if (updates.description !== undefined) {
+    sets.push("description = ?");
+    params.push(updates.description ?? null);
+  }
+  if (updates.scope !== undefined) {
+    sets.push("scope = ?");
+    params.push(updates.scope);
+  }
+  if (updates.transport !== undefined) {
+    sets.push("transport = ?");
+    params.push(updates.transport);
+  }
+  if (updates.command !== undefined) {
+    sets.push("command = ?");
+    params.push(updates.command ?? null);
+  }
+  if (updates.args !== undefined) {
+    sets.push("args = ?");
+    params.push(updates.args ?? null);
+  }
+  if (updates.url !== undefined) {
+    sets.push("url = ?");
+    params.push(updates.url ?? null);
+  }
+  if (updates.headers !== undefined) {
+    sets.push("headers = ?");
+    params.push(updates.headers ?? null);
+  }
+  if (updates.envConfigKeys !== undefined) {
+    sets.push("envConfigKeys = ?");
+    params.push(updates.envConfigKeys ?? null);
+  }
+  if (updates.headerConfigKeys !== undefined) {
+    sets.push("headerConfigKeys = ?");
+    params.push(updates.headerConfigKeys ?? null);
+  }
+  if (updates.isEnabled !== undefined) {
+    sets.push("isEnabled = ?");
+    params.push(updates.isEnabled ? 1 : 0);
+  }
+  if (updates.ownerAgentId !== undefined) {
+    sets.push("ownerAgentId = ?");
+    params.push(updates.ownerAgentId ?? null);
+  }
+
+  // Bump version on config changes
+  const configFields = [
+    "command",
+    "args",
+    "url",
+    "headers",
+    "envConfigKeys",
+    "headerConfigKeys",
+    "transport",
+  ];
+  if (configFields.some((f) => (updates as Record<string, unknown>)[f] !== undefined)) {
+    sets.push("version = version + 1");
+  }
+
+  params.push(id);
+  const row = getDb()
+    .prepare<McpServerRow, (string | number | null)[]>(
+      `UPDATE mcp_servers SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
+    )
+    .get(...params);
+
+  return row ? rowToMcpServer(row) : null;
+}
+
+export function deleteMcpServer(id: string): boolean {
+  const result = getDb().prepare("DELETE FROM mcp_servers WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
+export function getMcpServerById(id: string): McpServer | null {
+  const row = getDb()
+    .prepare<McpServerRow, [string]>("SELECT * FROM mcp_servers WHERE id = ?")
+    .get(id);
+  return row ? rowToMcpServer(row) : null;
+}
+
+export function getMcpServerByName(
+  name: string,
+  scope: McpServerScope,
+  ownerAgentId: string | null,
+): McpServer | null {
+  const row = getDb()
+    .prepare<McpServerRow, [string, string, string]>(
+      "SELECT * FROM mcp_servers WHERE name = ? AND scope = ? AND COALESCE(ownerAgentId, '') = ?",
+    )
+    .get(name, scope, ownerAgentId ?? "");
+  return row ? rowToMcpServer(row) : null;
+}
+
+export interface McpServerFilters {
+  scope?: McpServerScope;
+  ownerAgentId?: string;
+  transport?: McpServerTransport;
+  isEnabled?: boolean;
+  search?: string;
+}
+
+export function listMcpServers(filters?: McpServerFilters): McpServer[] {
+  let query = "SELECT * FROM mcp_servers WHERE 1=1";
+  const params: (string | number)[] = [];
+
+  if (filters?.scope) {
+    query += " AND scope = ?";
+    params.push(filters.scope);
+  }
+  if (filters?.ownerAgentId) {
+    query += " AND ownerAgentId = ?";
+    params.push(filters.ownerAgentId);
+  }
+  if (filters?.transport) {
+    query += " AND transport = ?";
+    params.push(filters.transport);
+  }
+  if (filters?.isEnabled !== undefined) {
+    query += " AND isEnabled = ?";
+    params.push(filters.isEnabled ? 1 : 0);
+  }
+  if (filters?.search) {
+    query += " AND (name LIKE ? OR description LIKE ?)";
+    const term = `%${filters.search}%`;
+    params.push(term, term);
+  }
+
+  query += " ORDER BY name ASC";
+
+  return getDb()
+    .prepare<McpServerRow, (string | number)[]>(query)
+    .all(...params)
+    .map(rowToMcpServer);
+}
+
+export function installMcpServer(agentId: string, mcpServerId: string): AgentMcpServer {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  const row = getDb()
+    .prepare<AgentMcpServerRow, [string, string, string, string]>(
+      `INSERT INTO agent_mcp_servers (id, agentId, mcpServerId, isActive, installedAt)
+       VALUES (?, ?, ?, 1, ?)
+       ON CONFLICT(agentId, mcpServerId) DO UPDATE SET isActive = 1
+       RETURNING *`,
+    )
+    .get(id, agentId, mcpServerId, now);
+
+  if (!row) throw new Error("Failed to install MCP server");
+  return rowToAgentMcpServer(row);
+}
+
+export function uninstallMcpServer(agentId: string, mcpServerId: string): boolean {
+  const result = getDb()
+    .prepare("DELETE FROM agent_mcp_servers WHERE agentId = ? AND mcpServerId = ?")
+    .run(agentId, mcpServerId);
+  return result.changes > 0;
+}
+
+export function getAgentMcpServers(agentId: string, activeOnly = true): McpServerWithInstallInfo[] {
+  const query = `
+    SELECT ms.*, ams.isActive, ams.installedAt
+    FROM mcp_servers ms
+    JOIN agent_mcp_servers ams ON ms.id = ams.mcpServerId
+    WHERE ams.agentId = ?
+      ${activeOnly ? "AND ams.isActive = 1" : ""}
+      AND ms.isEnabled = 1
+    ORDER BY ms.name ASC
+  `;
+
+  return getDb()
+    .prepare<McpServerWithInstallRow, [string]>(query)
+    .all(agentId)
+    .map(rowToMcpServerWithInstall);
+}
+
+// ============================================================================
+// Context Usage Snapshots
+// ============================================================================
+
+type ContextSnapshotRow = {
+  id: string;
+  taskId: string;
+  agentId: string;
+  sessionId: string;
+  contextUsedTokens: number | null;
+  contextTotalTokens: number | null;
+  contextPercent: number | null;
+  eventType: ContextSnapshotEventType;
+  compactTrigger: string | null;
+  preCompactTokens: number | null;
+  cumulativeInputTokens: number;
+  cumulativeOutputTokens: number;
+  createdAt: string;
+};
+
+function rowToContextSnapshot(row: ContextSnapshotRow): ContextSnapshot {
+  return {
+    id: row.id,
+    taskId: row.taskId,
+    agentId: row.agentId,
+    sessionId: row.sessionId,
+    contextUsedTokens: row.contextUsedTokens ?? undefined,
+    contextTotalTokens: row.contextTotalTokens ?? undefined,
+    contextPercent: row.contextPercent ?? undefined,
+    eventType: row.eventType,
+    compactTrigger: (row.compactTrigger as "auto" | "manual" | null) ?? undefined,
+    preCompactTokens: row.preCompactTokens ?? undefined,
+    cumulativeInputTokens: row.cumulativeInputTokens,
+    cumulativeOutputTokens: row.cumulativeOutputTokens,
+    createdAt: row.createdAt,
+  };
+}
+
+const contextSnapshotQueries = {
+  insert: () =>
+    getDb().prepare<
+      ContextSnapshotRow,
+      [
+        string,
+        string,
+        string,
+        string,
+        number | null,
+        number | null,
+        number | null,
+        string,
+        string | null,
+        number | null,
+        number,
+        number,
+        string,
+      ]
+    >(
+      `INSERT INTO task_context_snapshots (id, taskId, agentId, sessionId, contextUsedTokens, contextTotalTokens, contextPercent, eventType, compactTrigger, preCompactTokens, cumulativeInputTokens, cumulativeOutputTokens, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ),
+
+  getByTaskId: () =>
+    getDb().prepare<ContextSnapshotRow, [string, number]>(
+      "SELECT * FROM task_context_snapshots WHERE taskId = ? ORDER BY createdAt ASC LIMIT ?",
+    ),
+
+  getBySessionId: () =>
+    getDb().prepare<ContextSnapshotRow, [string, number]>(
+      "SELECT * FROM task_context_snapshots WHERE sessionId = ? ORDER BY createdAt ASC LIMIT ?",
+    ),
+};
+
+export interface CreateContextSnapshotInput {
+  taskId: string;
+  agentId: string;
+  sessionId: string;
+  contextUsedTokens?: number;
+  contextTotalTokens?: number;
+  contextPercent?: number;
+  eventType: ContextSnapshotEventType;
+  compactTrigger?: "auto" | "manual";
+  preCompactTokens?: number;
+  cumulativeInputTokens?: number;
+  cumulativeOutputTokens?: number;
+}
+
+export function createContextSnapshot(input: CreateContextSnapshotInput): ContextSnapshot {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  contextSnapshotQueries
+    .insert()
+    .run(
+      id,
+      input.taskId,
+      input.agentId,
+      input.sessionId,
+      input.contextUsedTokens ?? null,
+      input.contextTotalTokens ?? null,
+      input.contextPercent ?? null,
+      input.eventType,
+      input.compactTrigger ?? null,
+      input.preCompactTokens ?? null,
+      input.cumulativeInputTokens ?? 0,
+      input.cumulativeOutputTokens ?? 0,
+      now,
+    );
+
+  // Update aggregate columns on agent_tasks
+  if (input.contextPercent != null) {
+    getDb()
+      .prepare(
+        `UPDATE agent_tasks SET peakContextPercent = MAX(COALESCE(peakContextPercent, 0), ?)
+         WHERE id = ?`,
+      )
+      .run(input.contextPercent, input.taskId);
+  }
+
+  // Keep totalContextTokensUsed up to date with the latest known value
+  if (input.contextUsedTokens != null) {
+    getDb()
+      .prepare("UPDATE agent_tasks SET totalContextTokensUsed = ? WHERE id = ?")
+      .run(input.contextUsedTokens, input.taskId);
+  }
+
+  if (input.eventType === "compaction") {
+    getDb()
+      .prepare(
+        "UPDATE agent_tasks SET compactionCount = COALESCE(compactionCount, 0) + 1 WHERE id = ?",
+      )
+      .run(input.taskId);
+  }
+
+  if (input.eventType === "completion" && input.contextTotalTokens != null) {
+    getDb()
+      .prepare("UPDATE agent_tasks SET contextWindowSize = ? WHERE id = ?")
+      .run(input.contextTotalTokens, input.taskId);
+  }
+
+  return {
+    id,
+    taskId: input.taskId,
+    agentId: input.agentId,
+    sessionId: input.sessionId,
+    contextUsedTokens: input.contextUsedTokens,
+    contextTotalTokens: input.contextTotalTokens,
+    contextPercent: input.contextPercent,
+    eventType: input.eventType,
+    compactTrigger: input.compactTrigger,
+    preCompactTokens: input.preCompactTokens,
+    cumulativeInputTokens: input.cumulativeInputTokens ?? 0,
+    cumulativeOutputTokens: input.cumulativeOutputTokens ?? 0,
+    createdAt: now,
+  };
+}
+
+export function getContextSnapshotsByTaskId(taskId: string, limit = 500): ContextSnapshot[] {
+  return contextSnapshotQueries.getByTaskId().all(taskId, limit).map(rowToContextSnapshot);
+}
+
+export function getContextSnapshotsBySessionId(sessionId: string, limit = 500): ContextSnapshot[] {
+  return contextSnapshotQueries.getBySessionId().all(sessionId, limit).map(rowToContextSnapshot);
+}
+
+export interface ContextSummary {
+  compactionCount: number;
+  peakContextPercent: number | null;
+  totalContextTokensUsed: number | null;
+  contextWindowSize: number | null;
+  snapshotCount: number;
+}
+
+export function getContextSummaryByTaskId(taskId: string): ContextSummary {
+  const task = getTaskById(taskId);
+  const countRow = getDb()
+    .prepare<{ cnt: number }, [string]>(
+      "SELECT COUNT(*) as cnt FROM task_context_snapshots WHERE taskId = ?",
+    )
+    .get(taskId);
+
+  return {
+    compactionCount: task?.compactionCount ?? 0,
+    peakContextPercent: task?.peakContextPercent ?? null,
+    totalContextTokensUsed: task?.totalContextTokensUsed ?? null,
+    contextWindowSize: task?.contextWindowSize ?? null,
+    snapshotCount: countRow?.cnt ?? 0,
+  };
+}
+
+// ─── API Key Pool Tracking ───────────────────────────────────────────────────
+
+export interface ApiKeyStatus {
+  id: string;
+  keyType: string;
+  keySuffix: string;
+  keyIndex: number;
+  scope: string;
+  scopeId: string | null;
+  status: string;
+  rateLimitedUntil: string | null;
+  lastUsedAt: string | null;
+  lastRateLimitAt: string | null;
+  totalUsageCount: number;
+  rateLimitCount: number;
+  /** Optional human-friendly label set from the dashboard. */
+  name: string | null;
+  /** Auto-derived harness provider (claude/pi/codex) — see deriveProviderFromKeyType. */
+  provider: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Get available (non-rate-limited) key indices for a credential type.
+ * Automatically clears expired rate limits before returning.
+ */
+export function getAvailableKeyIndices(
+  keyType: string,
+  totalKeys: number,
+  scope = "global",
+  scopeId: string | null = null,
+): number[] {
+  const now = new Date().toISOString();
+  const db = getDb();
+  const effectiveScopeId = scopeId ?? "";
+
+  // Auto-clear expired rate limits
+  db.prepare(
+    `UPDATE api_key_status
+     SET status = 'available', rateLimitedUntil = NULL, updatedAt = ?
+     WHERE keyType = ? AND scope = ? AND scopeId = ?
+       AND status = 'rate_limited' AND rateLimitedUntil IS NOT NULL AND rateLimitedUntil <= ?`,
+  ).run(now, keyType, scope, effectiveScopeId, now);
+
+  // Get currently rate-limited key indices
+  const rateLimited = db
+    .prepare<{ keyIndex: number }, [string, string, string]>(
+      `SELECT keyIndex FROM api_key_status
+       WHERE keyType = ? AND scope = ? AND scopeId = ?
+         AND status = 'rate_limited'`,
+    )
+    .all(keyType, scope, effectiveScopeId);
+
+  const blockedIndices = new Set(rateLimited.map((r) => r.keyIndex));
+  const available: number[] = [];
+  for (let i = 0; i < totalKeys; i++) {
+    if (!blockedIndices.has(i)) available.push(i);
+  }
+  return available;
+}
+
+/**
+ * Record that a key was used for a task (upsert key status + update task).
+ */
+export function recordKeyUsage(
+  keyType: string,
+  keySuffix: string,
+  keyIndex: number,
+  taskId: string | null,
+  scope = "global",
+  scopeId: string | null = null,
+): void {
+  const now = new Date().toISOString();
+  const db = getDb();
+  const effectiveScopeId = scopeId ?? "";
+
+  // Upsert key status record. Sets `provider` on insert (auto-derived from
+  // keyType — see deriveProviderFromKeyType in src/utils/credentials.ts).
+  // The `name` column is left null on insert and only set via the
+  // setApiKeyName API endpoint when the user manually labels the key.
+  const provider = deriveProviderFromKeyType(keyType);
+  db.prepare(
+    `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, lastUsedAt, totalUsageCount, provider, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+     ON CONFLICT(keyType, keySuffix, scope, scopeId)
+     DO UPDATE SET
+       lastUsedAt = excluded.lastUsedAt,
+       totalUsageCount = totalUsageCount + 1,
+       keyIndex = excluded.keyIndex,
+       updatedAt = excluded.updatedAt`,
+  ).run(keyType, keySuffix, keyIndex, scope, effectiveScopeId, now, provider, now);
+
+  // Record which key was used on the task
+  if (taskId) {
+    db.prepare(
+      "UPDATE agent_tasks SET credentialKeySuffix = ?, credentialKeyType = ? WHERE id = ?",
+    ).run(keySuffix, keyType, taskId);
+  }
+}
+
+/**
+ * Mark a key as rate-limited with a retry-after timestamp.
+ */
+export function markKeyRateLimited(
+  keyType: string,
+  keySuffix: string,
+  keyIndex: number,
+  rateLimitedUntil: string,
+  scope = "global",
+  scopeId: string | null = null,
+): void {
+  const now = new Date().toISOString();
+  const effectiveScopeId = scopeId ?? "";
+  const provider = deriveProviderFromKeyType(keyType);
+  getDb()
+    .prepare(
+      `INSERT INTO api_key_status (keyType, keySuffix, keyIndex, scope, scopeId, status, rateLimitedUntil, lastRateLimitAt, rateLimitCount, provider, updatedAt)
+       VALUES (?, ?, ?, ?, ?, 'rate_limited', ?, ?, 1, ?, ?)
+       ON CONFLICT(keyType, keySuffix, scope, scopeId)
+       DO UPDATE SET
+         status = 'rate_limited',
+         rateLimitedUntil = excluded.rateLimitedUntil,
+         lastRateLimitAt = excluded.lastRateLimitAt,
+         rateLimitCount = rateLimitCount + 1,
+         keyIndex = excluded.keyIndex,
+         updatedAt = excluded.updatedAt`,
+    )
+    .run(
+      keyType,
+      keySuffix,
+      keyIndex,
+      scope,
+      effectiveScopeId,
+      rateLimitedUntil,
+      now,
+      provider,
+      now,
+    );
+}
+
+/**
+ * Set or clear the human-friendly `name` label on a pooled credential.
+ * Identified by the natural key (keyType + keySuffix + scope + scopeId).
+ * Returns true if a row was updated, false if no matching key exists.
+ */
+export function setApiKeyName(
+  keyType: string,
+  keySuffix: string,
+  name: string | null,
+  scope = "global",
+  scopeId: string | null = null,
+): boolean {
+  const result = getDb()
+    .prepare(
+      `UPDATE api_key_status
+       SET name = ?, updatedAt = ?
+       WHERE keyType = ? AND keySuffix = ? AND scope = ? AND scopeId = ?`,
+    )
+    .run(name, new Date().toISOString(), keyType, keySuffix, scope, scopeId ?? "");
+  return result.changes > 0;
+}
+
+/**
+ * Get all key status records for a credential type.
+ */
+export function getKeyStatuses(
+  keyType?: string,
+  scope?: string,
+  scopeId?: string | null,
+): ApiKeyStatus[] {
+  const db = getDb();
+  const conditions: string[] = [];
+  const params: string[] = [];
+
+  if (keyType) {
+    conditions.push("keyType = ?");
+    params.push(keyType);
+  }
+  if (scope) {
+    conditions.push("scope = ?");
+    params.push(scope);
+    if (scopeId !== undefined) {
+      conditions.push("scopeId = ?");
+      params.push(scopeId ?? "");
+    }
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  return db
+    .prepare<ApiKeyStatus, string[]>(`SELECT * FROM api_key_status ${where} ORDER BY keyIndex`)
+    .all(...params);
+}
+
+export interface KeyCostSummary {
+  keyType: string;
+  keySuffix: string;
+  totalCost: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  taskCount: number;
+}
+
+/**
+ * Aggregate cost data per API key by joining session_costs through agent_tasks.
+ */
+export function getKeyCostSummary(keyType?: string): KeyCostSummary[] {
+  const db = getDb();
+  const conditions = ["t.credentialKeySuffix IS NOT NULL"];
+  const params: string[] = [];
+
+  if (keyType) {
+    conditions.push("t.credentialKeyType = ?");
+    params.push(keyType);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  return db
+    .prepare<KeyCostSummary, string[]>(
+      `SELECT
+        t.credentialKeyType as keyType,
+        t.credentialKeySuffix as keySuffix,
+        COALESCE(SUM(sc.totalCostUsd), 0) as totalCost,
+        COALESCE(SUM(sc.inputTokens), 0) as totalInputTokens,
+        COALESCE(SUM(sc.outputTokens), 0) as totalOutputTokens,
+        COUNT(DISTINCT sc.taskId) as taskCount
+      FROM session_costs sc
+      JOIN agent_tasks t ON sc.taskId = t.id
+      ${where}
+      GROUP BY t.credentialKeyType, t.credentialKeySuffix`,
+    )
+    .all(...params);
+}
+
+// ============================================================================
+// User Identity Operations
+// ============================================================================
+
+type UserRow = {
+  id: string;
+  name: string;
+  email: string | null;
+  role: string | null;
+  notes: string | null;
+  slackUserId: string | null;
+  linearUserId: string | null;
+  githubUsername: string | null;
+  gitlabUsername: string | null;
+  emailAliases: string | null;
+  preferredChannel: string | null;
+  timezone: string | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+};
+
+function rowToUser(row: UserRow): User {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email ?? undefined,
+    role: row.role ?? undefined,
+    notes: row.notes ?? undefined,
+    slackUserId: row.slackUserId ?? undefined,
+    linearUserId: row.linearUserId ?? undefined,
+    githubUsername: row.githubUsername ?? undefined,
+    gitlabUsername: row.gitlabUsername ?? undefined,
+    emailAliases: row.emailAliases ? JSON.parse(row.emailAliases) : [],
+    preferredChannel: row.preferredChannel ?? "slack",
+    timezone: row.timezone ?? undefined,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+/**
+ * Resolve a user by any platform-specific identifier.
+ * Priority: exact match on platform ID, then email (including aliases), then name substring.
+ */
+export function resolveUser(opts: {
+  slackUserId?: string;
+  linearUserId?: string;
+  githubUsername?: string;
+  gitlabUsername?: string;
+  email?: string;
+  name?: string;
+}): User | null {
+  const db = getDb();
+
+  // Try exact platform ID matches first
+  if (opts.slackUserId) {
+    const row = db
+      .prepare<UserRow, string>("SELECT * FROM users WHERE slackUserId = ?")
+      .get(opts.slackUserId);
+    if (row) return rowToUser(row);
+  }
+  if (opts.linearUserId) {
+    const row = db
+      .prepare<UserRow, string>("SELECT * FROM users WHERE linearUserId = ?")
+      .get(opts.linearUserId);
+    if (row) return rowToUser(row);
+  }
+  if (opts.githubUsername) {
+    const row = db
+      .prepare<UserRow, string>("SELECT * FROM users WHERE githubUsername = ?")
+      .get(opts.githubUsername);
+    if (row) return rowToUser(row);
+  }
+  if (opts.gitlabUsername) {
+    const row = db
+      .prepare<UserRow, string>("SELECT * FROM users WHERE gitlabUsername = ?")
+      .get(opts.gitlabUsername);
+    if (row) return rowToUser(row);
+  }
+
+  // Try email match (primary email)
+  if (opts.email) {
+    const row = db.prepare<UserRow, string>("SELECT * FROM users WHERE email = ?").get(opts.email);
+    if (row) return rowToUser(row);
+
+    // Check emailAliases (JSON array search)
+    const aliasRows = db
+      .prepare<UserRow, []>("SELECT * FROM users WHERE emailAliases != '[]'")
+      .all();
+    for (const r of aliasRows) {
+      const aliases: string[] = r.emailAliases ? JSON.parse(r.emailAliases) : [];
+      if (aliases.some((a) => a.toLowerCase() === opts.email!.toLowerCase())) {
+        return rowToUser(r);
+      }
+    }
+  }
+
+  // Try name substring match (case-insensitive)
+  if (opts.name) {
+    const row = db
+      .prepare<UserRow, string>("SELECT * FROM users WHERE LOWER(name) LIKE '%' || LOWER(?) || '%'")
+      .get(opts.name);
+    if (row) return rowToUser(row);
+  }
+
+  return null;
+}
+
+export function getUserById(id: string): User | null {
+  const row = getDb().prepare<UserRow, string>("SELECT * FROM users WHERE id = ?").get(id);
+  return row ? rowToUser(row) : null;
+}
+
+export function getAllUsers(): User[] {
+  return getDb().prepare<UserRow, []>("SELECT * FROM users ORDER BY name").all().map(rowToUser);
+}
+
+export function createUser(data: {
+  name: string;
+  email?: string;
+  role?: string;
+  notes?: string;
+  slackUserId?: string;
+  linearUserId?: string;
+  githubUsername?: string;
+  gitlabUsername?: string;
+  emailAliases?: string[];
+  preferredChannel?: string;
+  timezone?: string;
+}): User {
+  const id = crypto.randomUUID().replace(/-/g, "");
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare<UserRow, (string | null)[]>(
+      `INSERT INTO users (id, name, email, role, notes, slackUserId, linearUserId, githubUsername, gitlabUsername, emailAliases, preferredChannel, timezone, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      data.name,
+      data.email ?? null,
+      data.role ?? null,
+      data.notes ?? null,
+      data.slackUserId ?? null,
+      data.linearUserId ?? null,
+      data.githubUsername ?? null,
+      data.gitlabUsername ?? null,
+      JSON.stringify(data.emailAliases ?? []),
+      data.preferredChannel ?? "slack",
+      data.timezone ?? null,
+      now,
+      now,
+    );
+  if (!row) throw new Error("Failed to create user");
+  return rowToUser(row);
+}
+
+export function updateUser(
+  id: string,
+  data: Partial<{
+    name: string;
+    email: string;
+    role: string;
+    notes: string;
+    slackUserId: string;
+    linearUserId: string;
+    githubUsername: string;
+    gitlabUsername: string;
+    emailAliases: string[];
+    preferredChannel: string;
+    timezone: string;
+  }>,
+): User | null {
+  const sets: string[] = [];
+  const params: (string | null)[] = [];
+
+  if (data.name !== undefined) {
+    sets.push("name = ?");
+    params.push(data.name);
+  }
+  if (data.email !== undefined) {
+    sets.push("email = ?");
+    params.push(data.email);
+  }
+  if (data.role !== undefined) {
+    sets.push("role = ?");
+    params.push(data.role);
+  }
+  if (data.notes !== undefined) {
+    sets.push("notes = ?");
+    params.push(data.notes);
+  }
+  if (data.slackUserId !== undefined) {
+    sets.push("slackUserId = ?");
+    params.push(data.slackUserId);
+  }
+  if (data.linearUserId !== undefined) {
+    sets.push("linearUserId = ?");
+    params.push(data.linearUserId);
+  }
+  if (data.githubUsername !== undefined) {
+    sets.push("githubUsername = ?");
+    params.push(data.githubUsername);
+  }
+  if (data.gitlabUsername !== undefined) {
+    sets.push("gitlabUsername = ?");
+    params.push(data.gitlabUsername);
+  }
+  if (data.emailAliases !== undefined) {
+    sets.push("emailAliases = ?");
+    params.push(JSON.stringify(data.emailAliases));
+  }
+  if (data.preferredChannel !== undefined) {
+    sets.push("preferredChannel = ?");
+    params.push(data.preferredChannel);
+  }
+  if (data.timezone !== undefined) {
+    sets.push("timezone = ?");
+    params.push(data.timezone);
+  }
+
+  if (sets.length === 0) return getUserById(id);
+
+  sets.push("lastUpdatedAt = ?");
+  params.push(new Date().toISOString());
+  params.push(id);
+
+  const row = getDb()
+    .prepare<UserRow, (string | null)[]>(
+      `UPDATE users SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
+    )
+    .get(...params);
+  return row ? rowToUser(row) : null;
+}
+
+export function deleteUser(id: string): boolean {
+  // Clear any task references before deleting
+  getDb()
+    .prepare("UPDATE agent_tasks SET requestedByUserId = NULL WHERE requestedByUserId = ?")
+    .run(id);
+  const result = getDb().prepare("DELETE FROM users WHERE id = ?").run(id);
+  return result.changes > 0;
 }

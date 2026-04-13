@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { createToolRegistrar } from "@/tools/utils";
-import { retryFailedRun } from "@/workflows";
+import { getExecutorRegistry, retryFailedRun } from "@/workflows";
 
 export const registerRetryWorkflowRunTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -21,7 +21,7 @@ export const registerRetryWorkflowRunTool = (server: McpServer) => {
     },
     async ({ runId }) => {
       try {
-        await retryFailedRun(runId);
+        await retryFailedRun(runId, getExecutorRegistry());
         return {
           content: [{ type: "text" as const, text: `Retrying workflow run ${runId}.` }],
           structuredContent: {
