@@ -77,6 +77,7 @@ export interface AgentTask {
   vcsAuthor?: string;
   credentialKeySuffix?: string;
   credentialKeyType?: string;
+  swarmVersion?: string;
 }
 
 export interface AgentWithTasks extends Agent {

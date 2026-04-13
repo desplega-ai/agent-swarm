@@ -23,6 +23,7 @@ import {
   Pause,
   Play,
   Scissors,
+  Tag,
   Terminal,
   Timer,
   User,
@@ -515,6 +516,16 @@ export default function TaskDetailPage() {
       {task.finishedAt && (
         <MetaRow icon={Clock} label="Finished">
           <span className="text-xs">{formatSmartTime(task.finishedAt)}</span>
+        </MetaRow>
+      )}
+      {task.swarmVersion && (
+        <MetaRow icon={Tag} label="Swarm version">
+          <span
+            className="text-xs font-mono text-muted-foreground"
+            title={`agent-swarm ${task.swarmVersion} at task creation`}
+          >
+            v{task.swarmVersion}
+          </span>
         </MetaRow>
       )}
       {task.parentTaskId && (

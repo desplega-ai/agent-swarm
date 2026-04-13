@@ -159,6 +159,10 @@ export const AgentTaskSchema = z.object({
 
   // User identity — canonical user who requested this task
   requestedByUserId: z.string().optional(),
+
+  // agent-swarm package version at task creation time. Enables benchmarking
+  // performance across releases. Nullable for rows created before tracking was added.
+  swarmVersion: z.string().optional(),
 });
 
 // ============================================================================
