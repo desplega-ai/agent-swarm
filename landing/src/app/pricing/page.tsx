@@ -7,6 +7,16 @@ export const metadata: Metadata = {
   title: "Pricing — Agent Swarm Cloud",
   description:
     "Simple, predictable pricing for Agent Swarm Cloud. Platform base at \u20AC9/mo plus \u20AC29/mo per worker. 7-day free trial included.",
+  keywords: [
+    "agent swarm pricing",
+    "AI agent cloud pricing",
+    "multi-agent orchestration cost",
+    "Claude Code agent pricing",
+    "AI coding agents subscription",
+    "autonomous agents SaaS",
+    "agent swarm cloud",
+    "free trial AI agents",
+  ],
   openGraph: {
     title: "Pricing — Agent Swarm Cloud",
     description:
