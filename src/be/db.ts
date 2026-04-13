@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import pkg from "../../package.json";
 import { addEyesReactionOnTaskStart } from "../github/task-reactions";
 import { configureDbResolver } from "../prompts/resolver";
 import type {
@@ -764,6 +765,7 @@ type AgentTaskRow = {
   credentialKeySuffix: string | null;
   credentialKeyType: string | null;
   requestedByUserId: string | null;
+  swarmVersion: string | null;
 };
 
 function rowToAgentTask(row: AgentTaskRow): AgentTask {
@@ -823,6 +825,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     credentialKeySuffix: row.credentialKeySuffix ?? undefined,
     credentialKeyType: row.credentialKeyType ?? undefined,
     requestedByUserId: row.requestedByUserId ?? undefined,
+    swarmVersion: row.swarmVersion ?? undefined,
   };
 }
 
@@ -839,10 +842,11 @@ export const taskQueries = {
         string | null,
         string | null,
         string | null,
+        string,
       ]
     >(
-      `INSERT INTO agent_tasks (id, agentId, task, status, source, slackChannelId, slackThreadTs, slackUserId, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
+      `INSERT INTO agent_tasks (id, agentId, task, status, source, slackChannelId, slackThreadTs, slackUserId, swarmVersion, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
     ),
 
   getById: () => getDb().prepare<AgentTaskRow, [string]>("SELECT * FROM agent_tasks WHERE id = ?"),
@@ -913,6 +917,7 @@ export function createTask(
       options?.slackChannelId ?? null,
       options?.slackThreadTs ?? null,
       options?.slackUserId ?? null,
+      pkg.version,
     );
   if (!row) throw new Error("Failed to create task");
   try {
@@ -1952,8 +1957,8 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, dir, parentTaskId, model, scheduleId,
-        workflowRunId, workflowRunStepId, outputSchema, requestedByUserId, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        workflowRunId, workflowRunStepId, outputSchema, requestedByUserId, swarmVersion, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -1993,6 +1998,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.workflowRunStepId ?? null,
       options?.outputSchema ? JSON.stringify(options.outputSchema) : null,
       options?.requestedByUserId ?? null,
+      pkg.version,
       now,
       now,
     );
