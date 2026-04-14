@@ -1,14 +1,8 @@
-import {
-  ArrowLeft,
-  ChevronDown,
-  ChevronRight,
-  ChevronsDownUp,
-  ChevronsUpDown,
-  RefreshCw,
-} from "lucide-react";
+import { ArrowLeft, ChevronsDownUp, ChevronsUpDown, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useRetryWorkflowRun, useWorkflow, useWorkflowRun } from "@/api/hooks/use-workflows";
+import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -29,7 +23,6 @@ export default function WorkflowRunDetailPage() {
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [expandedStepIds, setExpandedStepIds] = useState<Set<string>>(new Set());
-  const [triggerExpanded, setTriggerExpanded] = useState(false);
   const stepRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   const duration =
@@ -157,25 +150,14 @@ export default function WorkflowRunDetailPage() {
 
       {/* Trigger Data (collapsible) */}
       {run.triggerData != null && (
-        <div className="shrink-0 rounded-md border border-border/50">
-          <button
-            type="button"
-            onClick={() => setTriggerExpanded(!triggerExpanded)}
-            className="w-full flex items-center gap-1.5 px-3 py-2 text-left"
-          >
-            {triggerExpanded ? (
-              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-            )}
-            <span className="text-xs text-muted-foreground">Trigger Data</span>
-          </button>
-          {triggerExpanded && (
-            <div className="px-3 pb-2.5">
-              <JsonTree data={run.triggerData} defaultExpandDepth={1} maxHeight="200px" />
-            </div>
-          )}
-        </div>
+        <CollapsibleSection
+          title="Trigger Data"
+          variant="card"
+          borderColor="border-border/50"
+          className="shrink-0"
+        >
+          <JsonTree data={run.triggerData} defaultExpandDepth={1} maxHeight="200px" />
+        </CollapsibleSection>
       )}
 
       {/* Step Summary Bar */}
