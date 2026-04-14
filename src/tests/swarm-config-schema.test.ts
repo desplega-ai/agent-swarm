@@ -95,20 +95,31 @@ describe("swarm_config.encrypted column (migration 038)", () => {
     expect(raw?.encrypted).toBe(0);
   });
 
-  test("upsertSwarmConfig (isSecret=true) still returns encrypted=false in Phase 3", () => {
-    // Phase 3 is intentionally schema-only: inserting a secret row does NOT
-    // flip `encrypted` to 1. That wiring arrives in Phase 4. This test pins
-    // the Phase 3 contract so a regression would be loud.
+  test("upsertSwarmConfig (isSecret=true) encrypts at rest and round-trips plaintext", () => {
+    // Phase 4: secret writes are encrypted with AES-256-GCM before hitting
+    // SQLite. The returned config object still carries plaintext (thanks to
+    // rowToSwarmConfig's transparent decrypt), but the raw row holds
+    // ciphertext and `encrypted = 1`.
     const config = upsertSwarmConfig({
       scope: "global",
-      key: "PHASE3_SECRET",
+      key: "PHASE4_SECRET",
       value: "super-secret",
       isSecret: true,
     });
     expect(config.isSecret).toBe(true);
-    expect(config.encrypted).toBe(false);
-    // Plaintext still round-trips since nothing encrypts/decrypts yet.
+    expect(config.encrypted).toBe(true);
     expect(config.value).toBe("super-secret");
+
+    const raw = getDb()
+      .prepare<{ encrypted: number; value: string }, [string]>(
+        "SELECT encrypted, value FROM swarm_config WHERE id = ?",
+      )
+      .get(config.id);
+    expect(raw?.encrypted).toBe(1);
+    // Raw stored value must not equal plaintext — it's base64-encoded
+    // iv || ciphertext || authTag.
+    expect(raw?.value).not.toBe("super-secret");
+    expect(raw?.value.length ?? 0).toBeGreaterThan(0);
   });
 
   test("migration 038 is recorded in _migrations exactly once", () => {
