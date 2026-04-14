@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.67.0] - 2026-04-14
+
+### Added
+- Encrypted-at-rest storage for `swarm_config` `isSecret=1` rows using AES-256-GCM
+- New `SECRETS_ENCRYPTION_KEY` / `SECRETS_ENCRYPTION_KEY_FILE` env vars for providing the master key (otherwise auto-generated at `<data-dir>/.encryption-key` on first boot)
+- Auto-migration of legacy plaintext secrets to ciphertext on first boot after upgrade
+
+### Security
+- `swarm_config` API now rejects reserved keys `API_KEY` and `SECRETS_ENCRYPTION_KEY` (case-insensitive) at the HTTP, MCP, and DB layers — these remain environment-only and can no longer be stored in the SQLite config store
+- Secrets are no longer stored as plaintext in `agent-swarm-db.sqlite`; on-disk rows carry only `v1:<nonce>:<ciphertext>:<tag>` AES-256-GCM blobs
+
+### Operator notes
+- Upgrade is transparent — legacy plaintext secrets are auto-migrated on first boot after upgrade
+- **Back up the `.encryption-key` file alongside your SQLite DB** — losing either means losing all encrypted secrets with no recovery path
+- Key rotation is not yet supported (follow-up release)
+
 ## [1.66.0] - 2026-04-13
 
 ### Added
