@@ -537,6 +537,10 @@ export const SwarmConfigSchema = z.object({
   description: z.string().nullable(),
   createdAt: z.string(),
   lastUpdatedAt: z.string(),
+  // True when the row's value is stored as AES-256-GCM ciphertext in the DB.
+  // Plaintext rows return encrypted=false. Auto-encryption of legacy isSecret=1
+  // rows lands in Phase 4 of the swarm-config encryption plan.
+  encrypted: z.boolean(),
 });
 
 export type SwarmConfigScope = z.infer<typeof SwarmConfigScopeSchema>;

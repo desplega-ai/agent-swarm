@@ -4316,6 +4316,7 @@ type SwarmConfigRow = {
   description: string | null;
   createdAt: string;
   lastUpdatedAt: string;
+  encrypted: number; // SQLite boolean: 0 = plaintext, 1 = AES-256-GCM ciphertext
 };
 
 function rowToSwarmConfig(row: SwarmConfigRow): SwarmConfig {
@@ -4330,6 +4331,10 @@ function rowToSwarmConfig(row: SwarmConfigRow): SwarmConfig {
     description: row.description ?? null,
     createdAt: row.createdAt,
     lastUpdatedAt: row.lastUpdatedAt,
+    // Phase 3: schema-only. Encryption wiring (decrypt when encrypted=1) lands
+    // in Phase 4; for now we just carry the flag through so consumers can see
+    // which rows are ciphertext.
+    encrypted: row.encrypted === 1,
   };
 }
 
