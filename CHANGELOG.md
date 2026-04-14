@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.66.0] - 2026-04-13
+
+### Added
+- `swarmVersion` column on `agent_tasks` — each task is stamped with the current package.json version at creation time, enabling benchmarking agent performance (cost, duration, tokens) across releases (#332)
+- Task detail page shows "Swarm version" metadata row in the dashboard (#332)
+
+### Changed
+- Version bump 1.65.0 → 1.66.0 to mark the benchmarking tracking boundary (#332)
+
 ## [1.65.0] - 2026-04-12
 
 ### Added
