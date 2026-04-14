@@ -6,8 +6,6 @@ import {
   Box,
   Calendar,
   CheckCircle2,
-  ChevronDown,
-  ChevronRight,
   Clock,
   Cpu,
   DollarSign,
@@ -44,6 +42,7 @@ import {
 } from "@/api/hooks/use-tasks";
 import type { AgentLog, SessionCost, TaskContextResponse } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
+import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
@@ -228,45 +227,6 @@ function TaskPrompt({ text }: { text: string }) {
       >
         {expanded ? "Show less" : "Show more"}
       </button>
-    </div>
-  );
-}
-
-function CollapsibleCard({
-  title,
-  icon: Icon,
-  iconColor,
-  borderColor,
-  bgColor,
-  children,
-  defaultOpen = false,
-}: {
-  title: string;
-  icon: React.ElementType;
-  iconColor: string;
-  borderColor: string;
-  bgColor: string;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-
-  return (
-    <div className={cn("rounded-md border shrink-0", borderColor, bgColor)}>
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 w-full px-3 py-2 text-left"
-      >
-        {open ? (
-          <ChevronDown className={cn("h-3 w-3 shrink-0", iconColor)} />
-        ) : (
-          <ChevronRight className={cn("h-3 w-3 shrink-0", iconColor)} />
-        )}
-        <Icon className={cn("h-3.5 w-3.5 shrink-0", iconColor)} />
-        <span className={cn("text-xs font-semibold", iconColor)}>{title}</span>
-      </button>
-      {open && <div className="px-3 pb-2.5">{children}</div>}
     </div>
   );
 }
@@ -669,12 +629,9 @@ export default function TaskDetailPage() {
       {hasEvents && (
         <>
           <Separator className="my-2" />
-          <div className="space-y-2">
-            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-              Activity
-            </span>
+          <CollapsibleSection title={`Activity (${task.logs!.length})`} icon={Activity}>
             <LogTimeline logs={task.logs!} />
-          </div>
+          </CollapsibleSection>
         </>
       )}
     </div>
@@ -683,7 +640,8 @@ export default function TaskDetailPage() {
   const outcomeContent = (
     <div className="space-y-2">
       {isFailed && task.failureReason && (
-        <CollapsibleCard
+        <CollapsibleSection
+          variant="card"
           title="Failure Reason"
           icon={AlertTriangle}
           iconColor="text-red-400"
@@ -694,11 +652,12 @@ export default function TaskDetailPage() {
           <div className="text-sm text-red-300/80 leading-relaxed max-h-64 overflow-auto">
             <Streamdown>{normalizeNewlines(task.failureReason ?? "")}</Streamdown>
           </div>
-        </CollapsibleCard>
+        </CollapsibleSection>
       )}
 
       {hasOutput && (
-        <CollapsibleCard
+        <CollapsibleSection
+          variant="card"
           title="Output"
           icon={isCompleted ? CheckCircle2 : Terminal}
           iconColor={isCompleted ? "text-emerald-400" : "text-muted-foreground"}
@@ -709,7 +668,7 @@ export default function TaskDetailPage() {
           <div className="text-sm leading-relaxed max-h-[60vh] overflow-auto text-foreground/80">
             <Streamdown>{normalizeNewlines(task.output ?? "")}</Streamdown>
           </div>
-        </CollapsibleCard>
+        </CollapsibleSection>
       )}
 
       {!isFailed && !hasOutput && (
@@ -898,7 +857,8 @@ export default function TaskDetailPage() {
         {/* Right content: output/error (collapsible) + session logs (fills remaining) */}
         <div className="flex flex-col flex-1 min-h-0 overflow-hidden py-3 pl-3 px-1 gap-2">
           {isFailed && task.failureReason && (
-            <CollapsibleCard
+            <CollapsibleSection
+              variant="card"
               title="Failure Reason"
               icon={AlertTriangle}
               iconColor="text-red-400"
@@ -908,11 +868,12 @@ export default function TaskDetailPage() {
               <div className="text-sm text-red-300/80 leading-relaxed max-h-48 overflow-auto">
                 <Streamdown>{normalizeNewlines(task.failureReason ?? "")}</Streamdown>
               </div>
-            </CollapsibleCard>
+            </CollapsibleSection>
           )}
 
           {hasOutput && (
-            <CollapsibleCard
+            <CollapsibleSection
+              variant="card"
               title="Output"
               icon={isCompleted ? CheckCircle2 : Terminal}
               iconColor={isCompleted ? "text-emerald-400" : "text-muted-foreground"}
@@ -922,7 +883,7 @@ export default function TaskDetailPage() {
               <div className="text-sm leading-relaxed max-h-48 overflow-auto text-foreground/80">
                 <Streamdown>{normalizeNewlines(task.output ?? "")}</Streamdown>
               </div>
-            </CollapsibleCard>
+            </CollapsibleSection>
           )}
 
           {hasSessionLogs ? (

@@ -29,6 +29,7 @@ import type {
   WorkflowVersion,
 } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
+import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
@@ -782,7 +783,6 @@ function WorkflowMeta({
   input?: Record<string, string>;
   triggerSchema?: Record<string, unknown>;
 }) {
-  const [schemaOpen, setSchemaOpen] = useState(false);
   const hasMeta =
     triggers.length > 0 ||
     cooldown != null ||
@@ -836,21 +836,9 @@ function WorkflowMeta({
 
       {/* Trigger Schema (collapsible) */}
       {triggerSchema != null && (
-        <div className="space-y-1">
-          <button
-            type="button"
-            onClick={() => setSchemaOpen((v) => !v)}
-            className="flex items-center gap-1 text-xs text-muted-foreground uppercase tracking-wide hover:text-foreground transition-colors"
-          >
-            {schemaOpen ? (
-              <ChevronDown className="h-3 w-3" />
-            ) : (
-              <ChevronRight className="h-3 w-3" />
-            )}
-            Trigger Schema
-          </button>
-          {schemaOpen && <JsonTree data={triggerSchema} defaultExpandDepth={2} maxHeight="250px" />}
-        </div>
+        <CollapsibleSection title="Trigger Schema">
+          <JsonTree data={triggerSchema} defaultExpandDepth={2} maxHeight="250px" />
+        </CollapsibleSection>
       )}
     </div>
   );
