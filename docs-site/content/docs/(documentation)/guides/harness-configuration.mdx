@@ -1,6 +1,6 @@
 ---
 title: Harness Configuration
-description: Configure the AI provider (Claude Code or pi-mono) that powers your agents
+description: Configure the AI provider (Claude Code, Codex, or pi-mono) that powers your agents
 ---
 
 Agent Swarm uses a **harness** abstraction to decouple task execution from the underlying AI provider. Each worker runs one harness — the harness spawns sessions, manages credentials, and normalizes events so the rest of the system doesn't care which provider is underneath.
@@ -10,6 +10,7 @@ Agent Swarm uses a **harness** abstraction to decouple task execution from the u
 | Provider | `HARNESS_PROVIDER` | Description |
 |----------|-------------------|-------------|
 | **Claude Code** | `claude` (default) | Anthropic's Claude Code CLI. Recommended for most use cases |
+| **Codex** | `codex` | OpenAI Codex CLI with API-key or ChatGPT OAuth authentication |
 | **pi-mono** | `pi` | Open-source coding agent by [@badlogic](https://github.com/badlogic/pi-mono). Supports multiple model backends |
 
 ## How It Works
@@ -18,6 +19,7 @@ The `HARNESS_PROVIDER` environment variable selects which provider adapter is us
 
 ```
 HARNESS_PROVIDER=claude  →  ClaudeAdapter  →  spawns `claude` CLI process
+HARNESS_PROVIDER=codex   →  CodexAdapter   →  spawns `codex` CLI process
 HARNESS_PROVIDER=pi      →  PiMonoAdapter  →  creates in-process pi-mono session
 ```
 
@@ -80,6 +82,38 @@ Models can be set per-task via the API or per-agent via the agent profile. See t
 
 ---
 
+## Codex
+
+Codex runs through the `codex` CLI and supports both direct OpenAI API keys and ChatGPT OAuth.
+
+### Authentication Methods
+
+Codex checks credentials in this order:
+
+| Method | Source | Notes |
+|--------|--------|-------|
+| **OpenAI API key** | `OPENAI_API_KEY` | Standard API billing |
+| **Auth file** | `~/.codex/auth.json` | Native Codex CLI auth file |
+| **ChatGPT OAuth via config store** | `codex_oauth` | Restored automatically at worker boot |
+
+For ChatGPT OAuth setup, see [Provider Auth: Codex OAuth](/docs/guides/provider-auth/codex-oauth).
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `HARNESS_PROVIDER` | Yes | — | Must be set to `codex` |
+| `OPENAI_API_KEY` | No | — | Optional when using direct OpenAI API access |
+| `API_KEY` | Yes | — | Swarm API key used to fetch `codex_oauth` from the config store |
+| `MCP_BASE_URL` | Yes | `http://host.docker.internal:3013` | Swarm API URL reachable by the worker |
+| `AGENT_ID` | Recommended | Auto-generated | Keep stable across restarts for task resume |
+
+### Model Selection
+
+The default model baked into the worker image is `gpt-5.4`. You can override it with `MODEL_OVERRIDE` if needed.
+
+---
+
 ## pi-mono
 
 [pi-mono](https://github.com/badlogic/pi-mono) is an open-source coding agent that runs as a library (no external CLI process). It supports multiple LLM backends through a provider/model system. See the [coding agent README](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/README.md) for detailed configuration and usage.
@@ -130,16 +164,16 @@ pi-mono resolves models using a `provider/model-id` format. Set the model via `M
 
 ## Choosing a Provider
 
-| Consideration | Claude Code | pi-mono |
-|---------------|-------------|---------|
-| **Setup complexity** | Minimal — install CLI + OAuth token | Requires API key(s) |
-| **Subscription billing** | Uses Claude Pro/Max/Team subscription | Pay-per-token via API |
-| **Model flexibility** | Claude models only | Any provider via OpenRouter |
-| **Session resume** | Built-in `--resume` support | Session persistence via SessionManager |
-| **MCP integration** | Native (`.mcp.json` config) | HTTP-based tool discovery |
-| **Maturity** | Production-grade, well-tested | Community project, actively developed |
+| Consideration | Claude Code | Codex | pi-mono |
+|---------------|-------------|-------|---------|
+| **Setup complexity** | Minimal — install CLI + OAuth token | Minimal — CLI plus API key or OAuth bootstrap | Requires API key(s) |
+| **Billing model** | Uses Claude Pro/Max/Team subscription | OpenAI API billing or ChatGPT OAuth | Pay-per-token via API |
+| **Model flexibility** | Claude models only | Codex/OpenAI models | Any provider via OpenRouter |
+| **Session resume** | Built-in `--resume` support | Native CLI session support | Session persistence via SessionManager |
+| **MCP integration** | Native (`.mcp.json` config) | Native (`~/.codex/config.toml`) | HTTP-based tool discovery |
+| **Maturity** | Production-grade, well-tested | Production-grade, well-tested | Community project, actively developed |
 
-**Recommendation**: Use Claude Code with OAuth for most setups. Consider pi-mono when you need access to non-Claude models (e.g., Gemini, GPT) or want to avoid subscription-based billing.
+**Recommendation**: Use Claude Code with OAuth for most setups. Use Codex when you specifically want the OpenAI/Codex toolchain or ChatGPT OAuth-backed workers. Consider pi-mono when you need access to non-Claude models through OpenRouter or want a library-based open-source runner.
 
 ---
 

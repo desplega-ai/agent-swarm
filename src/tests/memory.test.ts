@@ -1,27 +1,17 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { chunkContent } from "../be/chunking";
-import {
-  closeDb,
-  createAgent,
-  createMemory,
-  deleteMemoriesBySourcePath,
-  deleteMemory,
-  getDb,
-  getMemoryById,
-  getMemoryStats,
-  initDb,
-  listMemoriesByAgent,
-  searchMemoriesByVector,
-  updateMemoryEmbedding,
-} from "../be/db";
+import { closeDb, createAgent, getDb, initDb } from "../be/db";
 import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "../be/embedding";
+import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 
 const TEST_DB_PATH = "./test-memory.sqlite";
 
 describe("Memory System", () => {
   const agentA = "aaaa0000-0000-4000-8000-000000000001";
   const agentB = "bbbb0000-0000-4000-8000-000000000002";
+
+  let store: SqliteMemoryStore;
 
   beforeAll(async () => {
     for (const suffix of ["", "-wal", "-shm"]) {
@@ -33,6 +23,7 @@ describe("Memory System", () => {
     }
 
     initDb(TEST_DB_PATH);
+    store = new SqliteMemoryStore();
 
     createAgent({ id: agentA, name: "Agent A", isLead: false, status: "idle" });
     createAgent({ id: agentB, name: "Agent B", isLead: true, status: "idle" });
@@ -212,12 +203,12 @@ describe("Memory System", () => {
   });
 
   // ==========================================================================
-  // DB CRUD tests
+  // DB CRUD tests (using SqliteMemoryStore)
   // ==========================================================================
 
-  describe("createMemory", () => {
+  describe("store.store (createMemory)", () => {
     test("creates a memory with all fields", () => {
-      const memory = createMemory({
+      const memory = store.store({
         agentId: agentA,
         scope: "agent",
         name: "Test Memory",
@@ -246,7 +237,8 @@ describe("Memory System", () => {
     });
 
     test("creates with minimal fields", () => {
-      const memory = createMemory({
+      const memory = store.store({
+        agentId: null,
         scope: "swarm",
         name: "Minimal",
         content: "Just content",
@@ -263,9 +255,9 @@ describe("Memory System", () => {
     });
   });
 
-  describe("getMemoryById", () => {
+  describe("store.get (getMemoryById)", () => {
     test("returns existing memory", () => {
-      const created = createMemory({
+      const created = store.store({
         agentId: agentA,
         scope: "agent",
         name: "Findable",
@@ -273,19 +265,19 @@ describe("Memory System", () => {
         source: "manual",
       });
 
-      const found = getMemoryById(created.id);
+      const found = store.get(created.id);
       expect(found).not.toBeNull();
       expect(found!.id).toBe(created.id);
       expect(found!.name).toBe("Findable");
     });
 
     test("returns null for non-existent ID", () => {
-      const found = getMemoryById("00000000-0000-0000-0000-000000000000");
+      const found = store.get("00000000-0000-0000-0000-000000000000");
       expect(found).toBeNull();
     });
 
     test("updates accessedAt on retrieval", () => {
-      const created = createMemory({
+      const created = store.store({
         agentId: agentA,
         scope: "agent",
         name: "Access Test",
@@ -299,16 +291,16 @@ describe("Memory System", () => {
         /* spin */
       }
 
-      const found = getMemoryById(created.id);
+      const found = store.get(created.id);
       expect(found).not.toBeNull();
       // accessedAt should be updated (may or may not differ depending on timing)
       expect(found!.accessedAt).toBeDefined();
     });
   });
 
-  describe("updateMemoryEmbedding", () => {
+  describe("store.updateEmbedding", () => {
     test("stores and retrieves embedding BLOB", () => {
-      const memory = createMemory({
+      const memory = store.store({
         agentId: agentA,
         scope: "agent",
         name: "Embedding Test",
@@ -317,10 +309,9 @@ describe("Memory System", () => {
       });
 
       const embedding = new Float32Array([0.1, 0.2, 0.3, -0.5]);
-      updateMemoryEmbedding(memory.id, serializeEmbedding(embedding));
+      store.updateEmbedding(memory.id, embedding, "test-model");
 
       // Read back the raw row to check embedding
-      const { getDb } = require("../be/db");
       const row = getDb()
         .prepare("SELECT embedding FROM agent_memory WHERE id = ?")
         .get(memory.id) as { embedding: Buffer | null };
@@ -333,7 +324,7 @@ describe("Memory System", () => {
     });
   });
 
-  describe("searchMemoriesByVector", () => {
+  describe("store.search (searchMemoriesByVector)", () => {
     const searchAgentId = "cccc0000-0000-4000-8000-000000000003";
     const searchAgentId2 = "dddd0000-0000-4000-8000-000000000004";
 
@@ -353,39 +344,39 @@ describe("Memory System", () => {
 
       // Create memories with known embeddings
       // Memory 1: agent scope for searchAgentId, embedding [1,0,0]
-      const m1 = createMemory({
+      const m1 = store.store({
         agentId: searchAgentId,
         scope: "agent",
         name: "Agent Memory 1",
         content: "Agent-scoped content",
         source: "manual",
       });
-      updateMemoryEmbedding(m1.id, serializeEmbedding(new Float32Array([1, 0, 0])));
+      store.updateEmbedding(m1.id, new Float32Array([1, 0, 0]), "test-model");
 
       // Memory 2: swarm scope, embedding [0,1,0]
-      const m2 = createMemory({
+      const m2 = store.store({
         agentId: searchAgentId,
         scope: "swarm",
         name: "Swarm Memory 1",
         content: "Swarm-scoped content",
         source: "file_index",
       });
-      updateMemoryEmbedding(m2.id, serializeEmbedding(new Float32Array([0, 1, 0])));
+      store.updateEmbedding(m2.id, new Float32Array([0, 1, 0]), "test-model");
 
       // Memory 3: agent scope for OTHER agent, embedding [0,0,1]
-      const m3 = createMemory({
+      const m3 = store.store({
         agentId: searchAgentId2,
         scope: "agent",
         name: "Other Agent Memory",
         content: "Other agent's private memory",
         source: "manual",
       });
-      updateMemoryEmbedding(m3.id, serializeEmbedding(new Float32Array([0, 0, 1])));
+      store.updateEmbedding(m3.id, new Float32Array([0, 0, 1]), "test-model");
     });
 
     test("worker sees own agent-scoped + swarm memories", () => {
       const query = new Float32Array([1, 0, 0]); // closest to Memory 1
-      const results = searchMemoriesByVector(query, searchAgentId, { isLead: false });
+      const results = store.search(query, searchAgentId, { isLead: false });
       const names = results.map((r) => r.name);
 
       expect(names).toContain("Agent Memory 1");
@@ -395,7 +386,7 @@ describe("Memory System", () => {
 
     test("worker does not see other agent's agent-scoped memories", () => {
       const query = new Float32Array([0, 0, 1]); // closest to Memory 3
-      const results = searchMemoriesByVector(query, searchAgentId, { isLead: false });
+      const results = store.search(query, searchAgentId, { isLead: false });
       const names = results.map((r) => r.name);
 
       expect(names).not.toContain("Other Agent Memory");
@@ -403,7 +394,7 @@ describe("Memory System", () => {
 
     test("lead sees ALL memories across agents", () => {
       const query = new Float32Array([0, 0, 1]); // closest to Memory 3
-      const results = searchMemoriesByVector(query, searchAgentId, { isLead: true });
+      const results = store.search(query, searchAgentId, { isLead: true });
       const names = results.map((r) => r.name);
 
       expect(names).toContain("Other Agent Memory");
@@ -413,7 +404,7 @@ describe("Memory System", () => {
 
     test("results sorted by similarity (highest first)", () => {
       const query = new Float32Array([1, 0, 0]); // identical to Memory 1's embedding
-      const results = searchMemoriesByVector(query, searchAgentId, { isLead: true });
+      const results = store.search(query, searchAgentId, { isLead: true });
 
       expect(results.length).toBeGreaterThan(0);
       expect(results[0].name).toBe("Agent Memory 1");
@@ -427,11 +418,11 @@ describe("Memory System", () => {
 
     test("scope filter works", () => {
       const query = new Float32Array([1, 1, 1]);
-      const agentOnly = searchMemoriesByVector(query, searchAgentId, {
+      const agentOnly = store.search(query, searchAgentId, {
         scope: "agent",
         isLead: false,
       });
-      const swarmOnly = searchMemoriesByVector(query, searchAgentId, {
+      const swarmOnly = store.search(query, searchAgentId, {
         scope: "swarm",
         isLead: false,
       });
@@ -446,7 +437,7 @@ describe("Memory System", () => {
 
     test("source filter works", () => {
       const query = new Float32Array([1, 1, 1]);
-      const results = searchMemoriesByVector(query, searchAgentId, {
+      const results = store.search(query, searchAgentId, {
         source: "file_index",
         isLead: true,
       });
@@ -458,7 +449,7 @@ describe("Memory System", () => {
 
     test("limit works", () => {
       const query = new Float32Array([1, 1, 1]);
-      const results = searchMemoriesByVector(query, searchAgentId, {
+      const results = store.search(query, searchAgentId, {
         limit: 1,
         isLead: true,
       });
@@ -466,13 +457,13 @@ describe("Memory System", () => {
     });
   });
 
-  describe("listMemoriesByAgent", () => {
+  describe("store.list (listMemoriesByAgent)", () => {
     test("lists agent memories with pagination", () => {
       const listAgent = "eeee0000-0000-4000-8000-000000000005";
       createAgent({ id: listAgent, name: "List Agent", isLead: false, status: "idle" });
 
       for (let i = 0; i < 5; i++) {
-        createMemory({
+        store.store({
           agentId: listAgent,
           scope: "agent",
           name: `List Memory ${i}`,
@@ -481,17 +472,17 @@ describe("Memory System", () => {
         });
       }
 
-      const page1 = listMemoriesByAgent(listAgent, { scope: "agent", limit: 3, offset: 0 });
+      const page1 = store.list(listAgent, { scope: "agent", limit: 3, offset: 0 });
       expect(page1.length).toBe(3);
 
-      const page2 = listMemoriesByAgent(listAgent, { scope: "agent", limit: 3, offset: 3 });
+      const page2 = store.list(listAgent, { scope: "agent", limit: 3, offset: 3 });
       expect(page2.length).toBe(2);
     });
   });
 
-  describe("deleteMemory", () => {
+  describe("store.delete (deleteMemory)", () => {
     test("deletes existing memory", () => {
-      const memory = createMemory({
+      const memory = store.store({
         agentId: agentA,
         scope: "agent",
         name: "To Delete",
@@ -499,26 +490,26 @@ describe("Memory System", () => {
         source: "manual",
       });
 
-      const deleted = deleteMemory(memory.id);
+      const deleted = store.delete(memory.id);
       expect(deleted).toBe(true);
 
-      const found = getMemoryById(memory.id);
+      const found = store.get(memory.id);
       expect(found).toBeNull();
     });
 
     test("returns false for non-existent memory", () => {
-      const deleted = deleteMemory("00000000-0000-0000-0000-000000000000");
+      const deleted = store.delete("00000000-0000-0000-0000-000000000000");
       expect(deleted).toBe(false);
     });
   });
 
-  describe("deleteMemoriesBySourcePath", () => {
+  describe("store.deleteBySourcePath (deleteMemoriesBySourcePath)", () => {
     test("deletes all chunks for a source path", () => {
       const path = "/workspace/personal/memory/to-reindex.md";
 
       // Create multiple chunks
       for (let i = 0; i < 3; i++) {
-        createMemory({
+        store.store({
           agentId: agentA,
           scope: "agent",
           name: "Reindex Test",
@@ -530,35 +521,35 @@ describe("Memory System", () => {
         });
       }
 
-      const deleted = deleteMemoriesBySourcePath(path, agentA);
+      const deleted = store.deleteBySourcePath(path, agentA);
       expect(deleted).toBe(3);
 
       // Verify they're gone
-      const remaining = listMemoriesByAgent(agentA).filter((m) => m.sourcePath === path);
+      const remaining = store.list(agentA).filter((m) => m.sourcePath === path);
       expect(remaining.length).toBe(0);
     });
   });
 
-  describe("getMemoryStats", () => {
+  describe("store.getStats (getMemoryStats)", () => {
     test("returns correct stats", () => {
       const statsAgent = "ffff0000-0000-4000-8000-000000000006";
       createAgent({ id: statsAgent, name: "Stats Agent", isLead: false, status: "idle" });
 
-      createMemory({
+      store.store({
         agentId: statsAgent,
         scope: "agent",
         name: "Stat 1",
         content: "Content",
         source: "manual",
       });
-      createMemory({
+      store.store({
         agentId: statsAgent,
         scope: "swarm",
         name: "Stat 2",
         content: "Content",
         source: "file_index",
       });
-      createMemory({
+      store.store({
         agentId: statsAgent,
         scope: "agent",
         name: "Stat 3",
@@ -566,12 +557,14 @@ describe("Memory System", () => {
         source: "manual",
       });
 
-      const stats = getMemoryStats(statsAgent);
+      const stats = store.getStats(statsAgent);
       expect(stats.total).toBe(3);
       expect(stats.bySource.manual).toBe(2);
       expect(stats.bySource.file_index).toBe(1);
       expect(stats.byScope.agent).toBe(2);
       expect(stats.byScope.swarm).toBe(1);
+      expect(stats.withEmbeddings).toBe(0);
+      expect(stats.expired).toBe(0);
     });
   });
 
@@ -601,26 +594,21 @@ describe("Memory System", () => {
               },
             ];
 
-      const memoryIds = getDb().transaction(() => {
-        const ids: string[] = [];
-        for (const chunk of finalChunks) {
-          const memory = createMemory({
-            agentId: ingestAgent,
-            content: chunk.content,
-            name: "ingest-test",
-            scope: "agent",
-            source: "file_index",
-            sourcePath: "/workspace/personal/memory/ingest-test.md",
-            chunkIndex: chunk.chunkIndex,
-            totalChunks: chunk.totalChunks,
-          });
-          ids.push(memory.id);
-        }
-        return ids;
-      })();
+      const memories = store.storeBatch(
+        finalChunks.map((chunk) => ({
+          agentId: ingestAgent,
+          content: chunk.content,
+          name: "ingest-test",
+          scope: "agent" as const,
+          source: "file_index" as const,
+          sourcePath: "/workspace/personal/memory/ingest-test.md",
+          chunkIndex: chunk.chunkIndex,
+          totalChunks: chunk.totalChunks,
+        })),
+      );
 
-      expect(memoryIds.length).toBe(1);
-      const memory = getMemoryById(memoryIds[0]!);
+      expect(memories.length).toBe(1);
+      const memory = store.get(memories[0]!.id);
       expect(memory).not.toBeNull();
       expect(memory!.source).toBe("file_index");
       expect(memory!.sourcePath).toBe("/workspace/personal/memory/ingest-test.md");
@@ -630,7 +618,7 @@ describe("Memory System", () => {
       const path = "/workspace/personal/memory/dedup-test.md";
 
       // First indexing
-      const m1 = createMemory({
+      const m1 = store.store({
         agentId: ingestAgent,
         content: "Original content",
         name: "dedup-test",
@@ -639,26 +627,24 @@ describe("Memory System", () => {
         sourcePath: path,
       });
 
-      // Re-index: delete old + create new in transaction
-      getDb().transaction(() => {
-        deleteMemoriesBySourcePath(path, ingestAgent);
-        createMemory({
-          agentId: ingestAgent,
-          content: "Updated content",
-          name: "dedup-test",
-          scope: "agent",
-          source: "file_index",
-          sourcePath: path,
-        });
-      })();
+      // Re-index: delete old + create new
+      store.deleteBySourcePath(path, ingestAgent);
+      store.store({
+        agentId: ingestAgent,
+        content: "Updated content",
+        name: "dedup-test",
+        scope: "agent",
+        source: "file_index",
+        sourcePath: path,
+      });
 
       // Old memory should be gone
-      expect(getMemoryById(m1.id)).toBeNull();
+      expect(store.get(m1.id)).toBeNull();
 
       // New memory should exist
-      const memories = listMemoriesByAgent(ingestAgent, { scope: "agent" }).filter(
-        (m) => m.sourcePath === path,
-      );
+      const memories = store
+        .list(ingestAgent, { scope: "agent" })
+        .filter((m) => m.sourcePath === path);
       expect(memories.length).toBe(1);
       expect(memories[0]!.content).toBe("Updated content");
     });
@@ -670,25 +656,23 @@ describe("Memory System", () => {
       const chunks = chunkContent(longContent);
       expect(chunks.length).toBeGreaterThan(1);
 
-      getDb().transaction(() => {
-        deleteMemoriesBySourcePath(path, ingestAgent);
-        for (const chunk of chunks) {
-          createMemory({
-            agentId: ingestAgent,
-            content: chunk.content,
-            name: "chunked-test",
-            scope: "agent",
-            source: "file_index",
-            sourcePath: path,
-            chunkIndex: chunk.chunkIndex,
-            totalChunks: chunk.totalChunks,
-          });
-        }
-      })();
-
-      const memories = listMemoriesByAgent(ingestAgent, { scope: "agent" }).filter(
-        (m) => m.sourcePath === path,
+      store.deleteBySourcePath(path, ingestAgent);
+      store.storeBatch(
+        chunks.map((chunk) => ({
+          agentId: ingestAgent,
+          content: chunk.content,
+          name: "chunked-test",
+          scope: "agent" as const,
+          source: "file_index" as const,
+          sourcePath: path,
+          chunkIndex: chunk.chunkIndex,
+          totalChunks: chunk.totalChunks,
+        })),
       );
+
+      const memories = store
+        .list(ingestAgent, { scope: "agent" })
+        .filter((m) => m.sourcePath === path);
       expect(memories.length).toBe(chunks.length);
       // Verify chunk metadata
       for (const m of memories) {
@@ -696,8 +680,8 @@ describe("Memory System", () => {
       }
     });
 
-    test("memory created without OPENAI_API_KEY has null embedding", () => {
-      const memory = createMemory({
+    test("memory created without embedding has null embedding in DB", () => {
+      const memory = store.store({
         agentId: ingestAgent,
         content: "No embedding needed",
         name: "no-embed",
@@ -711,8 +695,8 @@ describe("Memory System", () => {
       expect(row.embedding).toBeNull();
     });
 
-    test("updateMemoryEmbedding stores and retrieves correctly", () => {
-      const memory = createMemory({
+    test("store.updateEmbedding stores and retrieves correctly", () => {
+      const memory = store.store({
         agentId: ingestAgent,
         content: "Embed me",
         name: "embed-update",
@@ -721,7 +705,7 @@ describe("Memory System", () => {
       });
 
       const embedding = new Float32Array([0.5, -0.3, 0.8]);
-      updateMemoryEmbedding(memory.id, serializeEmbedding(embedding));
+      store.updateEmbedding(memory.id, embedding, "test-model");
 
       const row = getDb()
         .prepare("SELECT embedding FROM agent_memory WHERE id = ?")

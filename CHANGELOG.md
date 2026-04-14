@@ -6,6 +6,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.66.0] - 2026-04-13
+
+### Added
+- `swarmVersion` column on `agent_tasks` — each task is stamped with the current package.json version at creation time, enabling benchmarking agent performance (cost, duration, tokens) across releases (#332)
+- Task detail page shows "Swarm version" metadata row in the dashboard (#332)
+
+### Changed
+- Version bump 1.65.0 → 1.66.0 to mark the benchmarking tracking boundary (#332)
+
+## [1.65.0] - 2026-04-12
+
+### Added
+- Memory TTL support — memories can now have an `expiresAt` field; expired memories are automatically excluded from search results (#327)
+- Memory staleness management with access tracking — `accessCount` field tracks how often a memory is retrieved, enabling recency-aware reranking (#327)
+- `memory-delete` MCP tool for explicit memory removal (#327)
+- Memory provider abstraction layer (`EmbeddingProvider`, `MemoryStore` interfaces) for pluggable storage and embedding backends (#327)
+- Memory reranker combining vector similarity, recency decay, and access frequency into a unified relevance score (#327)
+
+### Changed
+- Memory system refactored from monolithic `db.ts` functions into modular `src/be/memory/` provider architecture with SQLite+sqlite-vec store and OpenAI embedding provider (#327)
+- `memory-search` now uses the reranker pipeline for improved result quality (#327)
+- `inject-learning` and `store-progress` updated to support new memory metadata fields (#327)
+
+## [1.64.1] - 2026-04-11
+
+### Added
+- Anonymized telemetry integration — tracks high-level task lifecycle events (created, started, completed, failed, cancelled), server start, and worker session start/end. Opt-out via `ANONYMIZED_TELEMETRY=false` (#325)
+
+### Fixed
+- Rate limit detection now matches "hit your limit" error messages in addition to existing patterns (#324)
+- Workflow `mustPass` validation failures now cancel only the failed branch's downstream nodes instead of the entire workflow run; parallel/sibling branches continue executing (#322)
+- Published package now includes `tsconfig.json`
+
+## [1.64.0] - 2026-04-10
+
+### Changed
+- Release cut after merging the latest `main`, carrying forward the Codex ChatGPT OAuth support, provider-auth documentation, and telemetry updates already landed on this branch.
+
+## [1.63.1] - 2026-04-10
+
+### Added
+- `agent-swarm codex-login` now supports an interactive ChatGPT OAuth flow for Codex workers: it prompts for the target swarm API URL, uses best-effort masked API key input, stores credentials as the global `codex_oauth` config entry, and documents the laptop-to-Docker-Compose restore flow for deployed swarms.
+
+### Fixed
+- Codex Docker workers now convert stored `codex_oauth` credentials into the real `~/.codex/auth.json` format expected by the Codex CLI, so ChatGPT OAuth works after container boot without `OPENAI_API_KEY`.
+- Codex tasks authenticated through ChatGPT OAuth now stamp `credentialKeyType=CODEX_OAUTH`, so the API Keys dashboard and cost tracking surfaces show OAuth-backed Codex usage alongside other credential types.
+
 ## [1.63.0] - 2026-04-09
 
 ### Added

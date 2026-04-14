@@ -3,7 +3,6 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import {
   completeTask,
-  createMemory,
   createSessionCost,
   createTaskExtended,
   failTask,
@@ -12,10 +11,9 @@ import {
   getLeadAgent,
   getTaskById,
   updateAgentStatusFromCapacity,
-  updateMemoryEmbedding,
   updateTaskProgress,
 } from "@/be/db";
-import { getEmbedding, serializeEmbedding } from "@/be/embedding";
+import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
 import { resolveTemplate } from "@/prompts/resolver";
 import { createToolRegistrar } from "@/tools/utils";
 import { AgentTaskSchema } from "@/types";
@@ -258,17 +256,20 @@ export const registerStoreProgressTool = (server: McpServer) => {
             // Skip indexing if there's truly no content
             if (taskContent.length < 30) return;
 
-            const memory = createMemory({
-              agentId: requestInfo.agentId,
+            const store = getMemoryStore();
+            const provider = getEmbeddingProvider();
+
+            const memory = store.store({
+              agentId: requestInfo.agentId ?? null,
               content: taskContent,
               name: `Task: ${result.task!.task.slice(0, 80)}`,
               scope: "agent",
               source: "task_completion",
               sourceTaskId: taskId,
             });
-            const embedding = await getEmbedding(taskContent);
+            const embedding = await provider.embed(taskContent);
             if (embedding) {
-              updateMemoryEmbedding(memory.id, serializeEmbedding(embedding));
+              store.updateEmbedding(memory.id, embedding, provider.name);
             }
 
             // Auto-promote high-value completions to swarm memory (P3)
@@ -280,17 +281,17 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
             if (shouldShareWithSwarm) {
               try {
-                const swarmMemory = createMemory({
-                  agentId: requestInfo.agentId,
+                const swarmMemory = store.store({
+                  agentId: requestInfo.agentId ?? null,
                   scope: "swarm",
                   name: `Shared: ${result.task!.task.slice(0, 80)}`,
                   content: `Task completed by agent ${requestInfo.agentId}:\n\n${taskContent}`,
                   source: "task_completion",
                   sourceTaskId: taskId,
                 });
-                const swarmEmbedding = await getEmbedding(taskContent);
+                const swarmEmbedding = await provider.embed(taskContent);
                 if (swarmEmbedding) {
-                  updateMemoryEmbedding(swarmMemory.id, serializeEmbedding(swarmEmbedding));
+                  store.updateEmbedding(swarmMemory.id, swarmEmbedding, provider.name);
                 }
               } catch {
                 // Non-blocking — swarm memory promotion failure is not critical

@@ -10,6 +10,7 @@ import {
   generateDefaultToolsMd,
 } from "../prompts/defaults.ts";
 import { configureHttpResolver, resolveTemplateAsync } from "../prompts/resolver.ts";
+import { authJsonToCredentialSelection } from "../providers/codex-oauth/auth-json.js";
 import {
   type CostData,
   createProviderAdapter,
@@ -17,6 +18,7 @@ import {
   type ProviderSession,
   type ProviderSessionConfig,
 } from "../providers/index.ts";
+import { initTelemetry, telemetry } from "../telemetry.ts";
 import type { RepoGuidelines } from "../types.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
 import { type CredentialSelection, resolveCredentialPools } from "../utils/credentials.ts";
@@ -634,6 +636,33 @@ async function reportKeyUsage(
   }
 }
 
+async function resolveCodexOAuthCredentialInfo(): Promise<CredentialSelection | null> {
+  try {
+    const home = process.env.HOME;
+    if (!home) return null;
+
+    const authFile = Bun.file(`${home}/.codex/auth.json`);
+    if (!(await authFile.exists())) {
+      return null;
+    }
+
+    const auth = JSON.parse(await authFile.text()) as {
+      auth_mode?: string;
+      tokens?: { account_id?: string };
+    };
+
+    if (auth.auth_mode !== "chatgpt" || !auth.tokens?.account_id) {
+      return null;
+    }
+
+    return authJsonToCredentialSelection(
+      auth as Parameters<typeof authJsonToCredentialSelection>[0],
+    );
+  } catch {
+    return null;
+  }
+}
+
 /** Report a rate-limited key to the API (fire-and-forget) */
 async function reportKeyRateLimit(
   apiUrl: string,
@@ -848,6 +877,7 @@ function setupShutdownHandlers(
     }
 
     if (apiConfig) {
+      telemetry.session("ended", { agentId: apiConfig.agentId });
       await closeAgent(apiConfig, role);
     }
     await savePm2State(role);
@@ -1567,6 +1597,20 @@ async function spawnProviderProcess(
 
   const session = await adapter.createSession(config);
 
+  let oauthSelection: CredentialSelection | undefined;
+  if (adapter.name === "codex" && credentialSelections.length === 0) {
+    oauthSelection = (await resolveCodexOAuthCredentialInfo()) ?? undefined;
+    if (oauthSelection && realTaskId) {
+      reportKeyUsage(
+        opts.apiUrl,
+        opts.apiKey,
+        oauthSelection.keyType,
+        oauthSelection,
+        realTaskId,
+      ).catch(() => {});
+    }
+  }
+
   // Set up log streaming
   const logBuffer: LogBuffer = { lines: [], lastFlush: Date.now(), partialLine: "" };
   const shouldStream = opts.apiUrl && opts.runnerSessionId && opts.iteration;
@@ -1874,7 +1918,7 @@ async function spawnProviderProcess(
   });
 
   // Build credential info for rate limit tracking
-  const primarySelection = credentialSelections[0];
+  const primarySelection = credentialSelections[0] ?? oauthSelection;
   const credentialInfo = primarySelection
     ? {
         keyType: primarySelection.keyType,
@@ -2008,7 +2052,7 @@ async function checkCompletedProcesses(
         console.log(`[${role}] Detected error for task ${taskId.slice(0, 8)}: ${failureReason}`);
 
         // If rate-limited and we know which key was used, report it
-        if (credentialInfo && /rate.?limit/i.test(failureReason)) {
+        if (credentialInfo && /rate.?limit|hit your limit/i.test(failureReason)) {
           // Try to extract reset time from the error message (e.g. "resets 3pm (UTC)")
           const parsedResetTime = parseRateLimitResetTime(failureReason);
           const defaultCooldownMs = 5 * 60 * 1000;
@@ -2161,6 +2205,46 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   if (process.env.API_KEY) {
     configureHttpResolver(apiUrl, process.env.API_KEY);
   }
+
+  // Initialize anonymized telemetry (opt-out via ANONYMIZED_TELEMETRY=false)
+  // Workers use HTTP-based config access (cannot import DB directly)
+  {
+    const telemetryApiKey = process.env.API_KEY;
+    await initTelemetry(
+      "worker",
+      async (key) => {
+        if (!telemetryApiKey) return undefined;
+        try {
+          const resp = await fetch(`${apiUrl}/api/config?scope=global&includeSecrets=true`, {
+            headers: { Authorization: `Bearer ${telemetryApiKey}` },
+            signal: AbortSignal.timeout(5_000),
+          });
+          if (!resp.ok) return undefined;
+          const data = (await resp.json()) as { configs: { key: string; value: string }[] };
+          return data.configs.find((c) => c.key === key)?.value;
+        } catch {
+          return undefined;
+        }
+      },
+      async (key, value) => {
+        if (!telemetryApiKey) return;
+        try {
+          await fetch(`${apiUrl}/api/config`, {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${telemetryApiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ scope: "global", key, value }),
+            signal: AbortSignal.timeout(5_000),
+          });
+        } catch {
+          // Silently ignore — telemetry is best-effort
+        }
+      },
+    );
+  }
+  telemetry.session("started", { agentId });
 
   let capabilities = config.capabilities;
 

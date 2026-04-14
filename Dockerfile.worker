@@ -162,7 +162,7 @@ RUN npm install -g \
     @sentry/cli@3.3.4 \
     @desplega.ai/wts@0.2.3 \
     @desplega.ai/localtunnel@2.2.0 \
-    @desplega.ai/qa-use@2.11.0 \
+    @desplega.ai/qa-use@2.14.0 \
     @desplega.ai/agent-fs@0.4.0 \
     && qa-use install-deps
 

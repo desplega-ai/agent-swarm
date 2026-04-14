@@ -27,6 +27,7 @@ import {
   registerMcpServerUpdateTool,
 } from "./tools/mcp-servers";
 // Memory capability
+import { registerMemoryDeleteTool } from "./tools/memory-delete";
 import { registerMemoryGetTool } from "./tools/memory-get";
 import { registerMemorySearchTool } from "./tools/memory-search";
 import { registerMyAgentInfoTool } from "./tools/my-agent-info";
@@ -237,6 +238,7 @@ export function createServer() {
   if (hasCapability("memory")) {
     registerMemorySearchTool(server);
     registerMemoryGetTool(server);
+    registerMemoryDeleteTool(server);
     registerInjectLearningTool(server);
   }
 

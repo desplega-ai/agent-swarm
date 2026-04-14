@@ -11,7 +11,12 @@ src/
   http.ts       # Main HTTP server + MCP endpoints
   stdio.ts      # Stdio MCP transport
   cli.tsx       # CLI entry point (Ink)
+  commands/
+    codex-login.ts  # Codex ChatGPT OAuth login command
   tools/        # MCP tool definitions
+  providers/
+    codex-oauth/   # Codex OAuth PKCE flow + storage
+    codex-adapter.ts # Codex provider adapter
   be/           # Backend (DB, storage)
     db.ts       # DB init + query functions
     migrations/ # SQL migration files + runner
@@ -44,6 +49,7 @@ If worker-side code needs data from the DB (template resolution, config lookup),
 | `bun run tsc:check` | Type check |
 | `bun test` | Run all unit tests |
 | `bun test src/tests/<file>.test.ts` | Run specific test |
+| `bun run pm2-start` | Start all (API :3013, UI :5274, lead :3201, worker :3202) |
 | `bun run pm2-start` | Start all (API :3013, UI :5274, lead :3201, worker :3202) |
 | `bun run pm2-stop` | Stop all services |
 | `bun run pm2-restart` | Restart all services |
@@ -179,7 +185,7 @@ Uses `@desplega.ai/business-use` to track system invariants. See [BUSINESS_USE.m
 
 **Environment files:** `.env` (API server), `.env.docker` (Docker worker), `.env.docker-lead` (Docker lead).
 
-**Key env vars:** `API_KEY` (auth, default: `123123`), `MCP_BASE_URL` (default: `http://localhost:3013`), `SLACK_DISABLE=true` / `GITHUB_DISABLE=true`, `HARNESS_PROVIDER` (`claude`, `pi`, or `codex` — codex requires `OPENAI_API_KEY` or `~/.codex/auth.json`), `TEMPLATE_ID` (e.g. `official/coder`), `TEMPLATE_REGISTRY_URL` (default: `https://templates.agent-swarm.dev`).
+**Key env vars:** `API_KEY` (auth, default: `123123`), `MCP_BASE_URL` (default: `http://localhost:3013`), `SLACK_DISABLE=true` / `GITHUB_DISABLE=true`, `HARNESS_PROVIDER` (`claude`, `pi`, or `codex` — codex requires `OPENAI_API_KEY` or `~/.codex/auth.json` or ChatGPT OAuth via `codex-login`), `TEMPLATE_ID` (e.g. `official/coder`), `TEMPLATE_REGISTRY_URL` (default: `https://templates.agent-swarm.dev`). ChatGPT OAuth is stored server-side as the global `codex_oauth` config entry; codex workers restore it into `~/.codex/auth.json` at boot.
 
 **Testing API locally:**
 ```bash
@@ -187,9 +193,11 @@ curl -H "Authorization: Bearer 123123" http://localhost:3013/api/agents
 curl -H "Authorization: Bearer 123123" -H "X-Agent-ID: <uuid>" http://localhost:3013/mcp
 ```
 
+**Codex ChatGPT OAuth:** Run `bun run src/cli.tsx codex-login` from your laptop or local terminal, not inside the worker container. The command prompts for the swarm API URL and uses masked API key input when the terminal supports raw mode. For a remote Docker Compose swarm, point `--api-url` at the public API URL (or an SSH tunnel), then restart codex workers so the entrypoint can restore `codex_oauth` from the config store.
+
 **Portless:** `bun run dev:http` → `https://api.swarm.localhost:1355`. Set `MCP_BASE_URL` and `APP_URL` in `.env`. Worktrees auto-get `<branch>.api.swarm.localhost:1355` subdomains. Non-portless fallback: `bun run start:http`.
 
-**Docker Compose:** Requires `.env` with `API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` (or `OPENROUTER_API_KEY`). See `docker-compose.example.yml` for production.
+**Docker Compose:** Requires `.env` with `API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` (or `OPENROUTER_API_KEY`). Codex workers can use `OPENAI_API_KEY` or ChatGPT OAuth (`codex-login` + `codex_oauth` in config store). See `docker-compose.example.yml` for production.
 
 </important>
 
@@ -309,6 +317,29 @@ slack_send_message(channel_id: "C0AR967K0KZ", message: "<@U0ALZGQCF96> hi")
 ```
 
 This sends a message to `#swarm-dev-2` mentioning the bot, which triggers the Slack handler → task assignment flow.
+
+</important>
+
+<important if="you are modifying memory system code (src/be/memory/, src/be/embedding.ts, src/tools/memory-*.ts, src/http/memory.ts, or src/tools/store-progress.ts memory sections)">
+
+## Memory system
+
+The memory system uses provider abstractions (`EmbeddingProvider`, `MemoryStore`) in `src/be/memory/` with sqlite-vec for vector search and a reranker for scoring.
+
+**When changing memory-related code, always run:**
+```bash
+bun test src/tests/memory-reranker.test.ts   # Reranker unit tests
+bun test src/tests/memory-store.test.ts      # Store integration tests
+bun test src/tests/memory.test.ts            # Legacy compatibility tests
+bun test src/tests/memory-e2e.test.ts        # Full memory E2E lifecycle
+```
+
+**Key architecture:**
+- `src/be/memory/types.ts` — `EmbeddingProvider` + `MemoryStore` interfaces
+- `src/be/memory/providers/` — Implementations (OpenAI embeddings, SQLite+sqlite-vec store)
+- `src/be/memory/reranker.ts` — Scoring: `similarity × recency_decay × access_boost`
+- `src/be/memory/constants.ts` — Tuning params (env-overridable)
+- `src/be/memory/index.ts` — Singleton getters (`getMemoryStore()`, `getEmbeddingProvider()`)
 
 </important>
 

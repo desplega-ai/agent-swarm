@@ -456,7 +456,12 @@ services:
 
   # Example: Codex worker (uses HARNESS_PROVIDER=codex instead of Claude)
   # Uncomment to add a Codex powered worker to the swarm.
-  # Requires OPENAI_API_KEY (or a pre-seeded ~/.codex/auth.json volume mount).
+  # Requires OPENAI_API_KEY, a pre-seeded ~/.codex/auth.json volume mount,
+  # or ChatGPT OAuth credentials stored via `agent-swarm codex-login`.
+  # For OAuth, run `agent-swarm codex-login` from your laptop against the same
+  # swarm API that this worker uses. The entrypoint restores `codex_oauth`
+  # from the config store into /home/worker/.codex/auth.json at boot, so
+  # OPENAI_API_KEY is not needed for that path.
   #
   # codex-worker:
   #   image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
@@ -473,12 +478,16 @@ services:
   #     # Codex model — see src/providers/codex-models.ts for the full catalogue.
   #     # Default baked into the image: gpt-5.4
   #     # - MODEL_OVERRIDE=gpt-5.4
+  #     # Optional when using standard OpenAI API billing.
+  #     # Omit when using ChatGPT OAuth via `agent-swarm codex-login`.
   #     - OPENAI_API_KEY=${OPENAI_API_KEY}
   #     - API_KEY=${API_KEY}
   #     # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
   #     - AGENT_ID=c3b4d5e6-7890-12fa-bcde-345678901bcd
   #     - AGENT_ROLE=worker
   #
+  #     # Worker-side API URL. Your laptop can use a different public URL when
+  #     # running `agent-swarm codex-login`, as long as both hit the same API.
   #     - MCP_BASE_URL=http://api:3013
   #
   #     - YOLO=true

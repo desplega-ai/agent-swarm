@@ -1,0 +1,71 @@
+---
+title: Telemetry
+description: What telemetry Agent Swarm collects, how it's anonymized, and how to opt out
+---
+
+Agent Swarm includes optional, anonymized telemetry to help the maintainers understand usage patterns and improve the product. Telemetry is **enabled by default** and can be disabled at any time.
+
+## What is collected
+
+Telemetry tracks high-level lifecycle events — no task content, prompts, outputs, or personally identifiable information is ever sent.
+
+| Event | When it fires | Properties |
+|---|---|---|
+| `server.started` | API server boots | — |
+| `task.created` | A new task is created | source, tags, hasParent, priority |
+| `task.started` | A task is assigned to an agent | source, agentId |
+| `task.claimed` | An agent auto-claims a task from the pool | source, agentId |
+| `task.completed` | A task finishes successfully | agentId, durationMs |
+| `task.failed` | A task fails | agentId, durationMs |
+| `task.cancelled` | A task is cancelled | source, agentId, previousStatus, durationMs |
+| `session.started` | A worker session begins | agentId, taskId |
+| `session.ended` | A worker session ends | agentId, taskId |
+
+Every event also includes:
+- A timestamp (`occurred_at`)
+- The source component (`api-server` or `worker`)
+- The environment (`production` or `development`)
+- A schema version number
+
+## How it's anonymized
+
+- **Installation ID**: Each installation generates a random, opaque identifier (e.g. `install_a1b2c3d4e5f6g7h8`) stored in the `swarm_config` table. This ID cannot be traced back to you or your organization.
+- **No content**: Task descriptions, prompts, outputs, agent names, and error messages are never included.
+- **No IPs logged**: The telemetry endpoint (`proxy.desplega.sh`) does not store client IP addresses.
+- **No auth required**: Events are sent in anonymous actor mode with no authentication headers.
+
+## Installation ID mechanism
+
+On first startup, the telemetry module checks `swarm_config` for a `telemetry_installation_id` key:
+
+1. If found, it reuses the existing ID for consistent tracking across restarts.
+2. If not found, it generates a new random ID (`install_` + 16 hex characters) and persists it.
+3. If config access fails (e.g. worker without DB access), an ephemeral ID (`ephemeral_` prefix) is generated for that session only.
+
+Workers access the installation ID via HTTP (respecting the DB boundary invariant), while the API server reads it directly from the database.
+
+## How to opt out
+
+Set the `ANONYMIZED_TELEMETRY` environment variable to `false`:
+
+```bash title=".env"
+ANONYMIZED_TELEMETRY=false
+```
+
+For Docker workers, also add it to `.env.docker`:
+
+```bash title=".env.docker"
+ANONYMIZED_TELEMETRY=false
+```
+
+When disabled:
+- No events are sent
+- No installation ID is generated or stored
+- The telemetry module initializes as a no-op
+
+## Technical details
+
+- **Endpoint**: `POST https://proxy.desplega.sh/v1/events`
+- **Timeout**: 5 seconds per request
+- **Failure mode**: Fire-and-forget — telemetry never throws exceptions or blocks operations
+- **Module**: `src/telemetry.ts` (importable from both API server and workers)

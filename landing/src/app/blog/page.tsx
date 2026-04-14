@@ -4,10 +4,24 @@ import { ArrowRight, Calendar, Clock } from "lucide-react";
 
 export const metadata: Metadata = {
   title: "Blog — Agent Swarm",
-  description: "Updates, technical deep dives, and stories from the Agent Swarm team.",
+  description:
+    "Technical deep dives on multi-agent AI systems: DAG workflow engines, persistent agent identity, task state machines, and autonomous coding agent architecture.",
+  keywords: [
+    "agent swarm blog",
+    "multi-agent AI",
+    "autonomous coding agents",
+    "DAG workflow engine",
+    "AI agent identity",
+    "SOUL.md",
+    "task state machine",
+    "AI orchestration",
+    "Claude Code",
+    "AI coding agents",
+  ],
   openGraph: {
     title: "Blog — Agent Swarm",
-    description: "Updates, technical deep dives, and stories from the Agent Swarm team.",
+    description:
+      "Technical deep dives on multi-agent AI systems: DAG workflow engines, persistent agent identity, task state machines, and autonomous coding agent architecture.",
     url: "https://agent-swarm.dev/blog",
     siteName: "Agent Swarm",
     type: "website",
@@ -23,7 +37,8 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "Blog — Agent Swarm",
-    description: "Updates, technical deep dives, and stories from the Agent Swarm team.",
+    description:
+      "Technical deep dives on multi-agent AI systems: DAG workflow engines, persistent agent identity, task state machines, and autonomous coding agent architecture.",
     images: ["https://agent-swarm.dev/og-image.png"],
   },
   alternates: {

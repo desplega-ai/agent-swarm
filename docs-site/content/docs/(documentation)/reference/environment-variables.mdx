@@ -18,6 +18,10 @@ Complete reference for all environment variables used by Agent Swarm.
 | `DATABASE_PATH` | `./agent-swarm-db.sqlite` | SQLite database file path |
 | `SCHEDULER_INTERVAL_MS` | `10000` | Polling interval for scheduled tasks (ms) |
 | `OPENAI_API_KEY` | — | OpenAI key for memory embeddings |
+| `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Days until memory recency decay reaches 0.5 |
+| `MEMORY_ACCESS_BOOST_MAX` | `1.5` | Maximum access boost multiplier for reranking |
+| `MEMORY_ACCESS_RECENCY_HOURS` | `48` | Hours within which access counts for full boost |
+| `MEMORY_CANDIDATE_MULTIPLIER` | `3` | Candidate set size relative to requested limit |
 | `CAPABILITIES` | All enabled | Comma-separated feature flags |
 | `HEARTBEAT_INTERVAL_MS` | `90000` | Heartbeat sweep interval (ms) |
 | `HEARTBEAT_DISABLE` | `false` | Set to `true` to disable the heartbeat module |
@@ -31,7 +35,7 @@ Complete reference for all environment variables used by Agent Swarm.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code) or `pi` (pi-mono). See [Harness Configuration](/docs/guides/harness-configuration) |
+| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code), `codex`, or `pi` (pi-mono). See [Harness Configuration](/docs/guides/harness-configuration) |
 
 ### Credentials
 
@@ -55,6 +59,16 @@ Which credentials you need depends on your selected harness provider:
 | `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key for multi-provider model access |
 
 \* At least one credential source is required (API key or `~/.pi/agent/auth.json`). **Do not** pass `CLAUDE_CODE_OAUTH_TOKEN` when using pi-mono — it will override the configured provider. See [Harness Configuration](/docs/guides/harness-configuration) for details.
+
+**Codex** (`HARNESS_PROVIDER=codex`):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OPENAI_API_KEY` | Optional | — | Standard OpenAI API key for Codex |
+| `API_KEY` | Yes | — | Swarm API key used to fetch `codex_oauth` from the config store |
+| `MCP_BASE_URL` | Yes | `http://host.docker.internal:3013` | Swarm API URL reachable by the worker |
+
+Codex can also authenticate through `~/.codex/auth.json`, including ChatGPT OAuth restored from the swarm config store. See [Provider Auth: Codex OAuth](/docs/guides/provider-auth/codex-oauth).
 
 ### General Worker Settings
 
@@ -225,6 +239,12 @@ ANTHROPIC_API_KEY=sk-key1,sk-key2
 ```
 
 When a session is spawned, the runner splits the credential value by commas and randomly selects one. Each session gets a single credential, distributing load across subscriptions. A log line indicates which credential index was selected (never the credential itself). Single values (no commas) work unchanged — fully backward compatible.
+
+## Telemetry
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ANONYMIZED_TELEMETRY` | `true` (enabled) | Set to `false` to disable anonymized telemetry. See [Telemetry](/docs/reference/telemetry) for details |
 
 ## Business-Use Instrumentation
 

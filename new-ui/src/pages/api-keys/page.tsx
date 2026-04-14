@@ -59,6 +59,7 @@ function formatKeyType(keyType: string): string {
   if (keyType === "CLAUDE_CODE_OAUTH_TOKEN") return "OAuth";
   if (keyType === "OPENROUTER_API_KEY") return "OpenRouter";
   if (keyType === "OPENAI_API_KEY") return "OpenAI";
+  if (keyType === "CODEX_OAUTH") return "codex-oauth";
   return keyType;
 }
 

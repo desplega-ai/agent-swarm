@@ -72,6 +72,8 @@ import {
   getCodexContextWindow,
   resolveCodexModel,
 } from "./codex-models";
+import { credentialsToAuthJson } from "./codex-oauth/auth-json.js";
+import { getValidCodexOAuth } from "./codex-oauth/storage.js";
 import { resolveCodexPrompt } from "./codex-skill-resolver";
 import { createCodexSwarmEventHandler } from "./codex-swarm-events";
 import type {
@@ -791,6 +793,46 @@ export class CodexAdapter implements ProviderAdapter {
           : {}),
         ...(config.env ?? {}),
       };
+
+      // OAuth credential resolution: if no OPENAI_API_KEY is set, try to
+      // restore or refresh ChatGPT OAuth credentials from the config store.
+      // The entrypoint also restores at boot, but this handles cases where
+      // the entrypoint didn't run (local dev) or tokens expired mid-session.
+      if (!process.env.OPENAI_API_KEY && config.apiUrl && config.apiKey) {
+        const authJsonPath = join(os.homedir(), ".codex", "auth.json");
+        let hasAuth = false;
+        try {
+          const fs = await import("node:fs/promises");
+          await fs.access(authJsonPath);
+          hasAuth = true;
+        } catch {
+          // auth.json doesn't exist
+        }
+
+        if (!hasAuth) {
+          const oauthCreds = await getValidCodexOAuth(config.apiUrl, config.apiKey);
+          if (oauthCreds) {
+            try {
+              const fs = await import("node:fs/promises");
+              const authJson = credentialsToAuthJson(oauthCreds);
+              await fs.mkdir(join(os.homedir(), ".codex"), { recursive: true, mode: 0o700 });
+              await fs.writeFile(authJsonPath, JSON.stringify(authJson, null, 2), {
+                mode: 0o600,
+              });
+              bufferedEmit({
+                type: "raw_stderr",
+                content: "[codex] Restored OAuth credentials from config store\n",
+              });
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              bufferedEmit({
+                type: "raw_stderr",
+                content: `[codex] Failed to write auth.json: ${message}\n`,
+              });
+            }
+          }
+        }
+      }
 
       // The SDK's default `findCodexPath()` does `require.resolve("@openai/codex")`
       // from the SDK's own module. When agent-swarm runs as a Bun single-file

@@ -159,6 +159,10 @@ export const AgentTaskSchema = z.object({
 
   // User identity — canonical user who requested this task
   requestedByUserId: z.string().optional(),
+
+  // agent-swarm package version at task creation time. Enables benchmarking
+  // performance across releases. Nullable for rows created before tracking was added.
+  swarmVersion: z.string().optional(),
 });
 
 // ============================================================================
@@ -592,6 +596,9 @@ export const AgentMemorySchema = z.object({
   tags: z.array(z.string()),
   createdAt: z.string(),
   accessedAt: z.string(),
+  expiresAt: z.string().nullable().optional(),
+  accessCount: z.number().int().min(0).default(0).optional(),
+  embeddingModel: z.string().nullable().optional(),
 });
 
 export type AgentMemoryScope = z.infer<typeof AgentMemoryScopeSchema>;

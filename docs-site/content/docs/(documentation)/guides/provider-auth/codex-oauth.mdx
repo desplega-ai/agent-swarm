@@ -1,0 +1,176 @@
+---
+title: Codex OAuth
+description: Set up ChatGPT OAuth for Codex workers in local and remote Agent Swarm deployments
+---
+
+Codex workers can authenticate in three different ways:
+
+1. `OPENAI_API_KEY`
+2. A pre-seeded `~/.codex/auth.json`
+3. ChatGPT OAuth stored centrally in the swarm config store as `codex_oauth`
+
+This page covers the third option: **run the login flow once from your laptop, then let Codex workers restore the credential automatically at boot**.
+
+## When To Use This
+
+Use Codex OAuth when you want Codex workers to authenticate with your ChatGPT account instead of a raw OpenAI API key.
+
+This is useful when:
+
+- you already use Codex locally with ChatGPT OAuth
+- you do not want to distribute `OPENAI_API_KEY` to every worker
+- you want one shared Codex OAuth credential per swarm
+
+<Callout type="warn">
+`codex_oauth` is currently stored at **global swarm scope**. One successful login applies to all Codex workers that can reach that same swarm API and database.
+</Callout>
+
+## Worker Requirements
+
+Every worker that should use this path needs:
+
+```bash
+HARNESS_PROVIDER=codex
+API_KEY=your-shared-swarm-api-key
+MCP_BASE_URL=http://api:3013
+AGENT_ID=stable-worker-uuid
+```
+
+Notes:
+
+- `OPENAI_API_KEY` is **not required** for this flow.
+- `AGENT_ID` should stay stable across restarts so task resume works correctly.
+- `MCP_BASE_URL` must point to the same swarm API that stores `codex_oauth`.
+
+## How The Flow Works
+
+The login flow happens on **your machine**, not inside the container:
+
+1. You run `agent-swarm codex-login` from your laptop or local terminal.
+2. The command opens a browser and completes the ChatGPT OAuth flow.
+3. Agent Swarm stores the resulting credential in the API config store as `codex_oauth`.
+4. Codex workers fetch that credential during container boot.
+5. The entrypoint converts it into the real `~/.codex/auth.json` format expected by the Codex CLI.
+
+That means the worker never needs a separate OAuth prompt.
+
+## Local Setup
+
+Start the API first, then run the login flow:
+
+```bash
+bun run start:http
+```
+
+In another terminal:
+
+```bash
+bun run src/cli.tsx codex-login
+```
+
+The command prompts for:
+
+- swarm API URL
+- swarm API key
+
+If your terminal supports raw-mode input, the API key is masked.
+
+For a default local setup:
+
+- API URL: `http://localhost:3013`
+- API key: `123123`
+
+After the login completes, restart any local Codex worker containers so they restore the stored credential on boot.
+
+## Remote Docker Compose Setup
+
+For a remote swarm, keep two URLs in mind:
+
+- **Laptop-facing API URL**: the public URL you use when running `codex-login`
+- **Worker-facing API URL**: the internal URL used by containers in `MCP_BASE_URL`
+
+These can be different as long as they reach the **same** swarm API and database.
+
+Example:
+
+```bash
+# run from your laptop
+bun run src/cli.tsx codex-login \
+  --api-url https://swarm.example.com \
+  --api-key YOUR_API_KEY
+```
+
+Worker config inside Docker Compose might still be:
+
+```bash
+HARNESS_PROVIDER=codex
+API_KEY=YOUR_API_KEY
+MCP_BASE_URL=http://api:3013
+AGENT_ID=c3b4d5e6-7890-12fa-bcde-345678901bcd
+```
+
+After the login completes, restart Codex workers:
+
+```bash
+docker compose restart worker-codex
+```
+
+If the remote API is not publicly reachable, use an SSH tunnel:
+
+```bash
+ssh -L 3013:localhost:3013 your-server
+bun run src/cli.tsx codex-login --api-url http://localhost:3013 --api-key YOUR_API_KEY
+```
+
+## Verification
+
+### Verify the credential was stored
+
+```bash
+curl -H "Authorization: Bearer YOUR_API_KEY" \
+  "http://localhost:3013/api/config/resolved?includeSecrets=true&key=codex_oauth"
+```
+
+### Verify the worker restored it
+
+```bash
+docker logs <codex-worker-container> 2>&1 | grep "Restored codex OAuth credentials"
+```
+
+### Verify a task uses Codex OAuth
+
+Run a trivial task, then inspect the task record:
+
+```bash
+curl -H "Authorization: Bearer YOUR_API_KEY" \
+  "http://localhost:3013/api/tasks/<task-id>"
+```
+
+You should see:
+
+- `credentialKeyType: "CODEX_OAUTH"`
+- `credentialKeySuffix: "..."`
+
+The API Keys dashboard should also show a `codex-oauth` credential entry.
+
+## Troubleshooting
+
+### Worker says `Token data is not available`
+
+This usually means the worker did not get a valid Codex `auth.json`.
+
+Check:
+
+- `codex_oauth` exists in the config store
+- the worker was restarted after login
+- the worker can reach `MCP_BASE_URL`
+
+### `codex-login` worked locally but workers still do not pick it up
+
+Check that your laptop and the workers are talking to the same swarm API/database. A common mistake is logging into staging while the worker points at production, or vice versa.
+
+### I want different credentials for different workers
+
+That is not supported by the current Codex OAuth path because `codex_oauth` is global to the swarm.
+
+If you need per-worker separation today, use separate swarm deployments or `OPENAI_API_KEY` instead.
