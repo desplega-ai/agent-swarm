@@ -127,13 +127,24 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleMcp(req, res, transports),
   ];
 
-  for (const handler of handlers) {
-    if (await handler()) return;
-  }
+  try {
+    for (const handler of handlers) {
+      if (await handler()) return;
+    }
 
-  // ── 404 ──
-  res.writeHead(404);
-  res.end("Not Found");
+    // ── 404 ──
+    res.writeHead(404);
+    res.end("Not Found");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[HTTP] ❌ ${req.method} ${req.url} → ${message}`);
+    if (!res.headersSent) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: message }));
+    } else if (!res.writableEnded) {
+      res.end();
+    }
+  }
 });
 
 // Store references in globalThis for hot reload persistence
