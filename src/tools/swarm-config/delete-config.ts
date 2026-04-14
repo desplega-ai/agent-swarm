@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { deleteSwarmConfig, getSwarmConfigById } from "@/be/db";
+import { isReservedConfigKey, reservedKeyError } from "@/be/swarm-config-guard";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerDeleteConfigTool = (server: McpServer) => {
@@ -42,6 +43,18 @@ export const registerDeleteConfigTool = (server: McpServer) => {
               yourAgentId: requestInfo.agentId,
               success: false,
               message: `Config entry "${id}" not found.`,
+            },
+          };
+        }
+
+        if (isReservedConfigKey(existing.key)) {
+          const message = reservedKeyError(existing.key).message;
+          return {
+            content: [{ type: "text", text: message }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message,
             },
           };
         }

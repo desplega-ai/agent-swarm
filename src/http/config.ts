@@ -8,6 +8,7 @@ import {
   maskSecrets,
   upsertSwarmConfig,
 } from "../be/db";
+import { isReservedConfigKey, reservedKeyError } from "../be/swarm-config-guard";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -156,6 +157,11 @@ export async function handleConfig(
       return true;
     }
 
+    if (isReservedConfigKey(key)) {
+      jsonError(res, reservedKeyError(key).message, 400);
+      return true;
+    }
+
     try {
       const includeSecrets = queryParams.get("includeSecrets") === "true";
       const config = upsertSwarmConfig({
@@ -178,6 +184,15 @@ export async function handleConfig(
   if (deleteConfig.match(req.method, pathSegments)) {
     const parsed = await deleteConfig.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
+    const existing = getSwarmConfigById(parsed.params.id);
+    if (!existing) {
+      jsonError(res, "Config not found", 404);
+      return true;
+    }
+    if (isReservedConfigKey(existing.key)) {
+      jsonError(res, reservedKeyError(existing.key).message, 400);
+      return true;
+    }
     const deleted = deleteSwarmConfig(parsed.params.id);
     if (!deleted) {
       jsonError(res, "Config not found", 404);

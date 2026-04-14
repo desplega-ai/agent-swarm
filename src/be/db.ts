@@ -60,6 +60,7 @@ import { deriveProviderFromKeyType } from "../utils/credentials";
 import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import { runMigrations } from "./migrations/runner";
 import { seedDefaultTemplates } from "./seed";
+import { isReservedConfigKey, reservedKeyError } from "./swarm-config-guard";
 
 let db: Database | null = null;
 let sqliteVecAvailable = false;
@@ -4434,6 +4435,10 @@ export function upsertSwarmConfig(data: {
   envPath?: string | null;
   description?: string | null;
 }): SwarmConfig {
+  if (isReservedConfigKey(data.key)) {
+    throw reservedKeyError(data.key);
+  }
+
   const now = new Date().toISOString();
   const scopeId = data.scope === "global" ? null : (data.scopeId ?? null);
   const isSecret = data.isSecret ? 1 : 0;
@@ -4508,6 +4513,12 @@ export function upsertSwarmConfig(data: {
  * Delete a config entry by ID.
  */
 export function deleteSwarmConfig(id: string): boolean {
+  const row = getDb()
+    .prepare<{ key: string }, [string]>("SELECT key FROM swarm_config WHERE id = ?")
+    .get(id);
+  if (row && isReservedConfigKey(row.key)) {
+    throw reservedKeyError(row.key);
+  }
   const result = getDb().run("DELETE FROM swarm_config WHERE id = ?", [id]);
   return result.changes > 0;
 }

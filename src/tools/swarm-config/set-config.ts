@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { maskSecrets, upsertSwarmConfig } from "@/be/db";
+import { isReservedConfigKey, reservedKeyError } from "@/be/swarm-config-guard";
 import { createToolRegistrar } from "@/tools/utils";
 import { SwarmConfigSchema, SwarmConfigScopeSchema } from "@/types";
 
@@ -72,6 +73,18 @@ export const registerSetConfigTool = (server: McpServer) => {
               yourAgentId: requestInfo.agentId,
               success: false,
               message: `scopeId is required for scope '${scope}'.`,
+            },
+          };
+        }
+
+        if (isReservedConfigKey(key)) {
+          const message = reservedKeyError(key).message;
+          return {
+            content: [{ type: "text", text: message }],
+            structuredContent: {
+              yourAgentId: requestInfo.agentId,
+              success: false,
+              message,
             },
           };
         }
