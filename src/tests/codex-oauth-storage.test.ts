@@ -163,7 +163,7 @@ describe("deleteCodexOAuth", () => {
 
   it("does nothing when no config found", async () => {
     let deleteCalled = false;
-    globalThis.fetch = async (url: string | URL | Request, init?: RequestInit) => {
+    globalThis.fetch = async (_url: string | URL | Request, init?: RequestInit) => {
       const method = init?.method || "GET";
       if (method === "DELETE") {
         deleteCalled = true;

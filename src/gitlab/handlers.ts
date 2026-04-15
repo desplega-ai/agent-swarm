@@ -235,7 +235,7 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
   const repo = project.path_with_namespace;
 
   // Resolve canonical user from GitLab sender
-  const requestedByUserId = resolveUser({ gitlabUsername: user.username })?.id;
+  const _requestedByUserId = resolveUser({ gitlabUsername: user.username })?.id;
 
   // Only handle comments with bot mentions
   if (!detectMention(note.note)) {

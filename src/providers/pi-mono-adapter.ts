@@ -498,7 +498,7 @@ export class PiMonoAdapter implements ProviderAdapter {
 
     // 5. Create resource loader with system prompt + extension
     const resourceLoader = new DefaultResourceLoader({
-      appendSystemPrompt: config.systemPrompt || undefined,
+      appendSystemPrompt: config.systemPrompt ? [config.systemPrompt] : undefined,
       extensionFactories: [swarmExtension],
     });
 

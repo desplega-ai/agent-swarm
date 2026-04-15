@@ -721,7 +721,7 @@ export async function handleComment(
   const { action, comment, repository, sender, issue, pull_request, installation } = event;
 
   // Resolve canonical user from GitHub sender
-  const requestedByUserId = resolveUser({ githubUsername: sender.login })?.id;
+  const _requestedByUserId = resolveUser({ githubUsername: sender.login })?.id;
 
   // Only handle created action
   if (action !== "created") {
@@ -826,7 +826,7 @@ export async function handlePullRequestReview(
   const { action, review, pull_request: pr, repository, sender, installation } = event;
 
   // Resolve canonical user from GitHub sender
-  const requestedByUserId = resolveUser({ githubUsername: sender.login })?.id;
+  const _requestedByUserId = resolveUser({ githubUsername: sender.login })?.id;
 
   // Only handle submitted reviews (the most important action)
   // Edited reviews are less common and dismissed is handled by the state
