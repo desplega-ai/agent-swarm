@@ -391,7 +391,13 @@ export function registerMessageHandler(app: App): void {
     const effectiveText = buildEffectiveText(msg.text, msg.files);
 
     // Bot user ID (already cached from the bot message check above)
-    const botUserId = cachedBotUserId!;
+    if (!cachedBotUserId) {
+      console.error(
+        "[Slack] Bot user ID unavailable — skipping message to avoid silent misbehavior",
+      );
+      return;
+    }
+    const botUserId = cachedBotUserId;
 
     // Check if bot was mentioned (in original text only)
     const botMentioned = !!msg.text?.includes(`<@${botUserId}>`);
