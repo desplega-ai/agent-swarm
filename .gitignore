@@ -1,3 +1,6 @@
+# Tests
+.encryption-key
+
 .roam
 
 # MCP
@@ -62,3 +65,6 @@ docker-compose.desplega.yaml
 
 # Business-Use (local config with API key + DB)
 .business-use/
+
+# Opencode artifacts
+.opencode/

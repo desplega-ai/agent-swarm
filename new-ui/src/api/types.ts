@@ -341,6 +341,9 @@ export interface SwarmConfig {
   description: string | null;
   createdAt: string;
   lastUpdatedAt: string;
+  // True when the row's value is stored as ciphertext server-side. Plaintext
+  // rows return encrypted=false. Mirrors SwarmConfigSchema in src/types.ts.
+  encrypted: boolean;
 }
 
 export interface SwarmConfigsResponse {
