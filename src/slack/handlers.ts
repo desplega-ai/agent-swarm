@@ -160,10 +160,16 @@ interface MessageEvent {
  * Bot messages can be identified by:
  * - `subtype === "bot_message"` (traditional Slack API)
  * - `bot_id` present (newer Slack API, may lack subtype)
+ * - `user` matches the bot's own user ID (catches edge cases where
+ *    messages posted with `username` override lack `bot_id`)
  */
-export function isBotMessage(event: { subtype?: string; bot_id?: string }): boolean {
+export function isBotMessage(
+  event: { subtype?: string; bot_id?: string; user?: string },
+  botUserId?: string | null,
+): boolean {
   if (event.subtype === "bot_message") return true;
   if (event.bot_id) return true;
+  if (botUserId && event.user === botUserId) return true;
   return false;
 }
 
@@ -174,6 +180,9 @@ interface ThreadMessage {
   text?: string;
   ts: string;
 }
+
+// Cache for bot's own user ID (avoids redundant auth.test calls)
+let cachedBotUserId: string | null = null;
 
 // Cache for user display names
 const userNameCache = new Map<string, string>();
@@ -327,9 +336,25 @@ export function registerMessageHandler(app: App): void {
   app.event("message", async ({ event, client, say }) => {
     const msg = event as MessageEvent;
 
-    // Ignore bot messages (covers both subtype-based and bot_id-based detection)
-    // and message_changed events
-    if (isBotMessage(msg) || msg.subtype === "message_changed") {
+    // Ignore message_changed events
+    if (msg.subtype === "message_changed") return;
+
+    // Cache bot user ID on first message (avoids calling auth.test on every event)
+    if (!cachedBotUserId) {
+      try {
+        const authResult = await client.auth.test();
+        cachedBotUserId = authResult.user_id as string;
+      } catch (error) {
+        console.error("[Slack] Failed to cache bot user ID:", error);
+      }
+    }
+
+    // Ignore bot messages — checks subtype, bot_id, AND bot user ID.
+    // The user ID check is critical: messages posted with `username` override
+    // (e.g., via slack-reply tool) may not include bot_id in the event,
+    // causing agent completion messages to be misidentified as human messages
+    // and triggering duplicate task creation.
+    if (isBotMessage(msg, cachedBotUserId)) {
       return;
     }
     const hasText = !!msg.text?.trim();
@@ -365,9 +390,14 @@ export function registerMessageHandler(app: App): void {
     // Build effective text that includes attachment metadata
     const effectiveText = buildEffectiveText(msg.text, msg.files);
 
-    // Get bot's user ID
-    const authResult = await client.auth.test();
-    const botUserId = authResult.user_id as string;
+    // Bot user ID (already cached from the bot message check above)
+    if (!cachedBotUserId) {
+      console.error(
+        "[Slack] Bot user ID unavailable — skipping message to avoid silent misbehavior",
+      );
+      return;
+    }
+    const botUserId = cachedBotUserId;
 
     // Check if bot was mentioned (in original text only)
     const botMentioned = !!msg.text?.includes(`<@${botUserId}>`);
