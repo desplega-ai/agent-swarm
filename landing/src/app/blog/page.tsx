@@ -57,6 +57,16 @@ interface BlogPost {
 
 const posts: BlogPost[] = [
   {
+    slug: "deep-dive-context-compaction-design",
+    title:
+      "Stop Fighting Context Window Limits — Design for Compaction Instead",
+    description:
+      "Why chasing infinite context windows is wrong. Our agents perform better with intentional compaction. Here's the architecture that makes it work.",
+    date: "January 21, 2025",
+    readTime: "12 min read",
+    tags: ["context compaction", "context windows", "agent architecture", "PreCompact hook"],
+  },
+  {
     slug: "deep-dive-dag-workflow-engine-pause-resume",
     title:
       "Building a DAG Workflow Engine That Waits: Pause, Resume, and Convergence Gates",
