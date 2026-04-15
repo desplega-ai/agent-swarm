@@ -26,7 +26,7 @@ export const metadata: Metadata = {
     type: "website",
     images: [
       {
-        url: "https://agent-swarm.dev/og-image.png",
+        url: "https://agent-swarm.dev/api/og?title=Pricing+%E2%80%94+Agent+Swarm+Cloud&subtitle=%E2%82%AC9%2Fmo+platform+%2B+%E2%82%AC29%2Fmo+per+worker.+7-day+free+trial.+Self-host+for+free.",
         width: 1200,
         height: 630,
         alt: "Agent Swarm — Pricing",
@@ -38,7 +38,9 @@ export const metadata: Metadata = {
     title: "Pricing — Agent Swarm Cloud",
     description:
       "Simple, predictable pricing for Agent Swarm Cloud. Platform base at \u20AC9/mo plus \u20AC29/mo per worker. 7-day free trial included.",
-    images: ["https://agent-swarm.dev/og-image.png"],
+    images: [
+      "https://agent-swarm.dev/api/og?title=Pricing+%E2%80%94+Agent+Swarm+Cloud&subtitle=%E2%82%AC9%2Fmo+platform+%2B+%E2%82%AC29%2Fmo+per+worker.+7-day+free+trial.+Self-host+for+free.",
+    ],
   },
   alternates: {
     canonical: "/pricing",

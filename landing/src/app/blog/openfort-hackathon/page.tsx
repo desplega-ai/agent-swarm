@@ -43,7 +43,7 @@ export const metadata: Metadata = {
     tags: ["x402", "Openfort", "Base", "USDC", "hackathon", "crypto payments"],
     images: [
       {
-        url: "https://agent-swarm.dev/og-image.png",
+        url: "https://agent-swarm.dev/api/og?title=Openfort+Hackathon%3A+Teaching+Agents+to+Pay&subtitle=AI+agents+now+pay+for+API+services+with+USDC+on+Base+mainnet+via+Openfort+managed+wallets%2C+no+human+approval+needed&type=article",
         width: 1200,
         height: 630,
         alt: "Openfort Hackathon: Teaching Agents to Pay — Agent Swarm",
@@ -55,7 +55,9 @@ export const metadata: Metadata = {
     title: "Openfort Hackathon: Teaching Agents to Pay",
     description:
       "We added x402 HTTP payment support to Agent Swarm — AI agents now pay for API services with USDC on Base mainnet via Openfort managed wallets, no human approval needed.",
-    images: ["https://agent-swarm.dev/og-image.png"],
+    images: [
+      "https://agent-swarm.dev/api/og?title=Openfort+Hackathon%3A+Teaching+Agents+to+Pay&subtitle=AI+agents+now+pay+for+API+services+with+USDC+on+Base+mainnet+via+Openfort+managed+wallets%2C+no+human+approval+needed&type=article",
+    ],
   },
   alternates: {
     canonical: "/blog/openfort-hackathon",

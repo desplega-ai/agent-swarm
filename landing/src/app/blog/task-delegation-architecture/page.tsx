@@ -45,7 +45,7 @@ export const metadata: Metadata = {
     tags: ["architecture", "task delegation", "AI agents", "Claude Code", "orchestration"],
     images: [
       {
-        url: "https://agent-swarm.dev/og-image.png",
+        url: "https://agent-swarm.dev/api/og?title=The+Architecture+Behind+Task+Delegation%3A+Pools%2C+Routing%2C+and+Dependencies&subtitle=How+we+built+an+AI+task+delegation+system+with+pools%2C+dependency+graphs%2C+and+offer%2Faccept+routing+across+6+Claude+Code+agents&type=article",
         width: 1200,
         height: 630,
         alt: "The Architecture Behind Task Delegation: Pools, Routing, and Dependencies",
@@ -57,7 +57,9 @@ export const metadata: Metadata = {
     title: "The Architecture Behind Task Delegation: Pools, Routing, and Dependencies",
     description:
       "How we built an AI task delegation system with pools, dependency graphs, and offer/accept routing across 6 Claude Code agents. Lessons from 3,000+ completed tasks.",
-    images: ["https://agent-swarm.dev/og-image.png"],
+    images: [
+      "https://agent-swarm.dev/api/og?title=The+Architecture+Behind+Task+Delegation%3A+Pools%2C+Routing%2C+and+Dependencies&subtitle=How+we+built+an+AI+task+delegation+system+with+pools%2C+dependency+graphs%2C+and+offer%2Faccept+routing+across+6+Claude+Code+agents&type=article",
+    ],
   },
   alternates: {
     canonical: "/blog/task-delegation-architecture",
