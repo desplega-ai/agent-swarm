@@ -27,10 +27,10 @@ export const metadata: Metadata = {
     type: "website",
     images: [
       {
-        url: "https://agent-swarm.dev/og-image.png",
+        url: "https://agent-swarm.dev/api/og?title=Blog+%E2%80%94+Agent+Swarm&subtitle=Technical+deep+dives+on+multi-agent+AI+systems%3A+DAG+workflow+engines%2C+persistent+agent+identity%2C+task+state+machines%2C+and+autonomous+coding+agent+architecture",
         width: 1200,
         height: 630,
-        alt: "Agent Swarm — Multi-Agent Orchestration for AI Coding Assistants",
+        alt: "Blog — Agent Swarm",
       },
     ],
   },
@@ -39,7 +39,9 @@ export const metadata: Metadata = {
     title: "Blog — Agent Swarm",
     description:
       "Technical deep dives on multi-agent AI systems: DAG workflow engines, persistent agent identity, task state machines, and autonomous coding agent architecture.",
-    images: ["https://agent-swarm.dev/og-image.png"],
+    images: [
+      "https://agent-swarm.dev/api/og?title=Blog+%E2%80%94+Agent+Swarm&subtitle=Technical+deep+dives+on+multi-agent+AI+systems%3A+DAG+workflow+engines%2C+persistent+agent+identity%2C+task+state+machines%2C+and+autonomous+coding+agent+architecture",
+    ],
   },
   alternates: {
     canonical: "/blog",

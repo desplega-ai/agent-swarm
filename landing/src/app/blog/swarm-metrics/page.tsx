@@ -43,7 +43,7 @@ export const metadata: Metadata = {
     tags: ["metrics", "AI agents", "Claude Code", "automation", "open source"],
     images: [
       {
-        url: "https://agent-swarm.dev/og-image.png",
+        url: "https://agent-swarm.dev/api/og?title=Agent+Swarm+by+the+Numbers%3A+80+Days%2C+242+PRs%2C+6+Agents&subtitle=6+Claude+Code+AI+agents+autonomously+shipped+242+pull+requests+across+4+repos+in+80+days&type=article",
         width: 1200,
         height: 630,
         alt: "Agent Swarm by the Numbers: 80 Days, 242 PRs, 6 Agents",
@@ -55,7 +55,9 @@ export const metadata: Metadata = {
     title: "Agent Swarm by the Numbers: 80 Days, 242 PRs, 6 Agents",
     description:
       "6 Claude Code AI agents autonomously shipped 242 pull requests across 4 repos in 80 days — building their own UI, fixing bugs, and running a marketing campaign.",
-    images: ["https://agent-swarm.dev/og-image.png"],
+    images: [
+      "https://agent-swarm.dev/api/og?title=Agent+Swarm+by+the+Numbers%3A+80+Days%2C+242+PRs%2C+6+Agents&subtitle=6+Claude+Code+AI+agents+autonomously+shipped+242+pull+requests+across+4+repos+in+80+days&type=article",
+    ],
   },
   alternates: {
     canonical: "/blog/swarm-metrics",
