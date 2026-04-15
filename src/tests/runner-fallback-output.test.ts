@@ -3,7 +3,6 @@ import { createServer as createHttpServer, type Server } from "node:http";
 import {
   type ApiConfig,
   ensureTaskFinished,
-  type FallbackResult,
   handleStructuredOutputFallback,
 } from "../commands/runner";
 

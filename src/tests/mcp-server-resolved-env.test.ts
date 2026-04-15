@@ -4,10 +4,8 @@ import {
   closeDb,
   createAgent,
   createMcpServer,
-  getAgentMcpServers,
   getResolvedConfig,
   initDb,
-  installMcpServer,
   upsertSwarmConfig,
 } from "../be/db";
 

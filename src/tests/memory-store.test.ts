@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, createAgent, initDb } from "../be/db";
-import { serializeEmbedding } from "../be/embedding";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 
 const TEST_DB_PATH = "./test-memory-store.sqlite";
@@ -323,7 +322,7 @@ describe("SqliteMemoryStore", () => {
 
     test("filters by agentId", () => {
       const filtered = store.listForReembedding({ agentId: agentA });
-      expect(filtered.every((m) => true)).toBe(true); // just verifying it doesn't throw
+      expect(filtered.every((_m) => true)).toBe(true); // just verifying it doesn't throw
       expect(filtered.length).toBeGreaterThan(0);
     });
   });
