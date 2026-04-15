@@ -293,6 +293,28 @@ describe("isBotMessage", () => {
     });
   });
 
+  describe("detects bot messages by user ID", () => {
+    test("returns true when user matches botUserId", () => {
+      expect(isBotMessage({ user: "UBOT123" }, "UBOT123")).toBe(true);
+    });
+
+    test("returns false when user does not match botUserId", () => {
+      expect(isBotMessage({ user: "UHUMAN456" }, "UBOT123")).toBe(false);
+    });
+
+    test("returns false when botUserId is null", () => {
+      expect(isBotMessage({ user: "UBOT123" }, null)).toBe(false);
+    });
+
+    test("returns false when botUserId is undefined", () => {
+      expect(isBotMessage({ user: "UBOT123" }, undefined)).toBe(false);
+    });
+
+    test("returns false when botUserId is not provided", () => {
+      expect(isBotMessage({ user: "UBOT123" })).toBe(false);
+    });
+  });
+
   describe("allows human messages", () => {
     test("returns false for regular user message (no subtype, no bot_id)", () => {
       expect(isBotMessage({})).toBe(false);
@@ -304,6 +326,10 @@ describe("isBotMessage", () => {
 
     test("returns false when subtype is undefined and bot_id is undefined", () => {
       expect(isBotMessage({ subtype: undefined, bot_id: undefined })).toBe(false);
+    });
+
+    test("returns false for human user when botUserId is known", () => {
+      expect(isBotMessage({ user: "UHUMAN789" }, "UBOT123")).toBe(false);
     });
   });
 
@@ -320,9 +346,16 @@ describe("isBotMessage", () => {
       expect(isBotMessage({ bot_id: "B_SWARM_BOT" })).toBe(true);
     });
 
+    test("agent posting with username override and NO bot_id — caught by user ID", () => {
+      // Edge case: username override causes Slack to omit bot_id from the event.
+      // The user ID fallback ensures these are still detected as bot messages.
+      expect(isBotMessage({ user: "UBOT123" }, "UBOT123")).toBe(true);
+    });
+
     test("human follow-up in same thread is NOT filtered", () => {
       // Human says "hey lead why did you process this 3 times" — no bot_id, no bot subtype
-      expect(isBotMessage({})).toBe(false);
+      expect(isBotMessage({}, "UBOT123")).toBe(false);
+      expect(isBotMessage({ user: "UHUMAN456" }, "UBOT123")).toBe(false);
     });
   });
 });

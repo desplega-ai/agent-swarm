@@ -35,10 +35,10 @@ export const metadata: Metadata = {
     locale: "en_US",
     images: [
       {
-        url: "https://agent-swarm.dev/og-image.png",
+        url: "https://agent-swarm.dev/api/og?title=Agent+Swarm+%E2%80%94+Multi-Agent+Orchestration+for+AI+Coding+Assistants&subtitle=Run+a+team+of+AI+coding+agents+that+coordinate+autonomously.+Open+source%2C+MCP-powered.",
         width: 1200,
         height: 630,
-        alt: "Agent Swarm",
+        alt: "Agent Swarm — Multi-Agent Orchestration for AI Coding Assistants",
       },
     ],
   },
@@ -49,7 +49,9 @@ export const metadata: Metadata = {
     title: "Agent Swarm — Multi-Agent Orchestration for AI Coding Assistants",
     description:
       "Run a team of AI coding agents that coordinate autonomously. Start your 7-day free trial on Agent Swarm Cloud, or self-host for free. Open source, MCP-powered.",
-    images: ["https://agent-swarm.dev/og-image.png"],
+    images: [
+      "https://agent-swarm.dev/api/og?title=Agent+Swarm+%E2%80%94+Multi-Agent+Orchestration+for+AI+Coding+Assistants&subtitle=Run+a+team+of+AI+coding+agents+that+coordinate+autonomously.+Open+source%2C+MCP-powered.",
+    ],
   },
   metadataBase: new URL("https://agent-swarm.dev"),
   robots: {

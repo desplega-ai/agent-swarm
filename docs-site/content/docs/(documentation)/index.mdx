@@ -58,7 +58,13 @@ graph TD
 
 ## Supported AI Assistants
 
-Agent Swarm currently supports **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** as the AI coding assistant. Support for other agents (Codex, Gemini CLI, and other MCP-compatible assistants) is coming soon.
+Agent Swarm supports multiple AI coding assistants via the harness system:
+
+- **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** (recommended) — Anthropic's official CLI for Claude
+- **[Codex](https://github.com/openai/codex)** — OpenAI's coding agent with support for both API keys and ChatGPT OAuth
+- **pi (pi-mono)** — Alternative provider backend for other model access
+
+See the [Harness Configuration](/docs/guides/harness-configuration) guide for setup instructions for each provider.
 
 ## Next Steps
 
