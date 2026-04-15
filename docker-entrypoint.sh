@@ -71,8 +71,9 @@ elif [ "$HARNESS_PROVIDER" = "codex" ]; then
     fi
 else
     # Claude auth (default)
-    if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
-        echo "Error: CLAUDE_CODE_OAUTH_TOKEN environment variable is required"
+    # Allow both Oauth and ANTHROPIC_API_KEY for flexibility, but require at least one
+    if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
+        echo "Error: Claude provider requires either CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY environment variable"
         exit 1
     fi
 fi
