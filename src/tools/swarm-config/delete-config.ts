@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { deleteSwarmConfig, getSwarmConfigById } from "@/be/db";
+import { deleteSwarmConfig, getSwarmConfigLookupById } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
 
 export const registerDeleteConfigTool = (server: McpServer) => {
@@ -34,7 +34,7 @@ export const registerDeleteConfigTool = (server: McpServer) => {
 
       try {
         // Check if config exists first for a better error message
-        const existing = getSwarmConfigById(id);
+        const existing = getSwarmConfigLookupById(id);
         if (!existing) {
           return {
             content: [{ type: "text", text: `Config entry "${id}" not found.` }],

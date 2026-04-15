@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.67.0] - 2026-04-14
+
+### Added
+- Encrypted-at-rest storage for `swarm_config` `isSecret=1` rows using AES-256-GCM
+- New `SECRETS_ENCRYPTION_KEY` / `SECRETS_ENCRYPTION_KEY_FILE` env vars for providing the master key (otherwise auto-generated at `<data-dir>/.encryption-key` only when the DB does not yet contain encrypted secret rows — e.g. a fresh DB or first upgrade from plaintext-only secrets)
+- Auto-migration of legacy plaintext secrets to ciphertext on first boot after upgrade
+
+### Security
+- `swarm_config` API now rejects reserved keys `API_KEY` and `SECRETS_ENCRYPTION_KEY` (case-insensitive) at the HTTP, MCP, and DB layers — these remain environment-only and can no longer be stored in the SQLite config store
+- Secrets are no longer stored as plaintext in `agent-swarm-db.sqlite`; on-disk rows carry only base64-encoded AES-256-GCM payloads of `iv || ciphertext || authTag`
+
+### Operator notes
+- Upgrade is transparent as long as the same encryption key remains available across restarts; legacy plaintext secrets are auto-migrated on first boot after upgrade
+- Existing databases that already contain encrypted secret rows now fail closed if the encryption key is missing, instead of silently auto-generating a different key
+- **First-time migration safety:** If upgrading from plaintext without `SECRETS_ENCRYPTION_KEY` set, a one-time plaintext backup is created at `<db-path>.backup.secrets-YYYY-MM-DD.env` before encryption. **Delete this file after verifying your encryption key is backed up.**
+- **Back up and preserve the actual encryption key material alongside your SQLite DB** — whether it comes from `SECRETS_ENCRYPTION_KEY`, `SECRETS_ENCRYPTION_KEY_FILE`, or an auto-generated `.encryption-key`. Losing that key means losing all encrypted secrets with no recovery path
+- Do not switch between env/file/auto-generated key sources unless the underlying base64 key value is identical
+- Key rotation is not yet supported (follow-up release)
+
 ## [1.66.0] - 2026-04-13
 
 ### Added
