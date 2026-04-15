@@ -250,6 +250,11 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       )
       .get()?.present ?? 0) === 1;
 
+  // Track whether user provided the key (for backup decision)
+  const userProvidedKey = !!(
+    process.env.SECRETS_ENCRYPTION_KEY?.length || process.env.SECRETS_ENCRYPTION_KEY_FILE?.length
+  );
+
   // Resolve the secrets encryption key after migrations so we can tell whether
   // this DB already contains encrypted secret rows (must reuse an explicit or
   // on-disk key) or is still plaintext-only (safe to generate a new key before
@@ -261,7 +266,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   // continuing would leave secrets at rest in plaintext — the opposite of the
   // guarantee this feature provides.
   try {
-    autoEncryptLegacyPlaintextSecrets(database);
+    autoEncryptLegacyPlaintextSecrets(database, dbPath, { createBackup: !userProvidedKey });
   } catch (err) {
     console.error(
       `[secrets] FATAL: failed to auto-encrypt legacy secrets: ${(err as Error).message}`,
@@ -4417,15 +4422,47 @@ function rowToSwarmConfig(row: SwarmConfigRow): SwarmConfig {
  * Exported for tests so they can simulate a pre-existing legacy row without
  * needing to replay a full boot.
  */
-export function autoEncryptLegacyPlaintextSecrets(database: Database): void {
+export function autoEncryptLegacyPlaintextSecrets(
+  database: Database,
+  dbPath: string,
+  options: { createBackup?: boolean } = {},
+): void {
   const rows = database
-    .prepare<{ id: string; value: string }, []>(
-      "SELECT id, value FROM swarm_config WHERE isSecret = 1 AND encrypted = 0",
+    .prepare<{ id: string; key: string; value: string }, []>(
+      "SELECT id, key, value FROM swarm_config WHERE isSecret = 1 AND encrypted = 0",
     )
     .all();
   if (rows.length === 0) return;
 
   const key = getEncryptionKey();
+
+  // Create plaintext backup if key was auto-generated (not user-provided)
+  if (options.createBackup) {
+    const { writeFileSync } = require("node:fs");
+    const backupPath = `${dbPath}.backup.secrets-${new Date().toISOString().split("T")[0]}.env`;
+    const backupLines = [
+      "# PLAINTEXT SECRET BACKUP - CREATED DURING AUTO-ENCRYPTION MIGRATION",
+      "# This file was created because you did not provide SECRETS_ENCRYPTION_KEY",
+      "# DELETE THIS FILE after verifying your encryption key is safely backed up",
+      "#",
+      "# Encryption key location:",
+      "#   - Check: <data-dir>/.encryption-key",
+      "#   - Or set: SECRETS_ENCRYPTION_KEY=<base64-key>",
+      "",
+      ...rows.map((r) => `${r.key}=${r.value}`),
+      "",
+    ].join("\n");
+
+    try {
+      writeFileSync(backupPath, backupLines, { mode: 0o600 });
+      console.warn(`[secrets] Created plaintext backup: ${backupPath}`);
+      console.warn(`[secrets] DELETE THIS FILE after verifying your encryption key is backed up!`);
+    } catch (err) {
+      console.error(`[secrets] Failed to create backup file: ${(err as Error).message}`);
+      // Continue with encryption even if backup fails - the secrets are still in DB
+    }
+  }
+
   console.log(`[secrets] Encrypting ${rows.length} legacy plaintext secret(s)...`);
 
   const txn = database.transaction((items: { id: string; value: string }[]) => {
