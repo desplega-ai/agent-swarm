@@ -130,4 +130,4 @@ agent-swarm/
 ## Contact & Support
 
 - Issues: https://github.com/desplega-ai/agent-swarm/issues
-- Built by: Desplega Labs (https://desplega.ai)
+- Built by: Desplega Labs (https://www.desplega.sh)
