@@ -114,11 +114,14 @@ Swarm
 agent-swarm/
 ├── src/
 │   ├── commands/       # Runner, worker, leader entrypoints
-│   ├── be/             # Backend: DB, API, MCP server
-│   │   ├── db/         # SQLite schema + queries
-│   │   └── server.ts   # MCP tool server
+│   ├── be/             # Backend: DB, migrations, memory
+│   │   ├── db.ts       # SQLite schema + query functions
+│   │   ├── db-queries/ # Modular query files
+│   │   └── migrations/ # SQL migration files
+│   ├── server.ts       # MCP tool server
 │   ├── hooks/          # Claude Code lifecycle hooks
-│   └── plugins/        # Skill definitions, commands
+│   └── http/           # HTTP API route handlers
+├── plugin/             # Skill definitions, commands
 ├── landing/            # agent-swarm.dev website (Next.js)
 ├── new-ui/             # Agent Swarm Cloud UI (Next.js + MUI)
 └── docker-compose.example.yml
