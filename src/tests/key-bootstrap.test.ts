@@ -157,6 +157,57 @@ describe("key-bootstrap: validation", () => {
     expect(() => resolveEncryptionKey(dbPath)).toThrow(/got 16 bytes/);
   });
 
+  it("error message includes openssl generation commands and the -base64 39 hint", () => {
+    process.env[ENV_KEY] = Buffer.alloc(16).toString("base64");
+    const dbPath = path.join(tmpDir, "test.sqlite");
+    let caught: Error | null = null;
+    try {
+      resolveEncryptionKey(dbPath);
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught).toBeTruthy();
+    const msg = caught?.message ?? "";
+    expect(msg).toContain("openssl rand -base64 32");
+    expect(msg).toContain("openssl rand -hex 32");
+    expect(msg).toContain("openssl rand -base64 39");
+  });
+
+  it("accepts a hex-encoded 32-byte key via SECRETS_ENCRYPTION_KEY env var", () => {
+    const keyBytes = randomBytes(AES_KEY_BYTES);
+    process.env[ENV_KEY] = keyBytes.toString("hex");
+    const dbPath = path.join(tmpDir, "test.sqlite");
+    const resolved = resolveEncryptionKey(dbPath);
+    expect(resolved.equals(keyBytes)).toBe(true);
+  });
+
+  it("accepts a hex-encoded 32-byte key via SECRETS_ENCRYPTION_KEY_FILE", () => {
+    const keyBytes = randomBytes(AES_KEY_BYTES);
+    const keyPath = path.join(tmpDir, "hex.key");
+    writeFileSync(keyPath, keyBytes.toString("hex"));
+    process.env[ENV_KEY_FILE] = keyPath;
+    const dbPath = path.join(tmpDir, "test.sqlite");
+    const resolved = resolveEncryptionKey(dbPath);
+    expect(resolved.equals(keyBytes)).toBe(true);
+  });
+
+  it("accepts a hex-encoded 32-byte key via on-disk .encryption-key", () => {
+    const keyBytes = randomBytes(AES_KEY_BYTES);
+    const keyFilePath = path.join(tmpDir, ".encryption-key");
+    writeFileSync(keyFilePath, keyBytes.toString("hex"));
+    const dbPath = path.join(tmpDir, "test.sqlite");
+    const resolved = resolveEncryptionKey(dbPath);
+    expect(resolved.equals(keyBytes)).toBe(true);
+  });
+
+  it("accepts uppercase hex-encoded keys", () => {
+    const keyBytes = randomBytes(AES_KEY_BYTES);
+    process.env[ENV_KEY] = keyBytes.toString("hex").toUpperCase();
+    const dbPath = path.join(tmpDir, "test.sqlite");
+    const resolved = resolveEncryptionKey(dbPath);
+    expect(resolved.equals(keyBytes)).toBe(true);
+  });
+
   it("throws when SECRETS_ENCRYPTION_KEY_FILE points to a malformed file", () => {
     const keyPath = path.join(tmpDir, "bad.key");
     writeFileSync(keyPath, Buffer.alloc(10).toString("base64"));

@@ -16,6 +16,8 @@ Complete reference for all environment variables used by Agent Swarm.
 | `APP_URL` | — | Dashboard URL for Slack message links |
 | `ENV` | — | Environment mode (`development` adds prefix to Slack agent names) |
 | `DATABASE_PATH` | `./agent-swarm-db.sqlite` | SQLite database file path |
+| `SECRETS_ENCRYPTION_KEY` | Auto-generated on first boot | Master key for encrypting `swarm_config` secret rows at rest. Accepts base64 (43-char, e.g. `openssl rand -base64 32`) **or** 64-char hex (e.g. `openssl rand -hex 32`). Decodes to exactly 32 bytes. **Reserved**: cannot be stored in the DB config store. See [Encryption Key](/docs/guides/deployment#encryption-key). |
+| `SECRETS_ENCRYPTION_KEY_FILE` | — | Alternative to `SECRETS_ENCRYPTION_KEY`: absolute path to a file whose contents are the base64- or hex-encoded key. Useful with Docker secrets or k8s `Secret` volume mounts. |
 | `SCHEDULER_INTERVAL_MS` | `10000` | Polling interval for scheduled tasks (ms) |
 | `OPENAI_API_KEY` | — | OpenAI key for memory embeddings |
 | `MEMORY_RECENCY_HALF_LIFE_DAYS` | `14` | Days until memory recency decay reaches 0.5 |
@@ -30,6 +32,17 @@ Complete reference for all environment variables used by Agent Swarm.
 | `HEARTBEAT_STALL_THRESHOLD_MIN` | `30` | Minutes before an in-progress task is considered stalled |
 | `HEARTBEAT_STALE_CLEANUP_MIN` | `30` | Minutes before stale resources (sessions, reviewing tasks) are cleaned up |
 | `HEARTBEAT_MAX_AUTO_ASSIGN` | `5` | Max pool tasks to auto-assign per sweep |
+
+<Callout type="warn">
+**Encryption key resolution** (see [Encryption Key](/docs/guides/deployment#encryption-key) for the full guide):
+
+1. `SECRETS_ENCRYPTION_KEY` env var
+2. `SECRETS_ENCRYPTION_KEY_FILE` env var (path to a file containing the key)
+3. `<data-dir>/.encryption-key` on the API's data volume
+4. Auto-generated on first boot **only** when the DB does not yet contain encrypted secret rows
+
+Losing the key while keeping the database means losing every encrypted secret with no recovery path. Back up the key alongside every database backup.
+</Callout>
 
 ## Docker Worker Variables
 

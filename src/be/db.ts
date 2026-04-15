@@ -100,12 +100,21 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   database.run("PRAGMA journal_mode = WAL;");
   database.run("PRAGMA foreign_keys = ON;");
 
-  // Load sqlite-vec extension for vector search
+  // Load sqlite-vec extension for vector search.
+  // In compiled binaries (`bun build --compile`) the JS lives in /$bunfs/ and
+  // `require.resolve("sqlite-vec-<platform>/vec0.so")` can't find the native
+  // asset — so we prefer an explicit filesystem path when set, and only fall
+  // back to the npm resolver for normal dev runs.
   try {
-    const sqliteVec = require("sqlite-vec");
-    sqliteVec.load(database);
+    const extensionPath = process.env.SQLITE_VEC_EXTENSION_PATH;
+    if (extensionPath) {
+      database.loadExtension(extensionPath);
+    } else {
+      const sqliteVec = require("sqlite-vec");
+      sqliteVec.load(database);
+    }
     sqliteVecAvailable = true;
-    console.log("[db] sqlite-vec loaded");
+    console.log(`[db] sqlite-vec loaded${extensionPath ? ` from ${extensionPath}` : ""}`);
   } catch (err) {
     console.warn(
       "[db] sqlite-vec not available, falling back to in-memory cosine:",

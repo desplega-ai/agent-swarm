@@ -36,6 +36,7 @@ Create a `.env` file in the same directory as `docker-compose.yml`:
 # ---- Required ----
 API_KEY=your-secret-api-key
 CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token   # Run `claude setup-token` to get this
+SECRETS_ENCRYPTION_KEY=                     # Run `openssl rand -base64 32` and paste here. See "Encryption Key" below.
 
 # ---- Optional ----
 GITHUB_TOKEN=ghp_xxxx                      # For git operations inside agents
@@ -46,6 +47,10 @@ SWARM_URL=localhost                         # Base domain for service discovery
 
 <Callout type="info">
 You can pass multiple OAuth tokens for load balancing: `CLAUDE_CODE_OAUTH_TOKEN=token1,token2,token3`
+</Callout>
+
+<Callout type="info">
+If you leave `SECRETS_ENCRYPTION_KEY` blank on a brand-new deploy, the API will auto-generate one and write it to the `swarm_api` volume at `.encryption-key`. For production, set it explicitly so you control where it lives and can back it up alongside your other secrets. See [Encryption Key](#encryption-key).
 </Callout>
 
 ### Step 3: Generate Stable Agent IDs
@@ -163,6 +168,71 @@ docker run --rm -v swarm_api:/app -v $(pwd):/backup alpine \
 docker compose up -d
 ```
 
+<Callout type="warn">
+A database backup is useless without the matching [encryption key](#encryption-key). Back up both together.
+</Callout>
+
+---
+
+## Encryption Key
+
+Agent Swarm encrypts all `swarm_config` rows marked as secrets (OAuth tokens, API keys, webhook signing secrets) at rest using AES-256-GCM. The master key is resolved on every boot in this order:
+
+1. `SECRETS_ENCRYPTION_KEY` env var (recommended for production)
+2. `SECRETS_ENCRYPTION_KEY_FILE` env var (path to a file containing the key — useful with Docker secrets or k8s `Secret` volume mounts)
+3. `<data-dir>/.encryption-key` file on the API's data volume
+4. Auto-generated on first boot **only** when the database does not yet contain any encrypted secret rows. Existing databases with encrypted rows fail closed if no key is found, instead of silently generating a different key and orphaning your secrets.
+
+### Generating a key
+
+Use either format — both are accepted everywhere (env var, file, on-disk):
+
+```bash
+# Recommended: 43-character base64 string
+openssl rand -base64 32
+
+# Equivalent: 64-character hex string
+openssl rand -hex 32
+```
+
+<Callout type="warn">
+**Do NOT use `openssl rand -base64 39`** (or any size other than 32). That produces a 52-character string that decodes to 39 bytes, which the server will reject at boot with `Invalid encryption key ... got 39 bytes after base64 decode`. The number passed to `openssl rand` is the decoded byte count, and AES-256 requires exactly 32.
+</Callout>
+
+### Backing up the key
+
+The encryption key is **just as critical as your database backup**. Losing the key while keeping the database means you lose every encrypted secret with no recovery path — you would have to manually re-add every OAuth token, API key, and webhook secret in the swarm.
+
+**Back up both together**, every time:
+
+```bash
+# Back up DB and key in one shot (Docker Compose deployment)
+docker run --rm -v swarm_api:/app -v $(pwd):/backup alpine sh -c '
+  cp /app/agent-swarm-db.sqlite /backup/agent-swarm-db-backup.sqlite &&
+  cp /app/.encryption-key /backup/encryption-key-backup 2>/dev/null || true
+'
+```
+
+If you set `SECRETS_ENCRYPTION_KEY` via env var instead, store the value itself in your secrets manager (1Password, Vault, AWS Secrets Manager, etc.) — treat it with the same rigor as your database backup.
+
+### Common mistakes
+
+| Mistake | Symptom | Fix |
+|---------|---------|-----|
+| Used `openssl rand -base64 39` | `got 39 bytes after base64 decode` on boot | Regenerate with `-base64 32` (or `-hex 32`) |
+| Wrapped value in quotes in `.env` | Same as above (extra characters change the decoded length) | Remove the quotes — `.env` lines are `KEY=value`, no quoting needed |
+| Trailing newline or whitespace | Same as above | The server trims surrounding whitespace, but if your secrets manager injected embedded characters, regenerate |
+| Changed key between deploys | Decryption errors when reading existing secrets | Restore the original key — key rotation is not yet supported (planned) |
+| Lost the key entirely | Decryption errors on every secret read | Manually delete encrypted rows via the dashboard or `swarm_config` API and re-add them under the new key |
+
+<Callout type="info">
+**Reserved key names**: `SECRETS_ENCRYPTION_KEY` and `API_KEY` are blocked from being stored in the DB config store (HTTP, MCP, and direct DB layers all reject them, case-insensitive). They must come from the environment.
+</Callout>
+
+### First-time migration from plaintext secrets
+
+If you upgraded from a pre-1.67 deploy that stored secrets in plaintext **without** setting `SECRETS_ENCRYPTION_KEY` ahead of time, the API auto-generates a `.encryption-key` on the data volume and writes a one-time plaintext backup at `<db-path>.backup.secrets-YYYY-MM-DD.env` before encrypting the existing rows. **Delete that backup file immediately after verifying your new encryption key is safely backed up** — it contains every secret in plaintext.
+
 ---
 
 ## Environment Variables
@@ -175,6 +245,7 @@ These are the key variables for Docker Compose deployment. For the complete refe
 |----------|-------------|
 | `API_KEY` | Shared authentication key between API and agents |
 | `CLAUDE_CODE_OAUTH_TOKEN` | OAuth token from `claude setup-token`. Supports comma-separated values for load balancing. |
+| `SECRETS_ENCRYPTION_KEY` | Master key for encrypting `swarm_config` secrets at rest. See [Encryption Key](#encryption-key) for generation and backup guidance. |
 
 ### Per-Agent (in `docker-compose.yml`)
 

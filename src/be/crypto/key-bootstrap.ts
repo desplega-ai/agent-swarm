@@ -26,22 +26,39 @@ const ENV_KEY = "SECRETS_ENCRYPTION_KEY";
 const ENV_KEY_FILE = "SECRETS_ENCRYPTION_KEY_FILE";
 const KEY_FILENAME = ".encryption-key";
 
+const HEX_32_BYTE_RE = /^[0-9a-fA-F]{64}$/;
+
+function keyGenerationHelp(): string {
+  return [
+    "",
+    "How to generate a valid key:",
+    "  openssl rand -base64 32   # 43-char base64 (recommended)",
+    "  openssl rand -hex 32      # 64-char hex (also accepted)",
+    "",
+    "Common mistake: `openssl rand -base64 39` produces a 52-char string that",
+    "decodes to 39 bytes — the number passed to `openssl rand` is the decoded",
+    "byte count, and AES-256 requires exactly 32.",
+  ].join("\n");
+}
+
 function decodeAndValidate(source: string, content: string): Buffer {
   const trimmed = content.trim();
-  let decoded: Buffer;
-  try {
-    decoded = Buffer.from(trimmed, "base64");
-  } catch (err) {
-    throw new Error(
-      `Invalid encryption key at ${source}: base64 decode failed: ${(err as Error).message}`,
-    );
+
+  // Hex path: a 64-char string of [0-9a-fA-F] is unambiguously hex — it would
+  // decode to 48 bytes as base64, never 32, so there is no overlap with the
+  // base64 happy path.
+  if (HEX_32_BYTE_RE.test(trimmed)) {
+    const decoded = Buffer.from(trimmed, "hex");
+    if (decoded.length === AES_KEY_BYTES) return decoded;
   }
-  if (decoded.length !== AES_KEY_BYTES) {
-    throw new Error(
-      `Invalid encryption key at ${source}: expected ${AES_KEY_BYTES} bytes after base64 decode, got ${decoded.length} bytes`,
-    );
-  }
-  return decoded;
+
+  const decoded = Buffer.from(trimmed, "base64");
+  if (decoded.length === AES_KEY_BYTES) return decoded;
+
+  throw new Error(
+    `Invalid encryption key at ${source}: expected ${AES_KEY_BYTES} bytes, ` +
+      `got ${decoded.length} bytes after base64 decode.\n${keyGenerationHelp()}`,
+  );
 }
 
 type ResolveEncryptionKeyOptions = {

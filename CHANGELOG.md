@@ -6,16 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Added
-- `AGENTS.md` and dynamic OG images for agent-swarm.dev SEO (#340)
-- Blog post: context compaction design (DES-37) (#337)
+## [1.67.1] - 2026-04-15
 
 ### Fixed
-- Slack bot message filter now checks bot user ID to prevent thread re-trigger on completion messages (#339)
-- Docker entrypoint accepts both `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` credentials (#341)
+- `SECRETS_ENCRYPTION_KEY` / `SECRETS_ENCRYPTION_KEY_FILE` / on-disk `.encryption-key` now also accept a 64-character hex-encoded 32-byte key (e.g. `openssl rand -hex 32`) in addition to the existing base64 format. Existing base64 keys keep working unchanged.
+- Invalid-key errors now include the exact generation commands (`openssl rand -base64 32` or `openssl rand -hex 32`) and call out the common `openssl rand -base64 39` mistake, instead of just reporting the byte count.
 
-### Changed
-- Bumped Claude Code CLI to v2.1.109 and pi-mono to v0.67.2 in worker Docker image
+### Docs
+- New **Encryption Key** section in the Docker Compose deployment guide covering resolution order, generation, backup, common mistakes, and first-time migration from plaintext
+- `SECRETS_ENCRYPTION_KEY` and `SECRETS_ENCRYPTION_KEY_FILE` added to the Environment Variables reference
 
 ## [1.67.0] - 2026-04-14
 

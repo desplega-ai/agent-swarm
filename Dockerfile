@@ -41,6 +41,12 @@ COPY package.json ./
 # Copy migration SQL files (compiled binary can't read from /$bunfs virtual filesystem)
 COPY src/be/migrations/*.sql /app/migrations/
 
+# Copy sqlite-vec native extension on real disk. `bun build --compile` embeds JS
+# into /$bunfs/ but not native .so files, and dlopen can't load from /$bunfs/.
+# The glob matches whichever arch-specific sqlite-vec optional dep bun installed
+# for this build (sqlite-vec-linux-x64 or sqlite-vec-linux-arm64).
+COPY --from=builder /build/node_modules/sqlite-vec-linux-*/vec0.so /app/extensions/vec0.so
+
 # Install archil CLI for FUSE/R2-backed disk mounts
 RUN curl https://s3.amazonaws.com/archil-client/install | sh
 
@@ -51,6 +57,7 @@ RUN mkdir -p /app/data /mnt/data /workspace/shared
 ENV PORT=3013
 ENV DATABASE_PATH=/app/data/agent-swarm-db.sqlite
 ENV MIGRATIONS_DIR=/app/migrations
+ENV SQLITE_VEC_EXTENSION_PATH=/app/extensions/vec0.so
 
 VOLUME /app/data
 
