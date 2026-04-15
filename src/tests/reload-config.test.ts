@@ -2,25 +2,33 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { initAgentMail, resetAgentMail } from "../agentmail";
-import { closeDb, getResolvedConfig, initDb, upsertSwarmConfig } from "../be/db";
+import { closeDb, getDb, initDb, upsertSwarmConfig } from "../be/db";
 import { initGitHub, resetGitHub } from "../github";
+import { loadGlobalConfigsIntoEnv } from "../http/core";
 
 const TEST_DB_PATH = "./test-reload-config.sqlite";
 const TEST_PORT = 13023;
 
-/**
- * Mirrors the loadGlobalConfigsIntoEnv logic from http.ts
- */
-function loadGlobalConfigsIntoEnv(override = false): string[] {
-  const globalConfigs = getResolvedConfig();
-  const updated: string[] = [];
-  for (const config of globalConfigs) {
-    if (override || !process.env[config.key]) {
-      process.env[config.key] = config.value;
-      updated.push(config.key);
-    }
-  }
-  return updated;
+function insertLegacyReservedRow(key: string, value = "legacy"): string {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  getDb().run(
+    `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt)
+     VALUES (?, ?, NULL, ?, ?, 0, NULL, NULL, ?, ?)`,
+    [id, "global", key, value, now, now],
+  );
+  return id;
+}
+
+function insertUnreadableReservedSecretRow(key: string): string {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  getDb().run(
+    `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted)
+     VALUES (?, ?, NULL, ?, ?, 1, NULL, NULL, ?, ?, 1)`,
+    [id, "global", key, "definitely-not-valid-ciphertext", now, now],
+  );
+  return id;
 }
 
 // Minimal HTTP handler for the reload-config endpoint
@@ -142,6 +150,29 @@ describe("reload-config", () => {
     const updated = loadGlobalConfigsIntoEnv(true);
     expect(updated).toContain(testKey);
     expect(process.env[testKey]).toBe("new-db-value");
+  });
+
+  test("loadGlobalConfigsIntoEnv skips legacy reserved keys instead of injecting them", () => {
+    insertLegacyReservedRow("API_KEY", "legacy-api-key");
+
+    delete process.env.API_KEY;
+    const updated = loadGlobalConfigsIntoEnv(true);
+
+    expect(updated).not.toContain("API_KEY");
+    expect(process.env.API_KEY).toBeUndefined();
+  });
+
+  test("loadGlobalConfigsIntoEnv skips unreadable reserved secret rows before decrypting them", () => {
+    const id = insertUnreadableReservedSecretRow("SECRETS_ENCRYPTION_KEY");
+
+    try {
+      delete process.env.SECRETS_ENCRYPTION_KEY;
+      const updated = loadGlobalConfigsIntoEnv(true);
+      expect(updated).not.toContain("SECRETS_ENCRYPTION_KEY");
+      expect(process.env.SECRETS_ENCRYPTION_KEY).toBeUndefined();
+    } finally {
+      getDb().run("DELETE FROM swarm_config WHERE id = ?", [id]);
+    }
   });
 
   test("POST /internal/reload-config loads configs and returns summary", async () => {

@@ -78,7 +78,10 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   // Fast path for tests: restore from pre-built template that already has
   // migrations, seeds, and all post-init work baked in. Only the per-connection
   // PRAGMA and the in-memory resolver function need to be set.
-  const templateBytes = (globalThis as any).__testMigrationTemplate as Uint8Array | undefined;
+  const templateGlobals = globalThis as typeof globalThis & {
+    __testMigrationTemplate?: Uint8Array;
+  };
+  const templateBytes = templateGlobals.__testMigrationTemplate;
   if (templateBytes) {
     db = Database.deserialize(templateBytes);
     db.run("PRAGMA foreign_keys = ON;");
@@ -109,12 +112,6 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
       (err as Error).message,
     );
   }
-
-  // Resolve the secrets encryption key BEFORE migrations so the auto-encrypt
-  // hook (called after legacy compatibility guards) has a key to work with.
-  // Resolution order: SECRETS_ENCRYPTION_KEY env -> SECRETS_ENCRYPTION_KEY_FILE
-  // -> <dbDir>/.encryption-key -> auto-generated.
-  resolveEncryptionKey(dbPath);
 
   // Run database migrations (schema creation + incremental changes)
   runMigrations(database);
@@ -245,6 +242,19 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
 
   // Seed default prompt templates from the in-memory code registry
   seedDefaultTemplates();
+
+  const hasExistingEncryptedSecrets =
+    (database
+      .prepare<{ present: number }, []>(
+        "SELECT EXISTS(SELECT 1 FROM swarm_config WHERE isSecret = 1 AND encrypted = 1) as present",
+      )
+      .get()?.present ?? 0) === 1;
+
+  // Resolve the secrets encryption key after migrations so we can tell whether
+  // this DB already contains encrypted secret rows (must reuse an explicit or
+  // on-disk key) or is still plaintext-only (safe to generate a new key before
+  // auto-migrating legacy plaintext rows).
+  resolveEncryptionKey(dbPath, { allowGenerate: !hasExistingEncryptedSecrets });
 
   // Auto-encrypt any legacy plaintext secrets that predate the encryption
   // feature. Runs after all compatibility guards; failures are fatal because
@@ -4343,8 +4353,35 @@ type SwarmConfigRow = {
   encrypted: number; // SQLite boolean: 0 = plaintext, 1 = AES-256-GCM ciphertext
 };
 
+type SwarmConfigLookupRow = {
+  id: string;
+  scope: string;
+  scopeId: string | null;
+  key: string;
+  isSecret: number;
+  encrypted: number;
+};
+
+const RESERVED_CONFIG_PLACEHOLDER = "[reserved key stored in swarm_config; delete this row]";
+
 function rowToSwarmConfig(row: SwarmConfigRow): SwarmConfig {
   const isEncrypted = row.encrypted === 1;
+  if (isReservedConfigKey(row.key)) {
+    return {
+      id: row.id,
+      scope: row.scope as "global" | "agent" | "repo",
+      scopeId: row.scopeId ?? null,
+      key: row.key,
+      value: RESERVED_CONFIG_PLACEHOLDER,
+      isSecret: row.isSecret === 1,
+      envPath: row.envPath ?? null,
+      description: row.description ?? null,
+      createdAt: row.createdAt,
+      lastUpdatedAt: row.lastUpdatedAt,
+      encrypted: isEncrypted,
+    };
+  }
+
   let value = row.value;
   if (isEncrypted) {
     try {
@@ -4484,6 +4521,23 @@ export function getSwarmConfigs(filters?: {
 }
 
 /**
+ * Global configs that are allowed to flow into process.env.
+ * Reserved env-only keys are filtered in SQL before decryption so a corrupted
+ * legacy reserved row cannot block startup or reload.
+ */
+export function getInjectableGlobalConfigs(): SwarmConfig[] {
+  return getDb()
+    .prepare<SwarmConfigRow, []>(
+      `SELECT * FROM swarm_config
+       WHERE scope = 'global'
+         AND UPPER(key) NOT IN ('API_KEY', 'SECRETS_ENCRYPTION_KEY')
+       ORDER BY key ASC`,
+    )
+    .all()
+    .map(rowToSwarmConfig);
+}
+
+/**
  * Get a single config entry by ID.
  */
 export function getSwarmConfigById(id: string): SwarmConfig | null {
@@ -4491,6 +4545,34 @@ export function getSwarmConfigById(id: string): SwarmConfig | null {
     .prepare<SwarmConfigRow, [string]>("SELECT * FROM swarm_config WHERE id = ?")
     .get(id);
   return row ? rowToSwarmConfig(row) : null;
+}
+
+/**
+ * Get config metadata by ID without decrypting the value. Used by cleanup
+ * paths so unreadable secret rows can still be inspected and removed.
+ */
+export function getSwarmConfigLookupById(id: string): {
+  id: string;
+  scope: "global" | "agent" | "repo";
+  scopeId: string | null;
+  key: string;
+  isSecret: boolean;
+  encrypted: boolean;
+} | null {
+  const row = getDb()
+    .prepare<SwarmConfigLookupRow, [string]>(
+      "SELECT id, scope, scopeId, key, isSecret, encrypted FROM swarm_config WHERE id = ?",
+    )
+    .get(id);
+  if (!row) return null;
+  return {
+    id: row.id,
+    scope: row.scope as "global" | "agent" | "repo",
+    scopeId: row.scopeId ?? null,
+    key: row.key,
+    isSecret: row.isSecret === 1,
+    encrypted: row.encrypted === 1,
+  };
 }
 
 /**
@@ -4604,14 +4686,11 @@ export function upsertSwarmConfig(data: {
 
 /**
  * Delete a config entry by ID.
+ *
+ * Intentionally does not decrypt or block reserved keys. Legacy rows that
+ * predate hardening must remain removable through remediation paths.
  */
 export function deleteSwarmConfig(id: string): boolean {
-  const row = getDb()
-    .prepare<{ key: string }, [string]>("SELECT key FROM swarm_config WHERE id = ?")
-    .get(id);
-  if (row && isReservedConfigKey(row.key)) {
-    throw reservedKeyError(row.key);
-  }
   const result = getDb().run("DELETE FROM swarm_config WHERE id = ?", [id]);
   return result.changes > 0;
 }

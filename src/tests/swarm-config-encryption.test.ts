@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,6 +23,11 @@ const FIXTURE_KEY_B64 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 const ALT_KEY_B64 = "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU=";
 
 const FILE_DB_PATH = "./test-swarm-config-encryption.sqlite";
+
+const testTemplateGlobals = globalThis as typeof globalThis & {
+  __testMigrationTemplate?: Uint8Array;
+  __savedTemplate?: Uint8Array;
+};
 
 async function cleanupFileDb(path: string) {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -218,16 +223,16 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
     __resetEncryptionKeyForTests();
     process.env.SECRETS_ENCRYPTION_KEY = FIXTURE_KEY_B64;
     // Temporarily hide the template so the main-path initDb runs.
-    (globalThis as any).__savedTemplate = (globalThis as any).__testMigrationTemplate;
-    (globalThis as any).__testMigrationTemplate = undefined;
+    testTemplateGlobals.__savedTemplate = testTemplateGlobals.__testMigrationTemplate;
+    testTemplateGlobals.__testMigrationTemplate = undefined;
     initDb(FILE_DB_PATH);
   });
 
   afterAll(async () => {
     closeDb();
     // Restore template for any subsequent test suites.
-    (globalThis as any).__testMigrationTemplate = (globalThis as any).__savedTemplate;
-    delete (globalThis as any).__savedTemplate;
+    testTemplateGlobals.__testMigrationTemplate = testTemplateGlobals.__savedTemplate;
+    delete testTemplateGlobals.__savedTemplate;
     // Re-resolve fixture key into cache for any subsequent suites.
     __resetEncryptionKeyForTests();
     process.env.SECRETS_ENCRYPTION_KEY = FIXTURE_KEY_B64;
@@ -333,6 +338,82 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
 
       // Clean up the now-unreadable row so it doesn't pollute further tests.
       getDb().run("DELETE FROM swarm_config WHERE id = ?", [config.id]);
+    }
+  });
+
+  test("initDb refuses to auto-generate a new key for an existing DB that already has encrypted secret rows", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "swarm-config-existing-secrets-"));
+    const dbPath = join(tmpDir, "existing.sqlite");
+    const keyFilePath = join(tmpDir, ".encryption-key");
+
+    try {
+      closeDb();
+      __resetEncryptionKeyForTests();
+      process.env.SECRETS_ENCRYPTION_KEY = FIXTURE_KEY_B64;
+      initDb(dbPath);
+
+      upsertSwarmConfig({
+        scope: "global",
+        key: "EXISTING_SECRET_BEFORE_RESTART",
+        value: "should-require-original-key",
+        isSecret: true,
+      });
+
+      closeDb();
+      __resetEncryptionKeyForTests();
+      delete process.env.SECRETS_ENCRYPTION_KEY;
+      delete process.env.SECRETS_ENCRYPTION_KEY_FILE;
+
+      expect(() => initDb(dbPath)).toThrow(/existing database with encrypted secret rows/i);
+      expect(existsSync(keyFilePath)).toBe(false);
+    } finally {
+      closeDb();
+      __resetEncryptionKeyForTests();
+      process.env.SECRETS_ENCRYPTION_KEY = FIXTURE_KEY_B64;
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("initDb auto-generates a key and migrates legacy plaintext secret rows on first upgrade boot", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "swarm-config-legacy-plaintext-"));
+    const dbPath = join(tmpDir, "legacy.sqlite");
+    const keyFilePath = join(tmpDir, ".encryption-key");
+
+    try {
+      closeDb();
+      __resetEncryptionKeyForTests();
+      process.env.SECRETS_ENCRYPTION_KEY = FIXTURE_KEY_B64;
+      initDb(dbPath);
+
+      const id = crypto.randomUUID();
+      const now = new Date().toISOString();
+      getDb().run(
+        `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted)
+         VALUES (?, 'global', NULL, 'LEGACY_SECRET_FIRST_UPGRADE', 'legacy-plain', 1, NULL, NULL, ?, ?, 0)`,
+        [id, now, now],
+      );
+
+      closeDb();
+      __resetEncryptionKeyForTests();
+      delete process.env.SECRETS_ENCRYPTION_KEY;
+      delete process.env.SECRETS_ENCRYPTION_KEY_FILE;
+
+      initDb(dbPath);
+
+      expect(existsSync(keyFilePath)).toBe(true);
+      const migrated = getDb()
+        .prepare<{ value: string; encrypted: number }, [string]>(
+          "SELECT value, encrypted FROM swarm_config WHERE id = ?",
+        )
+        .get(id);
+      expect(migrated?.encrypted).toBe(1);
+      expect(migrated?.value).not.toBe("legacy-plain");
+      expect(getSwarmConfigById(id)?.value).toBe("legacy-plain");
+    } finally {
+      closeDb();
+      __resetEncryptionKeyForTests();
+      process.env.SECRETS_ENCRYPTION_KEY = FIXTURE_KEY_B64;
+      rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 });

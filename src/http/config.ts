@@ -4,6 +4,7 @@ import {
   deleteSwarmConfig,
   getResolvedConfig,
   getSwarmConfigById,
+  getSwarmConfigLookupById,
   getSwarmConfigs,
   maskSecrets,
   upsertSwarmConfig,
@@ -66,7 +67,7 @@ const upsertConfig = route({
   method: "put",
   path: "/api/config",
   pattern: ["api", "config"],
-  summary: "Create or update a config entry",
+  summary: "Create or update a config entry (reserved env-only keys are rejected)",
   tags: ["Config"],
   body: z.object({
     scope: z.enum(["global", "agent", "repo"]),
@@ -87,7 +88,7 @@ const deleteConfig = route({
   method: "delete",
   path: "/api/config/{id}",
   pattern: ["api", "config", null],
-  summary: "Delete a config entry",
+  summary: "Delete a config entry by ID (including legacy reserved rows for cleanup)",
   tags: ["Config"],
   params: z.object({ id: z.string() }),
   responses: {
@@ -184,13 +185,9 @@ export async function handleConfig(
   if (deleteConfig.match(req.method, pathSegments)) {
     const parsed = await deleteConfig.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const existing = getSwarmConfigById(parsed.params.id);
+    const existing = getSwarmConfigLookupById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Config not found", 404);
-      return true;
-    }
-    if (isReservedConfigKey(existing.key)) {
-      jsonError(res, reservedKeyError(existing.key).message, 400);
       return true;
     }
     const deleted = deleteSwarmConfig(parsed.params.id);

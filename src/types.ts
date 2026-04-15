@@ -538,8 +538,9 @@ export const SwarmConfigSchema = z.object({
   createdAt: z.string(),
   lastUpdatedAt: z.string(),
   // True when the row's value is stored as AES-256-GCM ciphertext in the DB.
-  // Plaintext rows return encrypted=false. Auto-encryption of legacy isSecret=1
-  // rows lands in Phase 4 of the swarm-config encryption plan.
+  // Plaintext rows return encrypted=false. Legacy isSecret=1 rows are
+  // auto-encrypted during initDb; if that fails, boot aborts before normal API
+  // reads occur.
   encrypted: z.boolean(),
 });
 

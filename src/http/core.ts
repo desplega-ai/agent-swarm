@@ -4,8 +4,8 @@ import {
   getAgentById,
   getDb,
   getInboxSummary,
+  getInjectableGlobalConfigs,
   getRecentlyCancelledTasksForAgent,
-  getResolvedConfig,
   getTaskById,
   shouldBlockPolling,
   updateAgentStatus,
@@ -21,10 +21,12 @@ import { agentWithCapacity, parseQueryParams } from "./utils";
  * Load global swarm_config entries into process.env.
  * When override=false (default, used at startup), existing env vars take precedence.
  * When override=true (used for reload), DB values overwrite process.env.
+ * Reserved keys are filtered before decryption because they must remain
+ * environment-only, even if legacy rows still exist in the DB.
  * Returns the list of keys that were set/updated.
  */
 export function loadGlobalConfigsIntoEnv(override = false): string[] {
-  const globalConfigs = getResolvedConfig();
+  const globalConfigs = getInjectableGlobalConfigs();
   const updated: string[] = [];
   for (const config of globalConfigs) {
     if (override || !process.env[config.key]) {

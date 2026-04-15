@@ -199,6 +199,16 @@ if (!globalState.__runId) {
   globalState.__runId = `run_${Date.now()}`;
 }
 
+// Load global swarm configs before the server starts listening so decrypt/key
+// failures fail closed instead of leaving the runtime half-initialized.
+let startupConfigsInjected: string[] = [];
+try {
+  startupConfigsInjected = loadGlobalConfigsIntoEnv(false);
+} catch (err) {
+  console.error("[startup] Failed to load global swarm configs before listen:", err);
+  throw err;
+}
+
 // business-use initialization (no-op if envs not set)
 initialize();
 
@@ -215,15 +225,10 @@ httpServer
       },
     });
 
-    // Load global swarm configs into process.env (so integrations can read them)
-    // Infrastructure-level env vars take precedence — only missing keys are filled.
-    try {
-      const updated = loadGlobalConfigsIntoEnv(false);
-      if (updated.length > 0) {
-        console.log(`Injected ${updated.length} swarm_config value(s) into process.env`);
-      }
-    } catch (e) {
-      console.error("Failed to load global swarm configs:", e);
+    if (startupConfigsInjected.length > 0) {
+      console.log(
+        `Injected ${startupConfigsInjected.length} swarm_config value(s) into process.env`,
+      );
     }
 
     // Initialize anonymized telemetry (opt-out via ANONYMIZED_TELEMETRY=false)

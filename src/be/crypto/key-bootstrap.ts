@@ -11,11 +11,13 @@ import { AES_KEY_BYTES } from "./secrets-cipher";
  *   2. `SECRETS_ENCRYPTION_KEY_FILE` env var — path to file containing base64
  *   3. `<dirname(dbPath)>/.encryption-key` — on-disk file
  *   4. Auto-generate 32 random bytes, write to path from step 3 with mode 0600
+ *      only when generation is allowed for the current DB state
  *
  * Special cases:
  *   - `dbPath === ":memory:"`: steps 3-4 are skipped; an explicit env-var key is required.
  *   - Malformed key at any source: throw immediately (do NOT fall through to
  *     auto-generation, which would silently clobber a broken-but-present key).
+ *   - Callers can disable auto-generation for existing DBs via `allowGenerate=false`.
  */
 
 let cachedKey: Buffer | null = null;
@@ -42,13 +44,22 @@ function decodeAndValidate(source: string, content: string): Buffer {
   return decoded;
 }
 
+type ResolveEncryptionKeyOptions = {
+  allowGenerate?: boolean;
+};
+
 /**
  * Resolve the encryption key according to the order documented above. Idempotent:
  * the first successful call caches the key, and subsequent calls return it without
  * re-reading env vars or disk.
  */
-export function resolveEncryptionKey(dbPath: string): Buffer {
+export function resolveEncryptionKey(
+  dbPath: string,
+  options: ResolveEncryptionKeyOptions = {},
+): Buffer {
   if (cachedKey) return cachedKey;
+
+  const allowGenerate = options.allowGenerate ?? true;
 
   // 1. SECRETS_ENCRYPTION_KEY env var
   const envKey = process.env[ENV_KEY];
@@ -84,6 +95,12 @@ export function resolveEncryptionKey(dbPath: string): Buffer {
     const content = readFileSync(keyFilePath, "utf8");
     cachedKey = decodeAndValidate(`file:${keyFilePath}`, content);
     return cachedKey;
+  }
+
+  if (!allowGenerate) {
+    throw new Error(
+      `Refusing to auto-generate ${KEY_FILENAME} for an existing database with encrypted secret rows. Restore ${ENV_KEY}, ${ENV_KEY_FILE}, or ${keyFilePath} before booting.`,
+    );
   }
 
   // 4. Auto-generate. Use `wx` flag for TOCTOU safety — fail if file reappeared

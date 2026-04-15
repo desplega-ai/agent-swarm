@@ -30,9 +30,13 @@ services:
       # Preferred: mount a file and point SECRETS_ENCRYPTION_KEY_FILE at it
       # (see `secrets:` block below). Fallback: set SECRETS_ENCRYPTION_KEY
       # directly as a base64-encoded 32-byte value. If neither is set, the
-      # server auto-generates <data-dir>/.encryption-key on first boot —
-      # BACK THAT FILE UP alongside your SQLite DB. Losing the key means
-      # losing all encrypted secrets with no recovery path.
+      # server auto-generates <data-dir>/.encryption-key only when the DB does
+      # not yet contain encrypted secret rows (for example, a fresh DB or a
+      # first upgrade from plaintext-only secrets); otherwise boot fails closed
+      # until you restore the original key source. BACK UP AND PRESERVE THE
+      # ACTUAL KEY MATERIAL alongside your SQLite DB. Losing the key means
+      # losing all encrypted secrets with no recovery path. Do not switch key
+      # sources unless the underlying base64 key value is identical.
       - SECRETS_ENCRYPTION_KEY_FILE=/run/secrets/encryption_key
       # - SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY:-}
 
@@ -523,11 +527,11 @@ services:
 
 secrets:
   # Base64-encoded 32-byte AES-256-GCM key for swarm_config at-rest encryption.
-  # Create with: `openssl rand -base64 32 > ./encryption-key` then chmod 600.
+  # Create with: `openssl rand -base64 32 > ./encryption_key` then chmod 600.
   # BACK THIS FILE UP alongside your SQLite DB — losing it means losing all
   # encrypted swarm_config secrets with no recovery path.
   encryption_key:
-    file: ./encryption-key
+    file: ./encryption_key
 
 volumes:
   swarm_api:

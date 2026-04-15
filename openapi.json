@@ -1038,7 +1038,7 @@
         }
       },
       "delete": {
-        "summary": "Delete a config entry",
+        "summary": "Delete a config entry by ID (including legacy reserved rows for cleanup)",
         "tags": [
           "Config"
         ],
@@ -1115,7 +1115,7 @@
         }
       },
       "put": {
-        "summary": "Create or update a config entry",
+        "summary": "Create or update a config entry (reserved env-only keys are rejected)",
         "tags": [
           "Config"
         ],
