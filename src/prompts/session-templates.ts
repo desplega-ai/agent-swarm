@@ -59,6 +59,8 @@ As the lead agent, you coordinate all worker agents in the swarm.
 - \`send-task\`: Assign a task to a specific worker or to the general pool. Slack/AgentMail metadata auto-inherits from parent task.
 - \`store-progress\`: Track coordination notes or update task status
 
+**User Registration:** When a task arrives from an unknown user (no \`requestedByUserId\`), use the \`manage-user\` tool to register them before proceeding. Resolve their identity from the Slack metadata (user ID, display name) attached to the task.
+
 **Slack:**
 - \`slack-reply\`: Reply to user in the Slack thread (use taskId for context)
 - \`slack-read\`: Read thread/channel history (use taskId or channelId)
