@@ -22,6 +22,8 @@ Complete reference for all environment variables used by Agent Swarm.
 | `MEMORY_ACCESS_BOOST_MAX` | `1.5` | Maximum access boost multiplier for reranking |
 | `MEMORY_ACCESS_RECENCY_HOURS` | `48` | Hours within which access counts for full boost |
 | `MEMORY_CANDIDATE_MULTIPLIER` | `3` | Candidate set size relative to requested limit |
+| `SECRETS_ENCRYPTION_KEY` | — | Base64-encoded 32-byte AES-256-GCM key for encrypting `swarm_config` secrets at rest. See [Secrets Encryption](#secrets-encryption) |
+| `SECRETS_ENCRYPTION_KEY_FILE` | — | Path to a file containing the base64 encryption key (alternative to inline env var). Useful with Docker secrets |
 | `CAPABILITIES` | All enabled | Comma-separated feature flags |
 | `HEARTBEAT_INTERVAL_MS` | `90000` | Heartbeat sweep interval (ms) |
 | `HEARTBEAT_DISABLE` | `false` | Set to `true` to disable the heartbeat module |
@@ -256,6 +258,30 @@ Optional integration with [`@desplega.ai/business-use`](https://github.com/despl
 | `BUSINESS_USE_URL` | BU backend URL (default: `http://localhost:13370`) |
 
 SDK enters no-op mode if the API key is missing — safe to omit in environments without a BU backend.
+
+## Secrets Encryption
+
+`swarm_config` rows with `isSecret=1` are encrypted at rest using AES-256-GCM (`v1.67.0+`). The server resolves the encryption key on boot in this order:
+
+1. `SECRETS_ENCRYPTION_KEY` env var (base64-encoded 32 bytes)
+2. `SECRETS_ENCRYPTION_KEY_FILE` pointing at a file containing the base64 key
+3. `<data-dir>/.encryption-key` file on disk
+4. Auto-generated on first boot (only when the DB has no existing encrypted rows)
+
+Generate a key with:
+
+```bash
+openssl rand -base64 32 > ./encryption_key
+chmod 600 ./encryption_key
+```
+
+<Callout type="warn">
+**Back up and preserve the encryption key alongside your SQLite database.** Losing the key means losing all encrypted secrets (API tokens, OAuth creds, etc.) with no recovery path. Do not switch between key sources unless the underlying base64 value is identical.
+</Callout>
+
+**Reserved keys:** `API_KEY` and `SECRETS_ENCRYPTION_KEY` are rejected by the `swarm_config` API (case-insensitive) and must remain environment-only.
+
+**Upgrading from plaintext:** Legacy secrets are auto-migrated on first boot. If `SECRETS_ENCRYPTION_KEY` was not set beforehand, a one-time plaintext backup is created at `<db-path>.backup.secrets-YYYY-MM-DD.env`. Delete this file after verifying your key is backed up.
 
 ## Priority
 
