@@ -196,6 +196,22 @@ These are the key variables for Docker Compose deployment. For the complete refe
 | `SLACK_BOT_TOKEN` | Enable Slack integration (also needs `SLACK_APP_TOKEN`) |
 | `SLACK_DISABLE` | Set to `true` to disable Slack (default: `false`) |
 
+### Secrets Encryption
+
+Starting with `v1.67.0`, `swarm_config` secrets are encrypted at rest using AES-256-GCM. The `docker-compose.example.yml` includes a Docker secrets block for the encryption key:
+
+```bash
+# Generate the key file (one-time)
+openssl rand -base64 32 > ./encryption_key
+chmod 600 ./encryption_key
+```
+
+The compose file mounts this as a Docker secret at `/run/secrets/encryption_key` and sets `SECRETS_ENCRYPTION_KEY_FILE` accordingly. If you prefer an inline env var, use `SECRETS_ENCRYPTION_KEY` instead.
+
+<Callout type="warn">
+**Back up the encryption key alongside your SQLite database.** Losing it means losing all encrypted secrets with no recovery path. See [Environment Variables — Secrets Encryption](/docs/reference/environment-variables#secrets-encryption) for details.
+</Callout>
+
 ---
 
 ## Adding More Workers

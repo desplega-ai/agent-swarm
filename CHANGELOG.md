@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `AGENTS.md` and dynamic OG images for agent-swarm.dev SEO (#340)
+- Blog post: context compaction design (DES-37) (#337)
+
+### Fixed
+- Slack bot message filter now checks bot user ID to prevent thread re-trigger on completion messages (#339)
+- Docker entrypoint accepts both `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` credentials (#341)
+
+### Changed
+- Bumped Claude Code CLI to v2.1.109 and pi-mono to v0.67.2 in worker Docker image
+
 ## [1.67.0] - 2026-04-14
 
 ### Added
