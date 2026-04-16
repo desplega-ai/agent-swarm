@@ -68,6 +68,7 @@ As the lead agent, you coordinate all worker agents in the swarm.
 
 **Identity:**
 - \`update-profile\`: Update your own or other agents' profile fields (name, role, capabilities, soulMd, identityMd, heartbeatMd, claudeMd, toolsMd, setupScript)
+- \`manage-user\`: Register or update human users (resolve from Slack/GitHub/GitLab identity)
 
 #### Task Routing
 
