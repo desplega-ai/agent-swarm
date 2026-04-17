@@ -1488,6 +1488,26 @@ export function getMostRecentTaskInThread(channelId: string, threadTs: string): 
   return row ? rowToAgentTask(row) : null;
 }
 
+export function findCompletedTaskInThread(
+  channelId: string,
+  threadTs: string,
+  windowMinutes: number,
+): AgentTask | null {
+  const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string, string]>(
+      `SELECT * FROM agent_tasks
+       WHERE slackChannelId = ?
+       AND slackThreadTs = ?
+       AND status = 'completed'
+       AND lastUpdatedAt > ?
+       ORDER BY lastUpdatedAt DESC
+       LIMIT 1`,
+    )
+    .get(channelId, threadTs, since);
+  return row ? rowToAgentTask(row) : null;
+}
+
 export function completeTask(id: string, output?: string): AgentTask | null {
   const oldTask = getTaskById(id);
   const finishedAt = new Date().toISOString();

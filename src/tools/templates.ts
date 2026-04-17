@@ -22,6 +22,11 @@ Task: "{{task_desc}}"
 Output:
 {{output_summary}}
 
+IMPORTANT: Do NOT re-delegate or re-answer the original request. The worker has already handled it. Your job is ONLY to:
+1. Review the output above
+2. If the task has Slack metadata, use \`slack-reply\` to post the result to the thread (if the worker hasn't already)
+3. Complete this follow-up task
+
 Use \`get-task-details\` with taskId "{{task_id}}" for full details.`,
   variables: [
     { name: "agent_name", description: "Worker agent name or ID prefix" },
