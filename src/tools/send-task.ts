@@ -202,7 +202,7 @@ export const registerSendTaskTool = (server: McpServer) => {
           const recentCompleted = findCompletedTaskInThread(
             sourceTask.slackChannelId,
             sourceTask.slackThreadTs,
-            240, // 4 hours in minutes
+            2880, // 48 hours in minutes
           );
           if (recentCompleted) {
             const msg = `Blocked: re-delegation from follow-up task in a thread that already has completed work (task ${recentCompleted.id.slice(0, 8)}). The original request was already handled.`;

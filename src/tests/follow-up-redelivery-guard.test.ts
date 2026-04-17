@@ -46,8 +46,8 @@ describe("findCompletedTaskInThread", () => {
     // Mark as completed
     completeTask(task.id, "done");
 
-    // Should find the completed task within a 240-minute window
-    const result = findCompletedTaskInThread("C_DEDUP_1", "1000.0001", 240);
+    // Should find the completed task within a 2880-minute (48h) window
+    const result = findCompletedTaskInThread("C_DEDUP_1", "1000.0001", 2880);
     expect(result).not.toBeNull();
     expect(result!.id).toBe(task.id);
     expect(result!.status).toBe("completed");
@@ -68,7 +68,7 @@ describe("findCompletedTaskInThread", () => {
       slackThreadTs: "2000.0001",
     });
 
-    const result = findCompletedTaskInThread("C_DEDUP_2", "2000.0001", 240);
+    const result = findCompletedTaskInThread("C_DEDUP_2", "2000.0001", 2880);
     expect(result).toBeNull();
   });
 
@@ -88,12 +88,15 @@ describe("findCompletedTaskInThread", () => {
 
     completeTask(task.id, "done long ago");
 
-    // Backdate the lastUpdatedAt to 5 hours ago
-    const fiveHoursAgo = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [fiveHoursAgo, task.id]);
+    // Backdate the lastUpdatedAt to 49 hours ago (beyond the 48h window)
+    const fortyNineHoursAgo = new Date(Date.now() - 49 * 60 * 60 * 1000).toISOString();
+    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      fortyNineHoursAgo,
+      task.id,
+    ]);
 
-    // Should not find with a 4 hour window
-    const result = findCompletedTaskInThread("C_DEDUP_3", "3000.0001", 240);
+    // Should not find with a 48 hour window
+    const result = findCompletedTaskInThread("C_DEDUP_3", "3000.0001", 2880);
     expect(result).toBeNull();
   });
 
@@ -114,7 +117,7 @@ describe("findCompletedTaskInThread", () => {
     completeTask(task.id, "done");
 
     // Search in a different thread — should not find
-    const result = findCompletedTaskInThread("C_DEDUP_4", "4000.9999", 240);
+    const result = findCompletedTaskInThread("C_DEDUP_4", "4000.9999", 2880);
     expect(result).toBeNull();
   });
 });
@@ -170,7 +173,7 @@ describe("follow-up re-delegation guard logic", () => {
     const recentCompleted = findCompletedTaskInThread(
       sourceTask!.slackChannelId!,
       sourceTask!.slackThreadTs!,
-      240,
+      2880,
     );
     expect(recentCompleted).not.toBeNull();
     expect(recentCompleted!.id).toBe(workerTask.id);
@@ -219,7 +222,7 @@ describe("follow-up re-delegation guard logic", () => {
     const recentCompleted = findCompletedTaskInThread(
       sourceTask!.slackChannelId!,
       sourceTask!.slackThreadTs!,
-      240,
+      2880,
     );
     expect(recentCompleted).toBeNull();
 
@@ -235,10 +238,10 @@ describe("follow-up re-delegation guard logic", () => {
     });
     completeTask(oldWorkerTask.id, "done long ago");
 
-    // Backdate to 5 hours ago
-    const fiveHoursAgo = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
+    // Backdate to 49 hours ago (beyond the 48h window)
+    const fortyNineHoursAgo = new Date(Date.now() - 49 * 60 * 60 * 1000).toISOString();
     getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
-      fiveHoursAgo,
+      fortyNineHoursAgo,
       oldWorkerTask.id,
     ]);
 
@@ -255,7 +258,7 @@ describe("follow-up re-delegation guard logic", () => {
     const recentCompleted = findCompletedTaskInThread(
       sourceTask!.slackChannelId!,
       sourceTask!.slackThreadTs!,
-      240,
+      2880,
     );
     expect(recentCompleted).toBeNull();
 
