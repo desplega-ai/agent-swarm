@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `sqlite-vec` native extension bundled in Docker server image for vector similarity search; new `SQLITE_VEC_EXTENSION_PATH` env var points at the extension inside the container
+
+### Changed
+- Removed hardcoded seed users from migration 031; added `scripts/backfill-seed-users.sql` for manual re-seeding (#343)
+- Lead agent session template now references `manage-user` tool for registering unknown users from Slack (#343)
+
 ## [1.67.1] - 2026-04-15
 
 ### Fixed

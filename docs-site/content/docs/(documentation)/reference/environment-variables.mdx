@@ -16,6 +16,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `APP_URL` | — | Dashboard URL for Slack message links |
 | `ENV` | — | Environment mode (`development` adds prefix to Slack agent names) |
 | `DATABASE_PATH` | `./agent-swarm-db.sqlite` | SQLite database file path |
+| `SQLITE_VEC_EXTENSION_PATH` | — | Path to `vec0.so` native extension for sqlite-vec vector search. Set automatically in the Docker image (`/app/extensions/vec0.so`). Only needed for non-Docker deployments. |
 | `SECRETS_ENCRYPTION_KEY` | Auto-generated on first boot | Master key for encrypting `swarm_config` secret rows at rest. Accepts base64 (43-char, e.g. `openssl rand -base64 32`) **or** 64-char hex (e.g. `openssl rand -hex 32`). Decodes to exactly 32 bytes. **Reserved**: cannot be stored in the DB config store. See [Encryption Key](/docs/guides/deployment#encryption-key). |
 | `SECRETS_ENCRYPTION_KEY_FILE` | — | Alternative to `SECRETS_ENCRYPTION_KEY`: absolute path to a file whose contents are the base64- or hex-encoded key. Useful with Docker secrets or k8s `Secret` volume mounts. |
 | `SCHEDULER_INTERVAL_MS` | `10000` | Polling interval for scheduled tasks (ms) |
@@ -24,8 +25,6 @@ Complete reference for all environment variables used by Agent Swarm.
 | `MEMORY_ACCESS_BOOST_MAX` | `1.5` | Maximum access boost multiplier for reranking |
 | `MEMORY_ACCESS_RECENCY_HOURS` | `48` | Hours within which access counts for full boost |
 | `MEMORY_CANDIDATE_MULTIPLIER` | `3` | Candidate set size relative to requested limit |
-| `SECRETS_ENCRYPTION_KEY` | — | Base64-encoded 32-byte AES-256-GCM key for encrypting `swarm_config` secrets at rest. See [Secrets Encryption](#secrets-encryption) |
-| `SECRETS_ENCRYPTION_KEY_FILE` | — | Path to a file containing the base64 encryption key (alternative to inline env var). Useful with Docker secrets |
 | `CAPABILITIES` | All enabled | Comma-separated feature flags |
 | `HEARTBEAT_INTERVAL_MS` | `90000` | Heartbeat sweep interval (ms) |
 | `HEARTBEAT_DISABLE` | `false` | Set to `true` to disable the heartbeat module |
