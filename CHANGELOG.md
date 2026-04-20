@@ -6,12 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- Removed hardcoded seed users from migration 031; added `scripts/backfill-seed-users.sql` for manual re-seeding (#343)
+- Lead agent session template now references `manage-user` tool for registering unknown users from Slack (#343)
+
+## [1.67.2] - 2026-04-17
+
 ### Added
 - `sqlite-vec` native extension bundled in Docker server image for vector similarity search; new `SQLITE_VEC_EXTENSION_PATH` env var points at the extension inside the container
 
 ### Changed
-- Removed hardcoded seed users from migration 031; added `scripts/backfill-seed-users.sql` for manual re-seeding (#343)
-- Lead agent session template now references `manage-user` tool for registering unknown users from Slack (#343)
+- Bumped bundled Claude Code CLI version in `Dockerfile.worker` from 2.1.109 to 2.1.112
 
 ## [1.67.1] - 2026-04-15
 
