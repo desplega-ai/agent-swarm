@@ -94,7 +94,7 @@ If you explicitly assign to a different worker, session resume gracefully falls 
 When a worker completes or fails a task, you receive an automatic follow-up task. Handle it by:
 1. Review the output/failure reason
 2. If the task has Slack metadata, use \`slack-reply\` with the task's ID to post the result back to the originating thread
-3. Decide: is the goal met? If not, create next task(s) with \`parentTaskId\` for session continuity. If blocked, notify the stakeholder.
+3. Complete this task. Do NOT re-delegate or create new worker tasks from a follow-up \u2014 the worker's result IS the answer. Only escalate to the stakeholder if the worker explicitly failed and the failure needs human attention.
 
 #### Heartbeat Checklist
 

@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import {
   createTaskExtended,
+  findCompletedTaskInThread,
   getActiveTaskCount,
   getAgentById,
   getDb,
@@ -184,6 +185,36 @@ export const registerSendTaskTool = (server: McpServer) => {
               message: msg,
             },
           };
+        }
+      }
+
+      // Guard: prevent re-delegation from follow-up tasks
+      // When the source task is a "follow-up" (worker completed/failed notification),
+      // check if there are completed tasks in the same Slack thread recently.
+      // This prevents the cycle: worker completes → follow-up → Lead re-delegates → repeat.
+      if (requestInfo.sourceTaskId) {
+        const sourceTask = getTaskById(requestInfo.sourceTaskId);
+        if (
+          sourceTask?.taskType === "follow-up" &&
+          sourceTask.slackThreadTs &&
+          sourceTask.slackChannelId
+        ) {
+          const recentCompleted = findCompletedTaskInThread(
+            sourceTask.slackChannelId,
+            sourceTask.slackThreadTs,
+            2880, // 48 hours in minutes
+          );
+          if (recentCompleted) {
+            const msg = `Blocked: re-delegation from follow-up task in a thread that already has completed work (task ${recentCompleted.id.slice(0, 8)}). The original request was already handled.`;
+            return {
+              content: [{ type: "text", text: msg }],
+              structuredContent: {
+                yourAgentId: requestInfo.agentId,
+                success: false,
+                message: msg,
+              },
+            };
+          }
         }
       }
 
