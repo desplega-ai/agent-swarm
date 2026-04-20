@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <video src="https://github.com/desplega-ai/agent-swarm/raw/main/assets/agent-swarm.mp4" controls muted playsinline width="720"></video>
+  <video src="https://github.com/user-attachments/assets/e220712e-c54d-4f46-b059-bac04639d229" controls muted playsinline width="720"></video>
 </p>
 <p align="center">
   <sub>▸ <a href="./assets/agent-swarm.mp4">daily evolution</a> · <a href="./assets/agent-swarm-slack-to-pr.mp4">slack → pr</a> · <a href="./assets/video-source">Making of</a></sub>
