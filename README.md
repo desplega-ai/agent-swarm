@@ -12,6 +12,13 @@
 </p>
 
 <p align="center">
+  <video src="https://github.com/desplega-ai/agent-swarm/raw/main/assets/agent-swarm.mp4" controls muted playsinline width="720"></video>
+</p>
+<p align="center">
+  <sub>▸ <a href="./assets/agent-swarm.mp4">download</a> · <a href="./assets/video-source">edit the source (Remotion)</a></sub>
+</p>
+
+<p align="center">
   <a href="https://agent-swarm.dev">
     <img src="https://img.shields.io/badge/Website-agent--swarm.dev-000?style=for-the-badge" alt="Website">
   </a>
