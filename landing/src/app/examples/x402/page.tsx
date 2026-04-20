@@ -31,6 +31,18 @@ export const metadata: Metadata = {
       "Real session: AI agents used x402 protocol to pay $0.05 USDC for image generation on Base mainnet.",
     images: ["https://blob.imference.com/large/37f7ee3b-616b-402f-8cb3-d69896165e3f.webp"],
   },
+  keywords: [
+    "AI agent crypto payments",
+    "x402 protocol",
+    "AI autonomous payments",
+    "agent swarm x402",
+    "HTTP 402 payment required",
+    "USDC AI agent payments",
+    "AI agent micropayments",
+    "Openfort AI agents",
+    "crypto payment automation",
+    "autonomous agent wallet",
+  ],
   alternates: {
     canonical: "/examples/x402",
   },

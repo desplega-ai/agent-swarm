@@ -9,6 +9,20 @@ import { CTA } from "@/components/cta";
 import { Footer } from "@/components/footer";
 
 export const metadata: Metadata = {
+  keywords: [
+    "agent swarm",
+    "agent swarm cloud",
+    "multi-agent AI",
+    "AI agent orchestration",
+    "Claude Code agents",
+    "autonomous AI agents",
+    "MCP orchestration platform",
+    "multi-agent framework",
+    "AI coding assistant orchestration",
+    "agent swarm open source",
+    "AI coding automation",
+    "multi-agent system",
+  ],
   alternates: {
     canonical: "/",
   },
