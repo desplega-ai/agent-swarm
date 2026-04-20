@@ -25,7 +25,7 @@ const MEMORIES = [
 ];
 
 const KIND_COLOR: Record<string, string> = {
-  feedback: "#ff8a3d",
+  feedback: "#f2a93b",
   pattern: "#6ed5ff",
   project: "#b09cff",
   reference: "#8ee58e",
