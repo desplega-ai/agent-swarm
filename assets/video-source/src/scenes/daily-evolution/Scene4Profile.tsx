@@ -1,5 +1,5 @@
 import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
-import { theme } from "../theme";
+import { theme } from "../../theme";
 
 const BEFORE_LINES = [
   "## Working Style",
@@ -53,7 +53,7 @@ export const Scene4Profile: React.FC = () => {
       <div
         style={{
           padding: "32px 40px",
-          border: `1px solid ${theme.line}`,
+          border: `1px solid ${theme.border}`,
           borderRadius: 6,
           fontFamily: theme.mono,
           fontSize: 28,

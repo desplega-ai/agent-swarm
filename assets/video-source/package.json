@@ -1,14 +1,17 @@
 {
   "name": "agent-swarm-video-wireframe",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "start": "remotion studio",
-    "build": "remotion render src/index.ts DailyEvolution out/daily-evolution.mp4",
-    "build:gif": "remotion render src/index.ts DailyEvolution out/daily-evolution.gif --codec=gif"
+    "build:daily-evolution": "remotion render src/index.ts DailyEvolution out/daily-evolution.mp4",
+    "build:slack-to-pr": "remotion render src/index.ts SlackToPR out/slack-to-pr.mp4",
+    "build:all": "npm run build:daily-evolution && npm run build:slack-to-pr",
+    "audio": "./scripts/generate-audio.sh"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.0",
+    "@remotion/google-fonts": "^4.0.450",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "remotion": "^4.0.0"

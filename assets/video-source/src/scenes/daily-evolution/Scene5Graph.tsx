@@ -1,5 +1,5 @@
 import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
-import { theme } from "../theme";
+import { theme } from "../../theme";
 
 // Pseudo-random but deterministic node positions
 const seed = (i: number) => {
@@ -92,7 +92,7 @@ export const Scene5Graph: React.FC = () => {
         style={{
           position: "relative",
           flex: 1,
-          border: `1px solid ${theme.line}`,
+          border: `1px solid ${theme.border}`,
           borderRadius: 6,
           backgroundColor: "rgba(255,255,255,0.01)",
           overflow: "hidden",

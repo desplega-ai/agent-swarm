@@ -1,5 +1,5 @@
 import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
-import { theme } from "../theme";
+import { theme } from "../../theme";
 
 const AGENTS = [
   "Picateclas",
@@ -57,7 +57,7 @@ export const Scene2Scanning: React.FC = () => {
         style={{
           height: 6,
           width: "100%",
-          backgroundColor: theme.line,
+          backgroundColor: theme.border,
           borderRadius: 2,
           overflow: "hidden",
           marginBottom: 56,
@@ -89,7 +89,7 @@ export const Scene2Scanning: React.FC = () => {
               style={{
                 opacity,
                 padding: "14px 22px",
-                border: `1px solid ${theme.line}`,
+                border: `1px solid ${theme.border}`,
                 borderRadius: 6,
                 fontFamily: theme.mono,
                 fontSize: 22,

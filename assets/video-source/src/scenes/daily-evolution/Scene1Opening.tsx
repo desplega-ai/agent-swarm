@@ -1,5 +1,5 @@
 import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
-import { theme } from "../theme";
+import { theme } from "../../theme";
 
 export const Scene1Opening: React.FC = () => {
   const frame = useCurrentFrame();

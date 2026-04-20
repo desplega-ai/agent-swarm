@@ -1,5 +1,5 @@
 import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
-import { theme } from "../theme";
+import { theme } from "../../theme";
 
 const MEMORIES = [
   {
@@ -84,7 +84,7 @@ export const Scene3Memories: React.FC = () => {
                 opacity,
                 transform: `translateY(${y}px)`,
                 padding: "22px 28px",
-                border: `1px solid ${theme.line}`,
+                border: `1px solid ${theme.border}`,
                 borderLeft: `3px solid ${KIND_COLOR[m.kind]}`,
                 borderRadius: 4,
                 fontFamily: theme.sans,
