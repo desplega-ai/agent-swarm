@@ -36,7 +36,7 @@ const MSGS: Msg[] = [
     name: "Lead",
     time: "14:05",
     body: "yessir — spinning up a Remotion project now. 6 scenes, 30s, low-fi wireframe. ~5-10min.",
-    appearAt: 180,
+    appearAt: 150,
   },
 ];
 

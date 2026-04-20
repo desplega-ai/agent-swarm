@@ -15,7 +15,7 @@ export const SceneRender: React.FC = () => {
   const headerOp = interpolate(frame, [0, 15], [0, 1], {
     extrapolateRight: "clamp",
   });
-  const progressWidth = interpolate(frame, [30, 180], [0, 100], {
+  const progressWidth = interpolate(frame, [20, 150], [0, 100], {
     extrapolateRight: "clamp",
   });
   const percent = Math.round(progressWidth);
@@ -102,7 +102,7 @@ export const SceneRender: React.FC = () => {
         }}
       >
         {SCENES.map((s, i) => {
-          const appearAt = 30 + i * 22;
+          const appearAt = 24 + i * 18;
           const op = interpolate(frame, [appearAt, appearAt + 14], [0, 1], {
             extrapolateLeft: "clamp",
             extrapolateRight: "clamp",

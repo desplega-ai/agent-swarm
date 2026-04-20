@@ -48,9 +48,7 @@ src/
     daily-evolution/        # 6 scenes for DailyEvolution
     slack-to-pr/            # 7 scenes for SlackToPR
 public/
-  audio/bed.mp3             # ambient synth bed (CC0, generated locally)
-scripts/
-  generate-audio.sh         # regenerate bed.mp3 via ffmpeg
+  audio/bed.mp3             # music bed (see Audio credits below)
 ```
 
 ## Adding a new video
@@ -62,7 +60,11 @@ scripts/
 
 ## Audio
 
-`public/audio/bed.mp3` is a ~50s ambient bed generated offline with ffmpeg (see `scripts/generate-audio.sh`). Licensed CC0. Both compositions reference it via `<Audio src={staticFile("audio/bed.mp3")} />`.
+`public/audio/bed.mp3` is only used by `DailyEvolution` (the `SlackToPR` composition runs without audio). Referenced via `<Audio src={staticFile("audio/bed.mp3")} />`.
+
+### Credits
+
+> _Cool Chill Beat Loop_ by **monkeyman535** — https://freesound.org/s/351717/ — License: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 
 ## CI
 

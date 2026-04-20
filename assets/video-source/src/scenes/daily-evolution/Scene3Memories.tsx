@@ -66,7 +66,7 @@ export const Scene3Memories: React.FC = () => {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
         {MEMORIES.map((m, i) => {
-          const appearAt = 30 + i * 28;
+          const appearAt = 20 + i * 20;
           const y = interpolate(frame, [appearAt, appearAt + 18], [24, 0], {
             extrapolateLeft: "clamp",
             extrapolateRight: "clamp",

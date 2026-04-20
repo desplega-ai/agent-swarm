@@ -62,7 +62,7 @@ export const SceneBrainstorm: React.FC = () => {
             [0, 1],
             { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
           );
-          const pickedAt = 160;
+          const pickedAt = 130;
           const isPicked = a.picked;
           const pickOpacity = isPicked
             ? interpolate(frame, [pickedAt, pickedAt + 20], [0, 1], {

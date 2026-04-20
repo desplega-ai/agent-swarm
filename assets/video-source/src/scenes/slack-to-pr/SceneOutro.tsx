@@ -3,7 +3,7 @@ import { theme } from "../../theme";
 
 export const SceneOutro: React.FC = () => {
   const frame = useCurrentFrame();
-  const op = interpolate(frame, [0, 20, 70, 90], [0, 1, 1, 0.4], {
+  const op = interpolate(frame, [0, 15, 45, 60], [0, 1, 1, 0.4], {
     extrapolateRight: "clamp",
   });
 

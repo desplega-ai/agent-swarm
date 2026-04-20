@@ -18,12 +18,13 @@ const NODES = Array.from({ length: TOTAL_NODES }, (_, i) => ({
 
 export const Scene5Graph: React.FC = () => {
   const frame = useCurrentFrame();
-  const titleOpacity = interpolate(frame, [0, 18], [0, 1], {
+  const titleOpacity = interpolate(frame, [0, 22], [0, 1], {
     extrapolateRight: "clamp",
   });
 
-  // Map frames 20..160 across 7 days
-  const dayFloat = interpolate(frame, [20, 160], [0, 7], {
+  // Paced to fill ~15s — the scene the whole piece leans on.
+  // Map frames 30..400 across 7 days, then hold.
+  const dayFloat = interpolate(frame, [30, 400], [0, 7], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
@@ -123,7 +124,7 @@ export const Scene5Graph: React.FC = () => {
           })}
           {/* Nodes */}
           {visibleNodes.map((n) => {
-            const appearFrame = 20 + (n.addedAtDay / 7) * 140;
+            const appearFrame = 30 + (n.addedAtDay / 7) * 370;
             const scale = interpolate(
               frame,
               [appearFrame, appearFrame + 10],

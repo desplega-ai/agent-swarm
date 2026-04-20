@@ -3,13 +3,13 @@ import { theme } from "../../theme";
 
 const STEPS = [
   { at: 0, text: "$ mkdir -p /workspace/personal/remotion-wireframe" },
-  { at: 18, text: "$ npm init -y && npm i remotion react react-dom" },
-  { at: 40, text: "▸ scaffold Root.tsx, DailyEvolution.tsx, 6 scenes" },
-  { at: 72, text: "$ npx remotion render src/index.ts DailyEvolution out.mp4" },
-  { at: 108, text: "✗ libnspr4.so: cannot open shared object file" },
-  { at: 130, text: "$ sudo apt-get install -y libnspr4 libnss3 libatk1.0-0 …" },
-  { at: 158, text: "$ npx remotion render … out.mp4" },
-  { at: 180, text: "✓ rendered 900 frames · 2.6MB" },
+  { at: 14, text: "$ npm init -y && npm i remotion react react-dom" },
+  { at: 32, text: "▸ scaffold Root.tsx, DailyEvolution.tsx, 6 scenes" },
+  { at: 58, text: "$ npx remotion render src/index.ts DailyEvolution out.mp4" },
+  { at: 86, text: "✗ libnspr4.so: cannot open shared object file" },
+  { at: 104, text: "$ sudo apt-get install -y libnspr4 libnss3 libatk1.0-0 …" },
+  { at: 128, text: "$ npx remotion render … out.mp4" },
+  { at: 150, text: "✓ rendered 900 frames · 2.6MB" },
 ];
 
 export const SceneSpinUp: React.FC = () => {

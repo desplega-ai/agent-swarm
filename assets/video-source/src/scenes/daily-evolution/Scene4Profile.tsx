@@ -18,7 +18,7 @@ export const Scene4Profile: React.FC = () => {
   const titleOpacity = interpolate(frame, [0, 18], [0, 1], {
     extrapolateRight: "clamp",
   });
-  const strikeLine3 = interpolate(frame, [60, 80], [0, 1], {
+  const strikeLine3 = interpolate(frame, [40, 55], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
@@ -82,7 +82,7 @@ export const Scene4Profile: React.FC = () => {
           );
         })}
         {ADDED_LINES.map((line, i) => {
-          const appearAt = 90 + i * 28;
+          const appearAt = 60 + i * 20;
           const opacity = interpolate(
             frame,
             [appearAt, appearAt + 18],

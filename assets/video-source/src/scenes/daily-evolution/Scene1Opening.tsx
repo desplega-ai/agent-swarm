@@ -3,14 +3,14 @@ import { theme } from "../../theme";
 
 export const Scene1Opening: React.FC = () => {
   const frame = useCurrentFrame();
-  const line1Opacity = interpolate(frame, [0, 15, 90, 110], [0, 1, 1, 1], {
+  const line1Opacity = interpolate(frame, [0, 10], [0, 1], {
     extrapolateRight: "clamp",
   });
-  const line2Opacity = interpolate(frame, [40, 55, 110, 120], [0, 1, 1, 0.2], {
+  const line2Opacity = interpolate(frame, [18, 28], [0, 1], {
     extrapolateRight: "clamp",
   });
   const countdownValue = Math.round(
-    interpolate(frame, [55, 100], [0, 47], {
+    interpolate(frame, [24, 54], [0, 47], {
       extrapolateLeft: "clamp",
       extrapolateRight: "clamp",
     })

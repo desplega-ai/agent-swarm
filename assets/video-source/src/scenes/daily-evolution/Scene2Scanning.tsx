@@ -12,11 +12,11 @@ const AGENTS = [
 
 export const Scene2Scanning: React.FC = () => {
   const frame = useCurrentFrame();
-  const progress = interpolate(frame, [20, 160], [0, 1], {
+  const progress = interpolate(frame, [10, 80], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const titleOpacity = interpolate(frame, [0, 20], [0, 1], {
+  const titleOpacity = interpolate(frame, [0, 12], [0, 1], {
     extrapolateRight: "clamp",
   });
 
@@ -74,14 +74,14 @@ export const Scene2Scanning: React.FC = () => {
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
         {AGENTS.map((agent, i) => {
-          const appearAt = 30 + i * 12;
+          const appearAt = 18 + i * 7;
           const opacity = interpolate(
             frame,
-            [appearAt, appearAt + 12],
+            [appearAt, appearAt + 10],
             [0, 1],
             { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
           );
-          const checkAt = appearAt + 30 + i * 4;
+          const checkAt = appearAt + 18 + i * 3;
           const checked = frame > checkAt;
           return (
             <div
