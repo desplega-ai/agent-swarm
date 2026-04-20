@@ -59,6 +59,22 @@ interface BlogPost {
 
 const posts: BlogPost[] = [
   {
+    slug: "deep-dive-prompt-cache-scheduling-dead-zone",
+    title:
+      "Why We Banned 5-Minute Intervals in Our Agent Orchestrator (And What the Prompt Cache Actually Costs You)",
+    description:
+      "How Anthropic's 5-minute prompt cache TTL turned 'check every 5 minutes' into our most expensive architectural mistake, and the scheduling contract that fixed it.",
+    date: "April 20, 2026",
+    readTime: "13 min read",
+    tags: [
+      "prompt caching",
+      "agent scheduling",
+      "Anthropic",
+      "LLM caching",
+      "autonomous agents",
+    ],
+  },
+  {
     slug: "deep-dive-context-compaction-design",
     title:
       "Stop Fighting Context Window Limits — Design for Compaction Instead",
