@@ -15,7 +15,7 @@
   <video src="https://github.com/desplega-ai/agent-swarm/raw/main/assets/agent-swarm.mp4" controls muted playsinline width="720"></video>
 </p>
 <p align="center">
-  <sub>▸ <a href="./assets/agent-swarm.mp4">daily evolution</a> · <a href="./assets/agent-swarm-slack-to-pr.mp4">slack → pr</a> · <a href="./assets/video-source">edit the source (Remotion)</a></sub>
+  <sub>▸ <a href="./assets/agent-swarm.mp4">daily evolution</a> · <a href="./assets/agent-swarm-slack-to-pr.mp4">slack → pr</a> · <a href="./assets/video-source">Making of</a></sub>
 </p>
 
 <p align="center">
