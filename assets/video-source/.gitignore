@@ -1,0 +1,5 @@
+node_modules/
+out/
+package-lock.json
+bun.lock
+.remotion/
