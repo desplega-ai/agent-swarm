@@ -18,6 +18,7 @@ import "../src/http/repos";
 import "../src/http/schedules";
 import "../src/http/session-data";
 import "../src/http/skills";
+import "../src/http/mcp-oauth";
 import "../src/http/mcp-servers";
 import "../src/http/stats";
 import "../src/http/tasks";

@@ -13,6 +13,7 @@
     "ecosystem",
     "events",
     "heartbeat",
+    "mcp-oauth",
     "mcp-servers",
     "memory",
     "poll",
