@@ -141,6 +141,20 @@ After creating the handler:
 
 </important>
 
+<important if="you are bumping the version in package.json">
+
+## Version bumps — always regenerate OpenAPI
+
+The generated `openapi.json` and `docs-site/content/docs/api-reference/**` embed the current `package.json` version. CI enforces OpenAPI freshness via `.github/workflows/merge-gate.yml` — a PR that bumps the version without regenerating will fail the `OpenAPI Spec Freshness Check` even if no routes changed.
+
+**Whenever you change `package.json`'s `version`:**
+1. Run `bun run docs:openapi`
+2. Commit `openapi.json` and the regenerated `docs-site/content/docs/api-reference/**` files alongside the version bump
+
+Skipping this step is the most common cause of last-minute CI failures on release PRs.
+
+</important>
+
 <important if="you are creating or modifying workflows, or using the create-workflow tool">
 
 ## Workflow authoring

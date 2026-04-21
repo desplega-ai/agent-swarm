@@ -13,7 +13,7 @@ import { resolveTemplate } from "../prompts/resolver";
 import { workflowEventBus } from "../workflows/event-bus";
 import { buildTreeBlocks, type TreeNode } from "./blocks";
 import type { SlackFile } from "./files";
-import { extractTaskFromMessage, routeMessage } from "./router";
+import { extractTaskFromMessage, hasOtherUserMention, routeMessage } from "./router";
 // Side-effect import: registers all Slack event templates in the in-memory registry
 import "./templates";
 import { bufferThreadMessage, getBufferMessageCount, instantFlush } from "./thread-buffer";
@@ -162,6 +162,12 @@ interface MessageEvent {
  * - `bot_id` present (newer Slack API, may lack subtype)
  * - `user` matches the bot's own user ID (catches edge cases where
  *    messages posted with `username` override lack `bot_id`)
+ *
+ * Note: intentionally does NOT filter on `app_id`/`bot_profile`/`username` —
+ * those signals also appear on human messages sent via Slack apps that proxy
+ * a user (e.g. Claude.ai's Slack integration sends with `app_id` + `bot_profile`
+ * set, but the poster is still a real human). Filtering those drops legitimate
+ * human @mentions of the swarm.
  */
 export function isBotMessage(
   event: { subtype?: string; bot_id?: string; user?: string },
@@ -439,8 +445,17 @@ export function registerMessageHandler(app: App): void {
       }
     }
 
-    // ADDITIVE_SLACK: Buffer non-mention thread messages
+    // ADDITIVE_SLACK: Buffer non-mention thread messages.
+    // Skip if the message @-mentions someone other than our bot (e.g. "@Devin wdyt?"):
+    // that message is directed at a different bot/user and must not be fed to
+    // the swarm as an implicit follow-up.
     if (additiveSlack && !botMentioned && msg.thread_ts && !requireMentionForThreadFollowup) {
+      if (hasOtherUserMention(effectiveText, botUserId)) {
+        console.log(
+          `[Slack] Skipping ADDITIVE buffer in ${msg.channel}/${msg.thread_ts}: message mentions another user`,
+        );
+        return;
+      }
       // Check if this thread has any swarm activity (existing tasks)
       const hasSwarmActivity = getAgentWorkingOnThread(msg.channel, msg.thread_ts) !== null;
 

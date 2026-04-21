@@ -7,6 +7,15 @@ export interface ThreadContext {
 }
 
 /**
+ * Returns true if the text contains a `<@U...>` mention of anyone other than our bot.
+ * Exported for testing.
+ */
+export function hasOtherUserMention(text: string, botUserId: string): boolean {
+  const mentions = text.match(/<@([A-Z0-9]+)>/g) ?? [];
+  return mentions.some((m) => m !== `<@${botUserId}>`);
+}
+
+/**
  * Routes a Slack message to the appropriate agent(s) based on mentions.
  *
  * Routing rules:
@@ -16,7 +25,7 @@ export interface ThreadContext {
  */
 export function routeMessage(
   text: string,
-  _botUserId: string,
+  botUserId: string,
   botMentioned: boolean,
   threadContext?: ThreadContext,
 ): AgentMatch[] {
@@ -46,8 +55,17 @@ export function routeMessage(
     }
   }
 
-  // Thread follow-up — route to agent already working in this thread
+  // Thread follow-up — route to agent already working in this thread.
+  // Skip if the message @-mentions someone other than our bot (e.g. "@Devin wdyt?")
+  // and does not mention our bot: that message is directed at a different bot/user,
+  // not a follow-up intended for the swarm.
   if (matches.length === 0 && threadContext && (!requireMentionForThreadFollowup || botMentioned)) {
+    if (!botMentioned && hasOtherUserMention(text, botUserId)) {
+      console.log(
+        `[Slack] Skipping thread follow-up in ${threadContext.channelId}/${threadContext.threadTs}: message mentions another user`,
+      );
+      return matches;
+    }
     const workingAgent = getAgentWorkingOnThread(threadContext.channelId, threadContext.threadTs);
     if (workingAgent && workingAgent.status !== "offline") {
       console.log(
