@@ -84,6 +84,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   const templateBytes = templateGlobals.__testMigrationTemplate;
   if (templateBytes) {
     db = Database.deserialize(templateBytes);
+    db.run("PRAGMA busy_timeout = 5000;");
     db.run("PRAGMA foreign_keys = ON;");
     configureDbResolver(resolvePromptTemplate);
     // Ensure the encryption key is resolved even when restoring from the test
@@ -98,6 +99,7 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
 
   const database = db;
   database.run("PRAGMA journal_mode = WAL;");
+  database.run("PRAGMA busy_timeout = 5000;");
   database.run("PRAGMA foreign_keys = ON;");
 
   // Load sqlite-vec extension for vector search.
