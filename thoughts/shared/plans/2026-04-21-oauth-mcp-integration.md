@@ -15,6 +15,7 @@
 - Add **one migration (`041_mcp_oauth_tokens.sql`)**, ~5 HTTP routes, one UI section extension on `/mcp-servers/[id]`, and a small change to `resolveSecrets` on the entrypoint hot path.
 - Reuse `SECRETS_ENCRYPTION_KEY` (AES-256-GCM, from migration 038) to encrypt `accessToken` / `refreshToken` / `dcrClientSecret` at rest — do not inherit the plaintext posture of legacy `oauth_tokens`.
 - Ship **per-swarm / lead-scoped** tokens in v1. Leave `userId` as a nullable column for per-user v2.
+- **Harness-agnostic by construction** — tokens live in the API DB and surface only as `resolvedHeaders` on the existing `resolveSecrets` endpoint, which Claude Code and pi-mono already consume. See §4.4 for the harness matrix (Codex/Gemini are not yet implemented; they inherit OAuth for free if they adopt the same endpoint).
 - **Do not implement yet.** This PR is plan-only; Taras decides on the five flagged open questions before any code change.
 
 ---
@@ -208,6 +209,21 @@ If we see 401-mid-task in the wild, ship a tiny Bash helper that calls `POST /ap
 ### 4.3 Nothing changes for stdio MCPs
 
 `envConfigKeys` keeps resolving from `swarm_config`. The `authMethod` column defaults to `static` on every existing row, so no behavioural drift.
+
+### 4.4 Per-harness applicability
+
+The storage + authorization layer (migration 041, `/api/mcp-oauth/*` routes, `mcp_oauth_tokens`, refresh helpers) is **fully harness-agnostic** — tokens live in the API-server DB and never encode a harness identity. The only per-harness surface is *how the resolved `Authorization: Bearer …` header lands in front of the MCP client*.
+
+Today the repo ships two harnesses and has two more named but unimplemented. Both shipping harnesses already consume the same `GET /api/agents/:id/mcp-servers?resolveSecrets=true` endpoint that this plan extends, so v1 is effectively transparent to both.
+
+| Harness | MCP support today | Config sink | Change required for OAuth v1 |
+|---|---|---|---|
+| **Claude Code** (`HARNESS_PROVIDER=claude`, default) — `src/providers/claude-adapter.ts` | First-class (stdio + HTTP + SSE) via `/workspace/.mcp.json` | `docker-entrypoint.sh:295–328` merges `resolveSecrets` response into `.mcp.json`; per-session copy at `/tmp/mcp-<taskId>.json` via `--mcp-config` (`claude-adapter.ts:116–183`) | **None beyond the plan.** `resolvedHeaders['Authorization']` already flows into `.mcp.json`. v0.5 laptop workaround (`claude mcp add`) is Claude-specific. |
+| **Pi-Mono** (`HARNESS_PROVIDER=pi`) — `src/providers/pi-mono-adapter.ts` | Partial: HTTP + SSE only (no stdio). Discovers tools at runtime via `McpHttpClient` (`pi-mono-mcp-client.ts`) against the same installed-servers API. | Same API call: `pi-mono-adapter.ts:395–458` fetches `/api/agents/:id/mcp-servers?resolveSecrets=true`, filters `transport ∈ {http, sse}`, uses `srv.resolvedHeaders` for auth. Does **not** read `.mcp.json`. | **None.** Because pi-mono already merges `resolvedHeaders` into `McpHttpClient.customHeaders`, an OAuth-injected `Authorization: Bearer …` flows through with no adapter change. Stdio-OAuth is a non-issue (pi-mono has no stdio anyway; plan already scopes out stdio). |
+| **Codex** | **Not implemented.** No provider module; `src/providers/index.ts` rejects unknown `HARNESS_PROVIDER` values. | — | Out of scope. When Codex lands, if it goes through the same `resolveSecrets` endpoint (recommended), it inherits OAuth for free. |
+| **Gemini CLI** | **Not implemented.** Research-only doc (`thoughts/shared/research/2025-12-21-gemini-cli-integration.md`); no adapter, no entrypoint hook. | — | Out of scope. Same pattern as Codex on arrival. |
+
+**Takeaway:** the harness-facing changes in this plan are limited to §4.1 (Claude/`.mcp.json`). Pi-mono benefits automatically because it already consumes the same API response. Codex and Gemini are non-existent today, so they don't constrain v1 — but building any new harness adapter against the `resolveSecrets` endpoint (rather than a harness-local config file) keeps this story clean. **v0.5 laptop workaround is Claude-only** — pi-mono has no interactive browser-OAuth CLI equivalent; non-Claude users wait for v1.
 
 ---
 
@@ -403,6 +419,7 @@ Add one new flow in `task` and `api` flows:
 - It does not retrofit encryption on the Linear tracker's `oauth_tokens` table (follow-up).
 - It does not introduce per-user tokens (v2).
 - It does not add a full MCP HTTP proxy / broker (option B rejected).
+- It does not ship harness support for Codex or Gemini CLI — those providers are not yet in the repo (§4.4). When they arrive, they get OAuth for free if they consume the `resolveSecrets` endpoint.
 
 ---
 
