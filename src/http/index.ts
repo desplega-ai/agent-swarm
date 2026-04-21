@@ -43,6 +43,15 @@ import { getPathSegments, parseQueryParams, setCorsHeaders } from "./utils";
 import { handleWebhooks } from "./webhooks";
 import { handleWorkflows } from "./workflows";
 
+// Last-line-of-defense: never let a single bad request (e.g. a SQLITE_BUSY
+// thrown out of a transaction callback) kill the API process. Log and keep going.
+process.on("uncaughtException", (err) => {
+  console.error("[fatal] uncaughtException:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[fatal] unhandledRejection:", reason);
+});
+
 const port = parseInt(process.env.PORT || process.argv[2] || "3013", 10);
 const apiKey = process.env.API_KEY || "";
 
