@@ -6,9 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Composite index on `agent_tasks(slackChannelId, slackThreadTs, status)` (migration 040) to speed up Slack thread lookups used by the follow-up re-delegation guard (#345)
+- Hero wireframe video back in `README.md` plus reproducible Remotion source in `assets/video-source/` (two compositions: daily-evolution and slack-to-pr) (#350)
+
 ### Changed
 - Removed hardcoded seed users from migration 031; added `scripts/backfill-seed-users.sql` for manual re-seeding (#343)
 - Lead agent session template now references `manage-user` tool for registering unknown users from Slack (#343)
+- Lead session prompt and `task.worker.completed` / `task.worker.failed` templates updated to explicitly forbid re-delegating follow-up results back to a worker (#345)
+
+### Fixed
+- Duplicate Slack responses caused by the lead re-delegating follow-up tasks: `send-task` now blocks re-delegation when the thread already has a completed task within the last 48 hours, and the follow-up template discourages it at the prompt layer (#345)
 
 ## [1.67.2] - 2026-04-17
 

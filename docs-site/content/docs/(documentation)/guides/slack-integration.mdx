@@ -63,6 +63,8 @@ If the assigned worker is offline or unavailable, the follow-up routes to the le
 
 By default, thread follow-ups route automatically without requiring an @mention. Set `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true` to require an explicit @mention for thread follow-up routing — non-mention thread messages will be silently dropped instead of auto-routing.
 
+**Follow-up re-delegation guard:** When the lead receives a `task.worker.completed` or `task.worker.failed` follow-up, it is explicitly instructed (via prompt template) not to re-delegate the same work back to a worker. A second guard in `send-task` blocks any re-delegation on a Slack thread that already has a completed task within the last 48 hours, preventing the duplicate-response cycle where repeated re-delegations caused the bot to answer the same thread multiple times.
+
 ### Slack Context Propagation
 
 Slack metadata (`slackChannelId`, `slackThreadTs`, `slackUserId`) is **auto-inherited** from the creator's current task. When a lead delegates work from a Slack-originated task, workers automatically receive the Slack context and post progress updates to the originating thread — no manual metadata passing needed.
