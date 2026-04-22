@@ -2,10 +2,10 @@
 title: Integrations configuration UI (dashboard)
 date: 2026-04-21
 author: taras
-status: in-progress
+status: completed
 autonomy: critical
 last_updated: 2026-04-22
-last_updated_by: claude (phase-running agent, Phase 4)
+last_updated_by: claude (phase-running agent, Phase 5)
 ---
 
 # Integrations Configuration UI
@@ -345,10 +345,10 @@ Tighten the UX and deliver a QA session suitable for PR merge.
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Full pre-PR checks pass at repo root: `bun run lint:fix && bun run tsc:check && bun test && bash scripts/check-db-boundary.sh`.
-- [ ] new-ui checks: `cd new-ui && pnpm lint && pnpm exec tsc --noEmit && pnpm build`.
+- [x] Full pre-PR checks pass at repo root: `bun run lint:fix && bun run tsc:check && bun test && bash scripts/check-db-boundary.sh`.
+- [x] new-ui checks: `cd new-ui && pnpm lint && pnpm exec tsc --noEmit && pnpm build`.
 - [ ] `qa-use` artifacts committed or attached to PR.
-- [ ] If any plugin commands changed: `bun run build:pi-skills` runs clean.
+- [x] If any plugin commands changed: `bun run build:pi-skills` runs clean.
 
 #### Manual Verification:
 - [ ] Golden path from a fresh DB: configure Slack + GitHub + Anthropic entirely from the UI, restart API (`bun run pm2-restart`), confirm Slack handler wakes up and the worker/lead see the keys (`docker logs ...`).

@@ -21,6 +21,18 @@ import { cn } from "@/lib/utils";
 // live editable input. Matches the mask used by `src/be/db.ts`.
 const SECRET_MASK_SENTINEL = "********";
 
+// Inline, non-blocking format warnings keyed by swarm_config key. Returning
+// null means "no warning"; returning a string renders a muted hint beneath
+// the input. Save is never gated on these.
+const FORMAT_WARNINGS: Record<string, (v: string) => string | null> = {
+  SLACK_BOT_TOKEN: (v) => (v && !v.startsWith("xoxb-") ? "Expected format: xoxb-..." : null),
+  SLACK_APP_TOKEN: (v) => (v && !v.startsWith("xapp-") ? "Expected format: xapp-..." : null),
+  GITHUB_APP_PRIVATE_KEY: (v) =>
+    v && !v.includes("BEGIN RSA PRIVATE KEY") && !v.includes("BEGIN PRIVATE KEY")
+      ? "Expected a PEM block containing 'BEGIN RSA PRIVATE KEY' or 'BEGIN PRIVATE KEY'."
+      : null,
+};
+
 interface FieldRendererProps {
   field: IntegrationField;
   existingConfig?: SwarmConfig;
@@ -68,6 +80,11 @@ export function FieldRenderer({
           .map((s) => s.trim())
           .filter(Boolean).length
       : 0;
+
+  // Skip warnings while showing the server-side mask sentinel — that value
+  // isn't a real user input and would always fail prefix checks.
+  const warningText =
+    value && value !== SECRET_MASK_SENTINEL ? (FORMAT_WARNINGS[field.key]?.(value) ?? null) : null;
 
   return (
     <div className="space-y-1.5">
@@ -130,6 +147,8 @@ export function FieldRenderer({
           </span>
         </div>
       )}
+
+      {warningText && <p className="text-xs text-amber-500/90">{warningText}</p>}
 
       {field.helpText && (
         <p id={`${inputId}-help`} className="text-xs text-muted-foreground">

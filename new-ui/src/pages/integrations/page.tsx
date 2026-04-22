@@ -1,15 +1,19 @@
-import { Plug, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Info, Plug, Search, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { IntegrationCard } from "@/components/integrations/integration-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { INTEGRATIONS, type IntegrationCategory } from "@/lib/integrations-catalog";
-import { deriveIntegrationStatus } from "@/lib/integrations-status";
+import { deriveIntegrationStatus, findConfigForKey } from "@/lib/integrations-status";
 import { cn } from "@/lib/utils";
+
+const RESTART_HINT_DISMISS_KEY = "integrations-restart-hint-dismissed";
+const QUICK_PICK_IDS = ["slack", "github", "anthropic"] as const;
 
 const CATEGORY_LABELS: Record<IntegrationCategory, string> = {
   comm: "Communication",
@@ -27,6 +31,48 @@ export default function IntegrationsPage() {
   const { data: configs, isLoading, error } = useConfigs({ scope: "global" });
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<CategoryFilter>("all");
+  const [hintDismissed, setHintDismissed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.sessionStorage.getItem(RESTART_HINT_DISMISS_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  function dismissHint() {
+    setHintDismissed(true);
+    try {
+      window.sessionStorage.setItem(RESTART_HINT_DISMISS_KEY, "1");
+    } catch {
+      // sessionStorage unavailable — keep in-memory state, no-op.
+    }
+  }
+
+  // Determine whether any catalog integration has at least one config set.
+  // We look up each catalog field key (plus disableKey) against the fetched
+  // configs; if none match, treat the swarm as "fresh" and show quick-picks.
+  const hasAnyIntegrationConfigured = useMemo(() => {
+    if (!configs || configs.length === 0) return false;
+    for (const def of INTEGRATIONS) {
+      for (const f of def.fields) {
+        if (findConfigForKey(configs, f.key)) return true;
+      }
+      if (def.disableKey && findConfigForKey(configs, def.disableKey)) return true;
+    }
+    return false;
+  }, [configs]);
+
+  // Keep in sync if another tab clears sessionStorage.
+  useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      if (e.key === RESTART_HINT_DISMISS_KEY && e.newValue === null) {
+        setHintDismissed(false);
+      }
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   const availableCategories = useMemo<IntegrationCategory[]>(() => {
     const present = new Set<IntegrationCategory>();
@@ -62,12 +108,55 @@ export default function IntegrationsPage() {
         </p>
       </div>
 
+      {!hintDismissed && (
+        <Alert className="relative pr-10">
+          <Info className="h-4 w-4" />
+          <AlertDescription>
+            Some changes take effect only after restarting the API server (e.g.{" "}
+            <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
+              bun run pm2-restart
+            </code>
+            ).
+          </AlertDescription>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="absolute right-1 top-1 h-6 w-6"
+            onClick={dismissHint}
+            aria-label="Dismiss"
+          >
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </Alert>
+      )}
+
       {error && (
         <Alert variant="destructive">
           <AlertDescription>
             Failed to load configuration: {error instanceof Error ? error.message : String(error)}
           </AlertDescription>
         </Alert>
+      )}
+
+      {/* Get started — show only when nothing is configured. */}
+      {!hasAnyIntegrationConfigured && (
+        <section className="space-y-3" aria-labelledby="get-started-heading">
+          <h2
+            id="get-started-heading"
+            className="text-sm font-semibold uppercase text-muted-foreground tracking-wide"
+          >
+            Get started
+          </h2>
+          <div className="grid gap-4 grid-cols-1 md:grid-cols-3">
+            {QUICK_PICK_IDS.map((pickId) => {
+              const def = INTEGRATIONS.find((i) => i.id === pickId);
+              if (!def) return null;
+              const status = deriveIntegrationStatus(def, configs ?? []);
+              return <IntegrationCard key={def.id} def={def} status={status} />;
+            })}
+          </div>
+        </section>
       )}
 
       {/* Filter bar */}

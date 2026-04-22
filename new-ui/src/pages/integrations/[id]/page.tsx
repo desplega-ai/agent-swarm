@@ -19,7 +19,7 @@ import {
   Sparkles,
   SquareCheckBig,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   type UpsertConfigEntry,
@@ -234,6 +234,22 @@ function IntegrationDetailInner({
     if (!hasDirty) return;
     upsertBatch.mutate(dirtyEntries);
   }
+
+  // Cmd/Ctrl+S = Save. We intentionally let it fire even when focus is inside
+  // a textarea (private keys, etc.) — users expect cmd+S universally and can
+  // always fall back to the Save button if that shortcut is captured.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const isSaveShortcut = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s";
+      if (!isSaveShortcut) return;
+      if (upsertBatch.isPending) return;
+      if (!hasDirty) return;
+      e.preventDefault();
+      upsertBatch.mutate(dirtyEntries);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [hasDirty, upsertBatch, dirtyEntries]);
 
   function handleToggleDisable() {
     if (!def.disableKey) return;
