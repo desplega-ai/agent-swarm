@@ -808,8 +808,12 @@ export type CooldownConfig = z.infer<typeof CooldownConfigSchema>;
 // --- Input Value Resolution ---
 
 export const InputValueSchema = z.union([
-  z.string().regex(/^\$\{.+\}$/), // env var: ${MY_VAR}
-  z.string().regex(/^secret\..+$/), // swarm secret: secret.OPENAI_KEY
+  z
+    .string()
+    .regex(/^\$\{.+\}$/), // env var: ${MY_VAR}
+  z
+    .string()
+    .regex(/^secret\..+$/), // swarm secret: secret.OPENAI_KEY
   z.string(), // literal value
 ]);
 export type InputValue = z.infer<typeof InputValueSchema>;
