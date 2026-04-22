@@ -1044,6 +1044,9 @@ export type McpServerTransport = z.infer<typeof McpServerTransportSchema>;
 export const McpServerScopeSchema = z.enum(["global", "swarm", "agent"]);
 export type McpServerScope = z.infer<typeof McpServerScopeSchema>;
 
+export const McpAuthMethodSchema = z.enum(["static", "oauth", "auto"]);
+export type McpAuthMethod = z.infer<typeof McpAuthMethodSchema>;
+
 export const McpServerSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -1057,6 +1060,7 @@ export const McpServerSchema = z.object({
   headers: z.string().nullable(),
   envConfigKeys: z.string().nullable(),
   headerConfigKeys: z.string().nullable(),
+  authMethod: McpAuthMethodSchema.default("static"),
   isEnabled: z.boolean(),
   version: z.number(),
   createdAt: z.string(),
