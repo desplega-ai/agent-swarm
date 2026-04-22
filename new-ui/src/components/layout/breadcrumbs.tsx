@@ -1,5 +1,6 @@
 import { ChevronRight } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
+import { INTEGRATIONS } from "@/lib/integrations-catalog";
 
 const routeLabels: Record<string, string> = {
   agents: "Agents",
@@ -18,7 +19,13 @@ const routeLabels: Record<string, string> = {
   templates: "Templates",
   history: "History",
   debug: "Debug",
+  integrations: "Integrations",
+  "api-keys": "API Keys",
 };
+
+const INTEGRATION_NAME_BY_ID: Record<string, string> = Object.fromEntries(
+  INTEGRATIONS.map((def) => [def.id, def.name]),
+);
 
 /** Routes that don't have their own list page — redirect breadcrumb to a parent. */
 const routeRedirects: Record<string, string> = {
@@ -27,8 +34,11 @@ const routeRedirects: Record<string, string> = {
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function formatSegment(segment: string): string {
+function formatSegment(segment: string, prevSegment?: string): string {
   if (routeLabels[segment]) return routeLabels[segment];
+  if (prevSegment === "integrations" && INTEGRATION_NAME_BY_ID[segment]) {
+    return INTEGRATION_NAME_BY_ID[segment];
+  }
   if (UUID_REGEX.test(segment)) return `${segment.slice(0, 8)}...`;
   return segment;
 }
@@ -42,7 +52,7 @@ export function Breadcrumbs() {
   const crumbs = segments.map((segment, index) => {
     const defaultPath = `/${segments.slice(0, index + 1).join("/")}`;
     const path = routeRedirects[segment] ?? defaultPath;
-    const label = formatSegment(segment);
+    const label = formatSegment(segment, segments[index - 1]);
     const isLast = index === segments.length - 1;
 
     return { path, label, isLast };

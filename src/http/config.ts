@@ -10,8 +10,11 @@ import {
   upsertSwarmConfig,
 } from "../be/db";
 import { isReservedConfigKey, reservedKeyError } from "../be/swarm-config-guard";
+import { reloadGlobalConfigsAndIntegrations } from "./core";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
+
+const MAX_ENV_PRESENCE_KEYS = 200;
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -28,6 +31,36 @@ const getResolvedConfigRoute = route({
   }),
   responses: {
     200: { description: "Resolved config entries" },
+  },
+});
+
+const envPresence = route({
+  method: "get",
+  path: "/api/config/env-presence",
+  pattern: ["api", "config", "env-presence"],
+  summary:
+    "Check which of the given env var keys are currently set in process.env (presence only, no values)",
+  tags: ["Config"],
+  query: z.object({
+    keys: z.string().min(1),
+  }),
+  responses: {
+    200: { description: "Map of key -> boolean (true iff set in process.env)" },
+    400: { description: "Validation error" },
+  },
+});
+
+const reloadConfigRoute = route({
+  method: "post",
+  path: "/api/config/reload",
+  pattern: ["api", "config", "reload"],
+  summary:
+    "Reload global swarm_config into process.env (override=true) and re-init integrations (Slack, GitHub, Linear, AgentMail)",
+  tags: ["Config"],
+  body: z.object({}).optional(),
+  responses: {
+    200: { description: "Reload result" },
+    500: { description: "Reload failed" },
   },
 });
 
@@ -114,6 +147,40 @@ export async function handleConfig(
       parsed.query.repoId || undefined,
     );
     json(res, { configs: includeSecrets ? configs : maskSecrets(configs) });
+    return true;
+  }
+
+  if (envPresence.match(req.method, pathSegments)) {
+    const parsed = await envPresence.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const keys = parsed.query.keys
+      .split(",")
+      .map((k) => k.trim())
+      .filter(Boolean);
+    if (keys.length > MAX_ENV_PRESENCE_KEYS) {
+      jsonError(res, `Too many keys (max ${MAX_ENV_PRESENCE_KEYS})`, 400);
+      return true;
+    }
+    const presence: Record<string, boolean> = {};
+    for (const key of keys) {
+      presence[key] = process.env[key] !== undefined && process.env[key] !== "";
+    }
+    json(res, { presence });
+    return true;
+  }
+
+  if (reloadConfigRoute.match(req.method, pathSegments)) {
+    try {
+      const result = await reloadGlobalConfigsAndIntegrations();
+      console.log(
+        `[reload-config] Loaded ${result.configsLoaded} config(s), re-initialized: ${result.integrationsReinitialized.join(", ") || "none"}`,
+      );
+      json(res, { success: true, ...result });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error("[reload-config] Failed:", message);
+      jsonError(res, `Failed to reload config: ${message}`, 500);
+    }
     return true;
   }
 

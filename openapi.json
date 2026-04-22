@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.67.5",
+    "version": "1.68.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -991,6 +991,69 @@
         "responses": {
           "200": {
             "description": "Resolved config entries"
+          }
+        }
+      }
+    },
+    "/api/config/env-presence": {
+      "get": {
+        "summary": "Check which of the given env var keys are currently set in process.env (presence only, no values)",
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "keys",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Map of key -> boolean (true iff set in process.env)"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/config/reload": {
+      "post": {
+        "summary": "Reload global swarm_config into process.env (override=true) and re-init integrations (Slack, GitHub, Linear, AgentMail)",
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reload result"
+          },
+          "500": {
+            "description": "Reload failed"
           }
         }
       }

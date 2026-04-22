@@ -2,8 +2,10 @@
 title: Integrations configuration UI (dashboard)
 date: 2026-04-21
 author: taras
-status: draft
+status: completed
 autonomy: critical
+last_updated: 2026-04-22
+last_updated_by: claude (phase-running agent, Phase 5)
 ---
 
 # Integrations Configuration UI
@@ -152,11 +154,11 @@ Define the single source of truth for the UI: a typed catalog listing all known 
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Type-check passes: `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Lint passes: `cd new-ui && pnpm lint`
-- [ ] New catalog file exists: `ls new-ui/src/lib/integrations-catalog.ts`
-- [ ] Every `IntegrationDef.id` is unique and kebab-case: `grep -oE "id: \"[a-z0-9-]+\"" new-ui/src/lib/integrations-catalog.ts | sort | uniq -d` returns empty.
-- [ ] No reserved key (`API_KEY`, `SECRETS_ENCRYPTION_KEY`) appears in the catalog: `grep -iE "(API_KEY|SECRETS_ENCRYPTION_KEY)" new-ui/src/lib/integrations-catalog.ts` only matches in comments or not at all.
+- [x] Type-check passes: `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Lint passes: `cd new-ui && pnpm lint`
+- [x] New catalog file exists: `ls new-ui/src/lib/integrations-catalog.ts`
+- [x] Every `IntegrationDef.id` is unique and kebab-case: `grep -oE "id: \"[a-z0-9-]+\"" new-ui/src/lib/integrations-catalog.ts | sort | uniq -d` returns empty.
+- [x] No reserved key (`API_KEY`, `SECRETS_ENCRYPTION_KEY`) appears in the catalog: `grep -iE "(API_KEY|SECRETS_ENCRYPTION_KEY)" new-ui/src/lib/integrations-catalog.ts` only matches in comments or not at all.
 
 #### Manual Verification:
 - [ ] Run the sanity-check script (`bun new-ui/src/lib/integrations-status.sanity.ts`) and eyeball outputs for none / partial / full / disabled / reserved-key-skipped.
@@ -196,11 +198,11 @@ Surface the catalog as a cards grid with live status.
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Type-check: `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Lint: `cd new-ui && pnpm lint`
-- [ ] Route file registers both routes: `grep -nE "integrations" new-ui/src/app/router.tsx` shows both paths.
-- [ ] Sidebar entry present: `grep -n "/integrations" new-ui/src/components/layout/app-sidebar.tsx` returns a match in a `navGroups` entry.
-- [ ] Build succeeds: `cd new-ui && pnpm build`.
+- [x] Type-check: `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Lint: `cd new-ui && pnpm lint`
+- [x] Route file registers both routes: `grep -nE "integrations" new-ui/src/app/router.tsx` shows both paths.
+- [x] Sidebar entry present: `grep -n "/integrations" new-ui/src/components/layout/app-sidebar.tsx` returns a match in a `navGroups` entry.
+- [x] Build succeeds: `cd new-ui && pnpm build`.
 
 #### Manual Verification:
 - [ ] Start API + UI. Two supported workflows:
@@ -255,11 +257,11 @@ Turn each card into an editable, labeled form. This is the main UX delivery.
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Type-check: `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Lint: `cd new-ui && pnpm lint`
-- [ ] Hook exports present: `grep -nE "useUpsertConfigsBatch|useDeleteConfigsBatch" new-ui/src/api/hooks/use-config-api.ts` returns both.
-- [ ] Reserved-key filter present: `grep -n "API_KEY\|SECRETS_ENCRYPTION_KEY" new-ui/src/api/hooks/use-config-api.ts` shows a filter/guard line.
-- [ ] Build succeeds: `cd new-ui && pnpm build`.
+- [x] Type-check: `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Lint: `cd new-ui && pnpm lint`
+- [x] Hook exports present: `grep -nE "useUpsertConfigsBatch|useDeleteConfigsBatch" new-ui/src/api/hooks/use-config-api.ts` returns both.
+- [x] Reserved-key filter present: `grep -n "API_KEY\|SECRETS_ENCRYPTION_KEY" new-ui/src/api/hooks/use-config-api.ts` shows a filter/guard line.
+- [x] Build succeeds: `cd new-ui && pnpm build`.
 
 #### Manual Verification:
 - [ ] Open `/integrations/slack`. Form shows `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` as required password fields; allow-list fields under Advanced.
@@ -306,10 +308,10 @@ Cover the integrations that don't fit the generic field-form pattern.
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Type-check: `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Lint: `cd new-ui && pnpm lint`
-- [ ] Linear OAuth section imported in detail page: `grep -n "LinearOAuthSection" new-ui/src/pages/integrations/\[id\]/page.tsx` returns a match.
-- [ ] No new backend routes introduced: `git diff src/http/ | grep -c "route("` is unchanged from main.
+- [x] Type-check: `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Lint: `cd new-ui && pnpm lint`
+- [x] Linear OAuth section imported in detail page: `grep -n "LinearOAuthSection" new-ui/src/pages/integrations/\[id\]/page.tsx` returns a match.
+- [x] No new backend routes introduced: `git diff src/http/ | grep -c "route("` is unchanged from main.
 
 #### Manual Verification:
 - [ ] Set `LINEAR_CLIENT_ID`/`LINEAR_CLIENT_SECRET`/`LINEAR_SIGNING_SECRET` via the form → Save → restart API.
@@ -343,10 +345,10 @@ Tighten the UX and deliver a QA session suitable for PR merge.
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Full pre-PR checks pass at repo root: `bun run lint:fix && bun run tsc:check && bun test && bash scripts/check-db-boundary.sh`.
-- [ ] new-ui checks: `cd new-ui && pnpm lint && pnpm exec tsc --noEmit && pnpm build`.
+- [x] Full pre-PR checks pass at repo root: `bun run lint:fix && bun run tsc:check && bun test && bash scripts/check-db-boundary.sh`.
+- [x] new-ui checks: `cd new-ui && pnpm lint && pnpm exec tsc --noEmit && pnpm build`.
 - [ ] `qa-use` artifacts committed or attached to PR.
-- [ ] If any plugin commands changed: `bun run build:pi-skills` runs clean.
+- [x] If any plugin commands changed: `bun run build:pi-skills` runs clean.
 
 #### Manual Verification:
 - [ ] Golden path from a fresh DB: configure Slack + GitHub + Anthropic entirely from the UI, restart API (`bun run pm2-restart`), confirm Slack handler wakes up and the worker/lead see the keys (`docker logs ...`).
