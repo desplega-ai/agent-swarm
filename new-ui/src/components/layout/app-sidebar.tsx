@@ -10,7 +10,6 @@ import {
   Key,
   LayoutDashboard,
   ListTodo,
-  MessageSquare,
   Plug,
   Server,
   Settings,
@@ -41,15 +40,13 @@ const navGroups = [
       { title: "Dashboard", path: "/", icon: LayoutDashboard },
       { title: "Agents", path: "/agents", icon: Users },
       { title: "Tasks", path: "/tasks", icon: ListTodo },
-      { title: "Skills", path: "/skills", icon: BookOpen },
-      { title: "MCP Servers", path: "/mcp-servers", icon: Cable },
     ],
   },
   {
-    label: "Communication",
+    label: "AI",
     items: [
-      { title: "Chat", path: "/chat", icon: MessageSquare },
-      { title: "Templates", path: "/templates", icon: FileText },
+      { title: "Skills", path: "/skills", icon: BookOpen },
+      { title: "MCP Servers", path: "/mcp-servers", icon: Cable },
     ],
   },
   {
@@ -58,16 +55,22 @@ const navGroups = [
       { title: "Services", path: "/services", icon: Server },
       { title: "Schedules", path: "/schedules", icon: Clock },
       { title: "Workflows", path: "/workflows", icon: Workflow },
-      { title: "Approvals", path: "/approval-requests", icon: ClipboardCheck },
       { title: "Usage", path: "/usage", icon: BarChart3 },
+    ],
+  },
+  {
+    label: "Configuration",
+    items: [
+      { title: "Integrations", path: "/integrations", icon: Plug },
+      { title: "Templates", path: "/templates", icon: FileText },
+      { title: "Approvals", path: "/approval-requests", icon: ClipboardCheck },
+      { title: "Repos", path: "/repos", icon: GitBranch },
     ],
   },
   {
     label: "System",
     items: [
       { title: "Config", path: "/config", icon: Settings },
-      { title: "Repos", path: "/repos", icon: GitBranch },
-      { title: "Integrations", path: "/integrations", icon: Plug },
       { title: "API Keys", path: "/keys", icon: Key },
       { title: "Debug", path: "/debug", icon: Bug },
     ],
