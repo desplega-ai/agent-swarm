@@ -57,6 +57,7 @@ import type {
   WorkflowVersion,
 } from "../types";
 import { deriveProviderFromKeyType } from "../utils/credentials";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { decryptSecret, encryptSecret, getEncryptionKey, resolveEncryptionKey } from "./crypto";
 import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import { runMigrations } from "./migrations/runner";
@@ -3440,7 +3441,11 @@ export function createSessionLogs(logs: {
         logs.sessionId,
         logs.iteration,
         logs.cli,
-        line,
+        // Defense-in-depth: callers (runner.ts → POST /api/session-logs) send
+        // content that is already scrubbed at the adapter emit site. We scrub
+        // again here so any future write path that bypasses the adapter still
+        // lands clean text in the persistent session_logs table.
+        scrubSecrets(line),
         i,
       );
     }

@@ -14,6 +14,7 @@ import { initGitHub, resetGitHub } from "../github";
 import { initLinear, resetLinear } from "../linear";
 import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
+import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
 import { agentWithCapacity, parseQueryParams } from "./utils";
 
@@ -34,7 +35,48 @@ export function loadGlobalConfigsIntoEnv(override = false): string[] {
       updated.push(config.key);
     }
   }
+  // The scrubber caches process.env-derived secret values; invalidate so the
+  // next scrub picks up any new/rotated secrets we just injected.
+  if (updated.length > 0) {
+    refreshSecretScrubberCache();
+  }
   return updated;
+}
+
+export type ReloadConfigResult = {
+  configsLoaded: number;
+  keysUpdated: string[];
+  integrationsReinitialized: string[];
+};
+
+/**
+ * Re-read swarm_config into process.env with override=true, then reset and
+ * re-init each integration so long-lived clients (Slack socket mode, etc.)
+ * pick up the new values without requiring a process restart.
+ */
+export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfigResult> {
+  const updated = loadGlobalConfigsIntoEnv(true);
+
+  const integrations: string[] = [];
+
+  resetAgentMail();
+  if (initAgentMail()) integrations.push("agentmail");
+
+  resetGitHub();
+  if (initGitHub()) integrations.push("github");
+
+  resetLinear();
+  if (initLinear()) integrations.push("linear");
+
+  await stopSlackApp();
+  await startSlackApp();
+  integrations.push("slack");
+
+  return {
+    configsLoaded: updated.length,
+    keysUpdated: updated,
+    integrationsReinitialized: integrations,
+  };
 }
 
 export async function handleCore(
@@ -110,38 +152,12 @@ export async function handleCore(
   // POST /internal/reload-config — re-read swarm_config into process.env and re-init integrations
   if (req.method === "POST" && req.url === "/internal/reload-config") {
     try {
-      const updated = loadGlobalConfigsIntoEnv(true);
-
-      // Re-initialize integrations so they pick up new secrets
-      const integrations: string[] = [];
-
-      resetAgentMail();
-      if (initAgentMail()) integrations.push("agentmail");
-
-      resetGitHub();
-      if (initGitHub()) integrations.push("github");
-
-      resetLinear();
-      if (initLinear()) integrations.push("linear");
-
-      // Slack: stop and restart to pick up new token
-      await stopSlackApp();
-      await startSlackApp();
-      integrations.push("slack");
-
+      const result = await reloadGlobalConfigsAndIntegrations();
       console.log(
-        `[reload-config] Loaded ${updated.length} config(s), re-initialized: ${integrations.join(", ") || "none"}`,
+        `[reload-config] Loaded ${result.configsLoaded} config(s), re-initialized: ${result.integrationsReinitialized.join(", ") || "none"}`,
       );
-
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          success: true,
-          configsLoaded: updated.length,
-          keysUpdated: updated,
-          integrationsReinitialized: integrations,
-        }),
-      );
+      res.end(JSON.stringify({ success: true, ...result }));
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       console.error("[reload-config] Failed:", message);
