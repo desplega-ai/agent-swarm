@@ -59,6 +59,22 @@ interface BlogPost {
 
 const posts: BlogPost[] = [
   {
+    slug: "deep-dive-state-machine-orchestration",
+    title:
+      "Why We Ditched DAGs for State Machines in Agent Orchestration",
+    description:
+      "How agent-swarm.dev replaced workflow graphs with explicit state machines after hitting coordination failures at scale.",
+    date: "April 22, 2026",
+    readTime: "14 min read",
+    tags: [
+      "state machine",
+      "orchestration",
+      "workflow engine",
+      "DAG",
+      "distributed systems",
+    ],
+  },
+  {
     slug: "deep-dive-prompt-cache-scheduling-dead-zone",
     title:
       "Why We Banned 5-Minute Intervals in Our Agent Orchestrator (And What the Prompt Cache Actually Costs You)",
