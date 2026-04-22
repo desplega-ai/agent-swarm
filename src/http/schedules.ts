@@ -12,6 +12,7 @@ import {
   updateScheduledTask,
 } from "../be/db";
 import { calculateNextRun } from "../scheduler/scheduler";
+import { scheduleContextKey } from "../tasks/context-key";
 import { getExecutorRegistry } from "../workflows";
 import { handleScheduleTrigger } from "../workflows/triggers";
 import { route } from "./route-def";
@@ -294,6 +295,7 @@ export async function handleSchedules(
           model: schedule.model,
           scheduleId: schedule.id,
           source: "schedule",
+          contextKey: scheduleContextKey({ scheduleId: schedule.id }),
         });
 
         if (schedule.scheduleType === "one_time") {

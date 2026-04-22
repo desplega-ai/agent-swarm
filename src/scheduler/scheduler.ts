@@ -7,6 +7,7 @@ import {
   getScheduledTaskById,
   updateScheduledTask,
 } from "@/be/db";
+import { scheduleContextKey } from "@/tasks/context-key";
 import type { ScheduledTask } from "@/types";
 import type { ExecutorRegistry } from "@/workflows/executors/registry";
 import { handleScheduleTrigger } from "@/workflows/triggers";
@@ -58,6 +59,7 @@ async function recoverMissedSchedules(): Promise<void> {
             model: schedule.model,
             scheduleId: schedule.id,
             source: "schedule",
+            contextKey: scheduleContextKey({ scheduleId: schedule.id }),
           });
         });
         tx();
@@ -162,6 +164,7 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
           model: schedule.model,
           scheduleId: schedule.id,
           source: "schedule",
+          contextKey: scheduleContextKey({ scheduleId: schedule.id }),
         });
       })();
     }
@@ -352,6 +355,7 @@ export async function runScheduleNow(scheduleId: string): Promise<void> {
         model: schedule.model,
         scheduleId: schedule.id,
         source: "schedule",
+        contextKey: scheduleContextKey({ scheduleId: schedule.id }),
       });
     })();
   }

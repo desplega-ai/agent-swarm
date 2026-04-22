@@ -7,6 +7,7 @@ import {
   resolveUser,
 } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
+import { agentmailContextKey } from "../tasks/context-key";
 import { workflowEventBus } from "../workflows/event-bus";
 // Side-effect import: registers all AgentMail event templates in the in-memory registry
 import "./templates";
@@ -148,6 +149,7 @@ export async function handleMessageReceived(
       agentmailThreadId: thread_id,
       parentTaskId: existingTask.id,
       requestedByUserId,
+      contextKey: agentmailContextKey({ threadId: thread_id }),
     });
 
     console.log(
@@ -185,6 +187,7 @@ export async function handleMessageReceived(
           agentmailMessageId: message_id,
           agentmailThreadId: thread_id,
           requestedByUserId,
+          contextKey: agentmailContextKey({ threadId: thread_id }),
         });
 
         console.log(
@@ -214,6 +217,7 @@ export async function handleMessageReceived(
         agentmailMessageId: message_id,
         agentmailThreadId: thread_id,
         requestedByUserId,
+        contextKey: agentmailContextKey({ threadId: thread_id }),
       });
 
       console.log(
@@ -247,6 +251,7 @@ export async function handleMessageReceived(
       agentmailMessageId: message_id,
       agentmailThreadId: thread_id,
       requestedByUserId,
+      contextKey: agentmailContextKey({ threadId: thread_id }),
     });
 
     console.log(
@@ -275,6 +280,7 @@ export async function handleMessageReceived(
     agentmailMessageId: message_id,
     agentmailThreadId: thread_id,
     requestedByUserId,
+    contextKey: agentmailContextKey({ threadId: thread_id }),
   });
 
   console.log(`[AgentMail] Created unassigned task ${task.id} (no lead or mapping available)`);

@@ -4,6 +4,7 @@ import {
   getLeadAgent,
   getMostRecentTaskInThread,
 } from "../be/db";
+import { slackContextKey } from "../tasks/context-key";
 import { getSlackApp } from "./app";
 import { buildBufferFlushBlocks } from "./blocks";
 import { registerTreeMessage } from "./watcher";
@@ -178,6 +179,7 @@ async function flushBuffer(key: string, immediate = false): Promise<void> {
     slackUserId: buffer.slackUserId,
     dependsOn,
     parentTaskId: mostRecentTask?.id,
+    contextKey: slackContextKey({ channelId: buffer.channelId, threadTs: buffer.threadTs }),
   });
 
   console.log(

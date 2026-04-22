@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { workflowContextKey } from "../../tasks/context-key";
 import type { ExecutorMeta } from "../../types";
 import type { ExecutorResult } from "./base";
 import { BaseExecutor } from "./base";
@@ -90,6 +91,7 @@ export class AgentTaskExecutor extends BaseExecutor<
       model: config.model,
       parentTaskId: config.parentTaskId,
       outputSchema: config.outputSchema,
+      contextKey: workflowContextKey({ workflowRunId: meta.runId }),
     });
 
     // 4. Return async result — engine will pause the workflow

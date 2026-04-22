@@ -1,5 +1,6 @@
 import { createTaskExtended, failTask, findTaskByVcs, getAllAgents, resolveUser } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
+import { githubContextKey } from "../tasks/context-key";
 import {
   detectMention,
   extractMentionContext,
@@ -23,6 +24,25 @@ import type {
 // Simple deduplication cache (60 second TTL)
 const processedEvents = new Map<string, number>();
 const EVENT_TTL = 60_000;
+
+/**
+ * Build a uniform cross-ingress context key for a GitHub issue or PR.
+ * `repository.full_name` is "owner/repo"; split it and fall back gracefully
+ * if the split unexpectedly fails so we never block task creation on a bad key.
+ */
+function buildGithubContextKey(
+  fullName: string,
+  kind: "issue" | "pr",
+  number: number,
+): string | undefined {
+  const [owner, repo] = fullName.split("/");
+  if (!owner || !repo) return undefined;
+  try {
+    return githubContextKey({ owner, repo, kind, number });
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Get review state emoji and label
@@ -184,6 +204,7 @@ export async function handlePullRequest(
       requestedByUserId,
       vcsUrl: pr.html_url,
       vcsInstallationId: installation?.id,
+      contextKey: buildGithubContextKey(repository.full_name, "pr", pr.number),
     });
 
     if (lead) {
@@ -283,6 +304,7 @@ export async function handlePullRequest(
       requestedByUserId,
       vcsUrl: pr.html_url,
       vcsInstallationId: installation?.id,
+      contextKey: buildGithubContextKey(repository.full_name, "pr", pr.number),
     });
 
     if (lead) {
@@ -374,6 +396,7 @@ export async function handlePullRequest(
       requestedByUserId,
       vcsUrl: pr.html_url,
       vcsInstallationId: installation?.id,
+      contextKey: buildGithubContextKey(repository.full_name, "pr", pr.number),
     });
 
     if (lead) {
@@ -462,6 +485,7 @@ export async function handlePullRequest(
     vcsAuthor: sender.login,
     vcsUrl: pr.html_url,
     vcsInstallationId: installation?.id,
+    contextKey: buildGithubContextKey(repository.full_name, "pr", pr.number),
   });
 
   if (lead) {
@@ -536,6 +560,7 @@ export async function handleIssue(
       requestedByUserId,
       vcsUrl: issue.html_url,
       vcsInstallationId: installation?.id,
+      contextKey: buildGithubContextKey(repository.full_name, "issue", issue.number),
     });
 
     if (lead) {
@@ -623,6 +648,7 @@ export async function handleIssue(
       requestedByUserId,
       vcsUrl: issue.html_url,
       vcsInstallationId: installation?.id,
+      contextKey: buildGithubContextKey(repository.full_name, "issue", issue.number),
     });
 
     if (lead) {
@@ -693,6 +719,7 @@ export async function handleIssue(
     vcsAuthor: sender.login,
     vcsUrl: issue.html_url,
     vcsInstallationId: installation?.id,
+    contextKey: buildGithubContextKey(repository.full_name, "issue", issue.number),
   });
 
   if (lead) {
@@ -793,6 +820,9 @@ export async function handleComment(
     vcsUrl: targetUrl,
     vcsInstallationId: installation?.id,
     vcsNodeId: comment.node_id,
+    contextKey: targetNumber
+      ? buildGithubContextKey(repository.full_name, pull_request ? "pr" : "issue", targetNumber)
+      : undefined,
   });
 
   if (lead) {
@@ -907,6 +937,7 @@ export async function handlePullRequestReview(
     vcsUrl: review.html_url,
     vcsInstallationId: installation?.id,
     vcsNodeId: review.node_id,
+    contextKey: buildGithubContextKey(repository.full_name, "pr", pr.number),
   });
 
   if (lead) {

@@ -8,6 +8,7 @@ import {
 } from "../be/db-queries/tracker";
 import { ensureToken } from "../oauth/ensure-token";
 import { resolveTemplate } from "../prompts/resolver";
+import { linearContextKey } from "../tasks/context-key";
 // Side-effect import: registers all Linear event templates in the in-memory registry
 import "./templates";
 
@@ -332,6 +333,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
     source: "linear",
     taskType: "linear-issue",
     requestedByUserId,
+    contextKey: linearContextKey({ issueIdentifier }),
   });
 
   // Delete old tracker_sync before creating new one (UNIQUE constraint)
@@ -575,6 +577,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
     source: "linear",
     taskType: "linear-issue",
     requestedByUserId: promptedRequestedByUserId,
+    contextKey: linearContextKey({ issueIdentifier }),
   });
 
   // Repoint the existing tracker_sync to the new follow-up task (can't create a

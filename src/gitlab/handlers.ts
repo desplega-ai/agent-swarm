@@ -10,6 +10,7 @@
 
 import { createTaskExtended, failTask, findTaskByVcs, getAllAgents, resolveUser } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
+import { gitlabContextKey } from "../tasks/context-key";
 import { GITLAB_BOT_NAME } from "./auth";
 import { addGitLabNoteReaction, addGitLabReaction } from "./reactions";
 // Side-effect import: registers all GitLab event templates in the in-memory registry
@@ -110,6 +111,11 @@ export async function handleMergeRequest(
         vcsAuthor: user.username,
         requestedByUserId,
         vcsUrl: mr.url,
+        contextKey: gitlabContextKey({
+          projectId: String(project.id),
+          kind: "mr",
+          iid: mr.iid,
+        }),
       });
 
       try {
@@ -207,6 +213,11 @@ export async function handleIssue(
         vcsAuthor: user.username,
         requestedByUserId,
         vcsUrl: issue.url,
+        contextKey: gitlabContextKey({
+          projectId: String(project.id),
+          kind: "issue",
+          iid: issue.iid,
+        }),
       });
 
       try {
@@ -305,6 +316,13 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
     vcsAuthor: user.username,
     vcsUrl: targetUrl,
     parentTaskId: existingTask?.id,
+    contextKey: targetNumber
+      ? gitlabContextKey({
+          projectId: String(project.id),
+          kind: note.noteable_type === "MergeRequest" ? "mr" : "issue",
+          iid: targetNumber,
+        })
+      : undefined,
   });
 
   try {
@@ -373,6 +391,11 @@ export async function handlePipeline(
     vcsAuthor: "",
     vcsUrl: event.merge_request.url,
     parentTaskId: existingTask.id,
+    contextKey: gitlabContextKey({
+      projectId: String(project.id),
+      kind: "mr",
+      iid: mrIid,
+    }),
   });
 
   return { created: true, taskId: task.id };

@@ -63,6 +63,7 @@ const createTask = route({
     parentTaskId: z.string().optional(),
     source: z.string().optional(),
     outputSchema: z.record(z.string(), z.unknown()).optional(),
+    contextKey: z.string().optional(),
   }),
   responses: {
     201: { description: "Task created" },
@@ -252,6 +253,7 @@ export async function handleTasks(
         parentTaskId: parsed.body.parentTaskId || undefined,
         source: (parsed.body.source as import("../types").AgentTaskSource) || "api",
         outputSchema: parsed.body.outputSchema || undefined,
+        contextKey: parsed.body.contextKey || undefined,
       });
 
       ensure({

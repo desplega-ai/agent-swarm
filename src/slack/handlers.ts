@@ -10,6 +10,7 @@ import {
   resolveUser,
 } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
+import { slackContextKey } from "../tasks/context-key";
 import { workflowEventBus } from "../workflows/event-bus";
 import { buildTreeBlocks, type TreeNode } from "./blocks";
 import type { SlackFile } from "./files";
@@ -545,6 +546,7 @@ export function registerMessageHandler(app: App): void {
         slackThreadTs: threadTs,
         slackUserId: msg.user,
         requestedByUserId,
+        contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
       });
 
       await say({
@@ -618,6 +620,7 @@ export function registerMessageHandler(app: App): void {
             slackUserId: msg.user,
             parentTaskId: latestTask?.id,
             requestedByUserId,
+            contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
           });
           results.assigned.push({ agentName: agent.name, taskId: task.id });
           continue;
@@ -631,6 +634,7 @@ export function registerMessageHandler(app: App): void {
           slackThreadTs: threadTs,
           slackUserId: msg.user,
           requestedByUserId,
+          contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
         });
 
         // Check if agent has an in-progress task in this thread (queued follow-up)
