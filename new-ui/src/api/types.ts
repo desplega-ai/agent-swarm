@@ -676,6 +676,7 @@ export interface AgentSkillsResponse {
 // MCP Servers
 export type McpServerTransport = "stdio" | "http" | "sse";
 export type McpServerScope = "global" | "swarm" | "agent";
+export type McpAuthMethod = "static" | "oauth" | "auto";
 
 export interface McpServer {
   id: string;
@@ -690,10 +691,50 @@ export interface McpServer {
   headers: string | null;
   envConfigKeys: string | null;
   headerConfigKeys: string | null;
+  authMethod: McpAuthMethod;
   isEnabled: boolean;
   version: number;
   createdAt: string;
   lastUpdatedAt: string;
+}
+
+export type McpOAuthStatus = "connected" | "expired" | "error" | "revoked";
+export type McpOAuthClientSource = "dcr" | "manual" | "preregistered";
+
+export interface McpOAuthTokenStatus {
+  id: string;
+  status: McpOAuthStatus;
+  tokenType: string;
+  expiresAt: string | null;
+  scope: string | null;
+  lastErrorMessage: string | null;
+  lastRefreshedAt: string | null;
+  authorizationServerIssuer: string;
+  resourceUrl: string;
+  clientSource: McpOAuthClientSource;
+  hasRefreshToken: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface McpOAuthStatusResponse {
+  mcpServerId: string;
+  authMethod: McpAuthMethod;
+  connected: boolean;
+  token: McpOAuthTokenStatus | null;
+}
+
+export interface McpOAuthMetadataResponse {
+  requiresOAuth: boolean;
+  resourceUrl?: string;
+  authorizationServerIssuer?: string;
+  authorizeUrl?: string;
+  tokenUrl?: string;
+  revocationUrl?: string | null;
+  registrationEndpoint?: string | null;
+  scopes?: string[];
+  dcrSupported?: boolean;
+  bearerMethodsSupported?: string[] | null;
 }
 
 export interface McpServerWithInstallInfo extends McpServer {

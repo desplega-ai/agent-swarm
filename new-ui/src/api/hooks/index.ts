@@ -25,6 +25,13 @@ export {
   useTaskUsage,
 } from "./use-costs";
 export { useDbQuery, useTableColumns, useTableList } from "./use-db-query";
+export {
+  useDisconnectMcpOAuth,
+  useMcpOAuthMetadata,
+  useMcpOAuthStatus,
+  useRefreshMcpOAuth,
+  useRegisterMcpOAuthManualClient,
+} from "./use-mcp-oauth";
 export type { McpServerFilters } from "./use-mcp-servers";
 export {
   useAgentMcpServers,

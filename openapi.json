@@ -4695,6 +4695,45 @@
         }
       }
     },
+    "/api/mcp-oauth/{mcpServerId}/status": {
+      "get": {
+        "summary": "Get the current OAuth connection status for an MCP server",
+        "tags": [
+          "MCP OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "mcpServerId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "userId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Token status (never includes the token value itself)"
+          },
+          "404": {
+            "description": "MCP server not found"
+          }
+        }
+      }
+    },
     "/api/mcp-oauth/{mcpServerId}/authorize": {
       "get": {
         "summary": "Start an OAuth flow. Redirects to the provider.",

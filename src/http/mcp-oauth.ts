@@ -123,6 +123,21 @@ const metadataRoute = route({
   },
 });
 
+const statusRoute = route({
+  method: "get",
+  path: "/api/mcp-oauth/{mcpServerId}/status",
+  pattern: ["api", "mcp-oauth", null, "status"],
+  summary: "Get the current OAuth connection status for an MCP server",
+  tags: ["MCP OAuth"],
+  auth: { apiKey: true },
+  params: z.object({ mcpServerId: z.string() }),
+  query: z.object({ userId: z.string().optional() }),
+  responses: {
+    200: { description: "Token status (never includes the token value itself)" },
+    404: { description: "MCP server not found" },
+  },
+});
+
 const authorizeRoute = route({
   method: "get",
   path: "/api/mcp-oauth/{mcpServerId}/authorize",
@@ -310,6 +325,45 @@ export async function handleMcpOAuth(
       res.writeHead(302, { Location: target.toString() });
       res.end();
     }
+    return true;
+  }
+
+  // GET /api/mcp-oauth/:id/status — returns sanitized token state (no secrets)
+  if (statusRoute.match(req.method, pathSegments)) {
+    const parsed = await statusRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const server = getMcpServerById(parsed.params.mcpServerId);
+    if (!server) {
+      jsonError(res, "MCP server not found", 404);
+      return true;
+    }
+
+    const userId = parsed.query.userId ?? null;
+    const token = getMcpOAuthToken(parsed.params.mcpServerId, userId);
+
+    json(res, {
+      mcpServerId: server.id,
+      authMethod: server.authMethod,
+      connected: !!token && token.status === "connected",
+      token: token
+        ? {
+            id: token.id,
+            status: token.status,
+            tokenType: token.tokenType,
+            expiresAt: token.expiresAt,
+            scope: token.scope,
+            lastErrorMessage: token.lastErrorMessage,
+            lastRefreshedAt: token.lastRefreshedAt,
+            authorizationServerIssuer: token.authorizationServerIssuer,
+            resourceUrl: token.resourceUrl,
+            clientSource: token.clientSource,
+            hasRefreshToken: !!token.refreshToken,
+            createdAt: token.createdAt,
+            updatedAt: token.updatedAt,
+          }
+        : null,
+    });
     return true;
   }
 
