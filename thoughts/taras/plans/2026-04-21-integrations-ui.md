@@ -2,8 +2,10 @@
 title: Integrations configuration UI (dashboard)
 date: 2026-04-21
 author: taras
-status: draft
+status: in-progress
 autonomy: critical
+last_updated: 2026-04-22
+last_updated_by: claude (phase-running agent)
 ---
 
 # Integrations Configuration UI
@@ -152,11 +154,11 @@ Define the single source of truth for the UI: a typed catalog listing all known 
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Type-check passes: `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Lint passes: `cd new-ui && pnpm lint`
-- [ ] New catalog file exists: `ls new-ui/src/lib/integrations-catalog.ts`
-- [ ] Every `IntegrationDef.id` is unique and kebab-case: `grep -oE "id: \"[a-z0-9-]+\"" new-ui/src/lib/integrations-catalog.ts | sort | uniq -d` returns empty.
-- [ ] No reserved key (`API_KEY`, `SECRETS_ENCRYPTION_KEY`) appears in the catalog: `grep -iE "(API_KEY|SECRETS_ENCRYPTION_KEY)" new-ui/src/lib/integrations-catalog.ts` only matches in comments or not at all.
+- [x] Type-check passes: `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Lint passes: `cd new-ui && pnpm lint`
+- [x] New catalog file exists: `ls new-ui/src/lib/integrations-catalog.ts`
+- [x] Every `IntegrationDef.id` is unique and kebab-case: `grep -oE "id: \"[a-z0-9-]+\"" new-ui/src/lib/integrations-catalog.ts | sort | uniq -d` returns empty.
+- [x] No reserved key (`API_KEY`, `SECRETS_ENCRYPTION_KEY`) appears in the catalog: `grep -iE "(API_KEY|SECRETS_ENCRYPTION_KEY)" new-ui/src/lib/integrations-catalog.ts` only matches in comments or not at all.
 
 #### Manual Verification:
 - [ ] Run the sanity-check script (`bun new-ui/src/lib/integrations-status.sanity.ts`) and eyeball outputs for none / partial / full / disabled / reserved-key-skipped.
