@@ -1,18 +1,16 @@
-import { Info, Plug, Search, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Plug, Search } from "lucide-react";
+import { useMemo, useState } from "react";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { IntegrationCard } from "@/components/integrations/integration-card";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { INTEGRATIONS, type IntegrationCategory } from "@/lib/integrations-catalog";
 import { deriveIntegrationStatus, findConfigForKey } from "@/lib/integrations-status";
 import { cn } from "@/lib/utils";
 
-const RESTART_HINT_DISMISS_KEY = "integrations-restart-hint-dismissed";
 const QUICK_PICK_IDS = ["slack", "github", "anthropic"] as const;
 
 const CATEGORY_LABELS: Record<IntegrationCategory, string> = {
@@ -31,23 +29,6 @@ export default function IntegrationsPage() {
   const { data: configs, isLoading, error } = useConfigs({ scope: "global" });
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<CategoryFilter>("all");
-  const [hintDismissed, setHintDismissed] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      return window.sessionStorage.getItem(RESTART_HINT_DISMISS_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
-
-  function dismissHint() {
-    setHintDismissed(true);
-    try {
-      window.sessionStorage.setItem(RESTART_HINT_DISMISS_KEY, "1");
-    } catch {
-      // sessionStorage unavailable — keep in-memory state, no-op.
-    }
-  }
 
   // Determine whether any catalog integration has at least one config set.
   // We look up each catalog field key (plus disableKey) against the fetched
@@ -62,17 +43,6 @@ export default function IntegrationsPage() {
     }
     return false;
   }, [configs]);
-
-  // Keep in sync if another tab clears sessionStorage.
-  useEffect(() => {
-    function onStorage(e: StorageEvent) {
-      if (e.key === RESTART_HINT_DISMISS_KEY && e.newValue === null) {
-        setHintDismissed(false);
-      }
-    }
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
 
   const availableCategories = useMemo<IntegrationCategory[]>(() => {
     const present = new Set<IntegrationCategory>();
@@ -107,29 +77,6 @@ export default function IntegrationsPage() {
           hand-editing <code className="font-mono text-xs">.env</code>.
         </p>
       </div>
-
-      {!hintDismissed && (
-        <Alert className="relative pr-10">
-          <Info className="h-4 w-4" />
-          <AlertDescription>
-            Some changes take effect only after restarting the API server (e.g.{" "}
-            <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
-              bun run pm2-restart
-            </code>
-            ).
-          </AlertDescription>
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className="absolute right-1 top-1 h-6 w-6"
-            onClick={dismissHint}
-            aria-label="Dismiss"
-          >
-            <X className="h-3.5 w-3.5" />
-          </Button>
-        </Alert>
-      )}
 
       {error && (
         <Alert variant="destructive">

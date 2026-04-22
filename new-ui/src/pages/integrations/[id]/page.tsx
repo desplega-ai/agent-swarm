@@ -19,14 +19,20 @@ import {
   Sparkles,
   SquareCheckBig,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { toast } from "sonner";
 import {
   type UpsertConfigEntry,
   useConfigs,
   useDeleteConfigsBatch,
   useUpsertConfigsBatch,
 } from "@/api/hooks/use-config-api";
+import {
+  type EnvPresenceMap,
+  useEnvPresence,
+  useReloadConfig,
+} from "@/api/hooks/use-integrations-meta";
 import type { SwarmConfig } from "@/api/types";
 import { CodexOAuthSection } from "@/components/integrations/codex-oauth-section";
 import { FieldRenderer } from "@/components/integrations/field-renderer";
@@ -117,6 +123,15 @@ export default function IntegrationDetailPage() {
   const { data: configs, isLoading } = useConfigs({ scope: "global" });
   const upsertBatch = useUpsertConfigsBatch();
   const deleteBatch = useDeleteConfigsBatch();
+  const reloadConfig = useReloadConfig();
+
+  const envPresenceKeys = useMemo(() => {
+    if (!def) return [];
+    const keys = def.fields.map((f) => f.key);
+    if (def.disableKey) keys.push(def.disableKey);
+    return keys;
+  }, [def]);
+  const { data: envPresence } = useEnvPresence(envPresenceKeys);
 
   // Compute initial state only when configs/def land. We intentionally keep
   // local form state keyed by the catalog def id so navigating between
@@ -153,6 +168,8 @@ export default function IntegrationDetailPage() {
       initialState={initialState}
       upsertBatch={upsertBatch}
       deleteBatch={deleteBatch}
+      reloadConfig={reloadConfig}
+      envPresence={envPresence ?? {}}
     />
   );
 }
@@ -163,6 +180,8 @@ interface InnerProps {
   initialState: DirtyState;
   upsertBatch: ReturnType<typeof useUpsertConfigsBatch>;
   deleteBatch: ReturnType<typeof useDeleteConfigsBatch>;
+  reloadConfig: ReturnType<typeof useReloadConfig>;
+  envPresence: EnvPresenceMap;
 }
 
 function IntegrationDetailInner({
@@ -171,6 +190,8 @@ function IntegrationDetailInner({
   initialState,
   upsertBatch,
   deleteBatch,
+  reloadConfig,
+  envPresence,
 }: InnerProps) {
   const Icon = resolveIcon(def.iconKey);
   const status = deriveIntegrationStatus(def, configs);
@@ -227,13 +248,22 @@ function IntegrationDetailInner({
 
   const dirtyEntries = computeDirtyEntries();
   const hasDirty = dirtyEntries.length > 0;
-  const anyDirtySecret = dirtyEntries.some((e) => e.isSecret);
-  const showRestartHint = def.restartRequired === true || anyDirtySecret;
 
-  function handleSave() {
+  const handleSave = useCallback(async () => {
     if (!hasDirty) return;
-    upsertBatch.mutate(dirtyEntries);
-  }
+    const saveResult = await upsertBatch.mutateAsync(dirtyEntries);
+    if (saveResult.failureCount > 0) return; // upsertBatch already surfaced the error toast
+    try {
+      const reload = await reloadConfig.mutateAsync();
+      const summary =
+        reload.integrationsReinitialized.length > 0
+          ? `Applied live to: ${reload.integrationsReinitialized.join(", ")}`
+          : "Applied live (no integration re-init needed)";
+      toast.success(summary);
+    } catch {
+      // reload hook surfaces its own error toast
+    }
+  }, [hasDirty, dirtyEntries, upsertBatch, reloadConfig]);
 
   // Cmd/Ctrl+S = Save. We intentionally let it fire even when focus is inside
   // a textarea (private keys, etc.) — users expect cmd+S universally and can
@@ -242,14 +272,14 @@ function IntegrationDetailInner({
     function onKeyDown(e: KeyboardEvent) {
       const isSaveShortcut = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s";
       if (!isSaveShortcut) return;
-      if (upsertBatch.isPending) return;
+      if (upsertBatch.isPending || reloadConfig.isPending) return;
       if (!hasDirty) return;
       e.preventDefault();
-      upsertBatch.mutate(dirtyEntries);
+      void handleSave();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [hasDirty, upsertBatch, dirtyEntries]);
+  }, [hasDirty, upsertBatch.isPending, reloadConfig.isPending, handleSave]);
 
   function handleToggleDisable() {
     if (!def.disableKey) return;
@@ -358,20 +388,6 @@ function IntegrationDetailInner({
         </div>
       )}
 
-      {/* Restart hint */}
-      {showRestartHint && (
-        <Alert>
-          <Info className="h-4 w-4" />
-          <AlertDescription>
-            Changes take effect after the API server restarts. Run{" "}
-            <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
-              bun run pm2-restart
-            </code>{" "}
-            or restart your dev process.
-          </AlertDescription>
-        </Alert>
-      )}
-
       {/* Linear OAuth connection card — shown ABOVE the generic form. */}
       {isLinearOAuth && <LinearOAuthSection />}
 
@@ -411,6 +427,7 @@ function IntegrationDetailInner({
               fields={requiredFields}
               state={state}
               configs={configs}
+              envPresence={envPresence}
               onUpdate={updateField}
             />
           )}
@@ -426,6 +443,7 @@ function IntegrationDetailInner({
                   fields={advancedFields}
                   state={state}
                   configs={configs}
+                  envPresence={envPresence}
                   onUpdate={updateField}
                   bare
                 />
@@ -463,11 +481,20 @@ interface FieldGroupProps {
   fields: IntegrationField[];
   state: DirtyState;
   configs: SwarmConfig[];
+  envPresence: EnvPresenceMap;
   onUpdate: (key: string, patch: Partial<DirtyField>) => void;
   bare?: boolean;
 }
 
-function FieldGroup({ title, fields, state, configs, onUpdate, bare }: FieldGroupProps) {
+function FieldGroup({
+  title,
+  fields,
+  state,
+  configs,
+  envPresence,
+  onUpdate,
+  bare,
+}: FieldGroupProps) {
   const content = (
     <div className="space-y-5">
       {fields.map((f) => {
@@ -478,6 +505,7 @@ function FieldGroup({ title, fields, state, configs, onUpdate, bare }: FieldGrou
             key={f.key}
             field={f}
             existingConfig={existing}
+            inEnv={!!envPresence[f.key]}
             value={current.value}
             markedForReplace={!!current.markedForReplace}
             onChange={(v) => onUpdate(f.key, { value: v })}

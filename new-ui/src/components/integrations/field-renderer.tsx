@@ -36,6 +36,8 @@ const FORMAT_WARNINGS: Record<string, (v: string) => string | null> = {
 interface FieldRendererProps {
   field: IntegrationField;
   existingConfig?: SwarmConfig;
+  /** Whether the server currently has this key set in process.env (any source). */
+  inEnv?: boolean;
   value: string;
   markedForReplace: boolean;
   onChange: (value: string) => void;
@@ -46,6 +48,7 @@ interface FieldRendererProps {
 export function FieldRenderer({
   field,
   existingConfig,
+  inEnv = false,
   value,
   markedForReplace,
   onChange,
@@ -86,6 +89,31 @@ export function FieldRenderer({
   const warningText =
     value && value !== SECRET_MASK_SENTINEL ? (FORMAT_WARNINGS[field.key]?.(value) ?? null) : null;
 
+  // Source chip: distinguishes "set via deployment env only" from "persisted in
+  // swarm_config". When both are true the DB row was already loaded into env at
+  // boot (or env set and DB row match) — either way it's live.
+  const inDb = existingConfig !== undefined;
+  const sourceChip: { label: string; className: string; title: string } | null = inDb
+    ? inEnv
+      ? {
+          label: "db+env",
+          className: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+          title: "Set in DB and loaded into process.env. Live on the server.",
+        }
+      : {
+          label: "db (pending reload)",
+          className: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+          title: "Saved to DB but not yet in process.env — reload or restart the API to apply.",
+        }
+    : inEnv
+      ? {
+          label: "env (deploy)",
+          className: "bg-sky-500/10 text-sky-400 border-sky-500/30",
+          title:
+            "Set via deployment env (.env / docker). No DB row — save here to persist across DB reloads.",
+        }
+      : null;
+
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-2">
@@ -110,6 +138,14 @@ export function FieldRenderer({
         >
           {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
         </Button>
+        {sourceChip && (
+          <span
+            className={`ml-auto text-[9px] uppercase tracking-wide px-1.5 py-0 h-5 inline-flex items-center rounded-md border font-medium leading-none ${sourceChip.className}`}
+            title={sourceChip.title}
+          >
+            {sourceChip.label}
+          </span>
+        )}
       </div>
 
       {showMaskedReadOnly ? (

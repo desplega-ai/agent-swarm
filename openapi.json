@@ -995,6 +995,69 @@
         }
       }
     },
+    "/api/config/env-presence": {
+      "get": {
+        "summary": "Check which of the given env var keys are currently set in process.env (presence only, no values)",
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "keys",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Map of key -> boolean (true iff set in process.env)"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/config/reload": {
+      "post": {
+        "summary": "Reload global swarm_config into process.env (override=true) and re-init integrations (Slack, GitHub, Linear, AgentMail)",
+        "tags": [
+          "Config"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reload result"
+          },
+          "500": {
+            "description": "Reload failed"
+          }
+        }
+      }
+    },
     "/api/config/{id}": {
       "get": {
         "summary": "Get a single config entry by ID",
