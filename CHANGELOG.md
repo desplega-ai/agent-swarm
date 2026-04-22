@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.68.0] - 2026-04-22
+
+### Added
+- New `/integrations` dashboard page that lets operators configure third-party integrations (Slack, GitHub, GitLab, Linear, Sentry, AgentMail, Anthropic, OpenRouter, OpenAI, Codex, business-use) without hand-editing `.env`. Frontend-only catalog in `new-ui/src/lib/integrations-catalog.ts`, one form field per known `swarm_config` key, with labels, help text, docs links, and category/search filters (#364)
+- `POST /api/config/reload` — thin wrapper over the existing `/internal/reload-config` so the Integrations UI can apply saved values live (re-inits AgentMail, GitHub, Linear, stops/starts Slack socket mode) without a process restart (#364)
+- `GET /api/config/env-presence?keys=K1,K2,...` — returns `{ presence: { KEY: boolean } }` so the UI can surface which values come from the deployment env vs the DB without ever pushing raw env values to the browser (#364)
+- Per-field **Replace** / **Clear** affordances on the Integrations detail page. Secrets render masked (`••••••`); non-secret values (emails, channel names, flags) edit in place. Save auto-invokes reload and toasts which integrations were re-initialized (#364)
+- Source chips on each field: `db+env` (live), `env (deploy)` (no DB row), `db (pending reload)` — rendered via shadcn Tooltip for fast hover reveal. Collapsible legend on the list page explains every chip (#364)
+
+### Changed
+- Sidebar restructured: Chat and Services hidden (routes still accessible); new **AI** group (Skills, MCP Servers); new **Configuration** group (Integrations, Templates, Approvals, Repos). Breadcrumbs now resolve integration ids to display names (`github` → "GitHub") and include proper-case labels for Integrations and API Keys (#364)
+- Toaster references the correct Tailwind v4 CSS vars (`--color-popover` instead of `--popover`) and pins `!bg-popover` so toasts are opaque instead of translucent (#364)
+
 ## [1.67.5] - 2026-04-22
 
 ### Added
