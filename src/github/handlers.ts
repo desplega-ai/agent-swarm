@@ -1,6 +1,7 @@
-import { createTaskExtended, failTask, findTaskByVcs, getAllAgents, resolveUser } from "../be/db";
+import { failTask, findTaskByVcs, getAllAgents, resolveUser } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
 import { githubContextKey } from "../tasks/context-key";
+import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import {
   detectMention,
   extractMentionContext,
@@ -192,7 +193,7 @@ export async function handlePullRequest(
       return { created: false };
     }
 
-    const task = createTaskExtended(result.text, {
+    const task = createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -292,7 +293,7 @@ export async function handlePullRequest(
       return { created: false };
     }
 
-    const task = createTaskExtended(result.text, {
+    const task = createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -384,7 +385,7 @@ export async function handlePullRequest(
       return { created: false };
     }
 
-    const task = createTaskExtended(result.text, {
+    const task = createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -474,7 +475,7 @@ export async function handlePullRequest(
   }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = createTaskExtended(result.text, {
+  const task = createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",
@@ -548,7 +549,7 @@ export async function handleIssue(
       return { created: false };
     }
 
-    const task = createTaskExtended(result.text, {
+    const task = createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -636,7 +637,7 @@ export async function handleIssue(
       return { created: false };
     }
 
-    const task = createTaskExtended(result.text, {
+    const task = createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -708,7 +709,7 @@ export async function handleIssue(
   }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = createTaskExtended(result.text, {
+  const task = createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",
@@ -807,7 +808,7 @@ export async function handleComment(
   }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = createTaskExtended(result.text, {
+  const task = createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",
@@ -925,7 +926,7 @@ export async function handlePullRequestReview(
   }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = createTaskExtended(result.text, {
+  const task = createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",

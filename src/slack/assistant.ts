@@ -1,12 +1,13 @@
 import { Assistant } from "@slack/bolt";
 import {
-  createTaskExtended,
   getAgentWorkingOnThread,
   getLeadAgent,
   getMostRecentTaskInThread,
   resolveUser,
 } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
+import { slackContextKey } from "../tasks/context-key";
+import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { bufferThreadMessage } from "./thread-buffer";
 // Side-effect import: registers all Slack event templates in the in-memory registry
 import "./templates";
@@ -82,7 +83,7 @@ export function createAssistant(): Assistant {
 
           // Otherwise, create a follow-up task for the working agent
           const latestTask = getMostRecentTaskInThread(channelId, threadTs);
-          createTaskExtended(messageText, {
+          createTaskWithSiblingAwareness(messageText, {
             agentId: workingAgent.id,
             source: "slack",
             slackChannelId: channelId,
@@ -90,6 +91,7 @@ export function createAssistant(): Assistant {
             slackUserId: userId,
             parentTaskId: latestTask?.id,
             requestedByUserId,
+            contextKey: slackContextKey({ channelId, threadTs }),
           });
 
           await safeSetStatus("Processing follow-up...");
@@ -114,25 +116,27 @@ export function createAssistant(): Assistant {
         const lead = getLeadAgent();
         if (!lead) {
           // No lead — still queue the task
-          createTaskExtended(messageText + channelContext, {
+          createTaskWithSiblingAwareness(messageText + channelContext, {
             source: "slack",
             slackChannelId: channelId,
             slackThreadTs: threadTs,
             slackUserId: userId,
             requestedByUserId,
+            contextKey: slackContextKey({ channelId, threadTs }),
           });
           const offlineResult = resolveTemplate("slack.assistant.offline", {});
           await say(offlineResult.text);
           return;
         }
 
-        createTaskExtended(messageText + channelContext, {
+        createTaskWithSiblingAwareness(messageText + channelContext, {
           agentId: lead.id,
           source: "slack",
           slackChannelId: channelId,
           slackThreadTs: threadTs,
           slackUserId: userId,
           requestedByUserId,
+          contextKey: slackContextKey({ channelId, threadTs }),
         });
         // setStatus shows typing indicator — watcher will post final result when done
       } catch (error) {
