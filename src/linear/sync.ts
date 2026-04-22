@@ -1,4 +1,4 @@
-import { cancelTask, createTaskExtended, getAllAgents, getTaskById, resolveUser } from "../be/db";
+import { cancelTask, getAllAgents, getTaskById, resolveUser } from "../be/db";
 import { getOAuthTokens } from "../be/db-queries/oauth";
 import {
   createTrackerSync,
@@ -9,6 +9,7 @@ import {
 import { ensureToken } from "../oauth/ensure-token";
 import { resolveTemplate } from "../prompts/resolver";
 import { linearContextKey } from "../tasks/context-key";
+import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 // Side-effect import: registers all Linear event templates in the in-memory registry
 import "./templates";
 
@@ -288,18 +289,26 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
   if (existing) {
     const existingTask = getTaskById(existing.swarmId);
 
-    // If the task is still active, acknowledge the new session but don't create a duplicate
+    // If the task is still active, post a user-visible response on the new
+    // session explaining that a sibling is already in flight and the new
+    // session can be closed. Do NOT create a duplicate swarm task. If the user
+    // wants to force a fresh run, they can re-assign the issue after the
+    // current task finishes.
     if (existingTask && !["completed", "failed", "cancelled"].includes(existingTask.status)) {
       console.log(
-        `[Linear Sync] Issue ${issueIdentifier} already tracked as active task ${existing.swarmId}, skipping`,
+        `[Linear Sync] Issue ${issueIdentifier} already tracked as active task ${existing.swarmId} (status: ${existingTask.status}), skipping duplicate`,
       );
       if (sessionId) {
         taskSessionMap.set(existingTask.id, sessionId);
-        acknowledgeAgentSession(
-          sessionId,
-          `This issue is already being worked on (task ${existing.swarmId}).`,
-        ).catch((err) => {
-          console.error("[Linear Sync] Failed to acknowledge duplicate AgentSession:", err);
+        const refuseMsg = [
+          `This issue is already being worked on — task \`${existing.swarmId}\` is currently \`${existingTask.status}\`.`,
+          "",
+          "To avoid duplicating work, I'm not starting a new session for this re-assignment. Progress on the active task will continue to be posted here.",
+          "",
+          "If you want to force a fresh run, wait for the current task to finish (or cancel it) and re-assign the issue.",
+        ].join("\n");
+        postAgentSessionResponse(sessionId, refuseMsg).catch((err) => {
+          console.error("[Linear Sync] Failed to post hard-refuse response:", err);
         });
       }
       return;
@@ -328,7 +337,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
     return;
   }
 
-  const task = createTaskExtended(templateResult.text, {
+  const task = createTaskWithSiblingAwareness(templateResult.text, {
     agentId: lead?.id ?? "",
     source: "linear",
     taskType: "linear-issue",
@@ -572,7 +581,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
     return;
   }
 
-  const task = createTaskExtended(followupResult.text, {
+  const task = createTaskWithSiblingAwareness(followupResult.text, {
     agentId: lead?.id ?? "",
     source: "linear",
     taskType: "linear-issue",

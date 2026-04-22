@@ -1,12 +1,7 @@
 import type { App } from "@slack/bolt";
-import {
-  cancelTask,
-  createTaskExtended,
-  getAgentById,
-  getLeadAgent,
-  getTaskById,
-  resolveUser,
-} from "../be/db";
+import { cancelTask, getAgentById, getLeadAgent, getTaskById, resolveUser } from "../be/db";
+import { slackContextKey } from "../tasks/context-key";
+import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { buildCancelledBlocks, getTaskLink } from "./blocks";
 
 export function registerActionHandlers(app: App): void {
@@ -73,7 +68,7 @@ export function registerActionHandlers(app: App): void {
 
     const lead = getLeadAgent();
     const requestedByUserId = resolveUser({ slackUserId: body.user.id })?.id;
-    const followUpTask = createTaskExtended(followUpText, {
+    const followUpTask = createTaskWithSiblingAwareness(followUpText, {
       agentId: lead?.id,
       source: "slack",
       parentTaskId: taskId,
@@ -81,6 +76,12 @@ export function registerActionHandlers(app: App): void {
       slackThreadTs: originalTask.slackThreadTs,
       slackUserId: body.user.id,
       requestedByUserId,
+      contextKey: originalTask.slackThreadTs
+        ? slackContextKey({
+            channelId: originalTask.slackChannelId,
+            threadTs: originalTask.slackThreadTs,
+          })
+        : undefined,
     });
 
     const taskLink = getTaskLink(followUpTask.id);

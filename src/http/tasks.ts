@@ -4,7 +4,6 @@ import { z } from "zod";
 import {
   cancelTask,
   completeTask,
-  createTaskExtended,
   failTask,
   getAllTasks,
   getDb,
@@ -19,6 +18,7 @@ import {
   updateTaskProgress,
   updateTaskVcs,
 } from "../be/db";
+import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { telemetry } from "../telemetry";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -241,7 +241,7 @@ export async function handleTasks(
     if (!parsed) return true;
 
     try {
-      const task = createTaskExtended(parsed.body.task, {
+      const task = createTaskWithSiblingAwareness(parsed.body.task, {
         agentId: parsed.body.agentId || undefined,
         creatorAgentId: myAgentId || undefined,
         taskType: parsed.body.taskType || undefined,

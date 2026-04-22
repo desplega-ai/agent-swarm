@@ -11,6 +11,7 @@ import {
 } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
+import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { workflowEventBus } from "../workflows/event-bus";
 import { buildTreeBlocks, type TreeNode } from "./blocks";
 import type { SlackFile } from "./files";
@@ -539,7 +540,7 @@ export function registerMessageHandler(app: App): void {
       }
 
       const lead = getLeadAgent();
-      createTaskExtended(fullTaskDescription, {
+      createTaskWithSiblingAwareness(fullTaskDescription, {
         agentId: lead?.id,
         source: "slack",
         slackChannelId: msg.channel,
@@ -612,7 +613,7 @@ export function registerMessageHandler(app: App): void {
       try {
         const latestTask = getMostRecentTaskInThread(msg.channel, threadTs);
         if (agent.isLead) {
-          const task = createTaskExtended(fullTaskDescription, {
+          const task = createTaskWithSiblingAwareness(fullTaskDescription, {
             agentId: agent.id,
             source: "slack",
             slackChannelId: msg.channel,
@@ -627,7 +628,7 @@ export function registerMessageHandler(app: App): void {
         }
 
         // Workers receive tasks as before
-        const task = createTaskExtended(fullTaskDescription, {
+        const task = createTaskWithSiblingAwareness(fullTaskDescription, {
           agentId: agent.id,
           source: "slack",
           slackChannelId: msg.channel,
