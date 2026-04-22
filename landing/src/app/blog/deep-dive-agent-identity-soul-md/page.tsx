@@ -30,7 +30,7 @@ export const metadata: Metadata = {
       },
     ],
     type: "article",
-    publishedTime: "2025-01-13T00:00:00Z",
+    publishedTime: "2026-04-02T00:00:00Z",
     section: "Agent Swarm",
   },
   twitter: {
@@ -68,8 +68,8 @@ const jsonLd = {
     "Why Your AI Agent Needs a Job Description: How SOUL.md and Role Templates Turn Generic LLMs Into Reliable Specialists",
   description:
     "Turn generic LLMs into reliable specialists using SOUL.md and IDENTITY.md. Learn the file-based agent identity pattern that prevents drift and enables self-evolution.",
-  datePublished: "2025-01-13T00:00:00Z",
-  dateModified: "2025-01-13T00:00:00Z",
+  datePublished: "2026-04-02T00:00:00Z",
+  dateModified: "2026-04-02T00:00:00Z",
   author: {
     "@type": "Organization",
     name: "Agent Swarm",
@@ -94,7 +94,7 @@ const jsonLd = {
 export default function AgentIdentitySoulMdPost() {
   return (
     <BlogPostLayout
-      date="January 13, 2025"
+      date="April 2, 2026"
       readTime="12 min read"
       title={
         <>
