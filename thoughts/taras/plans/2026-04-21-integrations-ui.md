@@ -5,7 +5,7 @@ author: taras
 status: in-progress
 autonomy: critical
 last_updated: 2026-04-22
-last_updated_by: claude (phase-running agent, Phase 2)
+last_updated_by: claude (phase-running agent, Phase 3)
 ---
 
 # Integrations Configuration UI
@@ -257,11 +257,11 @@ Turn each card into an editable, labeled form. This is the main UX delivery.
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Type-check: `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Lint: `cd new-ui && pnpm lint`
-- [ ] Hook exports present: `grep -nE "useUpsertConfigsBatch|useDeleteConfigsBatch" new-ui/src/api/hooks/use-config-api.ts` returns both.
-- [ ] Reserved-key filter present: `grep -n "API_KEY\|SECRETS_ENCRYPTION_KEY" new-ui/src/api/hooks/use-config-api.ts` shows a filter/guard line.
-- [ ] Build succeeds: `cd new-ui && pnpm build`.
+- [x] Type-check: `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Lint: `cd new-ui && pnpm lint`
+- [x] Hook exports present: `grep -nE "useUpsertConfigsBatch|useDeleteConfigsBatch" new-ui/src/api/hooks/use-config-api.ts` returns both.
+- [x] Reserved-key filter present: `grep -n "API_KEY\|SECRETS_ENCRYPTION_KEY" new-ui/src/api/hooks/use-config-api.ts` shows a filter/guard line.
+- [x] Build succeeds: `cd new-ui && pnpm build`.
 
 #### Manual Verification:
 - [ ] Open `/integrations/slack`. Form shows `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` as required password fields; allow-list fields under Advanced.

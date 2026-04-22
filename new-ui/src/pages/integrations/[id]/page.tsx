@@ -1,23 +1,471 @@
+import {
+  Activity,
+  Bot,
+  Brain,
+  Bug,
+  ChartLine,
+  ExternalLink,
+  GitBranch,
+  Github,
+  GitMerge,
+  Info,
+  KeyRound,
+  ListChecks,
+  type LucideIcon,
+  Mail,
+  MessageSquare,
+  Plug,
+  Route,
+  Sparkles,
+  SquareCheckBig,
+} from "lucide-react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import {
+  type UpsertConfigEntry,
+  useConfigs,
+  useDeleteConfigsBatch,
+  useUpsertConfigsBatch,
+} from "@/api/hooks/use-config-api";
+import type { SwarmConfig } from "@/api/types";
+import { FieldRenderer } from "@/components/integrations/field-renderer";
+import { IntegrationStatusBadge } from "@/components/integrations/integration-status-badge";
+import { EmptyState } from "@/components/shared/empty-state";
+import { PageSkeleton } from "@/components/shared/page-skeleton";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  INTEGRATIONS,
+  type IntegrationDef,
+  type IntegrationField,
+} from "@/lib/integrations-catalog";
+import { deriveIntegrationStatus, findConfigForKey } from "@/lib/integrations-status";
 
-// Placeholder — the full detail/edit experience ships in Phase 3 of
-// `thoughts/taras/plans/2026-04-21-integrations-ui.md`. Kept trivial so the
-// route resolves and type-checks while we land the list page first.
+// Mirror of the ICON_MAP in integration-card — keeps the detail page rendering
+// the same icon as the card without a round-trip import.
+const ICON_MAP: Record<string, LucideIcon> = {
+  "message-square": MessageSquare,
+  github: Github,
+  "git-merge": GitMerge,
+  "git-branch": GitBranch,
+  "square-check-big": SquareCheckBig,
+  "list-checks": ListChecks,
+  activity: Activity,
+  bug: Bug,
+  mail: Mail,
+  brain: Brain,
+  sparkles: Sparkles,
+  bot: Bot,
+  route: Route,
+  "key-round": KeyRound,
+  "chart-line": ChartLine,
+};
+
+function resolveIcon(iconKey: string): LucideIcon {
+  return ICON_MAP[iconKey] ?? Plug;
+}
+
+// Server returns "********" for secret values unless ?includeSecrets=true.
+const SECRET_MASK_SENTINEL = "********";
+
+interface DirtyField {
+  value: string;
+  markedForReplace?: boolean;
+}
+
+type DirtyState = Record<string, DirtyField>;
+
+// Build the initial form state:
+//  - Non-secret fields: pre-fill with the existing value.
+//  - Secret fields with an existing row: leave value empty, mark as "existing"
+//    so the FieldRenderer shows the masked read-only + Replace affordance.
+function buildInitialState(def: IntegrationDef, configs: SwarmConfig[]): DirtyState {
+  const state: DirtyState = {};
+  for (const f of def.fields) {
+    const existing = findConfigForKey(configs, f.key);
+    if (!existing) {
+      state[f.key] = { value: f.default ?? "" };
+      continue;
+    }
+    if (f.isSecret) {
+      // Value is the "********" sentinel; store it as-is so the renderer knows
+      // there's an existing secret to show Replace for.
+      state[f.key] = { value: SECRET_MASK_SENTINEL };
+    } else {
+      state[f.key] = { value: existing.value };
+    }
+  }
+  return state;
+}
+
 export default function IntegrationDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const def = useMemo(() => INTEGRATIONS.find((i) => i.id === id), [id]);
+
+  const { data: configs, isLoading } = useConfigs({ scope: "global" });
+  const upsertBatch = useUpsertConfigsBatch();
+  const deleteBatch = useDeleteConfigsBatch();
+
+  // Compute initial state only when configs/def land. We intentionally keep
+  // local form state keyed by the catalog def id so navigating between
+  // integrations resets cleanly via the `key` prop trick (see below).
+  const initialState = useMemo(
+    () => (def && configs ? buildInitialState(def, configs) : {}),
+    [def, configs],
+  );
+
+  if (isLoading || !configs) return <PageSkeleton />;
+
+  if (!def) {
+    return (
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-4 p-2">
+        <EmptyState
+          icon={Plug}
+          title="Integration not found"
+          description={`No integration matches "${id ?? ""}".`}
+          action={
+            <Button asChild size="sm" variant="outline">
+              <Link to="/integrations">← Back to integrations</Link>
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto space-y-4 p-2">
-      <div className="space-y-1">
-        <h1 className="text-xl font-semibold">Integration: {id ?? "unknown"}</h1>
-        <p className="text-sm text-muted-foreground">
-          Phase 3 coming for <code className="font-mono text-xs">{id ?? "unknown"}</code>.
-        </p>
+    <IntegrationDetailInner
+      key={def.id}
+      def={def}
+      configs={configs}
+      initialState={initialState}
+      upsertBatch={upsertBatch}
+      deleteBatch={deleteBatch}
+    />
+  );
+}
+
+interface InnerProps {
+  def: IntegrationDef;
+  configs: SwarmConfig[];
+  initialState: DirtyState;
+  upsertBatch: ReturnType<typeof useUpsertConfigsBatch>;
+  deleteBatch: ReturnType<typeof useDeleteConfigsBatch>;
+}
+
+function IntegrationDetailInner({
+  def,
+  configs,
+  initialState,
+  upsertBatch,
+  deleteBatch,
+}: InnerProps) {
+  const Icon = resolveIcon(def.iconKey);
+  const status = deriveIntegrationStatus(def, configs);
+
+  const [state, setState] = useState<DirtyState>(initialState);
+  const [confirmResetOpen, setConfirmResetOpen] = useState(false);
+
+  function updateField(key: string, patch: Partial<DirtyField>) {
+    setState((prev) => ({
+      ...prev,
+      [key]: { ...(prev[key] ?? { value: "" }), ...patch },
+    }));
+  }
+
+  // A field is dirty when:
+  //   - It's marked for replace AND has a non-mask value OR empty-on-purpose.
+  //   - OR its value diverges from the stored config value.
+  //   - For secrets, the stored value is the sentinel — any non-sentinel
+  //     edited value counts as dirty, but only when the user opted into replace.
+  function computeDirtyEntries(): UpsertConfigEntry[] {
+    const entries: UpsertConfigEntry[] = [];
+    for (const f of def.fields) {
+      const current = state[f.key];
+      if (!current) continue;
+      const existing = findConfigForKey(configs, f.key);
+
+      if (f.isSecret) {
+        if (existing && !current.markedForReplace) continue; // masked, untouched
+        if (!current.value) continue; // empty secret → skip
+        if (current.value === SECRET_MASK_SENTINEL) continue; // never send sentinel back
+        entries.push({
+          key: f.key,
+          value: current.value,
+          isSecret: true,
+          description: null,
+          envPath: null,
+          scope: "global",
+        });
+      } else {
+        const prevValue = existing?.value ?? "";
+        if (current.value === prevValue) continue;
+        entries.push({
+          key: f.key,
+          value: current.value,
+          isSecret: false,
+          description: null,
+          envPath: null,
+          scope: "global",
+        });
+      }
+    }
+    return entries;
+  }
+
+  const dirtyEntries = computeDirtyEntries();
+  const hasDirty = dirtyEntries.length > 0;
+  const anyDirtySecret = dirtyEntries.some((e) => e.isSecret);
+  const showRestartHint = def.restartRequired === true || anyDirtySecret;
+
+  function handleSave() {
+    if (!hasDirty) return;
+    upsertBatch.mutate(dirtyEntries);
+  }
+
+  function handleToggleDisable() {
+    if (!def.disableKey) return;
+    const current = findConfigForKey(configs, def.disableKey);
+    const currentlyDisabled =
+      !!current && ["true", "1", "yes"].includes(current.value.trim().toLowerCase());
+    const nextValue = currentlyDisabled ? "false" : "true";
+    upsertBatch.mutate([
+      {
+        key: def.disableKey,
+        value: nextValue,
+        isSecret: false,
+        scope: "global",
+      },
+    ]);
+  }
+
+  function handleReset() {
+    const keys = def.fields.map((f) => f.key);
+    if (def.disableKey) keys.push(def.disableKey);
+    deleteBatch.mutate({ configs, keys });
+    setConfirmResetOpen(false);
+  }
+
+  const disableCfg = def.disableKey ? findConfigForKey(configs, def.disableKey) : undefined;
+  const isDisabled =
+    !!disableCfg && ["true", "1", "yes"].includes(disableCfg.value.trim().toLowerCase());
+
+  const requiredFields = def.fields.filter(
+    (f) => f.required === true || (f.advanced !== true && !f.required),
+  );
+  const advancedFields = def.fields.filter((f) => f.advanced === true);
+
+  const isSpecialFlow = def.specialFlow === "linear-oauth" || def.specialFlow === "codex-cli";
+
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-6 p-2">
+      {/* Header */}
+      <div className="flex flex-col gap-2">
+        <Button asChild size="sm" variant="ghost" className="self-start text-muted-foreground">
+          <Link to="/integrations">← All integrations</Link>
+        </Button>
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted/50 shrink-0">
+              <Icon className="h-6 w-6 text-foreground" aria-hidden="true" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-xl font-semibold">{def.name}</h1>
+              <p className="text-sm text-muted-foreground">{def.description}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <IntegrationStatusBadge status={status} />
+            <Button asChild size="sm" variant="outline" className="gap-1">
+              <a href={def.docsUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-3.5 w-3.5" /> Docs
+              </a>
+            </Button>
+          </div>
+        </div>
       </div>
-      <Button asChild size="sm" variant="outline">
-        <Link to="/integrations">← Back to integrations</Link>
-      </Button>
+
+      {/* Action bar */}
+      <div className="flex flex-wrap items-center gap-2 border border-border rounded-md p-3 bg-muted/20">
+        <Button
+          onClick={handleSave}
+          disabled={!hasDirty || upsertBatch.isPending}
+          className="bg-primary hover:bg-primary/90"
+          size="sm"
+        >
+          {upsertBatch.isPending
+            ? "Saving..."
+            : hasDirty
+              ? `Save ${dirtyEntries.length} change${dirtyEntries.length === 1 ? "" : "s"}`
+              : "Save changes"}
+        </Button>
+
+        {def.disableKey && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleToggleDisable}
+            disabled={upsertBatch.isPending}
+          >
+            {isDisabled ? "Enable" : "Disable"} {def.name}
+          </Button>
+        )}
+
+        <div className="flex-1" />
+
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+          onClick={() => setConfirmResetOpen(true)}
+          disabled={deleteBatch.isPending}
+        >
+          Reset integration
+        </Button>
+      </div>
+
+      {/* Restart hint */}
+      {showRestartHint && (
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertDescription>
+            Changes take effect after the API server restarts. Run{" "}
+            <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
+              bun run pm2-restart
+            </code>{" "}
+            or restart your dev process.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Special flow placeholder — Phase 4 wires the real UI */}
+      {isSpecialFlow && (
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertDescription>
+            <strong>Special flow ({def.specialFlow}) — will be wired in Phase 4.</strong> The
+            generic form below still lets you set any raw config fields this integration exposes.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Body */}
+      {def.fields.length === 0 ? (
+        <EmptyState
+          icon={Plug}
+          title="No configurable fields"
+          description="This integration has no key/value fields — see the docs for the required setup steps."
+        />
+      ) : (
+        <div className="space-y-6">
+          {requiredFields.length > 0 && (
+            <FieldGroup
+              title="Required"
+              fields={requiredFields}
+              state={state}
+              configs={configs}
+              onUpdate={updateField}
+            />
+          )}
+
+          {advancedFields.length > 0 && (
+            <details className="border border-border rounded-md">
+              <summary className="cursor-pointer px-4 py-2 text-sm font-medium select-none">
+                Advanced ({advancedFields.length})
+              </summary>
+              <div className="px-4 pb-4 pt-2">
+                <FieldGroup
+                  title=""
+                  fields={advancedFields}
+                  state={state}
+                  configs={configs}
+                  onUpdate={updateField}
+                  bare
+                />
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+
+      {/* Reset confirm dialog */}
+      <AlertDialog open={confirmResetOpen} onOpenChange={setConfirmResetOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset {def.name} integration?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This deletes every configuration key for this integration
+              {def.disableKey ? ` (including ${def.disableKey})` : ""}. You'll be able to
+              reconfigure from scratch.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={handleReset}>
+              Reset
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
+  );
+}
+
+interface FieldGroupProps {
+  title: string;
+  fields: IntegrationField[];
+  state: DirtyState;
+  configs: SwarmConfig[];
+  onUpdate: (key: string, patch: Partial<DirtyField>) => void;
+  bare?: boolean;
+}
+
+function FieldGroup({ title, fields, state, configs, onUpdate, bare }: FieldGroupProps) {
+  const content = (
+    <div className="space-y-5">
+      {fields.map((f) => {
+        const existing = findConfigForKey(configs, f.key);
+        const current = state[f.key] ?? { value: "" };
+        return (
+          <FieldRenderer
+            key={f.key}
+            field={f}
+            existingConfig={existing}
+            value={current.value}
+            markedForReplace={!!current.markedForReplace}
+            onChange={(v) => onUpdate(f.key, { value: v })}
+            onMarkForReplace={() => onUpdate(f.key, { value: "", markedForReplace: true })}
+            onUnmarkForReplace={() =>
+              onUpdate(f.key, { value: SECRET_MASK_SENTINEL, markedForReplace: false })
+            }
+          />
+        );
+      })}
+    </div>
+  );
+
+  if (bare) return content;
+
+  return (
+    <section className="space-y-3">
+      {title && (
+        <h2 className="text-sm font-semibold uppercase text-muted-foreground tracking-wide">
+          {title}
+        </h2>
+      )}
+      {content}
+    </section>
   );
 }
