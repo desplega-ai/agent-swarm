@@ -6,7 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.68.0] - 2026-04-22
+
 ### Added
+- New `/integrations` dashboard page that lets operators configure third-party integrations (Slack, GitHub, GitLab, Linear, Sentry, AgentMail, Anthropic, OpenRouter, OpenAI, Codex, business-use) without hand-editing `.env`. Frontend-only catalog in `new-ui/src/lib/integrations-catalog.ts`, one form field per known `swarm_config` key, with labels, help text, docs links, and category/search filters (#364)
+- `POST /api/config/reload` — thin wrapper over the existing `/internal/reload-config` so the Integrations UI can apply saved values live (re-inits AgentMail, GitHub, Linear, stops/starts Slack socket mode) without a process restart (#364)
+- `GET /api/config/env-presence?keys=K1,K2,...` — returns `{ presence: { KEY: boolean } }` so the UI can surface which values come from the deployment env vs the DB without ever pushing raw env values to the browser (#364)
+- Per-field **Replace** / **Clear** affordances on the Integrations detail page. Secrets render masked (`••••••`); non-secret values (emails, channel names, flags) edit in place. Save auto-invokes reload and toasts which integrations were re-initialized (#364)
+- Source chips on each field: `db+env` (live), `env (deploy)` (no DB row), `db (pending reload)` — rendered via shadcn Tooltip for fast hover reveal. Collapsible legend on the list page explains every chip (#364)
+
+### Changed
+- Sidebar restructured: Chat and Services hidden (routes still accessible); new **AI** group (Skills, MCP Servers); new **Configuration** group (Integrations, Templates, Approvals, Repos). Breadcrumbs now resolve integration ids to display names (`github` → "GitHub") and include proper-case labels for Integrations and API Keys (#364)
+- Toaster references the correct Tailwind v4 CSS vars (`--color-popover` instead of `--popover`) and pins `!bg-popover` so toasts are opaque instead of translucent (#364)
+
+## [1.67.5] - 2026-04-22
+
+### Added
+- Centralized secret scrubber (`src/utils/secret-scrubber.ts`) that replaces sensitive env values and known-shape tokens (GitHub PATs, Anthropic/OpenAI/OpenRouter `sk-*` keys, Slack `xox*`, JWTs, AWS access keys, Google API keys) with `[REDACTED:<name>]` markers at every text-egress point — adapter log files, `session_logs` writes, pretty-printed stdout, stderr dumps — so credentials never leak into `/workspace/logs/*.jsonl`, the `session_logs` SQLite table, or container stdout shipped to log aggregators (#363)
+- `CLAUDE.md` contributor note directing future code that logs/prints/transports sensitive values to wrap emitted strings with `scrubSecrets()` at the egress point (#363)
+
+## [1.67.4] - 2026-04-21
+
+### Fixed
+- Slack thread follow-ups that `@`-mention a different user/bot (e.g. `@Devin wdyt?`) no longer create spurious tasks for the swarm agent. Both the router thread-follow-up branch (`src/slack/router.ts`) and the `ADDITIVE_SLACK` buffer branch (`src/slack/handlers.ts`) now use a new `hasOtherUserMention()` helper and bail when the message mentions another `<@U...>` and does not mention our bot (#355)
+
+## [1.67.3] - 2026-04-21
+
+### Added
+- `PRAGMA busy_timeout = 5000` on every SQLite connection (`src/be/db.ts`, applied on both fresh-DB and `Database.deserialize` paths) so concurrent writer contention (heartbeat sweep vs. `/ping`, `/close`, agent registration) waits out the lock instead of failing instantly with `SQLITE_BUSY` (#354)
+- Process-level `uncaughtException` / `unhandledRejection` log-and-continue handlers in `src/http/index.ts` as defense-in-depth against a single bad request taking the API pod down (#354)
 - Composite index on `agent_tasks(slackChannelId, slackThreadTs, status)` (migration 040) to speed up Slack thread lookups used by the follow-up re-delegation guard (#345)
 - Hero wireframe video back in `README.md` plus reproducible Remotion source in `assets/video-source/` (two compositions: daily-evolution and slack-to-pr) (#350)
 
@@ -16,6 +44,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Lead session prompt and `task.worker.completed` / `task.worker.failed` templates updated to explicitly forbid re-delegating follow-up results back to a worker (#345)
 
 ### Fixed
+- API server no longer crashes with an unhandled `SQLiteError: database is locked` when heartbeat and HTTP writers race on the `agents` row — `busy_timeout` plus process-level guards together stop a single lock collision from failing every in-flight request (#354)
 - Duplicate Slack responses caused by the lead re-delegating follow-up tasks: `send-task` now blocks re-delegation when the thread already has a completed task within the last 48 hours, and the follow-up template discourages it at the prompt layer (#345)
 
 ## [1.67.2] - 2026-04-17

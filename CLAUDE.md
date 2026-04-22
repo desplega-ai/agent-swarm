@@ -193,6 +193,20 @@ Uses `@desplega.ai/business-use` to track system invariants. See [BUSINESS_USE.m
 
 </important>
 
+<important if="you are writing code that logs, prints, stores, or transports sensitive values (secrets, tokens, OAuth creds, API keys, DB URLs, webhook payloads)">
+
+## Secret scrubbing
+
+Any code path that emits text to logs, stdout/stderr, the `session_logs` SQLite table, or `/workspace/logs/*.jsonl` MUST run it through the centralized scrubber first — never print raw env values, credential-pool entries, OAuth payloads, webhook bodies, or tool output that may embed tokens.
+
+- Module: `src/utils/secret-scrubber.ts`
+- Use: `import { scrubSecrets } from "./utils/secret-scrubber"` and wrap the emitted string (`scrubSecrets(msg)`) at the egress point, not at the source.
+- Cache refresh: call `refreshSecretScrubberCache()` after reloading `swarm_config` or rotating credential pools so newly-added secrets get covered immediately (`/internal/reload-config` on the API, credential-selection on the worker already do this).
+- The module is worker/API-neutral (reads only `process.env`), so it's safe to import from either side without violating the DB boundary.
+- Covers env-sourced values (exact-match by length ≥ 12, plus comma-separated pool components) and structural patterns (GitHub PATs, Anthropic/OpenAI/OpenRouter `sk-*` keys, Slack `xox*`, JWTs, AWS access keys, Google API keys). If you add a new secret-shaped credential, extend `SENSITIVE_KEY_EXACT` or `TOKEN_REGEXES` in that file and add a regression test to `src/tests/secret-scrubber.test.ts`.
+
+</important>
+
 <important if="you are setting up local development, configuring environment variables, or running the server locally">
 
 ## Local development
