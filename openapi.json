@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.68.0",
+    "version": "1.69.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -4720,6 +4720,351 @@
         "responses": {
           "200": {
             "description": "Agent skills list"
+          }
+        }
+      }
+    },
+    "/api/mcp-oauth/{mcpServerId}/metadata": {
+      "get": {
+        "summary": "Probe OAuth metadata (PRMD + AS) for an MCP server",
+        "tags": [
+          "MCP OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "mcpServerId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OAuth metadata or { requiresOAuth: false }"
+          },
+          "400": {
+            "description": "MCP has no URL / invalid transport"
+          },
+          "404": {
+            "description": "MCP server not found"
+          }
+        }
+      }
+    },
+    "/api/mcp-oauth/{mcpServerId}/status": {
+      "get": {
+        "summary": "Get the current OAuth connection status for an MCP server",
+        "tags": [
+          "MCP OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "mcpServerId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "userId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Token status (never includes the token value itself)"
+          },
+          "404": {
+            "description": "MCP server not found"
+          }
+        }
+      }
+    },
+    "/api/mcp-oauth/{mcpServerId}/authorize": {
+      "get": {
+        "summary": "Start an OAuth flow. Redirects to the provider.",
+        "tags": [
+          "MCP OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "mcpServerId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "redirect",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "userId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scopes",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to authorization server"
+          },
+          "400": {
+            "description": "MCP has no URL / does not require OAuth"
+          },
+          "404": {
+            "description": "MCP server not found"
+          }
+        }
+      }
+    },
+    "/api/mcp-oauth/callback": {
+      "get": {
+        "summary": "OAuth redirect target. Exchanges code -> tokens and redirects back to dashboard.",
+        "tags": [
+          "MCP OAuth"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "code",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "error",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "error_description",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect back to dashboard with oauth=success or oauth=error"
+          },
+          "400": {
+            "description": "Bad state / missing code"
+          }
+        }
+      }
+    },
+    "/api/mcp-oauth/{mcpServerId}/refresh": {
+      "post": {
+        "summary": "Force-refresh the access token for an MCP server",
+        "tags": [
+          "MCP OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "mcpServerId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Refreshed token"
+          },
+          "404": {
+            "description": "No token for this MCP server"
+          },
+          "500": {
+            "description": "Refresh failed"
+          }
+        }
+      }
+    },
+    "/api/mcp-oauth/{mcpServerId}": {
+      "delete": {
+        "summary": "Revoke and delete the OAuth token for an MCP server",
+        "tags": [
+          "MCP OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "mcpServerId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "userId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Token revoked/deleted"
+          },
+          "404": {
+            "description": "No token for this MCP server"
+          }
+        }
+      }
+    },
+    "/api/mcp-oauth/{mcpServerId}/manual-client": {
+      "post": {
+        "summary": "Register a pre-existing OAuth client (DCR fallback)",
+        "tags": [
+          "MCP OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "mcpServerId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "clientId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "clientSecret": {
+                    "type": "string"
+                  },
+                  "authorizationServerIssuer": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "authorizeUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "tokenUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "revocationUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "clientId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pending client stored. Call /authorize to start the flow."
+          },
+          "400": {
+            "description": "Bad input"
+          },
+          "404": {
+            "description": "MCP server not found"
           }
         }
       }

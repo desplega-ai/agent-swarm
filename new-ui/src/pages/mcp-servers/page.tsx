@@ -32,6 +32,22 @@ function TransportBadge({ transport }: { transport: string }) {
   );
 }
 
+function AuthMethodBadge({ method }: { method: string }) {
+  const colors: Record<string, string> = {
+    static: "border-zinc-500/30 text-zinc-400",
+    oauth: "border-purple-500/30 text-purple-400",
+    auto: "border-sky-500/30 text-sky-400",
+  };
+  return (
+    <Badge
+      variant="outline"
+      className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${colors[method] || ""}`}
+    >
+      {method}
+    </Badge>
+  );
+}
+
 function ScopeBadge({ scope }: { scope: string }) {
   const colors: Record<string, string> = {
     global: "border-emerald-500/30 text-emerald-400",
@@ -88,6 +104,13 @@ export default function McpServersPage() {
         width: 100,
         cellRenderer: (params: ICellRendererParams<McpServer>) =>
           params.value ? <ScopeBadge scope={params.value} /> : null,
+      },
+      {
+        field: "authMethod",
+        headerName: "Auth",
+        width: 90,
+        cellRenderer: (params: ICellRendererParams<McpServer>) =>
+          params.value ? <AuthMethodBadge method={params.value} /> : null,
       },
       {
         field: "description",

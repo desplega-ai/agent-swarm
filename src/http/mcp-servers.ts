@@ -11,6 +11,7 @@ import {
   uninstallMcpServer,
   updateMcpServer,
 } from "../be/db";
+import { ensureMcpToken } from "../oauth/ensure-mcp-token";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -170,65 +171,94 @@ export async function handleMcpServers(
       const configs = getResolvedConfig(parsed.params.id);
       const configMap = new Map(configs.map((c) => [c.key, c.value]));
 
-      const serversWithSecrets = servers.map((server) => {
-        const resolvedEnv: Record<string, string> = {};
-        const resolvedHeaders: Record<string, string> = {};
+      const serversWithSecrets = await Promise.all(
+        servers.map(async (server) => {
+          const resolvedEnv: Record<string, string> = {};
+          const resolvedHeaders: Record<string, string> = {};
+          let authError: string | null = null;
 
-        // Resolve env config keys
-        // Supports both array format ["KEY_A", "KEY_B"] (key = config key = element)
-        // and object format {"ENV_VAR": "config-key-name"}
-        if (server.envConfigKeys) {
-          try {
-            const parsed = JSON.parse(server.envConfigKeys);
-            if (Array.isArray(parsed)) {
-              for (const key of parsed) {
-                const value = configMap.get(key);
-                if (value !== undefined) {
-                  resolvedEnv[key] = value;
+          // Resolve env config keys
+          // Supports both array format ["KEY_A", "KEY_B"] (key = config key = element)
+          // and object format {"ENV_VAR": "config-key-name"}
+          if (server.envConfigKeys) {
+            try {
+              const parsed = JSON.parse(server.envConfigKeys);
+              if (Array.isArray(parsed)) {
+                for (const key of parsed) {
+                  const value = configMap.get(key);
+                  if (value !== undefined) {
+                    resolvedEnv[key] = value;
+                  }
+                }
+              } else {
+                for (const [envVar, configKey] of Object.entries(
+                  parsed as Record<string, string>,
+                )) {
+                  const value = configMap.get(configKey);
+                  if (value !== undefined) {
+                    resolvedEnv[envVar] = value;
+                  }
                 }
               }
-            } else {
-              for (const [envVar, configKey] of Object.entries(parsed as Record<string, string>)) {
-                const value = configMap.get(configKey);
-                if (value !== undefined) {
-                  resolvedEnv[envVar] = value;
-                }
-              }
+            } catch {
+              // Invalid JSON — skip resolution
             }
-          } catch {
-            // Invalid JSON — skip resolution
           }
-        }
 
-        // Resolve header config keys
-        // Supports both array format ["Header-A", "Header-B"] and object format {"Header-Name": "config-key-name"}
-        if (server.headerConfigKeys) {
-          try {
-            const parsed = JSON.parse(server.headerConfigKeys);
-            if (Array.isArray(parsed)) {
-              for (const key of parsed) {
-                const value = configMap.get(key);
-                if (value !== undefined) {
-                  resolvedHeaders[key] = value;
+          // Resolve header config keys
+          // Supports both array format ["Header-A", "Header-B"] and object format {"Header-Name": "config-key-name"}
+          if (server.headerConfigKeys) {
+            try {
+              const parsed = JSON.parse(server.headerConfigKeys);
+              if (Array.isArray(parsed)) {
+                for (const key of parsed) {
+                  const value = configMap.get(key);
+                  if (value !== undefined) {
+                    resolvedHeaders[key] = value;
+                  }
+                }
+              } else {
+                for (const [headerName, configKey] of Object.entries(
+                  parsed as Record<string, string>,
+                )) {
+                  const value = configMap.get(configKey);
+                  if (value !== undefined) {
+                    resolvedHeaders[headerName] = value;
+                  }
                 }
               }
-            } else {
-              for (const [headerName, configKey] of Object.entries(
-                parsed as Record<string, string>,
-              )) {
-                const value = configMap.get(configKey);
-                if (value !== undefined) {
-                  resolvedHeaders[headerName] = value;
-                }
-              }
+            } catch {
+              // Invalid JSON — skip resolution
             }
-          } catch {
-            // Invalid JSON — skip resolution
           }
-        }
 
-        return { ...server, resolvedEnv, resolvedHeaders };
-      });
+          // OAuth-injected Authorization header: for authMethod='oauth' the
+          // DB-backed token overrides anything the static header resolver put
+          // in place. Refresh if expiring. If refresh fails we return an
+          // authError field so the worker / operator can see why the bearer
+          // is missing, rather than silently serving a stale header.
+          if (server.authMethod === "oauth") {
+            delete resolvedHeaders.Authorization;
+            delete resolvedHeaders.authorization;
+            try {
+              const token = await ensureMcpToken(server.id);
+              if (token && token.status === "connected") {
+                const prefix = token.tokenType || "Bearer";
+                resolvedHeaders.Authorization = `${prefix} ${token.accessToken}`;
+              } else if (!token) {
+                authError = "No OAuth token for this MCP server";
+              } else {
+                authError = token.lastErrorMessage ?? `OAuth status: ${token.status}`;
+              }
+            } catch (err) {
+              authError = err instanceof Error ? err.message : String(err);
+              console.error(`[mcp-oauth] resolveSecrets failed for ${server.id}: ${authError}`);
+            }
+          }
+
+          return { ...server, resolvedEnv, resolvedHeaders, authError };
+        }),
+      );
 
       json(res, { servers: serversWithSecrets, total: serversWithSecrets.length });
     } else {
