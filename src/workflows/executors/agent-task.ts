@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { workflowContextKey } from "../../tasks/context-key";
+import { withSiblingAwareness } from "../../tasks/sibling-awareness";
 import type { ExecutorMeta } from "../../types";
 import type { ExecutorResult } from "./base";
 import { BaseExecutor } from "./base";
@@ -77,20 +79,25 @@ export class AgentTaskExecutor extends BaseExecutor<
     }
 
     // 3. Create the task (config is already deep-interpolated by the engine)
-    const task = db.createTaskExtended(config.template, {
-      agentId: config.agentId ?? null,
-      source: "workflow",
-      tags: config.tags,
-      priority: config.priority,
-      offeredTo: config.offerMode ? config.agentId : undefined,
-      workflowRunId: meta.runId,
-      workflowRunStepId: meta.stepId,
-      dir: effectiveDir,
-      vcsRepo: effectiveVcsRepo,
-      model: config.model,
-      parentTaskId: config.parentTaskId,
-      outputSchema: config.outputSchema,
-    });
+    const { description: taskDescription, options: taskOptions } = withSiblingAwareness(
+      config.template,
+      {
+        agentId: config.agentId ?? null,
+        source: "workflow",
+        tags: config.tags,
+        priority: config.priority,
+        offeredTo: config.offerMode ? config.agentId : undefined,
+        workflowRunId: meta.runId,
+        workflowRunStepId: meta.stepId,
+        dir: effectiveDir,
+        vcsRepo: effectiveVcsRepo,
+        model: config.model,
+        parentTaskId: config.parentTaskId,
+        outputSchema: config.outputSchema,
+        contextKey: workflowContextKey({ workflowRunId: meta.runId }),
+      },
+    );
+    const task = db.createTaskExtended(taskDescription, taskOptions);
 
     // 4. Return async result — engine will pause the workflow
     return {

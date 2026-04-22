@@ -1,12 +1,8 @@
 import { ensure } from "@desplega.ai/business-use";
 import { CronExpressionParser } from "cron-parser";
-import {
-  createTaskExtended,
-  getDb,
-  getDueScheduledTasks,
-  getScheduledTaskById,
-  updateScheduledTask,
-} from "@/be/db";
+import { getDb, getDueScheduledTasks, getScheduledTaskById, updateScheduledTask } from "@/be/db";
+import { scheduleContextKey } from "@/tasks/context-key";
+import { createTaskWithSiblingAwareness } from "@/tasks/sibling-awareness";
 import type { ScheduledTask } from "@/types";
 import type { ExecutorRegistry } from "@/workflows/executors/registry";
 import { handleScheduleTrigger } from "@/workflows/triggers";
@@ -49,7 +45,7 @@ async function recoverMissedSchedules(): Promise<void> {
 
       if (!triggeredWorkflows) {
         const tx = getDb().transaction(() => {
-          createTaskExtended(schedule.taskTemplate, {
+          createTaskWithSiblingAwareness(schedule.taskTemplate, {
             creatorAgentId: schedule.createdByAgentId,
             taskType: schedule.taskType,
             tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, "recovered"],
@@ -58,6 +54,7 @@ async function recoverMissedSchedules(): Promise<void> {
             model: schedule.model,
             scheduleId: schedule.id,
             source: "schedule",
+            contextKey: scheduleContextKey({ scheduleId: schedule.id }),
           });
         });
         tx();
@@ -153,7 +150,7 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
     if (!triggeredWorkflows) {
       // No workflows linked — create standalone task (existing behavior)
       getDb().transaction(() => {
-        createTaskExtended(schedule.taskTemplate, {
+        createTaskWithSiblingAwareness(schedule.taskTemplate, {
           creatorAgentId: schedule.createdByAgentId,
           taskType: schedule.taskType,
           tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`],
@@ -162,6 +159,7 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
           model: schedule.model,
           scheduleId: schedule.id,
           source: "schedule",
+          contextKey: scheduleContextKey({ scheduleId: schedule.id }),
         });
       })();
     }
@@ -343,7 +341,7 @@ export async function runScheduleNow(scheduleId: string): Promise<void> {
   if (!triggeredWorkflows) {
     // No workflows linked — create standalone task (existing behavior)
     getDb().transaction(() => {
-      createTaskExtended(schedule.taskTemplate, {
+      createTaskWithSiblingAwareness(schedule.taskTemplate, {
         creatorAgentId: schedule.createdByAgentId,
         taskType: schedule.taskType,
         tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, "manual-run"],
@@ -352,6 +350,7 @@ export async function runScheduleNow(scheduleId: string): Promise<void> {
         model: schedule.model,
         scheduleId: schedule.id,
         source: "schedule",
+        contextKey: scheduleContextKey({ scheduleId: schedule.id }),
       });
     })();
   }

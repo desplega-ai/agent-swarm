@@ -141,6 +141,11 @@ export const AgentTaskSchema = z.object({
   workflowRunId: z.string().uuid().nullable().optional(),
   workflowRunStepId: z.string().uuid().nullable().optional(),
 
+  // Cross-ingress context key — uniform identifier for the "context entity"
+  // (Slack thread, GitHub issue, Linear issue, schedule, workflow run, ...).
+  // See src/tasks/context-key.ts. Nullable: legacy rows stay NULL.
+  contextKey: z.string().optional(),
+
   // Structured output schema (optional — JSON Schema that task output must conform to)
   outputSchema: z.record(z.string(), z.unknown()).optional(),
 

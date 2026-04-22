@@ -1,9 +1,7 @@
-import {
-  createTaskExtended,
-  getLatestActiveTaskInThread,
-  getLeadAgent,
-  getMostRecentTaskInThread,
-} from "../be/db";
+import { getLatestActiveTaskInThread, getLeadAgent, getMostRecentTaskInThread } from "../be/db";
+import { createAdditiveBuffer } from "../tasks/additive-buffer";
+import { slackContextKey } from "../tasks/context-key";
+import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { getSlackApp } from "./app";
 import { buildBufferFlushBlocks } from "./blocks";
 import { registerTreeMessage } from "./watcher";
@@ -12,23 +10,29 @@ interface BufferedMessage {
   text: string;
   userId: string;
   ts: string;
-}
-
-interface BufferedThread {
   channelId: string;
   threadTs: string;
-  messages: BufferedMessage[];
-  timer: Timer;
-  slackUserId: string; // original requester (first message sender)
 }
-
-const threadBuffers = new Map<string, BufferedThread>();
 
 const BUFFER_TIMEOUT_MS = Number(process.env.ADDITIVE_SLACK_BUFFER_MS) || 10_000;
 
 function makeKey(channelId: string, threadTs: string): string {
   return `${channelId}:${threadTs}`;
 }
+
+function splitKey(key: string): { channelId: string; threadTs: string } | null {
+  const idx = key.indexOf(":");
+  if (idx === -1) return null;
+  return { channelId: key.slice(0, idx), threadTs: key.slice(idx + 1) };
+}
+
+const slackBuffer = createAdditiveBuffer<BufferedMessage>({
+  timeoutMs: BUFFER_TIMEOUT_MS,
+  label: "slack-thread",
+  onFlush: async (items, key, reason) => {
+    await slackFlush(items, key, reason === "manual");
+  },
+});
 
 /**
  * Add a message to the thread buffer. Resets the debounce timer.
@@ -40,43 +44,27 @@ export function bufferThreadMessage(
   userId: string,
   ts: string,
 ): void {
-  const key = makeKey(channelId, threadTs);
-  const existing = threadBuffers.get(key);
-
-  if (existing) {
-    // Append to existing buffer, reset timer
-    existing.messages.push({ text, userId, ts });
-    clearTimeout(existing.timer);
-    existing.timer = setTimeout(() => flushBuffer(key, false), BUFFER_TIMEOUT_MS);
-    console.log(
-      `[Slack] Buffer append: ${key} (${existing.messages.length} messages, timer reset to ${BUFFER_TIMEOUT_MS}ms)`,
-    );
-  } else {
-    // Create new buffer entry
-    const timer = setTimeout(() => flushBuffer(key, false), BUFFER_TIMEOUT_MS);
-    threadBuffers.set(key, {
-      channelId,
-      threadTs,
-      messages: [{ text, userId, ts }],
-      timer,
-      slackUserId: userId,
-    });
-    console.log(`[Slack] Buffer created: ${key} (timer set to ${BUFFER_TIMEOUT_MS}ms)`);
-  }
+  slackBuffer.enqueue(makeKey(channelId, threadTs), {
+    text,
+    userId,
+    ts,
+    channelId,
+    threadTs,
+  });
 }
 
 /**
  * Check if a thread currently has a pending buffer.
  */
 export function isThreadBuffered(channelId: string, threadTs: string): boolean {
-  return threadBuffers.has(makeKey(channelId, threadTs));
+  return slackBuffer.isBuffered(makeKey(channelId, threadTs));
 }
 
 /**
  * Get the number of messages currently in the buffer for a thread key.
  */
 export function getBufferMessageCount(key: string): number {
-  return threadBuffers.get(key)?.messages.length ?? 0;
+  return slackBuffer.count(key);
 }
 
 /**
@@ -84,12 +72,7 @@ export function getBufferMessageCount(key: string): number {
  * and flushes with immediate=true (no dependsOn).
  */
 export async function instantFlush(key: string): Promise<void> {
-  const buffer = threadBuffers.get(key);
-  if (buffer) {
-    clearTimeout(buffer.timer);
-    console.log(`[Slack] Instant flush triggered: ${key}`);
-  }
-  await flushBuffer(key, true);
+  await slackBuffer.instantFlush(key);
 }
 
 /**
@@ -130,27 +113,34 @@ async function getThreadContextForBuffer(channelId: string, threadTs: string): P
 }
 
 /**
- * Flush the buffer: concatenate messages, create task with optional dependency chaining.
- * @param key - The buffer key (channelId:threadTs)
- * @param immediate - If true, skip dependency chaining (used by !now)
+ * Flush the Slack thread buffer: concatenate messages, create task with optional
+ * dependency chaining.
  */
-async function flushBuffer(key: string, immediate = false): Promise<void> {
-  const buffer = threadBuffers.get(key);
-  if (!buffer || buffer.messages.length === 0) {
-    threadBuffers.delete(key);
+async function slackFlush(
+  items: BufferedMessage[],
+  key: string,
+  immediate: boolean,
+): Promise<void> {
+  if (items.length === 0) return;
+
+  const split = splitKey(key);
+  if (!split) {
+    console.warn(`[Slack] Buffer flush: malformed key ${key}`);
     return;
   }
+  const { channelId, threadTs } = split;
+  // Buffer is guaranteed to have at least one item — the first carries the
+  // original requester's userId (same semantics as the pre-refactor version).
+  const originalRequesterId = items[0]!.userId;
 
-  console.log(
-    `[Slack] Flushing buffer: ${key} (${buffer.messages.length} messages, immediate=${immediate})`,
-  );
+  console.log(`[Slack] Flushing buffer: ${key} (${items.length} messages, immediate=${immediate})`);
 
   // Build combined task description
-  const combinedText = buffer.messages.map((m) => m.text).join("\n---\n");
-  const description = `[Thread follow-up — ${buffer.messages.length} message(s) buffered]\n\n${combinedText}`;
+  const combinedText = items.map((m) => m.text).join("\n---\n");
+  const description = `[Thread follow-up — ${items.length} message(s) buffered]\n\n${combinedText}`;
 
   // Find the latest active task in this thread for dependency chaining
-  const latestActiveTask = getLatestActiveTaskInThread(buffer.channelId, buffer.threadTs);
+  const latestActiveTask = getLatestActiveTaskInThread(channelId, threadTs);
   if (latestActiveTask) {
     console.log(
       `[Slack] Dependency chaining: latest active task ${latestActiveTask.id} (status: ${latestActiveTask.status})`,
@@ -160,7 +150,7 @@ async function flushBuffer(key: string, immediate = false): Promise<void> {
   const lead = getLeadAgent();
 
   // Thread context for the task
-  const threadContext = await getThreadContextForBuffer(buffer.channelId, buffer.threadTs);
+  const threadContext = await getThreadContextForBuffer(channelId, threadTs);
   const fullDescription = threadContext
     ? `<thread_context>\n${threadContext}\n</thread_context>\n\n${description}`
     : description;
@@ -169,15 +159,16 @@ async function flushBuffer(key: string, immediate = false): Promise<void> {
   // Otherwise, depend on the latest active task so it queues naturally.
   const dependsOn = !immediate && latestActiveTask ? [latestActiveTask.id] : undefined;
 
-  const mostRecentTask = getMostRecentTaskInThread(buffer.channelId, buffer.threadTs);
-  const task = createTaskExtended(fullDescription, {
+  const mostRecentTask = getMostRecentTaskInThread(channelId, threadTs);
+  const task = createTaskWithSiblingAwareness(fullDescription, {
     agentId: lead?.id,
     source: "slack",
-    slackChannelId: buffer.channelId,
-    slackThreadTs: buffer.threadTs,
-    slackUserId: buffer.slackUserId,
+    slackChannelId: channelId,
+    slackThreadTs: threadTs,
+    slackUserId: originalRequesterId,
     dependsOn,
     parentTaskId: mostRecentTask?.id,
+    contextKey: slackContextKey({ channelId, threadTs }),
   });
 
   console.log(
@@ -189,18 +180,18 @@ async function flushBuffer(key: string, immediate = false): Promise<void> {
   if (app) {
     const hasDependency = !immediate && !!latestActiveTask;
     const blocks = buildBufferFlushBlocks({
-      messageCount: buffer.messages.length,
+      messageCount: items.length,
       taskId: task.id,
       hasDependency,
     });
     const fallbackText = hasDependency
-      ? `${buffer.messages.length} follow-up message(s) queued pending completion of current task`
-      : `${buffer.messages.length} follow-up message(s) batched into task`;
+      ? `${items.length} follow-up message(s) queued pending completion of current task`
+      : `${items.length} follow-up message(s) batched into task`;
 
     try {
       const result = await app.client.chat.postMessage({
-        channel: buffer.channelId,
-        thread_ts: buffer.threadTs,
+        channel: channelId,
+        thread_ts: threadTs,
         text: fallbackText,
         // biome-ignore lint/suspicious/noExplicitAny: Block Kit objects
         blocks: blocks as any,
@@ -208,7 +199,7 @@ async function flushBuffer(key: string, immediate = false): Promise<void> {
 
       // Register the batching message as the tree message for this task
       if (result.ts && task) {
-        registerTreeMessage(task.id, buffer.channelId, buffer.threadTs, result.ts);
+        registerTreeMessage(task.id, channelId, threadTs, result.ts);
         console.log(
           `[Slack] Registered batched task ${task.id.slice(0, 8)} tree message from buffer flush`,
         );
@@ -217,6 +208,4 @@ async function flushBuffer(key: string, immediate = false): Promise<void> {
       console.error("[Slack] Failed to post buffer flush feedback:", error);
     }
   }
-
-  threadBuffers.delete(key);
 }

@@ -5744,6 +5744,9 @@
                   "outputSchema": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "contextKey": {
+                    "type": "string"
                   }
                 },
                 "required": [

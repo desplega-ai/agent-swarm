@@ -4,7 +4,6 @@ import { z } from "zod";
 import {
   cancelTask,
   completeTask,
-  createTaskExtended,
   failTask,
   getAllTasks,
   getDb,
@@ -19,6 +18,7 @@ import {
   updateTaskProgress,
   updateTaskVcs,
 } from "../be/db";
+import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { telemetry } from "../telemetry";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -63,6 +63,7 @@ const createTask = route({
     parentTaskId: z.string().optional(),
     source: z.string().optional(),
     outputSchema: z.record(z.string(), z.unknown()).optional(),
+    contextKey: z.string().optional(),
   }),
   responses: {
     201: { description: "Task created" },
@@ -240,7 +241,7 @@ export async function handleTasks(
     if (!parsed) return true;
 
     try {
-      const task = createTaskExtended(parsed.body.task, {
+      const task = createTaskWithSiblingAwareness(parsed.body.task, {
         agentId: parsed.body.agentId || undefined,
         creatorAgentId: myAgentId || undefined,
         taskType: parsed.body.taskType || undefined,
@@ -252,6 +253,7 @@ export async function handleTasks(
         parentTaskId: parsed.body.parentTaskId || undefined,
         source: (parsed.body.source as import("../types").AgentTaskSource) || "api",
         outputSchema: parsed.body.outputSchema || undefined,
+        contextKey: parsed.body.contextKey || undefined,
       });
 
       ensure({
