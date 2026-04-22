@@ -8,6 +8,10 @@
 // it's a temporary stand-in. If a test harness is added later, convert this
 // into `integrations-status.test.ts`.
 
+// `process` is provided by Bun/Node at runtime; we declare it locally so this
+// ad-hoc script compiles without adding `@types/node` as a dev dependency.
+declare const process: { exit(code: number): void };
+
 import type { SwarmConfig } from "@/api/types";
 import { INTEGRATIONS } from "./integrations-catalog";
 import {

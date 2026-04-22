@@ -5,7 +5,7 @@ author: taras
 status: in-progress
 autonomy: critical
 last_updated: 2026-04-22
-last_updated_by: claude (phase-running agent)
+last_updated_by: claude (phase-running agent, Phase 2)
 ---
 
 # Integrations Configuration UI
@@ -198,11 +198,11 @@ Surface the catalog as a cards grid with live status.
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Type-check: `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Lint: `cd new-ui && pnpm lint`
-- [ ] Route file registers both routes: `grep -nE "integrations" new-ui/src/app/router.tsx` shows both paths.
-- [ ] Sidebar entry present: `grep -n "/integrations" new-ui/src/components/layout/app-sidebar.tsx` returns a match in a `navGroups` entry.
-- [ ] Build succeeds: `cd new-ui && pnpm build`.
+- [x] Type-check: `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Lint: `cd new-ui && pnpm lint`
+- [x] Route file registers both routes: `grep -nE "integrations" new-ui/src/app/router.tsx` shows both paths.
+- [x] Sidebar entry present: `grep -n "/integrations" new-ui/src/components/layout/app-sidebar.tsx` returns a match in a `navGroups` entry.
+- [x] Build succeeds: `cd new-ui && pnpm build`.
 
 #### Manual Verification:
 - [ ] Start API + UI. Two supported workflows:

@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   ListTodo,
   MessageSquare,
+  Plug,
   Server,
   Settings,
   Users,
@@ -66,6 +67,7 @@ const navGroups = [
     items: [
       { title: "Config", path: "/config", icon: Settings },
       { title: "Repos", path: "/repos", icon: GitBranch },
+      { title: "Integrations", path: "/integrations", icon: Plug },
       { title: "API Keys", path: "/keys", icon: Key },
       { title: "Debug", path: "/debug", icon: Bug },
     ],
