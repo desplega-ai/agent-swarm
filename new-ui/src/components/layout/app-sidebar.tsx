@@ -11,7 +11,6 @@ import {
   LayoutDashboard,
   ListTodo,
   Plug,
-  Server,
   Settings,
   Users,
   Workflow,
@@ -52,7 +51,6 @@ const navGroups = [
   {
     label: "Operations",
     items: [
-      { title: "Services", path: "/services", icon: Server },
       { title: "Schedules", path: "/schedules", icon: Clock },
       { title: "Workflows", path: "/workflows", icon: Workflow },
       { title: "Usage", path: "/usage", icon: BarChart3 },
