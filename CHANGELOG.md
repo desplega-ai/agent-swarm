@@ -6,7 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.67.4] - 2026-04-21
+
+### Fixed
+- Slack thread follow-ups that `@`-mention a different user/bot (e.g. `@Devin wdyt?`) no longer create spurious tasks for the swarm agent. Both the router thread-follow-up branch (`src/slack/router.ts`) and the `ADDITIVE_SLACK` buffer branch (`src/slack/handlers.ts`) now use a new `hasOtherUserMention()` helper and bail when the message mentions another `<@U...>` and does not mention our bot (#355)
+
+## [1.67.3] - 2026-04-21
+
 ### Added
+- `PRAGMA busy_timeout = 5000` on every SQLite connection (`src/be/db.ts`, applied on both fresh-DB and `Database.deserialize` paths) so concurrent writer contention (heartbeat sweep vs. `/ping`, `/close`, agent registration) waits out the lock instead of failing instantly with `SQLITE_BUSY` (#354)
+- Process-level `uncaughtException` / `unhandledRejection` log-and-continue handlers in `src/http/index.ts` as defense-in-depth against a single bad request taking the API pod down (#354)
 - Composite index on `agent_tasks(slackChannelId, slackThreadTs, status)` (migration 040) to speed up Slack thread lookups used by the follow-up re-delegation guard (#345)
 - Hero wireframe video back in `README.md` plus reproducible Remotion source in `assets/video-source/` (two compositions: daily-evolution and slack-to-pr) (#350)
 
@@ -16,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Lead session prompt and `task.worker.completed` / `task.worker.failed` templates updated to explicitly forbid re-delegating follow-up results back to a worker (#345)
 
 ### Fixed
+- API server no longer crashes with an unhandled `SQLiteError: database is locked` when heartbeat and HTTP writers race on the `agents` row — `busy_timeout` plus process-level guards together stop a single lock collision from failing every in-flight request (#354)
 - Duplicate Slack responses caused by the lead re-delegating follow-up tasks: `send-task` now blocks re-delegation when the thread already has a completed task within the last 48 hours, and the follow-up template discourages it at the prompt layer (#345)
 
 ## [1.67.2] - 2026-04-17
