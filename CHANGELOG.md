@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.67.5] - 2026-04-22
+
+### Added
+- Centralized secret scrubber (`src/utils/secret-scrubber.ts`) that replaces sensitive env values and known-shape tokens (GitHub PATs, Anthropic/OpenAI/OpenRouter `sk-*` keys, Slack `xox*`, JWTs, AWS access keys, Google API keys) with `[REDACTED:<name>]` markers at every text-egress point — adapter log files, `session_logs` writes, pretty-printed stdout, stderr dumps — so credentials never leak into `/workspace/logs/*.jsonl`, the `session_logs` SQLite table, or container stdout shipped to log aggregators (#363)
+- `CLAUDE.md` contributor note directing future code that logs/prints/transports sensitive values to wrap emitted strings with `scrubSecrets()` at the egress point (#363)
+
 ## [1.67.4] - 2026-04-21
 
 ### Fixed
