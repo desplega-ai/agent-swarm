@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { IntegrationField } from "@/lib/integrations-catalog";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +44,8 @@ interface FieldRendererProps {
   onChange: (value: string) => void;
   onMarkForReplace: () => void;
   onUnmarkForReplace: () => void;
+  /** If provided, shows a "Clear" affordance that deletes the DB row. */
+  onClearExisting?: () => void;
 }
 
 export function FieldRenderer({
@@ -54,6 +57,7 @@ export function FieldRenderer({
   onChange,
   onMarkForReplace,
   onUnmarkForReplace,
+  onClearExisting,
 }: FieldRendererProps) {
   const [copied, setCopied] = useState(false);
   const inputId = `field-${field.key}`;
@@ -70,11 +74,11 @@ export function FieldRenderer({
     }
   }
 
-  // Secret already stored: show masked read-only + Replace until the user
-  // explicitly opts into editing.
-  const maskedServerValue =
-    field.isSecret && existingConfig !== undefined && existingConfig.value === SECRET_MASK_SENTINEL;
-  const showMaskedReadOnly = maskedServerValue && !markedForReplace;
+  // Secrets (tokens, API keys, webhook secrets): show masked read-only + Replace
+  // until the user opts in. Non-secret values (emails, channel names, flags)
+  // are shown in plaintext and edited in place — they're not sensitive.
+  const existingMasked = field.isSecret === true && existingConfig !== undefined;
+  const showMaskedReadOnly = existingMasked && !markedForReplace;
 
   const poolSize =
     field.credentialPool && value.includes(",")
@@ -139,12 +143,16 @@ export function FieldRenderer({
           {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
         </Button>
         {sourceChip && (
-          <span
-            className={`ml-auto text-[9px] uppercase tracking-wide px-1.5 py-0 h-5 inline-flex items-center rounded-md border font-medium leading-none ${sourceChip.className}`}
-            title={sourceChip.title}
-          >
-            {sourceChip.label}
-          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className={`ml-auto text-[9px] uppercase tracking-wide px-1.5 py-0 h-5 inline-flex items-center rounded-md border font-medium leading-none cursor-help ${sourceChip.className}`}
+              >
+                {sourceChip.label}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">{sourceChip.title}</TooltipContent>
+          </Tooltip>
         )}
       </div>
 
@@ -160,19 +168,41 @@ export function FieldRenderer({
           <Button type="button" size="sm" variant="outline" onClick={onMarkForReplace}>
             Replace
           </Button>
+          {existingConfig && onClearExisting && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onClearExisting}
+              className="border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+            >
+              Clear
+            </Button>
+          )}
         </div>
       ) : (
         <>
           {renderInput({ field, inputId, value, onChange })}
-          {markedForReplace && maskedServerValue && (
-            <button
-              type="button"
-              onClick={onUnmarkForReplace}
-              className="text-xs text-muted-foreground underline hover:text-foreground"
-            >
-              Cancel — keep existing value
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {markedForReplace && existingMasked && (
+              <button
+                type="button"
+                onClick={onUnmarkForReplace}
+                className="text-xs text-muted-foreground underline hover:text-foreground"
+              >
+                Cancel — keep existing value
+              </button>
+            )}
+            {!field.isSecret && existingConfig && onClearExisting && (
+              <button
+                type="button"
+                onClick={onClearExisting}
+                className="text-xs text-red-400/80 underline hover:text-red-300"
+              >
+                Clear value
+              </button>
+            )}
+          </div>
         </>
       )}
 

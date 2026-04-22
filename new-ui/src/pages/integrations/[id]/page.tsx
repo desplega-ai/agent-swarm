@@ -94,9 +94,10 @@ interface DirtyField {
 type DirtyState = Record<string, DirtyField>;
 
 // Build the initial form state:
-//  - Non-secret fields: pre-fill with the existing value.
-//  - Secret fields with an existing row: leave value empty, mark as "existing"
-//    so the FieldRenderer shows the masked read-only + Replace affordance.
+//  - Non-secret fields: pre-fill with the existing plaintext value (these are
+//    harmless — channel names, emails, flags, etc.).
+//  - Secret fields with an existing row: store the "********" sentinel so the
+//    renderer shows masked read-only + Replace.
 function buildInitialState(def: IntegrationDef, configs: SwarmConfig[]): DirtyState {
   const state: DirtyState = {};
   for (const f of def.fields) {
@@ -105,13 +106,9 @@ function buildInitialState(def: IntegrationDef, configs: SwarmConfig[]): DirtySt
       state[f.key] = { value: f.default ?? "" };
       continue;
     }
-    if (f.isSecret) {
-      // Value is the "********" sentinel; store it as-is so the renderer knows
-      // there's an existing secret to show Replace for.
-      state[f.key] = { value: SECRET_MASK_SENTINEL };
-    } else {
-      state[f.key] = { value: existing.value };
-    }
+    state[f.key] = {
+      value: f.isSecret ? SECRET_MASK_SENTINEL : existing.value,
+    };
   }
   return state;
 }
@@ -194,7 +191,7 @@ function IntegrationDetailInner({
   envPresence,
 }: InnerProps) {
   const Icon = resolveIcon(def.iconKey);
-  const status = deriveIntegrationStatus(def, configs);
+  const status = deriveIntegrationStatus(def, configs, envPresence);
 
   const [state, setState] = useState<DirtyState>(initialState);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
@@ -207,10 +204,9 @@ function IntegrationDetailInner({
   }
 
   // A field is dirty when:
-  //   - It's marked for replace AND has a non-mask value OR empty-on-purpose.
-  //   - OR its value diverges from the stored config value.
-  //   - For secrets, the stored value is the sentinel — any non-sentinel
-  //     edited value counts as dirty, but only when the user opted into replace.
+  //   - Secret + existing row + Replace clicked + non-mask value typed → send.
+  //   - Secret + no existing row + non-empty value typed → send.
+  //   - Non-secret + value differs from the stored value → send.
   function computeDirtyEntries(): UpsertConfigEntry[] {
     const entries: UpsertConfigEntry[] = [];
     for (const f of def.fields) {
@@ -219,29 +215,22 @@ function IntegrationDetailInner({
       const existing = findConfigForKey(configs, f.key);
 
       if (f.isSecret) {
-        if (existing && !current.markedForReplace) continue; // masked, untouched
-        if (!current.value) continue; // empty secret → skip
-        if (current.value === SECRET_MASK_SENTINEL) continue; // never send sentinel back
-        entries.push({
-          key: f.key,
-          value: current.value,
-          isSecret: true,
-          description: null,
-          envPath: null,
-          scope: "global",
-        });
+        if (existing && !current.markedForReplace) continue;
+        if (!current.value) continue;
+        if (current.value === SECRET_MASK_SENTINEL) continue;
       } else {
         const prevValue = existing?.value ?? "";
         if (current.value === prevValue) continue;
-        entries.push({
-          key: f.key,
-          value: current.value,
-          isSecret: false,
-          description: null,
-          envPath: null,
-          scope: "global",
-        });
       }
+
+      entries.push({
+        key: f.key,
+        value: current.value,
+        isSecret: f.isSecret === true,
+        description: null,
+        envPath: null,
+        scope: "global",
+      });
     }
     return entries;
   }
@@ -302,6 +291,19 @@ function IntegrationDetailInner({
     if (def.disableKey) keys.push(def.disableKey);
     deleteBatch.mutate({ configs, keys });
     setConfirmResetOpen(false);
+  }
+
+  async function handleClearField(key: string) {
+    const row = configs.find((c) => c.scope === "global" && c.key === key);
+    if (!row) return;
+    await deleteBatch.mutateAsync({ configs, keys: [key] });
+    try {
+      await reloadConfig.mutateAsync();
+    } catch {
+      // reload hook surfaces its own error toast
+    }
+    // Reset local state for the field so the UI doesn't hold a stale value.
+    setState((prev) => ({ ...prev, [key]: { value: "" } }));
   }
 
   const disableCfg = def.disableKey ? findConfigForKey(configs, def.disableKey) : undefined;
@@ -407,16 +409,18 @@ function IntegrationDetailInner({
             <Alert>
               <Info className="h-4 w-4" />
               <AlertDescription>
-                <strong>PAT mode is the default and simpler path.</strong> For GitHub App
-                integration (recommended for production), expand <em>Advanced</em> below and fill{" "}
-                <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
-                  GITHUB_APP_ID
-                </code>{" "}
-                +{" "}
-                <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
-                  GITHUB_APP_PRIVATE_KEY
-                </code>
-                .
+                <p className="leading-relaxed">
+                  <strong>PAT mode is the default and simpler path.</strong> For GitHub App
+                  integration (recommended for production), expand <em>Advanced</em> below and fill{" "}
+                  <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
+                    GITHUB_APP_ID
+                  </code>{" "}
+                  +{" "}
+                  <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
+                    GITHUB_APP_PRIVATE_KEY
+                  </code>
+                  .
+                </p>
               </AlertDescription>
             </Alert>
           )}
@@ -429,6 +433,7 @@ function IntegrationDetailInner({
               configs={configs}
               envPresence={envPresence}
               onUpdate={updateField}
+              onClearField={handleClearField}
             />
           )}
 
@@ -445,6 +450,7 @@ function IntegrationDetailInner({
                   configs={configs}
                   envPresence={envPresence}
                   onUpdate={updateField}
+                  onClearField={handleClearField}
                   bare
                 />
               </div>
@@ -483,6 +489,7 @@ interface FieldGroupProps {
   configs: SwarmConfig[];
   envPresence: EnvPresenceMap;
   onUpdate: (key: string, patch: Partial<DirtyField>) => void;
+  onClearField: (key: string) => void;
   bare?: boolean;
 }
 
@@ -493,6 +500,7 @@ function FieldGroup({
   configs,
   envPresence,
   onUpdate,
+  onClearField,
   bare,
 }: FieldGroupProps) {
   const content = (
@@ -513,6 +521,7 @@ function FieldGroup({
             onUnmarkForReplace={() =>
               onUpdate(f.key, { value: SECRET_MASK_SENTINEL, markedForReplace: false })
             }
+            onClearExisting={existing ? () => onClearField(f.key) : undefined}
           />
         );
       })}

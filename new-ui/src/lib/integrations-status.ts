@@ -15,6 +15,13 @@ import type { IntegrationDef, IntegrationField } from "./integrations-catalog";
 
 export type IntegrationStatus = "configured" | "partial" | "disabled" | "none";
 
+/**
+ * Map of env-var key → whether it's set in the API server's `process.env`.
+ * Sourced from `GET /api/config/env-presence`. Empty when the endpoint has
+ * not loaded yet — status derivation then falls back to DB-only presence.
+ */
+export type EnvPresence = Readonly<Record<string, boolean>>;
+
 const RESERVED_KEYS: ReadonlySet<string> = new Set(["api_key", "secrets_encryption_key"]);
 
 const TRUTHY_VALUES: ReadonlySet<string> = new Set(["true", "1", "yes"]);
@@ -46,10 +53,19 @@ export function findConfigForKey(configs: SwarmConfig[], key: string): SwarmConf
  * least one non-required field is set, otherwise "none". This handles cases
  * like `codex-oauth` where the only signal is the presence of the row.
  */
+function isFieldPresent(key: string, configs: SwarmConfig[], envPresence: EnvPresence): boolean {
+  if (isReservedKey(key)) return false;
+  if (findConfigForKey(configs, key) !== undefined) return true;
+  return envPresence[key] === true;
+}
+
 export function deriveIntegrationStatus(
   def: IntegrationDef,
   configs: SwarmConfig[],
+  envPresence: EnvPresence = {},
 ): IntegrationStatus {
+  // Disabled signal: only derivable from DB rows (env-presence is boolean-only,
+  // so we can't tell <PREFIX>_DISABLE=true from =false when set via deploy env).
   if (def.disableKey) {
     const disableCfg = findConfigForKey(configs, def.disableKey);
     if (disableCfg && TRUTHY_VALUES.has(disableCfg.value.trim().toLowerCase())) {
@@ -60,21 +76,30 @@ export function deriveIntegrationStatus(
   const requiredFields: IntegrationField[] = def.fields.filter(
     (f) => f.required === true && !isReservedKey(f.key),
   );
+  const advancedFields: IntegrationField[] = def.fields.filter(
+    (f) => f.advanced === true && !isReservedKey(f.key),
+  );
+
+  const allFieldsPresent = def.fields.some((f) => isFieldPresent(f.key, configs, envPresence));
 
   if (requiredFields.length === 0) {
-    // No required fields — any present non-disable field counts as configured.
-    const anyPresent = def.fields.some(
-      (f) => !isReservedKey(f.key) && findConfigForKey(configs, f.key) !== undefined,
-    );
-    return anyPresent ? "configured" : "none";
+    return allFieldsPresent ? "configured" : "none";
   }
 
-  const presentCount = requiredFields.reduce(
-    (acc, f) => acc + (findConfigForKey(configs, f.key) ? 1 : 0),
+  const requiredPresentCount = requiredFields.reduce(
+    (acc, f) => acc + (isFieldPresent(f.key, configs, envPresence) ? 1 : 0),
+    0,
+  );
+  const advancedPresentCount = advancedFields.reduce(
+    (acc, f) => acc + (isFieldPresent(f.key, configs, envPresence) ? 1 : 0),
     0,
   );
 
-  if (presentCount === 0) return "none";
-  if (presentCount === requiredFields.length) return "configured";
+  if (requiredPresentCount === requiredFields.length) return "configured";
+  // Alt-mode: no required set but an advanced path is in use (e.g. GitHub App
+  // mode sets GITHUB_APP_ID/GITHUB_APP_PRIVATE_KEY instead of GITHUB_TOKEN).
+  // Count the integration as configured as long as SOMETHING is set.
+  if (requiredPresentCount === 0 && advancedPresentCount > 0) return "configured";
+  if (requiredPresentCount === 0 && !allFieldsPresent) return "none";
   return "partial";
 }

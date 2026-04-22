@@ -37,7 +37,7 @@ function resolveApiUrl(): string {
 
 export function CodexOAuthSection() {
   const apiUrl = resolveApiUrl();
-  const snippet = `bun run src/cli.tsx codex-login --api-url ${apiUrl}`;
+  const snippet = `npx @desplega.ai/agent-swarm codex-login --api-url ${apiUrl}`;
 
   const { data: configs, isLoading } = useConfigs({ scope: "global" });
   const deleteBatch = useDeleteConfigsBatch();

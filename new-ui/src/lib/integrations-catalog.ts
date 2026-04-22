@@ -98,9 +98,9 @@ export const INTEGRATIONS: IntegrationDef[] = [
         key: "SLACK_SIGNING_SECRET",
         label: "Signing secret",
         type: "password",
-        required: true,
         isSecret: true,
-        helpText: "Verifies requests from Slack. Found under Basic Information → App Credentials.",
+        helpText:
+          "Only required for HTTP events. Socket Mode (the default) doesn't use it. Found under Basic Information → App Credentials.",
         affectsRestart: true,
       },
       {
@@ -438,22 +438,25 @@ export const INTEGRATIONS: IntegrationDef[] = [
     restartRequired: true,
     fields: [
       {
+        key: "CLAUDE_CODE_OAUTH_TOKEN",
+        label: "Claude Code OAuth token",
+        type: "password",
+        isSecret: true,
+        placeholder: "sk-ant-oat01-...",
+        helpText:
+          "Run `claude setup-token` (Claude Code CLI) to generate. Takes precedence over ANTHROPIC_API_KEY when both are set. Comma-separate multiple tokens to form a credential pool.",
+        credentialPool: true,
+        affectsRestart: true,
+      },
+      {
         key: "ANTHROPIC_API_KEY",
         label: "API key",
         type: "password",
         isSecret: true,
         placeholder: "sk-ant-...",
-        helpText: "Anthropic API key. Comma-separate multiple keys to form a credential pool.",
+        helpText:
+          "Anthropic API key. Used when no Claude Code OAuth token is set. Comma-separate multiple keys to form a credential pool.",
         credentialPool: true,
-        affectsRestart: true,
-      },
-      {
-        key: "CLAUDE_CODE_OAUTH_TOKEN",
-        label: "Claude Code OAuth token",
-        type: "password",
-        isSecret: true,
-        advanced: true,
-        helpText: "OAuth token from `claude login` (Claude Code). Alternative to an API key.",
         affectsRestart: true,
       },
     ],
