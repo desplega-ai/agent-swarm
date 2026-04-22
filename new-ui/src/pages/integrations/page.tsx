@@ -231,7 +231,7 @@ export default function IntegrationsPage() {
       ) : (
         <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
           {visible.map((def) => {
-            const status = deriveIntegrationStatus(def, configs ?? []);
+            const status = deriveIntegrationStatus(def, configs ?? [], presence);
             return <IntegrationCard key={def.id} def={def} status={status} />;
           })}
         </div>
