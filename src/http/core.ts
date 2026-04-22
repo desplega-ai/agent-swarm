@@ -14,6 +14,7 @@ import { initGitHub, resetGitHub } from "../github";
 import { initLinear, resetLinear } from "../linear";
 import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
+import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
 import { agentWithCapacity, parseQueryParams } from "./utils";
 
@@ -33,6 +34,11 @@ export function loadGlobalConfigsIntoEnv(override = false): string[] {
       process.env[config.key] = config.value;
       updated.push(config.key);
     }
+  }
+  // The scrubber caches process.env-derived secret values; invalidate so the
+  // next scrub picks up any new/rotated secrets we just injected.
+  if (updated.length > 0) {
+    refreshSecretScrubberCache();
   }
   return updated;
 }

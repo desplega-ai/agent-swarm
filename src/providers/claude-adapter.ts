@@ -7,6 +7,7 @@ import {
   SessionErrorTracker,
   trackErrorFromJson,
 } from "../utils/error-tracker";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import type {
   CostData,
   ProviderAdapter,
@@ -278,7 +279,9 @@ class ClaudeSession implements ProviderSession {
       for await (const chunk of stdout) {
         stdoutChunks++;
         const text = new TextDecoder().decode(chunk);
-        logFileHandle.write(text);
+        // Scrub before every log-egress point: file write, listener emit, and
+        // downstream pretty-print / session-logs push (all consume event.content).
+        logFileHandle.write(scrubSecrets(text));
 
         const combined = partialLine + text;
         const parts = combined.split("\n");
@@ -288,7 +291,7 @@ class ClaudeSession implements ProviderSession {
           const trimmed = line.trim();
           if (!trimmed) continue;
 
-          this.emit({ type: "raw_log", content: trimmed });
+          this.emit({ type: "raw_log", content: scrubSecrets(trimmed) });
           this.processJsonLine(trimmed, (cost) => {
             lastCost = cost;
           });
@@ -297,7 +300,7 @@ class ClaudeSession implements ProviderSession {
 
       // Handle remaining partial line
       if (partialLine.trim()) {
-        this.emit({ type: "raw_log", content: partialLine.trim() });
+        this.emit({ type: "raw_log", content: scrubSecrets(partialLine.trim()) });
         this.processJsonLine(partialLine.trim(), (cost) => {
           lastCost = cost;
         });
@@ -314,10 +317,11 @@ class ClaudeSession implements ProviderSession {
         const text = new TextDecoder().decode(chunk);
         stderrOutput += text;
         parseStderrForErrors(text, this.errorTracker);
+        const scrubbedText = scrubSecrets(text);
         logFileHandle.write(
-          `${JSON.stringify({ type: "stderr", content: text, timestamp: new Date().toISOString() })}\n`,
+          `${JSON.stringify({ type: "stderr", content: scrubbedText, timestamp: new Date().toISOString() })}\n`,
         );
-        this.emit({ type: "raw_stderr", content: text });
+        this.emit({ type: "raw_stderr", content: scrubbedText });
       }
     })();
 
@@ -337,7 +341,7 @@ class ClaudeSession implements ProviderSession {
 
     if (exitCode !== 0 && stderrOutput) {
       console.error(
-        `\x1b[31m[${this.config.role}] Full stderr for task ${this.config.taskId.slice(0, 8)}:\x1b[0m\n${stderrOutput}`,
+        `\x1b[31m[${this.config.role}] Full stderr for task ${this.config.taskId.slice(0, 8)}:\x1b[0m\n${scrubSecrets(stderrOutput)}`,
       );
     }
 
