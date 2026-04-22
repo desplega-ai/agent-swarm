@@ -7067,6 +7067,7 @@ type McpServerRow = {
   headers: string | null;
   envConfigKeys: string | null;
   headerConfigKeys: string | null;
+  authMethod: string | null;
   isEnabled: number;
   version: number;
   createdAt: string;
@@ -7097,6 +7098,7 @@ function rowToMcpServer(row: McpServerRow): McpServer {
     headers: row.headers,
     envConfigKeys: row.envConfigKeys,
     headerConfigKeys: row.headerConfigKeys,
+    authMethod: (row.authMethod as McpServer["authMethod"]) ?? "static",
     isEnabled: row.isEnabled === 1,
     version: row.version,
     createdAt: row.createdAt,
@@ -7172,7 +7174,10 @@ export function createMcpServer(data: McpServerInsert): McpServer {
 
 export function updateMcpServer(
   id: string,
-  updates: Partial<McpServerInsert> & { isEnabled?: boolean },
+  updates: Partial<McpServerInsert> & {
+    isEnabled?: boolean;
+    authMethod?: McpServer["authMethod"];
+  },
 ): McpServer | null {
   const existing = getMcpServerById(id);
   if (!existing) return null;
@@ -7228,6 +7233,10 @@ export function updateMcpServer(
   if (updates.ownerAgentId !== undefined) {
     sets.push("ownerAgentId = ?");
     params.push(updates.ownerAgentId ?? null);
+  }
+  if (updates.authMethod !== undefined) {
+    sets.push("authMethod = ?");
+    params.push(updates.authMethod);
   }
 
   // Bump version on config changes

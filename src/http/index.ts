@@ -28,6 +28,7 @@ import { handleEcosystem } from "./ecosystem";
 import { handleEvents } from "./events";
 import { handleHeartbeat } from "./heartbeat";
 import { handleMcp } from "./mcp";
+import { handleMcpOAuth, startMcpOAuthPendingGc, stopMcpOAuthPendingGc } from "./mcp-oauth";
 import { handleMcpServers } from "./mcp-servers";
 import { handleMemory } from "./memory";
 import { handlePoll } from "./poll";
@@ -129,6 +130,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleRepos(req, res, pathSegments, queryParams),
     () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
     () => handleMcpServers(req, res, pathSegments, queryParams),
+    () => handleMcpOAuth(req, res, pathSegments, queryParams),
     () => handleMemory(req, res, pathSegments, myAgentId),
     () => handleApiKeys(req, res, pathSegments, queryParams),
     () => handleHeartbeat(req, res, pathSegments),
@@ -180,6 +182,9 @@ async function shutdown() {
     const { stopOAuthKeepalive } = await import("../oauth/keepalive");
     stopOAuthKeepalive();
   }
+
+  // Stop MCP OAuth pending-session garbage collector
+  stopMcpOAuthPendingGc();
 
   // Close all active transports (SSE connections, etc.)
   for (const [id, transport] of Object.entries(transports)) {
@@ -290,6 +295,9 @@ httpServer
       const { startOAuthKeepalive } = await import("../oauth/keepalive");
       startOAuthKeepalive();
     }
+
+    // Start MCP OAuth pending-session garbage collector (5-min tick)
+    startMcpOAuthPendingGc();
   })
   .on("error", (err) => {
     console.error("HTTP Server Error:", err);
