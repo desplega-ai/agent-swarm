@@ -165,6 +165,10 @@ export interface UpsertMcpOAuthTokenInput {
 /**
  * Insert or update the token for a given (mcpServerId, userId) pair.
  * Encrypts accessToken/refreshToken/dcrClientSecret at write time.
+ *
+ * Uses explicit select-then-insert-or-update rather than ON CONFLICT because
+ * SQLite treats NULL values in UNIQUE(mcpServerId, userId) as distinct, so the
+ * v1 per-swarm case (userId IS NULL) would never trigger the conflict path.
  */
 export function upsertMcpOAuthToken(input: UpsertMcpOAuthTokenInput): void {
   const userId = input.userId ?? null;
@@ -172,39 +176,67 @@ export function upsertMcpOAuthToken(input: UpsertMcpOAuthTokenInput): void {
   const encryptedRefresh = encryptOrNull(input.refreshToken);
   const encryptedClientSecret = encryptOrNull(input.dcrClientSecret);
 
+  const existing = getMcpOAuthToken(input.mcpServerId, userId);
+  if (!existing) {
+    getDb()
+      .query(
+        `INSERT INTO mcp_oauth_tokens (
+          mcpServerId, userId,
+          accessToken, refreshToken, tokenType, expiresAt, scope,
+          resourceUrl, authorizationServerIssuer, authorizeUrl, tokenUrl, revocationUrl,
+          dcrClientId, dcrClientSecret, clientSource,
+          status, lastErrorMessage, lastRefreshedAt, connectedByUserId
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.mcpServerId,
+        userId,
+        encryptedAccess,
+        encryptedRefresh,
+        input.tokenType ?? "Bearer",
+        input.expiresAt ?? null,
+        input.scope ?? null,
+        input.resourceUrl,
+        input.authorizationServerIssuer,
+        input.authorizeUrl,
+        input.tokenUrl,
+        input.revocationUrl ?? null,
+        input.dcrClientId ?? null,
+        encryptedClientSecret,
+        input.clientSource,
+        input.status ?? "connected",
+        input.lastErrorMessage ?? null,
+        input.lastRefreshedAt ?? null,
+        input.connectedByUserId ?? null,
+      );
+    return;
+  }
+
   getDb()
     .query(
-      `INSERT INTO mcp_oauth_tokens (
-        mcpServerId, userId,
-        accessToken, refreshToken, tokenType, expiresAt, scope,
-        resourceUrl, authorizationServerIssuer, authorizeUrl, tokenUrl, revocationUrl,
-        dcrClientId, dcrClientSecret, clientSource,
-        status, lastErrorMessage, lastRefreshedAt, connectedByUserId
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(mcpServerId, userId) DO UPDATE SET
-        accessToken = excluded.accessToken,
-        refreshToken = COALESCE(excluded.refreshToken, mcp_oauth_tokens.refreshToken),
-        tokenType = excluded.tokenType,
-        expiresAt = excluded.expiresAt,
-        scope = COALESCE(excluded.scope, mcp_oauth_tokens.scope),
-        resourceUrl = excluded.resourceUrl,
-        authorizationServerIssuer = excluded.authorizationServerIssuer,
-        authorizeUrl = excluded.authorizeUrl,
-        tokenUrl = excluded.tokenUrl,
-        revocationUrl = excluded.revocationUrl,
-        dcrClientId = COALESCE(excluded.dcrClientId, mcp_oauth_tokens.dcrClientId),
-        dcrClientSecret = COALESCE(excluded.dcrClientSecret, mcp_oauth_tokens.dcrClientSecret),
-        clientSource = excluded.clientSource,
-        status = excluded.status,
-        lastErrorMessage = excluded.lastErrorMessage,
-        lastRefreshedAt = excluded.lastRefreshedAt,
-        connectedByUserId = COALESCE(excluded.connectedByUserId, mcp_oauth_tokens.connectedByUserId),
-        updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+      `UPDATE mcp_oauth_tokens SET
+        accessToken = ?,
+        refreshToken = COALESCE(?, refreshToken),
+        tokenType = ?,
+        expiresAt = ?,
+        scope = COALESCE(?, scope),
+        resourceUrl = ?,
+        authorizationServerIssuer = ?,
+        authorizeUrl = ?,
+        tokenUrl = ?,
+        revocationUrl = ?,
+        dcrClientId = COALESCE(?, dcrClientId),
+        dcrClientSecret = COALESCE(?, dcrClientSecret),
+        clientSource = ?,
+        status = ?,
+        lastErrorMessage = ?,
+        lastRefreshedAt = ?,
+        connectedByUserId = COALESCE(?, connectedByUserId),
+        updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      WHERE id = ?`,
     )
     .run(
-      input.mcpServerId,
-      userId,
       encryptedAccess,
       encryptedRefresh,
       input.tokenType ?? "Bearer",
@@ -222,6 +254,7 @@ export function upsertMcpOAuthToken(input: UpsertMcpOAuthTokenInput): void {
       input.lastErrorMessage ?? null,
       input.lastRefreshedAt ?? null,
       input.connectedByUserId ?? null,
+      existing.id,
     );
 }
 
