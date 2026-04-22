@@ -5,7 +5,7 @@ author: taras
 status: in-progress
 autonomy: critical
 last_updated: 2026-04-22
-last_updated_by: claude (phase-running agent, Phase 3)
+last_updated_by: claude (phase-running agent, Phase 4)
 ---
 
 # Integrations Configuration UI
@@ -308,10 +308,10 @@ Cover the integrations that don't fit the generic field-form pattern.
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] Type-check: `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Lint: `cd new-ui && pnpm lint`
-- [ ] Linear OAuth section imported in detail page: `grep -n "LinearOAuthSection" new-ui/src/pages/integrations/\[id\]/page.tsx` returns a match.
-- [ ] No new backend routes introduced: `git diff src/http/ | grep -c "route("` is unchanged from main.
+- [x] Type-check: `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Lint: `cd new-ui && pnpm lint`
+- [x] Linear OAuth section imported in detail page: `grep -n "LinearOAuthSection" new-ui/src/pages/integrations/\[id\]/page.tsx` returns a match.
+- [x] No new backend routes introduced: `git diff src/http/ | grep -c "route("` is unchanged from main.
 
 #### Manual Verification:
 - [ ] Set `LINEAR_CLIENT_ID`/`LINEAR_CLIENT_SECRET`/`LINEAR_SIGNING_SECRET` via the form → Save → restart API.

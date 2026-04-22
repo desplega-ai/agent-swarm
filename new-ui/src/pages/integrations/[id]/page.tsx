@@ -28,8 +28,10 @@ import {
   useUpsertConfigsBatch,
 } from "@/api/hooks/use-config-api";
 import type { SwarmConfig } from "@/api/types";
+import { CodexOAuthSection } from "@/components/integrations/codex-oauth-section";
 import { FieldRenderer } from "@/components/integrations/field-renderer";
 import { IntegrationStatusBadge } from "@/components/integrations/integration-status-badge";
+import { LinearOAuthSection } from "@/components/integrations/linear-oauth-section";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -265,7 +267,9 @@ function IntegrationDetailInner({
   );
   const advancedFields = def.fields.filter((f) => f.advanced === true);
 
-  const isSpecialFlow = def.specialFlow === "linear-oauth" || def.specialFlow === "codex-cli";
+  const isLinearOAuth = def.specialFlow === "linear-oauth";
+  const isCodexCli = def.specialFlow === "codex-cli";
+  const isGithub = def.id === "github";
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto space-y-6 p-2">
@@ -295,46 +299,48 @@ function IntegrationDetailInner({
         </div>
       </div>
 
-      {/* Action bar */}
-      <div className="flex flex-wrap items-center gap-2 border border-border rounded-md p-3 bg-muted/20">
-        <Button
-          onClick={handleSave}
-          disabled={!hasDirty || upsertBatch.isPending}
-          className="bg-primary hover:bg-primary/90"
-          size="sm"
-        >
-          {upsertBatch.isPending
-            ? "Saving..."
-            : hasDirty
-              ? `Save ${dirtyEntries.length} change${dirtyEntries.length === 1 ? "" : "s"}`
-              : "Save changes"}
-        </Button>
+      {/* Action bar — hidden for codex-cli (no catalog fields to save/reset via the generic flow). */}
+      {!isCodexCli && (
+        <div className="flex flex-wrap items-center gap-2 border border-border rounded-md p-3 bg-muted/20">
+          <Button
+            onClick={handleSave}
+            disabled={!hasDirty || upsertBatch.isPending}
+            className="bg-primary hover:bg-primary/90"
+            size="sm"
+          >
+            {upsertBatch.isPending
+              ? "Saving..."
+              : hasDirty
+                ? `Save ${dirtyEntries.length} change${dirtyEntries.length === 1 ? "" : "s"}`
+                : "Save changes"}
+          </Button>
 
-        {def.disableKey && (
+          {def.disableKey && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleToggleDisable}
+              disabled={upsertBatch.isPending}
+            >
+              {isDisabled ? "Enable" : "Disable"} {def.name}
+            </Button>
+          )}
+
+          <div className="flex-1" />
+
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={handleToggleDisable}
-            disabled={upsertBatch.isPending}
+            className="border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+            onClick={() => setConfirmResetOpen(true)}
+            disabled={deleteBatch.isPending}
           >
-            {isDisabled ? "Enable" : "Disable"} {def.name}
+            Reset integration
           </Button>
-        )}
-
-        <div className="flex-1" />
-
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
-          onClick={() => setConfirmResetOpen(true)}
-          disabled={deleteBatch.isPending}
-        >
-          Reset integration
-        </Button>
-      </div>
+        </div>
+      )}
 
       {/* Restart hint */}
       {showRestartHint && (
@@ -350,19 +356,14 @@ function IntegrationDetailInner({
         </Alert>
       )}
 
-      {/* Special flow placeholder — Phase 4 wires the real UI */}
-      {isSpecialFlow && (
-        <Alert>
-          <Info className="h-4 w-4" />
-          <AlertDescription>
-            <strong>Special flow ({def.specialFlow}) — will be wired in Phase 4.</strong> The
-            generic form below still lets you set any raw config fields this integration exposes.
-          </AlertDescription>
-        </Alert>
-      )}
+      {/* Linear OAuth connection card — shown ABOVE the generic form. */}
+      {isLinearOAuth && <LinearOAuthSection />}
 
       {/* Body */}
-      {def.fields.length === 0 ? (
+      {isCodexCli ? (
+        // Codex has zero catalog fields; swap the generic form entirely.
+        <CodexOAuthSection />
+      ) : def.fields.length === 0 ? (
         <EmptyState
           icon={Plug}
           title="No configurable fields"
@@ -370,6 +371,24 @@ function IntegrationDetailInner({
         />
       ) : (
         <div className="space-y-6">
+          {isGithub && (
+            <Alert>
+              <Info className="h-4 w-4" />
+              <AlertDescription>
+                <strong>PAT mode is the default and simpler path.</strong> For GitHub App
+                integration (recommended for production), expand <em>Advanced</em> below and fill{" "}
+                <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
+                  GITHUB_APP_ID
+                </code>{" "}
+                +{" "}
+                <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
+                  GITHUB_APP_PRIVATE_KEY
+                </code>
+                .
+              </AlertDescription>
+            </Alert>
+          )}
+
           {requiredFields.length > 0 && (
             <FieldGroup
               title="Required"
