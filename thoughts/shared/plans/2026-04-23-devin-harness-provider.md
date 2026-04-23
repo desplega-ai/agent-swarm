@@ -342,9 +342,9 @@ Flesh out the polling-to-event translation layer with full status state machine 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] All tests pass: `bun test`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] All tests pass: `bun test` (8 pre-existing GitLab failures, 0 new)
 
 #### Manual Verification:
 - [ ] Review the status-to-event mapping covers all Devin states
@@ -406,8 +406,8 @@ elif [ "$HARNESS_PROVIDER" = "devin" ]; then
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Entrypoint syntax valid: `bash -n docker-entrypoint.sh`
-- [ ] Lint passes: `bun run lint:fix`
+- [x] Entrypoint syntax valid: `bash -n docker-entrypoint.sh`
+- [x] Lint passes: `bun run lint:fix`
 
 #### Manual Verification:
 - [ ] Review that the Devin branch correctly validates both `DEVIN_API_KEY` and `DEVIN_ORG_ID`
@@ -490,9 +490,9 @@ If no `DEVIN_SKILLS_REPO` is set and the prompt references a skill (detected by 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] All tests pass: `bun test`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] All tests pass: `bun test` (8 pre-existing GitLab failures, 0 new)
 
 #### Manual Verification:
 - [ ] Review that playbook caching avoids re-creating unchanged system prompts
