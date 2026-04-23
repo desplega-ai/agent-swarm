@@ -3,6 +3,7 @@
   "pages": [
     "deployment",
     "harness-configuration",
+    "harness-providers",
     "provider-auth",
     "slack-integration",
     "github-integration",

@@ -377,6 +377,32 @@ bun test src/tests/memory-e2e.test.ts        # Full memory E2E lifecycle
 
 </important>
 
+<important if="you are modifying harness-provider code (src/providers/*, src/commands/runner.ts provider dispatch, src/prompts/*, docker-entrypoint.sh provider branches, or adding a new provider)">
+
+## Keep the harness-providers guide in sync
+
+The canonical doc for harness-provider internals — adapter contract, event translation, task↔session lifecycle, session-log pipeline, swarm-MCP exposure, system-prompt delivery, skills handling — lives at:
+
+- [`docs-site/content/docs/(documentation)/guides/harness-providers.mdx`](./docs-site/content/docs/(documentation)/guides/harness-providers.mdx)
+
+**Whenever you change any of the following, update that guide in the same PR:**
+
+- The `ProviderAdapter` / `ProviderSession` / `ProviderEvent` / `ProviderSessionConfig` interfaces in `src/providers/types.ts`
+- The factory dispatch in `src/providers/index.ts` (adding/removing a provider)
+- Any of the three reference adapters (`claude-adapter.ts`, `pi-mono-adapter.ts`, `codex-adapter.ts`) in ways that change observable behavior: event-translation rules, subprocess/SDK wiring, swarm-MCP registration, credential handling, model resolution, skill resolution, log-file format, abort semantics
+- The runner's provider dispatch path in `src/commands/runner.ts` (poll→spawn→events→finish flow, endpoints hit per task, task↔session binding)
+- System-prompt composition in `src/prompts/base-prompt.ts` / `src/prompts/defaults.ts` / `src/prompts/<provider>/`
+- Provider credential restoration or binary checks in `docker-entrypoint.sh`
+- OAuth flows under `src/providers/<provider>-oauth/*` or login CLIs under `src/commands/<provider>-login.ts`
+
+**What to update:** the affected section(s) of the guide, including concrete file references. Keep the section numbering intact. If adding a new provider, also extend the "Reference implementations" table, the "Files to touch" checklist, and the `README.md` multi-provider bullet.
+
+**Verify before committing:**
+1. `cd docs-site && pnpm exec next build` (or `pnpm dev` and visit `/docs/guides/harness-providers`) — the MDX must compile.
+2. Any new MDX components used (e.g. `Tabs`, `Callout`) must be imported at the top of the file; Fumadocs defaults do not include them.
+
+</important>
+
 ## Related
 
 - [BUSINESS_USE.md](./BUSINESS_USE.md) — Flow diagrams and instrumentation
