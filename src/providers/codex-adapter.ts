@@ -468,7 +468,7 @@ class CodexSession implements ProviderSession {
     switch (event.type) {
       case "thread.started": {
         this._sessionId = event.thread_id;
-        this.emit({ type: "session_init", sessionId: event.thread_id });
+        this.emit({ type: "session_init", sessionId: event.thread_id, provider: "codex" });
         break;
       }
       case "turn.started": {

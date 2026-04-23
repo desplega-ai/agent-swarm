@@ -145,10 +145,10 @@ Extend the `session_init` event to carry optional provider metadata, update the 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] All tests pass: `bun test`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] OpenAPI spec is fresh: `bun run docs:openapi` produces no diff
+- [x] Type check passes: `bun run tsc:check`
+- [x] All tests pass: `bun test`
+- [x] Lint passes: `bun run lint:fix`
+- [x] OpenAPI spec is fresh: `bun run docs:openapi` produces no diff
 
 #### Manual Verification:
 - [ ] Call `PUT /api/tasks/{id}/claude-session` with `{ "claudeSessionId": "test", "provider": "devin", "providerMeta": { "sessionUrl": "https://example.com" } }` — verify `GET /api/tasks/{id}` returns the stored values

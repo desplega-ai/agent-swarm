@@ -155,7 +155,7 @@ class PiMonoSession implements ProviderSession {
     this._sessionId = agentSession.sessionId;
 
     // Emit session_init immediately
-    this.emit({ type: "session_init", sessionId: this._sessionId });
+    this.emit({ type: "session_init", sessionId: this._sessionId, provider: "pi" });
 
     // Subscribe to agent events and normalize
     this.agentSession.subscribe((event) => this.handleAgentEvent(event));

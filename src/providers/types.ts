@@ -16,7 +16,12 @@ export interface CostData {
 
 /** Normalized event emitted by any provider adapter. */
 export type ProviderEvent =
-  | { type: "session_init"; sessionId: string }
+  | {
+      type: "session_init";
+      sessionId: string;
+      provider?: string;
+      providerMeta?: Record<string, unknown>;
+    }
   | { type: "message"; role: "assistant" | "user"; content: string }
   | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }
   | { type: "tool_end"; toolCallId: string; toolName: string; result: unknown }

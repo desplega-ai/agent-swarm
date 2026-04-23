@@ -5854,6 +5854,13 @@
                   "claudeSessionId": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "providerMeta": {
+                    "type": "object",
+                    "additionalProperties": {}
                   }
                 },
                 "required": [

@@ -78,7 +78,11 @@ const updateClaudeSession = route({
   summary: "Update Claude session ID for a task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
-  body: z.object({ claudeSessionId: z.string().min(1) }),
+  body: z.object({
+    claudeSessionId: z.string().min(1),
+    provider: z.string().optional(),
+    providerMeta: z.record(z.string(), z.unknown()).optional(),
+  }),
   responses: {
     200: { description: "Session ID updated" },
     404: { description: "Task not found" },
@@ -291,7 +295,12 @@ export async function handleTasks(
   if (updateClaudeSession.match(req.method, pathSegments)) {
     const parsed = await updateClaudeSession.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = updateTaskClaudeSessionId(parsed.params.id, parsed.body.claudeSessionId);
+    const task = updateTaskClaudeSessionId(
+      parsed.params.id,
+      parsed.body.claudeSessionId,
+      parsed.body.provider,
+      parsed.body.providerMeta,
+    );
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;
