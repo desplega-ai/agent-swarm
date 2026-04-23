@@ -69,6 +69,7 @@ class DevinSession implements ProviderSession {
   private lastStatusDetail: DevinStatusDetail | undefined;
   private lastStructuredOutput: string | undefined;
   private seenPrUrls = new Set<string>();
+  private seenMessageIds = new Set<string>();
   private approvalRequested = false;
   private consecutivePollErrors = 0;
   private messageCursor: string | undefined;
@@ -292,8 +293,12 @@ class DevinSession implements ProviderSession {
         this.messageCursor = resp.end_cursor;
       }
       for (const msg of resp.items) {
-        const role = msg.source === "devin" ? "assistant" : "user";
-        this.emit({ type: "message", role, content: msg.message });
+        if (this.seenMessageIds.has(msg.event_id)) continue;
+        this.seenMessageIds.add(msg.event_id);
+        // Emit as raw_log so messages flow through the runner's session-logs
+        // pipeline (stdout + POST /api/session-logs → visible in UI).
+        const prefix = msg.source === "devin" ? "[devin]" : "[user]";
+        this.emit({ type: "raw_log", content: `${prefix} ${msg.message}` });
       }
     } catch {
       // Non-fatal — messages are supplementary to status polling.
