@@ -19,7 +19,7 @@ import {
   type ProviderSessionConfig,
 } from "../providers/index.ts";
 import { initTelemetry, telemetry } from "../telemetry.ts";
-import type { RepoGuidelines } from "../types.ts";
+import type { ProviderName, RepoGuidelines } from "../types.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
 import { type CredentialSelection, resolveCredentialPools } from "../utils/credentials.ts";
 import { parseRateLimitResetTime } from "../utils/error-tracker.ts";
@@ -1032,7 +1032,7 @@ async function saveProviderSessionId(
   apiKey: string,
   taskId: string,
   claudeSessionId: string,
-  provider?: string,
+  provider?: ProviderName,
   providerMeta?: Record<string, unknown>,
 ): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -2297,15 +2297,18 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       traits,
       name: agentProfileName,
       description: agentDescription,
-      // Remote providers don't have local identity files or MCP tools
-      soulMd: traits.hasLocalEnvironment ? agentSoulMd : undefined,
-      identityMd: traits.hasLocalEnvironment ? agentIdentityMd : undefined,
-      toolsMd: traits.hasLocalEnvironment ? agentToolsMd : undefined,
-      claudeMd: traits.hasLocalEnvironment ? agentClaudeMd : undefined,
+      ...(traits.hasLocalEnvironment && {
+        soulMd: agentSoulMd,
+        identityMd: agentIdentityMd,
+        toolsMd: agentToolsMd,
+        claudeMd: agentClaudeMd,
+      }),
       repoContext: currentRepoContext,
       slackContext: currentTaskSlackContext,
-      skillsSummary: traits.hasMcp ? agentSkillsSummary : undefined,
-      mcpServersSummary: traits.hasMcp ? agentMcpServersSummary : undefined,
+      ...(traits.hasMcp && {
+        skillsSummary: agentSkillsSummary,
+        mcpServersSummary: agentMcpServersSummary,
+      }),
     });
   };
 

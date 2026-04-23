@@ -724,6 +724,8 @@ export class DevinAdapter implements ProviderAdapter {
           // for the same agent, so the playbook cache effectively deduplicates
           // — one playbook per agent configuration, reused across tasks.
           config.systemPrompt,
+          config.apiUrl,
+          config.apiKey,
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

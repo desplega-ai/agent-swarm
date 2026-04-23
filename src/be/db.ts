@@ -22,6 +22,7 @@ import type {
   ContextSnapshotEventType,
   ContextVersion,
   CooldownConfig,
+  DevinProviderMeta,
   InboxMessage,
   InboxMessageStatus,
   InputValue,
@@ -31,6 +32,7 @@ import type {
   McpServerWithInstallInfo,
   PromptTemplate,
   PromptTemplateHistory,
+  ProviderName,
   RepoGuidelines,
   ScheduledTask,
   Service,
@@ -882,8 +884,12 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     credentialKeyType: row.credentialKeyType ?? undefined,
     requestedByUserId: row.requestedByUserId ?? undefined,
     swarmVersion: row.swarmVersion ?? undefined,
-    provider: (row.provider as "claude" | "codex" | "pi" | "devin" | null) ?? undefined,
-    providerMeta: row.providerMeta ? JSON.parse(row.providerMeta) : undefined,
+    provider: (row.provider as ProviderName | null) ?? undefined,
+    providerMeta: row.providerMeta
+      ? row.provider === "devin"
+        ? (JSON.parse(row.providerMeta) as DevinProviderMeta)
+        : JSON.parse(row.providerMeta)
+      : undefined,
   };
 }
 
@@ -1065,7 +1071,7 @@ export function getChildTasks(parentTaskId: string): AgentTask[] {
 export function updateTaskClaudeSessionId(
   taskId: string,
   claudeSessionId: string,
-  provider?: string,
+  provider?: ProviderName,
   providerMeta?: Record<string, unknown>,
 ): AgentTask | null {
   const setClauses = ["claudeSessionId = ?", "lastUpdatedAt = ?"];

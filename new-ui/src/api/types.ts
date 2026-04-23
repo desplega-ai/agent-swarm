@@ -78,9 +78,12 @@ export interface AgentTask {
   credentialKeySuffix?: string;
   credentialKeyType?: string;
   swarmVersion?: string;
-  provider?: string;
-  providerMeta?: Record<string, unknown>;
+  provider?: ProviderName;
+  providerMeta?: DevinProviderMeta | Record<string, never>;
 }
+
+export type ProviderName = "claude" | "codex" | "pi" | "devin";
+export type DevinProviderMeta = { sessionUrl: string };
 
 export interface AgentWithTasks extends Agent {
   tasks: AgentTask[];

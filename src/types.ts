@@ -67,6 +67,11 @@ export const AgentTaskSourceSchema = z.enum([
 ]);
 export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 
+export const ProviderNameSchema = z.enum(["claude", "codex", "pi", "devin"]);
+export type ProviderName = z.infer<typeof ProviderNameSchema>;
+
+export type DevinProviderMeta = { sessionUrl: string };
+
 export const AgentTaskSchema = z.object({
   id: z.uuid(),
   agentId: z.uuid().nullable(), // Nullable for unassigned tasks
@@ -170,7 +175,7 @@ export const AgentTaskSchema = z.object({
   swarmVersion: z.string().optional(),
 
   // Provider tracking — which harness provider ran this task
-  provider: z.enum(["claude", "codex", "pi", "devin"]).optional(),
+  provider: ProviderNameSchema.optional(),
   providerMeta: z.record(z.string(), z.unknown()).optional(),
 });
 
