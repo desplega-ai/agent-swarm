@@ -261,11 +261,11 @@ Wire the Devin adapter into the factory, credential system, and type definitions
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] All tests pass: `bun test`
-- [ ] DB boundary check: `bash scripts/check-db-boundary.sh`
-- [ ] Grep confirms registration: `grep -n "devin" src/providers/index.ts`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] All tests pass: `bun test` (8 pre-existing GitLab failures, 0 new)
+- [x] DB boundary check: `bash scripts/check-db-boundary.sh`
+- [x] Grep confirms registration: `grep -n "devin" src/providers/index.ts`
 
 #### Manual Verification:
 - [ ] `createProviderAdapter("devin")` would return a `DevinAdapter` instance
