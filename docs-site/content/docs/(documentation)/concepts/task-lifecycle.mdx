@@ -105,6 +105,25 @@ A task with dependencies won't be offered or claimable until all dependencies ar
 | `dir` | Working directory (absolute path) for the agent to start in. Falls back to repo clone path or default cwd |
 | `model` | Model override: `haiku`, `sonnet`, or `opus`. Priority: task > `MODEL_OVERRIDE` config > `opus` |
 | `scheduleId` | Back-reference to the originating schedule (set automatically for schedule-created tasks) |
+| `contextKey` | Uniform ingress-scoped key populated automatically at every ingress site. See [Context Keys](#context-keys) below |
+
+## Context Keys
+
+Every task created through an ingress path gets a `contextKey` stamped on it so related tasks can be grouped across channels. The format is `task:<source>:<identifiers>`:
+
+| Source | Format | Example |
+|--------|--------|---------|
+| Slack | `task:slack:{channelId}:{threadTs}` | `task:slack:C0ABC:1700000000.000100` |
+| AgentMail | `task:agentmail:{threadId}` | `task:agentmail:thr_abc123` |
+| GitHub | `task:trackers:github:{owner}:{repo}:{issue\|pr}:{number}` | `task:trackers:github:desplega-ai:agent-swarm:pr:357` |
+| GitLab | `task:trackers:gitlab:{projectId}:{mr\|issue}:{iid}` | `task:trackers:gitlab:42:mr:7` |
+| Linear | `task:trackers:linear:{issueIdentifier}` | `task:trackers:linear:DES-37` |
+| Schedule | `task:schedule:{scheduleId}` | `task:schedule:b9fe33cb-...` |
+| Workflow | `task:workflow:{workflowRunId}` | `task:workflow:f8d42a10-...` |
+
+Child tasks created via `parentTaskId` (including `send-task` delegations) automatically inherit their parent's `contextKey`. This enables sibling-task awareness: when a worker starts a task, its prompt surfaces recent siblings sharing the same `contextKey` so related work across ingress paths isn't missed.
+
+The column is indexed as `(contextKey, status)` for fast sibling lookup. Historical rows remain `null` — no backfill is performed.
 
 ## Progress Tracking
 

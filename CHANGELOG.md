@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Uniform `contextKey` column on `agent_tasks` populated at every task-ingress site (Slack, AgentMail, GitHub, GitLab, Linear, scheduler, workflow, `send-task`). Schema: `task:slack:{channelId}:{threadTs}`, `task:agentmail:{threadId}`, `task:trackers:github:{owner}:{repo}:{issue|pr}:{number}`, `task:trackers:gitlab:{projectId}:{mr|issue}:{iid}`, `task:trackers:linear:{issueIdentifier}`, `task:schedule:{scheduleId}`, `task:workflow:{workflowRunId}`. Migration 041 adds nullable `contextKey` plus `(contextKey, status)` composite index. Child tasks auto-inherit from parent via `parentTaskId` (#358)
+- Cross-ingress sibling-task awareness (phase 2): reader-side prompt injection surfaces sibling/parent tasks sharing the same `contextKey` so workers see related work across ingress paths. Includes additive `ADDITIVE_SLACK` buffer generalization and Linear hard-refuse UX fix (#359)
+- New harness-providers guide at [`/docs/guides/harness-providers`](/docs/guides/harness-providers) covering the `ProviderAdapter` contract, task↔session lifecycle, raw session-log pipeline, swarm-MCP exposure, system-prompt composition/delivery, skills handling, and a 15-step walkthrough grounded in the claude / pi / codex reference adapters (`docs-site/content/docs/(documentation)/guides/harness-providers.mdx`)
+
+## [1.69.0] - 2026-04-22
+
+### Added
+- **OAuth 2.0 MCP support for headless swarms** — end-to-end support for OAuth 2.0-protected MCP servers running inside worker containers. Workers resolve a valid access token at dispatch time (refreshing on expiry), inject it into the provider config, and propagate token-refresh failures back to the task without leaking tokens into logs or prompts (#357)
+- `POST /api/mcp-oauth/{mcpServerId}/authorize` / `GET /api/mcp-oauth/callback` — browser-driven OAuth authorization code flow for user-scoped MCP servers (#357)
+- `POST /api/mcp-oauth/{mcpServerId}/manual-client` — operator-supplied client credentials for MCP servers that don't implement dynamic client registration (#357)
+- `GET /api/mcp-oauth/{mcpServerId}/metadata` / `GET /api/mcp-oauth/{mcpServerId}/status` — metadata discovery (RFC 8414) and per-server OAuth status for the Integrations UI (#357)
+- `POST /api/mcp-oauth/{mcpServerId}/refresh` / `DELETE /api/mcp-oauth/{mcpServerId}` — manual refresh and revocation endpoints (#357)
+- New MCP OAuth panel in the dashboard (`new-ui/src/pages/mcp-servers/[id]/mcp-oauth-panel.tsx`) for authorize / refresh / revoke / manual-client management, with live status from `use-mcp-oauth.ts` (#357)
+- Encrypted-at-rest OAuth token storage via migration `041_mcp_oauth_tokens.sql`, reusing the `swarm_config` AES-256-GCM encryption key; access tokens are never returned over HTTP (#357)
+- Dummy OAuth MCP server reference implementation at `scripts/dummy-oauth-mcp/` for local testing of the full flow (authorization code, PKCE, dynamic client registration, refresh) (#357)
+- 1100+ lines of new test coverage across `src/tests/mcp-oauth-*.test.ts` (queries, resolve-secrets, ensure-token, wrapper) (#357)
+
 ## [1.68.0] - 2026-04-22
 
 ### Added
