@@ -32,7 +32,7 @@
     <img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join Discord">
   </a>
   <a href="https://x.com/desplegalabs">
-    <img src="https://img.shields.io/badge/𝕏-@swarm__lead-000?style=for-the-badge&logo=x&logoColor=white" alt="Follow on X">
+    <img src="https://img.shields.io/badge/𝕏-@desplegalabs-000?style=for-the-badge&logo=x&logoColor=white" alt="Follow on X">
   </a>
 </p>
 
