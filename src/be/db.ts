@@ -817,6 +817,8 @@ type AgentTaskRow = {
   credentialKeyType: string | null;
   requestedByUserId: string | null;
   swarmVersion: string | null;
+  provider: string | null;
+  providerMeta: string | null;
 };
 
 function rowToAgentTask(row: AgentTaskRow): AgentTask {
@@ -877,6 +879,8 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     credentialKeyType: row.credentialKeyType ?? undefined,
     requestedByUserId: row.requestedByUserId ?? undefined,
     swarmVersion: row.swarmVersion ?? undefined,
+    provider: (row.provider as "claude" | "codex" | "pi" | "devin" | null) ?? undefined,
+    providerMeta: row.providerMeta ? JSON.parse(row.providerMeta) : undefined,
   };
 }
 
@@ -1058,12 +1062,28 @@ export function getChildTasks(parentTaskId: string): AgentTask[] {
 export function updateTaskClaudeSessionId(
   taskId: string,
   claudeSessionId: string,
+  provider?: string,
+  providerMeta?: Record<string, unknown>,
 ): AgentTask | null {
+  const setClauses = ["claudeSessionId = ?", "lastUpdatedAt = ?"];
+  const params: (string | null)[] = [claudeSessionId, new Date().toISOString()];
+
+  if (provider !== undefined) {
+    setClauses.push("provider = ?");
+    params.push(provider);
+  }
+  if (providerMeta !== undefined) {
+    setClauses.push("providerMeta = ?");
+    params.push(JSON.stringify(providerMeta));
+  }
+
+  params.push(taskId);
+
   const row = getDb()
-    .prepare<AgentTaskRow, [string, string, string]>(
-      `UPDATE agent_tasks SET claudeSessionId = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *`,
+    .prepare<AgentTaskRow, (string | null)[]>(
+      `UPDATE agent_tasks SET ${setClauses.join(", ")} WHERE id = ? RETURNING *`,
     )
-    .get(claudeSessionId, new Date().toISOString(), taskId);
+    .get(...params);
   return row ? rowToAgentTask(row) : null;
 }
 

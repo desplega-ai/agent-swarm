@@ -163,6 +163,10 @@ export const AgentTaskSchema = z.object({
   // agent-swarm package version at task creation time. Enables benchmarking
   // performance across releases. Nullable for rows created before tracking was added.
   swarmVersion: z.string().optional(),
+
+  // Provider tracking — which harness provider ran this task
+  provider: z.enum(["claude", "codex", "pi", "devin"]).optional(),
+  providerMeta: z.record(z.string(), z.unknown()).optional(),
 });
 
 // ============================================================================
