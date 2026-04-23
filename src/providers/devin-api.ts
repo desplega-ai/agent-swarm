@@ -6,8 +6,6 @@
  * overridden via `DEVIN_API_BASE_URL` for testing or on-prem deployments.
  */
 
-const DEVIN_API_BASE_URL = process.env.DEVIN_API_BASE_URL ?? "https://api.devin.ai";
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -74,7 +72,7 @@ export interface DevinPlaybookResponse {
 // ---------------------------------------------------------------------------
 
 function baseUrl(): string {
-  return DEVIN_API_BASE_URL;
+  return process.env.DEVIN_API_BASE_URL ?? "https://api.devin.ai";
 }
 
 function headers(apiKey: string): Record<string, string> {

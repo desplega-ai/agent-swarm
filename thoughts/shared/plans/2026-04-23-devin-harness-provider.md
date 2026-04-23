@@ -554,11 +554,11 @@ Write unit tests for the Devin adapter, API client, and playbook caching. Update
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] All tests pass: `bun test`
-- [ ] Devin-specific tests pass: `bun test src/tests/devin-adapter.test.ts src/tests/devin-api.test.ts`
-- [ ] DB boundary check: `bash scripts/check-db-boundary.sh`
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] All tests pass: `bun test` (8 pre-existing GitLab failures, 0 new)
+- [x] Devin-specific tests pass: `bun test src/tests/devin-adapter.test.ts src/tests/devin-api.test.ts` (39/39 pass)
+- [x] DB boundary check: `bash scripts/check-db-boundary.sh`
 
 #### Manual Verification:
 - [ ] Review test coverage for all Devin status states including resume scenarios
