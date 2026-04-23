@@ -1,12 +1,12 @@
 ---
 date: 2026-04-23T00:00:00Z
 topic: "Provider-Aware Task UI: Devin Session URL"
-status: in-progress
+status: completed
 ---
 
 # Provider-Aware Task UI: Devin Session URL
 
-**Status**: draft
+**Status**: completed
 
 ## Overview
 
