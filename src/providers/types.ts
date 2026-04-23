@@ -84,9 +84,18 @@ export interface ProviderResult {
   failureReason?: string;
 }
 
+/** Behavioral traits that govern prompt assembly and feature gating. */
+export interface ProviderTraits {
+  /** Provider can call MCP tools (store-progress, task-action, skills, slack-reply, etc.) */
+  hasMcp: boolean;
+  /** Provider runs in the local Docker container with /workspace, identity files, agent-fs, PM2, etc. */
+  hasLocalEnvironment: boolean;
+}
+
 /** Main contract for a harness provider adapter. */
 export interface ProviderAdapter {
   readonly name: string;
+  readonly traits: ProviderTraits;
   createSession(config: ProviderSessionConfig): Promise<ProviderSession>;
   canResume(sessionId: string): Promise<boolean>;
   formatCommand(commandName: string): string;

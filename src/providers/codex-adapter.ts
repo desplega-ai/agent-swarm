@@ -742,6 +742,7 @@ class CodexSession implements ProviderSession {
 
 export class CodexAdapter implements ProviderAdapter {
   readonly name = "codex";
+  readonly traits = { hasMcp: true, hasLocalEnvironment: true };
 
   /**
    * Optional override for the skill resolver's skills directory. When unset,

@@ -2287,22 +2287,25 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let currentTaskSlackContext: BasePromptArgs["slackContext"] | undefined;
 
   // Generate base prompt (identity fields injected after profile fetch below)
+  const { traits } = adapter;
   const buildSystemPrompt = async () => {
     return getBasePrompt({
       role,
       agentId,
       swarmUrl,
       capabilities,
+      traits,
       name: agentProfileName,
       description: agentDescription,
-      soulMd: agentSoulMd,
-      identityMd: agentIdentityMd,
-      toolsMd: agentToolsMd,
-      claudeMd: agentClaudeMd,
+      // Remote providers don't have local identity files or MCP tools
+      soulMd: traits.hasLocalEnvironment ? agentSoulMd : undefined,
+      identityMd: traits.hasLocalEnvironment ? agentIdentityMd : undefined,
+      toolsMd: traits.hasLocalEnvironment ? agentToolsMd : undefined,
+      claudeMd: traits.hasLocalEnvironment ? agentClaudeMd : undefined,
       repoContext: currentRepoContext,
       slackContext: currentTaskSlackContext,
-      skillsSummary: agentSkillsSummary,
-      mcpServersSummary: agentMcpServersSummary,
+      skillsSummary: traits.hasMcp ? agentSkillsSummary : undefined,
+      mcpServersSummary: traits.hasMcp ? agentMcpServersSummary : undefined,
     });
   };
 

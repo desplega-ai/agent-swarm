@@ -391,6 +391,7 @@ class PiMonoSession implements ProviderSession {
 
 export class PiMonoAdapter implements ProviderAdapter {
   readonly name = "pi";
+  readonly traits = { hasMcp: true, hasLocalEnvironment: true };
   private lastCwd = ".";
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
