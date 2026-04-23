@@ -20,6 +20,7 @@ import {
   updateTaskVcs,
 } from "../be/db";
 import { telemetry } from "../telemetry";
+import { ProviderNameSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -77,11 +78,18 @@ const updateClaudeSession = route({
   summary: "Update Claude session ID for a task",
   tags: ["Tasks"],
   params: z.object({ id: z.string() }),
-  body: z.object({
-    claudeSessionId: z.string().min(1),
-    provider: z.string().optional(),
-    providerMeta: z.record(z.string(), z.unknown()).optional(),
-  }),
+  body: z.union([
+    z.object({
+      claudeSessionId: z.string().min(1),
+      provider: z.literal("devin"),
+      providerMeta: z.object({ sessionUrl: z.string() }),
+    }),
+    z.object({
+      claudeSessionId: z.string().min(1),
+      provider: ProviderNameSchema.exclude(["devin"]).optional(),
+      providerMeta: z.object({}).optional(),
+    }),
+  ]),
   responses: {
     200: { description: "Session ID updated" },
     404: { description: "Task not found" },

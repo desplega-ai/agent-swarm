@@ -28,7 +28,6 @@ export type BasePromptArgs = {
   agentId: string;
   swarmUrl: string;
   capabilities?: string[];
-  /** Behavioral traits from the provider adapter. Gates feature-specific prompt assembly. */
   traits?: ProviderTraits;
   name?: string;
   description?: string;
@@ -56,9 +55,8 @@ export type BasePromptArgs = {
 };
 
 export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
-  const { role, agentId, swarmUrl } = args;
-  const hasMcp = args.traits?.hasMcp !== false;
-  const hasLocalEnv = args.traits?.hasLocalEnvironment !== false;
+  const { role, agentId, swarmUrl, traits } = args;
+  const { hasMcp = true, hasLocalEnvironment: hasLocalEnv = true } = traits ?? {};
 
   const vars: Record<string, string> = { role, agentId, swarmUrl };
 
@@ -133,20 +131,13 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
       prompt += `WARNING: ${args.repoContext.warning}\n\n`;
     }
 
-    if (args.repoContext.claudeMd) {
-      if (!hasLocalEnv) {
-        // Remote providers have their own workspace layout — don't constrain to a specific path
-        prompt += `The following CLAUDE.md is from the repository you are working on. Follow these instructions when working on this repository.\n\n`;
-      } else {
+    if (hasLocalEnv) {
+      if (args.repoContext.claudeMd) {
         prompt += `The following CLAUDE.md is from the repository cloned at \`${args.repoContext.clonePath}\`. `;
         prompt += `**IMPORTANT: These instructions apply ONLY when working within the \`${args.repoContext.clonePath}\` directory.** `;
         prompt += `Do NOT apply these rules to files outside that directory.\n\n`;
-      }
-      prompt += `${args.repoContext.claudeMd}\n`;
-    } else if (!args.repoContext.warning) {
-      if (!hasLocalEnv) {
-        prompt += `The repository has no CLAUDE.md file.\n`;
-      } else {
+        prompt += `${args.repoContext.claudeMd}\n`;
+      } else if (!args.repoContext.warning) {
         prompt += `Repository is cloned at \`${args.repoContext.clonePath}\` but has no CLAUDE.md file.\n`;
       }
     }

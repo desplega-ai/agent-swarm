@@ -484,7 +484,7 @@ describe("getBasePrompt — remote provider identity", () => {
 });
 
 describe("getBasePrompt — remote provider keeps repo context", () => {
-  test("includes repo CLAUDE.md without clonePath constraint", async () => {
+  test("skips CLAUDE.md content for remote providers", async () => {
     const result = await getBasePrompt({
       ...remoteProviderArgs,
       repoContext: {
@@ -493,10 +493,9 @@ describe("getBasePrompt — remote provider keeps repo context", () => {
       },
     });
     expect(result).toContain("Repository Context");
-    expect(result).toContain("Run `bun test` before pushing.");
-    // Should NOT reference the Docker clone path
+    // Remote providers don't get claudeMd injected
+    expect(result).not.toContain("Run `bun test` before pushing.");
     expect(result).not.toContain("/workspace/repos/my-repo");
-    expect(result).toContain("Follow these instructions when working on this repository");
   });
 
   test("includes repo guidelines", async () => {

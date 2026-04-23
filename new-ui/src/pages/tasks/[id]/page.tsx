@@ -44,6 +44,7 @@ import {
 import type { AgentLog, SessionCost, TaskContextResponse } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { SessionId } from "@/components/shared/session-id";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
@@ -507,21 +508,11 @@ export default function TaskDetailPage() {
       )}
       {task.claudeSessionId && (
         <MetaRow icon={Terminal} label="Session">
-          {task.provider === "devin" && typeof task.providerMeta?.sessionUrl === "string" ? (
-            <a
-              href={task.providerMeta.sessionUrl as string}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary hover:underline font-mono text-xs inline-flex items-center gap-1"
-            >
-              {task.claudeSessionId.slice(0, 12)}...
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          ) : (
-            <span className="text-xs font-mono truncate" title={task.claudeSessionId}>
-              {task.claudeSessionId.slice(0, 12)}...
-            </span>
-          )}
+          <SessionId
+            sessionId={task.claudeSessionId}
+            provider={task.provider}
+            providerMeta={task.providerMeta}
+          />
         </MetaRow>
       )}
       {task.credentialKeySuffix && (

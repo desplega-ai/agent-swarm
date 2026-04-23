@@ -14,12 +14,14 @@ export interface CostData {
   isError: boolean;
 }
 
+import type { ProviderName } from "../types";
+
 /** Normalized event emitted by any provider adapter. */
 export type ProviderEvent =
   | {
       type: "session_init";
       sessionId: string;
-      provider?: string;
+      provider?: ProviderName;
       providerMeta?: Record<string, unknown>;
     }
   | { type: "message"; role: "assistant" | "user"; content: string }

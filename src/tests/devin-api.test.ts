@@ -260,9 +260,9 @@ describe("devin-api: getSessionMessages", () => {
 
   test("4xx error — throws with status", async () => {
     nextResponse = { status: 404, body: JSON.stringify({ error: "session not found" }) };
-    await expect(
-      devinApi.getSessionMessages(ORG_ID, API_KEY, "ses-missing"),
-    ).rejects.toThrow(/HTTP 404/);
+    await expect(devinApi.getSessionMessages(ORG_ID, API_KEY, "ses-missing")).rejects.toThrow(
+      /HTTP 404/,
+    );
   });
 });
 
