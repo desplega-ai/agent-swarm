@@ -16,6 +16,7 @@ work
 
 # dependencies (bun install)
 node_modules
+.pnpm-global
 
 # output
 out
@@ -39,6 +40,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .env.local
 .env.docker
 .env.docker-lead
+.env.docker-devin
 
 # caches
 .eslintcache
@@ -68,3 +70,14 @@ docker-compose.desplega.yaml
 
 # Opencode artifacts
 .opencode/
+
+# Devenv
+.devenv*
+devenv.local.nix
+devenv.local.yaml
+
+# direnv
+.direnv
+
+# pre-commit
+.pre-commit-config.yaml

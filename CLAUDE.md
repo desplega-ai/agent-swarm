@@ -197,7 +197,7 @@ Uses `@desplega.ai/business-use` to track system invariants. See [BUSINESS_USE.m
 
 ## Local development
 
-**Environment files:** `.env` (API server), `.env.docker` (Docker worker), `.env.docker-lead` (Docker lead).
+**Environment files:** `.env` (API server), `.env.docker` (Docker worker), `.env.docker-lead` (Docker lead), `.env.docker-devin` (Devin worker).
 
 **Key env vars:** `API_KEY` (auth, default: `123123`), `MCP_BASE_URL` (default: `http://localhost:3013`), `SLACK_DISABLE=true` / `GITHUB_DISABLE=true`, `HARNESS_PROVIDER` (`claude`, `pi`, `codex`, or `devin` — codex requires `OPENAI_API_KEY` or `~/.codex/auth.json` or ChatGPT OAuth via `codex-login`; devin requires `DEVIN_API_KEY` + `DEVIN_ORG_ID`), `TEMPLATE_ID` (e.g. `official/coder`), `TEMPLATE_REGISTRY_URL` (default: `https://templates.agent-swarm.dev`). ChatGPT OAuth is stored server-side as the global `codex_oauth` config entry; codex workers restore it into `~/.codex/auth.json` at boot.
 
