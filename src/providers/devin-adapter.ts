@@ -17,6 +17,7 @@ import {
   type DevinSessionStatus,
   type DevinStatusDetail,
   getSession,
+  getSessionMessages,
   sendMessage,
 } from "./devin-api";
 import { getOrCreatePlaybook } from "./devin-playbooks";
@@ -70,6 +71,7 @@ class DevinSession implements ProviderSession {
   private seenPrUrls = new Set<string>();
   private approvalRequested = false;
   private consecutivePollErrors = 0;
+  private messageCursor: string | undefined;
 
   constructor(
     config: ProviderSessionConfig,
@@ -262,6 +264,9 @@ class DevinSession implements ProviderSession {
       }
     }
 
+    // Fetch new conversation messages from Devin.
+    await this.pollMessages();
+
     // Process status transitions.
     const statusChanged =
       response.status !== this.lastStatus || response.status_detail !== this.lastStatusDetail;
@@ -269,6 +274,30 @@ class DevinSession implements ProviderSession {
     this.lastStatusDetail = response.status_detail;
 
     this.processStatus(response, statusChanged);
+  }
+
+  // -------------------------------------------------------------------------
+  // Conversation messages
+  // -------------------------------------------------------------------------
+
+  private async pollMessages(): Promise<void> {
+    try {
+      const resp = await getSessionMessages(
+        this.orgId,
+        this.devinApiKey,
+        this._sessionId!,
+        this.messageCursor,
+      );
+      if (resp.end_cursor) {
+        this.messageCursor = resp.end_cursor;
+      }
+      for (const msg of resp.items) {
+        const role = msg.source === "devin" ? "assistant" : "user";
+        this.emit({ type: "message", role, content: msg.message });
+      }
+    } catch {
+      // Non-fatal — messages are supplementary to status polling.
+    }
   }
 
   // -------------------------------------------------------------------------

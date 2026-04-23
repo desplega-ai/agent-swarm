@@ -56,6 +56,20 @@ export interface DevinSessionResponse {
   updated_at: number;
 }
 
+export interface DevinSessionMessage {
+  event_id: string;
+  source: "devin" | "user";
+  message: string;
+  created_at: number;
+}
+
+export interface DevinMessagesResponse {
+  items: DevinSessionMessage[];
+  end_cursor: string | null;
+  has_next_page: boolean;
+  total: number | null;
+}
+
 export interface DevinPlaybookCreateRequest {
   title: string;
   body: string;
@@ -153,6 +167,23 @@ export async function archiveSession(
     headers: headers(apiKey),
   });
   await assertOk(res, "archiveSession");
+}
+
+/** Fetch session messages (cursor-based pagination). */
+export async function getSessionMessages(
+  orgId: string,
+  apiKey: string,
+  sessionId: string,
+  after?: string,
+): Promise<DevinMessagesResponse> {
+  const params = new URLSearchParams({ first: "200" });
+  if (after) params.set("after", after);
+  const res = await fetch(
+    `${baseUrl()}/v3/organizations/${orgId}/sessions/${sessionId}/messages?${params}`,
+    { method: "GET", headers: headers(apiKey) },
+  );
+  await assertOk(res, "getSessionMessages");
+  return (await res.json()) as DevinMessagesResponse;
 }
 
 /** Create a new playbook. */
