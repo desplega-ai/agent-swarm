@@ -28,7 +28,12 @@ export type DevinStatusDetail =
   | "inactivity"
   | "user_request"
   | "usage_limit_exceeded"
-  | "out_of_credits";
+  | "out_of_credits"
+  | "out_of_quota"
+  | "no_quota_allocation"
+  | "payment_declined"
+  | "org_usage_limit_exceeded"
+  | "error";
 
 export interface DevinSessionCreateRequest {
   prompt: string;

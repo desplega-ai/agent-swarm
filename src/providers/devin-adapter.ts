@@ -72,6 +72,7 @@ class DevinSession implements ProviderSession {
   private seenMessageIds = new Set<string>();
   private approvalRequested = false;
   private consecutivePollErrors = 0;
+  private humanResponseTimer: ReturnType<typeof setInterval> | null = null;
   private messageCursor: string | undefined;
 
   constructor(
@@ -205,6 +206,10 @@ class DevinSession implements ProviderSession {
     if (this.pollTimer) {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
+    }
+    if (this.humanResponseTimer) {
+      clearInterval(this.humanResponseTimer);
+      this.humanResponseTimer = null;
     }
   }
 
@@ -518,12 +523,14 @@ class DevinSession implements ProviderSession {
       }
 
       case "usage_limit_exceeded":
-      case "out_of_credits": {
+      case "out_of_credits":
+      case "out_of_quota":
+      case "no_quota_allocation":
+      case "payment_declined":
+      case "org_usage_limit_exceeded":
+      case "error": {
         const cost = this.buildCostData(acusConsumed, true);
-        const reason =
-          detail === "usage_limit_exceeded"
-            ? "Devin session suspended: usage limit exceeded"
-            : "Devin session suspended: out of credits";
+        const reason = `Devin session suspended: ${detail!.replaceAll("_", " ")}`;
         this.emit({ type: "error", message: reason });
         this.emit({
           type: "result",
@@ -608,10 +615,16 @@ class DevinSession implements ProviderSession {
   private async pollForHumanResponse(): Promise<void> {
     if (!this.config.apiUrl || !this.config.apiKey || !this.config.taskId) return;
 
+    // Clear any previous human-response timer before starting a new one.
+    if (this.humanResponseTimer) clearInterval(this.humanResponseTimer);
+
     // Simple polling loop — check every poll interval for a human response.
-    const checkInterval = setInterval(async () => {
+    this.humanResponseTimer = setInterval(async () => {
       if (this.settled || this.aborted) {
-        clearInterval(checkInterval);
+        if (this.humanResponseTimer) {
+          clearInterval(this.humanResponseTimer);
+          this.humanResponseTimer = null;
+        }
         return;
       }
 
@@ -629,7 +642,10 @@ class DevinSession implements ProviderSession {
         if (res.ok) {
           const data = (await res.json()) as { response?: string; answered?: boolean };
           if (data.answered && data.response) {
-            clearInterval(checkInterval);
+            if (this.humanResponseTimer) {
+              clearInterval(this.humanResponseTimer);
+              this.humanResponseTimer = null;
+            }
             this.approvalRequested = false;
             // Relay the human response to Devin.
             try {
@@ -753,6 +769,10 @@ export class DevinAdapter implements ProviderAdapter {
 
     try {
       const response = await getSession(orgId, devinApiKey, sessionId);
+      // Devin's API may allow sending messages to some errored sessions, but
+      // not all error subtypes are recoverable. Conservative default: treat
+      // `error` as non-resumable to avoid the runner looping on a broken session.
+      // Only `suspended` sessions (inactivity, user_request, cost limits) are resumable.
       return response.status !== "exit" && response.status !== "error";
     } catch {
       return false;

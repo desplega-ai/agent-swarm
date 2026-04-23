@@ -105,6 +105,23 @@ function handler(req: IncomingMessage, res: ServerResponse): void {
       return;
     }
 
+    // GET /v3/organizations/:orgId/sessions/:sessionId/messages
+    if (method === "GET" && url.match(/\/v3\/organizations\/[^/]+\/sessions\/[^/]+\/messages/)) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          items: [
+            { event_id: "msg-001", source: "user", message: "hello", created_at: 1700000001 },
+            { event_id: "msg-002", source: "devin", message: "hi there", created_at: 1700000002 },
+          ],
+          end_cursor: "cursor-abc",
+          has_next_page: false,
+          total: 2,
+        }),
+      );
+      return;
+    }
+
     // POST /v3/organizations/:orgId/playbooks
     if (method === "POST" && url.match(/\/v3\/organizations\/[^/]+\/playbooks$/)) {
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -214,6 +231,38 @@ describe("devin-api: archiveSession", () => {
     await devinApi.archiveSession(ORG_ID, API_KEY, "ses-archive-test");
     expect(lastRequest!.url).toContain("/ses-archive-test/archive");
     expect(lastRequest!.method).toBe("POST");
+  });
+});
+
+describe("devin-api: getSessionMessages", () => {
+  test("success — returns messages with cursor info", async () => {
+    const result = await devinApi.getSessionMessages(ORG_ID, API_KEY, "ses-abc-123");
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0].event_id).toBe("msg-001");
+    expect(result.items[1].source).toBe("devin");
+    expect(result.end_cursor).toBe("cursor-abc");
+    expect(result.has_next_page).toBe(false);
+  });
+
+  test("URL includes session ID and default pagination", async () => {
+    lastRequest = null;
+    await devinApi.getSessionMessages(ORG_ID, API_KEY, "ses-msg-test");
+    expect(lastRequest!.method).toBe("GET");
+    expect(lastRequest!.url).toContain("/ses-msg-test/messages");
+    expect(lastRequest!.url).toContain("first=200");
+  });
+
+  test("passes cursor via after param", async () => {
+    lastRequest = null;
+    await devinApi.getSessionMessages(ORG_ID, API_KEY, "ses-abc-123", "cursor-prev");
+    expect(lastRequest!.url).toContain("after=cursor-prev");
+  });
+
+  test("4xx error — throws with status", async () => {
+    nextResponse = { status: 404, body: JSON.stringify({ error: "session not found" }) };
+    await expect(
+      devinApi.getSessionMessages(ORG_ID, API_KEY, "ses-missing"),
+    ).rejects.toThrow(/HTTP 404/);
   });
 });
 

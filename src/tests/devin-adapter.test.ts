@@ -535,6 +535,14 @@ describe("DevinAdapter.canResume", () => {
     expect(result).toBe(false);
   });
 
+  test("returns false for error session (conservative — not all errors are recoverable)", async () => {
+    pollResponse.status = "error";
+
+    const adapter = new DevinAdapter();
+    const result = await adapter.canResume("ses-test-001");
+    expect(result).toBe(false);
+  });
+
   test("returns false for empty session ID", async () => {
     const adapter = new DevinAdapter();
     expect(await adapter.canResume("")).toBe(false);

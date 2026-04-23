@@ -1,7 +1,7 @@
 ---
 date: 2026-04-23T00:00:00Z
 topic: "Provider Traits Refactor"
-status: draft
+status: completed
 author: Gerard + Claude
 ---
 
