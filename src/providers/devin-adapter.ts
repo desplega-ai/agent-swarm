@@ -300,10 +300,11 @@ class DevinSession implements ProviderSession {
       for (const msg of resp.items) {
         if (this.seenMessageIds.has(msg.event_id)) continue;
         this.seenMessageIds.add(msg.event_id);
-        // Emit as raw_log so messages flow through the runner's session-logs
-        // pipeline (stdout + POST /api/session-logs → visible in UI).
-        const prefix = msg.source === "devin" ? "[devin]" : "[user]";
-        this.emit({ type: "raw_log", content: `${prefix} ${msg.message}` });
+        this.emit({
+          type: "message",
+          role: msg.source === "devin" ? "assistant" : "user",
+          content: msg.message,
+        });
       }
     } catch {
       // Non-fatal — messages are supplementary to status polling.
@@ -679,6 +680,7 @@ class DevinSession implements ProviderSession {
 
 export class DevinAdapter implements ProviderAdapter {
   readonly name = "devin";
+  readonly traits = { hasMcp: false, hasLocalEnvironment: false };
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
     // Resolve credentials from config.env (injected by runner) or process.env.

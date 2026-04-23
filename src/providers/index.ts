@@ -5,6 +5,7 @@ export type {
   ProviderResult,
   ProviderSession,
   ProviderSessionConfig,
+  ProviderTraits,
 } from "./types";
 
 import { ClaudeAdapter } from "./claude-adapter";

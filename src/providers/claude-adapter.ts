@@ -542,6 +542,7 @@ class ClaudeSession implements ProviderSession {
 
 export class ClaudeAdapter implements ProviderAdapter {
   readonly name = "claude";
+  readonly traits = { hasMcp: true, hasLocalEnvironment: true };
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
     const model = config.model || "opus";
