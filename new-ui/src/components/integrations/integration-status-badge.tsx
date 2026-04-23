@@ -51,11 +51,8 @@ export function IntegrationStatusBadge({ status, className }: IntegrationStatusB
         <Badge
           variant="outline"
           aria-label={meta.ariaLabel}
-          className={cn(
-            "text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase cursor-help",
-            meta.className,
-            className,
-          )}
+          size="tag"
+          className={cn("cursor-help", meta.className, className)}
         >
           {meta.label}
         </Badge>

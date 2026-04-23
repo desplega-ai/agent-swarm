@@ -144,8 +144,8 @@ export function CodexOAuthSection() {
             <Button
               type="button"
               size="sm"
-              variant="outline"
-              className="shrink-0 border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+              variant="destructive-outline"
+              className="shrink-0 hover:text-red-300"
               onClick={() => setConfirmClearOpen(true)}
               disabled={deleteBatch.isPending}
             >

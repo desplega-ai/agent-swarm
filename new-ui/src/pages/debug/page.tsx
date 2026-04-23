@@ -233,16 +233,10 @@ export default function DebugPage() {
 
             {dbQuery.data && (
               <div className="flex items-center gap-2 ml-auto">
-                <Badge
-                  variant="outline"
-                  className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-                >
+                <Badge variant="outline" size="tag">
                   {dbQuery.data.total} rows
                 </Badge>
-                <Badge
-                  variant="outline"
-                  className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-                >
+                <Badge variant="outline" size="tag">
                   {dbQuery.data.elapsed}ms
                 </Badge>
               </div>

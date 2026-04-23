@@ -68,10 +68,7 @@ export default function ServicesPage() {
                     />
                     <span className="font-semibold">{svc.name}</span>
                   </div>
-                  <Badge
-                    variant="outline"
-                    className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-                  >
+                  <Badge variant="outline" size="tag">
                     {statusLabels[svc.status] ?? svc.status}
                   </Badge>
                 </div>

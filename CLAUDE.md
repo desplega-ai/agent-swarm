@@ -1,40 +1,36 @@
 # Agent Swarm
 
-Multi-agent orchestration for Claude Code, Codex, Gemini CLI. Runtime: Bun + TypeScript. DB: bun:sqlite (WAL mode). Linter: Biome. CLI: Ink.
+Multi-agent orchestration for Claude Code, Codex, Gemini CLI. Bun + TypeScript, `bun:sqlite` (WAL), Biome, Ink CLI.
 
-**Getting Started**: See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup. Run `bun run start:http` to start the server.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) to get set up. Start the server with `bun run start:http`.
 
 ## Project map
 
 ```
 src/
-  http.ts       # Main HTTP server + MCP endpoints
-  stdio.ts      # Stdio MCP transport
-  cli.tsx       # CLI entry point (Ink)
-  commands/
-    codex-login.ts  # Codex ChatGPT OAuth login command
-  tools/        # MCP tool definitions
-  providers/
-    codex-oauth/   # Codex OAuth PKCE flow + storage
-    codex-adapter.ts # Codex provider adapter
-  be/           # Backend (DB, storage)
-    db.ts       # DB init + query functions
-    migrations/ # SQL migration files + runner
-  github/       # GitHub webhook handlers
-  slack/        # Slack integration
-new-ui/          # Dashboard (Next.js app)
-templates/       # Template data (official + community)
-  official/      # 9 official templates
-  community/     # Community-contributed templates
-  schema.ts      # Shared TypeScript types
-templates-ui/    # Templates registry (Next.js app)
+  http.ts, server.ts   # API server + MCP endpoints
+  stdio.ts             # Stdio MCP transport
+  cli.tsx              # CLI entry (Ink)
+  tools/               # MCP tool definitions
+  http/                # REST route handlers (use route() factory)
+  providers/           # Harness adapters (claude, pi, codex) + OAuth flows
+  commands/            # Worker-side command implementations
+  be/
+    db.ts              # DB init + query functions (API-only)
+    migrations/        # Forward-only SQL migrations
+  prompts/             # System-prompt composition
+  github/, slack/      # Integration handlers
+new-ui/                # Dashboard (Next.js, port 5274)
+templates-ui/          # Templates registry (Next.js)
+templates/             # Official + community template data
+docs-site/             # Fumadocs site (MDX)
 ```
 
 ## Architecture invariants
 
-The API server (`src/http.ts`, `src/server.ts`, `src/tools/`, `src/http/`) is the **sole owner** of the SQLite database. Worker-side code (`src/commands/`, `src/hooks/`, `src/providers/`, `src/prompts/`, `src/cli.tsx`, `src/claude.ts`) must **never** import from `src/be/db` or `bun:sqlite`. Workers communicate with the API exclusively via HTTP using `API_KEY` and `X-Agent-ID` headers. Enforced by `scripts/check-db-boundary.sh` (pre-push hook + CI).
+The API server (`src/http.ts`, `src/server.ts`, `src/tools/`, `src/http/`) is the **sole owner** of the SQLite database. Worker-side code (`src/commands/`, `src/hooks/`, `src/providers/`, `src/prompts/`, `src/cli.tsx`, `src/claude.ts`) must **never** import from `src/be/db` or `bun:sqlite`. Workers talk to the API over HTTP using `API_KEY` and `X-Agent-ID` headers. Enforced by `scripts/check-db-boundary.sh` (pre-push hook + CI).
 
-If worker-side code needs data from the DB (template resolution, config lookup), it must fetch via HTTP, not query SQLite directly. Shared pure logic goes in `src/prompts/` or `src/utils/`.
+Shared pure logic belongs in `src/prompts/` or `src/utils/`.
 
 <important if="you need to run commands to build, test, lint, start the server, or generate code">
 
@@ -44,48 +40,38 @@ If worker-side code needs data from the DB (template resolution, config lookup),
 |---|---|
 | `bun install` | Install dependencies |
 | `bun run start:http` | Run MCP HTTP server (port 3013) |
-| `bun run dev:http` | Dev with hot reload (portless) |
+| `bun run dev:http` | Dev with hot reload (portless: `https://api.swarm.localhost:1355`) |
 | `bun run lint:fix` | Lint & format with Biome |
 | `bun run tsc:check` | Type check |
 | `bun test` | Run all unit tests |
-| `bun test src/tests/<file>.test.ts` | Run specific test |
-| `bun run pm2-start` | Start all (API :3013, UI :5274, lead :3201, worker :3202) |
-| `bun run pm2-start` | Start all (API :3013, UI :5274, lead :3201, worker :3202) |
-| `bun run pm2-stop` | Stop all services |
-| `bun run pm2-restart` | Restart all services |
-| `bun run pm2-logs` | View logs |
-| `bun run pm2-status` | Check status |
+| `bun test src/tests/<file>.test.ts` | Run a specific test |
+| `bun run pm2-start` / `pm2-stop` / `pm2-restart` / `pm2-logs` / `pm2-status` | All services (API 3013, UI 5274, lead 3201, worker 3202) |
 | `bun run docker:build:worker` | Build Docker worker image |
 | `bun run docs:openapi` | Regenerate `openapi.json` |
 | `bun run docs:business-use` | Regenerate `BUSINESS_USE.md` (requires BU backend) |
 | `bun run build:pi-skills` | Regenerate `plugin/pi-skills/` from `plugin/commands/*.md` |
-| `docker compose -f docker-compose.local.yml up --build` | Local Docker Compose (API + lead + worker) |
-| `docker compose -f docker-compose.local.yml down` | Tear down local Docker Compose |
-| `uvx business-use-core@latest server dev` | Start BU backend on :13370 |
-| `uvx business-use-core@latest flow eval <runId> <flow> -g -v` | Evaluate a BU flow run |
-| `uvx business-use-core@latest flow graph <flow>` | Show BU flow graph |
+| `docker compose -f docker-compose.local.yml up --build` | Local compose (API + lead + worker) |
+| `uvx business-use-core@latest server dev` | BU backend on :13370 |
 
 PM2 note: lead/worker run in Docker. On code changes: `bun run docker:build:worker && bun run pm2-restart`.
 
 </important>
 
-<important if="you are choosing between Bun and Node.js APIs, selecting packages, or writing shell/file/HTTP/SQLite code">
+<important if="you are choosing between Bun and Node.js APIs, or writing shell/file/HTTP/SQLite code">
 
-## Bun rules
-
-Use Bun instead of Node.js, npm, pnpm, or vite everywhere.
+Use Bun, not Node/npm/pnpm/vite:
 
 - `Bun.serve()` for HTTP/WebSocket (not express/ws)
 - `bun:sqlite` for SQLite (not better-sqlite3)
-- `Bun.file()` over `node:fs` for file I/O
-- `Bun.$` for shell commands (not execa)
+- `Bun.file()` for file I/O (not `node:fs`)
+- `Bun.$` for shell (not execa)
 - Bun auto-loads `.env` — don't use dotenv
 
 </important>
 
 <important if="you are referencing Gemini models in tests, workflows, or examples">
 
-Use `google/gemini-3-flash-preview` as the default Gemini model (not `gemini-2.0-flash-001`).
+Default Gemini model: `google/gemini-3-flash-preview` (not `gemini-2.0-flash-001`).
 
 </important>
 
@@ -93,103 +79,69 @@ Use `google/gemini-3-flash-preview` as the default Gemini model (not `gemini-2.0
 
 ## Database migrations
 
-Schema changes use file-based migrations in `src/be/migrations/`. Runner auto-applies on startup.
+File-based, forward-only in `src/be/migrations/`. Runner auto-applies on startup.
 
-**Adding a migration:**
-1. Create `src/be/migrations/NNN_descriptive_name.sql` (next number after highest existing)
-2. Write forward-only SQL (CREATE TABLE, ALTER TABLE, CREATE INDEX, etc.)
-3. Test with both fresh DB (`rm agent-swarm-db.sqlite && bun run start:http`) and existing DB
+1. Create `src/be/migrations/NNN_descriptive_name.sql` (next number after highest existing).
+2. Forward-only SQL. Use `IF NOT EXISTS` on CREATE TABLE/INDEX.
+3. Test against fresh DB (`rm agent-swarm-db.sqlite && bun run start:http`) **and** an existing one.
 
-**Rules:**
-- Never modify an already-applied migration — create a new one instead
-- No `down` migrations (SQLite limitations make rollbacks unreliable)
-- Use `IF NOT EXISTS` for CREATE TABLE/INDEX for safety
-- Keep `AgentTaskSourceSchema` in `src/types.ts` in sync with CHECK constraints in SQL
-
-**How it works:** `_migrations` table tracks applied versions with checksums. Bootstrap is schema-aware — if baseline tables already exist, `001_initial` is marked applied without re-executing. `initDb()` runs compatibility guards after migrations for legacy DBs.
+Rules: never modify an already-applied migration — create a new one. No `down` migrations (SQLite rollbacks flake). Keep `AgentTaskSourceSchema` in `src/types.ts` in sync with SQL CHECK constraints.
 
 </important>
 
-<important if="you are adding or modifying CLI commands or help text">
+<important if="you are adding or modifying CLI commands or CLI help text">
 
-## CLI commands & help system
+CLI help lives in `src/cli.tsx` — plain `console.log`, not Ink. To add/modify a command:
 
-CLI help is plain `console.log` (not Ink), defined in `src/cli.tsx` via `COMMAND_HELP` record and `printHelp()`.
+1. Update `COMMAND_HELP` record (usage, description, options, examples).
+2. Add the command to the `commands` array in `printHelp()`.
+3. Route it in `App` switch (UI commands) or before `render()` (non-UI).
+4. Verify: `bun run src/cli.tsx help` and `bun run src/cli.tsx <command> --help`.
 
-**When adding/modifying CLI commands:**
-1. Add/update entry in `COMMAND_HELP` record (usage, description, options, examples)
-2. Add command to `commands` array in `printHelp()`
-3. Add routing in `App` switch (UI commands) or non-UI section before `render()` (simple commands)
-4. Verify: `bun run src/cli.tsx help` and `bun run src/cli.tsx <command> --help`
-
-**Command types:**
-- **Non-UI** (before `render()`): `help`, `version`, `docs`, `hook`, `artifact` — `console.log` + `process.exit(0)`
-- **UI** (Ink): `onboard`, `connect`, `api`, `claude`, `worker`, `lead` — return JSX from `App` switch
+**Non-UI commands** (`help`, `version`, `docs`, `hook`, `artifact`) run before `render()` with `console.log` + `process.exit(0)`. **UI commands** (`onboard`, `connect`, `api`, `claude`, `worker`, `lead`) return JSX from the `App` switch.
 
 </important>
 
 <important if="you are adding or modifying HTTP API endpoints or REST routes">
 
-## Adding HTTP endpoints
+Always use the `route()` factory from `src/http/route-def.ts` — it auto-registers in OpenAPI. Do **not** use raw `matchRoute`.
 
-Always use the `route()` factory from `src/http/route-def.ts` — it auto-registers in OpenAPI. Do NOT use raw `matchRoute` (bypasses OpenAPI generation). See existing handlers in `src/http/` for the pattern.
+After adding a handler:
 
-After creating the handler:
-1. Import and add to handler chain in `src/http/index.ts`
-2. Add the import to `scripts/generate-openapi.ts`
-3. Run `bun run docs:openapi` to regenerate `openapi.json` and commit it
+1. Import and add to the chain in `src/http/index.ts`.
+2. Add the import to `scripts/generate-openapi.ts`.
+3. `bun run docs:openapi` and commit `openapi.json`.
 
 </important>
 
 <important if="you are bumping the version in package.json">
 
-## Version bumps — always regenerate OpenAPI
+`openapi.json` and `docs-site/content/docs/api-reference/**` embed the current `package.json` version. CI fails the `OpenAPI Spec Freshness Check` on any version bump without a regenerated spec.
 
-The generated `openapi.json` and `docs-site/content/docs/api-reference/**` embed the current `package.json` version. CI enforces OpenAPI freshness via `.github/workflows/merge-gate.yml` — a PR that bumps the version without regenerating will fail the `OpenAPI Spec Freshness Check` even if no routes changed.
-
-**Whenever you change `package.json`'s `version`:**
-1. Run `bun run docs:openapi`
-2. Commit `openapi.json` and the regenerated `docs-site/content/docs/api-reference/**` files alongside the version bump
-
-Skipping this step is the most common cause of last-minute CI failures on release PRs.
+Whenever you change `package.json`'s `version`: run `bun run docs:openapi` and commit the regenerated files alongside the bump.
 
 </important>
 
 <important if="you are creating or modifying workflows, or using the create-workflow tool">
 
-## Workflow authoring
-
 Workflows are DAGs of nodes connected via `next`.
 
-**Cross-node data access:** Upstream outputs are NOT available by default. Declare an `inputs` mapping to access them:
-- Keys = local names for `{{interpolation}}`, values = context paths (usually a node ID)
-- Agent-task output shape: `{ taskId, taskOutput }` — access via `localName.taskOutput.field`
-- For trigger data: `{ "pr": "trigger.pullRequest" }` -> `{{pr.number}}`
-- Without `inputs`, upstream references silently resolve to empty strings (check `diagnostics.unresolvedTokens`)
-
-**Structured output:** Put your schema in `config.outputSchema` (not node-level `outputSchema`). The agent produces JSON matching it, validated by `store-progress`.
-
-**Interpolation:** `{{path.to.value}}` in any string field inside `config`. Objects are JSON-stringified, nulls resolve to empty string.
-
-**Agent-task config fields:** `template` (required), `outputSchema`, `agentId`, `tags`, `priority` (0-100, default 50), `offerMode`, `dir`, `vcsRepo`, `model`, `parentTaskId`.
+- **Cross-node data access:** upstream outputs are **not** available by default. Declare an `inputs` mapping — keys are local names for `{{interpolation}}`, values are context paths (usually a node ID). Agent-task output shape is `{ taskId, taskOutput }`, so access via `localName.taskOutput.field`. For trigger data: `{ "pr": "trigger.pullRequest" }` → `{{pr.number}}`. Without `inputs`, upstream references silently resolve to empty strings — check `diagnostics.unresolvedTokens`.
+- **Structured output:** put the schema in `config.outputSchema` (not node-level). Agent produces JSON matching it; validated by `store-progress`.
+- **Interpolation:** `{{path.to.value}}` in any string field inside `config`. Objects get JSON-stringified, nulls become empty strings.
+- **Agent-task config fields:** `template` (required), `outputSchema`, `agentId`, `tags`, `priority` (0–100, default 50), `offerMode`, `dir`, `vcsRepo`, `model`, `parentTaskId`.
 
 </important>
 
 <important if="you are adding business-use instrumentation or events">
 
-## Business-use instrumentation
+See [BUSINESS_USE.md](./BUSINESS_USE.md) for flow diagrams. Flows: `task` (runId = taskId), `agent` (runId = agentId), `api` (runId = per-boot ID).
 
-Uses `@desplega.ai/business-use` to track system invariants. See [BUSINESS_USE.md](./BUSINESS_USE.md) for flow diagrams.
-
-**Flows:** `task` (runId = taskId), `agent` (runId = agentId), `api` (runId = per-boot ID).
-
-**Guidelines:**
-- Use `ensure()` (auto-determines act vs assert based on validator presence)
-- Place calls AFTER successful state mutations, OUTSIDE transactions where possible
-- Validators must be self-contained — only reference `data` and `ctx` params, never closure variables (they get serialized)
-- Worker-side events use `depIds` pointing to server-side events in the same flow
-
-**Env vars:** `BUSINESS_USE_API_KEY` and `BUSINESS_USE_URL` in `.env` and `.env.docker*`. SDK enters no-op mode if key missing.
+- Use `ensure()` (auto-picks act vs assert based on whether a validator is present).
+- Place calls **after** successful state mutations, **outside** transactions when possible.
+- Validators must be self-contained — only reference `data` and `ctx` params, never closure variables (they get serialized).
+- Worker-side events use `depIds` pointing at server-side events in the same flow.
+- `BUSINESS_USE_API_KEY` / `BUSINESS_USE_URL` go in `.env` and `.env.docker*`. SDK no-ops if the key is missing.
 
 </important>
 
@@ -197,13 +149,13 @@ Uses `@desplega.ai/business-use` to track system invariants. See [BUSINESS_USE.m
 
 ## Secret scrubbing
 
-Any code path that emits text to logs, stdout/stderr, the `session_logs` SQLite table, or `/workspace/logs/*.jsonl` MUST run it through the centralized scrubber first — never print raw env values, credential-pool entries, OAuth payloads, webhook bodies, or tool output that may embed tokens.
+Any path that emits to logs, stdout/stderr, the `session_logs` table, or `/workspace/logs/*.jsonl` MUST run through the centralized scrubber first. Never print raw env values, credential-pool entries, OAuth payloads, webhook bodies, or tool output that may embed tokens.
 
-- Module: `src/utils/secret-scrubber.ts`
-- Use: `import { scrubSecrets } from "./utils/secret-scrubber"` and wrap the emitted string (`scrubSecrets(msg)`) at the egress point, not at the source.
-- Cache refresh: call `refreshSecretScrubberCache()` after reloading `swarm_config` or rotating credential pools so newly-added secrets get covered immediately (`/internal/reload-config` on the API, credential-selection on the worker already do this).
-- The module is worker/API-neutral (reads only `process.env`), so it's safe to import from either side without violating the DB boundary.
-- Covers env-sourced values (exact-match by length ≥ 12, plus comma-separated pool components) and structural patterns (GitHub PATs, Anthropic/OpenAI/OpenRouter `sk-*` keys, Slack `xox*`, JWTs, AWS access keys, Google API keys). If you add a new secret-shaped credential, extend `SENSITIVE_KEY_EXACT` or `TOKEN_REGEXES` in that file and add a regression test to `src/tests/secret-scrubber.test.ts`.
+- Module: `src/utils/secret-scrubber.ts`.
+- Use: `import { scrubSecrets } from "./utils/secret-scrubber"` and wrap at the **egress** point, not the source.
+- After reloading `swarm_config` or rotating credential pools, call `refreshSecretScrubberCache()` so newly-added secrets get covered (`/internal/reload-config` and worker credential-selection already do this).
+- Worker/API-neutral (reads only `process.env`) — safe to import from either side without violating the DB boundary.
+- Covers env-sourced values (≥12 chars exact-match, plus comma-separated pool components) and structural patterns (GitHub PATs, Anthropic/OpenAI/OpenRouter `sk-*`, Slack `xox*`, JWTs, AWS access keys, Google API keys). New secret-shaped credential? Extend `SENSITIVE_KEY_EXACT` or `TOKEN_REGEXES` + add a regression test in `src/tests/secret-scrubber.test.ts`.
 
 </important>
 
@@ -211,107 +163,46 @@ Any code path that emits text to logs, stdout/stderr, the `session_logs` SQLite 
 
 ## Local development
 
-**Environment files:** `.env` (API server), `.env.docker` (Docker worker), `.env.docker-lead` (Docker lead).
+**Env files:** `.env` (API server), `.env.docker` (Docker worker), `.env.docker-lead` (Docker lead).
 
-**Key env vars:** `API_KEY` (auth, default: `123123`), `MCP_BASE_URL` (default: `http://localhost:3013`), `SLACK_DISABLE=true` / `GITHUB_DISABLE=true`, `HARNESS_PROVIDER` (`claude`, `pi`, or `codex` — codex requires `OPENAI_API_KEY` or `~/.codex/auth.json` or ChatGPT OAuth via `codex-login`), `TEMPLATE_ID` (e.g. `official/coder`), `TEMPLATE_REGISTRY_URL` (default: `https://templates.agent-swarm.dev`). ChatGPT OAuth is stored server-side as the global `codex_oauth` config entry; codex workers restore it into `~/.codex/auth.json` at boot.
+**Key env vars:** `API_KEY` (auth, default `123123`), `MCP_BASE_URL` (default `http://localhost:3013`), `SLACK_DISABLE=true` / `GITHUB_DISABLE=true`, `HARNESS_PROVIDER` (`claude`, `pi`, or `codex` — codex needs `OPENAI_API_KEY` or `~/.codex/auth.json` or ChatGPT OAuth via `codex-login`), `TEMPLATE_ID` (e.g. `official/coder`), `TEMPLATE_REGISTRY_URL` (default `https://templates.agent-swarm.dev`). ChatGPT OAuth is stored server-side as the global `codex_oauth` config entry; codex workers restore it into `~/.codex/auth.json` at boot.
 
-**Secrets encryption (`SECRETS_ENCRYPTION_KEY` / `SECRETS_ENCRYPTION_KEY_FILE`):** `swarm_config` rows with `isSecret=1` are encrypted at rest with AES-256-GCM. The server resolves the key in this order on boot: (1) `SECRETS_ENCRYPTION_KEY` env var (base64-encoded 32 bytes), (2) `SECRETS_ENCRYPTION_KEY_FILE` pointing at a file containing the base64 key, (3) `<data-dir>/.encryption-key` on disk, (4) auto-generated on first boot and written to `<data-dir>/.encryption-key` with a `[secrets] generated new encryption key at <path> — BACK THIS UP` warning **only when the DB does not yet contain encrypted secret rows** (for example, a fresh DB or a first upgrade from plaintext-only secrets). Existing databases that already contain encrypted secret rows now fail closed if the key is missing, instead of silently generating a different one. **Back up and preserve the actual encryption key material alongside `agent-swarm-db.sqlite` — whether it comes from `SECRETS_ENCRYPTION_KEY`, `SECRETS_ENCRYPTION_KEY_FILE`, or an auto-generated `.encryption-key`. Losing that key means losing all encrypted secrets (API tokens, OAuth creds, etc.), with no recovery path. Do not switch between env/file/auto-generated sources unless the underlying base64 key value is identical.**
+**Secrets encryption:** `swarm_config` secret rows are encrypted at rest with AES-256-GCM. Key resolution order, backup requirements, and plaintext-migration notes live in [docs-site/.../guides/secrets-encryption.mdx](./docs-site/content/docs/(documentation)/guides/secrets-encryption.mdx). `API_KEY` and `SECRETS_ENCRYPTION_KEY` are reserved and cannot be stored in `swarm_config`.
 
-**First-time migration note:** If you're upgrading from plaintext secrets and did NOT set `SECRETS_ENCRYPTION_KEY` beforehand, a **one-time plaintext backup** is created at `<db-path>.backup.secrets-YYYY-MM-DD.env` before encryption. This file contains your secrets in plaintext and is created as a safety net. **Delete this file after verifying your encryption key is safely backed up.** The backup is NOT created if you provided `SECRETS_ENCRYPTION_KEY` or `SECRETS_ENCRYPTION_KEY_FILE`.
+**Codex ChatGPT OAuth:** run `bun run src/cli.tsx codex-login` from your laptop, not inside the worker container. Point `--api-url` at the public API (or SSH tunnel) for a remote swarm, then restart codex workers.
 
-Legacy plaintext secrets are auto-migrated on first boot after upgrade. Key rotation is not yet supported (follow-up). **Reserved keys:** `API_KEY` and `SECRETS_ENCRYPTION_KEY` are rejected by the `swarm_config` API/MCP/DB layers (case-insensitive), skipped during env injection, and must never be stored in the DB. Legacy rows can still be deleted for cleanup/remediation.
+**Portless dev:** `bun run dev:http` → `https://api.swarm.localhost:1355`. Set `MCP_BASE_URL` and `APP_URL` in `.env`. Worktrees auto-get `<branch>.api.swarm.localhost:1355` subdomains. Non-portless fallback: `bun run start:http`.
 
 **Testing API locally:**
+
 ```bash
 curl -H "Authorization: Bearer 123123" http://localhost:3013/api/agents
 curl -H "Authorization: Bearer 123123" -H "X-Agent-ID: <uuid>" http://localhost:3013/mcp
 ```
 
-**Codex ChatGPT OAuth:** Run `bun run src/cli.tsx codex-login` from your laptop or local terminal, not inside the worker container. The command prompts for the swarm API URL and uses masked API key input when the terminal supports raw mode. For a remote Docker Compose swarm, point `--api-url` at the public API URL (or an SSH tunnel), then restart codex workers so the entrypoint can restore `codex_oauth` from the config store.
-
-**Portless:** `bun run dev:http` → `https://api.swarm.localhost:1355`. Set `MCP_BASE_URL` and `APP_URL` in `.env`. Worktrees auto-get `<branch>.api.swarm.localhost:1355` subdomains. Non-portless fallback: `bun run start:http`.
-
-**Docker Compose:** Requires `.env` with `API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` (or `OPENROUTER_API_KEY`). Codex workers can use `OPENAI_API_KEY` or ChatGPT OAuth (`codex-login` + `codex_oauth` in config store). See `docker-compose.example.yml` for production.
+**Docker Compose:** requires `.env` with `API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` (or `OPENROUTER_API_KEY`). See `docker-compose.example.yml`.
 
 </important>
 
-<important if="you are writing or running unit tests">
+<important if="you are writing, running, or debugging any local tests (unit, E2E, entrypoint, MCP handshake, or UI)">
 
-## Unit tests
+See [LOCAL_TESTING.md](./LOCAL_TESTING.md) — covers unit-test conventions, the minimal Docker smoke-test, entrypoint round-trip checklist, MCP handshake sequence, UI port handling, and port-conflict resolution across worktrees.
 
-- Tests use isolated SQLite DBs (`./test-<name>.sqlite`) with `initDb()`/`closeDb()` in `beforeAll`/`afterAll`
-- Tests needing HTTP use a minimal `node:http` handler — NOT the full `src/http.ts` server
-- Use unique test ports to avoid conflicts (e.g. 13022, 13023)
-- Clean up DB files (including `-wal` and `-shm`) in `afterAll`
+For the **full guided E2E flow** (tasks, session logs, UI verification), invoke the `swarm-local-e2e` skill.
 
 </important>
 
-<important if="you are running E2E tests with Docker, or testing runtime behavior changes end-to-end">
+<important if="you are creating a plan (plan mode, /desplega:create-plan, the planning skill, or the QA skill) that includes verification, manual E2E, or testing steps">
 
-## E2E testing with Docker
-
-**Worktree port check:** Always check `.env` for `PORT` and `MCP_BASE_URL` first (`lsof -i :3013`). If occupied, set alternate port and update `MCP_BASE_URL` in both `.env` and `.env.docker` (use `host.docker.internal:<port>`).
-
-**Quick E2E setup:**
-```bash
-rm -f agent-swarm-db.sqlite agent-swarm-db.sqlite-wal agent-swarm-db.sqlite-shm
-bun run start:http &
-bun run docker:build:worker
-# Lead:
-docker run --rm -d --name e2e-test-lead --env-file .env.docker-lead -e AGENT_ROLE=lead -e MAX_CONCURRENT_TASKS=1 -p 3201:3000 agent-swarm-worker:latest
-# Worker:
-docker run --rm -d --name e2e-test-worker --env-file .env.docker -e MAX_CONCURRENT_TASKS=1 -p 3203:3000 agent-swarm-worker:latest
-# Verify:
-curl -s -H "Authorization: Bearer 123123" http://localhost:3013/api/agents | jq '.agents[] | {name, isLead, status}'
-# Cleanup:
-docker stop e2e-test-lead e2e-test-worker; kill $(lsof -ti :3013)
-```
-
-**Env file differences:** `.env.docker-lead` has lead-specific `AGENT_ID`, no `OPENROUTER_API_KEY`. `AGENT_ROLE=lead` must be passed explicitly (not in the env file).
-
-**Task cancellation caveat:** Direct DB updates bypass hook-based cancellation — use MCP `cancel-task` tool. Keep test tasks trivial ("Say hi").
-
-**When changes touch runtime behavior** (API, runner, polling, task lifecycle, Docker entrypoint), use the `swarm-local-e2e` skill for full verification.
-
-</important>
-
-<important if="you are modifying docker-entrypoint.sh or Docker bootstrap logic">
-
-## Entrypoint integration testing
-
-Validate beyond `bash -n` syntax checks with a full Docker round-trip:
-
-1. **Validate API endpoints first** — verify HTTP methods/paths in entrypoint `curl` calls against route definitions in `src/http/`. Common gotcha: config API uses `PUT /api/config` (not `POST`).
-2. **Test idempotency** — first boot registers, second boot (same `AGENT_ID`) should skip via config check.
-3. **Test failure mode** — stop external service, boot container, should continue via `|| true` guards.
-4. **Test lead vs worker paths** — `.env.docker-lead` + `-e AGENT_ROLE=lead` for lead, `.env.docker` for worker.
-5. **Grep logs:** `docker logs <name> 2>&1 | grep -i "<feature>"`
-6. **Verify persisted state:** `GET /api/config?includeSecrets=true`
-
-</important>
-
-<important if="you are testing MCP tools via curl or Streamable HTTP">
-
-## MCP tool testing
-
-MCP tools require a session handshake: `POST /mcp` with `initialize` -> capture `mcp-session-id` header -> send `notifications/initialized` -> call tools with session ID.
-
-Key gotchas:
-- `Accept` header MUST include both `application/json` and `text/event-stream`
-- `X-Agent-ID` must be a valid UUID (use `uuidgen`)
-- Session must be initialized before calling tools
+Read [LOCAL_TESTING.md](./LOCAL_TESTING.md) **before** drafting verification / E2E / QA steps — so the plan references real commands, ports, env files, and gotchas rather than invented ones. Copy the exact command form from the relevant section; don't paraphrase.
 
 </important>
 
 <important if="you are testing or modifying the dashboard UI (new-ui/)">
 
-## UI testing
+Use `qa-use` (`/qa-use:test-run`, `/qa-use:verify`, `/qa-use:explore`). Dashboard defaults to `APP_URL` (port 5274). UI reads `VITE_API_URL` (defaults to `http://localhost:3013`). See [LOCAL_TESTING.md § Dashboard UI](./LOCAL_TESTING.md#dashboard-ui) for port-conflict handling.
 
-Use `qa-use` tool (`/qa-use:test-run`, `/qa-use:verify`, `/qa-use:explore`). Dashboard defaults to port 5274 (`APP_URL`). UI connects to API via `VITE_API_URL` (defaults to `http://localhost:3013`).
-
-**Worktree port check:** `lsof -i :5274`. If occupied, `cd new-ui && pnpm run dev --port 5275` and update `APP_URL`.
-
-**PR requirement:** Any PR changing frontend code (`new-ui/`, `landing/`, `templates-ui/`) must include a `qa-use` session with screenshots verifying the changes running locally.
+**PR requirement:** any PR touching `new-ui/`, `landing/`, or `templates-ui/` must include a `qa-use` session with screenshots of the changes running locally.
 
 </important>
 
@@ -319,7 +210,8 @@ Use `qa-use` tool (`/qa-use:test-run`, `/qa-use:verify`, `/qa-use:explore`). Das
 
 ## Pre-PR checklist
 
-**Root project (src/, tools/):**
+Root project:
+
 ```bash
 bun run lint:fix
 bun run tsc:check
@@ -327,13 +219,10 @@ bun test
 bash scripts/check-db-boundary.sh
 ```
 
-**If you changed `plugin/commands/*.md`:** `bun run build:pi-skills` — CI enforces freshness.
-
-**new-ui/:** `cd new-ui && pnpm lint && pnpm exec tsc --noEmit`
-
-**Frontend changes (new-ui/, landing/, templates-ui/):** PRs must include a `qa-use` session with screenshots verifying the changes with the frontend running locally. Use `qa-use` to capture browser verification before creating or updating the PR.
-
-**Docker changes:** `docker build -f <Dockerfile> .`
+- Changed `plugin/commands/*.md`? → `bun run build:pi-skills` (CI enforces freshness).
+- Touched `new-ui/`? → `cd new-ui && pnpm lint && pnpm exec tsc --noEmit`.
+- Frontend changes (`new-ui/`, `landing/`, `templates-ui/`)? → include a `qa-use` session with screenshots.
+- Docker changes? → `docker build -f <Dockerfile> .`.
 
 All enforced by `.github/workflows/merge-gate.yml`.
 
@@ -341,73 +230,42 @@ All enforced by `.github/workflows/merge-gate.yml`.
 
 <important if="you are testing Slack integration manually or via E2E">
 
-## Slack testing
-
-**Dev channel:** `#swarm-dev-2` (ID: `C0AR967K0KZ`), **Bot:** `@dev-swarm` (member ID: `U0ALZGQCF96`).
-
-**Via Slack MCP:** Use the `slack_send_message` tool to trigger bot interactions:
-```
-slack_send_message(channel_id: "C0AR967K0KZ", message: "<@U0ALZGQCF96> hi")
-```
-
-This sends a message to `#swarm-dev-2` mentioning the bot, which triggers the Slack handler → task assignment flow.
+Dev channel `#swarm-dev-2` (`C0AR967K0KZ`), bot `@dev-swarm` (`U0ALZGQCF96`). Send `slack_send_message(channel_id: "C0AR967K0KZ", message: "<@U0ALZGQCF96> hi")` via the Slack MCP tool to trigger the bot handler → task-assignment flow.
 
 </important>
 
 <important if="you are modifying memory system code (src/be/memory/, src/be/embedding.ts, src/tools/memory-*.ts, src/http/memory.ts, or src/tools/store-progress.ts memory sections)">
 
-## Memory system
+Provider abstractions (`EmbeddingProvider`, `MemoryStore`) in `src/be/memory/` with sqlite-vec for vector search and a reranker scoring `similarity × recency_decay × access_boost`.
 
-The memory system uses provider abstractions (`EmbeddingProvider`, `MemoryStore`) in `src/be/memory/` with sqlite-vec for vector search and a reranker for scoring.
+Always run:
 
-**When changing memory-related code, always run:**
 ```bash
-bun test src/tests/memory-reranker.test.ts   # Reranker unit tests
-bun test src/tests/memory-store.test.ts      # Store integration tests
-bun test src/tests/memory.test.ts            # Legacy compatibility tests
-bun test src/tests/memory-e2e.test.ts        # Full memory E2E lifecycle
+bun test src/tests/memory-reranker.test.ts
+bun test src/tests/memory-store.test.ts
+bun test src/tests/memory.test.ts
+bun test src/tests/memory-e2e.test.ts
 ```
 
-**Key architecture:**
-- `src/be/memory/types.ts` — `EmbeddingProvider` + `MemoryStore` interfaces
-- `src/be/memory/providers/` — Implementations (OpenAI embeddings, SQLite+sqlite-vec store)
-- `src/be/memory/reranker.ts` — Scoring: `similarity × recency_decay × access_boost`
-- `src/be/memory/constants.ts` — Tuning params (env-overridable)
-- `src/be/memory/index.ts` — Singleton getters (`getMemoryStore()`, `getEmbeddingProvider()`)
+Key files: `src/be/memory/types.ts` (interfaces), `src/be/memory/providers/` (OpenAI embeddings, SQLite+sqlite-vec store), `src/be/memory/reranker.ts`, `src/be/memory/constants.ts` (env-overridable tuning), `src/be/memory/index.ts` (singletons).
 
 </important>
 
 <important if="you are modifying harness-provider code (src/providers/*, src/commands/runner.ts provider dispatch, src/prompts/*, docker-entrypoint.sh provider branches, or adding a new provider)">
 
-## Keep the harness-providers guide in sync
+Canonical reference: [docs-site/.../guides/harness-providers.mdx](./docs-site/content/docs/(documentation)/guides/harness-providers.mdx). Update that guide in the **same PR** as any observable change to the `ProviderAdapter` interface, the factory dispatch, adapter event-translation / log format / abort semantics, the runner's poll→spawn→events→finish flow, system-prompt composition, entrypoint credential restoration, or OAuth flows.
 
-The canonical doc for harness-provider internals — adapter contract, event translation, task↔session lifecycle, session-log pipeline, swarm-MCP exposure, system-prompt delivery, skills handling — lives at:
+When adding a new provider, also extend the guide's "Reference implementations" table, "Files to touch" checklist, and `README.md`'s multi-provider bullet.
 
-- [`docs-site/content/docs/(documentation)/guides/harness-providers.mdx`](./docs-site/content/docs/(documentation)/guides/harness-providers.mdx)
-
-**Whenever you change any of the following, update that guide in the same PR:**
-
-- The `ProviderAdapter` / `ProviderSession` / `ProviderEvent` / `ProviderSessionConfig` interfaces in `src/providers/types.ts`
-- The factory dispatch in `src/providers/index.ts` (adding/removing a provider)
-- Any of the three reference adapters (`claude-adapter.ts`, `pi-mono-adapter.ts`, `codex-adapter.ts`) in ways that change observable behavior: event-translation rules, subprocess/SDK wiring, swarm-MCP registration, credential handling, model resolution, skill resolution, log-file format, abort semantics
-- The runner's provider dispatch path in `src/commands/runner.ts` (poll→spawn→events→finish flow, endpoints hit per task, task↔session binding)
-- System-prompt composition in `src/prompts/base-prompt.ts` / `src/prompts/defaults.ts` / `src/prompts/<provider>/`
-- Provider credential restoration or binary checks in `docker-entrypoint.sh`
-- OAuth flows under `src/providers/<provider>-oauth/*` or login CLIs under `src/commands/<provider>-login.ts`
-
-**What to update:** the affected section(s) of the guide, including concrete file references. Keep the section numbering intact. If adding a new provider, also extend the "Reference implementations" table, the "Files to touch" checklist, and the `README.md` multi-provider bullet.
-
-**Verify before committing:**
-1. `cd docs-site && pnpm exec next build` (or `pnpm dev` and visit `/docs/guides/harness-providers`) — the MDX must compile.
-2. Any new MDX components used (e.g. `Tabs`, `Callout`) must be imported at the top of the file; Fumadocs defaults do not include them.
+Verify before committing: `cd docs-site && pnpm exec next build` (or `pnpm dev` and visit `/docs/guides/harness-providers`) — MDX must compile.
 
 </important>
 
 ## Related
 
-- [BUSINESS_USE.md](./BUSINESS_USE.md) — Flow diagrams and instrumentation
+- [LOCAL_TESTING.md](./LOCAL_TESTING.md) — unit / E2E / entrypoint / MCP / UI testing recipes
+- [BUSINESS_USE.md](./BUSINESS_USE.md) — flow diagrams and instrumentation
 - [MCP.md](./MCP.md) — MCP tools reference
-- [DEPLOYMENT.md](./DEPLOYMENT.md) — Production deployment
-- [CONTRIBUTING.md](./CONTRIBUTING.md) — Development setup
-- [new-ui/](./new-ui/) — Dashboard (Next.js)
-- [templates-ui/](./templates-ui/) — Templates registry (Next.js)
+- [DEPLOYMENT.md](./DEPLOYMENT.md) — production deployment
+- [CONTRIBUTING.md](./CONTRIBUTING.md) — dev setup
+- [docs-site/.../guides/](./docs-site/content/docs/(documentation)/guides/) — secrets encryption, harness providers, integrations

@@ -75,18 +75,12 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
         <div className="w-full flex items-center gap-2 px-3 py-2">
           <span className="text-sm font-medium truncate">{label}</span>
 
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase shrink-0"
-          >
+          <Badge variant="outline" size="tag" className="shrink-0">
             {step.nodeType}
           </Badge>
 
           {step.nextPort && step.nextPort !== "default" && (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase shrink-0 border-sky-500/30 text-sky-400"
-            >
+            <Badge variant="outline" size="tag" className="shrink-0 border-sky-500/30 text-sky-400">
               port: {step.nextPort}
             </Badge>
           )}
@@ -144,10 +138,7 @@ export const StepCard = forwardRef<HTMLDivElement, StepCardProps>(
             {/* Retry info */}
             {step.retryCount != null && step.retryCount > 0 && (
               <div className="flex items-center gap-2 text-xs">
-                <Badge
-                  variant="outline"
-                  className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase text-amber-600 dark:text-amber-400"
-                >
+                <Badge variant="outline" size="tag" className="text-amber-600 dark:text-amber-400">
                   Retry {step.retryCount}
                   {step.maxRetries != null ? `/${step.maxRetries}` : ""}
                 </Badge>
@@ -316,10 +307,7 @@ function HitlOutput({ step, node }: { step: WorkflowRunStep; node?: WorkflowNode
     <div className="space-y-2">
       {/* Status + branch + request link */}
       <div className="flex items-center gap-2 flex-wrap">
-        <Badge
-          variant="outline"
-          className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${statusBadgeClass}`}
-        >
+        <Badge variant="outline" size="tag" className={`${statusBadgeClass}`}>
           {statusLabel}
         </Badge>
         {step.nextPort && step.nextPort !== "default" && (
@@ -353,10 +341,7 @@ function HitlOutput({ step, node }: { step: WorkflowRunStep; node?: WorkflowNode
                   className="rounded-md border border-border/50 px-3 py-2 space-y-1"
                 >
                   <div className="flex items-center gap-2">
-                    <Badge
-                      variant="outline"
-                      className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase shrink-0"
-                    >
+                    <Badge variant="outline" size="tag" className="shrink-0">
                       {q.type ?? "unknown"}
                     </Badge>
                     <span className="text-xs text-muted-foreground">
@@ -500,10 +485,7 @@ function HitlConfig({ node }: { node: WorkflowNode }) {
                 className="rounded-md border border-border/50 px-3 py-2 space-y-1"
               >
                 <div className="flex items-center gap-2">
-                  <Badge
-                    variant="outline"
-                    className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase shrink-0"
-                  >
+                  <Badge variant="outline" size="tag" className="shrink-0">
                     {q.type ?? "unknown"}
                   </Badge>
                   <span className="text-xs font-medium">
@@ -552,10 +534,7 @@ function NotifyConfig({ node }: { node: WorkflowNode }) {
         {channel && (
           <div className="flex items-center gap-2 text-xs">
             <span className="text-muted-foreground">Channel:</span>
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-            >
+            <Badge variant="outline" size="tag">
               {channel}
             </Badge>
             {target && <span className="font-mono text-muted-foreground">{target}</span>}

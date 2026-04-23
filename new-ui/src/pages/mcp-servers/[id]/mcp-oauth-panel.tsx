@@ -46,10 +46,7 @@ function AuthMethodBadge({ method }: { method: McpServer["authMethod"] }) {
     auto: "border-sky-500/30 text-sky-400",
   };
   return (
-    <Badge
-      variant="outline"
-      className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${colors[method] || ""}`}
-    >
+    <Badge variant="outline" size="tag" className={`${colors[method] || ""}`}>
       {method}
     </Badge>
   );
@@ -63,10 +60,7 @@ function OAuthStatusBadge({ status }: { status: McpOAuthStatus }) {
     error: "border-red-500/30 text-red-400",
   };
   return (
-    <Badge
-      variant="outline"
-      className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${colors[status] || ""}`}
-    >
+    <Badge variant="outline" size="tag" className={`${colors[status] || ""}`}>
       {status}
     </Badge>
   );
@@ -386,12 +380,7 @@ export function McpOAuthPanel({ server }: { server: McpServer }) {
           {token && (
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="border-red-500/30 text-red-400 hover:bg-red-500/10"
-                  disabled={disconnect.isPending}
-                >
+                <Button size="sm" variant="destructive-outline" disabled={disconnect.isPending}>
                   Revoke
                 </Button>
               </AlertDialogTrigger>

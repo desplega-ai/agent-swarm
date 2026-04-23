@@ -101,10 +101,7 @@ export default function TemplateVersionDetailPage() {
 
         <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-xl font-semibold">Version {versionEntry.version}</h1>
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-          >
+          <Badge variant="outline" size="tag">
             {versionEntry.state?.replace(/_/g, " ") ?? "—"}
           </Badge>
         </div>
@@ -155,7 +152,8 @@ export default function TemplateVersionDetailPage() {
                   <Badge
                     key={v}
                     variant="outline"
-                    className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase border-amber-500/30 text-amber-400"
+                    size="tag"
+                    className="border-amber-500/30 text-amber-400"
                   >
                     {v}
                   </Badge>

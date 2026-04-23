@@ -53,10 +53,7 @@ export default function TemplatesPage() {
         headerName: "State",
         width: 180,
         cellRenderer: (params: { value: PromptTemplate["state"] }) => (
-          <Badge
-            variant={STATE_VARIANTS[params.value] ?? "outline"}
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-          >
+          <Badge variant={STATE_VARIANTS[params.value] ?? "outline"} size="tag">
             {params.value?.replace(/_/g, " ")}
           </Badge>
         ),
@@ -68,10 +65,7 @@ export default function TemplatesPage() {
         width: 100,
         cellRenderer: (params: { value: boolean }) =>
           params.value ? (
-            <Badge
-              variant="secondary"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-            >
+            <Badge variant="secondary" size="tag">
               Default
             </Badge>
           ) : null,

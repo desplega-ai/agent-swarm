@@ -160,16 +160,10 @@ export default function WorkflowDetailPage() {
               {workflow.enabled ? "Enabled" : "Disabled"}
             </span>
           </div>
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-          >
+          <Badge variant="outline" size="tag">
             {workflow.definition.nodes.length} nodes
           </Badge>
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-          >
+          <Badge variant="outline" size="tag">
             {workflow.definition.edges?.length ?? 0} edges
           </Badge>
           <div className="ml-auto flex items-center gap-1.5 shrink-0">
@@ -181,12 +175,7 @@ export default function WorkflowDetailPage() {
             >
               <Play className="h-3 w-3 mr-1" /> Trigger
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="border-red-500/30 text-red-400 hover:bg-red-500/10"
-              onClick={() => setDeleteOpen(true)}
-            >
+            <Button variant="destructive-outline" size="sm" onClick={() => setDeleteOpen(true)}>
               <Trash2 className="h-3 w-3 mr-1" /> Delete
             </Button>
           </div>
@@ -341,17 +330,11 @@ function NodeInspector({ node, allNodes }: { node: WorkflowNode; allNodes: Workf
         <div className="space-y-1.5">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-medium font-mono">{node.id}</span>
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-            >
+            <Badge variant="outline" size="tag">
               {node.type}
             </Badge>
             {executorInfo && (
-              <Badge
-                variant="outline"
-                className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase text-sky-400"
-              >
+              <Badge variant="outline" size="tag" className="text-sky-400">
                 {executorInfo.mode}
               </Badge>
             )}
@@ -497,35 +480,22 @@ function AgentTaskConfig({ config }: { config: Record<string, unknown> }) {
         {(tags || priority != null || offerMode != null || model) && (
           <div className="flex flex-wrap gap-1.5">
             {tags?.map((tag) => (
-              <Badge
-                key={tag}
-                variant="outline"
-                className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-              >
+              <Badge key={tag} variant="outline" size="tag">
                 {tag}
               </Badge>
             ))}
             {priority != null && (
-              <Badge
-                variant="outline"
-                className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-              >
+              <Badge variant="outline" size="tag">
                 priority: {priority}
               </Badge>
             )}
             {offerMode != null && (
-              <Badge
-                variant="outline"
-                className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-              >
+              <Badge variant="outline" size="tag">
                 offer: {String(offerMode)}
               </Badge>
             )}
             {model && (
-              <Badge
-                variant="outline"
-                className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-              >
+              <Badge variant="outline" size="tag">
                 {model}
               </Badge>
             )}
@@ -583,10 +553,7 @@ function ScriptConfig({ config }: { config: Record<string, unknown> }) {
           </pre>
         )}
         {timeout != null && (
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-          >
+          <Badge variant="outline" size="tag">
             timeout: {timeout}ms
           </Badge>
         )}
@@ -604,10 +571,7 @@ function RawLlmConfig({ config }: { config: Record<string, unknown> }) {
       <div className="space-y-3">
         {prompt && <HighlightedTemplate text={prompt} />}
         {model && (
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-          >
+          <Badge variant="outline" size="tag">
             {model}
           </Badge>
         )}
@@ -651,10 +615,7 @@ function HitlNodeConfig({ config }: { config: Record<string, unknown> }) {
                   className="rounded-md border border-border/50 px-3 py-2 space-y-1"
                 >
                   <div className="flex items-center gap-2">
-                    <Badge
-                      variant="outline"
-                      className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase shrink-0"
-                    >
+                    <Badge variant="outline" size="tag" className="shrink-0">
                       {q.type ?? "unknown"}
                     </Badge>
                     <span className="text-xs font-medium">
@@ -698,10 +659,7 @@ function NotifyNodeConfig({ config }: { config: Record<string, unknown> }) {
         {channel && (
           <div className="flex items-center gap-2 text-xs">
             <span className="text-muted-foreground">Channel:</span>
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-            >
+            <Badge variant="outline" size="tag">
               {channel}
             </Badge>
             {target && <span className="font-mono text-muted-foreground">{target}</span>}
@@ -798,11 +756,7 @@ function WorkflowMeta({
           <MetaBlock label="Triggers">
             <div className="flex flex-wrap gap-1.5">
               {triggers.map((t, i) => (
-                <Badge
-                  key={i}
-                  variant="outline"
-                  className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase font-mono"
-                >
+                <Badge key={i} variant="outline" size="tag" className="font-mono">
                   {t.type}
                   {t.type === "webhook" && t.hmacSecret
                     ? ` (hmac: ${maskSecret(t.hmacSecret)})`
@@ -817,10 +771,7 @@ function WorkflowMeta({
         {/* Cooldown */}
         {cooldown != null && (
           <MetaBlock label="Cooldown">
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase font-mono"
-            >
+            <Badge variant="outline" size="tag" className="font-mono">
               {formatCooldown(cooldown)}
             </Badge>
           </MetaBlock>
@@ -901,10 +852,7 @@ function VersionEntry({ version }: { version: WorkflowVersion }) {
         ) : (
           <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
         )}
-        <Badge
-          variant="outline"
-          className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase font-mono shrink-0"
-        >
+        <Badge variant="outline" size="tag" className="font-mono shrink-0">
           v{version.version}
         </Badge>
         <span className="text-xs text-muted-foreground">{formatSmartTime(version.createdAt)}</span>

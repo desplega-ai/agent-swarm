@@ -274,8 +274,8 @@ export default function ReposPage() {
               </Button>
               <Button
                 size="icon"
-                variant="outline"
-                className="h-7 w-7 border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                variant="destructive-outline"
+                className="h-7 w-7 hover:text-red-300"
                 onClick={(e) => {
                   e.stopPropagation();
                   setDeleteTarget(repo);

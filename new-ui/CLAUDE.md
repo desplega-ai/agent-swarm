@@ -1,95 +1,128 @@
 # Agent Swarm Dashboard (new-ui)
 
-New dashboard UI built with Vite 6 + React 19 + react-router v7 + shadcn/ui + Tailwind CSS v4 + AG Grid.
+React + Vite + shadcn/ui + Tailwind + AG Grid + react-query dashboard for the Agent Swarm API.
 
-**Thoughts directory**: All research, plans, and brainstorm documents go in the **root** `thoughts/` directory (`/thoughts/taras/plans/`, `/thoughts/shared/research/`, etc.), NOT inside `new-ui/thoughts/`. The `new-ui/` project does not have its own thoughts directory.
+<important if="you are running the new-ui dev server, building it, or setting up new-ui locally">
 
-## Quick Start
+## Quick start
 
-```bash
-pnpm install
-pnpm dev          # Dev server on http://localhost:5274
-pnpm build        # Production build
-pnpm preview      # Preview production build
-```
+| Command | What it does |
+|---|---|
+| `pnpm install` | Install dependencies |
+| `pnpm dev` | Dev server on http://localhost:5274 |
+| `pnpm build` | Production build |
+| `pnpm preview` | Preview production build |
+| `pnpm lint` / `pnpm lint:fix` | Biome check / auto-fix |
+| `pnpm exec tsc --noEmit` | Type check |
 
-## Tech Stack
+Dev server proxies `/api/*` and `/health` to `http://localhost:3013`.
 
-- **Framework**: React 19 + TypeScript
-- **Build**: Vite 6
-- **Routing**: react-router-dom v7
-- **Styling**: Tailwind CSS v4 + shadcn/ui (new-york style)
-- **Data Fetching**: @tanstack/react-query (5s auto-polling)
-- **Data Grid**: AG Grid Community (Quartz theme)
-- **Charts**: Recharts
-- **Markdown**: Streamdown (`streamdown`) — use `<Streamdown>{text}</Streamdown>` for all markdown rendering. Do NOT use `react-markdown` (removed).
-- **Icons**: Lucide React
+</important>
 
-## Project Structure
+<important if="you are creating a new file in new-ui/src/ and need to decide where it lives">
+
+## Project structure
 
 ```
 src/
-  api/            # API client, types, and react-query hooks
-    hooks/        # Domain-specific hook files (use-agents, use-tasks, etc.)
+  api/            # API client + react-query hooks
+    hooks/        # One file per domain (use-agents, use-tasks, ...)
     client.ts     # ApiClient singleton
-    types.ts      # TypeScript interfaces
+    types.ts
   app/            # App shell, providers, router
-  components/     # Reusable components
-    ui/           # shadcn/ui components
-    layout/       # Layout components (sidebar, header)
-    shared/       # Shared components
+  components/
+    ui/           # shadcn/ui primitives
+    layout/       # Sidebar, header
+    shared/       # Cross-page shared components (e.g. DataGrid)
   hooks/          # App-level hooks (theme, config, auto-scroll)
   lib/            # Utilities (cn, formatters, content-preview)
-  pages/          # Route pages (one dir per route)
+  pages/          # Route pages — one dir per route
   styles/         # Global CSS, AG Grid theme
 ```
 
-## Code Style
+- Pages use **default exports** (required for `React.lazy` in the router).
+- Import via `@/` path alias.
 
-- Use `@/` path alias for imports
-- Use shadcn/ui components from `@/components/ui`
-- Use `cn()` for conditional class merging
-- API hooks are in `@/api/hooks/`
-- Pages use default exports for React.lazy compatibility
+</important>
 
-## Data Tables (AG Grid)
+<important if="you are adding or modifying react-query hooks, api calls, or fetch intervals in new-ui">
 
-**Always use AG Grid** (`DataGrid` component from `@/components/shared/data-grid`) for tabular data. Never use HTML `<Table>` components for data lists.
+## Data fetching
 
-**Key patterns:**
-- Import types: `ColDef`, `ICellRendererParams`, `RowClickedEvent` from `ag-grid-community`
-- The `DataGrid` wrapper calls `sizeColumnsToFit()` on grid ready — columns fill available width
-- Set `width` on columns for initial sizing. Use `flex: 1` + `minWidth` for columns that should stretch
-- For pages in the main layout, use `flex flex-col flex-1 min-h-0 gap-4` as the page wrapper — DataGrid fills remaining height
-- For config-style pages that scroll, use `domLayout="autoHeight"` on the DataGrid
-- Cell vertical centering is handled globally via CSS (`.ag-cell-value { display: flex; align-items: center; }` in `ag-grid.css`)
+- react-query with a **5s auto-polling** default on most list/detail hooks.
+- Hooks live under `src/api/hooks/` — one file per domain (e.g. `use-agents.ts`, `use-tasks.ts`).
+- API client singleton: `src/api/client.ts`.
 
-**Cell renderers:**
-- Interactive elements (buttons, links) in cells MUST call `e.stopPropagation()` to prevent row click
-- Use `variant="outline"` for action buttons so they're visually distinct/clickable
-- Delete buttons: use `AlertDialog` popup for confirmation, not click-again patterns
-- Style delete buttons: `border-red-500/30 text-red-400 hover:bg-red-500/10`
+</important>
 
-**Badge style (consistent across all chips/tags):**
+<important if="you are adding or modifying a data table, list, or grid view in new-ui">
+
+## Data tables (AG Grid)
+
+- **Always use `DataGrid`** from `@/components/shared/data-grid`. **Never** use HTML `<Table>` components for data lists — this is a hard rule.
+- Page wrapper for grid pages in the main layout: `flex flex-col flex-1 min-h-0 gap-4` (DataGrid fills remaining height).
+- For config-style pages that scroll, set `domLayout="autoHeight"` on the DataGrid.
+- Sizing: `width` for fixed columns, `flex: 1 + minWidth` for stretch. `DataGrid` calls `sizeColumnsToFit()` on grid ready.
+- Interactive elements in cell renderers (buttons, links) MUST call `e.stopPropagation()` to prevent row-click.
+- Delete actions use `AlertDialog` confirmation (not click-again patterns).
+
+</important>
+
+<important if="you are rendering a tag, status chip, pill, or small badge in new-ui">
+
+## Tags / status chips
+
+Use the `tag` size on `Badge` — the small-uppercase chip styling (`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase`) is baked into the component:
+
+```tsx
+<Badge variant="outline" size="tag">PENDING</Badge>
+<Badge variant="outline" size="tag" className="border-sky-500/30 text-sky-400">QUEUED</Badge>
 ```
-text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase
+
+The `variant` controls color/background (outline, default, secondary, destructive, ghost, link). `size="tag"` controls the chip sizing/casing. Combine them — do not re-inline the className.
+
+</important>
+
+<important if="you are rendering a destructive-outline icon or button in new-ui (delete, remove, disconnect)">
+
+## Destructive-outline buttons
+
+Use `variant="destructive-outline"` on `Button` for red-outlined destructive actions (delete, remove, disconnect). The red border/text/hover colors are baked in:
+
+```tsx
+<Button variant="destructive-outline" size="icon"><Trash2 /></Button>
+<Button variant="destructive-outline" size="sm">Delete</Button>
 ```
-Use `Badge variant="outline"` with this className for all tags, status indicators, and chips.
 
-**Theme awareness:**
-- Never hardcode dark-mode colors (e.g. `bg-zinc-950`, `text-zinc-400`). Always use CSS variable classes: `bg-background`, `bg-muted`, `text-foreground`, `text-muted-foreground`, `border-border`, etc.
+Do not re-inline `border-red-500/30 text-red-400 hover:bg-red-500/10`. Pair with `AlertDialog` for confirmation.
 
-## API Proxy
+</important>
 
-Dev server proxies `/api/*` and `/health` to `http://localhost:3013` (the API server).
-In production, configure `apiUrl` in the config panel or pass `?apiUrl=...&apiKey=...` in URL.
+<important if="you are writing Tailwind classes, picking colors, or styling components in new-ui">
 
-## Theme
+## Theming
 
-"Mission Control" design — clean, information-dense, professional.
-- **Base:** Zinc-neutral palette (shadcn/ui v4 oklch tokens)
-- **Accent:** Amber as brand `--primary` only — interactive elements, active states
-- **Dark mode** is default. Toggle via header button.
-- **Typography:** Space Grotesk (sans) + Space Mono (mono). No display fonts.
-- **Status colors:** Semantic — emerald (success), amber (active/busy), red (error), zinc (inactive)
-- CSS variables defined in `src/styles/globals.css`. AG Grid themed via `src/styles/ag-grid.css`.
+- **Never hardcode dark-mode colors** (no `bg-zinc-950`, `text-zinc-400`, etc.). Use CSS variable classes: `bg-background`, `bg-muted`, `text-foreground`, `text-muted-foreground`, `border-border`, `bg-accent`.
+- **Amber** is brand `--primary` — use it for interactive / active states only.
+- **Status colors** (semantic): emerald (success), amber (active/busy), red (error), zinc (inactive).
+- CSS variables defined in `src/styles/globals.css`; AG Grid themed via `src/styles/ag-grid.css`.
+- Use `cn()` from `@/lib/utils` for conditional class merging.
+
+</important>
+
+<important if="you are rendering any markdown content in new-ui (LLM output, task descriptions, comments, task prompts, etc.)">
+
+## Markdown rendering
+
+Use `<Streamdown>{text}</Streamdown>` from `streamdown` for **all** markdown rendering — LLM output, user-supplied descriptions, anything that may contain markdown. Do not use `react-markdown`.
+
+</important>
+
+<important if="you are debugging API calls from new-ui, changing the dev proxy, or configuring production apiUrl/apiKey">
+
+## API connection
+
+- **Dev:** Vite proxies `/api/*` and `/health` to `http://localhost:3013`.
+- **Prod:** configure `apiUrl` in the in-app config panel, or pass `?apiUrl=...&apiKey=...` in the URL.
+
+</important>

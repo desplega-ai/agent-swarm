@@ -23,10 +23,7 @@ function TransportBadge({ transport }: { transport: string }) {
     sse: "border-cyan-500/30 text-cyan-400",
   };
   return (
-    <Badge
-      variant="outline"
-      className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${colors[transport] || ""}`}
-    >
+    <Badge variant="outline" size="tag" className={`${colors[transport] || ""}`}>
       {transport}
     </Badge>
   );
@@ -39,10 +36,7 @@ function AuthMethodBadge({ method }: { method: string }) {
     auto: "border-sky-500/30 text-sky-400",
   };
   return (
-    <Badge
-      variant="outline"
-      className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${colors[method] || ""}`}
-    >
+    <Badge variant="outline" size="tag" className={`${colors[method] || ""}`}>
       {method}
     </Badge>
   );
@@ -55,10 +49,7 @@ function ScopeBadge({ scope }: { scope: string }) {
     agent: "border-zinc-500/30 text-zinc-400",
   };
   return (
-    <Badge
-      variant="outline"
-      className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${colors[scope] || ""}`}
-    >
+    <Badge variant="outline" size="tag" className={`${colors[scope] || ""}`}>
       {scope}
     </Badge>
   );
@@ -125,7 +116,8 @@ export default function McpServersPage() {
         cellRenderer: (params: ICellRendererParams<McpServer>) => (
           <Badge
             variant="outline"
-            className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${
+            size="tag"
+            className={`${
               params.value
                 ? "border-emerald-500/30 text-emerald-400"
                 : "border-red-500/30 text-red-400"

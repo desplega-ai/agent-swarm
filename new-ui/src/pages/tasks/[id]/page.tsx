@@ -723,10 +723,7 @@ export default function TaskDetailPage() {
         <div className="flex items-center gap-2 flex-wrap">
           <StatusBadge status={task.status} size="md" />
           {task.taskType && (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-            >
+            <Badge variant="outline" size="tag">
               {task.taskType}
             </Badge>
           )}
@@ -739,19 +736,12 @@ export default function TaskDetailPage() {
             </Badge>
           )}
           {task.tags?.map((tag) => (
-            <Badge
-              key={tag}
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-            >
+            <Badge key={tag} variant="outline" size="tag">
               {tag}
             </Badge>
           ))}
           {task.source && (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-            >
+            <Badge variant="outline" size="tag">
               {task.source}
             </Badge>
           )}
@@ -801,11 +791,7 @@ export default function TaskDetailPage() {
               {canCancel && (
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="border-red-500/30 text-red-400 hover:bg-red-500/10"
-                    >
+                    <Button variant="destructive-outline" size="sm">
                       <Ban className="h-3 w-3 mr-1" />
                       Cancel
                     </Button>

@@ -210,7 +210,8 @@ export default function ScheduleDetailPage() {
         </div>
         <Badge
           variant="outline"
-          className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${
+          size="tag"
+          className={`${
             schedule.scheduleType === "one_time"
               ? "border-amber-500/30 text-amber-400"
               : "border-emerald-500/30 text-emerald-400"
@@ -219,10 +220,7 @@ export default function ScheduleDetailPage() {
           {schedule.scheduleType === "one_time" ? "One-time" : "Recurring"}
         </Badge>
         {schedule.taskType && (
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-          >
+          <Badge variant="outline" size="tag">
             {schedule.taskType}
           </Badge>
         )}
@@ -238,12 +236,7 @@ export default function ScheduleDetailPage() {
           <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
             <Pencil className="h-3 w-3 mr-1" /> Edit
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="border-red-500/30 text-red-400 hover:bg-red-500/10"
-            onClick={() => setDeleteOpen(true)}
-          >
+          <Button variant="destructive-outline" size="sm" onClick={() => setDeleteOpen(true)}>
             <Trash2 className="h-3 w-3 mr-1" /> Delete
           </Button>
         </div>
@@ -358,11 +351,7 @@ export default function ScheduleDetailPage() {
                     </span>
                     <div className="flex flex-wrap gap-1 mt-1">
                       {schedule.tags.map((tag) => (
-                        <Badge
-                          key={tag}
-                          variant="outline"
-                          className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-                        >
+                        <Badge key={tag} variant="outline" size="tag">
                           {tag}
                         </Badge>
                       ))}

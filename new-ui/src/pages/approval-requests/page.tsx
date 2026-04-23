@@ -68,29 +68,20 @@ export default function ApprovalRequestsPage() {
         cellRenderer: (params: { data: ApprovalRequest | undefined }) => {
           if (params.data?.workflowRunId) {
             return (
-              <Badge
-                variant="outline"
-                className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-              >
+              <Badge variant="outline" size="tag">
                 Workflow
               </Badge>
             );
           }
           if (params.data?.sourceTaskId) {
             return (
-              <Badge
-                variant="outline"
-                className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-              >
+              <Badge variant="outline" size="tag">
                 Agent
               </Badge>
             );
           }
           return (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-            >
+            <Badge variant="outline" size="tag">
               Manual
             </Badge>
           );

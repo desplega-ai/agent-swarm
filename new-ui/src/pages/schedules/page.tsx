@@ -350,7 +350,8 @@ export default function SchedulesPage() {
         cellRenderer: (params: { value?: string }) => (
           <Badge
             variant="outline"
-            className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${
+            size="tag"
+            className={`${
               params.value === "one_time"
                 ? "border-amber-500/30 text-amber-400"
                 : "border-emerald-500/30 text-emerald-400"

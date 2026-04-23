@@ -379,9 +379,9 @@ function IntegrationDetailInner({
 
           <Button
             type="button"
-            variant="outline"
+            variant="destructive-outline"
             size="sm"
-            className="border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+            className="hover:text-red-300"
             onClick={() => setConfirmResetOpen(true)}
             disabled={deleteBatch.isPending}
           >

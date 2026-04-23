@@ -30,10 +30,7 @@ function TransportBadge({ transport }: { transport: string }) {
     sse: "border-cyan-500/30 text-cyan-400",
   };
   return (
-    <Badge
-      variant="outline"
-      className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${colors[transport] || ""}`}
-    >
+    <Badge variant="outline" size="tag" className={`${colors[transport] || ""}`}>
       {transport}
     </Badge>
   );
@@ -46,10 +43,7 @@ function ScopeBadge({ scope }: { scope: string }) {
     agent: "border-zinc-500/30 text-zinc-400",
   };
   return (
-    <Badge
-      variant="outline"
-      className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${colors[scope] || ""}`}
-    >
+    <Badge variant="outline" size="tag" className={`${colors[scope] || ""}`}>
       {scope}
     </Badge>
   );
@@ -125,16 +119,14 @@ export default function McpServerDetailPage() {
           <TransportBadge transport={server.transport} />
           <ScopeBadge scope={server.scope} />
           {server.authMethod === "oauth" && (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase border-purple-500/30 text-purple-400"
-            >
+            <Badge variant="outline" size="tag" className="border-purple-500/30 text-purple-400">
               OAuth
             </Badge>
           )}
           <Badge
             variant="outline"
-            className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${
+            size="tag"
+            className={`${
               server.isEnabled
                 ? "border-emerald-500/30 text-emerald-400"
                 : "border-red-500/30 text-red-400"
@@ -149,11 +141,7 @@ export default function McpServerDetailPage() {
           </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-red-500/30 text-red-400 hover:bg-red-500/10"
-              >
+              <Button variant="destructive-outline" size="sm">
                 <Trash2 className="h-4 w-4 mr-1" /> Delete
               </Button>
             </AlertDialogTrigger>

@@ -257,17 +257,11 @@ function ConfigDetailDialog({
         {config && (
           <div className="space-y-4 py-2">
             <div className="flex items-center gap-2">
-              <Badge
-                variant="outline"
-                className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-              >
+              <Badge variant="outline" size="tag">
                 {config.scope}
               </Badge>
               {config.isSecret && (
-                <Badge
-                  variant="outline"
-                  className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase border-amber-500/30 text-amber-400"
-                >
+                <Badge variant="outline" size="tag" className="border-amber-500/30 text-amber-400">
                   secret
                 </Badge>
               )}
@@ -385,10 +379,7 @@ function SwarmConfigSection() {
         width: 110,
         minWidth: 90,
         cellRenderer: (params: { value: string }) => (
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-          >
+          <Badge variant="outline" size="tag">
             {params.value}
           </Badge>
         ),
@@ -461,8 +452,8 @@ function SwarmConfigSection() {
               </Button>
               <Button
                 size="icon"
-                variant="outline"
-                className="h-7 w-7 border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                variant="destructive-outline"
+                className="h-7 w-7 hover:text-red-300"
                 onClick={(e) => {
                   e.stopPropagation();
                   setDeleteTarget(cfg);
@@ -734,10 +725,7 @@ function ConnectionCard({
           <div className="flex items-center gap-2">
             <span className="font-medium truncate">{connection.name}</span>
             {isActive && (
-              <Badge
-                variant="outline"
-                className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase border-primary/30 text-primary"
-              >
+              <Badge variant="outline" size="tag" className="border-primary/30 text-primary">
                 active
               </Badge>
             )}
@@ -779,8 +767,8 @@ function ConnectionCard({
           {/* Delete */}
           <Button
             size="icon"
-            variant="outline"
-            className="h-8 w-8 border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+            variant="destructive-outline"
+            className="h-8 w-8 hover:text-red-300"
             onClick={onDelete}
           >
             <Trash2 className="h-3.5 w-3.5" />
