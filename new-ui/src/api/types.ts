@@ -78,6 +78,8 @@ export interface AgentTask {
   credentialKeySuffix?: string;
   credentialKeyType?: string;
   swarmVersion?: string;
+  provider?: string;
+  providerMeta?: Record<string, unknown>;
 }
 
 export interface AgentWithTasks extends Agent {

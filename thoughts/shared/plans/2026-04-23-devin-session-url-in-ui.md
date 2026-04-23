@@ -178,8 +178,8 @@ Add `provider` and `providerMeta` to the frontend types and render provider-awar
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Frontend type check: `cd new-ui && pnpm exec tsc --noEmit`
-- [ ] Frontend lint: `cd new-ui && pnpm lint`
+- [x] Frontend type check: `cd new-ui && pnpm exec tsc --noEmit`
+- [x] Frontend lint: `cd new-ui && pnpm lint`
 
 #### Manual Verification:
 - [ ] Task detail page for a Devin task shows a provider badge and clickable session link

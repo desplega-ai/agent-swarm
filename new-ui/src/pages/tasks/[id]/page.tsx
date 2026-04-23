@@ -507,9 +507,21 @@ export default function TaskDetailPage() {
       )}
       {task.claudeSessionId && (
         <MetaRow icon={Terminal} label="Session">
-          <span className="text-xs font-mono truncate" title={task.claudeSessionId}>
-            {task.claudeSessionId.slice(0, 12)}...
-          </span>
+          {task.provider === "devin" && typeof task.providerMeta?.sessionUrl === "string" ? (
+            <a
+              href={task.providerMeta.sessionUrl as string}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary hover:underline font-mono text-xs inline-flex items-center gap-1"
+            >
+              {task.claudeSessionId.slice(0, 12)}...
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          ) : (
+            <span className="text-xs font-mono truncate" title={task.claudeSessionId}>
+              {task.claudeSessionId.slice(0, 12)}...
+            </span>
+          )}
         </MetaRow>
       )}
       {task.credentialKeySuffix && (
@@ -753,6 +765,14 @@ export default function TaskDetailPage() {
               className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
             >
               {task.source}
+            </Badge>
+          )}
+          {task.provider && (
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+            >
+              {task.provider}
             </Badge>
           )}
           {(() => {
