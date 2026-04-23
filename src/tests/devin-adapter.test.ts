@@ -405,6 +405,26 @@ describe("Polling loop — lifecycle events", () => {
   });
 });
 
+describe("session_init — provider metadata", () => {
+  test("session_init event includes provider and providerMeta with sessionUrl", async () => {
+    pollResponse.status = "exit";
+    pollResponse.status_detail = "finished";
+
+    const adapter = new DevinAdapter();
+    const { events } = await runUntilSettled(adapter, testConfig());
+
+    const sessionInit = events.find((e) => e.type === "session_init");
+    expect(sessionInit).toBeDefined();
+    if (sessionInit?.type === "session_init") {
+      expect(sessionInit.provider).toBe("devin");
+      expect(sessionInit.providerMeta).toBeDefined();
+      expect(sessionInit.providerMeta?.sessionUrl).toBe(
+        "https://app.devin.ai/sessions/ses-test-001",
+      );
+    }
+  });
+});
+
 describe("Polling loop — suspended states", () => {
   test("suspended/inactivity settles with suspended_inactivity", async () => {
     pollResponse.status = "suspended";

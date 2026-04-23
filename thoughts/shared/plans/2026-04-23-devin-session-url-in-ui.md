@@ -222,8 +222,8 @@ Add/update tests to cover the new columns, event fields, and API changes.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] All tests pass: `bun test`
-- [ ] Devin adapter test specifically: `bun test src/tests/devin-adapter.test.ts`
+- [x] All tests pass: `bun test`
+- [x] Devin adapter test specifically: `bun test src/tests/devin-adapter.test.ts`
 
 #### Manual Verification:
 - [ ] Review test output for the new assertions
