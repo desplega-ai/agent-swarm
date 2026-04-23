@@ -212,6 +212,7 @@ class ClaudeSession implements ProviderSession {
     this.proc = Bun.spawn(cmd, {
       cwd: this.config.cwd,
       env: {
+        ENABLE_PROMPT_CACHING_1H: "1",
         ...(config.env || process.env),
         TASK_FILE: taskFilePath,
       } as Record<string, string>,
