@@ -95,7 +95,12 @@ class DevinSession implements ProviderSession {
     });
 
     // Emit initial session_init event.
-    this.emit({ type: "session_init", sessionId: sessionResponse.session_id });
+    this.emit({
+      type: "session_init",
+      sessionId: sessionResponse.session_id,
+      provider: "devin",
+      providerMeta: { sessionUrl: sessionResponse.url },
+    });
     this.emit({
       type: "message",
       role: "assistant",

@@ -368,7 +368,7 @@ class ClaudeSession implements ProviderSession {
       // Session ID from init message
       if (json.type === "system" && json.subtype === "init" && json.session_id) {
         this._sessionId = json.session_id;
-        this.emit({ type: "session_init", sessionId: json.session_id });
+        this.emit({ type: "session_init", sessionId: json.session_id, provider: "claude" });
         if (json.model) {
           this.contextWindowSize = getContextWindowSize(json.model);
         }

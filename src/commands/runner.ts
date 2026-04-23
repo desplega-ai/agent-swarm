@@ -1031,13 +1031,18 @@ async function saveProviderSessionId(
   apiKey: string,
   taskId: string,
   claudeSessionId: string,
+  provider?: string,
+  providerMeta?: Record<string, unknown>,
 ): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  const body: Record<string, unknown> = { claudeSessionId };
+  if (provider !== undefined) body.provider = provider;
+  if (providerMeta !== undefined) body.providerMeta = providerMeta;
   await fetch(`${apiUrl}/api/tasks/${taskId}/claude-session`, {
     method: "PUT",
     headers,
-    body: JSON.stringify({ claudeSessionId }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -1674,9 +1679,14 @@ async function spawnProviderProcess(
     switch (event.type) {
       case "session_init":
         if (realTaskId) {
-          saveProviderSessionId(opts.apiUrl, opts.apiKey, realTaskId, event.sessionId).catch(
-            (err) => console.warn(`[runner] Failed to save session ID: ${err}`),
-          );
+          saveProviderSessionId(
+            opts.apiUrl,
+            opts.apiKey,
+            realTaskId,
+            event.sessionId,
+            event.provider,
+            event.providerMeta,
+          ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
         } else {
           // Pool task: save provider session ID on active session so it can be
           // propagated to the real task when the agent claims one
@@ -1989,9 +1999,14 @@ async function runProviderIteration(
     if (event.type === "raw_log") prettyPrintLine(event.content, opts.role);
     if (event.type === "raw_stderr") prettyPrintStderr(event.content, opts.role);
     if (event.type === "session_init" && opts.taskId) {
-      saveProviderSessionId(opts.apiUrl, opts.apiKey, opts.taskId, event.sessionId).catch((err) =>
-        console.warn(`[runner] Failed to save session ID: ${err}`),
-      );
+      saveProviderSessionId(
+        opts.apiUrl,
+        opts.apiKey,
+        opts.taskId,
+        event.sessionId,
+        event.provider,
+        event.providerMeta,
+      ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
     }
   });
 
