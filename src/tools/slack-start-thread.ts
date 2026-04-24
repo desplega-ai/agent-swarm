@@ -5,32 +5,27 @@ import { getSlackApp } from "@/slack/app";
 import { markdownToSlack } from "@/slack/responses";
 import { createToolRegistrar } from "@/tools/utils";
 
-export const registerSlackPostTool = (server: McpServer) => {
+export const registerSlackStartThreadTool = (server: McpServer) => {
   createToolRegistrar(server)(
-    "slack-post",
+    "slack-start-thread",
     {
-      title: "Post message to Slack channel",
+      title: "Start a new Slack thread",
       description:
-        "Post a message to a Slack channel. By default creates a new top-level message; pass `threadTs` to post as a threaded reply under an existing message (obtain the ts from `slack-start-thread`). Requires lead privileges.",
+        "Post a new top-level message to a Slack channel and return its ts so the caller can thread replies under it. Pass the returned `ts` as `threadTs` on subsequent `slack-post` calls to keep replies in the same thread. Requires lead privileges.",
       annotations: { openWorldHint: true },
 
       inputSchema: z.object({
         channelId: z.string().min(1).describe("The Slack channel ID to post to."),
         message: z.string().min(1).max(4000).describe("The message content to post."),
-        threadTs: z
-          .string()
-          .optional()
-          .describe(
-            "Optional parent message ts to thread under. Obtain via `slack-start-thread`. When omitted, posts as a new top-level message.",
-          ),
       }),
       outputSchema: z.object({
         success: z.boolean(),
         message: z.string(),
-        messageTs: z.string().optional(),
+        channelId: z.string().optional(),
+        ts: z.string().optional(),
       }),
     },
-    async ({ channelId, message, threadTs }, requestInfo, _meta) => {
+    async ({ channelId, message }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         return {
           content: [{ type: "text", text: "Agent ID not found." }],
@@ -46,7 +41,6 @@ export const registerSlackPostTool = (server: McpServer) => {
         };
       }
 
-      // Require lead privileges to post directly to channels
       if (!agent.isLead) {
         return {
           content: [{ type: "text", text: "Posting to Slack channels requires lead privileges." }],
@@ -73,7 +67,6 @@ export const registerSlackPostTool = (server: McpServer) => {
           text: slackMessage, // Fallback for notifications
           username: agent.name,
           icon_emoji: ":crown:",
-          ...(threadTs ? { thread_ts: threadTs } : {}),
           blocks: [
             {
               type: "section",
@@ -85,26 +78,44 @@ export const registerSlackPostTool = (server: McpServer) => {
           ],
         });
 
-        const messageTs = result.ts;
+        const ts = result.ts;
+        const resolvedChannelId = result.channel ?? channelId;
+
+        if (!ts) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "Message posted but Slack did not return a ts — cannot thread replies.",
+              },
+            ],
+            structuredContent: {
+              success: false,
+              message: "Message posted but Slack did not return a ts — cannot thread replies.",
+              channelId: resolvedChannelId,
+            },
+          };
+        }
 
         return {
           content: [
             {
               type: "text",
-              text: `Message posted successfully.${messageTs ? ` Message timestamp: ${messageTs}` : ""}`,
+              text: `Thread started. channelId=${resolvedChannelId}, ts=${ts}. Pass ts as threadTs on slack-post to reply in-thread.`,
             },
           ],
           structuredContent: {
             success: true,
-            message: "Message posted successfully.",
-            messageTs,
+            message: "Thread started successfully.",
+            channelId: resolvedChannelId,
+            ts,
           },
         };
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
         return {
-          content: [{ type: "text", text: `Failed to post message: ${errorMsg}` }],
-          structuredContent: { success: false, message: `Failed to post message: ${errorMsg}` },
+          content: [{ type: "text", text: `Failed to start thread: ${errorMsg}` }],
+          structuredContent: { success: false, message: `Failed to start thread: ${errorMsg}` },
         };
       }
     },
