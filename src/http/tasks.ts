@@ -83,7 +83,11 @@ const updateClaudeSession = route({
     z.object({
       claudeSessionId: z.string().min(1),
       provider: z.literal("devin"),
-      providerMeta: z.object({ sessionUrl: z.string() }),
+      providerMeta: z.object({
+        sessionUrl: z.string(),
+        maxAcuLimit: z.number().optional(),
+        acuCostUsd: z.number().optional(),
+      }),
     }),
     z.object({
       claudeSessionId: z.string().min(1),

@@ -79,6 +79,7 @@ class DevinSession implements ProviderSession {
   private readonly devinApiKey: string;
   private readonly pollIntervalMs: number;
   private readonly acuCostUsd: number;
+  private readonly maxAcuLimit: number | undefined;
 
   private readonly listeners: Array<(event: ProviderEvent) => void> = [];
   private readonly eventQueue: ProviderEvent[] = [];
@@ -110,12 +111,14 @@ class DevinSession implements ProviderSession {
     orgId: string,
     devinApiKey: string,
     sessionResponse: DevinSessionResponse,
+    maxAcuLimit?: number,
   ) {
     this.config = config;
     this.orgId = orgId;
     this.devinApiKey = devinApiKey;
     this.pollIntervalMs = Number(process.env.DEVIN_POLL_INTERVAL_MS) || DEFAULT_POLL_INTERVAL_MS;
     this.acuCostUsd = Number(process.env.DEVIN_ACU_COST_USD) || DEFAULT_ACU_COST_USD;
+    this.maxAcuLimit = maxAcuLimit;
 
     this._sessionId = sessionResponse.session_id;
     this.sessionUrl = sessionResponse.url;
@@ -130,7 +133,11 @@ class DevinSession implements ProviderSession {
       type: "session_init",
       sessionId: sessionResponse.session_id,
       provider: "devin",
-      providerMeta: { sessionUrl: sessionResponse.url },
+      providerMeta: {
+        sessionUrl: sessionResponse.url,
+        ...(this.maxAcuLimit != null ? { maxAcuLimit: this.maxAcuLimit } : {}),
+        acuCostUsd: this.acuCostUsd,
+      },
     });
     this.emit({
       type: "message",
@@ -378,7 +385,8 @@ class DevinSession implements ProviderSession {
       case "claimed":
       case "resuming": {
         if (statusChanged) {
-          this.emit({ type: "progress", message: `Devin: ${status}` });
+          this.emit({ type: "progress", message: status });
+          this.emitSystemLog("status", { status, statusDetail: status });
         }
         break;
       }
@@ -420,7 +428,7 @@ class DevinSession implements ProviderSession {
     switch (detail) {
       case "working": {
         if (statusChanged) {
-          this.emit({ type: "progress", message: "Devin: working" });
+          this.emit({ type: "progress", message: "working" });
           this.emitSystemLog("status", { status: "running", statusDetail: "working" });
         }
         break;
@@ -428,7 +436,7 @@ class DevinSession implements ProviderSession {
 
       case "waiting_for_user": {
         if (statusChanged) {
-          this.emit({ type: "progress", message: "Devin: waiting for user" });
+          this.emit({ type: "progress", message: "waiting for user" });
           this.emitSystemLog("status", {
             status: "running",
             statusDetail: "waiting_for_user",
@@ -444,7 +452,7 @@ class DevinSession implements ProviderSession {
 
       case "waiting_for_approval": {
         if (statusChanged) {
-          this.emit({ type: "progress", message: "Devin: waiting for approval" });
+          this.emit({ type: "progress", message: "waiting for approval" });
           this.emitSystemLog("status", {
             status: "running",
             statusDetail: "waiting_for_approval",
@@ -465,7 +473,9 @@ class DevinSession implements ProviderSession {
 
       default: {
         if (statusChanged) {
-          this.emit({ type: "progress", message: `Devin: ${detail ?? "unknown"}` });
+          const label = detail ?? "unknown";
+          this.emit({ type: "progress", message: label });
+          this.emitSystemLog("status", { status: "running", statusDetail: label });
         }
         break;
       }
@@ -477,6 +487,7 @@ class DevinSession implements ProviderSession {
     const output = this.formatStructuredOutput();
     const cost = this.buildCostData(acusConsumed, false);
 
+    this.emit({ type: "progress", message: "completed" });
     this.emitSystemLog("status", {
       status: "completed",
       acusConsumed,
@@ -797,17 +808,22 @@ export class DevinAdapter implements ProviderAdapter {
     // Inline skill content if prompt starts with @skills:<name>.
     const resolvedPrompt = await resolveDevinPrompt(config.prompt);
 
+    // Resolve max ACU limit from env.
+    const rawAcuLimit = env.DEVIN_MAX_ACU_LIMIT ?? process.env.DEVIN_MAX_ACU_LIMIT;
+    const maxAcuLimit = rawAcuLimit ? Number(rawAcuLimit) : undefined;
+
     // Create the Devin session.
     const sessionResponse = await createSession(orgId, devinApiKey, {
       prompt: resolvedPrompt,
       ...(playbookId ? { playbook_id: playbookId } : {}),
       ...(repos.length > 0 ? { repos } : {}),
+      ...(maxAcuLimit != null ? { max_acu_limit: maxAcuLimit } : {}),
       structured_output_schema: DEVIN_STRUCTURED_OUTPUT_SCHEMA,
       title: `swarm-task-${config.taskId ?? "unknown"}`,
       tags: ["agent-swarm", config.agentId],
     });
 
-    return new DevinSession(config, orgId, devinApiKey, sessionResponse);
+    return new DevinSession(config, orgId, devinApiKey, sessionResponse, maxAcuLimit);
   }
 
   async canResume(sessionId: string): Promise<boolean> {

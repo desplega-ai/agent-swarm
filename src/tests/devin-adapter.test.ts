@@ -392,7 +392,7 @@ describe("Polling loop — lifecycle events", () => {
     clearTimeout(exitTimer);
 
     const progressEvent = events.find(
-      (e) => e.type === "progress" && e.message === "Devin: waiting for approval",
+      (e) => e.type === "progress" && e.message === "waiting for approval",
     );
     expect(progressEvent).toBeDefined();
   });

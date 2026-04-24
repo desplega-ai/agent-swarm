@@ -83,7 +83,11 @@ export interface AgentTask {
 }
 
 export type ProviderName = "claude" | "codex" | "pi" | "devin";
-export type DevinProviderMeta = { sessionUrl: string };
+export type DevinProviderMeta = {
+  sessionUrl: string;
+  maxAcuLimit?: number;
+  acuCostUsd?: number;
+};
 
 export interface AgentWithTasks extends Agent {
   tasks: AgentTask[];

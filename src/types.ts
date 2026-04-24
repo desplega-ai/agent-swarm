@@ -70,7 +70,11 @@ export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 export const ProviderNameSchema = z.enum(["claude", "codex", "pi", "devin"]);
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
-export type DevinProviderMeta = { sessionUrl: string };
+export type DevinProviderMeta = {
+  sessionUrl: string;
+  maxAcuLimit?: number;
+  acuCostUsd?: number;
+};
 
 export const AgentTaskSchema = z.object({
   id: z.uuid(),
