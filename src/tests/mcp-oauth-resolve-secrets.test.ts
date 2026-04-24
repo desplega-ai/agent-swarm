@@ -101,6 +101,85 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
     expect(match!.authError).toBeNull();
   });
 
+  test("lowercase 'bearer' tokenType is normalized to capital 'Bearer' in Authorization header", async () => {
+    // Providers that follow RFC 6749 strictly (e.g. Amplitude's MCP) return
+    // `token_type: "bearer"`. Some resource servers then reject the lowercase
+    // prefix with 401. The fix in src/http/mcp-servers.ts normalizes the
+    // scheme to capital "Bearer". See GitHub issue #368.
+    const agent = createAgent({
+      id: crypto.randomUUID(),
+      name: "oauth-agent-lowercase",
+      status: "idle",
+      isLead: false,
+    });
+    const mcp = createMcpServer({
+      name: "mcp-oauth-lowercase-bearer",
+      transport: "http",
+      url: "https://mcp.example.com",
+      scope: "agent",
+      ownerAgentId: agent.id,
+    });
+    installMcpServer(agent.id, mcp.id);
+    setMcpServerAuthMethod(mcp.id, "oauth");
+    upsertMcpOAuthToken({
+      mcpServerId: mcp.id,
+      accessToken: "lowercase-token-xyz",
+      refreshToken: null,
+      tokenType: "bearer", // lowercase, as RFC 6749 prescribes
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      resourceUrl: "https://mcp.example.com/",
+      authorizationServerIssuer: "https://as.example.com",
+      authorizeUrl: "https://as.example.com/authorize",
+      tokenUrl: "https://as.example.com/token",
+      clientSource: "dcr",
+      status: "connected",
+    });
+
+    const result = await agentMcpServers(agent.id);
+    const match = result.servers.find((s) => s.id === mcp.id);
+    expect(match).toBeTruthy();
+    expect(match!.resolvedHeaders?.Authorization).toBe("Bearer lowercase-token-xyz");
+    expect(match!.resolvedHeaders?.Authorization?.startsWith("Bearer ")).toBe(true);
+  });
+
+  test("non-bearer tokenType (e.g. 'MAC') is preserved verbatim in Authorization header", async () => {
+    // RFC 6749 allows non-bearer token types. The normalization must only
+    // touch the bearer scheme and leave others alone.
+    const agent = createAgent({
+      id: crypto.randomUUID(),
+      name: "oauth-agent-mac",
+      status: "idle",
+      isLead: false,
+    });
+    const mcp = createMcpServer({
+      name: "mcp-oauth-mac",
+      transport: "http",
+      url: "https://mcp.example.com",
+      scope: "agent",
+      ownerAgentId: agent.id,
+    });
+    installMcpServer(agent.id, mcp.id);
+    setMcpServerAuthMethod(mcp.id, "oauth");
+    upsertMcpOAuthToken({
+      mcpServerId: mcp.id,
+      accessToken: "mac-token-xyz",
+      refreshToken: null,
+      tokenType: "MAC",
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      resourceUrl: "https://mcp.example.com/",
+      authorizationServerIssuer: "https://as.example.com",
+      authorizeUrl: "https://as.example.com/authorize",
+      tokenUrl: "https://as.example.com/token",
+      clientSource: "dcr",
+      status: "connected",
+    });
+
+    const result = await agentMcpServers(agent.id);
+    const match = result.servers.find((s) => s.id === mcp.id);
+    expect(match).toBeTruthy();
+    expect(match!.resolvedHeaders?.Authorization).toBe("MAC mac-token-xyz");
+  });
+
   test("OAuth server without token row surfaces authError", async () => {
     const agent = createAgent({
       id: crypto.randomUUID(),
