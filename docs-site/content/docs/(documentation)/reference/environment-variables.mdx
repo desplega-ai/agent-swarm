@@ -62,6 +62,7 @@ Which credentials you need depends on your selected harness provider:
 | `CLAUDE_CODE_OAUTH_TOKEN` | Yes* | — | OAuth token for Claude CLI. Supports comma-separated values for [multi-credential load balancing](#multi-credential-support) |
 | `ANTHROPIC_API_KEY` | Alt* | — | Alternative to `CLAUDE_CODE_OAUTH_TOKEN`. Also supports comma-separated values |
 | `CLAUDE_BINARY` | No | `claude` | Path to Claude CLI binary (if not in `$PATH`) |
+| `ENABLE_PROMPT_CACHING_1H` | No | `1` | Enables Anthropic's 1-hour prompt cache for every Claude Code session spawned by the worker. Default-on since `v1.69.1`; set to `0` (env or `swarm_config`) to opt out. Injected by `ClaudeAdapter` into the spawned `claude` process env. |
 
 \* One of `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` is required.
 

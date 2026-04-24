@@ -11,6 +11,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Cross-ingress sibling-task awareness (phase 2): reader-side prompt injection surfaces sibling/parent tasks sharing the same `contextKey` so workers see related work across ingress paths. Includes additive `ADDITIVE_SLACK` buffer generalization and Linear hard-refuse UX fix (#359)
 - New harness-providers guide at [`/docs/guides/harness-providers`](/docs/guides/harness-providers) covering the `ProviderAdapter` contract, task↔session lifecycle, raw session-log pipeline, swarm-MCP exposure, system-prompt composition/delivery, skills handling, and a 15-step walkthrough grounded in the claude / pi / codex reference adapters (`docs-site/content/docs/(documentation)/guides/harness-providers.mdx`)
 
+## [1.69.1] - 2026-04-23
+
+### Added
+- `ENABLE_PROMPT_CACHING_1H=1` is now set by default for every Claude Code session spawned via `ClaudeAdapter`. Opt out via `swarm_config` or environment (`ENABLE_PROMPT_CACHING_1H=0`). Regenerated `openapi.json` + API reference pages for the version bump
+
 ## [1.69.0] - 2026-04-22
 
 ### Added
