@@ -2,13 +2,13 @@ import { AlertCircle, CheckCircle2, Loader2, RefreshCw, XCircle } from "lucide-r
 import { useState } from "react";
 import { toast } from "sonner";
 
-import { api } from "@/api/client";
 import {
   useDisconnectMcpOAuth,
   useMcpOAuthMetadata,
   useMcpOAuthStatus,
   useRefreshMcpOAuth,
   useRegisterMcpOAuthManualClient,
+  useStartMcpOAuthConnect,
 } from "@/api/hooks";
 import type { McpOAuthStatus, McpServer } from "@/api/types";
 import {
@@ -212,6 +212,7 @@ export function McpOAuthPanel({ server }: { server: McpServer }) {
   const { data: metadata, error: metadataError } = useMcpOAuthMetadata(server.id, enabled);
   const refresh = useRefreshMcpOAuth();
   const disconnect = useDisconnectMcpOAuth();
+  const startConnect = useStartMcpOAuthConnect();
 
   if (!supportsOAuth) {
     return (
@@ -234,7 +235,15 @@ export function McpOAuthPanel({ server }: { server: McpServer }) {
 
   const handleConnect = () => {
     const redirect = `${window.location.origin}${window.location.pathname}`;
-    window.location.href = api.mcpOAuthAuthorizeUrl(server.id, { redirect });
+    startConnect.mutate(
+      { mcpServerId: server.id, options: { redirect } },
+      {
+        onSuccess: ({ providerUrl }) => {
+          window.location.href = providerUrl;
+        },
+        onError: (err: Error) => toast.error(err.message),
+      },
+    );
   };
 
   const handleRefresh = () => {
@@ -360,9 +369,15 @@ export function McpOAuthPanel({ server }: { server: McpServer }) {
           <Button
             size="sm"
             onClick={handleConnect}
-            disabled={refresh.isPending || disconnect.isPending}
+            disabled={refresh.isPending || disconnect.isPending || startConnect.isPending}
           >
-            {connected ? "Reconnect" : "Connect"}
+            {startConnect.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : connected ? (
+              "Reconnect"
+            ) : (
+              "Connect"
+            )}
           </Button>
           <Button
             size="sm"

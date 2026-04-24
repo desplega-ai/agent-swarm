@@ -4855,6 +4855,64 @@
         }
       }
     },
+    "/api/mcp-oauth/{mcpServerId}/authorize-url": {
+      "get": {
+        "summary": "Build an OAuth authorize URL. Returns JSON so the browser can navigate without losing the Bearer auth header.",
+        "tags": [
+          "MCP OAuth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "mcpServerId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "redirect",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "userId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "scopes",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ providerUrl: string }"
+          },
+          "400": {
+            "description": "MCP has no URL / does not require OAuth"
+          },
+          "404": {
+            "description": "MCP server not found"
+          }
+        }
+      }
+    },
     "/api/mcp-oauth/callback": {
       "get": {
         "summary": "OAuth redirect target. Exchanges code -> tokens and redirects back to dashboard.",

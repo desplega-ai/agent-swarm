@@ -158,6 +158,27 @@ const authorizeRoute = route({
   },
 });
 
+const authorizeUrlRoute = route({
+  method: "get",
+  path: "/api/mcp-oauth/{mcpServerId}/authorize-url",
+  pattern: ["api", "mcp-oauth", null, "authorize-url"],
+  summary:
+    "Build an OAuth authorize URL. Returns JSON so the browser can navigate without losing the Bearer auth header.",
+  tags: ["MCP OAuth"],
+  auth: { apiKey: true },
+  params: z.object({ mcpServerId: z.string() }),
+  query: z.object({
+    redirect: z.string().optional(),
+    userId: z.string().optional(),
+    scopes: z.string().optional(),
+  }),
+  responses: {
+    200: { description: "{ providerUrl: string }" },
+    400: { description: "MCP has no URL / does not require OAuth" },
+    404: { description: "MCP server not found" },
+  },
+});
+
 const callbackRoute = route({
   method: "get",
   path: "/api/mcp-oauth/callback",
@@ -235,6 +256,86 @@ const manualClientRoute = route({
     404: { description: "MCP server not found" },
   },
 });
+
+// ─── Shared authorize flow ───────────────────────────────────────────────────
+
+interface AuthorizeFlowQuery {
+  redirect?: string;
+  userId?: string;
+  scopes?: string;
+}
+
+/**
+ * Discover metadata, DCR-register (or fail), build the authorize URL, and
+ * persist the pending session. Returns the provider `providerUrl` the caller
+ * should redirect to / respond with. On failure, writes a JSON error response
+ * and returns null.
+ */
+async function prepareAuthorizeFlow(
+  res: ServerResponse,
+  mcpServerId: string,
+  server: NonNullable<ReturnType<typeof getMcpServerById>>,
+  q: AuthorizeFlowQuery,
+): Promise<string | null> {
+  const discovery = await discoverForMcp(server.url!);
+  if (!discovery) {
+    jsonError(res, "MCP server does not require OAuth", 400);
+    return null;
+  }
+
+  let clientId: string | null = null;
+  let clientSecret: string | null = null;
+  if (discovery.dcrSupported && discovery.registrationEndpoint) {
+    const dcr = await registerClient(discovery.registrationEndpoint, {
+      client_name: `agent-swarm (${server.name})`,
+      redirect_uris: [callbackRedirectUri()],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "client_secret_basic",
+      application_type: "web",
+      scope: (q.scopes ?? discovery.scopes.join(" ")) || undefined,
+    });
+    clientId = dcr.client_id;
+    clientSecret = dcr.client_secret ?? null;
+  } else {
+    jsonError(
+      res,
+      "DCR not supported — paste client_id/client_secret via POST /api/mcp-oauth/:id/manual-client first.",
+      400,
+    );
+    return null;
+  }
+
+  const scopes = q.scopes ? q.scopes.split(" ").filter(Boolean) : discovery.scopes;
+
+  const built = await buildAuthorizeUrl({
+    authorizeUrl: discovery.authorizeUrl,
+    tokenUrl: discovery.tokenUrl,
+    clientId: clientId!,
+    redirectUri: callbackRedirectUri(),
+    scopes,
+    resource: discovery.resourceUrl,
+  });
+
+  insertMcpOAuthPending({
+    state: built.state,
+    mcpServerId,
+    userId: q.userId ?? null,
+    codeVerifier: built.codeVerifier,
+    resourceUrl: discovery.resourceUrl,
+    authorizationServerIssuer: discovery.authorizationServerIssuer,
+    authorizeUrl: discovery.authorizeUrl,
+    tokenUrl: discovery.tokenUrl,
+    revocationUrl: discovery.revocationUrl,
+    scopes: scopes.join(" "),
+    dcrClientId: clientId!,
+    dcrClientSecret: clientSecret,
+    redirectUri: callbackRedirectUri(),
+    finalRedirect: q.redirect ?? null,
+  });
+
+  return built.url;
+}
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
@@ -398,69 +499,40 @@ export async function handleMcpOAuth(
     if (!server) return true;
 
     try {
-      const discovery = await discoverForMcp(server.url!);
-      if (!discovery) {
-        jsonError(res, "MCP server does not require OAuth", 400);
-        return true;
-      }
-
-      // Dynamic Client Registration if supported, otherwise expect the user to
-      // have already called /manual-client.
-      let clientId: string | null = null;
-      let clientSecret: string | null = null;
-      if (discovery.dcrSupported && discovery.registrationEndpoint) {
-        const dcr = await registerClient(discovery.registrationEndpoint, {
-          client_name: `agent-swarm (${server.name})`,
-          redirect_uris: [callbackRedirectUri()],
-          grant_types: ["authorization_code", "refresh_token"],
-          response_types: ["code"],
-          token_endpoint_auth_method: "client_secret_basic",
-          application_type: "web",
-          scope: (parsed.query.scopes ?? discovery.scopes.join(" ")) || undefined,
-        });
-        clientId = dcr.client_id;
-        clientSecret = dcr.client_secret ?? null;
-      } else {
-        jsonError(
-          res,
-          "DCR not supported — paste client_id/client_secret via POST /api/mcp-oauth/:id/manual-client first.",
-          400,
-        );
-        return true;
-      }
-
-      const scopes = parsed.query.scopes
-        ? parsed.query.scopes.split(" ").filter(Boolean)
-        : discovery.scopes;
-
-      const built = await buildAuthorizeUrl({
-        authorizeUrl: discovery.authorizeUrl,
-        tokenUrl: discovery.tokenUrl,
-        clientId: clientId!,
-        redirectUri: callbackRedirectUri(),
-        scopes,
-        resource: discovery.resourceUrl,
-      });
-
-      insertMcpOAuthPending({
-        state: built.state,
-        mcpServerId: parsed.params.mcpServerId,
-        userId: parsed.query.userId ?? null,
-        codeVerifier: built.codeVerifier,
-        resourceUrl: discovery.resourceUrl,
-        authorizationServerIssuer: discovery.authorizationServerIssuer,
-        authorizeUrl: discovery.authorizeUrl,
-        tokenUrl: discovery.tokenUrl,
-        revocationUrl: discovery.revocationUrl,
-        scopes: scopes.join(" "),
-        dcrClientId: clientId!,
-        dcrClientSecret: clientSecret,
-        redirectUri: callbackRedirectUri(),
-        finalRedirect: parsed.query.redirect ?? null,
-      });
-
-      res.writeHead(302, { Location: built.url });
+      const providerUrl = await prepareAuthorizeFlow(
+        res,
+        parsed.params.mcpServerId,
+        server,
+        parsed.query,
+      );
+      if (!providerUrl) return true;
+      res.writeHead(302, { Location: providerUrl });
       res.end();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      jsonError(res, `Authorize failed: ${message}`, 502);
+    }
+    return true;
+  }
+
+  // GET /api/mcp-oauth/:id/authorize-url — JSON variant of /authorize so the
+  // dashboard can fetch the provider URL with Bearer auth and then navigate.
+  if (authorizeUrlRoute.match(req.method, pathSegments)) {
+    const parsed = await authorizeUrlRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    const server = getMcpOrError(res, parsed.params.mcpServerId);
+    if (!server) return true;
+
+    try {
+      const providerUrl = await prepareAuthorizeFlow(
+        res,
+        parsed.params.mcpServerId,
+        server,
+        parsed.query,
+      );
+      if (!providerUrl) return true;
+      json(res, { providerUrl });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       jsonError(res, `Authorize failed: ${message}`, 502);
