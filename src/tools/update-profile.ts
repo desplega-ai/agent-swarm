@@ -226,9 +226,12 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           },
         );
 
-        // Write updated files to workspace only when updating self
+        // Write updated files to workspace only when updating self AND the caller
+        // matches the real running agent (process.env.AGENT_ID). This guards against
+        // unit tests (with fake WORKER_IDs) accidentally overwriting the container's
+        // SOUL.md/IDENTITY.md when the test suite runs inside a real agent container.
         // (remote agent files live on their own container)
-        if (isUpdatingSelf) {
+        if (isUpdatingSelf && requestInfo.agentId === process.env.AGENT_ID) {
           if (soulMd !== undefined) {
             try {
               await Bun.write("/workspace/SOUL.md", soulMd);

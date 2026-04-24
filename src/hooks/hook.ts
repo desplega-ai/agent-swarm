@@ -355,8 +355,10 @@ export async function handleHook(): Promise<void> {
     }
   };
 
-  // Minimum length for SOUL.md and IDENTITY.md to prevent accidental corruption
-  const IDENTITY_FILE_MIN_LENGTH = 100;
+  // Minimum length for SOUL.md and IDENTITY.md to prevent accidental corruption.
+  // Raised from 100 to 500 after Picateclas profile corruption recurrences where
+  // a 234-char test sentinel payload was syncing into the real agent's DB row.
+  const IDENTITY_FILE_MIN_LENGTH = 500;
 
   /**
    * Sync SOUL.md and IDENTITY.md content back to the server
