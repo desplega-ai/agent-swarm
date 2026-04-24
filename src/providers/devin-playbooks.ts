@@ -82,7 +82,9 @@ export async function getOrCreatePlaybook(
   playbookCache.set(hash, response.playbook_id);
 
   if (swarmApiUrl && swarmApiKey) {
-    saveToConfig(swarmApiUrl, swarmApiKey, hash, response.playbook_id).catch(() => {});
+    saveToConfig(swarmApiUrl, swarmApiKey, hash, response.playbook_id).catch((err) =>
+      console.warn(`[devin] playbook cache save failed: ${err}`),
+    );
   }
 
   return response.playbook_id;
