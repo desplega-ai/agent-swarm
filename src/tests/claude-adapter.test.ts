@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ClaudeAdapter } from "../providers/claude-adapter";
+import { ClaudeAdapter, mergeMcpConfig } from "../providers/claude-adapter";
 import type { ProviderSessionConfig } from "../providers/types";
 
 /** Minimal config for testing — sessions won't actually spawn in these unit tests */
@@ -100,6 +100,148 @@ describe("Claude stream-json event parsing", () => {
       num_turns: 1,
     };
     expect(json.is_error).toBe(true);
+  });
+});
+
+describe("mergeMcpConfig (issue #369)", () => {
+  const TASK_ID = "task-abc-123";
+
+  test("returns only installed servers when base config is null", () => {
+    const installed = {
+      "my-mcp": {
+        type: "http",
+        url: "https://example.com",
+        headers: { Authorization: "Bearer x" },
+      },
+    };
+    const merged = mergeMcpConfig(null, installed, TASK_ID);
+    expect(merged.mcpServers["my-mcp"]).toEqual(installed["my-mcp"]);
+  });
+
+  test("returns only base servers when installedServers is null", () => {
+    const base = {
+      mcpServers: {
+        "agent-swarm": {
+          type: "http",
+          url: "http://localhost:3013/mcp",
+          headers: { Authorization: "Bearer KEY", "X-Agent-ID": "a1" },
+        },
+      },
+    };
+    const merged = mergeMcpConfig(base, null, TASK_ID);
+    const agentSwarm = merged.mcpServers["agent-swarm"] as Record<string, unknown>;
+    expect(agentSwarm).toBeDefined();
+    // Agent-swarm entry is augmented with X-Source-Task-Id
+    expect((agentSwarm.headers as Record<string, string>)["X-Source-Task-Id"]).toBe(TASK_ID);
+  });
+
+  test("installed servers OVERRIDE stale .mcp.json entries (precedence fix)", () => {
+    // Simulates: /workspace/.mcp.json has an entry baked at container startup with
+    // a stale OAuth Bearer; the per-session fetch returns a freshly-resolved Bearer.
+    // The merged config MUST carry the fresh token — this is the core of issue #369.
+    const base = {
+      mcpServers: {
+        stripe: {
+          type: "http",
+          url: "https://mcp.stripe.com",
+          headers: { Authorization: "Bearer STALE_TOKEN_FROM_STARTUP" },
+        },
+      },
+    };
+    const installed = {
+      stripe: {
+        type: "http",
+        url: "https://mcp.stripe.com",
+        headers: { Authorization: "Bearer FRESH_TOKEN_FROM_API" },
+      },
+    };
+    const merged = mergeMcpConfig(base, installed, TASK_ID);
+    const stripe = merged.mcpServers.stripe as Record<string, unknown>;
+    expect((stripe.headers as Record<string, string>).Authorization).toBe(
+      "Bearer FRESH_TOKEN_FROM_API",
+    );
+  });
+
+  test("installed-server removal is honored (uninstall propagates)", () => {
+    // Previously, if .mcp.json had `stripe` baked in but the server was uninstalled
+    // from the API, the stale entry persisted. With the precedence fix + skeleton
+    // .mcp.json, a server absent from installedServers stays in the merged config
+    // ONLY if it's also in base (e.g., manually-added) — no API-layer override is
+    // issued. This test confirms we don't spontaneously delete base entries; the
+    // docker-entrypoint change (don't bake installed servers) is what prevents
+    // stale uninstalls from persisting.
+    const base = {
+      mcpServers: {
+        "manually-configured": { type: "http", url: "https://x.test" },
+      },
+    };
+    const installed = {}; // Empty — nothing installed via API
+    const merged = mergeMcpConfig(base, installed, TASK_ID);
+    expect(merged.mcpServers["manually-configured"]).toBeDefined();
+  });
+
+  test("agent-swarm server gets X-Source-Task-Id injected", () => {
+    const base = {
+      mcpServers: {
+        "agent-swarm": {
+          type: "http",
+          url: "http://localhost:3013/mcp",
+          headers: { Authorization: "Bearer KEY", "X-Agent-ID": "a1" },
+        },
+      },
+    };
+    const merged = mergeMcpConfig(base, null, TASK_ID);
+    const agentSwarm = merged.mcpServers["agent-swarm"] as Record<string, unknown>;
+    const headers = agentSwarm.headers as Record<string, string>;
+    expect(headers["X-Source-Task-Id"]).toBe(TASK_ID);
+    // Existing headers preserved
+    expect(headers.Authorization).toBe("Bearer KEY");
+    expect(headers["X-Agent-ID"]).toBe("a1");
+  });
+
+  test("X-Source-Task-Id injection works on entry discovered by X-Agent-ID header", () => {
+    // Discovery path for non-standard server names.
+    const base = {
+      mcpServers: {
+        "custom-name-swarm": {
+          type: "http",
+          url: "http://localhost:3013/mcp",
+          headers: { Authorization: "Bearer KEY", "X-Agent-ID": "a1" },
+        },
+      },
+    };
+    const merged = mergeMcpConfig(base, null, TASK_ID);
+    const entry = merged.mcpServers["custom-name-swarm"] as Record<string, unknown>;
+    expect((entry.headers as Record<string, string>)["X-Source-Task-Id"]).toBe(TASK_ID);
+  });
+
+  test("does not mutate the input baseConfig", () => {
+    const base = {
+      mcpServers: {
+        stripe: {
+          type: "http",
+          url: "https://mcp.stripe.com",
+          headers: { Authorization: "Bearer STALE" },
+        },
+      },
+    };
+    const installed = {
+      stripe: {
+        type: "http",
+        url: "https://mcp.stripe.com",
+        headers: { Authorization: "Bearer FRESH" },
+      },
+    };
+    mergeMcpConfig(base, installed, TASK_ID);
+    // Original object should be untouched
+    expect((base.mcpServers.stripe.headers as Record<string, string>).Authorization).toBe(
+      "Bearer STALE",
+    );
+  });
+
+  test("empty base + empty installed yields empty mcpServers", () => {
+    const merged = mergeMcpConfig({ mcpServers: {} }, {}, TASK_ID);
+    expect(Object.keys(merged.mcpServers)).toHaveLength(0);
   });
 });
 

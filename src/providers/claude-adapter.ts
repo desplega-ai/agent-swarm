@@ -107,6 +107,52 @@ async function fetchInstalledMcpServers(
 }
 
 /**
+ * Merge a base MCP config (typically read from `.mcp.json`) with freshly-resolved
+ * installed servers from the API, and inject the per-task `X-Source-Task-Id` header
+ * into the `agent-swarm` entry.
+ *
+ * Precedence: installed servers from the API WIN over entries already in `.mcp.json`.
+ * This guards against stale credentials from a `.mcp.json` that was written once at
+ * container startup and never refreshed (see issue #369). The per-session fetch
+ * carries current OAuth tokens / rotated secrets / up-to-date installs.
+ *
+ * Exported for unit testing.
+ */
+export function mergeMcpConfig(
+  baseConfig: { mcpServers?: Record<string, unknown> } | null,
+  installedServers: Record<string, Record<string, unknown>> | null,
+  taskId: string,
+): { mcpServers: Record<string, unknown> } {
+  const config: { mcpServers: Record<string, unknown> } = {
+    mcpServers: { ...(baseConfig?.mcpServers ?? {}) },
+  };
+
+  // Installed servers from the API always win — fresh credentials replace stale ones.
+  if (installedServers) {
+    for (const [name, serverConfig] of Object.entries(installedServers)) {
+      config.mcpServers[name] = serverConfig;
+    }
+  }
+
+  // Find the agent-swarm server entry (could be named "agent-swarm" or similar)
+  const serverKey = Object.keys(config.mcpServers).find(
+    (k) =>
+      k === "agent-swarm" ||
+      ((config.mcpServers[k] as Record<string, unknown>)?.headers &&
+        ((config.mcpServers[k] as Record<string, Record<string, unknown>>).headers?.[
+          "X-Agent-ID"
+        ] as unknown)),
+  );
+  if (serverKey) {
+    const server = config.mcpServers[serverKey] as Record<string, unknown>;
+    if (!server.headers) server.headers = {};
+    (server.headers as Record<string, string>)["X-Source-Task-Id"] = taskId;
+  }
+
+  return config;
+}
+
+/**
  * Create a per-session MCP config file with X-Source-Task-Id header injected
  * and installed MCP servers merged in.
  * Each session gets its own copy to avoid race conditions when multiple concurrent
@@ -138,39 +184,14 @@ async function createSessionMcpConfig(
   if (!mcpJsonPath && !installedServers) return null;
 
   try {
-    let config: { mcpServers?: Record<string, unknown> } = { mcpServers: {} };
+    let baseConfig: { mcpServers?: Record<string, unknown> } = { mcpServers: {} };
     if (mcpJsonPath) {
       const file = Bun.file(mcpJsonPath);
-      config = await file.json();
+      baseConfig = await file.json();
     }
-    const servers = config?.mcpServers;
-    if (!servers && !installedServers) return null;
+    if (!baseConfig?.mcpServers && !installedServers) return null;
 
-    if (!config.mcpServers) config.mcpServers = {};
-
-    // Find the agent-swarm server entry (could be named "agent-swarm" or similar)
-    const serverKey = Object.keys(config.mcpServers).find(
-      (k) =>
-        k === "agent-swarm" ||
-        ((config.mcpServers![k] as Record<string, unknown>)?.headers &&
-          ((config.mcpServers![k] as Record<string, Record<string, unknown>>).headers?.[
-            "X-Agent-ID"
-          ] as unknown)),
-    );
-    if (serverKey) {
-      const server = config.mcpServers[serverKey] as Record<string, unknown>;
-      if (!server.headers) server.headers = {};
-      (server.headers as Record<string, string>)["X-Source-Task-Id"] = taskId;
-    }
-
-    // Merge installed MCP servers (don't overwrite existing entries)
-    if (installedServers) {
-      for (const [name, serverConfig] of Object.entries(installedServers)) {
-        if (!config.mcpServers[name]) {
-          config.mcpServers[name] = serverConfig;
-        }
-      }
-    }
+    const config = mergeMcpConfig(baseConfig, installedServers ?? null, taskId);
 
     // Write per-session config to /tmp — no race, each session has its own file
     const sessionConfigPath = `/tmp/mcp-${taskId}.json`;
