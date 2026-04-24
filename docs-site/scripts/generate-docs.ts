@@ -76,6 +76,35 @@ if (existsSync(outputDir)) {
   }
 }
 
+// --- Tag descriptions for SEO ---
+
+const tagDescriptions: Record<string, string> = {
+  "Active Sessions": "Query and manage active agent sessions — heartbeat data, context usage, and live session state",
+  "Agents": "CRUD operations for agent profiles — create, update, configure, and manage swarm agents",
+  "API Keys": "Manage access credentials — generate, rotate, and revoke API keys for agent authentication",
+  "ApprovalRequests": "Human-in-the-loop workflow API — create approval requests and handle human decisions",
+  "Config": "System configuration management — read and update swarm-wide and per-agent configuration",
+  "Debug": "Debug endpoints and database inspection — SQL query interface and system diagnostics",
+  "Ecosystem": "MCP server management — register, list, and manage Model Context Protocol services",
+  "Events": "Event stream endpoints — real-time updates via SSE for task and agent events",
+  "Health": "Health check endpoints for monitoring and service discovery",
+  "Inbox": "Message inbox operations — retrieve and manage incoming messages for agents",
+  "Linear": "Linear integration API — bidirectional sync between Agent Swarm and Linear issues",
+  "Memories": "Agent memory management — persistent learning storage and recall queries",
+  "Messages": "Inter-agent communication — send and receive messages within the swarm",
+  "Migrations": "Database migration control — run and manage schema migrations",
+  "Schedules": "Scheduled task management — create cron, interval, and delayed tasks",
+  "Services": "Service discovery and registration — HTTP service endpoints for inter-agent communication",
+  "Sessions": "Session lifecycle management — create, pause, resume, and terminate agent sessions",
+  "Skills": "Skill system API — create, install, publish, and manage reusable agent skills",
+  "Studies": "Persistent study/task management — long-running research and analysis tasks",
+  "System": "System-level operations — configuration, state, and maintenance endpoints",
+  "Tasks": "Task management core API — create, update, delegate, and monitor tasks",
+  "Tracker Links": "External tracker integration — link tasks to Linear, GitHub, and other issue trackers",
+  "User": "User registry and identity resolution — manage users across Slack, GitHub, GitLab platforms",
+  "Workflows": "Workflow orchestration API — create, trigger, and manage DAG-based automation",
+};
+
 // --- Generate index page ---
 
 const totalOps = [...tagGroups.values()].reduce((sum, ops) => sum + ops.length, 0);
@@ -114,10 +143,11 @@ for (const tag of sortedTags) {
   const slug = slugify(tag);
   const ops = tagGroups.get(tag)!;
   const opsJson = JSON.stringify(ops.map((o) => ({ path: o.path, method: o.method })));
+  const description = tagDescriptions[tag] ?? `${tag} API reference endpoints`;
 
   const tagMdx = `---
 title: "${tag}"
-description: "${tag} API endpoints"
+description: "${description}"
 full: true
 ---
 
