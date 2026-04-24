@@ -40,6 +40,9 @@ const DEFAULT_ACU_COST_USD = 2.25;
 /** Give up after this many consecutive poll failures. */
 const MAX_CONSECUTIVE_POLL_ERRORS = 10;
 
+/** Max time to wait for a human approval response before giving up. */
+const APPROVAL_TIMEOUT_MS = 60 * 60 * 1_000; // 1 hour
+
 /**
  * Structured output schema sent with every Devin session.
  *
@@ -100,7 +103,6 @@ class DevinSession implements ProviderSession {
   private lastStatusDetail: DevinStatusDetail | undefined;
   private lastStructuredOutput: string | undefined;
   private seenPrUrls = new Set<string>();
-  private seenMessageIds = new Set<string>();
   private approvalRequested = false;
   private consecutivePollErrors = 0;
   private humanResponseTimer: ReturnType<typeof setInterval> | null = null;
@@ -220,7 +222,10 @@ class DevinSession implements ProviderSession {
     this.settled = true;
     this.stopPolling();
     try {
-      this.logFileHandle.end();
+      const flushed = this.logFileHandle.flush();
+      (flushed instanceof Promise ? flushed : Promise.resolve(flushed))
+        .then(() => this.logFileHandle.end())
+        .catch(() => {});
     } catch {
       // Ignore log writer cleanup failures.
     }
@@ -355,8 +360,6 @@ class DevinSession implements ProviderSession {
         this.messageCursor = resp.end_cursor;
       }
       for (const msg of resp.items) {
-        if (this.seenMessageIds.has(msg.event_id)) continue;
-        this.seenMessageIds.add(msg.event_id);
         const role = msg.source === "devin" ? "assistant" : "user";
         this.emit({
           type: "raw_log",
@@ -622,9 +625,26 @@ class DevinSession implements ProviderSession {
     // Clear any previous human-response timer before starting a new one.
     if (this.humanResponseTimer) clearInterval(this.humanResponseTimer);
 
+    const approvalStart = Date.now();
+
     // Simple polling loop — check every poll interval for a human response.
     this.humanResponseTimer = setInterval(async () => {
       if (this.settled || this.aborted) {
+        if (this.humanResponseTimer) {
+          clearInterval(this.humanResponseTimer);
+          this.humanResponseTimer = null;
+        }
+        return;
+      }
+
+      // Give up after APPROVAL_TIMEOUT_MS to avoid leaking timers on
+      // abandoned approval flows. Devin's own inactivity timeout will
+      // eventually suspend the session, which the main poll loop handles.
+      if (Date.now() - approvalStart > APPROVAL_TIMEOUT_MS) {
+        this.emit({
+          type: "raw_stderr",
+          content: `[devin] Approval polling timed out after ${APPROVAL_TIMEOUT_MS / 60_000} minutes\n`,
+        });
         if (this.humanResponseTimer) {
           clearInterval(this.humanResponseTimer);
           this.humanResponseTimer = null;
