@@ -243,7 +243,11 @@ export async function handleMcpServers(
             try {
               const token = await ensureMcpToken(server.id);
               if (token && token.status === "connected") {
-                const prefix = token.tokenType || "Bearer";
+                // Normalize the bearer scheme to capital "Bearer": some resource
+                // servers reject the lowercase "bearer" RFC 6749 returns (issue #368).
+                // Non-bearer schemes (e.g. "MAC") are preserved verbatim.
+                const rawType = token.tokenType || "Bearer";
+                const prefix = rawType.toLowerCase() === "bearer" ? "Bearer" : rawType;
                 resolvedHeaders.Authorization = `${prefix} ${token.accessToken}`;
               } else if (!token) {
                 authError = "No OAuth token for this MCP server";
