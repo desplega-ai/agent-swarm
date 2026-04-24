@@ -1201,21 +1201,28 @@ class ApiClient {
   }
 
   /**
-   * Build the URL for kicking off the OAuth authorize flow. The browser must
-   * navigate to this URL directly (not via fetch) because the endpoint 302s to
-   * the external provider.
+   * Fetch the OAuth provider URL for an MCP server. The caller then navigates
+   * the browser to `providerUrl`.
+   *
+   * Using a separate authed endpoint (instead of navigating straight to
+   * `/api/mcp-oauth/:id/authorize`) keeps the Bearer auth header on the API
+   * call and lets the browser redirect freely to the external OAuth provider.
    */
-  mcpOAuthAuthorizeUrl(
+  async fetchMcpOAuthAuthorizeUrl(
     mcpServerId: string,
     options?: { redirect?: string; scopes?: string },
-  ): string {
-    const config = getConfig();
-    const apiBase = config.apiUrl?.replace(/\/+$/, "") ?? "";
+  ): Promise<{ providerUrl: string }> {
     const params = new URLSearchParams();
     if (options?.redirect) params.set("redirect", options.redirect);
     if (options?.scopes) params.set("scopes", options.scopes);
     const qs = params.toString();
-    return `${apiBase}/api/mcp-oauth/${mcpServerId}/authorize${qs ? `?${qs}` : ""}`;
+    const url = `${this.getBaseUrl()}/api/mcp-oauth/${mcpServerId}/authorize-url${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to start OAuth flow" }));
+      throw new Error(err.error || `Failed to start OAuth flow: ${res.status}`);
+    }
+    return res.json();
   }
 
   async refreshMcpOAuthToken(

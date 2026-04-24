@@ -16,7 +16,27 @@ import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
-import { agentWithCapacity, parseQueryParams } from "./utils";
+import { routeRegistry } from "./route-def";
+import { agentWithCapacity, getPathSegments, matchRoute, parseQueryParams } from "./utils";
+
+/**
+ * Check whether a request targets a route declared (via the `route()` factory)
+ * with `auth: { apiKey: false }` — i.e. one that opts out of the API-key
+ * bearer check. Handler files must use the `route()` factory for this to take
+ * effect; unknown paths fail closed (auth required).
+ */
+function isPublicRoute(method: string | undefined, pathSegments: string[]): boolean {
+  for (const def of routeRegistry) {
+    if (def.auth?.apiKey === false) {
+      if (
+        matchRoute(method, pathSegments, def.method.toUpperCase(), def.pattern, def.exact ?? true)
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 /**
  * Load global swarm_config entries into process.env.
@@ -121,31 +141,21 @@ export async function handleCore(
     return true;
   }
 
-  // API key authentication (if API_KEY is configured)
-  // Skip auth for webhooks (they have their own signature verification)
-  const isGitHubWebhook = req.url?.startsWith("/api/github/webhook");
-  const isGitLabWebhook = req.url?.startsWith("/api/gitlab/webhook");
-  const isAgentMailWebhook = req.url?.startsWith("/api/agentmail/webhook");
-  const isTrackerAuth =
-    req.url?.startsWith("/api/trackers/linear/authorize") ||
-    req.url?.startsWith("/api/trackers/linear/callback") ||
-    req.url?.startsWith("/api/trackers/linear/webhook");
-  const isWorkflowWebhook = req.url?.startsWith("/api/webhooks/");
-  if (
-    apiKey &&
-    !isGitHubWebhook &&
-    !isGitLabWebhook &&
-    !isAgentMailWebhook &&
-    !isTrackerAuth &&
-    !isWorkflowWebhook
-  ) {
-    const authHeader = req.headers.authorization;
-    const providedKey = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  // API-key authentication (if API_KEY is configured). Routes that opt out via
+  // `route({ auth: { apiKey: false } })` — webhooks, OAuth provider callbacks,
+  // etc. — are skipped based on the central `routeRegistry`. Unknown paths
+  // fall through to the bearer check (fail-closed).
+  if (apiKey) {
+    const pathSegments = getPathSegments(req.url || "");
+    if (!isPublicRoute(req.method, pathSegments)) {
+      const authHeader = req.headers.authorization;
+      const providedKey = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
-    if (providedKey !== apiKey) {
-      res.writeHead(401, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Unauthorized" }));
-      return true;
+      if (providedKey !== apiKey) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Unauthorized" }));
+        return true;
+      }
     }
   }
 

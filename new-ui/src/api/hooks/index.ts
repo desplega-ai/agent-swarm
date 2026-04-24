@@ -31,6 +31,7 @@ export {
   useMcpOAuthStatus,
   useRefreshMcpOAuth,
   useRegisterMcpOAuthManualClient,
+  useStartMcpOAuthConnect,
 } from "./use-mcp-oauth";
 export type { McpServerFilters } from "./use-mcp-servers";
 export {

@@ -19,6 +19,18 @@ export function useMcpOAuthMetadata(mcpServerId: string, enabled = true) {
   });
 }
 
+export function useStartMcpOAuthConnect() {
+  return useMutation({
+    mutationFn: ({
+      mcpServerId,
+      options,
+    }: {
+      mcpServerId: string;
+      options?: { redirect?: string; scopes?: string };
+    }) => api.fetchMcpOAuthAuthorizeUrl(mcpServerId, options),
+  });
+}
+
 export function useRefreshMcpOAuth() {
   const queryClient = useQueryClient();
   return useMutation({
