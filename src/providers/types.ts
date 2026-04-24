@@ -19,11 +19,11 @@ import type { ProviderName } from "../types";
 /** Normalized event emitted by any provider adapter. */
 export type ProviderEvent =
   | {
-      type: "session_init";
-      sessionId: string;
-      provider?: ProviderName;
-      providerMeta?: Record<string, unknown>;
-    }
+    type: "session_init";
+    sessionId: string;
+    provider?: ProviderName;
+    providerMeta?: Record<string, unknown>;
+  }
   | { type: "message"; role: "assistant" | "user"; content: string }
   | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }
   | { type: "tool_end"; toolCallId: string; toolName: string; result: unknown }
@@ -34,18 +34,18 @@ export type ProviderEvent =
   | { type: "progress"; message: string }
   | { type: "custom"; name: string; data: unknown }
   | {
-      type: "context_usage";
-      contextUsedTokens: number;
-      contextTotalTokens: number;
-      contextPercent: number;
-      outputTokens: number;
-    }
+    type: "context_usage";
+    contextUsedTokens: number;
+    contextTotalTokens: number;
+    contextPercent: number;
+    outputTokens: number;
+  }
   | {
-      type: "compaction";
-      preCompactTokens: number;
-      compactTrigger: "auto" | "manual";
-      contextTotalTokens: number;
-    };
+    type: "compaction";
+    preCompactTokens: number;
+    compactTrigger: "auto" | "manual";
+    contextTotalTokens: number;
+  };
 
 /** Configuration passed to a provider adapter to create a session. */
 export interface ProviderSessionConfig {
@@ -58,6 +58,7 @@ export interface ProviderSessionConfig {
   apiUrl: string;
   apiKey: string;
   cwd: string;
+  vcsRepo?: string;
   resumeSessionId?: string;
   iteration?: number;
   logFile: string;

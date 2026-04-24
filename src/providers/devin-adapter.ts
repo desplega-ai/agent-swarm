@@ -814,16 +814,10 @@ export class DevinAdapter implements ProviderAdapter {
       }
     }
 
-    // Build repos array from env.
+    // Build repos array from the task's vcsRepo (e.g. "owner/repo").
     const repos: string[] = [];
-    const devinRepos = env.DEVIN_REPOS ?? process.env.DEVIN_REPOS;
-    if (devinRepos) {
-      repos.push(
-        ...devinRepos
-          .split(",")
-          .map((r) => r.trim())
-          .filter(Boolean),
-      );
+    if (config.vcsRepo) {
+      repos.push(config.vcsRepo);
     }
     // Inline skill content if prompt starts with @skills:<name>.
     const resolvedPrompt = await resolveDevinPrompt(config.prompt);
