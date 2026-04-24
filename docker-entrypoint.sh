@@ -361,34 +361,27 @@ if [ -n "$AGENTMAIL_API_KEY" ]; then
 fi
 
 # === Installed MCP servers (from API) ===
+# NOTE (issue #369): we intentionally do NOT bake resolved credentials (OAuth Bearers,
+# env secrets, static headers) into /workspace/.mcp.json. The per-session dispatcher
+# in src/providers/claude-adapter.ts re-fetches the installed server list on every
+# session start and injects fresh credentials into a per-session MCP config via
+# --mcp-config + --strict-mcp-config. Baking credentials here made OAuth re-auth,
+# secret rotation, and install/uninstall silently fail to propagate until the
+# worker was restarted. We still fetch the list at startup so we can pre-register
+# permission patterns (mcp__<name>__*) in settings.json — that is not secret.
 MCP_SERVERS_RESPONSE=""
 SERVER_COUNT=0
 if [ -n "$AGENT_ID" ] && [ -n "$API_KEY" ]; then
-  echo "Fetching installed MCP servers..."
+  echo "Fetching installed MCP server names (for permission patterns only)..."
+  # resolveSecrets=false: we only need names at entrypoint time; credentials are
+  # resolved per-session by the dispatcher.
   MCP_SERVERS_RESPONSE=$(curl -sf -H "Authorization: Bearer $API_KEY" \
-    "${MCP_URL}/api/agents/${AGENT_ID}/mcp-servers?resolveSecrets=true" 2>/dev/null) || true
+    "${MCP_URL}/api/agents/${AGENT_ID}/mcp-servers?resolveSecrets=false" 2>/dev/null) || true
 
   if [ -n "$MCP_SERVERS_RESPONSE" ]; then
     SERVER_COUNT=$(echo "$MCP_SERVERS_RESPONSE" | jq '.servers | length' 2>/dev/null || echo "0")
     if [ "$SERVER_COUNT" -gt 0 ]; then
-      echo "Merging $SERVER_COUNT installed MCP server(s) into .mcp.json"
-      MCP_JSON=$(echo "$MCP_SERVERS_RESPONSE" | jq --argjson base "$MCP_JSON" '
-        reduce .servers[] as $srv ($base;
-          if $srv.transport == "stdio" then
-            .mcpServers[$srv.name] = {
-              command: $srv.command,
-              args: (if $srv.args then ($srv.args | fromjson) else [] end),
-              env: ($srv.resolvedEnv // {})
-            }
-          elif ($srv.transport == "http" or $srv.transport == "sse") then
-            .mcpServers[$srv.name] = {
-              type: $srv.transport,
-              url: $srv.url,
-              headers: ((if $srv.headers then ($srv.headers | fromjson) else {} end) * ($srv.resolvedHeaders // {}))
-            }
-          else . end
-        )
-      ')
+      echo "Found $SERVER_COUNT installed MCP server(s) — will be injected per-session, not baked into .mcp.json"
     fi
   fi
 fi
