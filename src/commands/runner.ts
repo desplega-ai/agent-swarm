@@ -1383,6 +1383,7 @@ async function buildPromptForTrigger(
   trigger: Trigger,
   defaultPrompt: string,
   fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
+  options?: { hasMcp?: boolean },
 ): Promise<string> {
   switch (trigger.type) {
     case "task_assigned": {
@@ -1393,10 +1394,14 @@ async function buildPromptForTrigger(
           : null;
       const taskDescSection = taskDesc ? `\n\nTask: "${taskDesc}"` : "";
 
-      // Build output instructions — use outputSchema if present, otherwise generic
+      // Build output instructions — use outputSchema if present, otherwise generic.
+      // Skip store-progress references for providers without MCP (e.g. Devin).
       const taskObj = trigger.task as Record<string, unknown> | undefined;
       let outputInstructions: string;
-      if (taskObj?.outputSchema && typeof taskObj.outputSchema === "object") {
+      const hasMcp = options?.hasMcp !== false;
+      if (!hasMcp) {
+        outputInstructions = "";
+      } else if (taskObj?.outputSchema && typeof taskObj.outputSchema === "object") {
         outputInstructions = `\n\n**Required Output Format**: When completing this task, you MUST call store-progress with output that is valid JSON conforming to this schema:\n\`\`\`json\n${JSON.stringify(taskObj.outputSchema, null, 2)}\n\`\`\`\nCall store-progress with status "completed" and your JSON output. If your output doesn't match the schema, the tool call will fail and you should fix and retry.`;
       } else {
         outputInstructions =
@@ -3034,6 +3039,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             trigger,
             prompt,
             adapter.formatCommand.bind(adapter),
+            { hasMcp: adapter.traits.hasMcp },
           );
 
           // Enrich prompt with relevant memories from past sessions

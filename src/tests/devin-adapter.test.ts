@@ -184,7 +184,6 @@ beforeAll(async () => {
     "DEVIN_ACU_COST_USD",
     "DEVIN_API_BASE_URL",
     "DEVIN_REPOS",
-    "DEVIN_SKILLS_REPO",
   ]) {
     savedEnv[key] = process.env[key];
   }
@@ -329,23 +328,17 @@ describe("DevinAdapter.createSession — playbook creation", () => {
 });
 
 describe("DevinAdapter.createSession — repos", () => {
-  test("DEVIN_REPOS and DEVIN_SKILLS_REPO are passed to session creation", async () => {
+  test("DEVIN_REPOS are passed to session creation", async () => {
     process.env.DEVIN_REPOS = "owner/repo1, owner/repo2";
-    process.env.DEVIN_SKILLS_REPO = "owner/skills-repo";
     pollResponse.status = "exit";
     pollResponse.status_detail = "finished";
 
     const adapter = new DevinAdapter();
     await runUntilSettled(adapter, testConfig());
 
-    expect(lastCreateSessionBody!.repos).toEqual([
-      "owner/repo1",
-      "owner/repo2",
-      "owner/skills-repo",
-    ]);
+    expect(lastCreateSessionBody!.repos).toEqual(["owner/repo1", "owner/repo2"]);
 
     delete process.env.DEVIN_REPOS;
-    delete process.env.DEVIN_SKILLS_REPO;
   });
 });
 

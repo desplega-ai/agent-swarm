@@ -21,6 +21,7 @@ import {
   sendMessage,
 } from "./devin-api";
 import { getOrCreatePlaybook } from "./devin-playbooks";
+import { resolveDevinPrompt } from "./devin-skill-resolver";
 import type {
   CostData,
   ProviderAdapter,
@@ -369,7 +370,7 @@ class DevinSession implements ProviderSession {
   // -------------------------------------------------------------------------
 
   private processStatus(response: DevinSessionResponse, statusChanged: boolean): void {
-    const { status, status_detail } = response;
+    const { status } = response;
 
     switch (status) {
       case "new":
@@ -407,6 +408,15 @@ class DevinSession implements ProviderSession {
   private processRunningStatus(response: DevinSessionResponse, statusChanged: boolean): void {
     const detail = response.status_detail;
 
+    // Check structured output completion before examining status_detail.
+    // Devin may set structured output `status: "done"` while still in any
+    // running sub-state (working, waiting_for_user, etc.) — the structured
+    // output is the authoritative completion signal.
+    if (this.isStructuredOutputDone(response)) {
+      this.handleTerminalSuccess(response);
+      return;
+    }
+
     switch (detail) {
       case "working": {
         if (statusChanged) {
@@ -417,15 +427,6 @@ class DevinSession implements ProviderSession {
       }
 
       case "waiting_for_user": {
-        // Check if structured output signals task completion. Devin often
-        // stays in `waiting_for_user` after finishing work instead of
-        // transitioning to `finished`. If the structured output has
-        // `status: "done"`, treat this as a successful completion.
-        if (this.isStructuredOutputDone(response)) {
-          this.handleTerminalSuccess(response);
-          return;
-        }
-
         if (statusChanged) {
           this.emit({ type: "progress", message: "Devin: waiting for user" });
           this.emitSystemLog("status", {
@@ -793,14 +794,12 @@ export class DevinAdapter implements ProviderAdapter {
           .filter(Boolean),
       );
     }
-    const skillsRepo = env.DEVIN_SKILLS_REPO ?? process.env.DEVIN_SKILLS_REPO;
-    if (skillsRepo) {
-      repos.push(skillsRepo.trim());
-    }
+    // Inline skill content if prompt starts with @skills:<name>.
+    const resolvedPrompt = await resolveDevinPrompt(config.prompt);
 
     // Create the Devin session.
     const sessionResponse = await createSession(orgId, devinApiKey, {
-      prompt: config.prompt,
+      prompt: resolvedPrompt,
       ...(playbookId ? { playbook_id: playbookId } : {}),
       ...(repos.length > 0 ? { repos } : {}),
       structured_output_schema: DEVIN_STRUCTURED_OUTPUT_SCHEMA,
