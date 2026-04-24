@@ -816,21 +816,28 @@ async function resumeTaskViaAPI(config: ApiConfig, taskId: string): Promise<bool
 async function buildResumePrompt(
   task: { id: string; task: string; progress?: string },
   fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
+  options?: { hasMcp?: boolean },
 ): Promise<string> {
+  const hasMcp = options?.hasMcp !== false;
+  const completionInstructions = hasMcp
+    ? '\n\nWhen done, use `store-progress` with status: "completed" and include your output.'
+    : "";
   if (task.progress) {
     const result = await resolveTemplateAsync("task.resumption.with_progress", {
-      work_on_task_cmd: fmt("work-on-task"),
-      task_id: task.id,
+      work_on_task_cmd: hasMcp ? fmt("work-on-task") : "",
+      task_id: hasMcp ? task.id : "",
       task_description: task.task,
       progress: task.progress,
+      completion_instructions: completionInstructions,
     });
     return result.text;
   }
 
   const result = await resolveTemplateAsync("task.resumption.no_progress", {
-    work_on_task_cmd: fmt("work-on-task"),
-    task_id: task.id,
+    work_on_task_cmd: hasMcp ? fmt("work-on-task") : "",
+    task_id: hasMcp ? task.id : "",
     task_description: task.task,
+    completion_instructions: completionInstructions,
   });
   return result.text;
 }
@@ -1385,6 +1392,7 @@ async function buildPromptForTrigger(
   fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
   options?: { hasMcp?: boolean },
 ): Promise<string> {
+  const hasMcp = options?.hasMcp !== false;
   switch (trigger.type) {
     case "task_assigned": {
       // Use the work-on-task command with task ID and description
@@ -1398,7 +1406,6 @@ async function buildPromptForTrigger(
       // Skip store-progress references for providers without MCP (e.g. Devin).
       const taskObj = trigger.task as Record<string, unknown> | undefined;
       let outputInstructions: string;
-      const hasMcp = options?.hasMcp !== false;
       if (!hasMcp) {
         outputInstructions = "";
       } else if (taskObj?.outputSchema && typeof taskObj.outputSchema === "object") {
@@ -1415,8 +1422,8 @@ async function buildPromptForTrigger(
         : "";
 
       const result = await resolveTemplateAsync("task.trigger.assigned", {
-        work_on_task_cmd: fmt("work-on-task"),
-        task_id: trigger.taskId,
+        work_on_task_cmd: hasMcp ? fmt("work-on-task") : "",
+        task_id: hasMcp ? trigger.taskId : "",
         task_desc_section: taskDescSection + requestedBySection,
         output_instructions: outputInstructions,
       });
@@ -1431,13 +1438,16 @@ async function buildPromptForTrigger(
           : null;
       const taskDescSection = taskDesc ? `\n\nA task has been offered to you:\n"${taskDesc}"` : "";
       const result = await resolveTemplateAsync("task.trigger.offered", {
-        review_offered_task_cmd: fmt("review-offered-task"),
-        task_id: trigger.taskId,
+        review_offered_task_cmd: hasMcp ? fmt("review-offered-task") : "",
+        task_id: hasMcp ? trigger.taskId : "",
         task_desc_section: taskDescSection,
       });
       return result.text;
     }
 
+    // NOTE: unread_mentions, pool_tasks_available, and channel_activity triggers
+    // reference MCP tools (read-messages, get-tasks, task-action, slack-reply, etc.)
+    // and are not currently fired for providers without MCP (e.g. Devin).
     case "unread_mentions": {
       const result = await resolveTemplateAsync("task.trigger.unread_mentions", {
         mention_count: trigger.count || "unread",
@@ -2792,7 +2802,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
 
           // Build prompt with resume context + memory injection
-          let resumePrompt = await buildResumePrompt(task, adapter.formatCommand.bind(adapter));
+          let resumePrompt = await buildResumePrompt(task, adapter.formatCommand.bind(adapter), {
+            hasMcp: adapter.traits.hasMcp,
+          });
 
           // Inject relevant memories for resumed tasks
           const resumeMemoryContext = await fetchRelevantMemories(
