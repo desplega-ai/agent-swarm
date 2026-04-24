@@ -31,6 +31,7 @@ export type ProviderEvent =
   | { type: "error"; message: string; category?: string }
   | { type: "raw_log"; content: string }
   | { type: "raw_stderr"; content: string }
+  | { type: "progress"; message: string }
   | { type: "custom"; name: string; data: unknown }
   | {
       type: "context_usage";

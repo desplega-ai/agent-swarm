@@ -39,6 +39,35 @@ const DEFAULT_ACU_COST_USD = 2.25;
 /** Give up after this many consecutive poll failures. */
 const MAX_CONSECUTIVE_POLL_ERRORS = 10;
 
+/**
+ * Structured output schema sent with every Devin session.
+ *
+ * Devin treats this as a "notepad" it fills as it works. The `status` field
+ * lets us detect completion even when Devin stays in `waiting_for_user`
+ * instead of transitioning to `finished`. The adapter checks for
+ * `status === "done"` in the `waiting_for_user` handler.
+ */
+const DEVIN_STRUCTURED_OUTPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    status: {
+      type: "string",
+      enum: ["working", "done", "needs_input", "error"],
+      description:
+        "Set to 'done' when the task is fully complete, 'needs_input' when you need clarification, 'error' if the task cannot be completed.",
+    },
+    output: {
+      type: "string",
+      description: "The final output or result of the task.",
+    },
+    summary: {
+      type: "string",
+      description: "A brief summary of what was accomplished.",
+    },
+  },
+  required: ["status"],
+} as const;
+
 // ---------------------------------------------------------------------------
 // DevinSession
 // ---------------------------------------------------------------------------
@@ -245,8 +274,17 @@ class DevinSession implements ProviderSession {
     // Reset on successful poll.
     this.consecutivePollErrors = 0;
 
-    // Always emit raw poll data for debugging.
-    this.emit({ type: "raw_log", content: JSON.stringify(response) });
+    // Log raw poll data to local JSONL file for debugging, but don't emit
+    // as raw_log — the session log viewer can't parse the Devin API shape
+    // and silently drops it. Conversation messages are emitted separately
+    // in pollMessages() in a format the viewer understands.
+    try {
+      this.logFileHandle.write(
+        `${JSON.stringify({ type: "raw_log", content: JSON.stringify(response), timestamp: new Date().toISOString() })}\n`,
+      );
+    } catch {
+      // Log writer failure must not break the event stream.
+    }
 
     // Track structured output changes.
     const currentStructuredOutput = response.structured_output
@@ -258,6 +296,12 @@ class DevinSession implements ProviderSession {
         type: "custom",
         name: "devin.structured_output",
         data: { sessionId: this._sessionId, structuredOutput: response.structured_output },
+      });
+      const so = response.structured_output as Record<string, unknown>;
+      this.emitSystemLog("structured_output", {
+        taskStatus: so.status,
+        output: so.output,
+        summary: so.summary,
       });
     }
 
@@ -305,11 +349,15 @@ class DevinSession implements ProviderSession {
       for (const msg of resp.items) {
         if (this.seenMessageIds.has(msg.event_id)) continue;
         this.seenMessageIds.add(msg.event_id);
+        const role = msg.source === "devin" ? "assistant" : "user";
         this.emit({
-          type: "message",
-          role: msg.source === "devin" ? "assistant" : "user",
-          content: msg.message,
+          type: "raw_log",
+          content: JSON.stringify({
+            type: role,
+            message: { role, content: msg.message },
+          }),
         });
+        this.emit({ type: "message", role, content: msg.message });
       }
     } catch {
       // Non-fatal — messages are supplementary to status polling.
@@ -329,11 +377,7 @@ class DevinSession implements ProviderSession {
       case "claimed":
       case "resuming": {
         if (statusChanged) {
-          this.emit({
-            type: "custom",
-            name: "devin.status",
-            data: { sessionId: this._sessionId, status, statusDetail: status_detail },
-          });
+          this.emit({ type: "progress", message: `Devin: ${status}` });
         }
         break;
       }
@@ -366,29 +410,27 @@ class DevinSession implements ProviderSession {
     switch (detail) {
       case "working": {
         if (statusChanged) {
-          this.emit({
-            type: "custom",
-            name: "devin.status",
-            data: {
-              sessionId: this._sessionId,
-              status: "running",
-              statusDetail: "working",
-            },
-          });
+          this.emit({ type: "progress", message: "Devin: working" });
+          this.emitSystemLog("status", { status: "running", statusDetail: "working" });
         }
         break;
       }
 
       case "waiting_for_user": {
+        // Check if structured output signals task completion. Devin often
+        // stays in `waiting_for_user` after finishing work instead of
+        // transitioning to `finished`. If the structured output has
+        // `status: "done"`, treat this as a successful completion.
+        if (this.isStructuredOutputDone(response)) {
+          this.handleTerminalSuccess(response);
+          return;
+        }
+
         if (statusChanged) {
-          this.emit({
-            type: "custom",
-            name: "devin.status",
-            data: {
-              sessionId: this._sessionId,
-              status: "running",
-              statusDetail: "waiting_for_user",
-            },
+          this.emit({ type: "progress", message: "Devin: waiting for user" });
+          this.emitSystemLog("status", {
+            status: "running",
+            statusDetail: "waiting_for_user",
           });
           this.emit({
             type: "message",
@@ -401,10 +443,10 @@ class DevinSession implements ProviderSession {
 
       case "waiting_for_approval": {
         if (statusChanged) {
-          this.emit({
-            type: "custom",
-            name: "devin.approval_needed",
-            data: { sessionId: this._sessionId, sessionUrl: this.sessionUrl },
+          this.emit({ type: "progress", message: "Devin: waiting for approval" });
+          this.emitSystemLog("status", {
+            status: "running",
+            statusDetail: "waiting_for_approval",
           });
         }
         // Request human input via the swarm API (once per approval cycle).
@@ -421,17 +463,8 @@ class DevinSession implements ProviderSession {
       }
 
       default: {
-        // Unknown running sub-status — emit as a generic status event.
         if (statusChanged) {
-          this.emit({
-            type: "custom",
-            name: "devin.status",
-            data: {
-              sessionId: this._sessionId,
-              status: "running",
-              statusDetail: detail,
-            },
-          });
+          this.emit({ type: "progress", message: `Devin: ${detail ?? "unknown"}` });
         }
         break;
       }
@@ -440,9 +473,14 @@ class DevinSession implements ProviderSession {
 
   private handleTerminalSuccess(response: DevinSessionResponse): void {
     const acusConsumed = response.acus_consumed ?? 0;
-    const output = this.lastStructuredOutput ?? undefined;
+    const output = this.formatStructuredOutput();
     const cost = this.buildCostData(acusConsumed, false);
 
+    this.emitSystemLog("status", {
+      status: "completed",
+      acusConsumed,
+      sessionUrl: this.sessionUrl,
+    });
     this.emit({
       type: "message",
       role: "assistant",
@@ -463,6 +501,11 @@ class DevinSession implements ProviderSession {
     const cost = this.buildCostData(acusConsumed, true);
     const message = `Devin session ended with error. ACUs consumed: ${acusConsumed}. Session: ${this.sessionUrl}`;
 
+    this.emitSystemLog("status", {
+      status: "error",
+      acusConsumed,
+      sessionUrl: this.sessionUrl,
+    });
     this.emit({ type: "error", message });
     this.emit({ type: "result", cost, isError: true, errorCategory: "devin_error" });
     this.settle({
@@ -477,95 +520,44 @@ class DevinSession implements ProviderSession {
   private handleSuspended(response: DevinSessionResponse): void {
     const acusConsumed = response.acus_consumed ?? 0;
     const detail = response.status_detail;
+    const cost = this.buildCostData(acusConsumed, true);
 
-    switch (detail) {
-      case "inactivity": {
-        const cost = this.buildCostData(acusConsumed, true);
-        this.emit({
-          type: "message",
-          role: "assistant",
-          content: `Devin session suspended due to inactivity. Session: ${this.sessionUrl}`,
-        });
-        this.emit({
-          type: "result",
-          cost,
-          isError: true,
-          errorCategory: "suspended_inactivity",
-        });
-        this.settle({
-          exitCode: 1,
-          sessionId: this._sessionId,
-          cost,
-          isError: true,
-          errorCategory: "suspended_inactivity",
-          failureReason: "Devin session suspended due to inactivity",
-        });
-        break;
-      }
+    const categoryMap: Record<string, string> = {
+      inactivity: "suspended_inactivity",
+      user_request: "suspended_user",
+      usage_limit_exceeded: "suspended_cost",
+      out_of_credits: "suspended_cost",
+      out_of_quota: "suspended_cost",
+      no_quota_allocation: "suspended_cost",
+      payment_declined: "suspended_cost",
+      org_usage_limit_exceeded: "suspended_cost",
+      error: "suspended_cost",
+    };
 
-      case "user_request": {
-        const cost = this.buildCostData(acusConsumed, true);
-        this.emit({
-          type: "result",
-          cost,
-          isError: true,
-          errorCategory: "suspended_user",
-        });
-        this.settle({
-          exitCode: 1,
-          sessionId: this._sessionId,
-          cost,
-          isError: true,
-          errorCategory: "suspended_user",
-          failureReason: "Devin session suspended by user request",
-        });
-        break;
-      }
+    const errorCategory = categoryMap[detail ?? ""] ?? "suspended";
+    const reason = `Devin session suspended${detail ? `: ${detail.replaceAll("_", " ")}` : ""}`;
 
-      case "usage_limit_exceeded":
-      case "out_of_credits":
-      case "out_of_quota":
-      case "no_quota_allocation":
-      case "payment_declined":
-      case "org_usage_limit_exceeded":
-      case "error": {
-        const cost = this.buildCostData(acusConsumed, true);
-        const reason = `Devin session suspended: ${detail!.replaceAll("_", " ")}`;
-        this.emit({ type: "error", message: reason });
-        this.emit({
-          type: "result",
-          cost,
-          isError: true,
-          errorCategory: "suspended_cost",
-        });
-        this.settle({
-          exitCode: 1,
-          sessionId: this._sessionId,
-          cost,
-          isError: true,
-          errorCategory: "suspended_cost",
-          failureReason: reason,
-        });
-        break;
-      }
-
-      default: {
-        // Unknown suspended reason — treat as error.
-        const cost = this.buildCostData(acusConsumed, true);
-        const reason = `Devin session suspended: ${detail ?? "unknown reason"}`;
-        this.emit({ type: "error", message: reason });
-        this.emit({ type: "result", cost, isError: true, errorCategory: "suspended" });
-        this.settle({
-          exitCode: 1,
-          sessionId: this._sessionId,
-          cost,
-          isError: true,
-          errorCategory: "suspended",
-          failureReason: reason,
-        });
-        break;
-      }
+    if (detail === "inactivity") {
+      this.emit({
+        type: "message",
+        role: "assistant",
+        content: `Devin session suspended due to inactivity. Session: ${this.sessionUrl}`,
+      });
     }
+
+    if (errorCategory === "suspended_cost" || errorCategory === "suspended") {
+      this.emit({ type: "error", message: reason });
+    }
+
+    this.emit({ type: "result", cost, isError: true, errorCategory });
+    this.settle({
+      exitCode: 1,
+      sessionId: this._sessionId,
+      cost,
+      isError: true,
+      errorCategory,
+      failureReason: reason,
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -671,6 +663,62 @@ class DevinSession implements ProviderSession {
   }
 
   // -------------------------------------------------------------------------
+  // Structured output completion detection
+  // -------------------------------------------------------------------------
+
+  /**
+   * Check if the structured output signals task completion.
+   * Returns true when the structured output has `status: "done"`.
+   */
+  private isStructuredOutputDone(response: DevinSessionResponse): boolean {
+    const output = response.structured_output;
+    if (!output || typeof output !== "object") return false;
+    return (output as Record<string, unknown>).status === "done";
+  }
+
+  /**
+   * Extract human-readable text from the last structured output.
+   * Returns summary + output joined as plain text, or the raw JSON
+   * string if extraction fails.
+   */
+  private formatStructuredOutput(): string | undefined {
+    if (!this.lastStructuredOutput) return undefined;
+    try {
+      const parsed = JSON.parse(this.lastStructuredOutput);
+      if (typeof parsed === "object" && parsed !== null) {
+        const parts: string[] = [];
+        if (parsed.summary) parts.push(parsed.summary);
+        if (parsed.output) parts.push(parsed.output);
+        if (parts.length > 0) return parts.join("\n\n");
+      }
+    } catch {
+      // Fall through to raw.
+    }
+    return this.lastStructuredOutput;
+  }
+
+  // -------------------------------------------------------------------------
+  // Session log helpers
+  // -------------------------------------------------------------------------
+
+  /**
+   * Emit a system-role raw_log entry that the session log viewer can parse.
+   * Used for status transitions and structured output — these render as
+   * system messages with a `provider_meta` payload so the viewer can add
+   * pills/colors.
+   */
+  private emitSystemLog(kind: "status" | "structured_output", data: Record<string, unknown>): void {
+    this.emit({
+      type: "raw_log",
+      content: JSON.stringify({
+        type: "system",
+        message: { role: "system", content: "" },
+        provider_meta: { provider: "devin", kind, ...data },
+      }),
+    });
+  }
+
+  // -------------------------------------------------------------------------
   // Cost tracking
   // -------------------------------------------------------------------------
 
@@ -755,6 +803,7 @@ export class DevinAdapter implements ProviderAdapter {
       prompt: config.prompt,
       ...(playbookId ? { playbook_id: playbookId } : {}),
       ...(repos.length > 0 ? { repos } : {}),
+      structured_output_schema: DEVIN_STRUCTURED_OUTPUT_SCHEMA,
       title: `swarm-task-${config.taskId ?? "unknown"}`,
       tags: ["agent-swarm", config.agentId],
     });

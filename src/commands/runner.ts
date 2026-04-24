@@ -29,6 +29,9 @@ import { interpolate } from "../workflows/template.ts";
 // Side-effect import: registers runner trigger/resumption templates
 import "./templates.ts";
 
+/** Throttle interval for progress updates (3 seconds). */
+const PROGRESS_THROTTLE_MS = 3000;
+
 /** Save PM2 process list for persistence across container restarts */
 async function savePm2State(role: string): Promise<void> {
   try {
@@ -526,6 +529,7 @@ export async function ensureTaskFinished(
   taskId: string,
   exitCode: number,
   failureReason?: string,
+  providerOutput?: string,
 ): Promise<void> {
   const headers: Record<string, string> = {
     "X-Agent-ID": config.agentId,
@@ -542,6 +546,9 @@ export async function ensureTaskFinished(
 
   if (status === "failed") {
     body.failureReason = failureReason || `Claude process exited with code ${exitCode}`;
+  } else if (providerOutput) {
+    // Provider already supplied structured output (e.g. Devin) — use directly.
+    body.output = providerOutput;
   } else {
     // Try structured output fallback if the task has an outputSchema
     const adapterType = process.env.HARNESS_PROVIDER || "claude";
@@ -1669,7 +1676,6 @@ async function spawnProviderProcess(
 
   // Auto-progress throttle: don't update more than once per 3 seconds
   let lastProgressTime = 0;
-  const PROGRESS_THROTTLE_MS = 3000;
 
   // Context usage throttle: max 1 snapshot per 30 seconds
   let lastContextPostTime = 0;
@@ -1844,6 +1850,19 @@ async function spawnProviderProcess(
       case "raw_stderr":
         prettyPrintStderr(event.content, opts.role);
         break;
+
+      case "progress": {
+        if (effectiveTaskId && opts.apiUrl) {
+          const now = Date.now();
+          if (now - lastProgressTime >= PROGRESS_THROTTLE_MS) {
+            lastProgressTime = now;
+            updateProgressViaAPI(opts.apiUrl, opts.apiKey, effectiveTaskId, event.message).catch(
+              () => {},
+            );
+          }
+        }
+        break;
+      }
     }
   });
 
@@ -1995,6 +2014,7 @@ async function runProviderIteration(
 
   const session = await adapter.createSession(config);
 
+  let lastAiLoopProgressTime = 0;
   session.onEvent((event) => {
     if (event.type === "raw_log") prettyPrintLine(event.content, opts.role);
     if (event.type === "raw_stderr") prettyPrintStderr(event.content, opts.role);
@@ -2007,6 +2027,13 @@ async function runProviderIteration(
         event.provider,
         event.providerMeta,
       ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
+    }
+    if (event.type === "progress" && opts.taskId) {
+      const now = Date.now();
+      if (now - lastAiLoopProgressTime >= PROGRESS_THROTTLE_MS) {
+        lastAiLoopProgressTime = now;
+        updateProgressViaAPI(opts.apiUrl, opts.apiKey, opts.taskId, event.message).catch(() => {});
+      }
     }
   });
 
@@ -2088,7 +2115,14 @@ async function checkCompletedProcesses(
           ).catch(() => {});
         }
       }
-      await ensureTaskFinished(apiConfig, role, taskId, result.exitCode, failureReason);
+      await ensureTaskFinished(
+        apiConfig,
+        role,
+        taskId,
+        result.exitCode,
+        failureReason,
+        result.output,
+      );
 
       ensure({
         id: "worker_process_finished",

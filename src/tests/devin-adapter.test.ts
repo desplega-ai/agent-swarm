@@ -384,7 +384,7 @@ describe("Polling loop — lifecycle events", () => {
     expect(result.exitCode).toBe(0);
   });
 
-  test("waiting_for_approval emits approval_needed custom event", async () => {
+  test("waiting_for_approval emits progress event", async () => {
     // Start with approval state, then transition to exit.
     pollResponse.status = "running";
     pollResponse.status_detail = "waiting_for_approval";
@@ -398,10 +398,10 @@ describe("Polling loop — lifecycle events", () => {
     const { events } = await runUntilSettled(adapter, testConfig());
     clearTimeout(exitTimer);
 
-    const approvalEvent = events.find(
-      (e) => e.type === "custom" && e.name === "devin.approval_needed",
+    const progressEvent = events.find(
+      (e) => e.type === "progress" && e.message === "Devin: waiting for approval",
     );
-    expect(approvalEvent).toBeDefined();
+    expect(progressEvent).toBeDefined();
   });
 });
 

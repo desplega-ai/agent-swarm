@@ -64,7 +64,7 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { cn, formatRelativeTime, formatSmartTime } from "@/lib/utils";
+import { cn, formatRelativeTime, formatSmartTime, normalizeNewlines } from "@/lib/utils";
 
 function logStatusColor(status: string | null | undefined): string {
   switch (status) {
@@ -194,9 +194,55 @@ function MetaRow({
   );
 }
 
-/** Normalize single newlines to double for markdown paragraph breaks, preserving existing double newlines and list/heading markers. */
-function normalizeNewlines(text: string): string {
-  return text.replace(/(?<!\n)\n(?!\n|[-*#>|]|\d+\.)/g, "\n\n");
+/** Try to parse structured output JSON ({status, output, summary}). */
+function parseStructuredOutput(raw: string): { output?: string; summary?: string } | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      ("output" in parsed || "summary" in parsed)
+    )
+      return parsed as { output?: string; summary?: string };
+  } catch {
+    // Not JSON — fall through.
+  }
+  return null;
+}
+
+function StructuredOutputContent({ raw, maxH }: { raw: string; maxH: string }) {
+  const structured = parseStructuredOutput(raw);
+  if (!structured) {
+    return (
+      <div className={`text-sm leading-relaxed overflow-auto text-foreground/80 ${maxH}`}>
+        <Streamdown>{normalizeNewlines(raw)}</Streamdown>
+      </div>
+    );
+  }
+  return (
+    <div className={`space-y-3 overflow-auto ${maxH}`}>
+      {structured.summary && (
+        <div>
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+            Summary
+          </span>
+          <div className="mt-1 text-sm leading-relaxed text-foreground/80">
+            <Streamdown>{normalizeNewlines(structured.summary)}</Streamdown>
+          </div>
+        </div>
+      )}
+      {structured.output && (
+        <div>
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+            Output
+          </span>
+          <div className="mt-1 text-sm leading-relaxed text-foreground/80">
+            <Streamdown>{normalizeNewlines(structured.output)}</Streamdown>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function TaskPrompt({ text }: { text: string }) {
@@ -679,9 +725,7 @@ export default function TaskDetailPage() {
           bgColor={isCompleted ? "bg-emerald-500/5" : "bg-muted/20"}
           defaultOpen
         >
-          <div className="text-sm leading-relaxed max-h-[60vh] overflow-auto text-foreground/80">
-            <Streamdown>{normalizeNewlines(task.output ?? "")}</Streamdown>
-          </div>
+          <StructuredOutputContent raw={task.output ?? ""} maxH="max-h-[60vh]" />
         </CollapsibleSection>
       )}
 
@@ -902,9 +946,7 @@ export default function TaskDetailPage() {
               borderColor={isCompleted ? "border-emerald-500/30" : "border-border"}
               bgColor={isCompleted ? "bg-emerald-500/5" : "bg-muted/20"}
             >
-              <div className="text-sm leading-relaxed max-h-48 overflow-auto text-foreground/80">
-                <Streamdown>{normalizeNewlines(task.output ?? "")}</Streamdown>
-              </div>
+              <StructuredOutputContent raw={task.output ?? ""} maxH="max-h-48" />
             </CollapsibleSection>
           )}
 
