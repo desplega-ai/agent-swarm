@@ -6,10 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.70.0] - 2026-04-24
+
 ### Added
 - Uniform `contextKey` column on `agent_tasks` populated at every task-ingress site (Slack, AgentMail, GitHub, GitLab, Linear, scheduler, workflow, `send-task`). Schema: `task:slack:{channelId}:{threadTs}`, `task:agentmail:{threadId}`, `task:trackers:github:{owner}:{repo}:{issue|pr}:{number}`, `task:trackers:gitlab:{projectId}:{mr|issue}:{iid}`, `task:trackers:linear:{issueIdentifier}`, `task:schedule:{scheduleId}`, `task:workflow:{workflowRunId}`. Migration 041 adds nullable `contextKey` plus `(contextKey, status)` composite index. Child tasks auto-inherit from parent via `parentTaskId` (#358)
 - Cross-ingress sibling-task awareness (phase 2): reader-side prompt injection surfaces sibling/parent tasks sharing the same `contextKey` so workers see related work across ingress paths. Includes additive `ADDITIVE_SLACK` buffer generalization and Linear hard-refuse UX fix (#359)
 - New harness-providers guide at [`/docs/guides/harness-providers`](/docs/guides/harness-providers) covering the `ProviderAdapter` contract, task↔session lifecycle, raw session-log pipeline, swarm-MCP exposure, system-prompt composition/delivery, skills handling, and a 15-step walkthrough grounded in the claude / pi / codex reference adapters (`docs-site/content/docs/(documentation)/guides/harness-providers.mdx`)
+- `slack-post` gains an optional `threadTs` parameter so the lead can post threaded replies under an existing message, and a sibling `slack-start-thread` tool posts a top-level message and returns `{ channelId, ts }` so subsequent `slack-post` calls can thread under it. Unblocks daily-digest flows where the parent is a summary and the body is an in-thread reply (#373)
+- `GET /api/mcp-oauth/{id}/authorize-url` returns `{ providerUrl }` (Bearer-authed) so the dashboard Connect flow can XHR-then-navigate and keep Bearer auth on the authed endpoint while letting the browser follow the provider redirect directly (#372)
+
+### Fixed
+- `core.ts` HTTP middleware now honors per-route `auth: { apiKey: false }` via a `routeRegistry` lookup instead of a hardcoded exception list, so `/api/mcp-oauth/callback` and other opt-out routes no longer 401 on API_KEY swarms. Unknown paths still fail closed. Adds middleware unit tests (#367, #372)
+- Docker entrypoint no longer inlines MCP credentials (OAuth Bearers, static headers, env-backed secrets) into `/workspace/.mcp.json` at boot; it now only uses installed-server names to seed `settings.json` permission patterns. The per-session merge in `claude-adapter.ts` is extracted into a pure `mergeMcpConfig` and flipped so installed servers from the API **override** on-disk entries, restoring the "resolve at dispatch time" guarantee from 1.69.0 so OAuth re-auth, secret rotation, and install/uninstall propagate without worker restart. 8 new unit tests cover precedence, uninstall propagation, and staleness (#369, #371)
+- MCP OAuth `Authorization` header now normalizes `token_type: "bearer"` to capital `Bearer`, so providers like Amplitude's MCP (which reject the RFC 6749 lowercase form despite RFC 6750 being case-insensitive) accept the token. Non-bearer schemes pass through verbatim (#370)
+- `update-profile` tool now gates `Bun.write("/workspace/SOUL.md" | "/workspace/IDENTITY.md")` on `requestInfo.agentId === process.env.AGENT_ID`, so test-suite fake `WORKER_ID`s no longer overwrite a real container's identity files. Also raises `IDENTITY_FILE_MIN_LENGTH` in `src/hooks/hook.ts` from 100 → 500 as defense-in-depth against the Stop hook syncing short sentinel writes back into the DB (#374)
 
 ## [1.69.1] - 2026-04-23
 
