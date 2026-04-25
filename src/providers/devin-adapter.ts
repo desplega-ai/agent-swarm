@@ -802,6 +802,14 @@ export class DevinAdapter implements ProviderAdapter {
       );
     }
 
+    // NOTE: is there a better place to handle this logic?
+    if (config.role === "lead" && !hasMcp) {
+      // Probably cannot happen as the envs from devin and the lead live in different files, but jsut in case
+      throw new Error(
+        "[devin] Devin is configured as lead but HAS_MCP=false. A lead needs access to the MCP to function. ",
+      );
+    }
+
     // If there's a system prompt, resolve it to a playbook.
     let playbookId: string | undefined;
     if (config.systemPrompt) {

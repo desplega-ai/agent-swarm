@@ -63,7 +63,8 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   // Resolve the composite session template (trait-aware for remote providers)
   let compositeEventType: string;
   if (!hasMcp) {
-    compositeEventType = role === "lead" ? "system.session.lead" : "system.session.worker.remote";
+    // If no MCP, role cannot be lead
+    compositeEventType = "system.session.worker.remote";
   } else {
     compositeEventType = role === "lead" ? "system.session.lead" : "system.session.worker";
   }
