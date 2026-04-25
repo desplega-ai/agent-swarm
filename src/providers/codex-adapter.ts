@@ -64,6 +64,7 @@ import {
   type Usage,
   type WebSearchItem,
 } from "@openai/codex-sdk";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { type CodexAgentsMdHandle, writeCodexAgentsMd } from "./codex-agents-md";
 import {
   CODEX_DEFAULT_MODEL,
@@ -344,9 +345,17 @@ class CodexSession implements ProviderSession {
   }
 
   private emit(event: ProviderEvent): void {
+    // Scrub secret values from raw_log / raw_stderr content before any egress
+    // (log file write, listener dispatch, downstream session-logs push). Keeps
+    // secrets out of /workspace/logs/*.jsonl, the session_logs SQLite table,
+    // and container stdout (pretty-print consumes event.content).
+    const scrubbed: ProviderEvent =
+      event.type === "raw_log" || event.type === "raw_stderr"
+        ? { ...event, content: scrubSecrets(event.content) }
+        : event;
     try {
       this.logFileHandle.write(
-        `${JSON.stringify({ ...event, timestamp: new Date().toISOString() })}\n`,
+        `${JSON.stringify({ ...scrubbed, timestamp: new Date().toISOString() })}\n`,
       );
     } catch {
       // Log writer failure must not break the event stream.
@@ -354,13 +363,13 @@ class CodexSession implements ProviderSession {
     if (this.listeners.length > 0) {
       for (const listener of this.listeners) {
         try {
-          listener(event);
+          listener(scrubbed);
         } catch {
           // Swallow listener errors — a bad listener must not kill the session.
         }
       }
     } else {
-      this.eventQueue.push(event);
+      this.eventQueue.push(scrubbed);
     }
   }
 

@@ -9,14 +9,20 @@ export const registerSlackPostTool = (server: McpServer) => {
   createToolRegistrar(server)(
     "slack-post",
     {
-      title: "Post new message to Slack channel",
+      title: "Post message to Slack channel",
       description:
-        "Post a new message to a Slack channel. This creates a new message (not a thread reply). Requires lead privileges.",
+        "Post a message to a Slack channel. By default creates a new top-level message; pass `threadTs` to post as a threaded reply under an existing message (obtain the ts from `slack-start-thread`). Requires lead privileges.",
       annotations: { openWorldHint: true },
 
       inputSchema: z.object({
         channelId: z.string().min(1).describe("The Slack channel ID to post to."),
         message: z.string().min(1).max(4000).describe("The message content to post."),
+        threadTs: z
+          .string()
+          .optional()
+          .describe(
+            "Optional parent message ts to thread under. Obtain via `slack-start-thread`. When omitted, posts as a new top-level message.",
+          ),
       }),
       outputSchema: z.object({
         success: z.boolean(),
@@ -24,7 +30,7 @@ export const registerSlackPostTool = (server: McpServer) => {
         messageTs: z.string().optional(),
       }),
     },
-    async ({ channelId, message }, requestInfo, _meta) => {
+    async ({ channelId, message, threadTs }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         return {
           content: [{ type: "text", text: "Agent ID not found." }],
@@ -67,6 +73,7 @@ export const registerSlackPostTool = (server: McpServer) => {
           text: slackMessage, // Fallback for notifications
           username: agent.name,
           icon_emoji: ":crown:",
+          ...(threadTs ? { thread_ts: threadTs } : {}),
           blocks: [
             {
               type: "section",

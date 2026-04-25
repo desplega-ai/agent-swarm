@@ -111,17 +111,11 @@ export default function WorkflowRunDetailPage() {
             </Link>
           </h1>
           <StatusBadge status={run.status} size="md" />
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-          >
+          <Badge variant="outline" size="tag">
             {formatSmartTime(run.startedAt)}
           </Badge>
           {duration && (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase font-mono"
-            >
+            <Badge variant="outline" size="tag" className="font-mono">
               {duration}
             </Badge>
           )}

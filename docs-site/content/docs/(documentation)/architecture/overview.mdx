@@ -55,7 +55,7 @@ The lead agent is the coordinator. It:
 Workers are the execution layer. Each worker:
 
 - Runs in an isolated Docker container with a full development environment
-- Uses a configurable AI harness — Claude Code (default) or pi-mono — selected via `HARNESS_PROVIDER`. See [Harness Configuration](/docs/guides/harness-configuration)
+- Uses a configurable AI harness — Claude Code (default), Codex, pi-mono, or Devin — selected via `HARNESS_PROVIDER`. See [Harness Configuration](/docs/guides/harness-configuration)
 - Has access to git, Node.js, Python, Bun, and common CLI tools
 - Executes tasks assigned by the lead agent
 - Reports progress via the `store-progress` MCP tool
@@ -154,7 +154,7 @@ agent-swarm/
 | Runtime | Bun |
 | API Protocol | MCP (Model Context Protocol) |
 | Database | SQLite (via `bun:sqlite`) |
-| AI Runtime | Claude Code (default) or pi-mono — selected via `HARNESS_PROVIDER`. See [Harness Configuration](/docs/guides/harness-configuration) |
+| AI Runtime | Claude Code (default), Codex, pi-mono, or Devin — selected via `HARNESS_PROVIDER`. See [Harness Configuration](/docs/guides/harness-configuration) |
 | Containerization | Docker |
 | Process Management | PM2 |
 | Memory Embeddings | OpenAI `text-embedding-3-small` |

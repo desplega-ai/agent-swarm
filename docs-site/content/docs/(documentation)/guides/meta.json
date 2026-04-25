@@ -2,7 +2,9 @@
   "title": "Guides",
   "pages": [
     "deployment",
+    "secrets-encryption",
     "harness-configuration",
+    "harness-providers",
     "provider-auth",
     "slack-integration",
     "github-integration",

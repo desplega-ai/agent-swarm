@@ -1,5 +1,4 @@
 import {
-  createTaskExtended,
   findTaskByAgentMailThread,
   getAgentById,
   getAgentMailInboxMapping,
@@ -7,10 +6,62 @@ import {
   resolveUser,
 } from "../be/db";
 import { resolveTemplate } from "../prompts/resolver";
+import { createIngressBuffer } from "../tasks/additive-ingress";
+import { agentmailContextKey } from "../tasks/context-key";
+import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { workflowEventBus } from "../workflows/event-bus";
 // Side-effect import: registers all AgentMail event templates in the in-memory registry
 import "./templates";
 import type { AgentMailMessage, AgentMailWebhookPayload } from "./types";
+
+const ACTIVE_TASK_STATUSES = new Set(["pending", "in_progress", "offered", "paused"]);
+
+interface BufferedAgentMailMessage {
+  from: string;
+  subject: string;
+  inboxId: string;
+  threadId: string;
+  messageId: string;
+  preview: string;
+  agentId: string | null;
+  parentTaskId: string;
+  requestedByUserId: string | undefined;
+}
+
+const AGENTMAIL_BUFFER_TIMEOUT_MS = Number(process.env.ADDITIVE_AGENTMAIL_BUFFER_MS) || 10_000;
+
+const agentmailBuffer = createIngressBuffer<BufferedAgentMailMessage>({
+  source: "agentmail",
+  envFlag: "ADDITIVE_AGENTMAIL",
+  timeoutMs: AGENTMAIL_BUFFER_TIMEOUT_MS,
+  onFlush: (items, contextKey) => {
+    if (items.length === 0) return;
+    const first = items[0]!;
+    const combinedPreview = items.map((m) => m.preview).join("\n---\n");
+    const followupResult = resolveTemplate("agentmail.email.followup", {
+      from: first.from,
+      subject: first.subject,
+      inbox_id: first.inboxId,
+      thread_id: first.threadId,
+      preview: `[${items.length} buffered message(s)]\n\n${combinedPreview}`,
+    });
+    if (followupResult.skipped) return;
+    const task = createTaskWithSiblingAwareness(followupResult.text, {
+      agentId: first.agentId,
+      source: "agentmail",
+      taskType: "agentmail-reply",
+      agentmailInboxId: first.inboxId,
+      agentmailMessageId: first.messageId,
+      agentmailThreadId: first.threadId,
+      parentTaskId: first.parentTaskId,
+      requestedByUserId: first.requestedByUserId,
+      contextKey,
+    });
+    console.log(
+      `[AgentMail] Buffered flush → task ${task.id} (${items.length} messages, thread ${first.threadId})`,
+    );
+  },
+});
 
 /**
  * Extract bare email address from a from_ field like "Taras Yarema <t@desplega.ai>" or "t@desplega.ai".
@@ -126,6 +177,31 @@ export async function handleMessageReceived(
   // Check for thread continuity - find existing task for this thread
   const existingTask = findTaskByAgentMailThread(thread_id);
   if (existingTask) {
+    const contextKey = agentmailContextKey({ threadId: thread_id });
+    const siblingInFlight = ACTIVE_TASK_STATUSES.has(existingTask.status);
+
+    // Opt-in: when ADDITIVE_AGENTMAIL is true, buffer rapid follow-ups while
+    // the prior task is still running — coalesce into ONE follow-up task.
+    if (
+      agentmailBuffer.enabled &&
+      agentmailBuffer.maybeBuffer(contextKey, siblingInFlight, {
+        from,
+        subject,
+        inboxId: inbox_id,
+        threadId: thread_id,
+        messageId: message_id,
+        preview,
+        agentId: existingTask.agentId,
+        parentTaskId: existingTask.id,
+        requestedByUserId,
+      })
+    ) {
+      console.log(
+        `[AgentMail] Buffered follow-up for thread ${thread_id} (parent ${existingTask.id}, status ${existingTask.status})`,
+      );
+      return { created: false };
+    }
+
     // Create a follow-up task with parentTaskId to continue the session
     const followupResult = resolveTemplate("agentmail.email.followup", {
       from,
@@ -139,7 +215,7 @@ export async function handleMessageReceived(
       return { created: false };
     }
 
-    const task = createTaskExtended(followupResult.text, {
+    const task = createTaskWithSiblingAwareness(followupResult.text, {
       agentId: existingTask.agentId,
       source: "agentmail",
       taskType: "agentmail-reply",
@@ -148,6 +224,7 @@ export async function handleMessageReceived(
       agentmailThreadId: thread_id,
       parentTaskId: existingTask.id,
       requestedByUserId,
+      contextKey,
     });
 
     console.log(
@@ -177,7 +254,7 @@ export async function handleMessageReceived(
           return { created: false };
         }
 
-        const task = createTaskExtended(leadResult.text, {
+        const task = createTaskWithSiblingAwareness(leadResult.text, {
           agentId: agent.id,
           source: "agentmail",
           taskType: "agentmail-message",
@@ -185,6 +262,7 @@ export async function handleMessageReceived(
           agentmailMessageId: message_id,
           agentmailThreadId: thread_id,
           requestedByUserId,
+          contextKey: agentmailContextKey({ threadId: thread_id }),
         });
 
         console.log(
@@ -206,7 +284,7 @@ export async function handleMessageReceived(
         return { created: false };
       }
 
-      const task = createTaskExtended(workerResult.text, {
+      const task = createTaskWithSiblingAwareness(workerResult.text, {
         agentId: agent.id,
         source: "agentmail",
         taskType: "agentmail-message",
@@ -214,6 +292,7 @@ export async function handleMessageReceived(
         agentmailMessageId: message_id,
         agentmailThreadId: thread_id,
         requestedByUserId,
+        contextKey: agentmailContextKey({ threadId: thread_id }),
       });
 
       console.log(
@@ -239,7 +318,7 @@ export async function handleMessageReceived(
       return { created: false };
     }
 
-    const task = createTaskExtended(unmappedResult.text, {
+    const task = createTaskWithSiblingAwareness(unmappedResult.text, {
       agentId: lead.id,
       source: "agentmail",
       taskType: "agentmail-message",
@@ -247,6 +326,7 @@ export async function handleMessageReceived(
       agentmailMessageId: message_id,
       agentmailThreadId: thread_id,
       requestedByUserId,
+      contextKey: agentmailContextKey({ threadId: thread_id }),
     });
 
     console.log(
@@ -268,13 +348,14 @@ export async function handleMessageReceived(
     return { created: false };
   }
 
-  const task = createTaskExtended(noAgentResult.text, {
+  const task = createTaskWithSiblingAwareness(noAgentResult.text, {
     source: "agentmail",
     taskType: "agentmail-message",
     agentmailInboxId: inbox_id,
     agentmailMessageId: message_id,
     agentmailThreadId: thread_id,
     requestedByUserId,
+    contextKey: agentmailContextKey({ threadId: thread_id }),
   });
 
   console.log(`[AgentMail] Created unassigned task ${task.id} (no lead or mapping available)`);

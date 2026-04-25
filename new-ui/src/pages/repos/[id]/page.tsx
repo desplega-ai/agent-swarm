@@ -170,10 +170,11 @@ function GuidelinesSection({ guidelines }: { guidelines: RepoGuidelines }) {
         <h2 className="text-lg font-semibold">Guidelines</h2>
         <Badge
           variant="outline"
+          size="tag"
           className={
             guidelines.allowMerge
-              ? "text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase bg-emerald-500/15 text-emerald-500 border-emerald-500/30"
-              : "text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase bg-red-500/15 text-red-400 border-red-500/30"
+              ? "bg-emerald-500/15 text-emerald-500 border-emerald-500/30"
+              : "bg-red-500/15 text-red-400 border-red-500/30"
           }
         >
           {guidelines.allowMerge ? "Merge allowed" : "Merge not allowed"}
@@ -260,19 +261,15 @@ export default function RepoDetailPage() {
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-semibold">{repo.name}</h1>
           {provider && (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-            >
+            <Badge variant="outline" size="tag">
               {provider}
             </Badge>
           )}
           <Badge
             variant="outline"
+            size="tag"
             className={
-              repo.autoClone
-                ? "text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase bg-emerald-500/15 text-emerald-500 border-emerald-500/30"
-                : "text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+              repo.autoClone ? "bg-emerald-500/15 text-emerald-500 border-emerald-500/30" : ""
             }
           >
             {repo.autoClone ? "Auto-clone ON" : "Auto-clone OFF"}
@@ -284,11 +281,7 @@ export default function RepoDetailPage() {
           </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1 border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
-              >
+              <Button size="sm" variant="destructive-outline" className="gap-1 hover:text-red-300">
                 <Trash2 className="h-3.5 w-3.5" /> Delete
               </Button>
             </AlertDialogTrigger>

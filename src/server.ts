@@ -77,6 +77,7 @@ import { registerSlackListChannelsTool } from "./tools/slack-list-channels";
 import { registerSlackPostTool } from "./tools/slack-post";
 import { registerSlackReadTool } from "./tools/slack-read";
 import { registerSlackReplyTool } from "./tools/slack-reply";
+import { registerSlackStartThreadTool } from "./tools/slack-start-thread";
 import { registerSlackUploadFileTool } from "./tools/slack-upload-file";
 import { registerStoreProgressTool } from "./tools/store-progress";
 // Swarm config tools
@@ -189,6 +190,7 @@ export function createServer() {
   registerSlackReplyTool(server);
   registerSlackReadTool(server);
   registerSlackPostTool(server);
+  registerSlackStartThreadTool(server);
   registerSlackListChannelsTool(server);
   registerSlackUploadFileTool(server);
   registerSlackDownloadFileTool(server);

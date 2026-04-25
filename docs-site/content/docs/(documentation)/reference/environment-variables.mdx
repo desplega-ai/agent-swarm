@@ -49,7 +49,7 @@ Losing the key while keeping the database means losing every encrypted secret wi
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code), `codex`, or `pi` (pi-mono). See [Harness Configuration](/docs/guides/harness-configuration) |
+| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code), `codex`, `pi` (pi-mono), or `devin`. See [Harness Configuration](/docs/guides/harness-configuration) |
 
 ### Credentials
 
@@ -62,6 +62,7 @@ Which credentials you need depends on your selected harness provider:
 | `CLAUDE_CODE_OAUTH_TOKEN` | Yes* | — | OAuth token for Claude CLI. Supports comma-separated values for [multi-credential load balancing](#multi-credential-support) |
 | `ANTHROPIC_API_KEY` | Alt* | — | Alternative to `CLAUDE_CODE_OAUTH_TOKEN`. Also supports comma-separated values |
 | `CLAUDE_BINARY` | No | `claude` | Path to Claude CLI binary (if not in `$PATH`) |
+| `ENABLE_PROMPT_CACHING_1H` | No | `1` | Enables Anthropic's 1-hour prompt cache for every Claude Code session spawned by the worker. Default-on since `v1.69.1`; set to `0` (env or `swarm_config`) to opt out. Injected by `ClaudeAdapter` into the spawned `claude` process env. |
 
 \* One of `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` is required.
 
@@ -83,6 +84,19 @@ Which credentials you need depends on your selected harness provider:
 | `MCP_BASE_URL` | Yes | `http://host.docker.internal:3013` | Swarm API URL reachable by the worker |
 
 Codex can also authenticate through `~/.codex/auth.json`, including ChatGPT OAuth restored from the swarm config store. See [Provider Auth: Codex OAuth](/docs/guides/provider-auth/codex-oauth).
+
+**Devin** (`HARNESS_PROVIDER=devin`):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DEVIN_API_KEY` | Yes | — | Devin API key (`cog_*` prefix) |
+| `DEVIN_ORG_ID` | Yes | — | Cognition organization ID (`org-*` prefix) |
+| `DEVIN_POLL_INTERVAL_MS` | No | `15000` | Polling interval in ms for session status checks |
+| `DEVIN_MAX_ACU_LIMIT` | No | — | Per-session ACU cap. Sent to the Devin API and shown in the UI budget bar |
+| `DEVIN_ACU_COST_USD` | No | `2.25` | Cost per ACU in USD for cost reporting |
+| `DEVIN_API_BASE_URL` | No | `https://api.devin.ai` | API base URL override for testing or on-prem |
+
+Devin sessions run fully remote — no local CLI, MCP, or filesystem access. Repos are specified via the task's `vcsRepo` field. See [Harness Configuration](/docs/guides/harness-configuration#devin) for details.
 
 ### General Worker Settings
 
@@ -304,7 +318,7 @@ When both CLI flags and environment variables are set:
 
 ## Related
 
-- [Harness Configuration](/docs/guides/harness-configuration) — Configure Claude Code or pi-mono provider settings
+- [Harness Configuration](/docs/guides/harness-configuration) — Configure Claude Code, Codex, pi-mono, or Devin provider settings
 - [Deployment Guide](/docs/guides/deployment) — Production deployment with Docker Compose
 - [CLI Reference](/docs/reference/cli) — Terminal commands that complement environment variable configuration
 - [MCP Tools Reference](/docs/reference/mcp-tools) — Tools available to agents at runtime

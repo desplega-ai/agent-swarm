@@ -14,8 +14,29 @@ import { initGitHub, resetGitHub } from "../github";
 import { initLinear, resetLinear } from "../linear";
 import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
+import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
-import { agentWithCapacity, parseQueryParams } from "./utils";
+import { routeRegistry } from "./route-def";
+import { agentWithCapacity, getPathSegments, matchRoute, parseQueryParams } from "./utils";
+
+/**
+ * Check whether a request targets a route declared (via the `route()` factory)
+ * with `auth: { apiKey: false }` — i.e. one that opts out of the API-key
+ * bearer check. Handler files must use the `route()` factory for this to take
+ * effect; unknown paths fail closed (auth required).
+ */
+function isPublicRoute(method: string | undefined, pathSegments: string[]): boolean {
+  for (const def of routeRegistry) {
+    if (def.auth?.apiKey === false) {
+      if (
+        matchRoute(method, pathSegments, def.method.toUpperCase(), def.pattern, def.exact ?? true)
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 /**
  * Load global swarm_config entries into process.env.
@@ -34,7 +55,48 @@ export function loadGlobalConfigsIntoEnv(override = false): string[] {
       updated.push(config.key);
     }
   }
+  // The scrubber caches process.env-derived secret values; invalidate so the
+  // next scrub picks up any new/rotated secrets we just injected.
+  if (updated.length > 0) {
+    refreshSecretScrubberCache();
+  }
   return updated;
+}
+
+export type ReloadConfigResult = {
+  configsLoaded: number;
+  keysUpdated: string[];
+  integrationsReinitialized: string[];
+};
+
+/**
+ * Re-read swarm_config into process.env with override=true, then reset and
+ * re-init each integration so long-lived clients (Slack socket mode, etc.)
+ * pick up the new values without requiring a process restart.
+ */
+export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfigResult> {
+  const updated = loadGlobalConfigsIntoEnv(true);
+
+  const integrations: string[] = [];
+
+  resetAgentMail();
+  if (initAgentMail()) integrations.push("agentmail");
+
+  resetGitHub();
+  if (initGitHub()) integrations.push("github");
+
+  resetLinear();
+  if (initLinear()) integrations.push("linear");
+
+  await stopSlackApp();
+  await startSlackApp();
+  integrations.push("slack");
+
+  return {
+    configsLoaded: updated.length,
+    keysUpdated: updated,
+    integrationsReinitialized: integrations,
+  };
 }
 
 export async function handleCore(
@@ -79,69 +141,33 @@ export async function handleCore(
     return true;
   }
 
-  // API key authentication (if API_KEY is configured)
-  // Skip auth for webhooks (they have their own signature verification)
-  const isGitHubWebhook = req.url?.startsWith("/api/github/webhook");
-  const isGitLabWebhook = req.url?.startsWith("/api/gitlab/webhook");
-  const isAgentMailWebhook = req.url?.startsWith("/api/agentmail/webhook");
-  const isTrackerAuth =
-    req.url?.startsWith("/api/trackers/linear/authorize") ||
-    req.url?.startsWith("/api/trackers/linear/callback") ||
-    req.url?.startsWith("/api/trackers/linear/webhook");
-  const isWorkflowWebhook = req.url?.startsWith("/api/webhooks/");
-  if (
-    apiKey &&
-    !isGitHubWebhook &&
-    !isGitLabWebhook &&
-    !isAgentMailWebhook &&
-    !isTrackerAuth &&
-    !isWorkflowWebhook
-  ) {
-    const authHeader = req.headers.authorization;
-    const providedKey = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  // API-key authentication (if API_KEY is configured). Routes that opt out via
+  // `route({ auth: { apiKey: false } })` — webhooks, OAuth provider callbacks,
+  // etc. — are skipped based on the central `routeRegistry`. Unknown paths
+  // fall through to the bearer check (fail-closed).
+  if (apiKey) {
+    const pathSegments = getPathSegments(req.url || "");
+    if (!isPublicRoute(req.method, pathSegments)) {
+      const authHeader = req.headers.authorization;
+      const providedKey = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
-    if (providedKey !== apiKey) {
-      res.writeHead(401, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Unauthorized" }));
-      return true;
+      if (providedKey !== apiKey) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Unauthorized" }));
+        return true;
+      }
     }
   }
 
   // POST /internal/reload-config — re-read swarm_config into process.env and re-init integrations
   if (req.method === "POST" && req.url === "/internal/reload-config") {
     try {
-      const updated = loadGlobalConfigsIntoEnv(true);
-
-      // Re-initialize integrations so they pick up new secrets
-      const integrations: string[] = [];
-
-      resetAgentMail();
-      if (initAgentMail()) integrations.push("agentmail");
-
-      resetGitHub();
-      if (initGitHub()) integrations.push("github");
-
-      resetLinear();
-      if (initLinear()) integrations.push("linear");
-
-      // Slack: stop and restart to pick up new token
-      await stopSlackApp();
-      await startSlackApp();
-      integrations.push("slack");
-
+      const result = await reloadGlobalConfigsAndIntegrations();
       console.log(
-        `[reload-config] Loaded ${updated.length} config(s), re-initialized: ${integrations.join(", ") || "none"}`,
+        `[reload-config] Loaded ${result.configsLoaded} config(s), re-initialized: ${result.integrationsReinitialized.join(", ") || "none"}`,
       );
-
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          success: true,
-          configsLoaded: updated.length,
-          keysUpdated: updated,
-          integrationsReinitialized: integrations,
-        }),
-      );
+      res.end(JSON.stringify({ success: true, ...result }));
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       console.error("[reload-config] Failed:", message);

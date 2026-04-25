@@ -1,5 +1,7 @@
 import { ArrowLeft, Trash2 } from "lucide-react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 
 import { useDeleteMcpServer, useMcpServer, useUpdateMcpServer } from "@/api/hooks";
 import {
@@ -19,6 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatRelativeTime } from "@/lib/utils";
+import { McpOAuthPanel } from "./mcp-oauth-panel";
 
 function TransportBadge({ transport }: { transport: string }) {
   const colors: Record<string, string> = {
@@ -27,10 +30,7 @@ function TransportBadge({ transport }: { transport: string }) {
     sse: "border-cyan-500/30 text-cyan-400",
   };
   return (
-    <Badge
-      variant="outline"
-      className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${colors[transport] || ""}`}
-    >
+    <Badge variant="outline" size="tag" className={`${colors[transport] || ""}`}>
       {transport}
     </Badge>
   );
@@ -43,10 +43,7 @@ function ScopeBadge({ scope }: { scope: string }) {
     agent: "border-zinc-500/30 text-zinc-400",
   };
   return (
-    <Badge
-      variant="outline"
-      className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${colors[scope] || ""}`}
-    >
+    <Badge variant="outline" size="tag" className={`${colors[scope] || ""}`}>
       {scope}
     </Badge>
   );
@@ -55,9 +52,30 @@ function ScopeBadge({ scope }: { scope: string }) {
 export default function McpServerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: server, isLoading } = useMcpServer(id!);
   const updateServer = useUpdateMcpServer();
   const deleteServer = useDeleteMcpServer();
+  const oauthParam = searchParams.get("oauth");
+  const [tab, setTab] = useState<string>(oauthParam ? "auth" : "config");
+
+  useEffect(() => {
+    if (!oauthParam) return;
+    if (oauthParam === "success") {
+      toast.success("OAuth connection established");
+    } else if (oauthParam === "error") {
+      const msg =
+        searchParams.get("error_description") ||
+        searchParams.get("error") ||
+        "OAuth authorization failed";
+      toast.error(msg);
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete("oauth");
+    next.delete("error");
+    next.delete("error_description");
+    setSearchParams(next, { replace: true });
+  }, [oauthParam, searchParams, setSearchParams]);
 
   if (isLoading) {
     return (
@@ -100,9 +118,15 @@ export default function McpServerDetailPage() {
           <h1 className="text-xl font-semibold">{server.name}</h1>
           <TransportBadge transport={server.transport} />
           <ScopeBadge scope={server.scope} />
+          {server.authMethod === "oauth" && (
+            <Badge variant="outline" size="tag" className="border-purple-500/30 text-purple-400">
+              OAuth
+            </Badge>
+          )}
           <Badge
             variant="outline"
-            className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${
+            size="tag"
+            className={`${
               server.isEnabled
                 ? "border-emerald-500/30 text-emerald-400"
                 : "border-red-500/30 text-red-400"
@@ -117,11 +141,7 @@ export default function McpServerDetailPage() {
           </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-red-500/30 text-red-400 hover:bg-red-500/10"
-              >
+              <Button variant="destructive-outline" size="sm">
                 <Trash2 className="h-4 w-4 mr-1" /> Delete
               </Button>
             </AlertDialogTrigger>
@@ -145,9 +165,10 @@ export default function McpServerDetailPage() {
         <p className="text-sm text-muted-foreground shrink-0">{server.description}</p>
       )}
 
-      <Tabs defaultValue="config" className="flex flex-col flex-1 min-h-0">
+      <Tabs value={tab} onValueChange={setTab} className="flex flex-col flex-1 min-h-0">
         <TabsList className="shrink-0">
           <TabsTrigger value="config">Configuration</TabsTrigger>
+          <TabsTrigger value="auth">Authentication</TabsTrigger>
           <TabsTrigger value="metadata">Metadata</TabsTrigger>
         </TabsList>
 
@@ -237,6 +258,10 @@ export default function McpServerDetailPage() {
               </CardContent>
             </Card>
           )}
+        </TabsContent>
+
+        <TabsContent value="auth" className="mt-4 overflow-y-auto space-y-4">
+          <McpOAuthPanel server={server} />
         </TabsContent>
 
         <TabsContent value="metadata" className="mt-4 overflow-y-auto">

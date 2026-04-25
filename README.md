@@ -31,8 +31,8 @@
   <a href="https://discord.gg/KZgfyyDVZa">
     <img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join Discord">
   </a>
-  <a href="https://x.com/swarm_lead">
-    <img src="https://img.shields.io/badge/𝕏-@swarm__lead-000?style=for-the-badge&logo=x&logoColor=white" alt="Follow on X">
+  <a href="https://x.com/desplegalabs">
+    <img src="https://img.shields.io/badge/𝕏-@desplegalabs-000?style=for-the-badge&logo=x&logoColor=white" alt="Follow on X">
   </a>
 </p>
 
@@ -89,7 +89,7 @@ flowchart LR
 - **Multi-channel inputs** — Slack, GitHub, GitLab, email, Linear, and the HTTP API all create tasks. [Integrations](#integrations)
 - **Workflow engine with Human-in-the-Loop** — DAG-based automation with approval gates, retries, and structured I/O. [Workflows →](https://docs.agent-swarm.dev/docs/concepts/workflows)
 - **Scheduled & recurring tasks** — cron-based automation for standing work. [Scheduling →](https://docs.agent-swarm.dev/docs/concepts/scheduling)
-- **Multi-provider** — run with Claude Code, OpenAI Codex, or pi-mono. [Harness config →](https://docs.agent-swarm.dev/docs/guides/harness-configuration)
+- **Multi-provider** — run with Claude Code, OpenAI Codex, or pi-mono. [Harness config →](https://docs.agent-swarm.dev/docs/guides/harness-configuration) · [Add a new provider →](https://docs.agent-swarm.dev/docs/guides/harness-providers)
 - **Skills & MCP servers** — reusable procedural knowledge and per-agent MCP servers with scope cascade. [MCP tools →](https://docs.agent-swarm.dev/docs/reference/mcp-tools)
 - **Real-time dashboard** — monitor agents, tasks, and inter-agent chat. [app.agent-swarm.dev →](https://app.agent-swarm.dev)
 

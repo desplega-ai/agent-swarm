@@ -201,10 +201,7 @@ export default function ApiKeysPage() {
         headerName: "Provider",
         width: 110,
         cellRenderer: (params: { value: string }) => (
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-          >
+          <Badge variant="outline" size="tag">
             <span className={cn("font-mono", PROVIDER_BADGE_TONE[params.value])}>
               {formatProvider(params.value)}
             </span>
@@ -216,10 +213,7 @@ export default function ApiKeysPage() {
         headerName: "Type",
         width: 140,
         cellRenderer: (params: { value: string }) => (
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase font-mono"
-          >
+          <Badge variant="outline" size="tag" className="font-mono">
             {formatKeyType(params.value)}
           </Badge>
         ),

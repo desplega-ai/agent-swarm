@@ -275,6 +275,7 @@ const SWARM_TOOL_LABELS: Record<string, string | null> = {
   "update-profile": "🪪 Updating profile",
   // Slack
   "slack-post": "💬 Posting to Slack",
+  "slack-start-thread": "💬 Starting Slack thread",
   "slack-reply": "💬 Replying in Slack",
   "slack-read": "💬 Reading Slack",
   "slack-list-channels": "💬 Listing Slack channels",

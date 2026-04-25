@@ -1,6 +1,6 @@
 ---
 title: Harness Configuration
-description: Configure the AI provider (Claude Code, Codex, or pi-mono) that powers your agents
+description: Configure the AI provider (Claude Code, Codex, pi-mono, or Devin) that powers your agents
 ---
 
 Agent Swarm uses a **harness** abstraction to decouple task execution from the underlying AI provider. Each worker runs one harness — the harness spawns sessions, manages credentials, and normalizes events so the rest of the system doesn't care which provider is underneath.
@@ -12,6 +12,7 @@ Agent Swarm uses a **harness** abstraction to decouple task execution from the u
 | **Claude Code** | `claude` (default) | Anthropic's Claude Code CLI. Recommended for most use cases |
 | **Codex** | `codex` | OpenAI Codex CLI with API-key or ChatGPT OAuth authentication |
 | **pi-mono** | `pi` | Open-source coding agent by [@badlogic](https://github.com/badlogic/pi-mono). Supports multiple model backends |
+| **Devin** | `devin` | Cognition's Devin AI — fully remote, API-driven sessions. No local environment or MCP |
 
 ## How It Works
 
@@ -21,9 +22,10 @@ The `HARNESS_PROVIDER` environment variable selects which provider adapter is us
 HARNESS_PROVIDER=claude  →  ClaudeAdapter  →  spawns `claude` CLI process
 HARNESS_PROVIDER=codex   →  CodexAdapter   →  spawns `codex` CLI process
 HARNESS_PROVIDER=pi      →  PiMonoAdapter  →  creates in-process pi-mono session
+HARNESS_PROVIDER=devin   →  DevinAdapter   →  creates remote Devin session via API
 ```
 
-Both adapters implement the same `ProviderAdapter` interface, producing normalized `ProviderEvent` streams (session init, tool calls, cost data, context usage, etc.) that the runner consumes identically.
+All adapters implement the same `ProviderAdapter` interface, producing normalized `ProviderEvent` streams (session init, tool calls, cost data, context usage, etc.) that the runner consumes identically.
 
 ---
 
@@ -162,18 +164,71 @@ pi-mono resolves models using a `provider/model-id` format. Set the model via `M
 
 ---
 
+## Devin
+
+[Devin](https://devin.ai) is Cognition's fully autonomous AI developer. Unlike the other providers, Devin sessions run entirely in Cognition's cloud — there is no local CLI process, no MCP tool access, and no local filesystem. The adapter communicates with the [Devin API](https://docs.devin.ai) and uses a polling loop to track session progress.
+
+### Authentication
+
+Devin requires an API key and organization ID from Cognition:
+
+| Credential | Env Var | Format |
+|------------|---------|--------|
+| **API key** | `DEVIN_API_KEY` | `cog_*` prefix |
+| **Organization ID** | `DEVIN_ORG_ID` | `org-*` prefix |
+
+Both are required. Obtain them from your Cognition dashboard.
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `HARNESS_PROVIDER` | Yes | — | Must be set to `devin` |
+| `DEVIN_API_KEY` | Yes | — | Devin API key (`cog_*` prefix) |
+| `DEVIN_ORG_ID` | Yes | — | Cognition organization ID (`org-*` prefix) |
+| `DEVIN_POLL_INTERVAL_MS` | No | `15000` | Polling interval in ms for session status checks |
+| `DEVIN_MAX_ACU_LIMIT` | No | — | Per-session ACU cap sent to the Devin API. Also shown in the UI budget bar |
+| `DEVIN_ACU_COST_USD` | No | `2.25` | Cost per ACU in USD for cost reporting |
+| `DEVIN_API_BASE_URL` | No | `https://api.devin.ai` | Override for testing or on-prem deployments |
+
+### How It Works
+
+1. **System prompt → Playbook**: The system prompt is converted to a Devin playbook (cached by content SHA-256 hash in the swarm config store).
+2. **Skill inlining**: Devin supports native skills, but they must be reachable in the repository. The adapter inlines swarm skill content directly into the prompt so that swarm-managed skills work without being committed to the repo.
+3. **Session creation**: A `POST` to the Devin API creates a remote session with the prompt, playbook, repo list (from the task's `vcsRepo` field), and optional ACU limit.
+4. **Polling loop**: The adapter polls the Devin API at `DEVIN_POLL_INTERVAL_MS` intervals for status updates, messages, structured output, and PR creation events.
+5. **Human approval**: When Devin requests approval, the adapter calls the swarm's human-input API directly (instead of using an MCP tool).
+6. **Completion**: Detected via structured output (`status: "done"`) or API terminal states (`exit`, `error`, `suspended`).
+
+### Billing
+
+Devin bills in **ACUs (Autonomous Compute Units)**, not tokens. The adapter reports cost as `acus_consumed × DEVIN_ACU_COST_USD`. Token counts are not available from the Devin API.
+
+Use `DEVIN_MAX_ACU_LIMIT` to cap per-session spend.
+
+### Devin Specifics
+
+- **No MCP tools**: Devin cannot call swarm MCP tools. The adapter sets `hasMcp: false`, so tool-related prompt sections are omitted.
+- **No local environment**: Sessions run in Cognition's cloud. The adapter sets `hasLocalEnvironment: false`, so local filesystem references and CLAUDE.md injection are skipped.
+- **Repo access**: Repos are configured via the task's `vcsRepo` field (set by webhooks, `send-task`, or workflow inheritance), not via local clones.
+- **Session resume**: Aborted sessions are not archived in Devin's cloud, so they remain available for resume.
+- **Session URL**: Each session gets a URL (e.g., `https://app.devin.ai/sessions/<id>`) shown in the task detail page.
+
+---
+
 ## Choosing a Provider
 
-| Consideration | Claude Code | Codex | pi-mono |
-|---------------|-------------|-------|---------|
-| **Setup complexity** | Minimal — install CLI + OAuth token | Minimal — CLI plus API key or OAuth bootstrap | Requires API key(s) |
-| **Billing model** | Uses Claude Pro/Max/Team subscription | OpenAI API billing or ChatGPT OAuth | Pay-per-token via API |
-| **Model flexibility** | Claude models only | Codex/OpenAI models | Any provider via OpenRouter |
-| **Session resume** | Built-in `--resume` support | Native CLI session support | Session persistence via SessionManager |
-| **MCP integration** | Native (`.mcp.json` config) | Native (`~/.codex/config.toml`) | HTTP-based tool discovery |
-| **Maturity** | Production-grade, well-tested | Production-grade, well-tested | Community project, actively developed |
+| Consideration | Claude Code | Codex | pi-mono | Devin |
+|---------------|-------------|-------|---------|-------|
+| **Setup complexity** | Minimal — install CLI + OAuth token | Minimal — CLI plus API key or OAuth bootstrap | Requires API key(s) | API key + org ID from Cognition |
+| **Billing model** | Uses Claude Pro/Max/Team subscription | OpenAI API billing or ChatGPT OAuth | Pay-per-token via API | ACU-based billing |
+| **Model flexibility** | Claude models only | Codex/OpenAI models | Any provider via OpenRouter | Devin's built-in model |
+| **Session resume** | Built-in `--resume` support | Native CLI session support | Session persistence via SessionManager | Sessions persist in Cognition cloud |
+| **MCP integration** | Native (`.mcp.json` config) | Native (`~/.codex/config.toml`) | HTTP-based tool discovery | None — skills inlined into prompt |
+| **Execution** | Local (Docker worker) | Local (Docker worker) | Local (Docker worker) | Fully remote (Cognition cloud) |
+| **Maturity** | Production-grade, well-tested | Production-grade, well-tested | Community project, actively developed | Production-grade, API-driven |
 
-**Recommendation**: Use Claude Code with OAuth for most setups. Use Codex when you specifically want the OpenAI/Codex toolchain or ChatGPT OAuth-backed workers. Consider pi-mono when you need access to non-Claude models through OpenRouter or want a library-based open-source runner.
+**Recommendation**: Use Claude Code with OAuth for most setups. Use Codex when you specifically want the OpenAI/Codex toolchain or ChatGPT OAuth-backed workers. Consider pi-mono when you need access to non-Claude models through OpenRouter or want a library-based open-source runner. Use Devin for fully remote autonomous sessions that don't need local tooling or MCP integration.
 
 ---
 
@@ -221,6 +276,19 @@ MCP_BASE_URL=http://host.docker.internal:3013
 AGENT_ID=your-worker-uuid
 GITHUB_TOKEN=ghp_...
 # Do NOT include CLAUDE_CODE_OAUTH_TOKEN — it will override the pi provider
+```
+
+### Devin Worker
+
+```bash
+# .env.docker-devin
+HARNESS_PROVIDER=devin
+DEVIN_API_KEY=cog_...
+DEVIN_ORG_ID=org-...
+DEVIN_MAX_ACU_LIMIT=10           # Optional — cap ACUs per session
+API_KEY=your-api-key
+MCP_BASE_URL=http://host.docker.internal:3013
+AGENT_ID=your-worker-uuid
 ```
 
 ### Mixed Swarm

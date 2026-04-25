@@ -159,6 +159,7 @@ describe("Tool Annotations & Classification", () => {
       "slack-reply",
       "slack-read",
       "slack-post",
+      "slack-start-thread",
       "slack-upload-file",
       "slack-download-file",
       "slack-list-channels",

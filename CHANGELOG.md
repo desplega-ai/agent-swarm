@@ -6,6 +6,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.70.0] - 2026-04-24
+
+### Added
+- Uniform `contextKey` column on `agent_tasks` populated at every task-ingress site (Slack, AgentMail, GitHub, GitLab, Linear, scheduler, workflow, `send-task`). Schema: `task:slack:{channelId}:{threadTs}`, `task:agentmail:{threadId}`, `task:trackers:github:{owner}:{repo}:{issue|pr}:{number}`, `task:trackers:gitlab:{projectId}:{mr|issue}:{iid}`, `task:trackers:linear:{issueIdentifier}`, `task:schedule:{scheduleId}`, `task:workflow:{workflowRunId}`. Migration 041 adds nullable `contextKey` plus `(contextKey, status)` composite index. Child tasks auto-inherit from parent via `parentTaskId` (#358)
+- Cross-ingress sibling-task awareness (phase 2): reader-side prompt injection surfaces sibling/parent tasks sharing the same `contextKey` so workers see related work across ingress paths. Includes additive `ADDITIVE_SLACK` buffer generalization and Linear hard-refuse UX fix (#359)
+- New harness-providers guide at [`/docs/guides/harness-providers`](/docs/guides/harness-providers) covering the `ProviderAdapter` contract, task↔session lifecycle, raw session-log pipeline, swarm-MCP exposure, system-prompt composition/delivery, skills handling, and a 15-step walkthrough grounded in the claude / pi / codex reference adapters (`docs-site/content/docs/(documentation)/guides/harness-providers.mdx`)
+- `slack-post` gains an optional `threadTs` parameter so the lead can post threaded replies under an existing message, and a sibling `slack-start-thread` tool posts a top-level message and returns `{ channelId, ts }` so subsequent `slack-post` calls can thread under it. Unblocks daily-digest flows where the parent is a summary and the body is an in-thread reply (#373)
+- `GET /api/mcp-oauth/{id}/authorize-url` returns `{ providerUrl }` (Bearer-authed) so the dashboard Connect flow can XHR-then-navigate and keep Bearer auth on the authed endpoint while letting the browser follow the provider redirect directly (#372)
+
+### Fixed
+- `core.ts` HTTP middleware now honors per-route `auth: { apiKey: false }` via a `routeRegistry` lookup instead of a hardcoded exception list, so `/api/mcp-oauth/callback` and other opt-out routes no longer 401 on API_KEY swarms. Unknown paths still fail closed. Adds middleware unit tests (#367, #372)
+- Docker entrypoint no longer inlines MCP credentials (OAuth Bearers, static headers, env-backed secrets) into `/workspace/.mcp.json` at boot; it now only uses installed-server names to seed `settings.json` permission patterns. The per-session merge in `claude-adapter.ts` is extracted into a pure `mergeMcpConfig` and flipped so installed servers from the API **override** on-disk entries, restoring the "resolve at dispatch time" guarantee from 1.69.0 so OAuth re-auth, secret rotation, and install/uninstall propagate without worker restart. 8 new unit tests cover precedence, uninstall propagation, and staleness (#369, #371)
+- MCP OAuth `Authorization` header now normalizes `token_type: "bearer"` to capital `Bearer`, so providers like Amplitude's MCP (which reject the RFC 6749 lowercase form despite RFC 6750 being case-insensitive) accept the token. Non-bearer schemes pass through verbatim (#370)
+- `update-profile` tool now gates `Bun.write("/workspace/SOUL.md" | "/workspace/IDENTITY.md")` on `requestInfo.agentId === process.env.AGENT_ID`, so test-suite fake `WORKER_ID`s no longer overwrite a real container's identity files. Also raises `IDENTITY_FILE_MIN_LENGTH` in `src/hooks/hook.ts` from 100 → 500 as defense-in-depth against the Stop hook syncing short sentinel writes back into the DB (#374)
+
+## [1.69.1] - 2026-04-23
+
+### Added
+- `ENABLE_PROMPT_CACHING_1H=1` is now set by default for every Claude Code session spawned via `ClaudeAdapter`. Opt out via `swarm_config` or environment (`ENABLE_PROMPT_CACHING_1H=0`). Regenerated `openapi.json` + API reference pages for the version bump
+
+## [1.69.0] - 2026-04-22
+
+### Added
+- **OAuth 2.0 MCP support for headless swarms** — end-to-end support for OAuth 2.0-protected MCP servers running inside worker containers. Workers resolve a valid access token at dispatch time (refreshing on expiry), inject it into the provider config, and propagate token-refresh failures back to the task without leaking tokens into logs or prompts (#357)
+- `POST /api/mcp-oauth/{mcpServerId}/authorize` / `GET /api/mcp-oauth/callback` — browser-driven OAuth authorization code flow for user-scoped MCP servers (#357)
+- `POST /api/mcp-oauth/{mcpServerId}/manual-client` — operator-supplied client credentials for MCP servers that don't implement dynamic client registration (#357)
+- `GET /api/mcp-oauth/{mcpServerId}/metadata` / `GET /api/mcp-oauth/{mcpServerId}/status` — metadata discovery (RFC 8414) and per-server OAuth status for the Integrations UI (#357)
+- `POST /api/mcp-oauth/{mcpServerId}/refresh` / `DELETE /api/mcp-oauth/{mcpServerId}` — manual refresh and revocation endpoints (#357)
+- New MCP OAuth panel in the dashboard (`new-ui/src/pages/mcp-servers/[id]/mcp-oauth-panel.tsx`) for authorize / refresh / revoke / manual-client management, with live status from `use-mcp-oauth.ts` (#357)
+- Encrypted-at-rest OAuth token storage via migration `041_mcp_oauth_tokens.sql`, reusing the `swarm_config` AES-256-GCM encryption key; access tokens are never returned over HTTP (#357)
+- Dummy OAuth MCP server reference implementation at `scripts/dummy-oauth-mcp/` for local testing of the full flow (authorization code, PKCE, dynamic client registration, refresh) (#357)
+- 1100+ lines of new test coverage across `src/tests/mcp-oauth-*.test.ts` (queries, resolve-secrets, ensure-token, wrapper) (#357)
+
+## [1.68.0] - 2026-04-22
+
+### Added
+- New `/integrations` dashboard page that lets operators configure third-party integrations (Slack, GitHub, GitLab, Linear, Sentry, AgentMail, Anthropic, OpenRouter, OpenAI, Codex, business-use) without hand-editing `.env`. Frontend-only catalog in `new-ui/src/lib/integrations-catalog.ts`, one form field per known `swarm_config` key, with labels, help text, docs links, and category/search filters (#364)
+- `POST /api/config/reload` — thin wrapper over the existing `/internal/reload-config` so the Integrations UI can apply saved values live (re-inits AgentMail, GitHub, Linear, stops/starts Slack socket mode) without a process restart (#364)
+- `GET /api/config/env-presence?keys=K1,K2,...` — returns `{ presence: { KEY: boolean } }` so the UI can surface which values come from the deployment env vs the DB without ever pushing raw env values to the browser (#364)
+- Per-field **Replace** / **Clear** affordances on the Integrations detail page. Secrets render masked (`••••••`); non-secret values (emails, channel names, flags) edit in place. Save auto-invokes reload and toasts which integrations were re-initialized (#364)
+- Source chips on each field: `db+env` (live), `env (deploy)` (no DB row), `db (pending reload)` — rendered via shadcn Tooltip for fast hover reveal. Collapsible legend on the list page explains every chip (#364)
+
+### Changed
+- Sidebar restructured: Chat and Services hidden (routes still accessible); new **AI** group (Skills, MCP Servers); new **Configuration** group (Integrations, Templates, Approvals, Repos). Breadcrumbs now resolve integration ids to display names (`github` → "GitHub") and include proper-case labels for Integrations and API Keys (#364)
+- Toaster references the correct Tailwind v4 CSS vars (`--color-popover` instead of `--popover`) and pins `!bg-popover` so toasts are opaque instead of translucent (#364)
+
+## [1.67.5] - 2026-04-22
+
+### Added
+- Centralized secret scrubber (`src/utils/secret-scrubber.ts`) that replaces sensitive env values and known-shape tokens (GitHub PATs, Anthropic/OpenAI/OpenRouter `sk-*` keys, Slack `xox*`, JWTs, AWS access keys, Google API keys) with `[REDACTED:<name>]` markers at every text-egress point — adapter log files, `session_logs` writes, pretty-printed stdout, stderr dumps — so credentials never leak into `/workspace/logs/*.jsonl`, the `session_logs` SQLite table, or container stdout shipped to log aggregators (#363)
+- `CLAUDE.md` contributor note directing future code that logs/prints/transports sensitive values to wrap emitted strings with `scrubSecrets()` at the egress point (#363)
+
 ## [1.67.4] - 2026-04-21
 
 ### Fixed

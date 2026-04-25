@@ -208,10 +208,7 @@ export default function TemplateDetailPage() {
         headerName: "State",
         width: 180,
         cellRenderer: (params: { value: string }) => (
-          <Badge
-            variant={STATE_VARIANTS[params.value] ?? "outline"}
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-          >
+          <Badge variant={STATE_VARIANTS[params.value] ?? "outline"} size="tag">
             {params.value?.replace(/_/g, " ")}
           </Badge>
         ),
@@ -297,41 +294,24 @@ export default function TemplateDetailPage() {
 
         <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-xl font-semibold">{template.eventType}</h1>
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-          >
+          <Badge variant="outline" size="tag">
             {template.scope}
           </Badge>
-          <Badge
-            variant={STATE_VARIANTS[template.state] ?? "outline"}
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-          >
+          <Badge variant={STATE_VARIANTS[template.state] ?? "outline"} size="tag">
             {template.state.replace(/_/g, " ")}
           </Badge>
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-          >
+          <Badge variant="outline" size="tag">
             v{template.version}
           </Badge>
           {template.isDefault && (
-            <Badge
-              variant="secondary"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-            >
+            <Badge variant="secondary" size="tag">
               Default
             </Badge>
           )}
 
           {!template.isDefault && (
             <div className="ml-auto">
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-red-500/30 text-red-400 hover:bg-red-500/10"
-                onClick={() => setDeleteOpen(true)}
-              >
+              <Button variant="destructive-outline" size="sm" onClick={() => setDeleteOpen(true)}>
                 Delete
               </Button>
             </div>
@@ -352,10 +332,7 @@ export default function TemplateDetailPage() {
           {template.isDefault ? (
             <>
               <div className="flex items-center gap-2">
-                <Badge
-                  variant="secondary"
-                  className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-                >
+                <Badge variant="secondary" size="tag">
                   Default — Read Only
                 </Badge>
                 <Button variant="outline" size="sm" onClick={handleCustomize}>
@@ -510,7 +487,8 @@ export default function TemplateDetailPage() {
                         <Badge
                           key={v}
                           variant="outline"
-                          className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase border-amber-500/30 text-amber-400"
+                          size="tag"
+                          className="border-amber-500/30 text-amber-400"
                         >
                           {v}
                         </Badge>

@@ -3,7 +3,6 @@ import { CronExpressionParser } from "cron-parser";
 import { z } from "zod";
 import {
   createScheduledTask,
-  createTaskExtended,
   deleteScheduledTask,
   getAgentById,
   getDb,
@@ -12,6 +11,8 @@ import {
   updateScheduledTask,
 } from "../be/db";
 import { calculateNextRun } from "../scheduler/scheduler";
+import { scheduleContextKey } from "../tasks/context-key";
+import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { getExecutorRegistry } from "../workflows";
 import { handleScheduleTrigger } from "../workflows/triggers";
 import { route } from "./route-def";
@@ -285,7 +286,7 @@ export async function handleSchedules(
       const now = new Date().toISOString();
 
       const task = getDb().transaction(() => {
-        const createdTask = createTaskExtended(schedule.taskTemplate, {
+        const createdTask = createTaskWithSiblingAwareness(schedule.taskTemplate, {
           creatorAgentId: schedule.createdByAgentId,
           taskType: schedule.taskType,
           tags: [...schedule.tags, "scheduled", `schedule:${schedule.name}`, "manual-run"],
@@ -294,6 +295,7 @@ export async function handleSchedules(
           model: schedule.model,
           scheduleId: schedule.id,
           source: "schedule",
+          contextKey: scheduleContextKey({ scheduleId: schedule.id }),
         });
 
         if (schedule.scheduleType === "one_time") {

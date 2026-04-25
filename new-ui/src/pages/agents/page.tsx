@@ -76,11 +76,7 @@ export default function AgentsPage() {
         cellRenderer: (params: { value: string[] | undefined }) => (
           <div className="flex gap-1 items-center justify-center">
             {params.value?.slice(0, 2).map((cap) => (
-              <Badge
-                key={cap}
-                variant="outline"
-                className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase shrink-0"
-              >
+              <Badge key={cap} variant="outline" size="tag" className="shrink-0">
                 {cap}
               </Badge>
             ))}

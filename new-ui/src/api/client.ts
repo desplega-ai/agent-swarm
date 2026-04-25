@@ -12,6 +12,8 @@ import type {
   DashboardCostResponse,
   EventDefinition,
   LogsResponse,
+  McpOAuthMetadataResponse,
+  McpOAuthStatusResponse,
   McpServer,
   McpServersResponse,
   MessagesResponse,
@@ -1176,6 +1178,101 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/agents/${agentId}/mcp-servers`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch agent MCP servers: ${res.status}`);
+    return res.json();
+  }
+
+  // ─── MCP OAuth ────────────────────────────────────────────────────────────
+
+  async fetchMcpOAuthStatus(mcpServerId: string): Promise<McpOAuthStatusResponse> {
+    const url = `${this.getBaseUrl()}/api/mcp-oauth/${mcpServerId}/status`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch OAuth status: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchMcpOAuthMetadata(mcpServerId: string): Promise<McpOAuthMetadataResponse> {
+    const url = `${this.getBaseUrl()}/api/mcp-oauth/${mcpServerId}/metadata`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to fetch OAuth metadata" }));
+      throw new Error(err.error || `Failed to fetch OAuth metadata: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  /**
+   * Fetch the OAuth provider URL for an MCP server. The caller then navigates
+   * the browser to `providerUrl`.
+   *
+   * Using a separate authed endpoint (instead of navigating straight to
+   * `/api/mcp-oauth/:id/authorize`) keeps the Bearer auth header on the API
+   * call and lets the browser redirect freely to the external OAuth provider.
+   */
+  async fetchMcpOAuthAuthorizeUrl(
+    mcpServerId: string,
+    options?: { redirect?: string; scopes?: string },
+  ): Promise<{ providerUrl: string }> {
+    const params = new URLSearchParams();
+    if (options?.redirect) params.set("redirect", options.redirect);
+    if (options?.scopes) params.set("scopes", options.scopes);
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/mcp-oauth/${mcpServerId}/authorize-url${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to start OAuth flow" }));
+      throw new Error(err.error || `Failed to start OAuth flow: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async refreshMcpOAuthToken(
+    mcpServerId: string,
+  ): Promise<{ ok: boolean; expiresAt: string | null; scope: string | null }> {
+    const url = `${this.getBaseUrl()}/api/mcp-oauth/${mcpServerId}/refresh`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to refresh OAuth token" }));
+      throw new Error(err.error || `Failed to refresh OAuth token: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async disconnectMcpOAuth(mcpServerId: string): Promise<{ ok: boolean }> {
+    const url = `${this.getBaseUrl()}/api/mcp-oauth/${mcpServerId}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to disconnect OAuth" }));
+      throw new Error(err.error || `Failed to disconnect OAuth: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async registerMcpOAuthManualClient(
+    mcpServerId: string,
+    data: {
+      clientId: string;
+      clientSecret?: string;
+      authorizationServerIssuer?: string;
+      authorizeUrl?: string;
+      tokenUrl?: string;
+      revocationUrl?: string;
+      scopes?: string[];
+    },
+  ): Promise<{ ok: boolean }> {
+    const url = `${this.getBaseUrl()}/api/mcp-oauth/${mcpServerId}/manual-client`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to register manual client" }));
+      throw new Error(err.error || `Failed to register manual client: ${res.status}`);
+    }
     return res.json();
   }
 }

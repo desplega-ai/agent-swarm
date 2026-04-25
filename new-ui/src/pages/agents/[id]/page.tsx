@@ -220,10 +220,7 @@ export default function AgentDetailPage() {
         width: 110,
         cellRenderer: (params: { value: string | undefined }) =>
           params.value ? (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-            >
+            <Badge variant="outline" size="tag">
               {params.value}
             </Badge>
           ) : null,
@@ -387,11 +384,7 @@ export default function AgentDetailPage() {
                   </span>
                   <div className="flex flex-wrap gap-1 mt-1">
                     {agent.capabilities.map((cap) => (
-                      <Badge
-                        key={cap}
-                        variant="outline"
-                        className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-                      >
+                      <Badge key={cap} variant="outline" size="tag">
                         {cap}
                       </Badge>
                     ))}
@@ -538,15 +531,13 @@ export default function AgentDetailPage() {
                         <p className="font-medium text-sm">{skill.name}</p>
                         <p className="text-xs text-muted-foreground">{skill.description}</p>
                       </div>
-                      <Badge
-                        variant="outline"
-                        className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-                      >
+                      <Badge variant="outline" size="tag">
                         {skill.type}
                       </Badge>
                       <Badge
                         variant="outline"
-                        className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${
+                        size="tag"
+                        className={`${
                           skill.isActive
                             ? "border-emerald-500/30 text-emerald-400"
                             : "border-zinc-500/30 text-zinc-400"
@@ -556,9 +547,8 @@ export default function AgentDetailPage() {
                       </Badge>
                     </div>
                     <Button
-                      variant="outline"
+                      variant="destructive-outline"
                       size="sm"
-                      className="border-red-500/30 text-red-400 hover:bg-red-500/10"
                       onClick={() => uninstallSkill.mutate({ skillId: skill.id, agentId: id! })}
                     >
                       Uninstall
@@ -589,7 +579,8 @@ export default function AgentDetailPage() {
                       </div>
                       <Badge
                         variant="outline"
-                        className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${
+                        size="tag"
+                        className={`${
                           server.transport === "stdio"
                             ? "border-blue-500/30 text-blue-400"
                             : server.transport === "http"
@@ -601,7 +592,8 @@ export default function AgentDetailPage() {
                       </Badge>
                       <Badge
                         variant="outline"
-                        className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${
+                        size="tag"
+                        className={`${
                           server.isActive
                             ? "border-emerald-500/30 text-emerald-400"
                             : "border-zinc-500/30 text-zinc-400"
@@ -611,9 +603,8 @@ export default function AgentDetailPage() {
                       </Badge>
                     </div>
                     <Button
-                      variant="outline"
+                      variant="destructive-outline"
                       size="sm"
-                      className="border-red-500/30 text-red-400 hover:bg-red-500/10"
                       onClick={() =>
                         uninstallMcpServer.mutate({ serverId: server.id, agentId: id! })
                       }

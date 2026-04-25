@@ -228,10 +228,7 @@ export default function ApprovalRequestDetailPage() {
                 <span className="text-muted-foreground">{idx + 1}.</span>
                 {question.label}
                 {question.required && <span className="text-red-400 text-xs">*</span>}
-                <Badge
-                  variant="outline"
-                  className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ml-auto"
-                >
+                <Badge variant="outline" size="tag" className="ml-auto">
                   {question.type}
                 </Badge>
               </CardTitle>

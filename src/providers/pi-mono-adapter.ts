@@ -22,6 +22,7 @@ import {
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
 import { type TSchema, Type } from "@sinclair/typebox";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { createSwarmHooksExtension } from "./pi-mono-extension";
 import { McpHttpClient } from "./pi-mono-mcp-client";
 import type {
@@ -164,17 +165,24 @@ class PiMonoSession implements ProviderSession {
   }
 
   private emit(event: ProviderEvent): void {
+    // Scrub secrets from raw_log / raw_stderr content before egress (log file
+    // write, listener dispatch, downstream session-logs push + pretty-print).
+    const scrubbed: ProviderEvent =
+      event.type === "raw_log" || event.type === "raw_stderr"
+        ? { ...event, content: scrubSecrets(event.content) }
+        : event;
+
     // Log all events
     this.logFileHandle.write(
-      `${JSON.stringify({ ...event, timestamp: new Date().toISOString() })}\n`,
+      `${JSON.stringify({ ...scrubbed, timestamp: new Date().toISOString() })}\n`,
     );
 
     if (this.listeners.length > 0) {
       for (const listener of this.listeners) {
-        listener(event);
+        listener(scrubbed);
       }
     } else {
-      this.eventQueue.push(event);
+      this.eventQueue.push(scrubbed);
     }
   }
 

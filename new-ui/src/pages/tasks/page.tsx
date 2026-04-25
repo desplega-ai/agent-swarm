@@ -365,10 +365,7 @@ export default function TasksPage() {
         width: 95,
         cellRenderer: (params: { value: string | undefined }) =>
           params.value ? (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-            >
+            <Badge variant="outline" size="tag">
               {params.value}
             </Badge>
           ) : null,
@@ -391,10 +388,7 @@ export default function TasksPage() {
         width: 80,
         cellRenderer: (params: { value: string | undefined }) =>
           params.value ? (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-            >
+            <Badge variant="outline" size="tag">
               {params.value}
             </Badge>
           ) : null,
@@ -405,10 +399,7 @@ export default function TasksPage() {
         width: 110,
         cellRenderer: (params: { value: string | undefined }) =>
           params.value ? (
-            <Badge
-              variant="outline"
-              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-            >
+            <Badge variant="outline" size="tag">
               {params.value}
             </Badge>
           ) : null,
@@ -461,11 +452,7 @@ export default function TasksPage() {
         cellRenderer: (params: { value: string[] }) => (
           <div className="flex gap-1 items-center">
             {params.value?.slice(0, 2).map((tag) => (
-              <Badge
-                key={tag}
-                variant="outline"
-                className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase shrink-0"
-              >
+              <Badge key={tag} variant="outline" size="tag" className="shrink-0">
                 {tag}
               </Badge>
             ))}

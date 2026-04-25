@@ -20,10 +20,7 @@ import { formatRelativeTime } from "@/lib/utils";
 
 function TypeBadge({ type }: { type: string }) {
   return (
-    <Badge
-      variant="outline"
-      className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-    >
+    <Badge variant="outline" size="tag">
       {type}
     </Badge>
   );
@@ -36,10 +33,7 @@ function ScopeBadge({ scope }: { scope: string }) {
     agent: "border-zinc-500/30 text-zinc-400",
   };
   return (
-    <Badge
-      variant="outline"
-      className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${colors[scope] || ""}`}
-    >
+    <Badge variant="outline" size="tag" className={`${colors[scope] || ""}`}>
       {scope}
     </Badge>
   );
@@ -105,7 +99,8 @@ export default function SkillsPage() {
         cellRenderer: (params: ICellRendererParams<Skill>) => (
           <Badge
             variant="outline"
-            className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${
+            size="tag"
+            className={`${
               params.value
                 ? "border-emerald-500/30 text-emerald-400"
                 : "border-red-500/30 text-red-400"

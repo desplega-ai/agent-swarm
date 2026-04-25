@@ -73,15 +73,13 @@ export default function SkillDetailPage() {
       <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-semibold">{skill.name}</h1>
-          <Badge
-            variant="outline"
-            className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
-          >
+          <Badge variant="outline" size="tag">
             {skill.type}
           </Badge>
           <Badge
             variant="outline"
-            className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${
+            size="tag"
+            className={`${
               skill.scope === "global"
                 ? "border-emerald-500/30 text-emerald-400"
                 : skill.scope === "swarm"
@@ -93,7 +91,8 @@ export default function SkillDetailPage() {
           </Badge>
           <Badge
             variant="outline"
-            className={`text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase ${
+            size="tag"
+            className={`${
               skill.isEnabled
                 ? "border-emerald-500/30 text-emerald-400"
                 : "border-red-500/30 text-red-400"
@@ -108,11 +107,7 @@ export default function SkillDetailPage() {
           </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-red-500/30 text-red-400 hover:bg-red-500/10"
-              >
+              <Button variant="destructive-outline" size="sm">
                 <Trash2 className="h-4 w-4 mr-1" /> Delete
               </Button>
             </AlertDialogTrigger>

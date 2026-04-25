@@ -59,6 +59,7 @@ import type {
   WorkflowVersion,
 } from "../types";
 import { deriveProviderFromKeyType } from "../utils/credentials";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { decryptSecret, encryptSecret, getEncryptionKey, resolveEncryptionKey } from "./crypto";
 import { normalizeDate, normalizeDateRequired } from "./date-utils";
 import { runMigrations } from "./migrations/runner";
@@ -803,6 +804,7 @@ type AgentTaskRow = {
   workflowRunId: string | null;
   workflowRunStepId: string | null;
   outputSchema: string | null;
+  contextKey: string | null;
   createdAt: string;
   lastUpdatedAt: string;
   finishedAt: string | null;
@@ -865,6 +867,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     workflowRunId: row.workflowRunId ?? undefined,
     workflowRunStepId: row.workflowRunStepId ?? undefined,
     outputSchema: row.outputSchema ? JSON.parse(row.outputSchema) : undefined,
+    contextKey: row.contextKey ?? undefined,
     compactionCount: row.compactionCount ?? undefined,
     peakContextPercent: row.peakContextPercent ?? undefined,
     totalContextTokensUsed: row.totalContextTokensUsed ?? undefined,
@@ -1456,6 +1459,31 @@ export function getInProgressSlackTasks(): AgentTask[] {
 }
 
 /**
+ * Return sibling tasks for a given cross-ingress context key, optionally
+ * filtered by status. The returned shape mirrors getInProgressSlackTasks for
+ * consistency; callers can narrow further in TypeScript.
+ *
+ * See src/tasks/context-key.ts for the key schema.
+ */
+export function getInProgressTasksByContextKey(
+  contextKey: string,
+  statuses: AgentTaskStatus[] = ["pending", "in_progress", "offered", "paused"],
+): AgentTask[] {
+  if (!contextKey || statuses.length === 0) return [];
+  const placeholders = statuses.map(() => "?").join(",");
+  return getDb()
+    .prepare<AgentTaskRow, (string | AgentTaskStatus)[]>(
+      `SELECT * FROM agent_tasks
+       WHERE contextKey = ?
+       AND status IN (${placeholders})
+       ORDER BY lastUpdatedAt DESC
+       LIMIT 200`,
+    )
+    .all(contextKey, ...statuses)
+    .map(rowToAgentTask);
+}
+
+/**
  * Find the most recent agent associated with a specific Slack thread.
  * No status filter — returns the last agent that touched this thread regardless of task state.
  * This is intentional: follow-up messages should route to the same agent even after task completion.
@@ -1959,6 +1987,7 @@ export interface CreateTaskOptions {
   sourceTaskId?: string;
   outputSchema?: Record<string, unknown>;
   requestedByUserId?: string;
+  contextKey?: string;
 }
 
 /**
@@ -2029,6 +2058,9 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       if (parent.requestedByUserId && !options.requestedByUserId) {
         options.requestedByUserId = parent.requestedByUserId;
       }
+      if (parent.contextKey && !options.contextKey) {
+        options.contextKey = parent.contextKey;
+      }
     }
   }
 
@@ -2054,8 +2086,8 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, dir, parentTaskId, model, scheduleId,
-        workflowRunId, workflowRunStepId, outputSchema, requestedByUserId, swarmVersion, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        workflowRunId, workflowRunStepId, outputSchema, requestedByUserId, contextKey, swarmVersion, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -2095,6 +2127,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.workflowRunStepId ?? null,
       options?.outputSchema ? JSON.stringify(options.outputSchema) : null,
       options?.requestedByUserId ?? null,
+      options?.contextKey ?? null,
       pkg.version,
       now,
       now,
@@ -3434,7 +3467,11 @@ export function createSessionLogs(logs: {
         logs.sessionId,
         logs.iteration,
         logs.cli,
-        line,
+        // Defense-in-depth: callers (runner.ts → POST /api/session-logs) send
+        // content that is already scrubbed at the adapter emit site. We scrub
+        // again here so any future write path that bypasses the adapter still
+        // lands clean text in the persistent session_logs table.
+        scrubSecrets(line),
         i,
       );
     }
@@ -7088,6 +7125,7 @@ type McpServerRow = {
   headers: string | null;
   envConfigKeys: string | null;
   headerConfigKeys: string | null;
+  authMethod: string | null;
   isEnabled: number;
   version: number;
   createdAt: string;
@@ -7118,6 +7156,7 @@ function rowToMcpServer(row: McpServerRow): McpServer {
     headers: row.headers,
     envConfigKeys: row.envConfigKeys,
     headerConfigKeys: row.headerConfigKeys,
+    authMethod: (row.authMethod as McpServer["authMethod"]) ?? "static",
     isEnabled: row.isEnabled === 1,
     version: row.version,
     createdAt: row.createdAt,
@@ -7193,7 +7232,10 @@ export function createMcpServer(data: McpServerInsert): McpServer {
 
 export function updateMcpServer(
   id: string,
-  updates: Partial<McpServerInsert> & { isEnabled?: boolean },
+  updates: Partial<McpServerInsert> & {
+    isEnabled?: boolean;
+    authMethod?: McpServer["authMethod"];
+  },
 ): McpServer | null {
   const existing = getMcpServerById(id);
   if (!existing) return null;
@@ -7249,6 +7291,10 @@ export function updateMcpServer(
   if (updates.ownerAgentId !== undefined) {
     sets.push("ownerAgentId = ?");
     params.push(updates.ownerAgentId ?? null);
+  }
+  if (updates.authMethod !== undefined) {
+    sets.push("authMethod = ?");
+    params.push(updates.authMethod);
   }
 
   // Bump version on config changes
