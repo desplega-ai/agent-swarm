@@ -156,7 +156,7 @@ Agents can read Slack threads using `slack-read`:
 
 ### Posting Messages
 
-The lead agent can post new messages to channels using `slack-post`.
+The lead agent can post messages to channels using `slack-post`. By default each call creates a new top-level message. To run a multi-message conversation under a single Slack thread, the lead first calls `slack-start-thread` to create the parent message, then passes the returned `ts` as `threadTs` on subsequent `slack-post` calls — keeping the channel tidy and the conversation discoverable.
 
 ## User Filtering
 
