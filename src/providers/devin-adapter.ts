@@ -29,6 +29,7 @@ import type {
   ProviderResult,
   ProviderSession,
   ProviderSessionConfig,
+  ProviderTraits,
 } from "./types";
 
 /** Default polling interval in milliseconds. */
@@ -776,7 +777,10 @@ class DevinSession implements ProviderSession {
 
 export class DevinAdapter implements ProviderAdapter {
   readonly name = "devin";
-  readonly traits = { hasMcp: false, hasLocalEnvironment: false };
+  get traits(): ProviderTraits {
+    const hasMcp = (process.env.HAS_MCP ?? "").toLowerCase() === "true";
+    return { hasMcp, hasLocalEnvironment: false };
+  }
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
     // Resolve credentials from config.env (injected by runner) or process.env.
@@ -789,6 +793,11 @@ export class DevinAdapter implements ProviderAdapter {
     }
     if (!orgId) {
       throw new Error("[devin] DEVIN_ORG_ID is required. Set it in environment or agent config.");
+    }
+
+    const hasMcp = (env.HAS_MCP ?? process.env.HAS_MCP ?? "").toLowerCase() === "true";
+    if (hasMcp) {
+      throw new Error("[devin] HAS_MCP=true is not supported yet — Devin MCP integration has not been tested.");
     }
 
     // If there's a system prompt, resolve it to a playbook.
