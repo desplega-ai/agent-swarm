@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { parseProviderMeta } from "@/utils/provider-metadata.ts";
 import pkg from "../../package.json";
 import { addEyesReactionOnTaskStart } from "../github/task-reactions";
 import { configureDbResolver } from "../prompts/resolver";
@@ -885,11 +886,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     requestedByUserId: row.requestedByUserId ?? undefined,
     swarmVersion: row.swarmVersion ?? undefined,
     provider: (row.provider as ProviderName | null) ?? undefined,
-    providerMeta: row.providerMeta
-      ? row.provider === "devin"
-        ? (JSON.parse(row.providerMeta) as DevinProviderMeta)
-        : JSON.parse(row.providerMeta)
-      : undefined,
+    providerMeta: parseProviderMeta(row.provider as ProviderName | null, row.providerMeta),
   };
 }
 

@@ -76,6 +76,16 @@ export type DevinProviderMeta = {
   acuCostUsd?: number;
 };
 
+// These providers do not have metadata yet.
+type NoProviderMeta = Record<string, never>;
+
+export type ProviderMetaMap = {
+  devin: DevinProviderMeta;
+  claude: NoProviderMeta;
+  codex: NoProviderMeta;
+  pi: NoProviderMeta;
+};
+
 export const AgentTaskSchema = z.object({
   id: z.uuid(),
   agentId: z.uuid().nullable(), // Nullable for unassigned tasks

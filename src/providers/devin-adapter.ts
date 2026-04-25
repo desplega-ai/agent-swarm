@@ -797,7 +797,9 @@ export class DevinAdapter implements ProviderAdapter {
 
     const hasMcp = (env.HAS_MCP ?? process.env.HAS_MCP ?? "").toLowerCase() === "true";
     if (hasMcp) {
-      throw new Error("[devin] HAS_MCP=true is not supported yet — Devin MCP integration has not been tested.");
+      throw new Error(
+        "[devin] HAS_MCP=true is not supported yet — Devin MCP integration has not been tested.",
+      );
     }
 
     // If there's a system prompt, resolve it to a playbook.
