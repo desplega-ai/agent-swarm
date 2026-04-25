@@ -179,7 +179,17 @@ Read messages from a Slack thread or channel.
 
 ### slack-post
 
-Post a new message to a Slack channel. Leads only.
+Post a message to a Slack channel. Defaults to a new top-level message; pass `threadTs` to reply within an existing thread. Leads only.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `channelId` | string | Yes | Channel ID |
+| `message` | string | Yes | Message content |
+| `threadTs` | string | No | Parent message ts to thread under (obtain via `slack-start-thread`) |
+
+### slack-start-thread
+
+Post a new top-level message to a Slack channel and return its `ts` so the caller can thread replies under it. Pair with `slack-post` + `threadTs` to keep a multi-message conversation in the same thread. Leads only.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
