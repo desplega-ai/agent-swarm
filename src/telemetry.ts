@@ -19,30 +19,51 @@ function isEnabled(): boolean {
   return process.env.ANONYMIZED_TELEMETRY !== "false";
 }
 
+interface InitTelemetryOptions {
+  /**
+   * Whether to mint and persist a new install ID when the config read returns
+   * nothing (or fails). Only the api-server should set this — it owns the
+   * install identity. Workers piggyback on whatever the api-server has
+   * persisted; if it's not there yet, the worker silently no-ops telemetry to
+   * avoid polluting metrics with ephemeral per-restart IDs.
+   *
+   * Default: false.
+   */
+  generateIfMissing?: boolean;
+}
+
 /**
  * Initialize telemetry. Call once at startup.
  * @param sourceId - "api-server" or "worker"
  * @param getConfig - reads a key from swarm_config (global scope)
  * @param setConfig - writes a key to swarm_config (global scope)
+ * @param options - see {@link InitTelemetryOptions}
  */
 export async function initTelemetry(
   sourceId: string,
   getConfig: (key: string) => Promise<string | undefined> | string | undefined,
   setConfig: (key: string, value: string) => Promise<void> | void,
+  options: InitTelemetryOptions = {},
 ): Promise<void> {
   if (!isEnabled()) return;
   source = sourceId;
+  const generateIfMissing = options.generateIfMissing === true;
   try {
     const existing = await getConfig("telemetry_installation_id");
     if (existing) {
       installationId = existing;
-    } else {
+    } else if (generateIfMissing) {
       installationId = `install_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
       await setConfig("telemetry_installation_id", installationId);
     }
+    // else: leave installationId = null; track() will no-op
   } catch {
-    // Config access failed — generate ephemeral ID so telemetry still works this session
-    installationId = `ephemeral_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    // Config access failed.
+    if (generateIfMissing) {
+      // Generate ephemeral ID so telemetry still works this session.
+      installationId = `ephemeral_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    }
+    // else: leave installationId = null; track() will no-op
   }
 }
 
@@ -80,6 +101,20 @@ export function track(options: TrackOptions): void {
   } catch {
     // Never throw
   }
+}
+
+/**
+ * Test-only: reset the module-scoped state so tests can re-init cleanly.
+ * Do not call from production code.
+ */
+export function _resetTelemetryStateForTests(): void {
+  installationId = null;
+  source = "unknown";
+}
+
+/** Test-only: read the resolved install ID. */
+export function _getInstallationIdForTests(): string | null {
+  return installationId;
 }
 
 export const telemetry = {

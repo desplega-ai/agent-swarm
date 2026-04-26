@@ -245,13 +245,17 @@ httpServer
       );
     }
 
-    // Initialize anonymized telemetry (opt-out via ANONYMIZED_TELEMETRY=false)
+    // Initialize anonymized telemetry (opt-out via ANONYMIZED_TELEMETRY=false).
+    // The api-server is the sole authority for the install identity — pass
+    // generateIfMissing so it mints a new install ID on first boot. Workers
+    // must NOT mint (see src/commands/runner.ts).
     await initTelemetry(
       "api-server",
       (key) => getSwarmConfigs({ scope: "global", key })?.[0]?.value,
       (key, value) => {
         upsertSwarmConfig({ scope: "global", key, value });
       },
+      { generateIfMissing: true },
     );
     telemetry.server("started", { port });
 
