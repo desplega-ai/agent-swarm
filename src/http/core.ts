@@ -16,27 +16,8 @@ import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
-import { routeRegistry } from "./route-def";
-import { agentWithCapacity, getPathSegments, matchRoute, parseQueryParams } from "./utils";
-
-/**
- * Check whether a request targets a route declared (via the `route()` factory)
- * with `auth: { apiKey: false }` — i.e. one that opts out of the API-key
- * bearer check. Handler files must use the `route()` factory for this to take
- * effect; unknown paths fail closed (auth required).
- */
-function isPublicRoute(method: string | undefined, pathSegments: string[]): boolean {
-  for (const def of routeRegistry) {
-    if (def.auth?.apiKey === false) {
-      if (
-        matchRoute(method, pathSegments, def.method.toUpperCase(), def.pattern, def.exact ?? true)
-      ) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
+import { isPublicRoute } from "./route-def";
+import { agentWithCapacity, getPathSegments, parseQueryParams } from "./utils";
 
 /**
  * Load global swarm_config entries into process.env.
