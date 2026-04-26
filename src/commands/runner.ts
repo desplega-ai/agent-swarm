@@ -2207,8 +2207,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     configureHttpResolver(apiUrl, process.env.API_KEY);
   }
 
-  // Initialize anonymized telemetry (opt-out via ANONYMIZED_TELEMETRY=false)
-  // Workers use HTTP-based config access (cannot import DB directly)
+  // Initialize anonymized telemetry (opt-out via ANONYMIZED_TELEMETRY=false).
+  // Workers use HTTP-based config access (cannot import DB directly).
+  // IMPORTANT: workers must NOT pass `generateIfMissing` — the api-server is
+  // the sole authority for `telemetry_installation_id`. If the API hasn't
+  // persisted one yet (network blip, fresh boot, API down), the worker simply
+  // skips telemetry instead of minting a fresh `install_<hex>` ID per
+  // restart, which floods prod metrics with phantom installs.
   {
     const telemetryApiKey = process.env.API_KEY;
     await initTelemetry(

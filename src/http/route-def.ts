@@ -60,6 +60,25 @@ interface RouteHandle<TParams, TQuery, TBody> {
 /** Global registry — populated at import time, read by OpenAPI generator */
 export const routeRegistry: RouteDef[] = [];
 
+/**
+ * Check whether a request targets a route declared (via the `route()` factory)
+ * with `auth: { apiKey: false }` — i.e. one that opts out of the API-key
+ * bearer check. Handler files must use the `route()` factory for this to take
+ * effect; unknown paths fail closed (auth required).
+ */
+export function isPublicRoute(method: string | undefined, pathSegments: string[]): boolean {
+  for (const def of routeRegistry) {
+    if (def.auth?.apiKey === false) {
+      if (
+        matchRoute(method, pathSegments, def.method.toUpperCase(), def.pattern, def.exact ?? true)
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // ─── Factory ─────────────────────────────────────────────────────────────────
 
 export function route<
