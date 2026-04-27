@@ -10,7 +10,7 @@ status: in-progress
 research_source: thoughts/taras/research/2026-04-21-jira-integration.md
 autonomy: critical
 last_updated: 2026-04-27
-last_updated_by: claude (phase 5 implemented)
+last_updated_by: claude (phase 6 implemented)
 ---
 
 # Jira Cloud Integration — Implementation Plan
@@ -453,14 +453,14 @@ Files touched:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] All new unit tests pass: `bun test src/tests/jira-adf.test.ts src/tests/jira-metadata.test.ts src/tests/jira-webhook.test.ts src/tests/jira-sync.test.ts src/tests/jira-outbound-sync.test.ts src/tests/jira-oauth.test.ts`
-- [ ] Full test suite: `bun test`
-- [ ] Type check: `bun run tsc:check`
-- [ ] Lint: `bun run lint:fix`
-- [ ] DB boundary: `bash scripts/check-db-boundary.sh`
-- [ ] OpenAPI fresh: `bun run docs:openapi`
-- [ ] UI type check: `cd new-ui && pnpm lint && pnpm exec tsc --noEmit`
-- [ ] Docs site builds (if applicable): `cd docs-site && pnpm build` or `bun run build` depending on configured script
+- [x] All new unit tests pass: `bun test src/tests/jira-adf.test.ts src/tests/jira-metadata.test.ts src/tests/jira-webhook.test.ts src/tests/jira-sync.test.ts src/tests/jira-outbound-sync.test.ts src/tests/jira-oauth.test.ts`
+- [x] Full test suite: `bun test`
+- [x] Type check: `bun run tsc:check`
+- [x] Lint: `bun run lint:fix`
+- [x] DB boundary: `bash scripts/check-db-boundary.sh`
+- [x] OpenAPI fresh: `bun run docs:openapi`
+- [x] UI type check: `cd new-ui && pnpm lint && pnpm exec tsc --noEmit`
+- [x] Docs site builds (if applicable): `cd docs-site && pnpm build` or `bun run build` depending on configured script
 
 #### Manual Verification:
 - [ ] Read the new `jira-integration.mdx` end-to-end — verify every step is actionable for a fresh user.

@@ -1,0 +1,158 @@
+---
+title: Jira Integration
+description: Connect Agent Swarm to Atlassian Jira Cloud for bidirectional issue tracking via OAuth 3LO and dynamic webhooks
+---
+
+Agent Swarm integrates with [Atlassian Jira Cloud](https://www.atlassian.com/software/jira) as the second provider in its generic ticket-tracker framework. Issues assigned to (or @-mentioning) the bot become swarm tasks; task lifecycle events post back as Jira comments.
+
+## Features
+
+- **OAuth 3LO authentication** — PKCE flow via the same generic `oauth4webapi` module that powers the Linear integration.
+- **Inbound on assignee or @-mention** — `jira:issue_updated` (assignee → bot) and `comment_created` / `comment_updated` (bot @-mention) both create or follow-up tasks.
+- **Outbound lifecycle comments** — `task.created`, `task.completed`, `task.failed`, `task.cancelled` each post a plaintext comment to the linked issue via Jira REST v2.
+- **Auto-webhook registration + 25-day refresh** — admins call `POST /webhook-register` with a JQL filter; a 12-hour timer refreshes any webhook expiring within 7 days.
+- **ADF text extraction** — issue descriptions and comment bodies stored as Atlassian Document Format are walked into plaintext for prompts.
+
+## Setup
+
+### 1. Create the Atlassian OAuth 2.0 (3LO) app
+
+1. Go to [https://developer.atlassian.com/console](https://developer.atlassian.com/console/myapps/) → "Create" → "OAuth 2.0 integration".
+2. On the Permissions tab, add the **Jira API** product and grant the following scopes:
+   - `read:jira-work`
+   - `write:jira-work`
+   - `manage:jira-webhook`
+   - `offline_access`
+   - `read:me`
+3. On the Authorization tab, set the **callback URL** to `<MCP_BASE_URL>/api/trackers/jira/callback` — for example `https://your-swarm.example.com/api/trackers/jira/callback`. With `bun run dev:http` portless mode this is `https://api.swarm.localhost:1355/api/trackers/jira/callback`.
+4. Copy the **Client ID** and **Client Secret** from the Settings tab.
+5. Generate a high-entropy webhook token: `openssl rand -hex 32`. This becomes `JIRA_WEBHOOK_TOKEN`.
+
+<Callout type="warn">
+**Atlassian does not HMAC-sign OAuth 3LO dynamic webhooks** (plan errata I8). Instead we authenticate inbound deliveries by embedding `JIRA_WEBHOOK_TOKEN` in the path segment of the registered URL and using a constant-time compare. Treat the registered webhook URL like a Slack incoming-webhook URL — keep it out of public repos, screenshots, and logs.
+</Callout>
+
+### 2. Configure environment
+
+Add to your `.env`:
+
+```bash
+JIRA_CLIENT_ID=your-client-id
+JIRA_CLIENT_SECRET=your-client-secret
+JIRA_WEBHOOK_TOKEN=hex-token-from-openssl-rand
+# Optional — defaults to <MCP_BASE_URL>/api/trackers/jira/callback
+JIRA_REDIRECT_URI=https://your-swarm.example.com/api/trackers/jira/callback
+```
+
+Atlassian rejects `localhost` and plaintext `http://` in webhook registration. For local development, expose your API server through an HTTPS tunnel and point `MCP_BASE_URL` at it:
+
+```bash
+# .env
+MCP_BASE_URL=https://taras-swarm.ngrok.dev
+```
+
+To temporarily disable Jira without removing the env vars: `JIRA_DISABLE=true` (or set `JIRA_ENABLED=false`).
+
+### 3. Connect
+
+1. Restart the API server so `initJira()` picks up the new env vars.
+2. Visit `<MCP_BASE_URL>/api/trackers/jira/authorize` in a browser — you'll be redirected through Atlassian's consent screen.
+3. After consent, the swarm stores the access/refresh tokens, fetches `accessible-resources`, and persists `cloudId` + `siteUrl` in the `oauth_apps.metadata` blob.
+
+Verify with:
+
+```bash
+curl -H "Authorization: Bearer <API_KEY>" $MCP_BASE_URL/api/trackers/jira/status | jq
+```
+
+### 4. Register a webhook
+
+If your OAuth grant includes the `manage:jira-webhook` scope (it should, given the setup above), you can auto-register:
+
+```bash
+curl -X POST -H "Authorization: Bearer <API_KEY>" -H "Content-Type: application/json" \
+  -d '{"jqlFilter":"project = KAN"}' \
+  $MCP_BASE_URL/api/trackers/jira/webhook-register | jq
+```
+
+The response includes `webhookId` and `expiresAt` (defaulted to 30 days; the first refresh tick replaces this with Atlassian's authoritative value).
+
+If you don't have the `manage:jira-webhook` scope (e.g. consenting via a restricted user), register the webhook manually via Atlassian REST or the developer console — the registered URL is exactly the one returned by `/status` under `webhookUrl`.
+
+## How it works
+
+### Inbound
+
+1. Atlassian POSTs to `<MCP_BASE_URL>/api/trackers/jira/webhook/<JIRA_WEBHOOK_TOKEN>`. The path token is verified in constant time against `JIRA_WEBHOOK_TOKEN`; mismatches return 401 with an empty body (no info leak).
+2. The dispatcher branches on `webhookEvent`:
+   - `jira:issue_updated` → `handleIssueEvent` (only assignee transitions **to** the bot account create/follow-up tasks; transitions away are ignored).
+   - `comment_created` / `comment_updated` → `handleCommentEvent` (only when the bot is @-mentioned).
+   - `jira:issue_deleted` → `handleIssueDeleteEvent` (cancels any active swarm task linked to the issue).
+3. The `tracker_sync` row is inserted FIRST via `createTrackerSyncIfAbsent` (UNIQUE-gated). Only when the insert is fresh does the swarm task get created — making concurrent webhook deliveries idempotent.
+4. ADF (Atlassian Document Format) issue descriptions and comment bodies are walked to plaintext via `src/jira/adf.ts` before being injected into the prompt template.
+5. Two short-circuits prevent loops:
+   - **Self-authored skip**: comments where `author.accountId === botAccountId` are ignored.
+   - **5s outbound-echo skip**: if the linked `tracker_sync` row has `lastSyncOrigin === "swarm"` and `lastSyncedAt` within the last 5 seconds, the inbound is dropped (it's almost certainly an echo of a comment we just posted).
+
+### Outbound
+
+1. The swarm's task lifecycle event bus emits `task.created`, `task.completed`, `task.failed`, `task.cancelled`.
+2. `src/jira/outbound.ts` listens, looks up the `tracker_sync` row, skips if `lastSyncOrigin === "external"` within the 5s window, and otherwise calls `jiraFetch("/rest/api/2/issue/<KEY>/comment")` with a plaintext body.
+3. On success, the row's `lastSyncOrigin` flips to `swarm` and `lastSyncedAt` updates — closing the loop with the inbound short-circuit.
+4. We use REST v2 (plaintext body), not v3 (ADF). Plaintext-only outbound is intentional for v1.
+
+### Webhook lifecycle
+
+Atlassian dynamic webhooks expire 30 days after registration / refresh. A 12-hour interval timer (`startJiraWebhookKeepalive` in `src/jira/webhook-lifecycle.ts`) calls `PUT /rest/api/3/webhook/refresh` whenever any registered webhook's `expiresAt` is within 7 days. On 200 + `{ expirationDate }`, the new expiry is fanned out to every locally-tracked webhook. On 204 No Content, local expiries are left untouched and a warning is logged.
+
+## MCP tools
+
+| Tool | Description |
+|------|-------------|
+| `tracker-status` | Pass `provider: "jira"` to inspect connection state. |
+| `tracker-link-task` | Manually link a swarm task to a Jira issue id/key. |
+| `tracker-sync-status` | View sync rows for the Jira provider. |
+| `tracker-map-agent` | Map a swarm agent to a Jira `accountId` for assignment routing. |
+
+All four tools are provider-generic — see [MCP.md](../../mcp) for full schemas.
+
+## Architecture
+
+```
+Atlassian → POST /api/trackers/jira/webhook/<token>
+            (URL-token authenticated; no HMAC)
+              │
+              ▼
+       handleJiraWebhook
+       ├─ verifyJiraWebhookToken (constant-time)
+       ├─ synthesizeDeliveryId  (event + ts + entity + sha256(body))
+       ├─ hasTrackerDelivery    (DB-persisted dedup)
+       └─ dispatchAndRecord
+            ├─ jira:issue_updated  → handleIssueEvent
+            ├─ comment_created     → handleCommentEvent
+            ├─ comment_updated     → handleCommentEvent
+            └─ jira:issue_deleted  → handleIssueDeleteEvent
+
+Swarm task lifecycle  ──► event-bus  ──► src/jira/outbound.ts
+                                          │
+                                          ▼
+                                 jiraFetch /rest/api/2/issue/<KEY>/comment
+                                 (plaintext body)
+```
+
+The integration shares the same `oauth_apps`/`oauth_tokens`/`tracker_sync`/`tracker_agent_mapping` tables as Linear — only the provider-specific webhook receiver, sync handlers, and outbound poster live under `src/jira/`.
+
+## Known limitations (v1)
+
+- **Single workspace per install.** `cloudId` is fixed at the first OAuth connect. Reconnecting picks the **first** entry from `accessible-resources` — multi-workspace support is a v2 concern.
+- **`JIRA_WEBHOOK_TOKEN` rotation requires re-registering every webhook.** There's no automated drift detection between the env value and Atlassian's stored URL. Rotation flow: set new `JIRA_WEBHOOK_TOKEN` → restart → `DELETE /api/trackers/jira/webhook/:id` for each existing webhook → `POST /api/trackers/jira/webhook-register` to re-register with the new token.
+- **No status transitions on task completion.** Outbound is comments only (mirrors Linear v1).
+- **Plaintext-only outbound.** No ADF formatting — the comment body posts via REST v2 as raw plaintext including emoji.
+- **No per-issue debounce / outbound queue.** Rate-limit handling is `jiraFetch`'s single 429 retry. A queued outbound poster is a v2 concern.
+- **Bot identity = consenting Atlassian user.** There's no separate `@swarm-bot` handle without a dedicated Atlassian account; mentions resolve to whichever user completed the OAuth consent.
+
+## Related
+
+- [Linear Integration](./linear-integration) — sibling tracker provider
+- [Harness Providers](./harness-providers) — how the swarm dispatches different LLM harnesses
+- [MCP Tools](../mcp) — full schemas for the `tracker-*` MCP tools

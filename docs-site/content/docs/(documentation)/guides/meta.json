@@ -12,6 +12,7 @@
     "agentmail-integration",
     "sentry-integration",
     "linear-integration",
+    "jira-integration",
     "x402-payments"
   ]
 }

@@ -41,7 +41,7 @@ export type IntegrationCategory =
   | "email"
   | "other";
 
-export type IntegrationSpecialFlow = "linear-oauth" | "codex-cli";
+export type IntegrationSpecialFlow = "linear-oauth" | "jira-oauth" | "codex-cli";
 
 export interface IntegrationDef {
   /** URL slug (kebab-case). Must be unique. */
@@ -355,6 +355,58 @@ export const INTEGRATIONS: IntegrationDef[] = [
         placeholder: "https://your-swarm.example.com/api/trackers/linear/callback",
         helpText:
           "OAuth redirect URI. Must exactly match the value configured on your Linear OAuth app.",
+      },
+    ],
+  },
+
+  // ------------------------------------------------------------------ Jira
+  {
+    id: "jira",
+    name: "Jira",
+    description:
+      "Sync Jira Cloud issues to tasks via OAuth 3LO. Inbound on assignee→bot or @-mention; outbound lifecycle comments back to the issue.",
+    category: "issues",
+    iconKey: "square-check-big",
+    docsUrl: "https://docs.agent-swarm.dev/guides/jira-integration",
+    disableKey: "JIRA_DISABLE",
+    restartRequired: true,
+    specialFlow: "jira-oauth",
+    fields: [
+      {
+        key: "JIRA_CLIENT_ID",
+        label: "OAuth client ID",
+        type: "text",
+        required: true,
+        helpText:
+          "From your Atlassian OAuth 2.0 (3LO) app (developer.atlassian.com → My Apps → Settings).",
+        affectsRestart: true,
+      },
+      {
+        key: "JIRA_CLIENT_SECRET",
+        label: "OAuth client secret",
+        type: "password",
+        required: true,
+        isSecret: true,
+        helpText: "OAuth client secret paired with the client ID above.",
+        affectsRestart: true,
+      },
+      {
+        key: "JIRA_WEBHOOK_TOKEN",
+        label: "Webhook URL token",
+        type: "password",
+        required: true,
+        isSecret: true,
+        helpText:
+          "High-entropy token embedded in the registered webhook URL (Atlassian doesn't HMAC-sign 3LO webhooks). Generate with `openssl rand -hex 32`.",
+        affectsRestart: true,
+      },
+      {
+        key: "JIRA_REDIRECT_URI",
+        label: "OAuth redirect URI",
+        type: "text",
+        placeholder: "https://your-swarm.example.com/api/trackers/jira/callback",
+        helpText:
+          "OAuth redirect URI. Must exactly match the callback URL configured on your Atlassian OAuth app.",
       },
     ],
   },
