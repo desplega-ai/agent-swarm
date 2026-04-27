@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- Worker telemetry no longer mints `install_<hex>` IDs at boot. `initTelemetry()` gains an opt-in `generateIfMissing` flag (default `false`); only the api-server passes it. When the worker's config read returns nothing or fails, `installationId` stays `null` and `track()` no-ops, eliminating phantom install records (~94% false-positive rate in prod metrics). The api-server is now the sole authority for `telemetry_installation_id` (#377)
+- `isPublicRoute` middleware helper moved from `src/http/core.ts` to `src/http/route-def.ts` (re-exported) so the merge-gate's "raw `matchRoute` usage outside route-def.ts/utils.ts" check passes (#377)
+
 ## [1.70.0] - 2026-04-24
 
 ### Added
