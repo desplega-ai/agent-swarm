@@ -50,7 +50,9 @@ export function initJira(): boolean {
     // where we override scopes from the comma-stored value back to spaces in
     // the authorize URL via the standard `scopes` array path.
     scopes: "read:jira-work,write:jira-work,manage:jira-webhook,offline_access,read:me",
-    metadata: "{}",
+    // Intentionally omit metadata: cloudId/siteUrl/webhookIds are written by
+    // the OAuth callback + webhook-register flows. upsertOAuthApp preserves
+    // existing metadata on UPDATE when not passed.
   });
 
   // TODO(phase 4): initJiraOutboundSync() once src/jira/outbound.ts lands.

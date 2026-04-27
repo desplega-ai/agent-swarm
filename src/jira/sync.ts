@@ -15,17 +15,18 @@
  */
 
 import { cancelTask, getAllAgents, getTaskById } from "../be/db";
+import { getOAuthTokens } from "../be/db-queries/oauth";
 import {
   createTrackerSyncIfAbsent,
   getTrackerSyncByExternalId,
   updateTrackerSyncSwarmId,
 } from "../be/db-queries/tracker";
+import { ensureToken } from "../oauth/ensure-token";
 import { resolveTemplate } from "../prompts/resolver";
 import { buildJiraContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import type { Agent } from "../types";
 import { extractMentions, extractText } from "./adf";
-import { jiraFetch } from "./client";
 import { getJiraMetadata } from "./metadata";
 // Side-effect import: registers all Jira event templates in the prompt registry
 import "./templates";
@@ -35,7 +36,14 @@ import "./templates";
 let cachedBotAccountId: string | null = null;
 
 /**
- * Resolve and cache the bot Atlassian `accountId` via `/rest/api/3/myself`.
+ * Resolve and cache the bot Atlassian `accountId` via the User Identity API
+ * `https://api.atlassian.com/me`.
+ *
+ * We deliberately avoid `/rest/api/3/myself` because that endpoint requires
+ * `read:jira-user` (not in our Phase 0 scope set). `/me` returns the same
+ * Atlassian `account_id` (atlassian-wide identifier — issue assignees and
+ * comment authors are keyed on the same value) and is covered by `read:me`,
+ * which we already have.
  *
  * The first webhook delivery after a fresh boot pays the round-trip cost; all
  * subsequent calls hit the in-memory cache. `resetBotAccountIdCache()` clears
@@ -50,17 +58,28 @@ export async function resolveBotAccountId(): Promise<string | null> {
   if (cachedBotAccountId) return cachedBotAccountId;
 
   try {
-    const res = await jiraFetch("/rest/api/3/myself");
+    await ensureToken("jira");
+    const tokens = getOAuthTokens("jira");
+    if (!tokens?.accessToken) {
+      console.warn("[Jira Sync] No Jira access token; cannot resolve bot accountId");
+      return null;
+    }
+    const res = await fetch("https://api.atlassian.com/me", {
+      headers: {
+        Authorization: `Bearer ${tokens.accessToken}`,
+        Accept: "application/json",
+      },
+    });
     if (!res.ok) {
-      console.warn(`[Jira Sync] /myself returned ${res.status}; cannot resolve bot accountId`);
+      console.warn(`[Jira Sync] /me returned ${res.status}; cannot resolve bot accountId`);
       return null;
     }
-    const data = (await res.json()) as { accountId?: unknown };
-    if (typeof data.accountId !== "string" || data.accountId.length === 0) {
-      console.warn("[Jira Sync] /myself response missing accountId");
+    const data = (await res.json()) as { account_id?: unknown };
+    if (typeof data.account_id !== "string" || data.account_id.length === 0) {
+      console.warn("[Jira Sync] /me response missing account_id");
       return null;
     }
-    cachedBotAccountId = data.accountId;
+    cachedBotAccountId = data.account_id;
     return cachedBotAccountId;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

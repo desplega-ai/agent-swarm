@@ -39,9 +39,14 @@ export function upsertOAuthApp(
     metadata?: string;
   },
 ): void {
-  getDb()
-    .query(
-      `INSERT INTO oauth_apps (provider, clientId, clientSecret, authorizeUrl, tokenUrl, redirectUri, scopes, metadata)
+  // metadata is treated as a runtime-owned column (cloudId, webhookIds, etc.
+  // are written by OAuth callback + webhook-register flows). On INSERT we
+  // seed it with whatever the caller passed (or "{}"); on UPDATE we ONLY
+  // overwrite when the caller explicitly provided one — otherwise the
+  // existing value is preserved across server restarts.
+  const metadataProvided = data.metadata !== undefined;
+  const sql = metadataProvided
+    ? `INSERT INTO oauth_apps (provider, clientId, clientSecret, authorizeUrl, tokenUrl, redirectUri, scopes, metadata)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(provider) DO UPDATE SET
          clientId = excluded.clientId,
@@ -51,18 +56,43 @@ export function upsertOAuthApp(
          redirectUri = excluded.redirectUri,
          scopes = excluded.scopes,
          metadata = excluded.metadata,
-         updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
-    )
-    .run(
-      provider,
-      data.clientId,
-      data.clientSecret,
-      data.authorizeUrl,
-      data.tokenUrl,
-      data.redirectUri,
-      data.scopes,
-      data.metadata ?? "{}",
-    );
+         updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`
+    : `INSERT INTO oauth_apps (provider, clientId, clientSecret, authorizeUrl, tokenUrl, redirectUri, scopes, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, '{}')
+       ON CONFLICT(provider) DO UPDATE SET
+         clientId = excluded.clientId,
+         clientSecret = excluded.clientSecret,
+         authorizeUrl = excluded.authorizeUrl,
+         tokenUrl = excluded.tokenUrl,
+         redirectUri = excluded.redirectUri,
+         scopes = excluded.scopes,
+         updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`;
+  if (metadataProvided) {
+    getDb()
+      .query(sql)
+      .run(
+        provider,
+        data.clientId,
+        data.clientSecret,
+        data.authorizeUrl,
+        data.tokenUrl,
+        data.redirectUri,
+        data.scopes,
+        data.metadata as string,
+      );
+  } else {
+    getDb()
+      .query(sql)
+      .run(
+        provider,
+        data.clientId,
+        data.clientSecret,
+        data.authorizeUrl,
+        data.tokenUrl,
+        data.redirectUri,
+        data.scopes,
+      );
+  }
 }
 
 // ── OAuth Tokens ──
