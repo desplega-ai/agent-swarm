@@ -10,7 +10,7 @@ status: in-progress
 research_source: thoughts/taras/research/2026-04-21-jira-integration.md
 autonomy: critical
 last_updated: 2026-04-27
-last_updated_by: claude (phase 3 implemented)
+last_updated_by: claude (phase 4 implemented)
 ---
 
 # Jira Cloud Integration — Implementation Plan
@@ -289,10 +289,10 @@ Files touched:
 - [x] Webhook endpoint accepts valid token: `curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d '{"webhookEvent":"jira:issue_updated","timestamp":1714000000000,"issue":{"id":"10001","key":"TEST-1"}}' "http://localhost:3013/api/trackers/jira/webhook/$JIRA_WEBHOOK_TOKEN"` returns `200`
 
 #### Manual Verification:
-- [ ] Using the Atlassian REST API Browser or `curl` with the OAuth token, manually register a webhook pointing at an ngrok-tunneled `/api/trackers/jira/webhook` with `jqlFilter: "project = <YOUR_PROJECT>"` and `events: ["jira:issue_updated", "comment_created"]`. Include the `secret` so Jira signs deliveries with `JIRA_SIGNING_SECRET`.
-- [ ] Assign a test issue to the bot user in Jira. Confirm a swarm task is created with `source='jira'` in DB.
-- [ ] Post a comment mentioning the bot. Confirm a follow-up task (or initial task, depending on state) is created.
-- [ ] Confirm `tracker_sync` row is inserted with correct `externalId`, `externalIdentifier` (issue key), `externalUrl`.
+- [x] Manually register a webhook against `<ngrok>/api/trackers/jira/webhook/<JIRA_WEBHOOK_TOKEN>` with `jqlFilter: "project = <YOUR_PROJECT>"` and events `[issue_updated, issue_deleted, comment_created, comment_updated]`. (Done 2026-04-27 against KAN — webhook id 1. Required two fixups committed in `e870954`: `oauth_apps.metadata` preservation across server restarts; bot accountId via `/me` instead of `/rest/api/3/myself` since `read:me` doesn't grant `read:jira-user`.)
+- [x] Assign a test issue to the bot user in Jira. Confirm a swarm task is created with `source='jira'` in DB. (Done — task `f1c17da5-…`, KAN-1, `contextKey: task:trackers:jira:KAN-1`.)
+- [x] Post a comment mentioning the bot. Confirm a follow-up task (or initial task, depending on state) is created. (Done — `comment_created` delivered 200; correctly took the "active prior task → log+return" branch since the assignee event had already created the task. Either is valid behavior per design.)
+- [x] Confirm `tracker_sync` row is inserted with correct `externalId`, `externalIdentifier` (issue key), `externalUrl`. (Done — externalIdentifier `KAN-1`, `lastSyncOrigin: external`, `lastDeliveryId` populated.)
 - [ ] Delete the issue. Confirm the swarm task is cancelled.
 - [ ] Check that duplicate webhook deliveries (same `webhookEvent + timestamp + issue.id + body hash`) are silently dropped (manually POST the same body twice — second delivery should be a no-op because `tracker_sync.lastDeliveryId` matches). Verify via `sqlite3 agent-swarm-db.sqlite "SELECT lastDeliveryId FROM tracker_sync WHERE provider='jira'"`.
 - [ ] Confirm inbound loop-prevention: simulate a swarm-posted comment by setting `lastSyncOrigin='swarm', lastSyncedAt=<now>` in `tracker_sync` then POST a comment-created webhook for that issue — handler should skip without creating a task. Wait 6 seconds and re-POST — handler should now process it.
@@ -332,9 +332,9 @@ Files touched:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check: `bun run tsc:check`
-- [ ] Lint: `bun run lint:fix`
-- [ ] Existing tests pass: `bun test`
+- [x] Type check: `bun run tsc:check`
+- [x] Lint: `bun run lint:fix`
+- [x] Existing tests pass: `bun test`
 
 #### Manual Verification:
 - [ ] Reuse the ngrok-tunneled webhook from Phase 3. Assign an issue to trigger a swarm task.

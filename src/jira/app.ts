@@ -1,4 +1,5 @@
 import { upsertOAuthApp } from "../be/db-queries/oauth";
+import { initJiraOutboundSync, teardownJiraOutboundSync } from "./outbound";
 // Side-effect import: registers all Jira event templates in the in-memory
 // registry at module load time (mirrors `src/linear/templates.ts`).
 import "./templates";
@@ -18,7 +19,7 @@ export function resetJira(): void {
   // Phase 3: drop the cached bot accountId so a reconnect as a different
   // Atlassian user re-resolves identity on the next inbound webhook.
   resetBotAccountIdCache();
-  // TODO(phase 4): teardownJiraOutboundSync() once src/jira/outbound.ts lands.
+  teardownJiraOutboundSync();
   // TODO(phase 5): stopJiraWebhookKeepalive() once src/jira/webhook-lifecycle.ts lands.
   initialized = false;
 }
@@ -55,7 +56,7 @@ export function initJira(): boolean {
     // existing metadata on UPDATE when not passed.
   });
 
-  // TODO(phase 4): initJiraOutboundSync() once src/jira/outbound.ts lands.
+  initJiraOutboundSync();
   // TODO(phase 5): startJiraWebhookKeepalive() once src/jira/webhook-lifecycle.ts lands.
 
   console.log("[Jira] Integration initialized");
