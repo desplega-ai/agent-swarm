@@ -6,11 +6,11 @@ branch: main
 repository: agent-swarm
 topic: "Jira Cloud integration (basic, Linear parity)"
 tags: [plan, integrations, jira, oauth, webhooks, trackers]
-status: in-progress
+status: completed
 research_source: thoughts/taras/research/2026-04-21-jira-integration.md
 autonomy: critical
 last_updated: 2026-04-27
-last_updated_by: claude (phase 6 implemented)
+last_updated_by: claude (all 6 phases implemented + manually verified end-to-end)
 ---
 
 # Jira Cloud Integration — Implementation Plan
