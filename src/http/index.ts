@@ -12,6 +12,7 @@ import { closeDb, getSwarmConfigs, upsertSwarmConfig } from "../be/db";
 import { initGitHub } from "../github";
 import { initGitLab } from "../gitlab";
 import { stopHeartbeat } from "../heartbeat";
+import { initJira } from "../jira";
 import { initLinear } from "../linear";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { initTelemetry, telemetry } from "../telemetry";
@@ -273,6 +274,9 @@ httpServer
 
     // Initialize Linear tracker integration (if configured)
     initLinear();
+
+    // Initialize Jira tracker integration (if configured)
+    initJira();
 
     // Initialize workflow engine (trigger subscriptions + resume listener)
     initWorkflows();

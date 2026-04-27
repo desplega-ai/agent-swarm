@@ -13,6 +13,16 @@ export interface OAuthProviderConfig {
   scopes: string[];
   /** Extra query params appended to the authorization URL (e.g. { actor: "app" } for Linear) */
   extraParams?: Record<string, string>;
+  /**
+   * How to join `scopes` in the authorization URL.
+   *
+   * - Linear: `","` (its OAuth implementation requires comma-separated scopes).
+   * - Atlassian / RFC 6749 default: `" "` (space-separated).
+   *
+   * Defaults to `","` for backward compatibility with Linear, the only
+   * pre-existing consumer of this wrapper.
+   */
+  scopeSeparator?: string;
 }
 
 interface PendingState {
@@ -61,7 +71,7 @@ export async function buildAuthorizationUrl(
   url.searchParams.set("client_id", config.clientId);
   url.searchParams.set("redirect_uri", config.redirectUri);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", config.scopes.join(","));
+  url.searchParams.set("scope", config.scopes.join(config.scopeSeparator ?? ","));
   url.searchParams.set("state", state);
   url.searchParams.set("code_challenge", codeChallenge);
   url.searchParams.set("code_challenge_method", "S256");
