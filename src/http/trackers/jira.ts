@@ -5,8 +5,12 @@ import { isJiraEnabled } from "../../jira/app";
 import { getJiraMetadata } from "../../jira/metadata";
 import { getJiraAuthorizationUrl, handleJiraCallback } from "../../jira/oauth";
 import { handleJiraWebhook } from "../../jira/webhook";
+import { deleteJiraWebhook, registerJiraWebhook } from "../../jira/webhook-lifecycle";
 import { route } from "../route-def";
 import { parseQueryParams } from "../utils";
+
+const MANUAL_WEBHOOK_INSTRUCTIONS =
+  "See docs-site/.../guides/jira-integration.mdx for manual webhook registration steps.";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -68,6 +72,43 @@ const jiraWebhook = route({
     200: { description: "Event accepted" },
     401: { description: "Invalid URL token" },
     503: { description: "Jira webhook handler not configured" },
+  },
+});
+
+// Admin: register a new dynamic webhook with Atlassian. apiKey is required
+// (route-factory default). The registered URL embeds JIRA_WEBHOOK_TOKEN so
+// inbound deliveries can be authenticated.
+const jiraWebhookRegister = route({
+  method: "post",
+  path: "/api/trackers/jira/webhook-register",
+  pattern: ["api", "trackers", "jira", "webhook-register"],
+  summary: "Register a Jira dynamic webhook (admin only)",
+  tags: ["Trackers"],
+  body: z.object({
+    jqlFilter: z.string().min(1),
+  }),
+  responses: {
+    200: { description: "Webhook registered" },
+    400: { description: "Invalid jqlFilter" },
+    503: { description: "Jira not connected or JIRA_WEBHOOK_TOKEN missing" },
+  },
+});
+
+// Admin: delete a dynamic webhook from Atlassian and remove from local
+// metadata. apiKey is required (route-factory default).
+const jiraWebhookDelete = route({
+  method: "delete",
+  path: "/api/trackers/jira/webhook/{id}",
+  pattern: ["api", "trackers", "jira", "webhook", null],
+  summary: "Delete a Jira dynamic webhook (admin only)",
+  tags: ["Trackers"],
+  params: z.object({
+    id: z.coerce.number().int().positive(),
+  }),
+  responses: {
+    200: { description: "Webhook deleted" },
+    400: { description: "Invalid webhook id" },
+    503: { description: "Jira not connected" },
   },
 });
 
@@ -166,17 +207,27 @@ export async function handleJiraTracker(
     // Atlassian returns scopes space-separated in the token response.
     const scopeList = scope ? scope.split(/[\s,]+/).filter(Boolean) : [];
 
-    const status = {
+    const hasManageWebhookScope = scopeList.includes("manage:jira-webhook");
+
+    const status: Record<string, unknown> = {
       provider: "jira",
       connected: !!tokens,
       cloudId: meta.cloudId ?? null,
       siteUrl: meta.siteUrl ?? null,
       tokenExpiresAt: tokens?.expiresAt ?? null,
       scope,
-      hasManageWebhookScope: scopeList.includes("manage:jira-webhook"),
+      hasManageWebhookScope,
       webhookTokenConfigured: Boolean(process.env.JIRA_WEBHOOK_TOKEN),
       webhookUrl: getWebhookUrl(),
+      webhookIds: meta.webhookIds ?? [],
     };
+
+    // Phase 5: surface manual-webhook instructions when the OAuth grant
+    // doesn't include `manage:jira-webhook` (admin must register webhooks
+    // manually in the Atlassian UI).
+    if (!hasManageWebhookScope) {
+      status.manualWebhookInstructions = MANUAL_WEBHOOK_INSTRUCTIONS;
+    }
 
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(status));
@@ -216,6 +267,63 @@ export async function handleJiraTracker(
 
     res.writeHead(result.status, { "Content-Type": "application/json" });
     res.end(typeof result.body === "string" ? result.body : JSON.stringify(result.body));
+    return true;
+  }
+
+  // POST /api/trackers/jira/webhook-register — admin: register a dynamic webhook.
+  if (jiraWebhookRegister.match(req.method, pathSegments)) {
+    if (!isJiraEnabled()) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Jira integration not configured" }));
+      return true;
+    }
+    if (!process.env.JIRA_WEBHOOK_TOKEN) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "JIRA_WEBHOOK_TOKEN is not set" }));
+      return true;
+    }
+
+    const queryParams = parseQueryParams(req.url || "");
+    const parsed = await jiraWebhookRegister.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    try {
+      const result = await registerJiraWebhook(parsed.body.jqlFilter);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(result));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[Jira] Webhook register failed:", message);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Webhook registration failed", details: message }));
+    }
+    return true;
+  }
+
+  // DELETE /api/trackers/jira/webhook/:id — admin: delete a dynamic webhook.
+  // Note: this pattern overlaps the POST /webhook/:token path; the matcher
+  // disambiguates by HTTP method.
+  if (jiraWebhookDelete.match(req.method, pathSegments)) {
+    if (!isJiraEnabled()) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Jira integration not configured" }));
+      return true;
+    }
+
+    const queryParams = parseQueryParams(req.url || "");
+    const parsed = await jiraWebhookDelete.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+
+    try {
+      await deleteJiraWebhook(parsed.params.id);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ deleted: true, webhookId: parsed.params.id }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[Jira] Webhook delete failed (id=${parsed.params.id}):`, message);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Webhook delete failed", details: message }));
+    }
     return true;
   }
 

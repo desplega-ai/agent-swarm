@@ -14,3 +14,11 @@ export {
   synthesizeDeliveryId,
   verifyJiraWebhookToken,
 } from "./webhook";
+export type { RegisterJiraWebhookResult } from "./webhook-lifecycle";
+export {
+  deleteJiraWebhook,
+  refreshJiraWebhooks,
+  registerJiraWebhook,
+  startJiraWebhookKeepalive,
+  stopJiraWebhookKeepalive,
+} from "./webhook-lifecycle";

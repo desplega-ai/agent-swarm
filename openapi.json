@@ -6315,6 +6315,83 @@
         }
       }
     },
+    "/api/trackers/jira/webhook-register": {
+      "post": {
+        "summary": "Register a Jira dynamic webhook (admin only)",
+        "tags": [
+          "Trackers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "jqlFilter": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "jqlFilter"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook registered"
+          },
+          "400": {
+            "description": "Invalid jqlFilter"
+          },
+          "503": {
+            "description": "Jira not connected or JIRA_WEBHOOK_TOKEN missing"
+          }
+        }
+      }
+    },
+    "/api/trackers/jira/webhook/{id}": {
+      "delete": {
+        "summary": "Delete a Jira dynamic webhook (admin only)",
+        "tags": [
+          "Trackers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Webhook deleted"
+          },
+          "400": {
+            "description": "Invalid webhook id"
+          },
+          "503": {
+            "description": "Jira not connected"
+          }
+        }
+      }
+    },
     "/api/trackers/linear/authorize": {
       "get": {
         "summary": "Redirect to Linear OAuth consent screen",

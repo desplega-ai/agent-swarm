@@ -10,7 +10,7 @@ status: in-progress
 research_source: thoughts/taras/research/2026-04-21-jira-integration.md
 autonomy: critical
 last_updated: 2026-04-27
-last_updated_by: claude (phase 4 implemented)
+last_updated_by: claude (phase 5 implemented)
 ---
 
 # Jira Cloud Integration — Implementation Plan
@@ -388,10 +388,10 @@ Files touched:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check: `bun run tsc:check`
-- [ ] Lint: `bun run lint:fix`
-- [ ] OpenAPI fresh: `bun run docs:openapi`
-- [ ] `curl -s -X POST -H "Authorization: Bearer 123123" -H "Content-Type: application/json" -d '{"jqlFilter":"project = TEST"}' http://localhost:3013/api/trackers/jira/webhook-register` returns 200 with webhook id(s)
+- [x] Type check: `bun run tsc:check`
+- [x] Lint: `bun run lint:fix`
+- [x] OpenAPI fresh: `bun run docs:openapi`
+- [x] `curl -s -X POST -H "Authorization: Bearer 123123" -H "Content-Type: application/json" -d '{"jqlFilter":"project = TEST"}' http://localhost:3013/api/trackers/jira/webhook-register` returns 200 with webhook id(s)
 
 #### Manual Verification:
 - [ ] After Phase 2 OAuth connect, hit `/webhook-register` with a JQL filter. Confirm Jira returns a valid webhook id.

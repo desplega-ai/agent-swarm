@@ -4,6 +4,7 @@ import { initJiraOutboundSync, teardownJiraOutboundSync } from "./outbound";
 // registry at module load time (mirrors `src/linear/templates.ts`).
 import "./templates";
 import { resetBotAccountIdCache } from "./sync";
+import { startJiraWebhookKeepalive, stopJiraWebhookKeepalive } from "./webhook-lifecycle";
 
 let initialized = false;
 
@@ -20,7 +21,7 @@ export function resetJira(): void {
   // Atlassian user re-resolves identity on the next inbound webhook.
   resetBotAccountIdCache();
   teardownJiraOutboundSync();
-  // TODO(phase 5): stopJiraWebhookKeepalive() once src/jira/webhook-lifecycle.ts lands.
+  stopJiraWebhookKeepalive();
   initialized = false;
 }
 
@@ -57,7 +58,7 @@ export function initJira(): boolean {
   });
 
   initJiraOutboundSync();
-  // TODO(phase 5): startJiraWebhookKeepalive() once src/jira/webhook-lifecycle.ts lands.
+  startJiraWebhookKeepalive();
 
   console.log("[Jira] Integration initialized");
   return true;
