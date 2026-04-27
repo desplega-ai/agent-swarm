@@ -59,6 +59,22 @@ interface BlogPost {
 
 const posts: BlogPost[] = [
   {
+    slug: "deep-dive-stateless-workers-db-ban",
+    title:
+      "Our AI Worker Containers Have Zero Local Database — And a 30-Line Bash Script That Makes It Impossible to Add One",
+    description:
+      "How we banned database imports from worker containers with a bash script, and why it saved our agent swarm from catastrophic state divergence.",
+    date: "April 27, 2026",
+    readTime: "13 min read",
+    tags: [
+      "stateless workers",
+      "database boundary",
+      "microservices",
+      "distributed systems",
+      "horizontal scaling",
+    ],
+  },
+  {
     slug: "deep-dive-state-machine-orchestration",
     title:
       "Why We Ditched DAGs for State Machines in Agent Orchestration",
