@@ -12,6 +12,7 @@
  *   task:trackers:github:{owner}:{repo}:{issue|pr}:{number}
  *   task:trackers:gitlab:{projectId}:{mr|issue}:{iid}
  *   task:trackers:linear:{issueIdentifier}        (e.g. DES-42 — case preserved)
+ *   task:trackers:jira:{issueIdentifier}          (e.g. PROJ-123 — case preserved)
  *   task:schedule:{scheduleId}
  *   task:workflow:{workflowRunId}
  *
@@ -30,7 +31,7 @@ const SEPARATOR = ":";
 
 export type ContextKeyFamily = "slack" | "agentmail" | "trackers" | "schedule" | "workflow";
 
-export type TrackerProvider = "github" | "gitlab" | "linear";
+export type TrackerProvider = "github" | "gitlab" | "linear" | "jira";
 
 export type ParsedContextKey =
   | { family: "slack"; parts: { channelId: string; threadTs: string } }
@@ -48,6 +49,11 @@ export type ParsedContextKey =
   | {
       family: "trackers";
       subFamily: "linear";
+      parts: { issueIdentifier: string };
+    }
+  | {
+      family: "trackers";
+      subFamily: "jira";
       parts: { issueIdentifier: string };
     }
   | { family: "schedule"; parts: { scheduleId: string } }
@@ -127,6 +133,18 @@ export function gitlabContextKey(input: {
 export function linearContextKey(input: { issueIdentifier: string }): string {
   const issueIdentifier = assertSafePart(input.issueIdentifier, "issueIdentifier");
   return ["task", "trackers", "linear", issueIdentifier].join(SEPARATOR);
+}
+
+/**
+ * Build a Jira tracker context key. Plan Phase 1 names this `buildJiraContextKey`
+ * (positional `issueIdentifier`) rather than the `<provider>ContextKey({input})`
+ * shape used by older builders. New ingress sites should prefer this signature;
+ * the existing Linear/GitHub/GitLab builders are kept as-is to avoid touching
+ * unrelated call sites.
+ */
+export function buildJiraContextKey(issueIdentifier: string): string {
+  const id = assertSafePart(issueIdentifier, "issueIdentifier");
+  return ["task", "trackers", "jira", id].join(SEPARATOR);
 }
 
 export function scheduleContextKey(input: { scheduleId: string }): string {
@@ -232,6 +250,16 @@ export function parseContextKey(key: string): ParsedContextKey {
         return {
           family: "trackers",
           subFamily: "linear",
+          parts: { issueIdentifier: parts[3] as string },
+        };
+      }
+      if (subFamily === "jira") {
+        if (parts.length !== 4) {
+          throw new Error(`context-key: malformed jira key: ${JSON.stringify(key)}`);
+        }
+        return {
+          family: "trackers",
+          subFamily: "jira",
           parts: { issueIdentifier: parts[3] as string },
         };
       }

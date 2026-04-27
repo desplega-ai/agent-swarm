@@ -12,7 +12,7 @@ export const registerTrackerLinkTaskTool = (server: McpServer) => {
       annotations: { destructiveHint: false },
 
       inputSchema: z.object({
-        provider: z.string().describe("Tracker provider (e.g. 'linear')"),
+        provider: z.string().describe("Tracker provider (e.g. 'linear', 'jira')"),
         swarmTaskId: z.string().describe("The swarm task ID to link"),
         externalId: z.string().describe("The external issue ID in the tracker"),
         externalIdentifier: z

@@ -6,11 +6,11 @@ branch: main
 repository: agent-swarm
 topic: "Jira Cloud integration (basic, Linear parity)"
 tags: [plan, integrations, jira, oauth, webhooks, trackers]
-status: ready
+status: in-progress
 research_source: thoughts/taras/research/2026-04-21-jira-integration.md
 autonomy: critical
-last_updated: 2026-04-24
-last_updated_by: claude (review pass 2, post file-review)
+last_updated: 2026-04-27
+last_updated_by: claude (phase 1 executed: schema migration + type plumbing)
 ---
 
 # Jira Cloud Integration — Implementation Plan
@@ -139,13 +139,13 @@ Files touched:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check passes: `bun run tsc:check`
-- [ ] Lint passes: `bun run lint:fix`
-- [ ] DB boundary check passes: `bash scripts/check-db-boundary.sh`
-- [ ] Fresh DB boots clean: `rm -f agent-swarm-db.sqlite agent-swarm-db.sqlite-wal agent-swarm-db.sqlite-shm && bun run start:http &` then `curl -s -H "Authorization: Bearer 123123" http://localhost:3013/api/agents | jq '.agents | length'`
-- [ ] Existing DB migrates cleanly (test against a copy of a populated DB if available) — grep for `[migrations] applied 043_jira_source` in logs
-- [ ] Existing unit tests still pass: `bun test`
-- [ ] `'jira'` is present in the source CHECK: `sqlite3 agent-swarm-db.sqlite "SELECT sql FROM sqlite_master WHERE name='agent_tasks'"` shows `'jira'` in the list
+- [x] Type check passes: `bun run tsc:check`
+- [x] Lint passes: `bun run lint:fix`
+- [x] DB boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] Fresh DB boots clean: `rm -f agent-swarm-db.sqlite agent-swarm-db.sqlite-wal agent-swarm-db.sqlite-shm && bun run start:http &` then `curl -s -H "Authorization: Bearer 123123" http://localhost:3013/api/agents | jq '.agents | length'`
+- [x] Existing DB migrates cleanly (test against a copy of a populated DB if available) — grep for `[migrations] applied 043_jira_source` in logs
+- [x] Existing unit tests still pass: `bun test`
+- [x] `'jira'` is present in the source CHECK: `sqlite3 agent-swarm-db.sqlite "SELECT sql FROM sqlite_master WHERE name='agent_tasks'"` shows `'jira'` in the list
 
 #### Manual Verification:
 - [ ] Open DB inspector and confirm `agent_tasks` table has the new CHECK constraint
