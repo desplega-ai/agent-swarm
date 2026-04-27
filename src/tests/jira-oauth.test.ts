@@ -1,30 +1,29 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, getDb, initDb } from "../be/db";
 import { upsertOAuthApp } from "../be/db-queries/oauth";
 import { getJiraMetadata } from "../jira/metadata";
+import * as wrapperModule from "../oauth/wrapper";
 
 const TEST_DB_PATH = "./test-jira-oauth.sqlite";
 
-// Stub the OAuth wrapper so we don't try to validate state or hit the token URL.
-const exchangeCodeMock = mock(() =>
-  Promise.resolve({
-    accessToken: "access-1",
-    refreshToken: "refresh-1",
-    expiresIn: 3600,
-    scope: "read:jira-work",
-  }),
-);
-
-mock.module("../oauth/wrapper", () => ({
-  exchangeCode: exchangeCodeMock,
-  buildAuthorizationUrl: () =>
-    Promise.resolve({
-      url: "https://auth.atlassian.com/authorize?state=x",
-      state: "x",
-      codeVerifier: "v",
-    }),
-}));
+// Spy on `exchangeCode` instead of `mock.module(...)` so the real wrapper
+// module remains untouched in the test process. mock.module is process-global
+// and not restorable per bun's docs ("mock.restore() does not reset the value
+// of modules that were overridden with mock.module()") — when this file ran
+// before src/tests/oauth-wrapper.test.ts in CI's order, the wrapper stayed
+// mocked and broke the wrapper's own unit tests.
+const exchangeCodeSpy = spyOn(wrapperModule, "exchangeCode");
 
 const originalFetch = globalThis.fetch;
 
@@ -42,6 +41,7 @@ beforeAll(() => {
 
 afterAll(async () => {
   globalThis.fetch = originalFetch;
+  mock.restore();
   closeDb();
   await unlink(TEST_DB_PATH).catch(() => {});
   await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
@@ -51,7 +51,15 @@ afterAll(async () => {
 const { handleJiraCallback } = await import("../jira/oauth");
 
 beforeEach(() => {
-  exchangeCodeMock.mockClear();
+  exchangeCodeSpy.mockClear();
+  exchangeCodeSpy.mockImplementation(() =>
+    Promise.resolve({
+      accessToken: "access-1",
+      refreshToken: "refresh-1",
+      expiresIn: 3600,
+      scope: "read:jira-work",
+    }),
+  );
   // Wipe metadata between tests to confirm writes happen.
   getDb().query("UPDATE oauth_apps SET metadata = '{}' WHERE provider = 'jira'").run();
 });
@@ -85,7 +93,7 @@ describe("handleJiraCallback", () => {
     const result = await handleJiraCallback("code-1", "state-1");
 
     // exchangeCode invoked with our config + code/state
-    expect(exchangeCodeMock).toHaveBeenCalledTimes(1);
+    expect(exchangeCodeSpy).toHaveBeenCalledTimes(1);
     expect(result.accessToken).toBe("access-1");
     expect(result.cloudId).toBe("cloud-abc");
     expect(result.siteUrl).toBe("https://example.atlassian.net");

@@ -1,4 +1,14 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, getDb, initDb } from "../be/db";
 import { upsertOAuthApp } from "../be/db-queries/oauth";
@@ -7,23 +17,19 @@ import {
   hasTrackerDelivery,
   markTrackerDelivery,
 } from "../be/db-queries/tracker";
+import * as syncModule from "../jira/sync";
 
 const TEST_DB_PATH = "./test-jira-webhook.sqlite";
 const TEST_TOKEN = "test-jira-webhook-token-deadbeefcafe1234";
 
-// Mock the sync handlers so we can assert dispatcher routing without DB
-// dependencies at the handler layer.
-const issueHandler = mock(() => Promise.resolve());
-const commentHandler = mock(() => Promise.resolve());
-const issueDeleteHandler = mock(() => Promise.resolve());
+// Spy on the sync handlers — using mock.module here would leak globally
+// because bun's mock.module has no documented restore. spyOn is restored by
+// mock.restore() in afterAll, leaving the real module intact for other test
+// files (notably jira-sync.test.ts which exercises the real handlers).
+const issueHandler = spyOn(syncModule, "handleIssueEvent").mockResolvedValue(undefined);
+const commentHandler = spyOn(syncModule, "handleCommentEvent").mockResolvedValue(undefined);
+const issueDeleteHandler = spyOn(syncModule, "handleIssueDeleteEvent").mockResolvedValue(undefined);
 
-mock.module("../jira/sync", () => ({
-  handleIssueEvent: issueHandler,
-  handleCommentEvent: commentHandler,
-  handleIssueDeleteEvent: issueDeleteHandler,
-}));
-
-// Import AFTER the mock is registered so the webhook module wires up the mocks.
 const { handleJiraWebhook, isDuplicateDelivery, synthesizeDeliveryId, verifyJiraWebhookToken } =
   await import("../jira/webhook");
 
@@ -43,6 +49,7 @@ beforeAll(() => {
 
 afterAll(async () => {
   delete process.env.JIRA_WEBHOOK_TOKEN;
+  mock.restore();
   closeDb();
   await unlink(TEST_DB_PATH).catch(() => {});
   await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
