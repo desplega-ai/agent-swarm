@@ -1,4 +1,8 @@
 import { upsertOAuthApp } from "../be/db-queries/oauth";
+// Side-effect import: registers all Jira event templates in the in-memory
+// registry at module load time (mirrors `src/linear/templates.ts`).
+import "./templates";
+import { resetBotAccountIdCache } from "./sync";
 
 let initialized = false;
 
@@ -11,9 +15,9 @@ export function isJiraEnabled(): boolean {
 }
 
 export function resetJira(): void {
-  // TODO(phase 3): call resetBotAccountIdCache() once src/jira/sync.ts lands
-  // so a reconnect as a different Atlassian user invalidates the cached
-  // bot accountId. (Plan Phase 3 step 3.)
+  // Phase 3: drop the cached bot accountId so a reconnect as a different
+  // Atlassian user re-resolves identity on the next inbound webhook.
+  resetBotAccountIdCache();
   // TODO(phase 4): teardownJiraOutboundSync() once src/jira/outbound.ts lands.
   // TODO(phase 5): stopJiraWebhookKeepalive() once src/jira/webhook-lifecycle.ts lands.
   initialized = false;

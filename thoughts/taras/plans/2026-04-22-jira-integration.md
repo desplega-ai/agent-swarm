@@ -10,7 +10,7 @@ status: in-progress
 research_source: thoughts/taras/research/2026-04-21-jira-integration.md
 autonomy: critical
 last_updated: 2026-04-27
-last_updated_by: claude (phase 2 implemented)
+last_updated_by: claude (phase 3 implemented)
 ---
 
 # Jira Cloud Integration — Implementation Plan
@@ -218,11 +218,11 @@ Files touched:
 - [x] Server boots cleanly with Jira env vars NOT set: status endpoint returns 503
 
 #### Manual Verification:
-- [ ] Create a Jira Cloud OAuth 2.0 app at https://developer.atlassian.com/console/myapps/, set callback to `http://localhost:3013/api/trackers/jira/callback`, enable the 5 required scopes.
-- [ ] Set `JIRA_CLIENT_ID` + `JIRA_CLIENT_SECRET` + `JIRA_SIGNING_SECRET` in `.env`, restart.
-- [ ] Open `http://localhost:3013/api/trackers/jira/authorize` in a browser, complete consent, land on success page.
-- [ ] `curl -s -H "Authorization: Bearer 123123" http://localhost:3013/api/trackers/jira/status | jq` shows `connected: true`, non-null `cloudId`, and a reasonable `tokenExpiresAt` (~1h out).
-- [ ] `sqlite3 agent-swarm-db.sqlite "SELECT metadata FROM oauth_apps WHERE provider='jira'"` shows JSON containing `cloudId` and `siteUrl`.
+- [x] Create a Jira Cloud OAuth 2.0 app at https://developer.atlassian.com/console/myapps/, set callback to `http://localhost:3013/api/trackers/jira/callback`, enable the 5 required scopes.
+- [x] Set `JIRA_CLIENT_ID` + `JIRA_CLIENT_SECRET` + `JIRA_WEBHOOK_TOKEN` in `.env`, restart.
+- [x] Open `http://localhost:3013/api/trackers/jira/authorize` in a browser, complete consent, land on success page.
+- [x] `curl -s -H "Authorization: Bearer 123123" http://localhost:3013/api/trackers/jira/status | jq` shows `connected: true`, non-null `cloudId`, and a reasonable `tokenExpiresAt` (~1h out). (Verified 2026-04-27: cloudId 0054e739-…, siteUrl desplega.atlassian.net.)
+- [x] `sqlite3 agent-swarm-db.sqlite "SELECT metadata FROM oauth_apps WHERE provider='jira'"` shows JSON containing `cloudId` and `siteUrl`.
 - [ ] Confirm secret rows are encrypted at rest (if `SECRETS_ENCRYPTION_KEY` is configured) — this is handled by existing `storeOAuthTokens()` path, no new code.
 
 ### QA Spec (optional):
@@ -279,14 +279,14 @@ Files touched:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Type check: `bun run tsc:check`
-- [ ] Lint: `bun run lint:fix`
-- [ ] New unit tests (shell — fuller suite in Phase 6): `bun test src/tests/jira-adf.test.ts` (smoke: text + mention extraction)
-- [ ] Existing tests still pass: `bun test`
-- [ ] OpenAPI fresh: `bun run docs:openapi` (no diff after commit)
-- [ ] Webhook endpoint rejects invalid token: `curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d '{}' http://localhost:3013/api/trackers/jira/webhook/wrong-token` returns `401`
-- [ ] Webhook endpoint rejects missing token: `curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d '{}' http://localhost:3013/api/trackers/jira/webhook/` returns `404` (no route match — also acceptable as 401 if a catch-all is added)
-- [ ] Webhook endpoint accepts valid token: `curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d '{"webhookEvent":"jira:issue_updated","timestamp":1714000000000,"issue":{"id":"10001","key":"TEST-1"}}' "http://localhost:3013/api/trackers/jira/webhook/$JIRA_WEBHOOK_TOKEN"` returns `200`
+- [x] Type check: `bun run tsc:check`
+- [x] Lint: `bun run lint:fix`
+- [x] New unit tests (shell — fuller suite in Phase 6): `bun test src/tests/jira-adf.test.ts` (smoke: text + mention extraction)
+- [x] Existing tests still pass: `bun test`
+- [x] OpenAPI fresh: `bun run docs:openapi` (no diff after commit)
+- [x] Webhook endpoint rejects invalid token: `curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d '{}' http://localhost:3013/api/trackers/jira/webhook/wrong-token` returns `401`
+- [x] Webhook endpoint rejects missing token: `curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d '{}' http://localhost:3013/api/trackers/jira/webhook/` returns `404` (no route match — also acceptable as 401 if a catch-all is added)
+- [x] Webhook endpoint accepts valid token: `curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d '{"webhookEvent":"jira:issue_updated","timestamp":1714000000000,"issue":{"id":"10001","key":"TEST-1"}}' "http://localhost:3013/api/trackers/jira/webhook/$JIRA_WEBHOOK_TOKEN"` returns `200`
 
 #### Manual Verification:
 - [ ] Using the Atlassian REST API Browser or `curl` with the OAuth token, manually register a webhook pointing at an ngrok-tunneled `/api/trackers/jira/webhook` with `jqlFilter: "project = <YOUR_PROJECT>"` and `events: ["jira:issue_updated", "comment_created"]`. Include the `secret` so Jira signs deliveries with `JIRA_SIGNING_SECRET`.

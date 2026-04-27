@@ -4,6 +4,7 @@ import { getOAuthTokens } from "../../be/db-queries/oauth";
 import { isJiraEnabled } from "../../jira/app";
 import { getJiraMetadata } from "../../jira/metadata";
 import { getJiraAuthorizationUrl, handleJiraCallback } from "../../jira/oauth";
+import { handleJiraWebhook } from "../../jira/webhook";
 import { route } from "../route-def";
 import { parseQueryParams } from "../utils";
 
@@ -182,14 +183,39 @@ export async function handleJiraTracker(
     return true;
   }
 
-  // POST /api/trackers/jira/webhook/:token — Phase 2 SHELL ONLY.
+  // POST /api/trackers/jira/webhook/:token — receive Jira dynamic-webhook events.
   //
-  // Phase 3 will fill in: timing-safe token compare, dedup via tracker_sync,
-  // dispatch to handleIssueEvent / handleCommentEvent / handleIssueDeleteEvent.
-  // For now we accept the route signature so Phase 3 wiring is mechanical.
+  // Atlassian does not HMAC-sign OAuth 3LO dynamic webhooks (errata I8); we
+  // authenticate via a URL-path token compared with `JIRA_WEBHOOK_TOKEN`.
   if (jiraWebhook.match(req.method, pathSegments)) {
-    res.writeHead(503, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "webhook handler not configured yet" }));
+    // Path token sits at index 4 of the matched segments
+    // (["api","trackers","jira","webhook", null]). Use the route parser so
+    // we go through the same Zod path-param plumbing the rest of the route
+    // file uses.
+    const queryParams = parseQueryParams(req.url || "");
+    const parsed = await jiraWebhook.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true; // 400 already sent
+
+    // Read raw body using the same chunk-assembly pattern as
+    // src/http/trackers/linear.ts:166-171 — we don't trust the framework to
+    // hand us a parsed body for webhook routes.
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(chunk);
+    }
+    const rawBody = Buffer.concat(chunks).toString();
+
+    const result = await handleJiraWebhook(parsed.params.token, rawBody);
+
+    // 401 with empty body — no info leak about valid-vs-missing token.
+    if (result.status === 401) {
+      res.writeHead(401);
+      res.end();
+      return true;
+    }
+
+    res.writeHead(result.status, { "Content-Type": "application/json" });
+    res.end(typeof result.body === "string" ? result.body : JSON.stringify(result.body));
     return true;
   }
 
