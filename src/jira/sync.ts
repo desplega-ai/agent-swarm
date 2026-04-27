@@ -33,7 +33,22 @@ import "./templates";
 
 // ─── Bot identity (Atlassian accountId) ────────────────────────────────────
 
-let cachedBotAccountId: string | null = null;
+// Cache the bot's Atlassian accountId on globalThis (not a module-level `let`)
+// so that test runners which re-import the module under cache-busting URLs —
+// e.g. the templates `?t=${Date.now()}` pattern in src/tests/jira-sync.test.ts —
+// still observe the same cache slot. Without this, CI's parallel test order can
+// land a new module copy whose `cachedBotAccountId` is `null` while the test's
+// seeded value sits on the original copy, causing handler short-circuits.
+const BOT_ACCOUNT_ID_SLOT = Symbol.for("agent-swarm.jira.botAccountId");
+type BotIdHolder = { [BOT_ACCOUNT_ID_SLOT]?: string | null };
+
+function getCachedBotAccountId(): string | null {
+  return (globalThis as BotIdHolder)[BOT_ACCOUNT_ID_SLOT] ?? null;
+}
+
+function setCachedBotAccountId(value: string | null): void {
+  (globalThis as BotIdHolder)[BOT_ACCOUNT_ID_SLOT] = value;
+}
 
 /**
  * Resolve and cache the bot Atlassian `accountId` via the User Identity API
@@ -55,7 +70,8 @@ let cachedBotAccountId: string | null = null;
  * would trigger Atlassian retries.
  */
 export async function resolveBotAccountId(): Promise<string | null> {
-  if (cachedBotAccountId) return cachedBotAccountId;
+  const cached = getCachedBotAccountId();
+  if (cached) return cached;
 
   try {
     await ensureToken("jira");
@@ -79,8 +95,8 @@ export async function resolveBotAccountId(): Promise<string | null> {
       console.warn("[Jira Sync] /me response missing account_id");
       return null;
     }
-    cachedBotAccountId = data.account_id;
-    return cachedBotAccountId;
+    setCachedBotAccountId(data.account_id);
+    return data.account_id;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[Jira Sync] Failed to resolve bot accountId: ${message}`);
@@ -90,12 +106,12 @@ export async function resolveBotAccountId(): Promise<string | null> {
 
 /** Test-visible cache reset; called from `resetJira()`. */
 export function resetBotAccountIdCache(): void {
-  cachedBotAccountId = null;
+  setCachedBotAccountId(null);
 }
 
 /** Test-only: seed the cache so handler tests can run without an OAuth round-trip. */
 export function _setBotAccountIdForTesting(id: string | null): void {
-  cachedBotAccountId = id;
+  setCachedBotAccountId(id);
 }
 
 // ─── Lead-agent picker (mirrors Linear) ────────────────────────────────────
