@@ -848,3 +848,54 @@ export interface DbQueryResponse {
   elapsed: number;
   total: number;
 }
+
+// Budgets & Pricing — see src/types.ts in the API repo for the source of truth.
+export type BudgetScope = "global" | "agent";
+
+export interface Budget {
+  scope: BudgetScope;
+  scopeId: string;
+  dailyBudgetUsd: number;
+  createdAt: number;
+  lastUpdatedAt: number;
+}
+
+export interface BudgetsResponse {
+  budgets: Budget[];
+}
+
+export type BudgetRefusalCause = "agent" | "global";
+
+export interface BudgetRefusalNotification {
+  taskId: string;
+  date: string;
+  agentId: string;
+  cause: BudgetRefusalCause;
+  agentSpendUsd?: number | null;
+  agentBudgetUsd?: number | null;
+  globalSpendUsd?: number | null;
+  globalBudgetUsd?: number | null;
+  followUpTaskId?: string | null;
+  createdAt: number;
+}
+
+export interface BudgetRefusalsResponse {
+  refusals: BudgetRefusalNotification[];
+}
+
+export type PricingProvider = "claude" | "codex" | "pi";
+export type PricingTokenClass = "input" | "cached_input" | "output";
+
+export interface PricingRow {
+  provider: PricingProvider;
+  model: string;
+  tokenClass: PricingTokenClass;
+  effectiveFrom: number;
+  pricePerMillionUsd: number;
+  createdAt: number;
+  lastUpdatedAt: number;
+}
+
+export interface PricingResponse {
+  rows: PricingRow[];
+}

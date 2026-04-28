@@ -8507,6 +8507,20 @@ export function getBudgetRefusalNotification(
 }
 
 /**
+ * List recent budget refusal notifications across all tasks/dates, newest
+ * first. Used by the operator dashboard to surface refusals as an
+ * actionable feed (parent task → follow-up task link).
+ */
+export function getRecentBudgetRefusalNotifications(limit = 50): BudgetRefusalNotification[] {
+  const rows = getDb()
+    .prepare<BudgetRefusalNotificationRow, [number]>(
+      "SELECT * FROM budget_refusal_notifications ORDER BY createdAt DESC LIMIT ?",
+    )
+    .all(limit);
+  return rows.map(rowToBudgetRefusalNotification);
+}
+
+/**
  * Boolean observability helper — returns true iff a refusal notification has
  * already been recorded for `(taskId, date)`.
  */

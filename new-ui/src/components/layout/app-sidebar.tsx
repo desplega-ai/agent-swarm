@@ -13,6 +13,7 @@ import {
   Plug,
   Settings,
   Users,
+  Wallet,
   Workflow,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
@@ -54,6 +55,7 @@ const navGroups = [
       { title: "Schedules", path: "/schedules", icon: Clock },
       { title: "Workflows", path: "/workflows", icon: Workflow },
       { title: "Usage", path: "/usage", icon: BarChart3 },
+      { title: "Budgets", path: "/budgets", icon: Wallet },
     ],
   },
   {

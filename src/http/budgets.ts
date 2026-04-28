@@ -9,8 +9,15 @@
 import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { createLogEntry, deleteBudget, getBudget, getBudgets, upsertBudget } from "../be/db";
-import { BudgetSchema, BudgetScopeSchema } from "../types";
+import {
+  createLogEntry,
+  deleteBudget,
+  getBudget,
+  getBudgets,
+  getRecentBudgetRefusalNotifications,
+  upsertBudget,
+} from "../be/db";
+import { BudgetRefusalNotificationSchema, BudgetSchema, BudgetScopeSchema } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -46,6 +53,23 @@ const listBudgets = route({
   tags: ["Budgets"],
   responses: {
     200: { description: "Budget list", schema: z.object({ budgets: z.array(BudgetSchema) }) },
+  },
+});
+
+const listBudgetRefusals = route({
+  method: "get",
+  path: "/api/budgets/refusals",
+  pattern: ["api", "budgets", "refusals"],
+  summary: "List recent budget refusal notifications",
+  tags: ["Budgets"],
+  query: z.object({
+    limit: z.coerce.number().int().positive().max(500).optional(),
+  }),
+  responses: {
+    200: {
+      description: "Recent budget refusals (newest first)",
+      schema: z.object({ refusals: z.array(BudgetRefusalNotificationSchema) }),
+    },
   },
 });
 
@@ -105,6 +129,17 @@ export async function handleBudgets(
     const parsed = await listBudgets.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     json(res, { budgets: getBudgets() });
+    return true;
+  }
+
+  // GET /api/budgets/refusals — must come BEFORE the {scope}/{scopeId} routes
+  // since those use a 4-segment pattern; this is 3 segments so they are
+  // disjoint, but conceptually the literal must win over the wildcards.
+  if (listBudgetRefusals.match(req.method, pathSegments)) {
+    const parsed = await listBudgetRefusals.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const limit = parsed.query.limit ?? 50;
+    json(res, { refusals: getRecentBudgetRefusalNotifications(limit) });
     return true;
   }
 
