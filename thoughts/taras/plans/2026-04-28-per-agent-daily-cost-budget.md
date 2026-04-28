@@ -8,7 +8,7 @@ autonomy: critical
 related_brainstorm: thoughts/taras/brainstorms/2026-04-28-per-agent-daily-cost-budget.md
 related_research: thoughts/taras/research/2026-04-28-per-agent-daily-cost-budget.md
 last_updated: 2026-04-28
-last_updated_by: claude (phase-running, phase 3)
+last_updated_by: claude (phase-running, phase 4)
 ---
 
 # Per-Agent Daily Cost Budget (V1) Implementation Plan
@@ -340,14 +340,14 @@ Cap is 5 min per scoping answer. Initial interval is `basePollInterval` (today's
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Lint passes: `bun run lint`
-- [ ] Type-check passes: `bun run tsc:check`
-- [ ] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
-- [ ] Worker back-off tests pass: `bun test src/tests/runner-budget-refused.test.ts`
-- [ ] Full suite green: `bun test`
+- [x] Lint passes: `bun run lint`
+- [x] Type-check passes: `bun run tsc:check`
+- [x] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] Worker back-off tests pass: `bun test src/tests/runner-budget-refused.test.ts`
+- [x] Full suite green: `bun test`
 
 #### Automated QA:
-- [ ] PM2 walkthrough: with a seeded DB blowing the global budget, `bun run pm2-restart` then `bun run pm2-logs worker | grep budget_refused` shows back-off messages with increasing delays. Capture the first 3 log lines in the implementation note.
+- [x] PM2 walkthrough: ran the Option B fallback (standalone `bun` script driving a stubbed `pollForTrigger` returning `budget_refused` 12× then `task_assigned` then 3× refusal). Output proves doubling 2s → 4s → 8s → 16s → 32s → 64s → 128s → 256s → cap at 300s, then reset to 2s after the non-refused trigger. First 3 log lines (verbatim): `[lead] budget_refused — backing off 2000ms: {"event":"budget_refused","cause":"global",...,"consecutiveRefusals":1,"backoffMs":2000}` / `[lead] budget_refused — backing off 4000ms: {... "consecutiveRefusals":2,"backoffMs":4000}` / `[lead] budget_refused — backing off 8000ms: {... "consecutiveRefusals":3,"backoffMs":8000}`. Real PM2/Docker walkthrough deferred to manual run (skipped to avoid heavyweight docker:build:worker rebuild during phase agent execution).
 
 #### Manual Verification:
 - [ ] Confirm on a local PM2 run that the worker doesn't busy-loop after refusal (CPU stays idle between back-off intervals; visible via `top`).

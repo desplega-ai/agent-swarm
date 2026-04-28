@@ -172,14 +172,14 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
   test("global budget blown → trigger=budget_refused with cause='global'", async () => {
     const worker = createAgent({ name: "w-glob", isLead: false, status: "idle", maxTasks: 1 });
     insertBudget("global", "", 0.01);
-    insertSpend(worker.id, 0.10); // blows the global budget
+    insertSpend(worker.id, 0.1); // blows the global budget
     createTaskExtended("blocked-by-global", { agentId: worker.id });
 
     const { body } = await callPoll(worker.id);
     if ("error" in body) throw new Error("unexpected error response");
     expect(body.trigger?.type).toBe("budget_refused");
     expect((body.trigger as { cause: string }).cause).toBe("global");
-    expect((body.trigger as { globalSpend: number }).globalSpend).toBe(0.10);
+    expect((body.trigger as { globalSpend: number }).globalSpend).toBe(0.1);
     expect((body.trigger as { globalBudget: number }).globalBudget).toBe(0.01);
     // Agent fields must not be present (cause=global).
     expect((body.trigger as { agentSpend?: number }).agentSpend).toBeUndefined();
@@ -188,7 +188,7 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
   test("budget refusal in pool path: blows the gate without claiming an unassigned task", async () => {
     const worker = createAgent({ name: "w-pool", isLead: false, status: "idle", maxTasks: 1 });
     insertBudget("agent", worker.id, 0.01);
-    insertSpend(worker.id, 0.50);
+    insertSpend(worker.id, 0.5);
     // Unassigned (pool) task — no `agentId`.
     const pooled = createTaskExtended("pool task", {});
     expect(pooled.status).toBe("unassigned");
@@ -207,7 +207,7 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
   test("refused poll does NOT auto-increment server-side empty-poll counter", async () => {
     const worker = createAgent({ name: "w-emptyp", isLead: false, status: "idle", maxTasks: 1 });
     insertBudget("agent", worker.id, 0.01);
-    insertSpend(worker.id, 0.50);
+    insertSpend(worker.id, 0.5);
     createTaskExtended("blocked", { agentId: worker.id });
 
     const before = getAgentById(worker.id)?.emptyPollCount ?? 0;
@@ -267,13 +267,13 @@ describe("Phase 3 — MCP task-action accept gate (canClaim integration)", () =>
     const { canClaim } = await import("../be/budget-admission");
     const worker = createAgent({ name: "accept-w", isLead: false, status: "idle", maxTasks: 1 });
     insertBudget("agent", worker.id, 0.01);
-    insertSpend(worker.id, 0.50);
+    insertSpend(worker.id, 0.5);
 
     const result = canClaim(worker.id, new Date());
     expect(result.allowed).toBe(false);
     if (result.allowed) throw new Error("unreachable");
     expect(result.cause).toBe("agent");
-    expect(result.agentSpend).toBe(0.50);
+    expect(result.agentSpend).toBe(0.5);
     expect(result.agentBudget).toBe(0.01);
     // Shape parity with the envelope returned by the accept handler.
     expect(result.resetAt).toMatch(/^\d{4}-\d{2}-\d{2}T00:00:00\.000Z$/);
