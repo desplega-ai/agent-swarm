@@ -50,6 +50,9 @@ const REQUIRED_ENV_VARS = [
 
 export class ClaudeManagedAdapter implements ProviderAdapter {
   readonly name = "claude-managed";
+  // Anthropic's cloud sandbox calls back into our /mcp endpoint, but the worker
+  // process is a thin SSE relay — no /workspace, no PM2, no agent-fs, no skills FS.
+  readonly traits = { hasMcp: true, hasLocalEnvironment: false };
 
   /** Anthropic API key (kept private; never logged). */
   private readonly apiKey: string;
