@@ -12,11 +12,25 @@ export interface CostData {
   numTurns: number;
   model: string;
   isError: boolean;
+  /**
+   * Phase 6: tells the API which recompute path to use on
+   * `POST /api/session-costs`. Codex triggers the pricing-table recompute
+   * (when DB pricing rows exist for all three token classes); Claude / pi
+   * always trust the harness-reported `totalCostUsd` as-is.
+   */
+  provider?: "claude" | "codex" | "pi";
 }
+
+import type { ProviderName } from "../types";
 
 /** Normalized event emitted by any provider adapter. */
 export type ProviderEvent =
-  | { type: "session_init"; sessionId: string }
+  | {
+      type: "session_init";
+      sessionId: string;
+      provider?: ProviderName;
+      providerMeta?: Record<string, unknown>;
+    }
   | { type: "message"; role: "assistant" | "user"; content: string }
   | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }
   | { type: "tool_end"; toolCallId: string; toolName: string; result: unknown }
@@ -24,6 +38,7 @@ export type ProviderEvent =
   | { type: "error"; message: string; category?: string }
   | { type: "raw_log"; content: string }
   | { type: "raw_stderr"; content: string }
+  | { type: "progress"; message: string }
   | { type: "custom"; name: string; data: unknown }
   | {
       type: "context_usage";
@@ -50,6 +65,7 @@ export interface ProviderSessionConfig {
   apiUrl: string;
   apiKey: string;
   cwd: string;
+  vcsRepo?: string;
   resumeSessionId?: string;
   iteration?: number;
   logFile: string;
@@ -79,9 +95,18 @@ export interface ProviderResult {
   failureReason?: string;
 }
 
+/** Behavioral traits that govern prompt assembly and feature gating. */
+export interface ProviderTraits {
+  /** Provider can call MCP tools (store-progress, task-action, skills, slack-reply, etc.) */
+  hasMcp: boolean;
+  /** Provider runs in the local Docker container with /workspace, identity files, agent-fs, PM2, etc. */
+  hasLocalEnvironment: boolean;
+}
+
 /** Main contract for a harness provider adapter. */
 export interface ProviderAdapter {
   readonly name: string;
+  readonly traits: ProviderTraits;
   createSession(config: ProviderSessionConfig): Promise<ProviderSession>;
   canResume(sessionId: string): Promise<boolean>;
   formatCommand(commandName: string): string;

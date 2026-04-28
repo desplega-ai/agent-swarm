@@ -155,7 +155,7 @@ class PiMonoSession implements ProviderSession {
     this._sessionId = agentSession.sessionId;
 
     // Emit session_init immediately
-    this.emit({ type: "session_init", sessionId: this._sessionId });
+    this.emit({ type: "session_init", sessionId: this._sessionId, provider: "pi" });
 
     // Subscribe to agent events and normalize
     this.agentSession.subscribe((event) => this.handleAgentEvent(event));
@@ -364,6 +364,7 @@ class PiMonoSession implements ProviderSession {
       numTurns: stats.userMessages + stats.assistantMessages,
       model: this.agentSession.model?.name ?? this.config.model,
       isError: false,
+      provider: "pi",
     };
   }
 
@@ -391,6 +392,7 @@ class PiMonoSession implements ProviderSession {
 
 export class PiMonoAdapter implements ProviderAdapter {
   readonly name = "pi";
+  readonly traits = { hasMcp: true, hasLocalEnvironment: true };
   private lastCwd = ".";
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {

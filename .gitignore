@@ -39,6 +39,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .env.local
 .env.docker
 .env.docker-lead
+.env.docker-devin
 
 # caches
 .eslintcache

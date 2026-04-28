@@ -74,8 +74,25 @@ export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 // String identifiers accepted by `HARNESS_PROVIDER` and the
 // `createProviderAdapter` factory in `src/providers/index.ts`. Keep this in
 // sync with the factory's switch and the unknown-provider error message.
-export const HarnessProviderSchema = z.enum(["claude", "pi", "codex", "claude-managed"]);
-export type HarnessProvider = z.infer<typeof HarnessProviderSchema>;
+export const ProviderNameSchema = z.enum(["claude", "codex", "pi", "devin", "claude-managed"]);
+export type ProviderName = z.infer<typeof ProviderNameSchema>;
+
+export type DevinProviderMeta = {
+  sessionUrl: string;
+  maxAcuLimit?: number;
+  acuCostUsd?: number;
+};
+
+// These providers do not have metadata yet.
+type NoProviderMeta = Record<string, never>;
+
+export type ProviderMetaMap = {
+  devin: DevinProviderMeta;
+  claude: NoProviderMeta;
+  codex: NoProviderMeta;
+  pi: NoProviderMeta;
+  "claude-managed": NoProviderMeta;
+};
 
 export const AgentTaskSchema = z.object({
   id: z.uuid(),
@@ -178,6 +195,10 @@ export const AgentTaskSchema = z.object({
   // agent-swarm package version at task creation time. Enables benchmarking
   // performance across releases. Nullable for rows created before tracking was added.
   swarmVersion: z.string().optional(),
+
+  // Provider tracking — which harness provider ran this task
+  provider: ProviderNameSchema.optional(),
+  providerMeta: z.record(z.string(), z.unknown()).optional(),
 });
 
 // ============================================================================
@@ -374,6 +395,11 @@ export const AgentLogEventTypeSchema = z.enum([
   "service_registered",
   "service_unregistered",
   "service_status_change",
+  // Phase 6: budget / pricing operator-mutation audit log events
+  "budget.upserted",
+  "budget.deleted",
+  "pricing.inserted",
+  "pricing.deleted",
 ]);
 
 export const AgentLogSchema = z.object({
@@ -405,6 +431,9 @@ export const SessionLogSchema = z.object({
 export type SessionLog = z.infer<typeof SessionLogSchema>;
 
 // Session Cost Types (aggregated cost data per session)
+export const SessionCostSourceSchema = z.enum(["harness", "pricing-table"]);
+export type SessionCostSource = z.infer<typeof SessionCostSourceSchema>;
+
 export const SessionCostSchema = z.object({
   id: z.uuid(),
   sessionId: z.string(),
@@ -419,6 +448,10 @@ export const SessionCostSchema = z.object({
   numTurns: z.number().int().min(1),
   model: z.string(),
   isError: z.boolean().default(false),
+  // Phase 6: where the recorded totalCostUsd came from. New rows write the
+  // actual source ('pricing-table' when the API recomputed Codex USD from DB
+  // pricing rows, 'harness' otherwise). Defaults to 'harness' for back-compat.
+  costSource: SessionCostSourceSchema.default("harness"),
   createdAt: z.iso.datetime(),
 });
 
@@ -1131,3 +1164,77 @@ export const ContextSnapshotSchema = z.object({
 });
 
 export type ContextSnapshot = z.infer<typeof ContextSnapshotSchema>;
+
+// ============================================================================
+// Budgets + Pricing (per-agent daily cost budget — V1)
+// ============================================================================
+//
+// Timestamp convention for these schemas: number = epoch milliseconds (UTC).
+// This is a deliberate divergence from the rest of types.ts (which uses
+// `z.iso.datetime()` strings) so that the price-book "largest
+// effective_from <= now" lookup is a pure integer comparison. Matches the
+// SQL columns in migration 046_budgets_and_pricing.sql verbatim.
+
+export const BudgetScopeSchema = z.enum(["global", "agent"]);
+export type BudgetScope = z.infer<typeof BudgetScopeSchema>;
+
+export const BudgetSchema = z.object({
+  scope: BudgetScopeSchema,
+  scopeId: z.string(), // '' (empty string) for the global row
+  dailyBudgetUsd: z.number().nonnegative(),
+  createdAt: z.number(), // epoch ms
+  lastUpdatedAt: z.number(), // epoch ms
+});
+export type Budget = z.infer<typeof BudgetSchema>;
+
+export const PricingProviderSchema = z.enum(["claude", "codex", "pi"]);
+export type PricingProvider = z.infer<typeof PricingProviderSchema>;
+
+export const PricingTokenClassSchema = z.enum(["input", "cached_input", "output"]);
+export type PricingTokenClass = z.infer<typeof PricingTokenClassSchema>;
+
+export const PricingRowSchema = z.object({
+  provider: PricingProviderSchema,
+  model: z.string(),
+  tokenClass: PricingTokenClassSchema,
+  effectiveFrom: z.number().nonnegative(), // epoch ms; 0 = seed
+  pricePerMillionUsd: z.number().nonnegative(),
+  createdAt: z.number(), // epoch ms
+  lastUpdatedAt: z.number(), // epoch ms
+});
+export type PricingRow = z.infer<typeof PricingRowSchema>;
+
+export const BudgetRefusalCauseSchema = z.enum(["agent", "global"]);
+export type BudgetRefusalCause = z.infer<typeof BudgetRefusalCauseSchema>;
+
+export const BudgetRefusalNotificationSchema = z.object({
+  taskId: z.string(),
+  date: z.string(), // 'YYYY-MM-DD' UTC
+  agentId: z.string(),
+  cause: BudgetRefusalCauseSchema,
+  agentSpendUsd: z.number().nullable().optional(),
+  agentBudgetUsd: z.number().nullable().optional(),
+  globalSpendUsd: z.number().nullable().optional(),
+  globalBudgetUsd: z.number().nullable().optional(),
+  followUpTaskId: z.string().nullable().optional(),
+  createdAt: z.number(), // epoch ms
+});
+export type BudgetRefusalNotification = z.infer<typeof BudgetRefusalNotificationSchema>;
+
+/**
+ * Phase 3 — `budget_refused` is the new variant of the `/api/poll` trigger
+ * envelope returned when an admission gate (`canClaim`) refuses to let the
+ * agent take a task. Older workers receiving this discriminator fall through
+ * to default polling without back-off (degrades gracefully); Phase 4 teaches
+ * the runner to recognize it.
+ */
+export const BudgetRefusedTriggerSchema = z.object({
+  type: z.literal("budget_refused"),
+  cause: BudgetRefusalCauseSchema,
+  agentSpend: z.number().optional(),
+  agentBudget: z.number().optional(),
+  globalSpend: z.number().optional(),
+  globalBudget: z.number().optional(),
+  resetAt: z.string(), // ISO 8601, next UTC midnight
+});
+export type BudgetRefusedTrigger = z.infer<typeof BudgetRefusedTriggerSchema>;

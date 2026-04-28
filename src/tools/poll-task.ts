@@ -67,6 +67,13 @@ export const registerPollTaskTool = (server: McpServer) => {
       const agentId = requestInfo.agentId;
       const now = new Date();
       const maxTime = addMinutes(now, MAX_POLL_DURATION_MS / 60000);
+      // Phase 3 (D-R3): when a budget refusal occurs, the empty-poll counter
+      // must NOT advance — refused ≠ empty. The MCP `poll-task` tool is NOT
+      // gated by `canClaim` in V1 (per plan §"What We're NOT Doing" — D-R1),
+      // so this is structural / forward-compat plumbing: future revisions
+      // that gate poll-task flip this to true at the refusal site instead of
+      // touching the bookkeeping path below.
+      const wasBudgetRefused: boolean = false;
 
       const agent = getAgentById(agentId);
       if (!agent) {
@@ -174,8 +181,12 @@ export const registerPollTaskTool = (server: McpServer) => {
 
       const waitedForSeconds = Math.round((Date.now() - now.getTime()) / 1000);
 
-      // Increment empty poll count and check if agent should exit
-      const newCount = incrementEmptyPollCount(agentId);
+      // Increment empty poll count and check if agent should exit.
+      // Refused ≠ empty (D-R3) — skip bookkeeping when a budget refusal
+      // occurred during this poll window.
+      const newCount = wasBudgetRefused
+        ? (getAgentById(agentId)?.emptyPollCount ?? 0)
+        : incrementEmptyPollCount(agentId);
       const shouldExit = newCount >= MAX_EMPTY_POLLS;
 
       // If no task was found within the time limit

@@ -394,7 +394,7 @@ class ClaudeSession implements ProviderSession {
       // Session ID from init message
       if (json.type === "system" && json.subtype === "init" && json.session_id) {
         this._sessionId = json.session_id;
-        this.emit({ type: "session_init", sessionId: json.session_id });
+        this.emit({ type: "session_init", sessionId: json.session_id, provider: "claude" });
         if (json.model) {
           this.contextWindowSize = getContextWindowSize(json.model);
         }
@@ -434,6 +434,7 @@ class ClaudeSession implements ProviderSession {
           numTurns: json.num_turns || 1,
           model: this.model,
           isError: json.is_error || false,
+          provider: "claude",
         };
         setCost(cost);
         this.emit({
@@ -568,6 +569,7 @@ class ClaudeSession implements ProviderSession {
 
 export class ClaudeAdapter implements ProviderAdapter {
   readonly name = "claude";
+  readonly traits = { hasMcp: true, hasLocalEnvironment: true };
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
     const model = config.model || "opus";

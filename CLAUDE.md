@@ -13,7 +13,7 @@ src/
   cli.tsx              # CLI entry (Ink)
   tools/               # MCP tool definitions
   http/                # REST route handlers (use route() factory)
-  providers/           # Harness adapters (claude, pi, codex) + OAuth flows
+  providers/           # Harness adapters (claude, pi, codex, devin) + OAuth flows
   commands/            # Worker-side command implementations
   be/
     db.ts              # DB init + query functions (API-only)
@@ -136,7 +136,7 @@ Full setup — env files, env vars, OAuth flows (Linear/Jira/Codex), portless de
 Quick reference:
 - Auth: `Authorization: Bearer ${API_KEY}` (default `123123`).
 - Server URL: `MCP_BASE_URL` (default `http://localhost:3013`).
-- Provider: `HARNESS_PROVIDER=claude|pi|codex|claude-managed`. `claude-managed` runs in Anthropic's cloud sandbox — requires one-time `bun run src/cli.tsx claude-managed-setup` and an HTTPS-public `MCP_BASE_URL`. See [runbooks/local-development.md § Claude Managed Agents](./runbooks/local-development.md#claude-managed-agents).
+- Provider: `HARNESS_PROVIDER=claude|pi|codex|devin|claude-managed`. `claude-managed` runs in Anthropic's cloud sandbox — requires one-time `bun run src/cli.tsx claude-managed-setup` and an HTTPS-public `MCP_BASE_URL`. See [runbooks/local-development.md § Claude Managed Agents](./runbooks/local-development.md#claude-managed-agents).
 - Disable integrations: `SLACK_DISABLE` / `GITHUB_DISABLE` / `JIRA_DISABLE` / `LINEAR_DISABLE=true`.
 
 </important>

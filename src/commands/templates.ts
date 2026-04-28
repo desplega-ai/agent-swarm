@@ -111,14 +111,16 @@ Task: "{{task_description}}"
 Previous Progress:
 {{progress}}
 
-Continue from where you left off. Review the progress above and complete the remaining work.
-
-When done, use \`store-progress\` with status: "completed" and include your output.`,
+Continue from where you left off. Review the progress above and complete the remaining work.{{completion_instructions}}`,
   variables: [
     { name: "work_on_task_cmd", description: "Formatted /work-on-task command" },
     { name: "task_id", description: "Task ID" },
     { name: "task_description", description: "Original task description" },
     { name: "progress", description: "Previous progress text" },
+    {
+      name: "completion_instructions",
+      description: "Completion instructions (empty for providers without MCP)",
+    },
   ],
   category: "task_lifecycle",
 });
@@ -132,13 +134,15 @@ registerTemplate({
 
 Task: "{{task_description}}"
 
-No progress was saved before the interruption. Start the task fresh but be aware files may have been partially modified.
-
-When done, use \`store-progress\` with status: "completed" and include your output.`,
+No progress was saved before the interruption. Start the task fresh but be aware files may have been partially modified.{{completion_instructions}}`,
   variables: [
     { name: "work_on_task_cmd", description: "Formatted /work-on-task command" },
     { name: "task_id", description: "Task ID" },
     { name: "task_description", description: "Original task description" },
+    {
+      name: "completion_instructions",
+      description: "Completion instructions (empty for providers without MCP)",
+    },
   ],
   category: "task_lifecycle",
 });

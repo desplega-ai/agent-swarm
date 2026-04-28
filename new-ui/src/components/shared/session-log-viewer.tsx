@@ -13,16 +13,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 
-/** Normalize single newlines to double for markdown paragraph breaks, preserving list/heading markers. */
-function normalizeNewlines(text: string): string {
-  return text.replace(/(?<!\n)\n(?!\n|[-*#>|]|\d+\.)/g, "\n\n");
-}
-
 import type { ContextSnapshot, SessionLog } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { JsonTree } from "@/components/workflows/json-tree";
 import { useAutoScroll } from "@/hooks/use-auto-scroll";
-import { cn } from "@/lib/utils";
+import { cn, normalizeNewlines } from "@/lib/utils";
 
 // --- Parsed message types ---
 
@@ -49,7 +44,14 @@ interface ThinkingBlock {
   thinking: string;
 }
 
-type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock;
+interface ProviderMetaBlock {
+  type: "provider_meta";
+  kind: "status" | "structured_output";
+  provider: string;
+  data: Record<string, unknown>;
+}
+
+type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock | ProviderMetaBlock;
 
 interface ParsedMessage {
   id: string;
@@ -203,6 +205,7 @@ function parseSessionLogs(logs: SessionLog[]): ParsedMessage[] {
     let parsed: {
       type?: string;
       message?: { role?: string; content?: unknown; model?: string; id?: string };
+      provider_meta?: { provider: string; kind: string; [key: string]: unknown };
     } | null = null;
     try {
       parsed = JSON.parse(log.content);
@@ -212,6 +215,26 @@ function parseSessionLogs(logs: SessionLog[]): ParsedMessage[] {
         id: log.id,
         role: "system",
         content: [{ type: "text", text: log.content }],
+        iteration: log.iteration,
+        timestamp: log.createdAt,
+      });
+      continue;
+    }
+
+    // Provider meta events (status transitions, structured output)
+    if (parsed?.provider_meta) {
+      const { kind, provider, ...data } = parsed.provider_meta;
+      messages.push({
+        id: log.id,
+        role: "system",
+        content: [
+          {
+            type: "provider_meta",
+            kind: kind as "status" | "structured_output",
+            provider,
+            data,
+          },
+        ],
         iteration: log.iteration,
         timestamp: log.createdAt,
       });
@@ -429,6 +452,83 @@ function ToolResultBubble({ content }: { content: string }) {
   );
 }
 
+// --- Provider meta rendering ---
+
+const PROVIDER_STATUS_STYLES: Record<string, { label: string; bg: string; text: string }> = {
+  running: { label: "Running", bg: "bg-blue-500/15", text: "text-blue-400" },
+  working: { label: "Working", bg: "bg-blue-500/15", text: "text-blue-400" },
+  waiting_for_user: { label: "Awaiting Input", bg: "bg-amber-500/15", text: "text-amber-400" },
+  waiting_for_approval: { label: "Needs Approval", bg: "bg-amber-500/15", text: "text-amber-400" },
+  completed: { label: "Completed", bg: "bg-emerald-500/15", text: "text-emerald-400" },
+  done: { label: "Done", bg: "bg-emerald-500/15", text: "text-emerald-400" },
+  needs_input: { label: "Needs Input", bg: "bg-amber-500/15", text: "text-amber-400" },
+  error: { label: "Error", bg: "bg-red-500/15", text: "text-red-400" },
+};
+
+function ProviderStatusPill({ value }: { value: string }) {
+  const style = PROVIDER_STATUS_STYLES[value] ?? {
+    label: value,
+    bg: "bg-muted",
+    text: "text-muted-foreground",
+  };
+  return (
+    <span
+      className={cn(
+        "text-[9px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide",
+        style.bg,
+        style.text,
+      )}
+    >
+      {style.label}
+    </span>
+  );
+}
+
+function ProviderMetaBubble({ block }: { block: ProviderMetaBlock }) {
+  const label = block.provider.charAt(0).toUpperCase() + block.provider.slice(1);
+
+  if (block.kind === "status") {
+    const status = String(block.data.status ?? "");
+    const detail = block.data.statusDetail ? String(block.data.statusDetail) : undefined;
+    const acus = block.data.acusConsumed as number | undefined;
+    return (
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] text-muted-foreground/60 font-mono uppercase tracking-wider">
+          {label}
+        </span>
+        <ProviderStatusPill value={detail ?? status} />
+        {acus !== undefined && acus > 0 && (
+          <span className="text-[10px] text-muted-foreground/50">{acus.toFixed(2)} ACUs</span>
+        )}
+      </div>
+    );
+  }
+
+  if (block.kind === "structured_output") {
+    const taskStatus = block.data.taskStatus ? String(block.data.taskStatus) : undefined;
+    const output = block.data.output ? String(block.data.output) : undefined;
+    const summary = block.data.summary ? String(block.data.summary) : undefined;
+    return (
+      <div className="rounded-md border border-border/50 bg-muted/20 px-3 py-2 space-y-1.5">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-muted-foreground/60 font-mono uppercase tracking-wider">
+            {label} Result
+          </span>
+          {taskStatus && <ProviderStatusPill value={taskStatus} />}
+        </div>
+        {summary && <p className="text-xs text-muted-foreground">{summary}</p>}
+        {output && (
+          <div className="text-sm text-foreground prose-chat prose-session-log">
+            <Streamdown>{normalizeNewlines(output)}</Streamdown>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return null;
+}
+
 function MessageBubble({ message }: { message: ParsedMessage }) {
   const isAssistant = message.role === "assistant";
   const isSystem = message.role === "system";
@@ -439,15 +539,23 @@ function MessageBubble({ message }: { message: ParsedMessage }) {
         "px-4 py-2.5",
         isAssistant
           ? "border-l-2 border-l-primary/30"
-          : isSystem
-            ? "bg-muted/10"
-            : "border-l-2 border-l-muted-foreground/20",
+          : message.role === "user"
+            ? "border-l-2 border-l-blue-400/30"
+            : isSystem
+              ? "bg-muted/10"
+              : "border-l-2 border-l-muted-foreground/20",
       )}
     >
       <div className="min-w-0 space-y-1.5">
         <div className="flex items-center gap-2">
           <span className="text-[11px] font-semibold text-muted-foreground">
-            {isAssistant ? "Agent" : isSystem ? "System" : "Tool"}
+            {isAssistant
+              ? "Agent"
+              : isSystem
+                ? "System"
+                : message.role === "user"
+                  ? "User"
+                  : "Tool"}
           </span>
           {message.model && (
             <span className="text-[9px] text-muted-foreground/40 font-mono">{message.model}</span>
@@ -478,6 +586,8 @@ function MessageBubble({ message }: { message: ParsedMessage }) {
               return <ToolUseBubble key={key} name={block.name} input={block.input} />;
             case "tool_result":
               return <ToolResultBubble key={key} content={block.content} />;
+            case "provider_meta":
+              return <ProviderMetaBubble key={key} block={block} />;
             default:
               return null;
           }

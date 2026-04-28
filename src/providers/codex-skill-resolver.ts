@@ -30,6 +30,8 @@ import type { ProviderEvent } from "./types";
  */
 const SLASH_COMMAND_REGEX = /^\/([a-z0-9:_-]+)(?:\s+(.*))?$/;
 
+const MAX_SKILL_CHARS = Number(process.env.MAX_SKILL_CHARS) || 100_000;
+
 /**
  * Resolve the default skills directory for Codex.
  *
@@ -102,6 +104,14 @@ export async function resolveCodexPrompt(
       content: `[codex] skill resolver: failed to read SKILL.md for /${commandName}: ${message}\n`,
     });
     return prompt;
+  }
+
+  if (skillContent.length > MAX_SKILL_CHARS) {
+    emit?.({
+      type: "raw_stderr",
+      content: `[codex] skill resolver: SKILL.md for /${commandName} exceeds ${MAX_SKILL_CHARS} chars (${skillContent.length}), truncating\n`,
+    });
+    skillContent = skillContent.slice(0, MAX_SKILL_CHARS);
   }
 
   // Assemble the user-request body: trailing args from the slash line (if any),

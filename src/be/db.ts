@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { parseProviderMeta } from "@/utils/provider-metadata.ts";
 import pkg from "../../package.json";
 import { addEyesReactionOnTaskStart } from "../github/task-reactions";
 import { configureDbResolver } from "../prompts/resolver";
@@ -14,6 +15,10 @@ import type {
   AgentTaskSource,
   AgentTaskStatus,
   AgentWithTasks,
+  Budget,
+  BudgetRefusalCause,
+  BudgetRefusalNotification,
+  BudgetScope,
   ChangeSource,
   Channel,
   ChannelMessage,
@@ -22,6 +27,7 @@ import type {
   ContextSnapshotEventType,
   ContextVersion,
   CooldownConfig,
+  DevinProviderMeta,
   InboxMessage,
   InboxMessageStatus,
   InputValue,
@@ -29,13 +35,18 @@ import type {
   McpServerScope,
   McpServerTransport,
   McpServerWithInstallInfo,
+  PricingProvider,
+  PricingRow,
+  PricingTokenClass,
   PromptTemplate,
   PromptTemplateHistory,
+  ProviderName,
   RepoGuidelines,
   ScheduledTask,
   Service,
   ServiceStatus,
   SessionCost,
+  SessionCostSource,
   SessionLog,
   Skill,
   SkillScope,
@@ -819,6 +830,8 @@ type AgentTaskRow = {
   credentialKeyType: string | null;
   requestedByUserId: string | null;
   swarmVersion: string | null;
+  provider: string | null;
+  providerMeta: string | null;
 };
 
 function rowToAgentTask(row: AgentTaskRow): AgentTask {
@@ -880,6 +893,8 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     credentialKeyType: row.credentialKeyType ?? undefined,
     requestedByUserId: row.requestedByUserId ?? undefined,
     swarmVersion: row.swarmVersion ?? undefined,
+    provider: (row.provider as ProviderName | null) ?? undefined,
+    providerMeta: parseProviderMeta(row.provider as ProviderName | null, row.providerMeta),
   };
 }
 
@@ -1061,12 +1076,28 @@ export function getChildTasks(parentTaskId: string): AgentTask[] {
 export function updateTaskClaudeSessionId(
   taskId: string,
   claudeSessionId: string,
+  provider?: ProviderName,
+  providerMeta?: Record<string, unknown>,
 ): AgentTask | null {
+  const setClauses = ["claudeSessionId = ?", "lastUpdatedAt = ?"];
+  const params: (string | null)[] = [claudeSessionId, new Date().toISOString()];
+
+  if (provider !== undefined) {
+    setClauses.push("provider = ?");
+    params.push(provider);
+  }
+  if (providerMeta !== undefined) {
+    setClauses.push("providerMeta = ?");
+    params.push(JSON.stringify(providerMeta));
+  }
+
+  params.push(taskId);
+
   const row = getDb()
-    .prepare<AgentTaskRow, [string, string, string]>(
-      `UPDATE agent_tasks SET claudeSessionId = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *`,
+    .prepare<AgentTaskRow, (string | null)[]>(
+      `UPDATE agent_tasks SET ${setClauses.join(", ")} WHERE id = ? RETURNING *`,
     )
-    .get(claudeSessionId, new Date().toISOString(), taskId);
+    .get(...params);
   return row ? rowToAgentTask(row) : null;
 }
 
@@ -1907,6 +1938,14 @@ export function getLogsByTaskIdChronological(taskId: string): AgentLog[] {
     )
     .all(taskId)
     .map(rowToAgentLog);
+}
+
+/**
+ * Phase 6: list all log rows of a given eventType, newest first. Used by the
+ * REST audit-log tests to assert mutation rows landed.
+ */
+export function getLogsByEventType(eventType: AgentLogEventType): AgentLog[] {
+  return logQueries.getByEventType().all(eventType).map(rowToAgentLog);
 }
 
 export function getAllLogs(limit?: number): AgentLog[] {
@@ -3478,6 +3517,7 @@ type SessionCostRow = {
   numTurns: number;
   model: string;
   isError: number;
+  costSource: string;
   createdAt: string;
 };
 
@@ -3496,6 +3536,7 @@ function rowToSessionCost(row: SessionCostRow): SessionCost {
     numTurns: row.numTurns,
     model: row.model,
     isError: row.isError === 1,
+    costSource: (row.costSource as SessionCostSource) ?? "harness",
     createdAt: row.createdAt,
   };
 }
@@ -3518,10 +3559,11 @@ const sessionCostQueries = {
         number,
         string,
         number,
+        string,
       ]
     >(
-      `INSERT INTO session_costs (id, sessionId, taskId, agentId, totalCostUsd, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, durationMs, numTurns, model, isError, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+      `INSERT INTO session_costs (id, sessionId, taskId, agentId, totalCostUsd, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, durationMs, numTurns, model, isError, costSource, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
     ),
 
   getByTaskId: () =>
@@ -3553,10 +3595,19 @@ export interface CreateSessionCostInput {
   numTurns: number;
   model: string;
   isError?: boolean;
+  /**
+   * Phase 6: where the recorded `totalCostUsd` came from.
+   *  - 'harness'        — value reported by the harness as-is (default).
+   *  - 'pricing-table'  — value recomputed by the API from `pricing` rows
+   *                       (Codex when DB pricing rows exist for all three
+   *                       token classes).
+   */
+  costSource?: SessionCostSource;
 }
 
 export function createSessionCost(input: CreateSessionCostInput): SessionCost {
   const id = crypto.randomUUID();
+  const costSource: SessionCostSource = input.costSource ?? "harness";
   sessionCostQueries
     .insert()
     .run(
@@ -3573,6 +3624,7 @@ export function createSessionCost(input: CreateSessionCostInput): SessionCost {
       input.numTurns,
       input.model,
       input.isError ? 1 : 0,
+      costSource,
     );
 
   return {
@@ -3589,6 +3641,7 @@ export function createSessionCost(input: CreateSessionCostInput): SessionCost {
     numTurns: input.numTurns,
     model: input.model,
     isError: input.isError ?? false,
+    costSource,
     createdAt: new Date().toISOString(),
   };
 }
@@ -8069,4 +8122,420 @@ export function deleteUser(id: string): boolean {
     .run(id);
   const result = getDb().prepare("DELETE FROM users WHERE id = ?").run(id);
   return result.changes > 0;
+}
+
+// ============================================================================
+// Budgets, daily-spend aggregation, and budget-refusal notifications (Phase 2)
+// ----------------------------------------------------------------------------
+// `budgets` and `budget_refusal_notifications` use INTEGER epoch-ms for their
+// `createdAt` / `lastUpdatedAt` columns (deliberate divergence — see migration
+// 044). All inserts here use `Date.now()` accordingly.
+// ============================================================================
+
+interface BudgetRow {
+  scope: string;
+  scope_id: string;
+  daily_budget_usd: number;
+  createdAt: number;
+  lastUpdatedAt: number;
+}
+
+interface BudgetRefusalNotificationRow {
+  task_id: string;
+  date: string;
+  agent_id: string;
+  cause: string;
+  agent_spend_usd: number | null;
+  agent_budget_usd: number | null;
+  global_spend_usd: number | null;
+  global_budget_usd: number | null;
+  follow_up_task_id: string | null;
+  createdAt: number;
+}
+
+interface CoalesceSumRow {
+  total: number;
+}
+
+function rowToBudget(row: BudgetRow): Budget {
+  return {
+    scope: row.scope as BudgetScope,
+    scopeId: row.scope_id,
+    dailyBudgetUsd: row.daily_budget_usd,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+function rowToBudgetRefusalNotification(
+  row: BudgetRefusalNotificationRow,
+): BudgetRefusalNotification {
+  return {
+    taskId: row.task_id,
+    date: row.date,
+    agentId: row.agent_id,
+    cause: row.cause as BudgetRefusalCause,
+    agentSpendUsd: row.agent_spend_usd ?? undefined,
+    agentBudgetUsd: row.agent_budget_usd ?? undefined,
+    globalSpendUsd: row.global_spend_usd ?? undefined,
+    globalBudgetUsd: row.global_budget_usd ?? undefined,
+    followUpTaskId: row.follow_up_task_id ?? undefined,
+    createdAt: row.createdAt,
+  };
+}
+
+/**
+ * Look up a single budget row by (scope, scopeId). Returns `null` when no row
+ * exists — callers treat that as "unlimited / no budget configured".
+ */
+export function getBudget(scope: BudgetScope, scopeId: string): Budget | null {
+  const row = getDb()
+    .prepare<BudgetRow, [string, string]>(
+      "SELECT scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt FROM budgets WHERE scope = ? AND scope_id = ?",
+    )
+    .get(scope, scopeId);
+  return row ? rowToBudget(row) : null;
+}
+
+/**
+ * Phase 6: list every budget row in the system. Used by `GET /api/budgets`.
+ * Order is `(scope, scope_id)` for stable output across calls.
+ */
+export function getBudgets(): Budget[] {
+  return getDb()
+    .prepare<BudgetRow, []>(
+      "SELECT scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt FROM budgets ORDER BY scope, scope_id",
+    )
+    .all()
+    .map(rowToBudget);
+}
+
+/**
+ * Phase 6: upsert a budget row. Creates the row if `(scope, scopeId)` does not
+ * exist, otherwise updates `daily_budget_usd` and `lastUpdatedAt`. Returns the
+ * resulting row in both cases.
+ */
+export function upsertBudget(scope: BudgetScope, scopeId: string, dailyBudgetUsd: number): Budget {
+  const now = Date.now();
+  getDb()
+    .prepare(
+      `INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(scope, scope_id) DO UPDATE SET
+         daily_budget_usd = excluded.daily_budget_usd,
+         lastUpdatedAt = excluded.lastUpdatedAt`,
+    )
+    .run(scope, scopeId, dailyBudgetUsd, now, now);
+
+  const updated = getBudget(scope, scopeId);
+  if (!updated) {
+    throw new Error(
+      `upsertBudget: row missing after insert for (scope=${scope}, scopeId=${scopeId})`,
+    );
+  }
+  return updated;
+}
+
+/**
+ * Phase 6: delete a budget row. Returns `true` if a row was deleted, `false`
+ * if `(scope, scopeId)` did not exist.
+ */
+export function deleteBudget(scope: BudgetScope, scopeId: string): boolean {
+  const result = getDb()
+    .prepare("DELETE FROM budgets WHERE scope = ? AND scope_id = ?")
+    .run(scope, scopeId);
+  return result.changes > 0;
+}
+
+// ============================================================================
+// Pricing rows (Phase 6 — append-only price book)
+// ----------------------------------------------------------------------------
+// `pricing` uses INTEGER epoch-ms for `effective_from`, `createdAt`,
+// `lastUpdatedAt` (see migration 044). Append-only by design: operators add a
+// new row with a later `effective_from` rather than mutating an existing row.
+// `getActivePricingRow` resolves the row with the largest
+// `effective_from <= atEpochMs`, which is the correct "what price was in
+// effect at time T" semantics regardless of insertion order.
+// ============================================================================
+
+interface PricingRowDb {
+  provider: string;
+  model: string;
+  token_class: string;
+  effective_from: number;
+  price_per_million_usd: number;
+  createdAt: number;
+  lastUpdatedAt: number;
+}
+
+function rowToPricingRow(row: PricingRowDb): PricingRow {
+  return {
+    provider: row.provider as PricingProvider,
+    model: row.model,
+    tokenClass: row.token_class as PricingTokenClass,
+    effectiveFrom: row.effective_from,
+    pricePerMillionUsd: row.price_per_million_usd,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+/** Phase 6: list every pricing row, latest-effective first. */
+export function getAllPricingRows(): PricingRow[] {
+  return getDb()
+    .prepare<PricingRowDb, []>(
+      "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing ORDER BY provider, model, token_class, effective_from DESC",
+    )
+    .all()
+    .map(rowToPricingRow);
+}
+
+/**
+ * Phase 6: list every pricing row for a given (provider, model, tokenClass)
+ * triple. Order is `effective_from DESC` so newest is first.
+ */
+export function getPricingRows(
+  provider: PricingProvider,
+  model: string,
+  tokenClass: PricingTokenClass,
+): PricingRow[] {
+  return getDb()
+    .prepare<PricingRowDb, [string, string, string]>(
+      "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing WHERE provider = ? AND model = ? AND token_class = ? ORDER BY effective_from DESC",
+    )
+    .all(provider, model, tokenClass)
+    .map(rowToPricingRow);
+}
+
+/**
+ * Phase 6: resolve "what price was in effect at time `atEpochMs`" — the row
+ * with the largest `effective_from <= atEpochMs`. Returns null when no row
+ * matches (model unseeded for that triple at that time). Backed by the
+ * `idx_pricing_lookup` index from migration 044.
+ */
+export function getActivePricingRow(
+  provider: PricingProvider,
+  model: string,
+  tokenClass: PricingTokenClass,
+  atEpochMs: number,
+): PricingRow | null {
+  const row = getDb()
+    .prepare<PricingRowDb, [string, string, string, number]>(
+      "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing WHERE provider = ? AND model = ? AND token_class = ? AND effective_from <= ? ORDER BY effective_from DESC LIMIT 1",
+    )
+    .get(provider, model, tokenClass, atEpochMs);
+  return row ? rowToPricingRow(row) : null;
+}
+
+export interface InsertPricingRowInput {
+  provider: PricingProvider;
+  model: string;
+  tokenClass: PricingTokenClass;
+  effectiveFrom: number;
+  pricePerMillionUsd: number;
+}
+
+/**
+ * Phase 6: insert a new pricing row. Throws on PK collision
+ * `(provider, model, token_class, effective_from)` — caller (the HTTP route)
+ * translates that into a 409.
+ */
+export function insertPricingRow(input: InsertPricingRowInput): PricingRow {
+  const now = Date.now();
+  getDb()
+    .prepare(
+      `INSERT INTO pricing (provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      input.provider,
+      input.model,
+      input.tokenClass,
+      input.effectiveFrom,
+      input.pricePerMillionUsd,
+      now,
+      now,
+    );
+  return {
+    provider: input.provider,
+    model: input.model,
+    tokenClass: input.tokenClass,
+    effectiveFrom: input.effectiveFrom,
+    pricePerMillionUsd: input.pricePerMillionUsd,
+    createdAt: now,
+    lastUpdatedAt: now,
+  };
+}
+
+/**
+ * Phase 6: delete a pricing row. Returns true if a row was deleted, false if
+ * the row did not exist. Discouraged operationally — historical session_costs
+ * are not retroactively recomputed — but allowed for typo correction.
+ */
+export function deletePricingRow(
+  provider: PricingProvider,
+  model: string,
+  tokenClass: PricingTokenClass,
+  effectiveFrom: number,
+): boolean {
+  const result = getDb()
+    .prepare(
+      "DELETE FROM pricing WHERE provider = ? AND model = ? AND token_class = ? AND effective_from = ?",
+    )
+    .run(provider, model, tokenClass, effectiveFrom);
+  return result.changes > 0;
+}
+
+/**
+ * Sum of `totalCostUsd` across all `session_costs` rows for a given agent on a
+ * given UTC calendar day. `dateUtc` MUST be `'YYYY-MM-DD'` (UTC). Returns 0
+ * when no rows exist.
+ *
+ * Implementation note: we filter on `substr(createdAt, 1, 10) = ?` rather than
+ * `date(createdAt / 1000, 'unixepoch') = ?` because `session_costs.createdAt`
+ * is TEXT in ISO 8601 format (`'YYYY-MM-DDTHH:MM:SS.SSSZ'`), populated via
+ * `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`. The left-anchored `substr` prefix
+ * also lets the SQLite optimizer use the existing
+ * `idx_session_costs_agent_createdAt` index (verified via EXPLAIN QUERY PLAN
+ * in the test suite).
+ */
+export function getDailySpendForAgent(agentId: string, dateUtc: string): number {
+  const row = getDb()
+    .prepare<CoalesceSumRow, [string, string]>(
+      "SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE agentId = ? AND substr(createdAt, 1, 10) = ?",
+    )
+    .get(agentId, dateUtc);
+  return row?.total ?? 0;
+}
+
+/**
+ * Sum of `totalCostUsd` across all `session_costs` rows for a given UTC
+ * calendar day, regardless of agent. `dateUtc` MUST be `'YYYY-MM-DD'` (UTC).
+ *
+ * NOTE: this query has no `agentId` prefix and therefore does not naturally
+ * match the `(agentId, createdAt)` composite index. SQLite's optimizer may
+ * pick `idx_session_costs_createdAt` (single-column on `createdAt`) — but
+ * because the predicate is `substr(createdAt, 1, 10) = ?` rather than a range
+ * scan, the planner often falls back to a full table scan. That is acceptable
+ * for V1 daily-spend volumes; if it ever becomes a hotspot, a covering
+ * functional index on `substr(createdAt, 1, 10)` would be the fix.
+ */
+export function getDailySpendGlobal(dateUtc: string): number {
+  const row = getDb()
+    .prepare<CoalesceSumRow, [string]>(
+      "SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE substr(createdAt, 1, 10) = ?",
+    )
+    .get(dateUtc);
+  return row?.total ?? 0;
+}
+
+export interface RecordBudgetRefusalNotificationInput {
+  taskId: string;
+  date: string;
+  agentId: string;
+  cause: BudgetRefusalCause;
+  agentSpendUsd?: number;
+  agentBudgetUsd?: number;
+  globalSpendUsd?: number;
+  globalBudgetUsd?: number;
+}
+
+/**
+ * Idempotent insert of a budget-refusal notification keyed by
+ * `(task_id, date)`. Returns `{ inserted: true, row }` on first call for that
+ * key, or `{ inserted: false, row }` (with the original row) on subsequent
+ * calls — used by the notification path to dedup "the agent told me about
+ * this task already" across retries within the same UTC day.
+ */
+export function recordBudgetRefusalNotification(input: RecordBudgetRefusalNotificationInput): {
+  inserted: boolean;
+  row: BudgetRefusalNotification;
+} {
+  const db = getDb();
+  const now = Date.now();
+  const result = db
+    .prepare(
+      `INSERT OR IGNORE INTO budget_refusal_notifications
+       (task_id, date, agent_id, cause, agent_spend_usd, agent_budget_usd, global_spend_usd, global_budget_usd, follow_up_task_id, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+    )
+    .run(
+      input.taskId,
+      input.date,
+      input.agentId,
+      input.cause,
+      input.agentSpendUsd ?? null,
+      input.agentBudgetUsd ?? null,
+      input.globalSpendUsd ?? null,
+      input.globalBudgetUsd ?? null,
+      now,
+    );
+
+  const existing = db
+    .prepare<BudgetRefusalNotificationRow, [string, string]>(
+      "SELECT * FROM budget_refusal_notifications WHERE task_id = ? AND date = ?",
+    )
+    .get(input.taskId, input.date);
+
+  if (!existing) {
+    // Should be unreachable: INSERT OR IGNORE either inserts or leaves an
+    // existing row. If we hit this it's a hard schema/runtime invariant break.
+    throw new Error(
+      `recordBudgetRefusalNotification: row missing after insert for (taskId=${input.taskId}, date=${input.date})`,
+    );
+  }
+
+  return {
+    inserted: result.changes > 0,
+    row: rowToBudgetRefusalNotification(existing),
+  };
+}
+
+/**
+ * Lookup helper used by tests and by the Phase 5 follow-up-task write-back.
+ */
+export function getBudgetRefusalNotification(
+  taskId: string,
+  date: string,
+): BudgetRefusalNotification | null {
+  const row = getDb()
+    .prepare<BudgetRefusalNotificationRow, [string, string]>(
+      "SELECT * FROM budget_refusal_notifications WHERE task_id = ? AND date = ?",
+    )
+    .get(taskId, date);
+  return row ? rowToBudgetRefusalNotification(row) : null;
+}
+
+/**
+ * Boolean observability helper — returns true iff a refusal notification has
+ * already been recorded for `(taskId, date)`.
+ */
+export function hasBudgetRefusalNotificationToday(taskId: string, date: string): boolean {
+  const row = getDb()
+    .prepare<{ one: number }, [string, string]>(
+      "SELECT 1 as one FROM budget_refusal_notifications WHERE task_id = ? AND date = ? LIMIT 1",
+    )
+    .get(taskId, date);
+  return row !== null;
+}
+
+/**
+ * Phase 5 write-back: link the freshly-created lead-facing follow-up task
+ * back to its dedup row so operators can audit "find the lead-facing
+ * follow-up that was created when this task was first refused".
+ *
+ * Idempotent — safe to call multiple times with the same `(taskId, date)`,
+ * but only the first refusal per day creates a follow-up task in the first
+ * place (see `recordBudgetRefusalNotification` for the dedup invariant).
+ */
+export function setBudgetRefusalFollowUpTaskId(
+  taskId: string,
+  date: string,
+  followUpTaskId: string,
+): void {
+  getDb()
+    .prepare(
+      "UPDATE budget_refusal_notifications SET follow_up_task_id = ? WHERE task_id = ? AND date = ?",
+    )
+    .run(followUpTaskId, taskId, date);
 }

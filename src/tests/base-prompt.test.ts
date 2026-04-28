@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt";
+import type { ProviderTraits } from "../providers/types";
 
 /** Minimal valid args to reduce boilerplate */
 const minimalArgs: BasePromptArgs = {
@@ -332,5 +333,203 @@ describe("getBasePrompt — truncation", () => {
     // The full repo content should be present (never truncated)
     expect(result).toContain(hugeRepoClaudeMd);
     expect(result).not.toContain("[...truncated");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Remote provider (no MCP, no local environment) — trait-aware prompt assembly
+// ---------------------------------------------------------------------------
+const remoteTraits: ProviderTraits = { hasMcp: false, hasLocalEnvironment: false };
+const remoteProviderArgs: BasePromptArgs = {
+  ...minimalArgs,
+  traits: remoteTraits,
+};
+
+describe("getBasePrompt — remote provider composite selection", () => {
+  test("uses remote worker composite (not generic worker)", async () => {
+    const result = await getBasePrompt(remoteProviderArgs);
+    // Remote worker template says "output is captured automatically"
+    expect(result).toContain("output is captured automatically");
+    // Should NOT contain generic worker tools
+    expect(result).not.toContain("store-progress");
+    expect(result).not.toContain("task-action");
+    expect(result).not.toContain("read-messages");
+  });
+
+  test("still includes role and agentId", async () => {
+    const result = await getBasePrompt(remoteProviderArgs);
+    expect(result).toContain("worker");
+    expect(result).toContain("agent-abc-123");
+  });
+});
+
+describe("getBasePrompt — remote provider excluded sections", () => {
+  test("excludes join-swarm / register instructions", async () => {
+    const result = await getBasePrompt(remoteProviderArgs);
+    expect(result).not.toContain("join-swarm");
+  });
+
+  test("excludes /workspace filesystem layout", async () => {
+    const result = await getBasePrompt(remoteProviderArgs);
+    expect(result).not.toContain("/workspace/personal");
+    expect(result).not.toContain("/workspace/shared");
+  });
+
+  test("excludes How You Are Built section", async () => {
+    const result = await getBasePrompt(remoteProviderArgs);
+    expect(result).not.toContain("How You Are Built");
+    expect(result).not.toContain("hooks fire during your session");
+  });
+
+  test("excludes context mode tools", async () => {
+    const result = await getBasePrompt(remoteProviderArgs);
+    expect(result).not.toContain("context-mode");
+    expect(result).not.toContain("batch_execute");
+  });
+
+  test("excludes system packages section", async () => {
+    const result = await getBasePrompt(remoteProviderArgs);
+    expect(result).not.toContain("sudo apt-get install");
+    expect(result).not.toContain("System packages available");
+  });
+
+  test("excludes VCS CLI tools table", async () => {
+    const result = await getBasePrompt(remoteProviderArgs);
+    expect(result).not.toContain("glab mr create");
+    expect(result).not.toContain("gh pr create");
+  });
+
+  test("excludes service registry / PM2", async () => {
+    const result = await getBasePrompt(remoteProviderArgs);
+    expect(result).not.toContain("Service Registry");
+    expect(result).not.toContain("pm2 start");
+  });
+
+  test("excludes code quality section", async () => {
+    const result = await getBasePrompt(remoteProviderArgs);
+    expect(result).not.toContain("Code Quality");
+    expect(result).not.toContain("--no-verify");
+  });
+
+  test("excludes capabilities listing", async () => {
+    const result = await getBasePrompt({
+      ...remoteProviderArgs,
+      capabilities: ["core", "task-pool"],
+    });
+    expect(result).not.toContain("Capabilities enabled");
+  });
+
+  test("skips Slack instructions even with slackContext", async () => {
+    const result = await getBasePrompt({
+      ...remoteProviderArgs,
+      slackContext: { channelId: "C123", threadTs: "123.456" },
+    });
+    expect(result).not.toContain("slack-reply");
+    expect(result).not.toContain("C123");
+  });
+
+  test("skips skills section even when provided", async () => {
+    const result = await getBasePrompt({
+      ...remoteProviderArgs,
+      skillsSummary: [{ name: "commit", description: "Create a commit" }],
+    });
+    expect(result).not.toContain("Installed Skills");
+    expect(result).not.toContain("/commit");
+  });
+
+  test("skips MCP servers section even when provided", async () => {
+    const result = await getBasePrompt({
+      ...remoteProviderArgs,
+      mcpServersSummary: "- my-server: http://localhost:3000",
+    });
+    expect(result).not.toContain("Installed MCP Servers");
+    expect(result).not.toContain("my-server");
+  });
+
+  test("skips CLAUDE.md and TOOLS.md truncatable sections", async () => {
+    const result = await getBasePrompt({
+      ...remoteProviderArgs,
+      claudeMd: "# Agent instructions here",
+      toolsMd: "# Tools here",
+    });
+    expect(result).not.toContain("Agent Instructions");
+    expect(result).not.toContain("Agent instructions here");
+    expect(result).not.toContain("Your Tools & Capabilities");
+    expect(result).not.toContain("Tools here");
+  });
+});
+
+describe("getBasePrompt — remote provider identity", () => {
+  test("uses simplified identity (no SOUL.md / IDENTITY.md)", async () => {
+    const result = await getBasePrompt({
+      ...remoteProviderArgs,
+      name: "remote-worker-1",
+      description: "A remote worker",
+      soulMd: "# SOUL.md content that should NOT appear",
+      identityMd: "# IDENTITY.md content that should NOT appear",
+    });
+    expect(result).toContain("**Name:** remote-worker-1");
+    expect(result).toContain("**Description:** A remote worker");
+    expect(result).toContain("Desplega platform");
+    // Identity files should NOT be injected
+    expect(result).not.toContain("SOUL.md content that should NOT appear");
+    expect(result).not.toContain("IDENTITY.md content that should NOT appear");
+  });
+
+  test("identity section present even without name", async () => {
+    const result = await getBasePrompt(remoteProviderArgs);
+    expect(result).toContain("Your Identity");
+    expect(result).toContain("Desplega platform");
+  });
+});
+
+describe("getBasePrompt — remote provider keeps repo context", () => {
+  test("skips CLAUDE.md content for remote providers", async () => {
+    const result = await getBasePrompt({
+      ...remoteProviderArgs,
+      repoContext: {
+        claudeMd: "Run `bun test` before pushing.",
+        clonePath: "/workspace/repos/my-repo",
+      },
+    });
+    expect(result).toContain("Repository Context");
+    // Remote providers don't get claudeMd injected
+    expect(result).not.toContain("Run `bun test` before pushing.");
+    expect(result).not.toContain("/workspace/repos/my-repo");
+  });
+
+  test("includes repo guidelines", async () => {
+    const result = await getBasePrompt({
+      ...remoteProviderArgs,
+      repoContext: {
+        clonePath: "/workspace/repos/my-repo",
+        guidelines: {
+          prChecks: ["bun run lint:fix", "bun test"],
+          mergeChecks: [],
+          allowMerge: false,
+          review: [],
+        },
+      },
+    });
+    expect(result).toContain("Repository Guidelines");
+    expect(result).toContain("bun run lint:fix");
+    expect(result).toContain("bun test");
+  });
+});
+
+describe("getBasePrompt — local providers unaffected", () => {
+  test("local provider uses generic worker composite", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      traits: { hasMcp: true, hasLocalEnvironment: true },
+    });
+    expect(result).toContain("store-progress");
+    expect(result).toContain("/workspace");
+  });
+
+  test("undefined traits defaults to local provider behavior", async () => {
+    const result = await getBasePrompt(minimalArgs);
+    expect(result).toContain("store-progress");
+    expect(result).toContain("/workspace");
   });
 });

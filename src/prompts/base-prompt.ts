@@ -7,6 +7,7 @@
  * still assembled here based on runtime state.
  */
 
+import type { ProviderTraits } from "../providers/types";
 import { resolveTemplateAsync } from "./resolver";
 
 // Side-effect import: register all system + session templates
@@ -27,6 +28,7 @@ export type BasePromptArgs = {
   agentId: string;
   swarmUrl: string;
   capabilities?: string[];
+  traits?: ProviderTraits;
   name?: string;
   description?: string;
   soulMd?: string;
@@ -53,17 +55,25 @@ export type BasePromptArgs = {
 };
 
 export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
-  const { role, agentId, swarmUrl } = args;
+  const { role, agentId, swarmUrl, traits } = args;
+  const { hasMcp = true, hasLocalEnvironment: hasLocalEnv = true } = traits ?? {};
 
   const vars: Record<string, string> = { role, agentId, swarmUrl };
 
-  // Resolve the composite session template (lead or worker)
-  const compositeEventType = role === "lead" ? "system.session.lead" : "system.session.worker";
+  // Resolve the composite session template (trait-aware for remote providers)
+  let compositeEventType: string;
+  if (!hasMcp) {
+    // If no MCP, role cannot be lead
+    compositeEventType = "system.session.worker.remote";
+  } else {
+    compositeEventType = role === "lead" ? "system.session.lead" : "system.session.worker";
+  }
   const compositeResult = await resolveTemplateAsync(compositeEventType, vars);
   let prompt = compositeResult.text;
 
   // Conditionally inject Slack instructions for workers with Slack-originated tasks
-  if (role !== "lead" && args.slackContext) {
+  // Skip for providers without MCP — they can't call Slack tools (slack-reply, etc.)
+  if (role !== "lead" && args.slackContext && hasMcp) {
     const slackResult = await resolveTemplateAsync("system.agent.worker.slack", {
       slackChannelId: args.slackContext.channelId,
       slackThreadTs: args.slackContext.threadTs ?? "",
@@ -71,8 +81,21 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     prompt += slackResult.text;
   }
 
-  // Inject agent identity (soul + identity + name/description) if available
-  if (args.soulMd || args.identityMd || args.name) {
+  // Inject agent identity
+  if (!hasLocalEnv) {
+    // Simplified identity for remote providers — no self-evolution, no /workspace files
+    prompt += "\n\n## Your Identity\n\n";
+    if (args.name) {
+      prompt += `**Name:** ${args.name}\n`;
+      if (args.description) {
+        prompt += `**Description:** ${args.description}\n`;
+      }
+      prompt += "\n";
+    }
+    prompt += `You are part of an agent swarm managed by the Desplega platform. `;
+    prompt += `You receive tasks from the swarm's lead agent and execute them independently. `;
+    prompt += `Focus on quality work and clear communication of results.\n`;
+  } else if (args.soulMd || args.identityMd || args.name) {
     prompt += "\n\n## Your Identity\n\n";
     if (args.name) {
       prompt += `**Name:** ${args.name}\n`;
@@ -90,13 +113,14 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   }
 
   // Installed skills section (progressive disclosure — name + description only)
-  if (args.skillsSummary && args.skillsSummary.length > 0) {
+  // Skip for providers without MCP — skills require the Skill MCP tool
+  if (hasMcp && args.skillsSummary && args.skillsSummary.length > 0) {
     const summaries = args.skillsSummary.map((s) => `- /${s.name}: ${s.description}`).join("\n");
     prompt += `\n\n## Installed Skills\n\nThe following skills are available. Use the Skill tool to invoke them by name.\n\n${summaries}\n`;
   }
 
-  // Installed MCP servers section
-  if (args.mcpServersSummary) {
+  // Installed MCP servers section — skip for providers without MCP
+  if (hasMcp && args.mcpServersSummary) {
     prompt += `\n\n## Installed MCP Servers\n\nThe following MCP servers are configured for your use:\n${args.mcpServersSummary}\n`;
   }
 
@@ -108,13 +132,15 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
       prompt += `WARNING: ${args.repoContext.warning}\n\n`;
     }
 
-    if (args.repoContext.claudeMd) {
-      prompt += `The following CLAUDE.md is from the repository cloned at \`${args.repoContext.clonePath}\`. `;
-      prompt += `**IMPORTANT: These instructions apply ONLY when working within the \`${args.repoContext.clonePath}\` directory.** `;
-      prompt += `Do NOT apply these rules to files outside that directory.\n\n`;
-      prompt += `${args.repoContext.claudeMd}\n`;
-    } else if (!args.repoContext.warning) {
-      prompt += `Repository is cloned at \`${args.repoContext.clonePath}\` but has no CLAUDE.md file.\n`;
+    if (hasLocalEnv) {
+      if (args.repoContext.claudeMd) {
+        prompt += `The following CLAUDE.md is from the repository cloned at \`${args.repoContext.clonePath}\`. `;
+        prompt += `**IMPORTANT: These instructions apply ONLY when working within the \`${args.repoContext.clonePath}\` directory.** `;
+        prompt += `Do NOT apply these rules to files outside that directory.\n\n`;
+        prompt += `${args.repoContext.claudeMd}\n`;
+      } else if (!args.repoContext.warning) {
+        prompt += `Repository is cloned at \`${args.repoContext.clonePath}\` but has no CLAUDE.md file.\n`;
+      }
     }
 
     // Inject repo guidelines
@@ -153,73 +179,77 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     }
   }
 
-  // Build conditional suffix (sections that depend on runtime env/capabilities)
-  let conditionalSuffix = "";
+  // Skip conditional suffix and truncatable sections for remote providers — these
+  // reference local Docker environment features (agent-fs, services, artifacts, /workspace files)
+  if (hasLocalEnv) {
+    // Build conditional suffix (sections that depend on runtime env/capabilities)
+    let conditionalSuffix = "";
 
-  // Conditionally include agent-fs instructions when available
-  if (process.env.AGENT_FS_API_URL) {
-    const sharedOrgId = process.env.AGENT_FS_SHARED_ORG_ID || "YOUR_SHARED_ORG_ID";
-    const agentFsResult = await resolveTemplateAsync("system.agent.agent_fs", {
-      agentId,
-      sharedOrgId,
-    });
-    conditionalSuffix += agentFsResult.text;
-  }
+    // Conditionally include agent-fs instructions when available
+    if (process.env.AGENT_FS_API_URL) {
+      const sharedOrgId = process.env.AGENT_FS_SHARED_ORG_ID || "YOUR_SHARED_ORG_ID";
+      const agentFsResult = await resolveTemplateAsync("system.agent.agent_fs", {
+        agentId,
+        sharedOrgId,
+      });
+      conditionalSuffix += agentFsResult.text;
+    }
 
-  if (!args.capabilities || args.capabilities.includes("services")) {
-    const servicesResult = await resolveTemplateAsync("system.agent.services", {
-      agentId,
-      swarmUrl,
-    });
-    conditionalSuffix += servicesResult.text;
-  }
+    if (!args.capabilities || args.capabilities.includes("services")) {
+      const servicesResult = await resolveTemplateAsync("system.agent.services", {
+        agentId,
+        swarmUrl,
+      });
+      conditionalSuffix += servicesResult.text;
+    }
 
-  if (!args.capabilities || args.capabilities.includes("artifacts")) {
-    const artifactsResult = await resolveTemplateAsync("system.agent.artifacts", {});
-    conditionalSuffix += artifactsResult.text;
-  }
+    if (!args.capabilities || args.capabilities.includes("artifacts")) {
+      const artifactsResult = await resolveTemplateAsync("system.agent.artifacts", {});
+      conditionalSuffix += artifactsResult.text;
+    }
 
-  if (args.capabilities) {
-    conditionalSuffix += `
+    if (args.capabilities) {
+      conditionalSuffix += `
 ### Capabilities enabled for this agent:
 
 - ${args.capabilities.join("\n- ")}
 `;
+    }
+
+    // Inject truncatable sections with per-section and total character caps
+    // Priority: agent CLAUDE.md > tools (tools cut first when over total budget)
+    const protectedLength = prompt.length + conditionalSuffix.length;
+    const totalBudget = Math.max(0, BOOTSTRAP_TOTAL_MAX_CHARS - protectedLength);
+    let totalUsed = 0;
+
+    // Agent CLAUDE.md (higher priority — injected first)
+    if (args.claudeMd) {
+      const perSectionBudget = Math.min(BOOTSTRAP_MAX_CHARS, totalBudget - totalUsed);
+      const section = truncateSection(
+        args.claudeMd,
+        "## Agent Instructions",
+        "CLAUDE.md",
+        perSectionBudget,
+      );
+      prompt += section;
+      totalUsed += section.length;
+    }
+
+    // Tools (lower priority — gets whatever budget remains)
+    if (args.toolsMd) {
+      const perSectionBudget = Math.min(BOOTSTRAP_MAX_CHARS, totalBudget - totalUsed);
+      const section = truncateSection(
+        args.toolsMd,
+        "## Your Tools & Capabilities",
+        "TOOLS.md",
+        perSectionBudget,
+      );
+      prompt += section;
+      totalUsed += section.length;
+    }
+
+    prompt += conditionalSuffix;
   }
-
-  // Inject truncatable sections with per-section and total character caps
-  // Priority: agent CLAUDE.md > tools (tools cut first when over total budget)
-  const protectedLength = prompt.length + conditionalSuffix.length;
-  const totalBudget = Math.max(0, BOOTSTRAP_TOTAL_MAX_CHARS - protectedLength);
-  let totalUsed = 0;
-
-  // Agent CLAUDE.md (higher priority — injected first)
-  if (args.claudeMd) {
-    const perSectionBudget = Math.min(BOOTSTRAP_MAX_CHARS, totalBudget - totalUsed);
-    const section = truncateSection(
-      args.claudeMd,
-      "## Agent Instructions",
-      "CLAUDE.md",
-      perSectionBudget,
-    );
-    prompt += section;
-    totalUsed += section.length;
-  }
-
-  // Tools (lower priority — gets whatever budget remains)
-  if (args.toolsMd) {
-    const perSectionBudget = Math.min(BOOTSTRAP_MAX_CHARS, totalBudget - totalUsed);
-    const section = truncateSection(
-      args.toolsMd,
-      "## Your Tools & Capabilities",
-      "TOOLS.md",
-      perSectionBudget,
-    );
-    prompt += section;
-    totalUsed += section.length;
-  }
-
-  prompt += conditionalSuffix;
 
   return prompt;
 };
