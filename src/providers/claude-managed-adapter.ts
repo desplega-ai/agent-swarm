@@ -58,8 +58,10 @@ import type {
 } from "@anthropic-ai/sdk/resources/beta/sessions";
 import type { SkillCreateResponse as Skill } from "@anthropic-ai/sdk/resources/beta/skills";
 
+import { checkToolLoop } from "../hooks/tool-loop-detection";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { computeClaudeManagedCostUsd } from "./claude-managed-models";
+import { createClaudeManagedSwarmEventHandler } from "./claude-managed-swarm-events";
 import type {
   CostData,
   ProviderAdapter,
@@ -230,6 +232,8 @@ class ClaudeManagedSession implements ProviderSession {
   private readonly abortController = new AbortController();
   private readonly seenEventIds: Set<string>;
   private readonly cost: CostData;
+  /** Per-task taskId — captured for `checkToolLoop` lookups. */
+  private readonly taskId: string | null;
   private aborted = false;
   private settled = false;
 
@@ -245,10 +249,30 @@ class ClaudeManagedSession implements ProviderSession {
     this.userMessageContent = userMessageContent;
     this.seenEventIds = seenEventIds;
     this.cost = emptyCost(config, config.model);
+    this.taskId = config.taskId;
     this.logFileHandle = Bun.file(config.logFile).writer();
     this.completionPromise = new Promise<ProviderResult>((resolve) => {
       this.resolveCompletion = resolve;
     });
+
+    // Phase 5: adapter-side swarm hooks. Lower-latency cancellation poll,
+    // tool-loop detection (the handler also calls `checkToolLoop` on
+    // tool_start; we additionally call it inline below for the blocked-result
+    // emit), heartbeat, activity ping, and context-usage reporting. Skipped
+    // when there's no task or API context to talk to.
+    if (config.taskId && config.apiUrl && config.apiKey) {
+      const abortRef = { current: this.abortController };
+      const handler = createClaudeManagedSwarmEventHandler({
+        apiUrl: config.apiUrl,
+        apiKey: config.apiKey,
+        agentId: config.agentId,
+        taskId: config.taskId,
+        abortRef,
+        client: this.client,
+        managedSessionId: this._sessionId,
+      });
+      this.listeners.push(handler);
+    }
 
     // Kick the SSE loop asynchronously so the constructor can return.
     void this.runSession();
@@ -367,6 +391,32 @@ class ClaudeManagedSession implements ProviderSession {
   }
 
   /**
+   * Tool-loop detection: fires asynchronously alongside each `tool_start`
+   * emit. If `checkToolLoop` reports `blocked: true`, we surface the reason
+   * via `raw_stderr` and trigger `abortController.abort()` — the SSE loop's
+   * AbortError catch path emits the cancelled `result` and settles.
+   *
+   * Made non-blocking so the SSE for-await loop stays synchronous in the hot
+   * path. Errors from `checkToolLoop` (file I/O on `/tmp`) are swallowed —
+   * loop detection failure must never kill a real session.
+   */
+  private runToolLoopCheck(toolName: string, args: unknown): void {
+    if (!this.taskId) return;
+    const argRecord = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+    void checkToolLoop(this.taskId, toolName, argRecord)
+      .then((result) => {
+        if (result.blocked) {
+          this.emit({
+            type: "raw_stderr",
+            content: `[claude-managed] Tool-loop detection blocked further calls: ${result.reason ?? "(no reason given)"}\n`,
+          });
+          this.abortController.abort();
+        }
+      })
+      .catch(() => {});
+  }
+
+  /**
    * Translate one Anthropic SSE event into zero-or-more `ProviderEvent`s.
    * Returns `true` if the event was a terminal session-status (idle /
    * terminated) — caller breaks the SSE loop on `true`.
@@ -393,8 +443,7 @@ class ClaudeManagedSession implements ProviderSession {
       }
       case "agent.tool_use": {
         const tu = event as BetaManagedAgentsAgentToolUseEvent;
-        // Phase 5 wires `checkToolLoop(...)` here; for Phase 3 we only emit
-        // the `tool_start` ProviderEvent.
+        this.runToolLoopCheck(tu.name, tu.input);
         this.emit({
           type: "tool_start",
           toolCallId: tu.id,
@@ -405,10 +454,12 @@ class ClaudeManagedSession implements ProviderSession {
       }
       case "agent.mcp_tool_use": {
         const tu = event as BetaManagedAgentsAgentMCPToolUseEvent;
+        const fqToolName = `${tu.mcp_server_name}:${tu.name}`;
+        this.runToolLoopCheck(fqToolName, tu.input);
         this.emit({
           type: "tool_start",
           toolCallId: tu.id,
-          toolName: `${tu.mcp_server_name}:${tu.name}`,
+          toolName: fqToolName,
           args: tu.input,
         });
         return { terminal: false, isError: false };
@@ -567,6 +618,12 @@ class ClaudeManagedSession implements ProviderSession {
       // 4. Drain the SSE stream.
       try {
         for await (const event of stream) {
+          // Phase 5: external abort (swarm-events poll, tool-loop detection)
+          // can fire `abortController.abort()` without crashing the SSE
+          // stream. Bail proactively so the cancel path runs.
+          if (this.abortController.signal.aborted) {
+            throw Object.assign(new Error("aborted"), { name: "AbortError" });
+          }
           // Resume dedup: skip events we already saw via `events.list`.
           if (this.seenEventIds.size > 0 && "id" in event && event.id) {
             if (this.seenEventIds.has(event.id)) {
@@ -585,7 +642,11 @@ class ClaudeManagedSession implements ProviderSession {
           }
         }
       } catch (err) {
-        if (this.aborted || (err instanceof Error && err.name === "AbortError")) {
+        if (
+          this.aborted ||
+          this.abortController.signal.aborted ||
+          (err instanceof Error && err.name === "AbortError")
+        ) {
           // Cancellation path — the abort controller fired and we crashed
           // out of the for-await. Emit the cancelled `result` and return.
           const cost = this.snapshotCost(true);

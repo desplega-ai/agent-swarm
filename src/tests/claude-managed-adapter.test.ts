@@ -877,3 +877,238 @@ describe("ClaudeManagedAdapter (Phase 4) — repo provisioning + cost data", () 
     expect(tokenCost + fee).toBeCloseTo(4.58, 10);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 5 tests — cancellation polling + heartbeat + tool-loop detection.
+//
+// The adapter wires `createClaudeManagedSwarmEventHandler` as a session
+// listener when `config.taskId/apiUrl/apiKey` are present. The handler polls
+// the swarm API on every `tool_start` (throttled 500ms) and, if the task is
+// listed as cancelled, fires `abortRef.current?.abort()` + the onCancel
+// callback (which sends `user.interrupt` + archives the session).
+// ---------------------------------------------------------------------------
+
+describe("ClaudeManagedAdapter (Phase 5) — cancellation + tool-loop detection", () => {
+  const tmpLogDir = `/tmp/claude-managed-adapter-phase5-${Date.now()}`;
+
+  beforeAll(() => {
+    mkdirSync(tmpLogDir, { recursive: true });
+    process.env.ANTHROPIC_API_KEY = "sk-test";
+    process.env.MANAGED_AGENT_ID = "agent_x";
+    process.env.MANAGED_ENVIRONMENT_ID = "env_x";
+  });
+
+  afterAll(() => {
+    rmSync(tmpLogDir, { recursive: true, force: true });
+    for (const [key, value] of Object.entries(ORIGINAL_ENV)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  });
+
+  // Stub fetch for swarm-API calls. Each test installs its own response
+  // function and inspects the captured calls.
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test("throttle constants match the codex pre-extraction values", async () => {
+    // Validates the shared module's exported throttle windows. If anyone
+    // changes them this test breaks loudly — the plan's hard constraint.
+    const shared = await import("../providers/swarm-events-shared");
+    expect(shared.CANCELLATION_THROTTLE_MS).toBe(500);
+    expect(shared.HEARTBEAT_THROTTLE_MS).toBe(5_000);
+    expect(shared.ACTIVITY_THROTTLE_MS).toBe(5_000);
+    expect(shared.CONTEXT_THROTTLE_MS).toBe(30_000);
+  });
+
+  test("cancel poll → adapter aborts, sessions.archive called, errorCategory=cancelled", async () => {
+    // The fake stream yields tool_use events one at a time, with a small
+    // delay between each so the cancel poll has time to fire and abort
+    // between events. After a few tool_use events the cancel endpoint
+    // reports the task as cancelled.
+    let pollCount = 0;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/cancelled-tasks")) {
+        pollCount += 1;
+        // Second poll: report cancelled.
+        if (pollCount >= 2) {
+          return new Response(
+            JSON.stringify({ cancelled: [{ id: "task-uuid", failureReason: "user request" }] }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ cancelled: [] }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+
+    // Stream that yields a tool_use, waits, yields another tool_use, then
+    // hangs until aborted.
+    let cancelObserved = false;
+    const spy = makeFakeClient({
+      streamEvents: async function* () {
+        // First tool_use — triggers cancel poll #1 (returns not-cancelled).
+        yield {
+          type: "agent.tool_use",
+          id: "tu1",
+          processed_at: "2026-01-01T00:00:00Z",
+          name: "read_file",
+          input: { path: "/etc/hosts" },
+        };
+        // Wait > 500ms throttle window so the next poll runs.
+        await new Promise((r) => setTimeout(r, 600));
+        // Second tool_use — triggers cancel poll #2 (returns cancelled).
+        yield {
+          type: "agent.tool_use",
+          id: "tu2",
+          processed_at: "2026-01-01T00:00:01Z",
+          name: "read_file",
+          input: { path: "/etc/passwd" },
+        };
+        // Hang until the abort signal flips (the swarm-event handler fires
+        // abortController.abort() once cancellation is observed).
+        for (let i = 0; i < 100; i++) {
+          if (cancelObserved) {
+            throw Object.assign(new Error("aborted"), { name: "AbortError" });
+          }
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      },
+    });
+
+    const adapter = new ClaudeManagedAdapter({ client: spy.client });
+    const session = await adapter.createSession(
+      tConfig({
+        logFile: join(tmpLogDir, "cancel-poll.log"),
+        // Provide the API context so the swarm-event handler attaches.
+        apiUrl: "http://test-api",
+        apiKey: "test-key",
+        taskId: "task-uuid",
+      }),
+    );
+
+    const emitted: ProviderEvent[] = [];
+    session.onEvent((e) => {
+      emitted.push(e);
+    });
+
+    // Watch for the archive call (the onCancel callback's signal of
+    // cancellation). Wait up to 3s for the cancel-poll-driven flow to
+    // unwind.
+    const start = Date.now();
+    while (Date.now() - start < 3_000) {
+      if (spy.archived.length > 0) {
+        cancelObserved = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 25));
+    }
+
+    const result = await session.waitForCompletion();
+    expect(result.isError).toBe(true);
+    expect(result.failureReason).toBe("cancelled");
+    expect(result.exitCode).toBe(130);
+
+    // sessions.archive was called.
+    expect(spy.archived).toContain("sesn_test_123");
+
+    // user.interrupt was sent to the session.
+    const interrupt = spy.sent.find((s) =>
+      s.events.some((e) => (e as Record<string, unknown>).type === "user.interrupt"),
+    );
+    expect(interrupt).toBeDefined();
+
+    // result event has errorCategory: "cancelled".
+    const resultEvent = emitted.findLast((e) => e.type === "result");
+    expect(resultEvent).toBeDefined();
+    if (resultEvent && resultEvent.type === "result") {
+      expect(resultEvent.errorCategory).toBe("cancelled");
+    }
+  }, 10_000);
+
+  test("repeated identical tool_use events trigger checkToolLoop block → session aborts", async () => {
+    // checkToolLoop persists history across calls in /tmp using the taskId
+    // as the session key. We use a unique taskId per test run so we don't
+    // contaminate other tests. After 15 identical tool_use events the
+    // detector returns blocked=true (REPEAT_CRITICAL_THRESHOLD = 15 in
+    // src/hooks/tool-loop-detection.ts).
+    const taskId = `task-loop-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    // Fetch stub: cancel poll always returns empty (we want the LOOP path,
+    // not the cancel path, to drive the abort).
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ cancelled: [] }), { status: 200 })) as typeof fetch;
+
+    let abortObserved = false;
+    const spy = makeFakeClient({
+      streamEvents: async function* () {
+        // Yield 20 identical tool_use events with tiny gaps — well above
+        // the critical threshold.
+        for (let i = 0; i < 20; i++) {
+          if (abortObserved) {
+            throw Object.assign(new Error("aborted"), { name: "AbortError" });
+          }
+          yield {
+            type: "agent.tool_use",
+            id: `tu-${i}`,
+            processed_at: "2026-01-01T00:00:00Z",
+            name: "stuck_tool",
+            input: { same: "args" },
+          };
+          // Small await so the async checkToolLoop has a chance to fire.
+          await new Promise((r) => setTimeout(r, 25));
+        }
+      },
+    });
+
+    const adapter = new ClaudeManagedAdapter({ client: spy.client });
+    const session = await adapter.createSession(
+      tConfig({
+        logFile: join(tmpLogDir, "tool-loop.log"),
+        apiUrl: "http://test-api",
+        apiKey: "test-key",
+        taskId,
+      }),
+    );
+
+    const emitted: ProviderEvent[] = [];
+    session.onEvent((e) => {
+      emitted.push(e);
+    });
+
+    // Wait until we observe a raw_stderr warning OR archive — either path
+    // proves the abort fired from the loop detector.
+    const start = Date.now();
+    while (Date.now() - start < 5_000) {
+      const blockedWarning = emitted.find(
+        (e) =>
+          e.type === "raw_stderr" &&
+          typeof e.content === "string" &&
+          e.content.includes("Tool-loop"),
+      );
+      if (blockedWarning || spy.archived.length > 0) {
+        abortObserved = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 25));
+    }
+
+    const result = await session.waitForCompletion();
+    // Either the loop detector aborted (errorCategory cancelled) or the
+    // stream completed all 20 events naturally — but the warning should
+    // have surfaced in the emitted events.
+    const blockedWarning = emitted.find(
+      (e) =>
+        e.type === "raw_stderr" && typeof e.content === "string" && e.content.includes("Tool-loop"),
+    );
+    expect(blockedWarning).toBeDefined();
+    // After the block fires, abort propagates → cancelled result.
+    expect(result.isError).toBe(true);
+  }, 15_000);
+});

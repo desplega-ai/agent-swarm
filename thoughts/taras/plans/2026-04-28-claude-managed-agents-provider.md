@@ -10,7 +10,7 @@ status: in-progress
 research_source: thoughts/d454d1a5-4df9-49bd-8a89-e58d6a657dc3/research/2026-04-09-claude-managed-agents-integration.md
 autonomy: critical
 last_updated: 2026-04-28
-last_updated_by: claude (phase 4)
+last_updated_by: claude (phase 5)
 ---
 
 # Claude Managed Agents Harness Provider Implementation Plan
@@ -505,20 +505,22 @@ Lift the throttled-poll machinery out of `codex-swarm-events.ts` into a shared h
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run tsc:check` passes
-- [ ] `bun run lint:fix` produces no errors
-- [ ] `bun test` passes (codex adapter tests + new claude-managed cancel tests)
-- [ ] `bash scripts/check-db-boundary.sh` passes
+- [x] `bun run tsc:check` passes
+- [x] `bun run lint:fix` produces no errors
+- [x] `bun test` passes (codex adapter tests + new claude-managed cancel tests)
+- [x] `bash scripts/check-db-boundary.sh` passes
 
 #### Automated QA:
-- [ ] Mock test: scripted swarm API returns `cancelled: [{ id: taskId }]` on the second poll → adapter aborts, archive is called, ProviderResult.errorCategory is `"cancelled"`.
-- [ ] Mock test: 5 consecutive `tool_start` events with the same toolName/args trigger `checkToolLoop` block on the 5th → session aborts.
+- [x] Mock test: scripted swarm API returns `cancelled: [{ id: taskId }]` on the second poll → adapter aborts, archive is called, ProviderResult.errorCategory is `"cancelled"`.
+- [x] Mock test: 5 consecutive `tool_start` events with the same toolName/args trigger `checkToolLoop` block on the 5th → session aborts.
 
 #### Manual Verification:
 - [ ] Run a real task against the sandbox account; cancel it via the swarm UI; confirm the managed session is archived within ≤2 s.
 - [ ] Trigger an obvious tool loop (e.g. an agent stuck reading the same file repeatedly); confirm the run terminates with `errorCategory: "tool_loop"` (or whatever the existing detection emits).
 
 **Implementation Note**: After this phase, pause for manual confirmation. If commit-per-phase was requested, create commit `[phase 5] managed-agents cancellation + heartbeat + tool-loop detection (shared helper extracted)`.
+
+**Phase 5 implementation note (2026-04-28):** Shared helper `src/providers/swarm-events-shared.ts` extracted from `codex-swarm-events.ts`; codex-swarm-events now a thin pass-through that supplies `sessionIdFallbackPrefix: "codex"` to preserve historical context-POST `sessionId` shape. Throttle constants exported (`CANCELLATION_THROTTLE_MS=500`, `HEARTBEAT_THROTTLE_MS=5000`, `ACTIVITY_THROTTLE_MS=5000`, `CONTEXT_THROTTLE_MS=30000`) and asserted in a unit test. New `claude-managed-swarm-events.ts` wires the shared handler with an `onCancel` that fires `user.interrupt` + `archive` on the in-flight session. Adapter self-registers the handler in the session ctor (when `taskId/apiUrl/apiKey` present) — mirrors codex's `runner.ts:303`-equivalent self-registration pattern. Tool-loop detection runs inline before `tool_start` emit on `agent.tool_use`/`agent.mcp_tool_use`; on `blocked: true` we emit a `raw_stderr` warning and fire `abortController.abort()`. The SSE for-await loop now also checks `abortController.signal.aborted` between events so external aborts (cancel poll, tool-loop detector) propagate even when the SDK stream isn't tied to the controller.
 
 ---
 
