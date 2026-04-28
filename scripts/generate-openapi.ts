@@ -12,6 +12,7 @@ import "../src/http/ecosystem";
 import "../src/http/api-keys";
 import "../src/http/events";
 import "../src/http/heartbeat";
+import "../src/http/integrations";
 import "../src/http/memory";
 import "../src/http/prompt-templates";
 import "../src/http/poll";

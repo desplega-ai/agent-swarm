@@ -2615,6 +2615,34 @@
         }
       }
     },
+    "/api/integrations/claude-managed/test": {
+      "post": {
+        "summary": "Test the claude-managed integration: resolves ANTHROPIC_API_KEY + MANAGED_AGENT_ID from swarm_config and calls beta.agents.retrieve.",
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Connection result — `{ ok: true, agentName, model }` on success or `{ ok: false, error }` on any failure (missing config, Anthropic API error). Always 200 OK."
+          }
+        }
+      }
+    },
     "/api/memory/index": {
       "post": {
         "summary": "Ingest content into memory system (async embedding)",
@@ -6643,7 +6671,8 @@
                         "enum": [
                           "claude",
                           "codex",
-                          "pi"
+                          "pi",
+                          "claude-managed"
                         ]
                       },
                       "providerMeta": {

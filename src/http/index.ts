@@ -29,6 +29,7 @@ import { handleDbQuery } from "./db-query";
 import { handleEcosystem } from "./ecosystem";
 import { handleEvents } from "./events";
 import { handleHeartbeat } from "./heartbeat";
+import { handleIntegrations } from "./integrations";
 import { handleMcp } from "./mcp";
 import { handleMcpOAuth, startMcpOAuthPendingGc, stopMcpOAuthPendingGc } from "./mcp-oauth";
 import { handleMcpServers } from "./mcp-servers";
@@ -130,6 +131,7 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleWorkflows(req, res, pathSegments, queryParams, myAgentId),
     () => handleApprovalRequests(req, res, pathSegments, queryParams),
     () => handleConfig(req, res, pathSegments, queryParams),
+    () => handleIntegrations(req, res, pathSegments),
     () => handlePromptTemplates(req, res, pathSegments, queryParams),
     () => handleDbQuery(req, res, pathSegments, queryParams),
     () => handleRepos(req, res, pathSegments, queryParams),

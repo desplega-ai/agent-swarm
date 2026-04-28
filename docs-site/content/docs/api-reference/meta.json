@@ -14,6 +14,7 @@
     "ecosystem",
     "events",
     "heartbeat",
+    "integrations",
     "mcp-oauth",
     "mcp-servers",
     "memory",

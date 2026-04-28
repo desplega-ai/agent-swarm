@@ -4,6 +4,7 @@ import {
   Brain,
   Bug,
   ChartLine,
+  Cloud,
   ExternalLink,
   GitBranch,
   Github,
@@ -34,6 +35,7 @@ import {
   useReloadConfig,
 } from "@/api/hooks/use-integrations-meta";
 import type { SwarmConfig } from "@/api/types";
+import { ClaudeManagedSection } from "@/components/integrations/claude-managed-section";
 import { CodexOAuthSection } from "@/components/integrations/codex-oauth-section";
 import { FieldRenderer } from "@/components/integrations/field-renderer";
 import { IntegrationStatusBadge } from "@/components/integrations/integration-status-badge";
@@ -78,6 +80,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   route: Route,
   "key-round": KeyRound,
   "chart-line": ChartLine,
+  cloud: Cloud,
 };
 
 function resolveIcon(iconKey: string): LucideIcon {
@@ -319,6 +322,7 @@ function IntegrationDetailInner({
   const isLinearOAuth = def.specialFlow === "linear-oauth";
   const isJiraOAuth = def.specialFlow === "jira-oauth";
   const isCodexCli = def.specialFlow === "codex-cli";
+  const isClaudeManagedCli = def.specialFlow === "claude-managed-cli";
   const isGithub = def.id === "github";
 
   return (
@@ -397,6 +401,12 @@ function IntegrationDetailInner({
 
       {/* Jira OAuth connection card — shown ABOVE the generic form. */}
       {isJiraOAuth && <JiraOAuthSection />}
+
+      {/* Claude Managed Agents — CLI explainer + Test connection — shown
+          ABOVE the generic form (the form still renders below for editing). */}
+      {isClaudeManagedCli && (
+        <ClaudeManagedSection def={def} configs={configs} envPresence={envPresence} />
+      )}
 
       {/* Body */}
       {isCodexCli ? (

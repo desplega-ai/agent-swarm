@@ -4,6 +4,7 @@ import {
   Brain,
   Bug,
   ChartLine,
+  Cloud,
   GitBranch,
   Github,
   GitMerge,
@@ -44,6 +45,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   route: Route,
   "key-round": KeyRound,
   "chart-line": ChartLine,
+  cloud: Cloud,
 };
 
 function resolveIcon(iconKey: string): LucideIcon {

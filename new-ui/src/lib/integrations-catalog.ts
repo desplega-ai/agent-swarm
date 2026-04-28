@@ -41,7 +41,11 @@ export type IntegrationCategory =
   | "email"
   | "other";
 
-export type IntegrationSpecialFlow = "linear-oauth" | "jira-oauth" | "codex-cli";
+export type IntegrationSpecialFlow =
+  | "linear-oauth"
+  | "jira-oauth"
+  | "codex-cli"
+  | "claude-managed-cli";
 
 export interface IntegrationDef {
   /** URL slug (kebab-case). Must be unique. */
@@ -557,6 +561,66 @@ export const INTEGRATIONS: IntegrationDef[] = [
     specialFlow: "codex-cli",
     restartRequired: true,
     fields: [],
+  },
+
+  // -------------------------------------------------- Claude Managed Agents
+  {
+    id: "claude-managed",
+    name: "Claude Managed Agents",
+    description:
+      "Run swarm tasks in Anthropic's managed cloud sandbox. Requires running the claude-managed-setup CLI once to create the Anthropic-side agent + environment.",
+    category: "llm",
+    iconKey: "cloud",
+    docsUrl: "https://docs.agent-swarm.dev/guides/harness-configuration#claude-managed-agents",
+    specialFlow: "claude-managed-cli",
+    restartRequired: true,
+    fields: [
+      {
+        key: "ANTHROPIC_API_KEY",
+        label: "Anthropic API key",
+        type: "password",
+        required: true,
+        isSecret: true,
+        placeholder: "sk-ant-...",
+        helpText: "Used by claude-managed sessions. Stored encrypted at rest in swarm_config.",
+        affectsRestart: true,
+      },
+      {
+        key: "MANAGED_AGENT_ID",
+        label: "Managed agent ID",
+        type: "text",
+        required: true,
+        placeholder: "agent_...",
+        helpText: "From `bun run src/cli.tsx claude-managed-setup`.",
+        affectsRestart: true,
+      },
+      {
+        key: "MANAGED_ENVIRONMENT_ID",
+        label: "Managed environment ID",
+        type: "text",
+        required: true,
+        placeholder: "env_...",
+        helpText: "From `bun run src/cli.tsx claude-managed-setup`.",
+        affectsRestart: true,
+      },
+      {
+        key: "MCP_BASE_URL",
+        label: "MCP base URL",
+        type: "text",
+        required: true,
+        placeholder: "https://api.swarm.example.com",
+        helpText:
+          "Must be HTTPS-public so Anthropic's sandbox can reach `/mcp`. Reuses the same env var as Jira webhook setup.",
+        affectsRestart: true,
+      },
+      {
+        key: "MANAGED_AGENT_MODEL",
+        label: "Default model",
+        type: "text",
+        placeholder: "claude-sonnet-4-6",
+        helpText: "Optional override. Defaults to claude-sonnet-4-6.",
+      },
+    ],
   },
 
   // ------------------------------------------------------------ business-use

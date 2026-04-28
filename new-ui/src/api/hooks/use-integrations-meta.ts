@@ -92,3 +92,42 @@ export function useReloadConfig() {
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Claude Managed Agents — test-connection mutation
+//
+// Hits `POST /api/integrations/claude-managed/test`. The endpoint reads
+// `ANTHROPIC_API_KEY` + `MANAGED_AGENT_ID` from `swarm_config` and calls
+// `client.beta.agents.retrieve` to verify the configured pair actually points
+// at a live managed agent. Always returns 200 OK with `{ ok, ... }`.
+// ---------------------------------------------------------------------------
+
+export interface ClaudeManagedTestResult {
+  ok: boolean;
+  agentName?: string | null;
+  model?: string | null;
+  error?: string;
+}
+
+async function postClaudeManagedTest(): Promise<ClaudeManagedTestResult> {
+  const url = `${getBaseUrl()}/api/integrations/claude-managed/test`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: getHeaders(),
+    body: "{}",
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Test connection failed (${res.status}): ${body.slice(0, 200)}`);
+  }
+  return (await res.json()) as ClaudeManagedTestResult;
+}
+
+export function useTestClaudeManagedConnection() {
+  return useMutation<ClaudeManagedTestResult, Error>({
+    mutationFn: postClaudeManagedTest,
+    onError: (err) => {
+      toast.error(`Test connection failed: ${err.message}`);
+    },
+  });
+}
