@@ -104,6 +104,7 @@ class DevinSession implements ProviderSession {
   private lastStatusDetail: DevinStatusDetail | undefined;
   private lastStructuredOutput: string | undefined;
   private seenPrUrls = new Set<string>();
+  private seenMessageIds = new Set<string>();
   private approvalRequested = false;
   private consecutivePollErrors = 0;
   private humanResponseTimer: ReturnType<typeof setInterval> | null = null;
@@ -361,6 +362,8 @@ class DevinSession implements ProviderSession {
         this.messageCursor = resp.end_cursor;
       }
       for (const msg of resp.items) {
+        if (this.seenMessageIds.has(msg.event_id)) continue;
+        this.seenMessageIds.add(msg.event_id);
         const role = msg.source === "devin" ? "assistant" : "user";
         this.emit({
           type: "raw_log",
