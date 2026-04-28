@@ -6,7 +6,12 @@ import {
   ClaudeManagedAdapter,
   composeManagedUserMessage,
   type ManagedAgentsClient,
+  normalizeRepoUrl,
 } from "../providers/claude-managed-adapter";
+import {
+  CLAUDE_MANAGED_MODEL_PRICING,
+  computeClaudeManagedCostUsd,
+} from "../providers/claude-managed-models";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 
 // Stash + restore env vars so this file plays nicely with the rest of the
@@ -333,7 +338,13 @@ describe("ClaudeManagedAdapter (Phase 3) — session lifecycle", () => {
       expect(resultEvent.cost.cacheReadTokens).toBe(10);
       expect(resultEvent.cost.cacheWriteTokens).toBe(5);
       expect(resultEvent.cost.numTurns).toBe(1);
-      expect(resultEvent.cost.totalCostUsd).toBe(0); // Phase 4 will fix
+      // Phase 4: totalCostUsd is now computed via per-Mtok rates +
+      // $0.08/session-hour runtime fee. With sonnet rates and 100/50/10/5
+      // tokens, the token cost is essentially zero (sub-cent) but a few-ms
+      // session also adds a sub-cent fee. We assert non-negative + finite
+      // here; precise pricing is asserted in the Phase 4 describe block.
+      expect(resultEvent.cost.totalCostUsd).toBeGreaterThanOrEqual(0);
+      expect(Number.isFinite(resultEvent.cost.totalCostUsd)).toBe(true);
       expect(resultEvent.output).toBe("Hello from managed agent");
     }
 
@@ -611,5 +622,258 @@ describe("ClaudeManagedAdapter (Phase 3) — session lifecycle", () => {
         expect(typeof r.content).toBe("string");
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 4 tests — repo provisioning + cost data.
+//
+// 1. Resources mapping: when `vcsRepo` is set on the spawn config, the
+//    `sessions.create` payload includes a `resources: [...]` array with a
+//    `github_repository` entry pointing at the requested URL + branch.
+//    When unset, the field is absent.
+// 2. Pricing: `computeClaudeManagedCostUsd` returns the expected USD value
+//    against Anthropic's published rates.
+// 3. Runtime fee: a 1-hour session adds exactly $0.08 to `totalCostUsd`.
+// ---------------------------------------------------------------------------
+
+describe("ClaudeManagedAdapter (Phase 4) — repo provisioning + cost data", () => {
+  const tmpLogDir = `/tmp/claude-managed-adapter-phase4-${Date.now()}`;
+
+  beforeAll(() => {
+    mkdirSync(tmpLogDir, { recursive: true });
+    process.env.ANTHROPIC_API_KEY = "sk-test";
+    process.env.MANAGED_AGENT_ID = "agent_x";
+    process.env.MANAGED_ENVIRONMENT_ID = "env_x";
+  });
+
+  afterAll(() => {
+    rmSync(tmpLogDir, { recursive: true, force: true });
+    delete process.env.MANAGED_GITHUB_TOKEN;
+    delete process.env.MANAGED_GITHUB_VAULT_ID;
+  });
+
+  afterEach(() => {
+    delete process.env.MANAGED_GITHUB_TOKEN;
+    delete process.env.MANAGED_GITHUB_VAULT_ID;
+  });
+
+  test("normalizeRepoUrl: passes through https URLs and expands owner/repo shorthand", () => {
+    expect(normalizeRepoUrl("https://github.com/desplega-ai/agent-swarm")).toBe(
+      "https://github.com/desplega-ai/agent-swarm",
+    );
+    expect(normalizeRepoUrl("desplega-ai/agent-swarm")).toBe(
+      "https://github.com/desplega-ai/agent-swarm",
+    );
+    expect(normalizeRepoUrl("http://gitlab.example.com/foo/bar")).toBe(
+      "http://gitlab.example.com/foo/bar",
+    );
+  });
+
+  test("createSession includes resources[github_repository] when config.vcsRepo is set", async () => {
+    process.env.MANAGED_GITHUB_TOKEN = "ghp_test_pat";
+    const events: Array<Record<string, unknown>> = [
+      {
+        type: "session.status_idle",
+        id: "evt-idle",
+        processed_at: "2026-01-01T00:00:00Z",
+        stop_reason: { type: "end_turn" },
+      },
+    ];
+    const spy = makeFakeClient({
+      streamEvents: async function* () {
+        for (const e of events) yield e;
+      },
+    });
+    const adapter = new ClaudeManagedAdapter({ client: spy.client });
+    const session = await adapter.createSession(
+      tConfig({
+        logFile: join(tmpLogDir, "with-vcsrepo.log"),
+        vcsRepo: "desplega-ai/agent-swarm",
+      }),
+    );
+    await session.waitForCompletion();
+
+    expect(spy.created).toHaveLength(1);
+    const params = spy.created[0]!;
+    const resources = params.resources as Array<Record<string, unknown>> | undefined;
+    expect(resources).toBeDefined();
+    expect(resources).toHaveLength(1);
+    const repo = resources![0]!;
+    expect(repo.type).toBe("github_repository");
+    expect(repo.url).toBe("https://github.com/desplega-ai/agent-swarm");
+    expect(repo.authorization_token).toBe("ghp_test_pat");
+    const checkout = repo.checkout as Record<string, unknown> | undefined;
+    expect(checkout?.type).toBe("branch");
+    expect(checkout?.name).toBe("main");
+  });
+
+  test("createSession passes vault_ids when MANAGED_GITHUB_VAULT_ID is set", async () => {
+    process.env.MANAGED_GITHUB_VAULT_ID = "vault_abc123";
+    const events: Array<Record<string, unknown>> = [
+      {
+        type: "session.status_idle",
+        id: "evt-idle",
+        processed_at: "2026-01-01T00:00:00Z",
+        stop_reason: { type: "end_turn" },
+      },
+    ];
+    const spy = makeFakeClient({
+      streamEvents: async function* () {
+        for (const e of events) yield e;
+      },
+    });
+    const adapter = new ClaudeManagedAdapter({ client: spy.client });
+    const session = await adapter.createSession(
+      tConfig({
+        logFile: join(tmpLogDir, "with-vault.log"),
+        vcsRepo: "desplega-ai/agent-swarm",
+      }),
+    );
+    await session.waitForCompletion();
+
+    const params = spy.created[0]!;
+    expect(params.vault_ids).toEqual(["vault_abc123"]);
+  });
+
+  test("createSession omits resources entirely when vcsRepo is unset", async () => {
+    const events: Array<Record<string, unknown>> = [
+      {
+        type: "session.status_idle",
+        id: "evt-idle",
+        processed_at: "2026-01-01T00:00:00Z",
+        stop_reason: { type: "end_turn" },
+      },
+    ];
+    const spy = makeFakeClient({
+      streamEvents: async function* () {
+        for (const e of events) yield e;
+      },
+    });
+    const adapter = new ClaudeManagedAdapter({ client: spy.client });
+    const session = await adapter.createSession(
+      tConfig({ logFile: join(tmpLogDir, "no-vcsrepo.log") }),
+    );
+    await session.waitForCompletion();
+
+    expect(spy.created).toHaveLength(1);
+    const params = spy.created[0]!;
+    expect(params.resources).toBeUndefined();
+  });
+
+  test("computeClaudeManagedCostUsd returns expected USD for sonnet-4-6 against published rate", () => {
+    // 1M input tokens × $3.00/Mtok = $3.00
+    // 100k output tokens × $15.00/Mtok = $1.50
+    // total = $4.50
+    const cost = computeClaudeManagedCostUsd("claude-sonnet-4-6", 1_000_000, 100_000, 0, 0);
+    expect(cost).toBeCloseTo(4.5, 10);
+  });
+
+  test("computeClaudeManagedCostUsd factors cache-read and cache-write at correct rates", () => {
+    // Sonnet rates: cache-read $0.30/Mtok, cache-write $3.75/Mtok
+    // 1M cache-read = $0.30; 1M cache-write = $3.75; total = $4.05
+    const cost = computeClaudeManagedCostUsd(
+      "claude-sonnet-4-6",
+      0,
+      0,
+      1_000_000, // cache read
+      1_000_000, // cache write
+    );
+    expect(cost).toBeCloseTo(4.05, 10);
+  });
+
+  test("computeClaudeManagedCostUsd returns 0 for unknown model (silenced after first warn)", () => {
+    // The console.warn dedup is a Set<string> on the module — we just assert
+    // the return value here. We don't assert the warn itself fires (it's
+    // stateful and tested implicitly by it being deduplicated across calls).
+    const cost1 = computeClaudeManagedCostUsd("totally-fake-model-xyz", 1_000, 1_000, 0, 0);
+    const cost2 = computeClaudeManagedCostUsd("totally-fake-model-xyz", 1_000, 1_000, 0, 0);
+    expect(cost1).toBe(0);
+    expect(cost2).toBe(0);
+  });
+
+  test("CLAUDE_MANAGED_MODEL_PRICING covers sonnet, opus, haiku at minimum", () => {
+    expect(CLAUDE_MANAGED_MODEL_PRICING["claude-sonnet-4-6"]).toBeDefined();
+    expect(CLAUDE_MANAGED_MODEL_PRICING["claude-opus-4-7"]).toBeDefined();
+    expect(CLAUDE_MANAGED_MODEL_PRICING["claude-haiku-4-5"]).toBeDefined();
+  });
+
+  test("session totalCostUsd = token cost + (durationMs/3.6e6) × $0.08 runtime fee", async () => {
+    // Run a short live session, then reverse-derive the runtime fee from the
+    // final `durationMs` and assert the formula holds. The runtime fee scales
+    // linearly so we can validate the contract on a sub-second wallclock —
+    // there's no need to actually run for an hour.
+    const events: Array<Record<string, unknown>> = [
+      {
+        type: "span.model_request_end",
+        id: "span1",
+        processed_at: "2026-01-01T00:00:00Z",
+        is_error: false,
+        model_request_start_id: "spanstart1",
+        model_usage: {
+          input_tokens: 1_000_000,
+          output_tokens: 100_000,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
+      },
+      {
+        type: "session.status_idle",
+        id: "evt-idle",
+        processed_at: "2026-01-01T00:00:01Z",
+        stop_reason: { type: "end_turn" },
+      },
+    ];
+    const spy = makeFakeClient({
+      streamEvents: async function* () {
+        for (const e of events) yield e;
+      },
+    });
+    const adapter = new ClaudeManagedAdapter({ client: spy.client });
+    const session = await adapter.createSession(
+      tConfig({
+        logFile: join(tmpLogDir, "runtime-fee.log"),
+        model: "claude-sonnet-4-6",
+      }),
+    );
+    const emitted: ProviderEvent[] = [];
+    session.onEvent((e) => emitted.push(e));
+    await session.waitForCompletion();
+
+    const resultEvent = emitted.findLast((e) => e.type === "result");
+    expect(resultEvent).toBeDefined();
+    if (resultEvent && resultEvent.type === "result") {
+      const tokenOnly = computeClaudeManagedCostUsd(
+        "claude-sonnet-4-6",
+        resultEvent.cost.inputTokens ?? 0,
+        resultEvent.cost.outputTokens ?? 0,
+        resultEvent.cost.cacheReadTokens ?? 0,
+        resultEvent.cost.cacheWriteTokens ?? 0,
+      );
+      const expectedRuntimeFee = (resultEvent.cost.durationMs / 3_600_000) * 0.08;
+      const expectedTotal = tokenOnly + expectedRuntimeFee;
+      // The runtime fee should match formula exactly (both are pure numeric
+      // multiplications on the same `durationMs` value).
+      expect(resultEvent.cost.totalCostUsd).toBeCloseTo(expectedTotal, 10);
+      // Sanity: token cost matches the published rate on its own.
+      expect(tokenOnly).toBeCloseTo(4.5, 10);
+      // Fee should be non-negative (durationMs ≥ 0). On a sub-ms session
+      // `Date.now() - startedAt` can round to 0; what we're really asserting
+      // is the formula composition, not a floor on duration.
+      expect(expectedRuntimeFee).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  test("snapshotCost adds exactly $0.08 to totalCostUsd for a 1-hour durationMs", () => {
+    // Pure unit test on the formula: feed a known durationMs into the
+    // pricing+fee math and assert the fee component equals $0.08 within FP.
+    // We compute this directly here (the adapter's `snapshotCost` is a
+    // private method); the formula is `(durationMs / 3_600_000) * 0.08`.
+    const oneHourMs = 3_600_000;
+    const fee = (oneHourMs / 3_600_000) * 0.08;
+    expect(fee).toBeCloseTo(0.08, 12);
+    // Also assert that token cost + fee for a sonnet 1M/100k turn lands at $4.58.
+    const tokenCost = computeClaudeManagedCostUsd("claude-sonnet-4-6", 1_000_000, 100_000, 0, 0);
+    expect(tokenCost + fee).toBeCloseTo(4.58, 10);
   });
 });

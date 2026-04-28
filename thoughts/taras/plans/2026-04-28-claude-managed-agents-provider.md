@@ -10,7 +10,7 @@ status: in-progress
 research_source: thoughts/d454d1a5-4df9-49bd-8a89-e58d6a657dc3/research/2026-04-09-claude-managed-agents-integration.md
 autonomy: critical
 last_updated: 2026-04-28
-last_updated_by: claude (phase 3)
+last_updated_by: claude (phase 4)
 ---
 
 # Claude Managed Agents Harness Provider Implementation Plan
@@ -440,19 +440,21 @@ Pick option 1 unless the spawn site at `runner.ts:3140-3160` shows that `task` i
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run tsc:check` passes
-- [ ] `bun run lint:fix` produces no errors
-- [ ] `bun test src/tests/claude-managed-adapter.test.ts` passes
-- [ ] `bash scripts/check-db-boundary.sh` passes
+- [x] `bun run tsc:check` passes
+- [x] `bun run lint:fix` produces no errors
+- [x] `bun test src/tests/claude-managed-adapter.test.ts` passes
+- [x] `bash scripts/check-db-boundary.sh` passes
 
 #### Automated QA:
-- [ ] Unit test asserts cost computation against a known token-count fixture matches Anthropic's published pricing.
-- [ ] Mock `sessions.create` and assert `resources` is shaped correctly when the task has a repo.
+- [x] Unit test asserts cost computation against a known token-count fixture matches Anthropic's published pricing.
+- [x] Mock `sessions.create` and assert `resources` is shaped correctly when the task has a repo.
 
 #### Manual Verification:
 - [ ] Run a real task that operates on a repo (e.g. `/work-on-task` against a small public test repo). Confirm Anthropic logs show the repo cloned in the sandbox and the agent operated on it. Confirm post-task `cost.totalCostUsd > 0` in the swarm UI.
 
 **Implementation Note**: After this phase, pause for manual confirmation. If commit-per-phase was requested, create commit `[phase 4] managed-agents repo provisioning + cost computation`.
+
+**Phase 4 implementation note (2026-04-28):** Followed the plan's Option 1 (reuse `task.vcsRepo` via existing `ProviderSessionConfig.vcsRepo` string) — verified `runner.ts:3296` already passes it through. SDK shape deviation: managed-agents requires `type: "github_repository"` (not `"github_repo"`), `url` (not `repo_url`), and `checkout: { type: "branch", name }` per `BetaManagedAgentsGitHubRepositoryResourceParams`; tests + adapter use the actual SDK shape. `authorization_token` is sourced from `MANAGED_GITHUB_TOKEN` env (dev) and/or `vault_ids: [MANAGED_GITHUB_VAULT_ID]` (prod) — both documented in `runbooks/local-development.md § GitHub access for repo-bound tasks`.
 
 ---
 

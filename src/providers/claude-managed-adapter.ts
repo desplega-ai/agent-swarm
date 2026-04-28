@@ -59,6 +59,7 @@ import type {
 import type { SkillCreateResponse as Skill } from "@anthropic-ai/sdk/resources/beta/skills";
 
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { computeClaudeManagedCostUsd } from "./claude-managed-models";
 import type {
   CostData,
   ProviderAdapter,
@@ -145,6 +146,20 @@ export function composeManagedUserMessage(
       text: `---\n\nUser request:\n${config.prompt}`,
     },
   ];
+}
+
+/**
+ * Normalize the runner's `vcsRepo` (which may be `"owner/repo"` shorthand or
+ * a fully-qualified `https://...` URL — see `src/types.ts:136` and
+ * `src/commands/runner.ts:3185-3192`) to a fully-qualified GitHub HTTPS URL,
+ * which is what the managed-agents `BetaManagedAgentsGitHubRepositoryResourceParams.url`
+ * field expects. Pass-through if already a URL.
+ */
+export function normalizeRepoUrl(vcsRepo: string): string {
+  if (vcsRepo.startsWith("http://") || vcsRepo.startsWith("https://")) {
+    return vcsRepo;
+  }
+  return `https://github.com/${vcsRepo}`;
 }
 
 /**
@@ -321,15 +336,33 @@ class ClaudeManagedSession implements ProviderSession {
     this.resolveCompletion(result);
   }
 
-  /** Build the terminal `CostData` snapshot. Phase 4 wires real USD pricing. */
+  /**
+   * Build the terminal `CostData` snapshot.
+   *
+   * Phase 4 wires real USD pricing:
+   * 1. Per-token cost via `computeClaudeManagedCostUsd` (looks up the per-Mtok
+   *    rates in `claude-managed-models.ts`).
+   * 2. Anthropic's $0.08/session-hour runtime fee — billed continuously by
+   *    Anthropic regardless of model usage, so we add it here to surface in
+   *    the swarm's per-session cost UI.
+   */
   private snapshotCost(isError: boolean): CostData {
+    const durationMs = Date.now() - this.startedAt;
+    const tokenCostUsd = computeClaudeManagedCostUsd(
+      this.cost.model,
+      this.cost.inputTokens ?? 0,
+      this.cost.outputTokens ?? 0,
+      this.cost.cacheReadTokens ?? 0,
+      this.cost.cacheWriteTokens ?? 0,
+    );
+    // $0.08 / session-hour. Sandbox runtime is billed by wallclock, so we
+    // amortize linearly across the session's `durationMs`.
+    const runtimeFeeUsd = (durationMs / 3_600_000) * 0.08;
     return {
       ...this.cost,
-      durationMs: Date.now() - this.startedAt,
+      durationMs,
       isError,
-      // TODO(Phase 4): swap zero for `computeClaudeManagedCostUsd(...)` once
-      // the pricing table lands in `claude-managed-models.ts`.
-      totalCostUsd: 0,
+      totalCostUsd: tokenCostUsd + runtimeFeeUsd,
     };
   }
 
@@ -710,17 +743,47 @@ export class ClaudeManagedAdapter implements ProviderAdapter {
       // Fresh session. Compose the cache-control-annotated user message and
       // open the managed session against the pre-existing agent + env.
       userMessageContent = composeManagedUserMessage(config);
-      const created = await Promise.resolve(
-        this.client.beta.sessions.create({
-          agent: this.agentId,
-          environment_id: this.environmentId,
-          title: `Task ${config.taskId}`,
-          metadata: {
-            swarmAgentId: config.agentId,
-            swarmTaskId: config.taskId,
+      // Phase 4: derive `resources` from `config.vcsRepo` (which the runner
+      // copies from `task.vcsRepo` at the spawn site, see
+      // src/commands/runner.ts:3296). The SDK contract is
+      // `BetaManagedAgentsGitHubRepositoryResourceParams`:
+      //   { type: 'github_repository', url, authorization_token, checkout?: { type: 'branch', name } }
+      // We default `branch` to "main" since `ProviderSessionConfig` only
+      // carries the repo identifier as a string.
+      //
+      // GitHub auth: prefer the operator-side `MANAGED_GITHUB_VAULT_ID`
+      // (passed via `vault_ids` on the session — see runbook §"Claude Managed
+      // Agents — GitHub access"). If a literal PAT is supplied via
+      // `MANAGED_GITHUB_TOKEN`, use that instead. Without either, the SDK's
+      // required `authorization_token` field gets an empty string and the
+      // operator sees an authentication error from Anthropic — which is
+      // strictly better than silently dropping `resources`.
+      const createParams: Record<string, unknown> = {
+        agent: this.agentId,
+        environment_id: this.environmentId,
+        title: `Task ${config.taskId}`,
+        metadata: {
+          swarmAgentId: config.agentId,
+          swarmTaskId: config.taskId,
+        },
+      };
+      if (config.vcsRepo) {
+        const repoUrl = normalizeRepoUrl(config.vcsRepo);
+        const branch = "main"; // ProviderSessionConfig doesn't carry per-task branch info today.
+        const githubToken = process.env.MANAGED_GITHUB_TOKEN ?? "";
+        createParams.resources = [
+          {
+            type: "github_repository",
+            url: repoUrl,
+            authorization_token: githubToken,
+            checkout: { type: "branch", name: branch },
           },
-        }),
-      );
+        ];
+      }
+      if (process.env.MANAGED_GITHUB_VAULT_ID) {
+        createParams.vault_ids = [process.env.MANAGED_GITHUB_VAULT_ID];
+      }
+      const created = await Promise.resolve(this.client.beta.sessions.create(createParams));
       sessionId = created.id;
     }
 
