@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   createSessionCost,
   createSessionLogs,
+  getActivePricingRow,
   getAllSessionCosts,
   getDashboardCostSummary,
   getSessionCostSummary,
@@ -12,7 +13,7 @@ import {
   getSessionLogsByTaskId,
   getTaskById,
 } from "../be/db";
-import type { SessionCost } from "../types";
+import type { SessionCost, SessionCostSource } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -69,6 +70,18 @@ const createSessionCostRoute = route({
     numTurns: z.number().int().optional(),
     model: z.string().optional(),
     isError: z.boolean().optional(),
+    /**
+     * Phase 6: when present, drives the codex pricing-table recompute path.
+     * Other providers ('claude' / 'pi') always trust harness-reported USD.
+     * Optional / undefined keeps back-compat for existing callers.
+     */
+    provider: z.enum(["claude", "codex", "pi"]).optional(),
+    /**
+     * Phase 6: epoch-ms timestamp used as the "active price at time T" lookup
+     * basis. Defaults to `Date.now()` when omitted. Including it lets
+     * historical recomputes pick the correct `effective_from` row.
+     */
+    createdAt: z.number().int().nonnegative().optional(),
   }),
   responses: {
     201: { description: "Cost record stored" },
@@ -170,19 +183,54 @@ export async function handleSessionData(
     if (!parsed) return true;
 
     try {
+      const inputTokens = parsed.body.inputTokens ?? 0;
+      const cachedInputTokens = parsed.body.cacheReadTokens ?? 0;
+      const outputTokens = parsed.body.outputTokens ?? 0;
+      const model = parsed.body.model || "opus";
+
+      // Phase 6: Codex USD recompute. When the worker reports `provider='codex'`
+      // and DB pricing rows exist for ALL three token classes at the lookup
+      // time, recompute `totalCostUsd` from tokens × DB prices and tag the
+      // row as 'pricing-table'. If any class has no row, fall back to the
+      // worker-reported value with `costSource='harness'` (back-compat for
+      // unseeded models). Claude / pi paths always use 'harness'.
+      let totalCostUsd = parsed.body.totalCostUsd;
+      let costSource: SessionCostSource = "harness";
+
+      if (parsed.body.provider === "codex") {
+        const lookupTime = parsed.body.createdAt ?? Date.now();
+        const inputRow = getActivePricingRow("codex", model, "input", lookupTime);
+        const cachedRow = getActivePricingRow("codex", model, "cached_input", lookupTime);
+        const outputRow = getActivePricingRow("codex", model, "output", lookupTime);
+
+        if (inputRow && cachedRow && outputRow) {
+          // Mirror the existing computeCodexCostUsd logic: subtract cached
+          // tokens from input before billing the uncached portion at the full
+          // rate (Codex SDK reports input_tokens as TOTAL across the turn).
+          const uncachedInputTokens = Math.max(0, inputTokens - cachedInputTokens);
+          totalCostUsd =
+            (uncachedInputTokens * inputRow.pricePerMillionUsd +
+              cachedInputTokens * cachedRow.pricePerMillionUsd +
+              outputTokens * outputRow.pricePerMillionUsd) /
+            1_000_000;
+          costSource = "pricing-table";
+        }
+      }
+
       const cost = createSessionCost({
         sessionId: parsed.body.sessionId,
         taskId: parsed.body.taskId || undefined,
         agentId: parsed.body.agentId,
-        totalCostUsd: parsed.body.totalCostUsd,
-        inputTokens: parsed.body.inputTokens ?? 0,
-        outputTokens: parsed.body.outputTokens ?? 0,
-        cacheReadTokens: parsed.body.cacheReadTokens ?? 0,
+        totalCostUsd,
+        inputTokens,
+        outputTokens,
+        cacheReadTokens: cachedInputTokens,
         cacheWriteTokens: parsed.body.cacheWriteTokens ?? 0,
         durationMs: parsed.body.durationMs ?? 0,
         numTurns: parsed.body.numTurns ?? 1,
-        model: parsed.body.model || "opus",
+        model,
         isError: parsed.body.isError ?? false,
+        costSource,
       });
       json(res, { success: true, cost }, 201);
     } catch (error) {

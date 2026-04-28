@@ -364,6 +364,7 @@ class PiMonoSession implements ProviderSession {
       numTurns: stats.userMessages + stats.assistantMessages,
       model: this.agentSession.model?.name ?? this.config.model,
       isError: false,
+      provider: "pi",
     };
   }
 

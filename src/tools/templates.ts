@@ -84,3 +84,32 @@ Decide whether to reassign, retry, or handle the failure. Use \`get-task-details
   ],
   category: "task_lifecycle",
 });
+
+// ============================================================================
+// Budget refusal follow-up (Phase 5: created when an agent is refused due to
+// per-agent or global daily budget exhaustion)
+// ============================================================================
+
+registerTemplate({
+  eventType: "task.budget.refused",
+  header: "",
+  defaultBody: `Budget refusal \u2014 task is blocked.
+
+Cause: {{cause}}
+Agent: {{agent_name}}
+Task: {{task_desc}}
+Spend / budget: {{spend_summary}}
+Resets at: {{reset_at}}
+
+Decide whether to raise the budget, reassign, or wait for the daily reset.
+Use \`get-task-details\` with taskId "{{task_id}}" for full details.`,
+  variables: [
+    { name: "cause", description: "'agent' or 'global'" },
+    { name: "agent_name", description: "Refusing agent name or ID prefix" },
+    { name: "task_desc", description: "Task description (truncated to 200 chars)" },
+    { name: "spend_summary", description: 'Formatted "$X / $Y" pair' },
+    { name: "reset_at", description: "UTC reset time (human readable)" },
+    { name: "task_id", description: "Original task ID" },
+  ],
+  category: "task_lifecycle",
+});

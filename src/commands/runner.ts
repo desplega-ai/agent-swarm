@@ -20,10 +20,12 @@ import {
 } from "../providers/index.ts";
 import { initTelemetry, telemetry } from "../telemetry.ts";
 import type { ProviderName, RepoGuidelines } from "../types.ts";
+import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
 import { type CredentialSelection, resolveCredentialPools } from "../utils/credentials.ts";
 import { parseRateLimitResetTime } from "../utils/error-tracker.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
+import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
 import { interpolate } from "../workflows/template.ts";
 // Side-effect import: registers runner trigger/resumption templates
@@ -1269,7 +1271,8 @@ interface Trigger {
     | "task_offered"
     | "unread_mentions"
     | "pool_tasks_available"
-    | "channel_activity";
+    | "channel_activity"
+    | "budget_refused";
   taskId?: string;
   task?: unknown;
   mentionsCount?: number;
@@ -1294,6 +1297,16 @@ interface Trigger {
   }>;
   cursorUpdates?: Array<{ channelId: string; ts: string }>; // Deferred cursor commits for channel_activity
   requestedBy?: { name: string; email?: string };
+  // Phase 4 — budget_refused fields. The server emits this envelope from
+  // /api/poll and MCP task-action accept when an admission gate refuses to
+  // let the agent claim a task. Worker reads cause + reset/spend/budget for
+  // structured logging and back-off; never reaches buildPromptForTrigger.
+  cause?: "agent" | "global";
+  agentSpend?: number;
+  agentBudget?: number;
+  globalSpend?: number;
+  globalBudget?: number;
+  resetAt?: string; // ISO 8601, next UTC midnight
 }
 
 /** Options for polling */
@@ -1486,6 +1499,28 @@ async function buildPromptForTrigger(
         messages_detail: messagesDetail,
       });
       return result.text;
+    }
+
+    case "budget_refused": {
+      // DEFENSIVE: refusals are normally handled in the poll loop *before*
+      // reaching buildPromptForTrigger (the loop short-circuits on
+      // `trigger.type === "budget_refused"` to apply back-off + continue).
+      // This branch exists purely to keep the switch exhaustive in TypeScript
+      // and as future-refactor protection. It should never run in tested
+      // paths. Returning the default prompt is the safe no-op behavior.
+      const payload = JSON.stringify({
+        type: trigger.type,
+        cause: trigger.cause,
+        agentSpend: trigger.agentSpend,
+        agentBudget: trigger.agentBudget,
+        globalSpend: trigger.globalSpend,
+        globalBudget: trigger.globalBudget,
+        resetAt: trigger.resetAt,
+      });
+      console.warn(
+        `[runner] buildPromptForTrigger received budget_refused (defensive branch — should be handled in poll loop): ${scrubSecrets(payload)}`,
+      );
+      return defaultPrompt;
     }
 
     default:
@@ -2962,6 +2997,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       }
     }
 
+    // Phase 4 — exponential back-off state for `budget_refused` triggers.
+    // Resets to 0 on any non-refused outcome. Lives outside the loop so
+    // state persists across iterations.
+    let consecutiveBudgetRefusals = 0;
+
     // Track last finished task check for leads (to avoid re-processing)
     while (true) {
       // Ping server on each iteration to keep status updated
@@ -3032,6 +3072,36 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         });
 
         if (trigger) {
+          // Phase 4 — server refused to admit a claim because the agent or
+          // global budget is exhausted. Log a structured payload (scrubbed
+          // at egress per project convention) and back off exponentially.
+          // We deliberately `continue` BEFORE the empty-poll counter logic
+          // below — refusals are not empty polls.
+          if (trigger.type === "budget_refused") {
+            consecutiveBudgetRefusals++;
+            const backoffMs = computeBudgetBackoffMs(consecutiveBudgetRefusals, PollIntervalMs);
+            const refusalPayload = JSON.stringify({
+              event: "budget_refused",
+              cause: trigger.cause,
+              agentSpend: trigger.agentSpend,
+              agentBudget: trigger.agentBudget,
+              globalSpend: trigger.globalSpend,
+              globalBudget: trigger.globalBudget,
+              resetAt: trigger.resetAt,
+              consecutiveRefusals: consecutiveBudgetRefusals,
+              backoffMs,
+            });
+            console.log(
+              `[${role}] budget_refused — backing off ${backoffMs}ms: ${scrubSecrets(refusalPayload)}`,
+            );
+            await Bun.sleep(backoffMs);
+            continue;
+          }
+
+          // Any other non-null trigger means we're being admitted normally —
+          // reset the back-off so the next refusal starts at base interval.
+          consecutiveBudgetRefusals = 0;
+
           console.log(`[${role}] Trigger received: ${trigger.type}`);
 
           if (

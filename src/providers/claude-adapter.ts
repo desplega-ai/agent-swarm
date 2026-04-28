@@ -434,6 +434,7 @@ class ClaudeSession implements ProviderSession {
           numTurns: json.num_turns || 1,
           model: this.model,
           isError: json.is_error || false,
+          provider: "claude",
         };
         setCost(cost);
         this.emit({

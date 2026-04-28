@@ -1,5 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
+import { canClaim } from "@/be/budget-admission";
+import {
+  type BudgetRefusalContext,
+  emitBudgetRefusalSideEffects,
+} from "@/be/budget-refusal-notify";
 import {
   acceptTask,
   checkDependencies,
@@ -14,12 +19,13 @@ import {
   moveTaskFromBacklog,
   moveTaskToBacklog,
   reassociateSessionLogs,
+  recordBudgetRefusalNotification,
   rejectTask,
   releaseTask,
   updateTaskClaudeSessionId,
 } from "@/be/db";
 import { createToolRegistrar } from "@/tools/utils";
-import { AgentTaskSchema } from "@/types";
+import { AgentTaskSchema, BudgetRefusalCauseSchema } from "@/types";
 
 const TaskActionSchema = z.enum([
   "create",
@@ -83,6 +89,14 @@ export const registerTaskActionTool = (server: McpServer) => {
         success: z.boolean(),
         message: z.string(),
         task: AgentTaskSchema.optional(),
+        // Phase 3: budget-admission refusal fields. Populated only on
+        // `accept` action when the per-agent or global daily budget is blown.
+        refusalCause: BudgetRefusalCauseSchema.optional(),
+        agentSpend: z.number().optional(),
+        agentBudget: z.number().optional(),
+        globalSpend: z.number().optional(),
+        globalBudget: z.number().optional(),
+        resetAt: z.string().optional(),
       }),
     },
     async (input, requestInfo, _meta) => {
@@ -241,6 +255,60 @@ export const registerTaskActionTool = (server: McpServer) => {
                 message: `Task "${taskId}" has unmet dependencies: ${blockedBy.join(", ")}. Cannot accept until dependencies are completed.`,
               };
             }
+            // Budget admission gate (Phase 3). Same in-transaction placement
+            // as the /api/poll gates so capacity AND budget share atomicity.
+            // Phase 5: record dedup row + capture side-effect context for the
+            // after-commit lead follow-up + workflow event-bus emit.
+            const admission = canClaim(agentId, new Date());
+            if (!admission.allowed) {
+              const causeMsg =
+                admission.cause === "agent"
+                  ? "agent daily budget exceeded"
+                  : "global daily budget exceeded";
+              const utcDate = new Date().toISOString().slice(0, 10);
+              const dedup = recordBudgetRefusalNotification({
+                taskId,
+                date: utcDate,
+                agentId,
+                cause: admission.cause,
+                agentSpendUsd: admission.agentSpend,
+                agentBudgetUsd: admission.agentBudget,
+                globalSpendUsd: admission.globalSpend,
+                globalBudgetUsd: admission.globalBudget,
+              });
+              return {
+                success: false,
+                message: `Refused: ${causeMsg}. Resets at ${admission.resetAt}.`,
+                refusalCause: admission.cause,
+                ...(admission.agentSpend !== undefined && { agentSpend: admission.agentSpend }),
+                ...(admission.agentBudget !== undefined && { agentBudget: admission.agentBudget }),
+                ...(admission.globalSpend !== undefined && { globalSpend: admission.globalSpend }),
+                ...(admission.globalBudget !== undefined && {
+                  globalBudget: admission.globalBudget,
+                }),
+                resetAt: admission.resetAt,
+                refusalSideEffects: {
+                  context: {
+                    task: {
+                      id: existingTask.id,
+                      task: existingTask.task,
+                      slackChannelId: existingTask.slackChannelId,
+                      slackThreadTs: existingTask.slackThreadTs,
+                      slackUserId: existingTask.slackUserId,
+                    },
+                    agentId,
+                    date: utcDate,
+                    cause: admission.cause,
+                    agentSpendUsd: admission.agentSpend,
+                    agentBudgetUsd: admission.agentBudget,
+                    globalSpendUsd: admission.globalSpend,
+                    globalBudgetUsd: admission.globalBudget,
+                    resetAt: admission.resetAt,
+                  } satisfies BudgetRefusalContext,
+                  inserted: dedup.inserted,
+                },
+              };
+            }
             const acceptedTask = acceptTask(taskId, agentId);
             if (!acceptedTask) {
               return { success: false, message: `Failed to accept task "${taskId}".` };
@@ -334,11 +402,33 @@ export const registerTaskActionTool = (server: McpServer) => {
 
       const result = txn();
 
+      // Phase 5: when the accept gate refused, run after-commit side
+      // effects (lead follow-up + workflow bus). The dedup row was recorded
+      // inside the txn; this just consumes the captured context.
+      if (
+        "refusalSideEffects" in result &&
+        result.refusalSideEffects &&
+        typeof result.refusalSideEffects === "object"
+      ) {
+        const sideEffects = result.refusalSideEffects as {
+          context: BudgetRefusalContext;
+          inserted: boolean;
+        };
+        emitBudgetRefusalSideEffects(sideEffects.context, sideEffects.inserted);
+      }
+
+      // Strip the internal-only `refusalSideEffects` field from the wire
+      // response — workers receive only the public refusal envelope.
+      const { refusalSideEffects: _omit, ...publicResult } = result as {
+        refusalSideEffects?: unknown;
+        [key: string]: unknown;
+      };
+
       return {
         content: [{ type: "text", text: result.message }],
         structuredContent: {
           yourAgentId: agentId,
-          ...result,
+          ...publicResult,
         },
       };
     },

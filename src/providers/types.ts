@@ -12,6 +12,13 @@ export interface CostData {
   numTurns: number;
   model: string;
   isError: boolean;
+  /**
+   * Phase 6: tells the API which recompute path to use on
+   * `POST /api/session-costs`. Codex triggers the pricing-table recompute
+   * (when DB pricing rows exist for all three token classes); Claude / pi
+   * always trust the harness-reported `totalCostUsd` as-is.
+   */
+  provider?: "claude" | "codex" | "pi";
 }
 
 import type { ProviderName } from "../types";

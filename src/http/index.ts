@@ -21,6 +21,7 @@ import { handleActiveSessions } from "./active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "./agents";
 import { handleApiKeys } from "./api-keys";
 import { handleApprovalRequests } from "./approval-requests";
+import { handleBudgets } from "./budgets";
 import { handleConfig } from "./config";
 import { handleContext } from "./context";
 import { handleCore, loadGlobalConfigsIntoEnv } from "./core";
@@ -33,6 +34,7 @@ import { handleMcpOAuth, startMcpOAuthPendingGc, stopMcpOAuthPendingGc } from ".
 import { handleMcpServers } from "./mcp-servers";
 import { handleMemory } from "./memory";
 import { handlePoll } from "./poll";
+import { handlePricing } from "./pricing";
 import { handlePromptTemplates } from "./prompt-templates";
 import { handleRepos } from "./repos";
 import { handleSchedules } from "./schedules";
@@ -118,10 +120,12 @@ const httpServer = createHttpServer(async (req, res) => {
     () => handleTrackers(req, res, pathSegments),
     () => handleWebhooks(req, res, pathSegments),
     () => handleAgentsRest(req, res, pathSegments, queryParams, myAgentId),
+    () => handleBudgets(req, res, pathSegments, queryParams, myAgentId),
     () => handleContext(req, res, pathSegments, queryParams, myAgentId),
     () => handleTasks(req, res, pathSegments, queryParams, myAgentId),
     () => handleStats(req, res, pathSegments, queryParams),
     () => handleActiveSessions(req, res, pathSegments, queryParams, myAgentId),
+    () => handlePricing(req, res, pathSegments, queryParams, myAgentId),
     () => handleSchedules(req, res, pathSegments, queryParams, myAgentId),
     () => handleWorkflows(req, res, pathSegments, queryParams, myAgentId),
     () => handleApprovalRequests(req, res, pathSegments, queryParams),
