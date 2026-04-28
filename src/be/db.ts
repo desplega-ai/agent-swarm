@@ -14,6 +14,10 @@ import type {
   AgentTaskSource,
   AgentTaskStatus,
   AgentWithTasks,
+  Budget,
+  BudgetRefusalCause,
+  BudgetRefusalNotification,
+  BudgetScope,
   ChangeSource,
   Channel,
   ChannelMessage,
@@ -8069,4 +8073,210 @@ export function deleteUser(id: string): boolean {
     .run(id);
   const result = getDb().prepare("DELETE FROM users WHERE id = ?").run(id);
   return result.changes > 0;
+}
+
+// ============================================================================
+// Budgets, daily-spend aggregation, and budget-refusal notifications (Phase 2)
+// ----------------------------------------------------------------------------
+// `budgets` and `budget_refusal_notifications` use INTEGER epoch-ms for their
+// `createdAt` / `lastUpdatedAt` columns (deliberate divergence — see migration
+// 044). All inserts here use `Date.now()` accordingly.
+// ============================================================================
+
+interface BudgetRow {
+  scope: string;
+  scope_id: string;
+  daily_budget_usd: number;
+  createdAt: number;
+  lastUpdatedAt: number;
+}
+
+interface BudgetRefusalNotificationRow {
+  task_id: string;
+  date: string;
+  agent_id: string;
+  cause: string;
+  agent_spend_usd: number | null;
+  agent_budget_usd: number | null;
+  global_spend_usd: number | null;
+  global_budget_usd: number | null;
+  follow_up_task_id: string | null;
+  createdAt: number;
+}
+
+interface CoalesceSumRow {
+  total: number;
+}
+
+function rowToBudget(row: BudgetRow): Budget {
+  return {
+    scope: row.scope as BudgetScope,
+    scopeId: row.scope_id,
+    dailyBudgetUsd: row.daily_budget_usd,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+function rowToBudgetRefusalNotification(
+  row: BudgetRefusalNotificationRow,
+): BudgetRefusalNotification {
+  return {
+    taskId: row.task_id,
+    date: row.date,
+    agentId: row.agent_id,
+    cause: row.cause as BudgetRefusalCause,
+    agentSpendUsd: row.agent_spend_usd ?? undefined,
+    agentBudgetUsd: row.agent_budget_usd ?? undefined,
+    globalSpendUsd: row.global_spend_usd ?? undefined,
+    globalBudgetUsd: row.global_budget_usd ?? undefined,
+    followUpTaskId: row.follow_up_task_id ?? undefined,
+    createdAt: row.createdAt,
+  };
+}
+
+/**
+ * Look up a single budget row by (scope, scopeId). Returns `null` when no row
+ * exists — callers treat that as "unlimited / no budget configured".
+ */
+export function getBudget(scope: BudgetScope, scopeId: string): Budget | null {
+  const row = getDb()
+    .prepare<BudgetRow, [string, string]>(
+      "SELECT scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt FROM budgets WHERE scope = ? AND scope_id = ?",
+    )
+    .get(scope, scopeId);
+  return row ? rowToBudget(row) : null;
+}
+
+/**
+ * Sum of `totalCostUsd` across all `session_costs` rows for a given agent on a
+ * given UTC calendar day. `dateUtc` MUST be `'YYYY-MM-DD'` (UTC). Returns 0
+ * when no rows exist.
+ *
+ * Implementation note: we filter on `substr(createdAt, 1, 10) = ?` rather than
+ * `date(createdAt / 1000, 'unixepoch') = ?` because `session_costs.createdAt`
+ * is TEXT in ISO 8601 format (`'YYYY-MM-DDTHH:MM:SS.SSSZ'`), populated via
+ * `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`. The left-anchored `substr` prefix
+ * also lets the SQLite optimizer use the existing
+ * `idx_session_costs_agent_createdAt` index (verified via EXPLAIN QUERY PLAN
+ * in the test suite).
+ */
+export function getDailySpendForAgent(agentId: string, dateUtc: string): number {
+  const row = getDb()
+    .prepare<CoalesceSumRow, [string, string]>(
+      "SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE agentId = ? AND substr(createdAt, 1, 10) = ?",
+    )
+    .get(agentId, dateUtc);
+  return row?.total ?? 0;
+}
+
+/**
+ * Sum of `totalCostUsd` across all `session_costs` rows for a given UTC
+ * calendar day, regardless of agent. `dateUtc` MUST be `'YYYY-MM-DD'` (UTC).
+ *
+ * NOTE: this query has no `agentId` prefix and therefore does not naturally
+ * match the `(agentId, createdAt)` composite index. SQLite's optimizer may
+ * pick `idx_session_costs_createdAt` (single-column on `createdAt`) — but
+ * because the predicate is `substr(createdAt, 1, 10) = ?` rather than a range
+ * scan, the planner often falls back to a full table scan. That is acceptable
+ * for V1 daily-spend volumes; if it ever becomes a hotspot, a covering
+ * functional index on `substr(createdAt, 1, 10)` would be the fix.
+ */
+export function getDailySpendGlobal(dateUtc: string): number {
+  const row = getDb()
+    .prepare<CoalesceSumRow, [string]>(
+      "SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE substr(createdAt, 1, 10) = ?",
+    )
+    .get(dateUtc);
+  return row?.total ?? 0;
+}
+
+export interface RecordBudgetRefusalNotificationInput {
+  taskId: string;
+  date: string;
+  agentId: string;
+  cause: BudgetRefusalCause;
+  agentSpendUsd?: number;
+  agentBudgetUsd?: number;
+  globalSpendUsd?: number;
+  globalBudgetUsd?: number;
+}
+
+/**
+ * Idempotent insert of a budget-refusal notification keyed by
+ * `(task_id, date)`. Returns `{ inserted: true, row }` on first call for that
+ * key, or `{ inserted: false, row }` (with the original row) on subsequent
+ * calls — used by the notification path to dedup "the agent told me about
+ * this task already" across retries within the same UTC day.
+ */
+export function recordBudgetRefusalNotification(input: RecordBudgetRefusalNotificationInput): {
+  inserted: boolean;
+  row: BudgetRefusalNotification;
+} {
+  const db = getDb();
+  const now = Date.now();
+  const result = db
+    .prepare(
+      `INSERT OR IGNORE INTO budget_refusal_notifications
+       (task_id, date, agent_id, cause, agent_spend_usd, agent_budget_usd, global_spend_usd, global_budget_usd, follow_up_task_id, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+    )
+    .run(
+      input.taskId,
+      input.date,
+      input.agentId,
+      input.cause,
+      input.agentSpendUsd ?? null,
+      input.agentBudgetUsd ?? null,
+      input.globalSpendUsd ?? null,
+      input.globalBudgetUsd ?? null,
+      now,
+    );
+
+  const existing = db
+    .prepare<BudgetRefusalNotificationRow, [string, string]>(
+      "SELECT * FROM budget_refusal_notifications WHERE task_id = ? AND date = ?",
+    )
+    .get(input.taskId, input.date);
+
+  if (!existing) {
+    // Should be unreachable: INSERT OR IGNORE either inserts or leaves an
+    // existing row. If we hit this it's a hard schema/runtime invariant break.
+    throw new Error(
+      `recordBudgetRefusalNotification: row missing after insert for (taskId=${input.taskId}, date=${input.date})`,
+    );
+  }
+
+  return {
+    inserted: result.changes > 0,
+    row: rowToBudgetRefusalNotification(existing),
+  };
+}
+
+/**
+ * Lookup helper used by tests and by the Phase 5 follow-up-task write-back.
+ */
+export function getBudgetRefusalNotification(
+  taskId: string,
+  date: string,
+): BudgetRefusalNotification | null {
+  const row = getDb()
+    .prepare<BudgetRefusalNotificationRow, [string, string]>(
+      "SELECT * FROM budget_refusal_notifications WHERE task_id = ? AND date = ?",
+    )
+    .get(taskId, date);
+  return row ? rowToBudgetRefusalNotification(row) : null;
+}
+
+/**
+ * Boolean observability helper — returns true iff a refusal notification has
+ * already been recorded for `(taskId, date)`.
+ */
+export function hasBudgetRefusalNotificationToday(taskId: string, date: string): boolean {
+  const row = getDb()
+    .prepare<{ one: number }, [string, string]>(
+      "SELECT 1 as one FROM budget_refusal_notifications WHERE task_id = ? AND date = ? LIMIT 1",
+    )
+    .get(taskId, date);
+  return row !== null;
 }

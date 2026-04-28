@@ -8,7 +8,7 @@ autonomy: critical
 related_brainstorm: thoughts/taras/brainstorms/2026-04-28-per-agent-daily-cost-budget.md
 related_research: thoughts/taras/research/2026-04-28-per-agent-daily-cost-budget.md
 last_updated: 2026-04-28
-last_updated_by: claude (phase-running, phase 1)
+last_updated_by: claude (phase-running, phase 2)
 ---
 
 # Per-Agent Daily Cost Budget (V1) Implementation Plan
@@ -218,14 +218,14 @@ Why a separate file (not inline in `db.ts`): keeps the predicate composable, eas
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Lint passes: `bun run lint`
-- [ ] Type-check passes: `bun run tsc:check`
-- [ ] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
-- [ ] All new unit tests pass: `bun test src/tests/budget-admission.test.ts`
-- [ ] Full unit suite still green: `bun test`
+- [x] Lint passes: `bun run lint`
+- [x] Type-check passes: `bun run tsc:check`
+- [x] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] All new unit tests pass: `bun test src/tests/budget-admission.test.ts`
+- [x] Full unit suite still green: `bun test`
 
 #### Automated QA:
-- [ ] Test asserts `getDailySpendForAgent` uses the index (EXPLAIN QUERY PLAN over a seeded DB returns "USING INDEX idx_session_costs_agent_created" — included in the test file)
+- [x] Test asserts `getDailySpendForAgent` uses the index (EXPLAIN QUERY PLAN over a seeded DB returns "USING INDEX idx_session_costs_agent_created" — included in the test file)
 
 #### Manual Verification:
 - [ ] None — phase is library-level. Skip.
