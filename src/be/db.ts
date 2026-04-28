@@ -8280,3 +8280,24 @@ export function hasBudgetRefusalNotificationToday(taskId: string, date: string):
     .get(taskId, date);
   return row !== null;
 }
+
+/**
+ * Phase 5 write-back: link the freshly-created lead-facing follow-up task
+ * back to its dedup row so operators can audit "find the lead-facing
+ * follow-up that was created when this task was first refused".
+ *
+ * Idempotent — safe to call multiple times with the same `(taskId, date)`,
+ * but only the first refusal per day creates a follow-up task in the first
+ * place (see `recordBudgetRefusalNotification` for the dedup invariant).
+ */
+export function setBudgetRefusalFollowUpTaskId(
+  taskId: string,
+  date: string,
+  followUpTaskId: string,
+): void {
+  getDb()
+    .prepare(
+      "UPDATE budget_refusal_notifications SET follow_up_task_id = ? WHERE task_id = ? AND date = ?",
+    )
+    .run(followUpTaskId, taskId, date);
+}

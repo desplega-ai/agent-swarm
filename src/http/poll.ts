@@ -3,6 +3,10 @@ import { ensure } from "@desplega.ai/business-use";
 import { z } from "zod";
 import { canClaim } from "../be/budget-admission";
 import {
+  type BudgetRefusalContext,
+  emitBudgetRefusalSideEffects,
+} from "../be/budget-refusal-notify";
+import {
   claimMentions,
   claimOfferedTask,
   claimTask,
@@ -12,9 +16,11 @@ import {
   getInboxSummary,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
+  getTaskById,
   getUnassignedTaskIds,
   getUserById,
   hasCapacity,
+  recordBudgetRefusalNotification,
   startTask,
   upsertChannelActivityCursor,
 } from "../be/db";
@@ -30,9 +36,10 @@ import { json, jsonError } from "./utils";
  * here (not in budget-admission) because it's the API-shape contract — workers
  * read this on the wire (Phase 4 teaches them how).
  *
- * TODO(phase 5): record notification + lead follow-up. Phase 3 just emits the
- * refusal envelope; Phase 5 wires `recordBudgetRefusalNotification` and the
- * lead-facing follow-up task at the same call sites.
+ * Phase 5: each refusal site additionally calls
+ * `recordBudgetRefusalNotification` (in-txn) and
+ * `emitBudgetRefusalSideEffects` (after-commit) to drive the lead follow-up
+ * + workflow bus emit. See `src/be/budget-refusal-notify.ts`.
  */
 function buildBudgetRefusedTrigger(refusal: {
   cause: "agent" | "global";
@@ -127,9 +134,19 @@ export async function handlePoll(
     }
 
     // Use transaction for consistent reads across all trigger checks
-    let result:
+    type PollTxnResult =
       | { error: string; status: number }
-      | { trigger: { type: string; [key: string]: unknown } | null };
+      | {
+          trigger: { type: string; [key: string]: unknown } | null;
+          /**
+           * Phase 5: when the trigger is `budget_refused`, the txn captures
+           * the dedup-row state + the refused task's Slack context so the
+           * after-commit step can resolve the template and create the lead
+           * follow-up. Undefined for any other trigger.
+           */
+          refusalSideEffects?: { context: BudgetRefusalContext; inserted: boolean };
+        };
+    let result: PollTxnResult;
     try {
       result = getDb().transaction(() => {
         const agent = getAgentById(myAgentId);
@@ -161,10 +178,44 @@ export async function handlePoll(
           if (pendingTask) {
             // Budget admission gate (Phase 3). Runs in the same transaction as
             // the capacity check so capacity AND budget gates share atomicity.
-            // TODO(phase 5): record notification + lead follow-up here.
+            // Phase 5 also records the dedup row + captures the side-effect
+            // context here so the after-commit step can notify the lead.
             const admission = canClaim(myAgentId, new Date());
             if (!admission.allowed) {
-              return { trigger: buildBudgetRefusedTrigger(admission) };
+              const utcDate = new Date().toISOString().slice(0, 10);
+              const dedup = recordBudgetRefusalNotification({
+                taskId: pendingTask.id,
+                date: utcDate,
+                agentId: myAgentId,
+                cause: admission.cause,
+                agentSpendUsd: admission.agentSpend,
+                agentBudgetUsd: admission.agentBudget,
+                globalSpendUsd: admission.globalSpend,
+                globalBudgetUsd: admission.globalBudget,
+              });
+              return {
+                trigger: buildBudgetRefusedTrigger(admission),
+                refusalSideEffects: {
+                  context: {
+                    task: {
+                      id: pendingTask.id,
+                      task: pendingTask.task,
+                      slackChannelId: pendingTask.slackChannelId,
+                      slackThreadTs: pendingTask.slackThreadTs,
+                      slackUserId: pendingTask.slackUserId,
+                    },
+                    agentId: myAgentId,
+                    date: utcDate,
+                    cause: admission.cause,
+                    agentSpendUsd: admission.agentSpend,
+                    agentBudgetUsd: admission.agentBudget,
+                    globalSpendUsd: admission.globalSpend,
+                    globalBudgetUsd: admission.globalBudget,
+                    resetAt: admission.resetAt,
+                  },
+                  inserted: dedup.inserted,
+                },
+              };
             }
 
             // Mark task as in_progress immediately to prevent duplicate polling
@@ -247,11 +298,51 @@ export async function handlePoll(
             // per-agent budgets matter most here, but we still check global.
             // Only run the gate when there's at least one candidate task; an
             // empty pool is "no work", not "refused".
-            // TODO(phase 5): record notification + lead follow-up here.
+            // Phase 5: dedup row keyed on the FIRST candidate id (the one we
+            // would have claimed). That id is stable for the duration of the
+            // refusal, and the dedup is per-(task,date) so subsequent same-day
+            // refusals on the same lead-candidate are suppressed.
             if (unassignedIds.length > 0) {
               const admission = canClaim(myAgentId, new Date());
               if (!admission.allowed) {
-                return { trigger: buildBudgetRefusedTrigger(admission) };
+                const candidateId = unassignedIds[0]!;
+                const candidateTask = getTaskById(candidateId);
+                const utcDate = new Date().toISOString().slice(0, 10);
+                const dedup = recordBudgetRefusalNotification({
+                  taskId: candidateId,
+                  date: utcDate,
+                  agentId: myAgentId,
+                  cause: admission.cause,
+                  agentSpendUsd: admission.agentSpend,
+                  agentBudgetUsd: admission.agentBudget,
+                  globalSpendUsd: admission.globalSpend,
+                  globalBudgetUsd: admission.globalBudget,
+                });
+                return {
+                  trigger: buildBudgetRefusedTrigger(admission),
+                  refusalSideEffects: candidateTask
+                    ? {
+                        context: {
+                          task: {
+                            id: candidateTask.id,
+                            task: candidateTask.task,
+                            slackChannelId: candidateTask.slackChannelId,
+                            slackThreadTs: candidateTask.slackThreadTs,
+                            slackUserId: candidateTask.slackUserId,
+                          },
+                          agentId: myAgentId,
+                          date: utcDate,
+                          cause: admission.cause,
+                          agentSpendUsd: admission.agentSpend,
+                          agentBudgetUsd: admission.agentBudget,
+                          globalSpendUsd: admission.globalSpend,
+                          globalBudgetUsd: admission.globalBudget,
+                          resetAt: admission.resetAt,
+                        },
+                        inserted: dedup.inserted,
+                      }
+                    : undefined,
+                };
               }
             }
             for (const candidateId of unassignedIds) {
@@ -292,6 +383,16 @@ export async function handlePoll(
     if ("error" in result) {
       jsonError(res, result.error, result.status ?? 500);
       return true;
+    }
+
+    // Phase 5: after the refusal txn commits, run side effects (lead
+    // follow-up + workflow event bus). Errors here are logged inside the
+    // helper; we never let them affect the response the worker sees.
+    if (result.refusalSideEffects) {
+      emitBudgetRefusalSideEffects(
+        result.refusalSideEffects.context,
+        result.refusalSideEffects.inserted,
+      );
     }
 
     // If no trigger found and agent is lead, check for Slack channel activity.
@@ -361,7 +462,13 @@ export async function handlePoll(
       }
     }
 
-    json(res, result);
+    // Strip the internal-only `refusalSideEffects` field from the wire
+    // response — workers receive only the public trigger envelope.
+    const { refusalSideEffects: _omit, ...publicResult } = result as {
+      refusalSideEffects?: unknown;
+      [key: string]: unknown;
+    };
+    json(res, publicResult);
     return true;
   }
 

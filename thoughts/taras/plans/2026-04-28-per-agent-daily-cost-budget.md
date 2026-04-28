@@ -8,7 +8,7 @@ autonomy: critical
 related_brainstorm: thoughts/taras/brainstorms/2026-04-28-per-agent-daily-cost-budget.md
 related_research: thoughts/taras/research/2026-04-28-per-agent-daily-cost-budget.md
 last_updated: 2026-04-28
-last_updated_by: claude (phase-running, phase 4)
+last_updated_by: claude (phase-running, phase 5)
 ---
 
 # Per-Agent Daily Cost Budget (V1) Implementation Plan
@@ -433,14 +433,14 @@ Use \`get-task-details\` with taskId "{{task_id}}" for full details.`,
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Lint passes: `bun run lint`
-- [ ] Type-check passes: `bun run tsc:check`
-- [ ] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
-- [ ] New notification tests pass: `bun test src/tests/budget-refusal-notification.test.ts`
-- [ ] Full suite green: `bun test`
+- [x] Lint passes: `bun run lint`
+- [x] Type-check passes: `bun run tsc:check`
+- [x] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] New notification tests pass: `bun test src/tests/budget-refusal-notification.test.ts`
+- [x] Full suite green: `bun test`
 
 #### Automated QA:
-- [ ] Walkthrough: blow a budget locally, poll twice, confirm exactly one follow-up task lands in the lead's queue (`sqlite3 agent-swarm-db.sqlite "SELECT id, agentId, parentTaskId, taskType FROM agent_tasks WHERE taskType='follow-up' ORDER BY createdAt DESC LIMIT 5"`).
+- [x] Walkthrough: blow a budget locally, poll twice, confirm exactly one follow-up task lands in the lead's queue (`sqlite3 agent-swarm-db.sqlite "SELECT id, agentId, parentTaskId, taskType FROM agent_tasks WHERE taskType='follow-up' ORDER BY createdAt DESC LIMIT 5"`).
 
 #### Manual Verification:
 - [ ] None — automated coverage suffices.
