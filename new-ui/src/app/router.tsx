@@ -12,6 +12,7 @@ const ServicesPage = lazy(() => import("@/pages/services/page"));
 const SchedulesPage = lazy(() => import("@/pages/schedules/page"));
 const ScheduleDetailPage = lazy(() => import("@/pages/schedules/[id]/page"));
 const UsagePage = lazy(() => import("@/pages/usage/page"));
+const BudgetsPage = lazy(() => import("@/pages/budgets/page"));
 const ConfigPage = lazy(() => import("@/pages/config/page"));
 const IntegrationsPage = lazy(() => import("@/pages/integrations/page"));
 const IntegrationDetailPage = lazy(() => import("@/pages/integrations/[id]/page"));
@@ -56,6 +57,7 @@ export const router = createBrowserRouter([
       { path: "approval-requests", element: <ApprovalRequestsPage /> },
       { path: "approval-requests/:id", element: <ApprovalRequestDetailPage /> },
       { path: "usage", element: <UsagePage /> },
+      { path: "budgets", element: <BudgetsPage /> },
       { path: "config", element: <ConfigPage /> },
       { path: "integrations", element: <IntegrationsPage /> },
       { path: "integrations/:id", element: <IntegrationDetailPage /> },

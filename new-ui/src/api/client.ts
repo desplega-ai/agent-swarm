@@ -7,6 +7,10 @@ import type {
   ApiKeyStatusResponse,
   ApprovalRequest,
   ApprovalRequestsResponse,
+  Budget,
+  BudgetRefusalsResponse,
+  BudgetScope,
+  BudgetsResponse,
   ChannelMessage,
   ChannelsResponse,
   DashboardCostResponse,
@@ -18,6 +22,10 @@ import type {
   McpServersResponse,
   MessagesResponse,
   PreviewResponse,
+  PricingProvider,
+  PricingResponse,
+  PricingRow,
+  PricingTokenClass,
   PromptTemplate,
   PromptTemplateHistory,
   ScheduledTask,
@@ -1274,6 +1282,95 @@ class ApiClient {
       throw new Error(err.error || `Failed to register manual client: ${res.status}`);
     }
     return res.json();
+  }
+
+  // ─── Budgets ───────────────────────────────────────────────────────────────
+
+  async fetchBudgets(): Promise<BudgetsResponse> {
+    const url = `${this.getBaseUrl()}/api/budgets`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch budgets: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchBudgetRefusals(limit?: number): Promise<BudgetRefusalsResponse> {
+    const params = limit ? `?limit=${limit}` : "";
+    const url = `${this.getBaseUrl()}/api/budgets/refusals${params}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch budget refusals: ${res.status}`);
+    return res.json();
+  }
+
+  /** Pass scopeId="" for global; the wire format substitutes "_global". */
+  async upsertBudget(scope: BudgetScope, scopeId: string, dailyBudgetUsd: number): Promise<Budget> {
+    const wireScopeId = scope === "global" ? "_global" : scopeId;
+    const url = `${this.getBaseUrl()}/api/budgets/${scope}/${encodeURIComponent(wireScopeId)}`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: this.getHeaders(),
+      body: JSON.stringify({ dailyBudgetUsd }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to upsert budget" }));
+      throw new Error(err.error || `Failed to upsert budget: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async deleteBudget(scope: BudgetScope, scopeId: string): Promise<void> {
+    const wireScopeId = scope === "global" ? "_global" : scopeId;
+    const url = `${this.getBaseUrl()}/api/budgets/${scope}/${encodeURIComponent(wireScopeId)}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok && res.status !== 404) {
+      const err = await res.json().catch(() => ({ error: "Failed to delete budget" }));
+      throw new Error(err.error || `Failed to delete budget: ${res.status}`);
+    }
+  }
+
+  // ─── Pricing ───────────────────────────────────────────────────────────────
+
+  async fetchPricing(): Promise<PricingResponse> {
+    const url = `${this.getBaseUrl()}/api/pricing`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch pricing: ${res.status}`);
+    return res.json();
+  }
+
+  async insertPricingRow(input: {
+    provider: PricingProvider;
+    model: string;
+    tokenClass: PricingTokenClass;
+    pricePerMillionUsd: number;
+    effectiveFrom?: number;
+  }): Promise<PricingRow> {
+    const url = `${this.getBaseUrl()}/api/pricing/${input.provider}/${encodeURIComponent(input.model)}/${input.tokenClass}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify({
+        pricePerMillionUsd: input.pricePerMillionUsd,
+        effectiveFrom: input.effectiveFrom,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to insert pricing row" }));
+      throw new Error(err.error || `Failed to insert pricing row: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async deletePricingRow(
+    provider: PricingProvider,
+    model: string,
+    tokenClass: PricingTokenClass,
+    effectiveFrom: number,
+  ): Promise<void> {
+    const url = `${this.getBaseUrl()}/api/pricing/${provider}/${encodeURIComponent(model)}/${tokenClass}/${effectiveFrom}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok && res.status !== 404) {
+      const err = await res.json().catch(() => ({ error: "Failed to delete pricing row" }));
+      throw new Error(err.error || `Failed to delete pricing row: ${res.status}`);
+    }
   }
 }
 

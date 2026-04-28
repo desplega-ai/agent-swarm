@@ -1012,6 +1012,112 @@
         }
       }
     },
+    "/api/budgets/refusals": {
+      "get": {
+        "summary": "List recent budget refusal notifications",
+        "tags": [
+          "Budgets"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 500
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent budget refusals (newest first)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "refusals": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "taskId": {
+                            "type": "string"
+                          },
+                          "date": {
+                            "type": "string"
+                          },
+                          "agentId": {
+                            "type": "string"
+                          },
+                          "cause": {
+                            "type": "string",
+                            "enum": [
+                              "agent",
+                              "global"
+                            ]
+                          },
+                          "agentSpendUsd": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "agentBudgetUsd": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "globalSpendUsd": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "globalBudgetUsd": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "followUpTaskId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "taskId",
+                          "date",
+                          "agentId",
+                          "cause",
+                          "createdAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "refusals"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/budgets/{scope}/{scopeId}": {
       "get": {
         "summary": "Get a single budget row",

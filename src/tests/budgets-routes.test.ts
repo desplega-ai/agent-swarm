@@ -12,7 +12,13 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, getDb, getLogsByEventType, initDb } from "../be/db";
+import {
+  closeDb,
+  getDb,
+  getLogsByEventType,
+  initDb,
+  recordBudgetRefusalNotification,
+} from "../be/db";
 import { handleBudgets } from "../http/budgets";
 import { handleCore } from "../http/core";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -72,6 +78,7 @@ afterEach(() => {
   const db = getDb();
   db.prepare("DELETE FROM budgets").run();
   db.prepare("DELETE FROM agent_log WHERE eventType LIKE 'budget.%'").run();
+  db.prepare("DELETE FROM budget_refusal_notifications").run();
 });
 
 function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -242,6 +249,65 @@ describe("Phase 6 — /api/budgets REST surface", () => {
       expect(updateMeta.before.dailyBudgetUsd).toBe(3);
       expect(updateMeta.after.dailyBudgetUsd).toBe(7);
       expect(updateMeta.apiKeyFingerprint).toMatch(/^[a-f0-9]{8}$/);
+    });
+
+    test("GET /api/budgets/refusals returns recent refusals newest first", async () => {
+      // Seed three refusals across two days/agents.
+      recordBudgetRefusalNotification({
+        taskId: "task-old",
+        date: "2026-04-26",
+        agentId: "agent-A",
+        cause: "agent",
+        agentSpendUsd: 1.5,
+        agentBudgetUsd: 1.0,
+      });
+      // Force a small gap so createdAt ordering is deterministic.
+      await new Promise((r) => setTimeout(r, 5));
+      recordBudgetRefusalNotification({
+        taskId: "task-mid",
+        date: "2026-04-27",
+        agentId: "agent-B",
+        cause: "global",
+        globalSpendUsd: 50,
+        globalBudgetUsd: 40,
+      });
+      await new Promise((r) => setTimeout(r, 5));
+      recordBudgetRefusalNotification({
+        taskId: "task-new",
+        date: "2026-04-28",
+        agentId: "agent-A",
+        cause: "agent",
+        agentSpendUsd: 2.0,
+        agentBudgetUsd: 1.5,
+      });
+
+      const res = await authedFetch(`/api/budgets/refusals`);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.refusals).toBeInstanceOf(Array);
+      expect(body.refusals.length).toBe(3);
+      // Newest first by createdAt.
+      expect(body.refusals[0].taskId).toBe("task-new");
+      expect(body.refusals[1].taskId).toBe("task-mid");
+      expect(body.refusals[2].taskId).toBe("task-old");
+      expect(body.refusals[0].cause).toBe("agent");
+      expect(body.refusals[1].cause).toBe("global");
+    });
+
+    test("GET /api/budgets/refusals respects limit query param", async () => {
+      for (let i = 0; i < 5; i++) {
+        recordBudgetRefusalNotification({
+          taskId: `task-${i}`,
+          date: "2026-04-28",
+          agentId: "agent-A",
+          cause: "agent",
+        });
+        await new Promise((r) => setTimeout(r, 2));
+      }
+      const res = await authedFetch(`/api/budgets/refusals?limit=2`);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.refusals.length).toBe(2);
     });
 
     test("DELETE writes a budget.deleted log row with key fingerprint", async () => {
