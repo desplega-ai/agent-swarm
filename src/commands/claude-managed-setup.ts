@@ -58,6 +58,7 @@ export type ClaudeManagedSetupResult = {
   environmentId: string;
   skillIds: string[];
   alreadyConfigured: boolean;
+  mcpVaultId?: string | null;
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -71,6 +72,12 @@ const SKILLS_BETA_HEADER = "skills-2025-10-02";
 const CONFIG_KEY_AGENT_ID = "managed_agent_id";
 const CONFIG_KEY_ENVIRONMENT_ID = "managed_environment_id";
 const CONFIG_KEY_API_KEY = "anthropic_api_key";
+const CONFIG_KEY_MCP_VAULT_ID = "managed_mcp_vault_id";
+
+// Display name for the swarm-MCP vault. Used as the lookup key on rerun so the
+// upsert is idempotent — there is intentionally only one MCP vault per
+// installation, scoped to the configured `MCP_BASE_URL`.
+const MCP_VAULT_DISPLAY_NAME = "swarm-mcp";
 
 // ─── Arg parsing + help ──────────────────────────────────────────────────────
 
@@ -245,6 +252,107 @@ async function uploadSkill(
     }
     throw err;
   }
+}
+
+// ─── MCP vault upsert ────────────────────────────────────────────────────────
+
+/**
+ * Find or create the swarm-MCP vault, then ensure a static-bearer credential
+ * exists for `mcpServerUrl` with the given `bearerToken`. Returns the vault id.
+ *
+ * Idempotency rules:
+ *   - Vault: matched by `display_name === MCP_VAULT_DISPLAY_NAME`. Only one
+ *     should exist per Anthropic account; if you somehow have multiple, the
+ *     most recently created one wins (sorted by `created_at`). On rerun, no
+ *     new vault is created.
+ *   - Credential: matched by `auth.type === "static_bearer"` AND
+ *     `auth.mcp_server_url === mcpServerUrl` (the URL is immutable per the
+ *     SDK type docstring, so a URL change requires a new credential).
+ *     The token itself is never returned in API responses, so on rerun we
+ *     update the existing credential's token only when `force=true` (matches
+ *     the agent-recreate semantics of `--force`).
+ *
+ * Anthropic's managed sandbox refuses to call our `/mcp` endpoint until a
+ * matching credential exists in a vault that the session is bound to via
+ * `vault_ids`. Calling this function from the setup CLI is what closes the
+ * loop without an out-of-band dashboard step.
+ */
+export async function upsertMcpVault(
+  client: Anthropic,
+  mcpServerUrl: string,
+  bearerToken: string,
+  force: boolean,
+  log: (msg: string) => void,
+): Promise<string> {
+  // 1. Find an existing swarm-MCP vault by display name.
+  let vaultId: string | null = null;
+  let vaultExisted = false;
+  try {
+    let mostRecent: { id: string; created_at: string } | null = null;
+    for await (const v of client.beta.vaults.list({})) {
+      if (v.archived_at) continue;
+      if (v.display_name !== MCP_VAULT_DISPLAY_NAME) continue;
+      if (!mostRecent || v.created_at > mostRecent.created_at) {
+        mostRecent = { id: v.id, created_at: v.created_at };
+      }
+    }
+    if (mostRecent) {
+      vaultId = mostRecent.id;
+      vaultExisted = true;
+      log(`  · vault "${MCP_VAULT_DISPLAY_NAME}" already exists — reusing id=${vaultId}`);
+    }
+  } catch (err) {
+    log(`  · vault list failed (${(err as Error).message}); proceeding to create`);
+  }
+
+  // 2. Create the vault if it didn't exist.
+  if (!vaultId) {
+    const created = await client.beta.vaults.create({ display_name: MCP_VAULT_DISPLAY_NAME });
+    vaultId = created.id;
+    log(`  + created vault "${MCP_VAULT_DISPLAY_NAME}" id=${vaultId}`);
+  }
+
+  // 3. Find or create-or-update the static-bearer credential matching mcpServerUrl.
+  let existingCredentialId: string | null = null;
+  if (vaultExisted) {
+    try {
+      for await (const c of client.beta.vaults.credentials.list(vaultId)) {
+        if (c.archived_at) continue;
+        if (
+          c.auth?.type === "static_bearer" &&
+          (c.auth as { mcp_server_url?: string }).mcp_server_url === mcpServerUrl
+        ) {
+          existingCredentialId = c.id;
+          break;
+        }
+      }
+    } catch (err) {
+      log(`  · credential list failed (${(err as Error).message}); proceeding to create`);
+    }
+  }
+
+  if (existingCredentialId) {
+    if (force) {
+      await client.beta.vaults.credentials.update(existingCredentialId, {
+        vault_id: vaultId,
+        auth: { type: "static_bearer", token: bearerToken },
+      });
+      log(`  + rotated credential token (--force) id=${existingCredentialId}`);
+    } else {
+      log(`  · credential for ${mcpServerUrl} already exists — leaving token alone`);
+    }
+  } else {
+    const cred = await client.beta.vaults.credentials.create(vaultId, {
+      auth: {
+        type: "static_bearer",
+        token: bearerToken,
+        mcp_server_url: mcpServerUrl,
+      },
+    });
+    log(`  + added static-bearer credential id=${cred.id} for ${mcpServerUrl}`);
+  }
+
+  return vaultId;
 }
 
 // ─── Validation helpers ──────────────────────────────────────────────────────
@@ -462,6 +570,26 @@ export async function runClaudeManagedSetupFlow(
   const agent: BetaManagedAgentsAgent = await client.beta.agents.create(agentParams);
   log(`  + agent id=${agent.id}`);
 
+  // 3b. Upsert MCP vault + static-bearer credential when MCP is enabled.
+  // Anthropic's managed sandbox refuses to call our `/mcp` endpoint until a
+  // matching vault credential exists. Without this step the operator would
+  // have to configure the vault manually via the Anthropic dashboard — see
+  // DES-279 in the QA report (`thoughts/taras/qa/2026-04-29-…`) for context.
+  let mcpVaultId: string | null = null;
+  if (mcpServer) {
+    log("Upserting Anthropic MCP vault + static-bearer credential ...");
+    try {
+      mcpVaultId = await upsertMcpVault(client, mcpServer.url, config.apiKey, config.force, log);
+    } catch (err) {
+      log(`  · MCP vault upsert failed: ${(err as Error).message}`);
+      log(
+        "  · The agent was created but MCP tool calls will fail with " +
+          "`mcp_authentication_failed_error` until a vault credential exists. " +
+          "Re-run with --force, or configure the vault manually via the Anthropic dashboard.",
+      );
+    }
+  }
+
   // 4. Persist IDs to swarm_config.
   log("Persisting IDs to swarm_config via PUT /api/config ...");
   await upsert(config.apiUrl, config.apiKey, {
@@ -482,7 +610,20 @@ export async function runClaudeManagedSetupFlow(
     isSecret: true,
     description: "Anthropic API key for claude-managed provider",
   });
-  log("  + persisted managed_agent_id, managed_environment_id, anthropic_api_key");
+  if (mcpVaultId) {
+    await upsert(config.apiUrl, config.apiKey, {
+      key: CONFIG_KEY_MCP_VAULT_ID,
+      value: mcpVaultId,
+      isSecret: false,
+      description:
+        "Anthropic vault id holding the static-bearer credential for the swarm MCP server",
+    });
+    log(
+      `  + persisted managed_agent_id, managed_environment_id, anthropic_api_key, managed_mcp_vault_id`,
+    );
+  } else {
+    log("  + persisted managed_agent_id, managed_environment_id, anthropic_api_key");
+  }
 
   log("");
   log("Done. Add the following to your .env if you prefer env-based config:");
@@ -490,6 +631,7 @@ export async function runClaudeManagedSetupFlow(
   log(`  ANTHROPIC_API_KEY=<the key you just provided>`);
   log(`  MANAGED_AGENT_ID=${agent.id}`);
   log(`  MANAGED_ENVIRONMENT_ID=${env.id}`);
+  if (mcpVaultId) log(`  MANAGED_MCP_VAULT_ID=${mcpVaultId}`);
   log("");
   log(
     "Or skip the .env entries — deployed workers automatically restore these from " +
@@ -501,6 +643,7 @@ export async function runClaudeManagedSetupFlow(
     environmentId: env.id,
     skillIds,
     alreadyConfigured: false,
+    mcpVaultId,
   };
 }
 

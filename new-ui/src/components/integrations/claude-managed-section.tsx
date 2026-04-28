@@ -32,7 +32,7 @@ interface ClaudeManagedSectionProps {
   envPresence: EnvPresence;
 }
 
-const SETUP_SNIPPET = "bun run src/cli.tsx claude-managed-setup";
+const SETUP_SNIPPET = "bunx @desplega.ai/agent-swarm claude-managed-setup";
 
 export function ClaudeManagedSection({ def, configs, envPresence }: ClaudeManagedSectionProps) {
   const status = deriveIntegrationStatus(def, configs, envPresence);

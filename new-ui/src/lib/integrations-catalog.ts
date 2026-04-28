@@ -591,7 +591,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
         type: "text",
         required: true,
         placeholder: "agent_...",
-        helpText: "From `bun run src/cli.tsx claude-managed-setup`.",
+        helpText: "From `bunx @desplega.ai/agent-swarm claude-managed-setup`.",
         affectsRestart: true,
       },
       {
@@ -600,7 +600,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
         type: "text",
         required: true,
         placeholder: "env_...",
-        helpText: "From `bun run src/cli.tsx claude-managed-setup`.",
+        helpText: "From `bunx @desplega.ai/agent-swarm claude-managed-setup`.",
         affectsRestart: true,
       },
       {

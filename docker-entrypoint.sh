@@ -26,7 +26,8 @@ elif [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
     if [ -n "$API_KEY" ] && [ -n "$MCP_BASE_URL" ]; then
         for KEY_TUPLE in "ANTHROPIC_API_KEY:anthropic_api_key" \
                          "MANAGED_AGENT_ID:managed_agent_id" \
-                         "MANAGED_ENVIRONMENT_ID:managed_environment_id"; do
+                         "MANAGED_ENVIRONMENT_ID:managed_environment_id" \
+                         "MANAGED_MCP_VAULT_ID:managed_mcp_vault_id"; do
             ENV_VAR="${KEY_TUPLE%%:*}"
             CONFIG_KEY="${KEY_TUPLE##*:}"
             # Only fill if the env var isn't already set externally.

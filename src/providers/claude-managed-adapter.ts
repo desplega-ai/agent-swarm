@@ -822,8 +822,17 @@ export class ClaudeManagedAdapter implements ProviderAdapter {
           },
         ];
       }
-      if (process.env.MANAGED_GITHUB_VAULT_ID) {
-        createParams.vault_ids = [process.env.MANAGED_GITHUB_VAULT_ID];
+      // Multiple vaults can be linked to a single session — `vault_ids` is an
+      // array. The MCP vault holds the static-bearer credential for our
+      // `/mcp` endpoint (provisioned by `claude-managed-setup`); the GitHub
+      // vault holds the credential used by the `github_repository` resource.
+      // Either or both may be unset.
+      const vaultIds = [
+        process.env.MANAGED_MCP_VAULT_ID,
+        process.env.MANAGED_GITHUB_VAULT_ID,
+      ].filter((v): v is string => !!v && v.length > 0);
+      if (vaultIds.length > 0) {
+        createParams.vault_ids = Array.from(new Set(vaultIds));
       }
       const created = await Promise.resolve(this.client.beta.sessions.create(createParams));
       sessionId = created.id;
