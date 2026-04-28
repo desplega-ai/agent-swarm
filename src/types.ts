@@ -68,6 +68,15 @@ export const AgentTaskSourceSchema = z.enum([
 ]);
 export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 
+// ---------------------------------------------------------------------------
+// Harness Provider
+// ---------------------------------------------------------------------------
+// String identifiers accepted by `HARNESS_PROVIDER` and the
+// `createProviderAdapter` factory in `src/providers/index.ts`. Keep this in
+// sync with the factory's switch and the unknown-provider error message.
+export const HarnessProviderSchema = z.enum(["claude", "pi", "codex", "claude-managed"]);
+export type HarnessProvider = z.infer<typeof HarnessProviderSchema>;
+
 export const AgentTaskSchema = z.object({
   id: z.uuid(),
   agentId: z.uuid().nullable(), // Nullable for unassigned tasks
