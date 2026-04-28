@@ -36,7 +36,7 @@ describe("ClaudeManagedAdapter (Phase 1 skeleton)", () => {
 
   test("factory still rejects unknown providers and lists claude-managed", () => {
     expect(() => createProviderAdapter("nope")).toThrow(
-      'Unknown HARNESS_PROVIDER: "nope". Supported: claude, pi, codex, claude-managed',
+      'Unknown HARNESS_PROVIDER: "nope". Supported: claude, pi, codex, devin, claude-managed',
     );
   });
 
