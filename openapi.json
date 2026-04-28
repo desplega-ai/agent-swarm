@@ -947,6 +947,295 @@
         }
       }
     },
+    "/api/budgets": {
+      "get": {
+        "summary": "List all configured budget rows",
+        "tags": [
+          "Budgets"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Budget list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "budgets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "scope": {
+                            "type": "string",
+                            "enum": [
+                              "global",
+                              "agent"
+                            ]
+                          },
+                          "scopeId": {
+                            "type": "string"
+                          },
+                          "dailyBudgetUsd": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "createdAt": {
+                            "type": "number"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "scope",
+                          "scopeId",
+                          "dailyBudgetUsd",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "budgets"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/budgets/{scope}/{scopeId}": {
+      "get": {
+        "summary": "Get a single budget row",
+        "tags": [
+          "Budgets"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "global",
+                "agent"
+              ]
+            },
+            "required": true,
+            "name": "scope",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 255,
+              "description": "Scope identifier — empty string for global, agent UUID otherwise"
+            },
+            "required": true,
+            "description": "Scope identifier — empty string for global, agent UUID otherwise",
+            "name": "scopeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Budget row",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "global",
+                        "agent"
+                      ]
+                    },
+                    "scopeId": {
+                      "type": "string"
+                    },
+                    "dailyBudgetUsd": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "createdAt": {
+                      "type": "number"
+                    },
+                    "lastUpdatedAt": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "scopeId",
+                    "dailyBudgetUsd",
+                    "createdAt",
+                    "lastUpdatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Budget not configured"
+          }
+        }
+      },
+      "put": {
+        "summary": "Create or update a budget row",
+        "tags": [
+          "Budgets"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "global",
+                "agent"
+              ]
+            },
+            "required": true,
+            "name": "scope",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 255,
+              "description": "Scope identifier — empty string for global, agent UUID otherwise"
+            },
+            "required": true,
+            "description": "Scope identifier — empty string for global, agent UUID otherwise",
+            "name": "scopeId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "dailyBudgetUsd": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "dailyBudgetUsd"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Budget upserted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "global",
+                        "agent"
+                      ]
+                    },
+                    "scopeId": {
+                      "type": "string"
+                    },
+                    "dailyBudgetUsd": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "createdAt": {
+                      "type": "number"
+                    },
+                    "lastUpdatedAt": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "scopeId",
+                    "dailyBudgetUsd",
+                    "createdAt",
+                    "lastUpdatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a budget row",
+        "tags": [
+          "Budgets"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "global",
+                "agent"
+              ]
+            },
+            "required": true,
+            "name": "scope",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 255,
+              "description": "Scope identifier — empty string for global, agent UUID otherwise"
+            },
+            "required": true,
+            "description": "Scope identifier — empty string for global, agent UUID otherwise",
+            "name": "scopeId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Budget deleted"
+          },
+          "404": {
+            "description": "Budget not configured"
+          }
+        }
+      }
+    },
     "/api/config/resolved": {
       "get": {
         "summary": "Get resolved config (merged global + agent + repo scopes)",
@@ -2993,6 +3282,449 @@
         }
       }
     },
+    "/api/pricing": {
+      "get": {
+        "summary": "List every pricing row across all providers",
+        "tags": [
+          "Pricing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pricing rows",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string",
+                            "enum": [
+                              "claude",
+                              "codex",
+                              "pi"
+                            ]
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "tokenClass": {
+                            "type": "string",
+                            "enum": [
+                              "input",
+                              "cached_input",
+                              "output"
+                            ]
+                          },
+                          "effectiveFrom": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "pricePerMillionUsd": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "createdAt": {
+                            "type": "number"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "model",
+                          "tokenClass",
+                          "effectiveFrom",
+                          "pricePerMillionUsd",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "rows"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/pricing/{provider}/{model}/{tokenClass}": {
+      "get": {
+        "summary": "List pricing history for a (provider, model, tokenClass) triple",
+        "tags": [
+          "Pricing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "codex",
+                "pi"
+              ]
+            },
+            "required": true,
+            "name": "provider",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "model",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "input",
+                "cached_input",
+                "output"
+              ]
+            },
+            "required": true,
+            "name": "tokenClass",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pricing rows (latest first)"
+          }
+        }
+      },
+      "post": {
+        "summary": "Append a new pricing row",
+        "tags": [
+          "Pricing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "codex",
+                "pi"
+              ]
+            },
+            "required": true,
+            "name": "provider",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "model",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "input",
+                "cached_input",
+                "output"
+              ]
+            },
+            "required": true,
+            "name": "tokenClass",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "pricePerMillionUsd": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "effectiveFrom": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "pricePerMillionUsd"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Pricing row inserted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "provider": {
+                      "type": "string",
+                      "enum": [
+                        "claude",
+                        "codex",
+                        "pi"
+                      ]
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "tokenClass": {
+                      "type": "string",
+                      "enum": [
+                        "input",
+                        "cached_input",
+                        "output"
+                      ]
+                    },
+                    "effectiveFrom": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "pricePerMillionUsd": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "createdAt": {
+                      "type": "number"
+                    },
+                    "lastUpdatedAt": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "provider",
+                    "model",
+                    "tokenClass",
+                    "effectiveFrom",
+                    "pricePerMillionUsd",
+                    "createdAt",
+                    "lastUpdatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error"
+          },
+          "409": {
+            "description": "Duplicate (provider, model, tokenClass, effectiveFrom)"
+          }
+        }
+      }
+    },
+    "/api/pricing/{provider}/{model}/{tokenClass}/active": {
+      "get": {
+        "summary": "Get the currently active pricing row",
+        "tags": [
+          "Pricing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "codex",
+                "pi"
+              ]
+            },
+            "required": true,
+            "name": "provider",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "model",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "input",
+                "cached_input",
+                "output"
+              ]
+            },
+            "required": true,
+            "name": "tokenClass",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active pricing row",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "provider": {
+                      "type": "string",
+                      "enum": [
+                        "claude",
+                        "codex",
+                        "pi"
+                      ]
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "tokenClass": {
+                      "type": "string",
+                      "enum": [
+                        "input",
+                        "cached_input",
+                        "output"
+                      ]
+                    },
+                    "effectiveFrom": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "pricePerMillionUsd": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "createdAt": {
+                      "type": "number"
+                    },
+                    "lastUpdatedAt": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "provider",
+                    "model",
+                    "tokenClass",
+                    "effectiveFrom",
+                    "pricePerMillionUsd",
+                    "createdAt",
+                    "lastUpdatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No pricing row in effect"
+          }
+        }
+      }
+    },
+    "/api/pricing/{provider}/{model}/{tokenClass}/{effectiveFrom}": {
+      "delete": {
+        "summary": "Delete a pricing row (typo correction)",
+        "tags": [
+          "Pricing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "codex",
+                "pi"
+              ]
+            },
+            "required": true,
+            "name": "provider",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "model",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "input",
+                "cached_input",
+                "output"
+              ]
+            },
+            "required": true,
+            "name": "tokenClass",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+$"
+            },
+            "required": true,
+            "name": "effectiveFrom",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Pricing row deleted"
+          },
+          "404": {
+            "description": "Pricing row not found"
+          }
+        }
+      }
+    },
     "/api/repos/{id}": {
       "get": {
         "summary": "Get a repo by ID",
@@ -4149,6 +4881,18 @@
                   },
                   "isError": {
                     "type": "boolean"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex",
+                      "pi"
+                    ]
+                  },
+                  "createdAt": {
+                    "type": "integer",
+                    "minimum": 0
                   }
                 },
                 "required": [

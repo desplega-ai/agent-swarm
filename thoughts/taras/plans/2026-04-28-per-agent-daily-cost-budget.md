@@ -3,12 +3,12 @@ date: 2026-04-28
 author: claude (taras)
 topic: "Per-agent daily cost budget with refusal-at-claim — V1"
 tags: [plan, cost-control, agents, budgets, claim-flow, notifications]
-status: in-progress
+status: completed
 autonomy: critical
 related_brainstorm: thoughts/taras/brainstorms/2026-04-28-per-agent-daily-cost-budget.md
 related_research: thoughts/taras/research/2026-04-28-per-agent-daily-cost-budget.md
 last_updated: 2026-04-28
-last_updated_by: claude (phase-running, phase 5)
+last_updated_by: claude (phase-running, phase 6)
 ---
 
 # Per-Agent Daily Cost Budget (V1) Implementation Plan
@@ -527,19 +527,19 @@ Run `bun run docs:openapi`; commit `openapi.json` AND any regenerated `docs-site
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Lint passes: `bun run lint`
-- [ ] Type-check passes: `bun run tsc:check`
-- [ ] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
-- [ ] New REST tests pass: `bun test src/tests/budgets-routes.test.ts src/tests/pricing-routes.test.ts`
-- [ ] Updated cost tests pass: `bun test src/tests/session-costs.test.ts`
-- [ ] OpenAPI regen produces no spurious diffs: `bun run docs:openapi && git diff --exit-code openapi.json` (after intentional changes are staged)
-- [ ] Full suite green: `bun test`
-- [ ] OpenAPI spec includes the new operations: `jq -e '.paths["/api/budgets"].get and .paths["/api/budgets/{scope}/{scopeId}"].put and .paths["/api/pricing"].get and .paths["/api/pricing/{provider}/{model}/{tokenClass}"].get and .paths["/api/pricing/{provider}/{model}/{tokenClass}/active"].get' openapi.json` exits 0
-- [ ] OpenAPI spec validates as well-formed OpenAPI 3.x: `bunx @redocly/cli@latest lint openapi.json` (or `bunx @apidevtools/swagger-cli validate openapi.json`) exits 0
-- [ ] Spec request/response schemas match the new Zod schemas: small node script in `scripts/check-openapi-budgets.ts` parses `openapi.json` and asserts the `BudgetSchema` / `PricingRowSchema` shapes are present in `components.schemas` (or wherever the route factory emits them). Exit 0 = pass.
+- [x] Lint passes: `bun run lint`
+- [x] Type-check passes: `bun run tsc:check`
+- [x] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] New REST tests pass: `bun test src/tests/budgets-routes.test.ts src/tests/pricing-routes.test.ts`
+- [x] Updated cost tests pass: `bun test src/tests/session-costs.test.ts` (and new `src/tests/session-costs-codex-recompute.test.ts`)
+- [x] OpenAPI regen produces no spurious diffs: `bun run docs:openapi && git diff --exit-code openapi.json` (after intentional changes are staged)
+- [x] Full suite green: `bun test` (3005 pass / 0 fail)
+- [x] OpenAPI spec includes the new operations: `jq -e '.paths["/api/budgets"].get and .paths["/api/budgets/{scope}/{scopeId}"].put and .paths["/api/pricing"].get and .paths["/api/pricing/{provider}/{model}/{tokenClass}"].get and .paths["/api/pricing/{provider}/{model}/{tokenClass}/active"].get' openapi.json` exits 0
+- [x] OpenAPI spec validates as well-formed OpenAPI 3.x: `bunx @apidevtools/swagger-cli validate openapi.json` exits 0 (`redocly lint` reports 12 PRE-EXISTING errors unrelated to Phase 6 — they exist on `main`)
+- [x] Spec request/response schemas match the new Zod schemas: `bun scripts/check-openapi-budgets.ts` exits 0
 
 #### Automated QA:
-- [ ] curl walkthrough committed to plan (or `LOCAL_TESTING.md`):
+- [x] curl walkthrough committed to plan (or `LOCAL_TESTING.md`):
   ```bash
   # Set a per-agent budget
   curl -X PUT http://localhost:3013/api/budgets/agent/<agent_id> \

@@ -365,6 +365,11 @@ export const AgentLogEventTypeSchema = z.enum([
   "service_registered",
   "service_unregistered",
   "service_status_change",
+  // Phase 6: budget / pricing operator-mutation audit log events
+  "budget.upserted",
+  "budget.deleted",
+  "pricing.inserted",
+  "pricing.deleted",
 ]);
 
 export const AgentLogSchema = z.object({
@@ -396,6 +401,9 @@ export const SessionLogSchema = z.object({
 export type SessionLog = z.infer<typeof SessionLogSchema>;
 
 // Session Cost Types (aggregated cost data per session)
+export const SessionCostSourceSchema = z.enum(["harness", "pricing-table"]);
+export type SessionCostSource = z.infer<typeof SessionCostSourceSchema>;
+
 export const SessionCostSchema = z.object({
   id: z.uuid(),
   sessionId: z.string(),
@@ -410,6 +418,10 @@ export const SessionCostSchema = z.object({
   numTurns: z.number().int().min(1),
   model: z.string(),
   isError: z.boolean().default(false),
+  // Phase 6: where the recorded totalCostUsd came from. New rows write the
+  // actual source ('pricing-table' when the API recomputed Codex USD from DB
+  // pricing rows, 'harness' otherwise). Defaults to 'harness' for back-compat.
+  costSource: SessionCostSourceSchema.default("harness"),
   createdAt: z.iso.datetime(),
 });
 

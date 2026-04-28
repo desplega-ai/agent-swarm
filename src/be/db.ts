@@ -33,6 +33,9 @@ import type {
   McpServerScope,
   McpServerTransport,
   McpServerWithInstallInfo,
+  PricingProvider,
+  PricingRow,
+  PricingTokenClass,
   PromptTemplate,
   PromptTemplateHistory,
   RepoGuidelines,
@@ -40,6 +43,7 @@ import type {
   Service,
   ServiceStatus,
   SessionCost,
+  SessionCostSource,
   SessionLog,
   Skill,
   SkillScope,
@@ -1913,6 +1917,14 @@ export function getLogsByTaskIdChronological(taskId: string): AgentLog[] {
     .map(rowToAgentLog);
 }
 
+/**
+ * Phase 6: list all log rows of a given eventType, newest first. Used by the
+ * REST audit-log tests to assert mutation rows landed.
+ */
+export function getLogsByEventType(eventType: AgentLogEventType): AgentLog[] {
+  return logQueries.getByEventType().all(eventType).map(rowToAgentLog);
+}
+
 export function getAllLogs(limit?: number): AgentLog[] {
   if (limit) {
     return getDb()
@@ -3482,6 +3494,7 @@ type SessionCostRow = {
   numTurns: number;
   model: string;
   isError: number;
+  costSource: string;
   createdAt: string;
 };
 
@@ -3500,6 +3513,7 @@ function rowToSessionCost(row: SessionCostRow): SessionCost {
     numTurns: row.numTurns,
     model: row.model,
     isError: row.isError === 1,
+    costSource: (row.costSource as SessionCostSource) ?? "harness",
     createdAt: row.createdAt,
   };
 }
@@ -3522,10 +3536,11 @@ const sessionCostQueries = {
         number,
         string,
         number,
+        string,
       ]
     >(
-      `INSERT INTO session_costs (id, sessionId, taskId, agentId, totalCostUsd, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, durationMs, numTurns, model, isError, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+      `INSERT INTO session_costs (id, sessionId, taskId, agentId, totalCostUsd, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, durationMs, numTurns, model, isError, costSource, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
     ),
 
   getByTaskId: () =>
@@ -3557,10 +3572,19 @@ export interface CreateSessionCostInput {
   numTurns: number;
   model: string;
   isError?: boolean;
+  /**
+   * Phase 6: where the recorded `totalCostUsd` came from.
+   *  - 'harness'        — value reported by the harness as-is (default).
+   *  - 'pricing-table'  — value recomputed by the API from `pricing` rows
+   *                       (Codex when DB pricing rows exist for all three
+   *                       token classes).
+   */
+  costSource?: SessionCostSource;
 }
 
 export function createSessionCost(input: CreateSessionCostInput): SessionCost {
   const id = crypto.randomUUID();
+  const costSource: SessionCostSource = input.costSource ?? "harness";
   sessionCostQueries
     .insert()
     .run(
@@ -3577,6 +3601,7 @@ export function createSessionCost(input: CreateSessionCostInput): SessionCost {
       input.numTurns,
       input.model,
       input.isError ? 1 : 0,
+      costSource,
     );
 
   return {
@@ -3593,6 +3618,7 @@ export function createSessionCost(input: CreateSessionCostInput): SessionCost {
     numTurns: input.numTurns,
     model: input.model,
     isError: input.isError ?? false,
+    costSource,
     createdAt: new Date().toISOString(),
   };
 }
@@ -8146,6 +8172,195 @@ export function getBudget(scope: BudgetScope, scopeId: string): Budget | null {
     )
     .get(scope, scopeId);
   return row ? rowToBudget(row) : null;
+}
+
+/**
+ * Phase 6: list every budget row in the system. Used by `GET /api/budgets`.
+ * Order is `(scope, scope_id)` for stable output across calls.
+ */
+export function getBudgets(): Budget[] {
+  return getDb()
+    .prepare<BudgetRow, []>(
+      "SELECT scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt FROM budgets ORDER BY scope, scope_id",
+    )
+    .all()
+    .map(rowToBudget);
+}
+
+/**
+ * Phase 6: upsert a budget row. Creates the row if `(scope, scopeId)` does not
+ * exist, otherwise updates `daily_budget_usd` and `lastUpdatedAt`. Returns the
+ * resulting row in both cases.
+ */
+export function upsertBudget(scope: BudgetScope, scopeId: string, dailyBudgetUsd: number): Budget {
+  const now = Date.now();
+  getDb()
+    .prepare(
+      `INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(scope, scope_id) DO UPDATE SET
+         daily_budget_usd = excluded.daily_budget_usd,
+         lastUpdatedAt = excluded.lastUpdatedAt`,
+    )
+    .run(scope, scopeId, dailyBudgetUsd, now, now);
+
+  const updated = getBudget(scope, scopeId);
+  if (!updated) {
+    throw new Error(
+      `upsertBudget: row missing after insert for (scope=${scope}, scopeId=${scopeId})`,
+    );
+  }
+  return updated;
+}
+
+/**
+ * Phase 6: delete a budget row. Returns `true` if a row was deleted, `false`
+ * if `(scope, scopeId)` did not exist.
+ */
+export function deleteBudget(scope: BudgetScope, scopeId: string): boolean {
+  const result = getDb()
+    .prepare("DELETE FROM budgets WHERE scope = ? AND scope_id = ?")
+    .run(scope, scopeId);
+  return result.changes > 0;
+}
+
+// ============================================================================
+// Pricing rows (Phase 6 — append-only price book)
+// ----------------------------------------------------------------------------
+// `pricing` uses INTEGER epoch-ms for `effective_from`, `createdAt`,
+// `lastUpdatedAt` (see migration 044). Append-only by design: operators add a
+// new row with a later `effective_from` rather than mutating an existing row.
+// `getActivePricingRow` resolves the row with the largest
+// `effective_from <= atEpochMs`, which is the correct "what price was in
+// effect at time T" semantics regardless of insertion order.
+// ============================================================================
+
+interface PricingRowDb {
+  provider: string;
+  model: string;
+  token_class: string;
+  effective_from: number;
+  price_per_million_usd: number;
+  createdAt: number;
+  lastUpdatedAt: number;
+}
+
+function rowToPricingRow(row: PricingRowDb): PricingRow {
+  return {
+    provider: row.provider as PricingProvider,
+    model: row.model,
+    tokenClass: row.token_class as PricingTokenClass,
+    effectiveFrom: row.effective_from,
+    pricePerMillionUsd: row.price_per_million_usd,
+    createdAt: row.createdAt,
+    lastUpdatedAt: row.lastUpdatedAt,
+  };
+}
+
+/** Phase 6: list every pricing row, latest-effective first. */
+export function getAllPricingRows(): PricingRow[] {
+  return getDb()
+    .prepare<PricingRowDb, []>(
+      "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing ORDER BY provider, model, token_class, effective_from DESC",
+    )
+    .all()
+    .map(rowToPricingRow);
+}
+
+/**
+ * Phase 6: list every pricing row for a given (provider, model, tokenClass)
+ * triple. Order is `effective_from DESC` so newest is first.
+ */
+export function getPricingRows(
+  provider: PricingProvider,
+  model: string,
+  tokenClass: PricingTokenClass,
+): PricingRow[] {
+  return getDb()
+    .prepare<PricingRowDb, [string, string, string]>(
+      "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing WHERE provider = ? AND model = ? AND token_class = ? ORDER BY effective_from DESC",
+    )
+    .all(provider, model, tokenClass)
+    .map(rowToPricingRow);
+}
+
+/**
+ * Phase 6: resolve "what price was in effect at time `atEpochMs`" — the row
+ * with the largest `effective_from <= atEpochMs`. Returns null when no row
+ * matches (model unseeded for that triple at that time). Backed by the
+ * `idx_pricing_lookup` index from migration 044.
+ */
+export function getActivePricingRow(
+  provider: PricingProvider,
+  model: string,
+  tokenClass: PricingTokenClass,
+  atEpochMs: number,
+): PricingRow | null {
+  const row = getDb()
+    .prepare<PricingRowDb, [string, string, string, number]>(
+      "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing WHERE provider = ? AND model = ? AND token_class = ? AND effective_from <= ? ORDER BY effective_from DESC LIMIT 1",
+    )
+    .get(provider, model, tokenClass, atEpochMs);
+  return row ? rowToPricingRow(row) : null;
+}
+
+export interface InsertPricingRowInput {
+  provider: PricingProvider;
+  model: string;
+  tokenClass: PricingTokenClass;
+  effectiveFrom: number;
+  pricePerMillionUsd: number;
+}
+
+/**
+ * Phase 6: insert a new pricing row. Throws on PK collision
+ * `(provider, model, token_class, effective_from)` — caller (the HTTP route)
+ * translates that into a 409.
+ */
+export function insertPricingRow(input: InsertPricingRowInput): PricingRow {
+  const now = Date.now();
+  getDb()
+    .prepare(
+      `INSERT INTO pricing (provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      input.provider,
+      input.model,
+      input.tokenClass,
+      input.effectiveFrom,
+      input.pricePerMillionUsd,
+      now,
+      now,
+    );
+  return {
+    provider: input.provider,
+    model: input.model,
+    tokenClass: input.tokenClass,
+    effectiveFrom: input.effectiveFrom,
+    pricePerMillionUsd: input.pricePerMillionUsd,
+    createdAt: now,
+    lastUpdatedAt: now,
+  };
+}
+
+/**
+ * Phase 6: delete a pricing row. Returns true if a row was deleted, false if
+ * the row did not exist. Discouraged operationally — historical session_costs
+ * are not retroactively recomputed — but allowed for typo correction.
+ */
+export function deletePricingRow(
+  provider: PricingProvider,
+  model: string,
+  tokenClass: PricingTokenClass,
+  effectiveFrom: number,
+): boolean {
+  const result = getDb()
+    .prepare(
+      "DELETE FROM pricing WHERE provider = ? AND model = ? AND token_class = ? AND effective_from = ?",
+    )
+    .run(provider, model, tokenClass, effectiveFrom);
+  return result.changes > 0;
 }
 
 /**

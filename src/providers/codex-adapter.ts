@@ -408,6 +408,7 @@ class CodexSession implements ProviderSession {
       numTurns: this.numTurns,
       model: this.resolvedModel,
       isError,
+      provider: "codex",
     };
   }
 
