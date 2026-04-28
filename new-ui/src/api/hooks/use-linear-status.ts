@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getConfig } from "@/lib/config";
 
 // ---------------------------------------------------------------------------
@@ -30,8 +30,15 @@ export interface LinearTrackerStatus {
   tokenExpiry: number | null;
   scope: string | null;
   webhookUrl: string;
+  /** Computed callback URL — paste into Linear app's Callback URLs. */
+  redirectUri: string;
   /** True when `GET /status` returned 503 — Linear isn't enabled on the server. */
   notConfigured?: boolean;
+}
+
+export interface LinearDisconnectResult {
+  disconnected: boolean;
+  revoked: boolean;
 }
 
 function getBaseUrl(): string {
@@ -65,6 +72,7 @@ async function fetchLinearStatus(): Promise<LinearTrackerStatus> {
       tokenExpiry: null,
       scope: null,
       webhookUrl: "",
+      redirectUri: "",
       notConfigured: true,
     };
   }
@@ -87,7 +95,32 @@ export function useLinearTrackerStatus() {
   });
 }
 
-/** Absolute authorize URL — callers set `window.location.href = buildLinearAuthorizeUrl()`. */
+/** Absolute authorize URL — callers open it in a new tab via `window.open`. */
 export function buildLinearAuthorizeUrl(): string {
   return `${getBaseUrl()}/api/trackers/linear/authorize`;
+}
+
+/**
+ * Mutation hook for `DELETE /api/trackers/linear/disconnect`. On success, the
+ * status query is invalidated so the card immediately reflects the
+ * disconnected state.
+ */
+export function useDisconnectLinear() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<LinearDisconnectResult> => {
+      const res = await fetch(`${getBaseUrl()}/api/trackers/linear/disconnect`, {
+        method: "DELETE",
+        headers: getHeaders(),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Disconnect failed (${res.status}): ${text}`);
+      }
+      return (await res.json()) as LinearDisconnectResult;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["linear", "tracker", "status"] });
+    },
+  });
 }

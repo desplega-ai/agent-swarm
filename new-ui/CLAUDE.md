@@ -126,3 +126,11 @@ Use `<Streamdown>{text}</Streamdown>` from `streamdown` for **all** markdown ren
 - **Prod:** configure `apiUrl` in the in-app config panel, or pass `?apiUrl=...&apiKey=...` in the URL.
 
 </important>
+
+<important if="you are preparing a PR that touches new-ui/, or running automated UI tests against new-ui">
+
+## qa-use & PR screenshot requirement
+
+Use `qa-use` for browser automation: `/qa-use:test-run`, `/qa-use:verify`, `/qa-use:explore`. Any PR touching `new-ui/` MUST include a `qa-use` session with screenshots of the changes running locally — enforced by the merge gate. Port-conflict handling: [../LOCAL_TESTING.md § Dashboard UI](../LOCAL_TESTING.md#dashboard-ui).
+
+</important>

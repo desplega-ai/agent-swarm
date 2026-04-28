@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   agentmailContextKey,
+  buildJiraContextKey,
   githubContextKey,
   gitlabContextKey,
   linearContextKey,
@@ -37,6 +38,10 @@ describe("context-key builders", () => {
     expect(linearContextKey({ issueIdentifier: "DES-42" })).toBe("task:trackers:linear:DES-42");
   });
 
+  test("buildJiraContextKey preserves identifier case", () => {
+    expect(buildJiraContextKey("PROJ-123")).toBe("task:trackers:jira:PROJ-123");
+  });
+
   test("scheduleContextKey builds expected format", () => {
     expect(scheduleContextKey({ scheduleId: "sched-uuid" })).toBe("task:schedule:sched-uuid");
   });
@@ -71,10 +76,15 @@ describe("context-key separator safety", () => {
     expect(() => linearContextKey({ issueIdentifier: "DES:42" })).toThrow(/must not contain/);
   });
 
+  test("buildJiraContextKey throws when identifier contains ':'", () => {
+    expect(() => buildJiraContextKey("PROJ:123")).toThrow(/must not contain/);
+  });
+
   test("throws on empty values", () => {
     expect(() => slackContextKey({ channelId: "", threadTs: "1" })).toThrow(/non-empty/);
     expect(() => agentmailContextKey({ threadId: "" })).toThrow(/non-empty/);
     expect(() => linearContextKey({ issueIdentifier: "" })).toThrow(/non-empty/);
+    expect(() => buildJiraContextKey("")).toThrow(/non-empty/);
   });
 
   test("githubContextKey validates kind", () => {
@@ -144,6 +154,15 @@ describe("parseContextKey", () => {
       family: "trackers",
       subFamily: "linear",
       parts: { issueIdentifier: "DES-42" },
+    });
+  });
+
+  test("round-trips jira keys with case preserved", () => {
+    const key = buildJiraContextKey("PROJ-123");
+    expect(parseContextKey(key)).toEqual({
+      family: "trackers",
+      subFamily: "jira",
+      parts: { issueIdentifier: "PROJ-123" },
     });
   });
 

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.70.0",
+    "version": "1.71.2",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -6262,6 +6262,210 @@
         }
       }
     },
+    "/api/trackers/jira/authorize": {
+      "get": {
+        "summary": "Redirect to Atlassian OAuth consent screen",
+        "tags": [
+          "Trackers"
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to Atlassian OAuth"
+          },
+          "500": {
+            "description": "Failed to generate authorization URL"
+          },
+          "503": {
+            "description": "Jira integration not configured"
+          }
+        }
+      }
+    },
+    "/api/trackers/jira/callback": {
+      "get": {
+        "summary": "Handle Jira OAuth callback (resolves cloudId via accessible-resources)",
+        "tags": [
+          "Trackers"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "code",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "state",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OAuth complete"
+          },
+          "400": {
+            "description": "Invalid state or code"
+          },
+          "500": {
+            "description": "Token exchange or accessible-resources fetch failed"
+          }
+        }
+      }
+    },
+    "/api/trackers/jira/status": {
+      "get": {
+        "summary": "Jira connection status, cloudId/siteUrl, token expiry, expected webhook URL, scope/token-config flags",
+        "tags": [
+          "Trackers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Connection status"
+          },
+          "503": {
+            "description": "Jira integration not configured"
+          }
+        }
+      }
+    },
+    "/api/trackers/jira/webhook/{token}": {
+      "post": {
+        "summary": "Receive Jira webhook events (URL-token authenticated). Phase 2 stub — Phase 3 fills in dispatch.",
+        "tags": [
+          "Trackers"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "token",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event accepted"
+          },
+          "401": {
+            "description": "Invalid URL token"
+          },
+          "503": {
+            "description": "Jira webhook handler not configured"
+          }
+        }
+      }
+    },
+    "/api/trackers/jira/webhook-register": {
+      "post": {
+        "summary": "Register a Jira dynamic webhook (admin only)",
+        "tags": [
+          "Trackers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "jqlFilter": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "jqlFilter"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook registered"
+          },
+          "400": {
+            "description": "Invalid jqlFilter"
+          },
+          "503": {
+            "description": "Jira not connected or JIRA_WEBHOOK_TOKEN missing"
+          }
+        }
+      }
+    },
+    "/api/trackers/jira/webhook/{id}": {
+      "delete": {
+        "summary": "Delete a Jira dynamic webhook (admin only)",
+        "tags": [
+          "Trackers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Webhook deleted"
+          },
+          "400": {
+            "description": "Invalid webhook id"
+          },
+          "503": {
+            "description": "Jira not connected"
+          }
+        }
+      }
+    },
+    "/api/trackers/jira/disconnect": {
+      "delete": {
+        "summary": "Fully disconnect Jira: delete all webhooks, drop tokens, clear metadata",
+        "tags": [
+          "Trackers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Disconnected"
+          },
+          "503": {
+            "description": "Jira not configured"
+          }
+        }
+      }
+    },
     "/api/trackers/linear/authorize": {
       "get": {
         "summary": "Redirect to Linear OAuth consent screen",
@@ -6354,6 +6558,27 @@
           },
           "503": {
             "description": "Linear integration not configured"
+          }
+        }
+      }
+    },
+    "/api/trackers/linear/disconnect": {
+      "delete": {
+        "summary": "Fully disconnect Linear: revoke OAuth grant + drop tokens",
+        "tags": [
+          "Trackers"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Disconnected"
+          },
+          "503": {
+            "description": "Linear not configured"
           }
         }
       }

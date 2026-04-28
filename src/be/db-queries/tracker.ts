@@ -41,6 +41,75 @@ export function getTrackerSyncByExternalId(
   return row ? normalizeTrackerSync(row) : null;
 }
 
+/**
+ * Idempotent UNIQUE-gated insert into `tracker_sync`. Returns
+ * `{ inserted: true, sync }` when a fresh row was created, or
+ * `{ inserted: false, sync }` when the `(provider, entityType, externalId)`
+ * tuple already had a row. Used by inbound webhook handlers (currently Jira)
+ * to gate task creation atomically: insert sync row first, only call
+ * `createTaskExtended` if `inserted === true`.
+ *
+ * Note: this is a "claim" insert — `swarmId` is initially the sentinel value
+ * passed in (callers typically pass a placeholder like `""` or a known UUID),
+ * then update it with `updateTrackerSyncSwarmId` once the task is created.
+ */
+export function createTrackerSyncIfAbsent(data: {
+  provider: string;
+  entityType: "task";
+  providerEntityType?: string | null;
+  swarmId: string;
+  externalId: string;
+  externalIdentifier?: string | null;
+  externalUrl?: string | null;
+  lastSyncOrigin?: "swarm" | "external" | null;
+  lastDeliveryId?: string | null;
+  syncDirection?: "inbound" | "outbound" | "bidirectional";
+}): { inserted: boolean; sync: TrackerSync } {
+  const insertResult = getDb()
+    .query(
+      `INSERT INTO tracker_sync (provider, entityType, providerEntityType, swarmId, externalId, externalIdentifier, externalUrl, lastSyncOrigin, lastDeliveryId, syncDirection)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (provider, entityType, externalId) DO NOTHING
+       RETURNING *`,
+    )
+    .get(
+      data.provider,
+      data.entityType,
+      data.providerEntityType ?? null,
+      data.swarmId,
+      data.externalId,
+      data.externalIdentifier ?? null,
+      data.externalUrl ?? null,
+      data.lastSyncOrigin ?? null,
+      data.lastDeliveryId ?? null,
+      data.syncDirection ?? "inbound",
+    ) as TrackerSync | null;
+
+  if (insertResult) {
+    return { inserted: true, sync: normalizeTrackerSync(insertResult) };
+  }
+
+  // Row already existed — fetch it for the caller.
+  const existing = getTrackerSyncByExternalId(data.provider, data.entityType, data.externalId);
+  if (!existing) {
+    // Should be unreachable: ON CONFLICT means a row exists, but this guard
+    // satisfies the type system and surfaces unexpected races loudly.
+    throw new Error(
+      `[tracker] createTrackerSyncIfAbsent: ON CONFLICT fired but no existing row found for (${data.provider}, ${data.entityType}, ${data.externalId})`,
+    );
+  }
+  return { inserted: false, sync: existing };
+}
+
+/**
+ * Update the `swarmId` on an existing `tracker_sync` row. Used after the
+ * idempotent `createTrackerSyncIfAbsent` returned `{ inserted: true }` and
+ * we've now created the swarm task that should own this row.
+ */
+export function updateTrackerSyncSwarmId(id: string, swarmId: string): void {
+  getDb().query("UPDATE tracker_sync SET swarmId = ? WHERE id = ?").run(swarmId, id);
+}
+
 export function createTrackerSync(data: {
   provider: string;
   entityType: "task";
@@ -126,6 +195,46 @@ export function updateTrackerSync(
 
 export function deleteTrackerSync(id: string): void {
   getDb().query("DELETE FROM tracker_sync WHERE id = ?").run(id);
+}
+
+/**
+ * Check whether a `tracker_sync` row exists for `provider` with the given
+ * `lastDeliveryId`. Used by inbound webhook handlers (Jira) to dedupe
+ * deliveries via DB-persisted state instead of a process-local Map.
+ *
+ * Returns `false` when `deliveryId` is falsy/empty so callers don't have to
+ * branch.
+ */
+export function hasTrackerDelivery(
+  provider: string,
+  deliveryId: string | null | undefined,
+): boolean {
+  if (!deliveryId) return false;
+  const row = getDb()
+    .query("SELECT 1 AS hit FROM tracker_sync WHERE provider = ? AND lastDeliveryId = ? LIMIT 1")
+    .get(provider, deliveryId) as { hit: number } | null;
+  return !!row;
+}
+
+/**
+ * Mark a delivery as processed by writing `deliveryId` into the relevant
+ * `tracker_sync` row identified by `(provider, entityType, externalId)`.
+ *
+ * No-op when the row doesn't exist yet (the very first inbound event creates
+ * the row via `createTrackerSyncIfAbsent` — recording delivery happens after
+ * that). Caller is responsible for ordering.
+ */
+export function markTrackerDelivery(
+  provider: string,
+  entityType: "task",
+  externalId: string,
+  deliveryId: string,
+): void {
+  getDb()
+    .query(
+      "UPDATE tracker_sync SET lastDeliveryId = ? WHERE provider = ? AND entityType = ? AND externalId = ?",
+    )
+    .run(deliveryId, provider, entityType, externalId);
 }
 
 export function getAllTrackerSyncs(provider?: string, entityType?: "task"): TrackerSync[] {

@@ -33,3 +33,27 @@ export async function handleLinearCallback(
   if (!config) throw new Error("Linear OAuth not configured");
   return exchangeCode(config, code, state);
 }
+
+/**
+ * Revoke an OAuth access token with Linear. Best-effort — caller should not
+ * abort the disconnect flow if this fails. Linear's revocation endpoint is
+ * `POST https://api.linear.app/oauth/revoke` with the access token in the
+ * Authorization header (per https://developers.linear.app/docs/oauth/authentication).
+ *
+ * Returns true on a 2xx response, false otherwise.
+ */
+export async function revokeLinearToken(accessToken: string): Promise<boolean> {
+  try {
+    const res = await fetch("https://api.linear.app/oauth/revoke", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn(
+      "[Linear] Token revocation failed (best-effort):",
+      err instanceof Error ? err.message : err,
+    );
+    return false;
+  }
+}

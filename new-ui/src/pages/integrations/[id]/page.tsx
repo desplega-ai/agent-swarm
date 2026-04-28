@@ -37,6 +37,7 @@ import type { SwarmConfig } from "@/api/types";
 import { CodexOAuthSection } from "@/components/integrations/codex-oauth-section";
 import { FieldRenderer } from "@/components/integrations/field-renderer";
 import { IntegrationStatusBadge } from "@/components/integrations/integration-status-badge";
+import { JiraOAuthSection } from "@/components/integrations/jira-oauth-section";
 import { LinearOAuthSection } from "@/components/integrations/linear-oauth-section";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
@@ -316,6 +317,7 @@ function IntegrationDetailInner({
   const advancedFields = def.fields.filter((f) => f.advanced === true);
 
   const isLinearOAuth = def.specialFlow === "linear-oauth";
+  const isJiraOAuth = def.specialFlow === "jira-oauth";
   const isCodexCli = def.specialFlow === "codex-cli";
   const isGithub = def.id === "github";
 
@@ -392,6 +394,9 @@ function IntegrationDetailInner({
 
       {/* Linear OAuth connection card — shown ABOVE the generic form. */}
       {isLinearOAuth && <LinearOAuthSection />}
+
+      {/* Jira OAuth connection card — shown ABOVE the generic form. */}
+      {isJiraOAuth && <JiraOAuthSection />}
 
       {/* Body */}
       {isCodexCli ? (

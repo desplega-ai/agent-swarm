@@ -939,7 +939,7 @@ Map a swarm agent to an external tracker user (for assignment sync).
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear |
+| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear', 'jira |
 | `agentId` | `string` | Yes | - | The swarm agent ID |
 | `externalUserId` | `string` | Yes | - | The external user ID in the tracker |
 | `agentName` | `string` | Yes | - | Display name for the agent mapping |
@@ -952,7 +952,7 @@ Link a swarm task to an external tracker issue.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear |
+| `provider` | `string` | Yes | - | Tracker provider (e.g. 'linear', 'jira |
 | `swarmTaskId` | `string` | Yes | - | The swarm task ID to link |
 | `externalId` | `string` | Yes | - | The external issue ID in the tracker |
 | `externalUrl` | `string` | No | - | URL to the external issue |
@@ -965,7 +965,7 @@ Show all tracker sync mappings with their state.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `provider` | `string` | No | - | Filter by provider (e.g. 'linear |
+| `provider` | `string` | No | - | Filter by provider (e.g. 'linear', 'jira |
 | `entityType` | `task` | No | - | Filter by entity type |
 
 ### tracker-status

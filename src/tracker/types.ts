@@ -1,4 +1,4 @@
-export type TrackerProvider = "linear"; // extend as providers are added
+export type TrackerProvider = "linear" | "jira"; // extend as providers are added
 
 export interface OAuthApp {
   id: string;

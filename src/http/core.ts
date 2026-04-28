@@ -11,6 +11,7 @@ import {
   updateAgentStatus,
 } from "../be/db";
 import { initGitHub, resetGitHub } from "../github";
+import { initJira, resetJira } from "../jira";
 import { initLinear, resetLinear } from "../linear";
 import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
@@ -68,6 +69,9 @@ export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfig
 
   resetLinear();
   if (initLinear()) integrations.push("linear");
+
+  resetJira();
+  if (initJira()) integrations.push("jira");
 
   await stopSlackApp();
   await startSlackApp();

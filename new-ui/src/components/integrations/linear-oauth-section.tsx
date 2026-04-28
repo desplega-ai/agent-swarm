@@ -1,17 +1,35 @@
-import { AlertCircle, Check, Copy, ExternalLink, Link as LinkIcon, RefreshCw } from "lucide-react";
+import {
+  AlertCircle,
+  Check,
+  Copy,
+  ExternalLink,
+  Link as LinkIcon,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import { useState } from "react";
-import { buildLinearAuthorizeUrl, useLinearTrackerStatus } from "@/api/hooks/use-linear-status";
+import {
+  buildLinearAuthorizeUrl,
+  useDisconnectLinear,
+  useLinearTrackerStatus,
+} from "@/api/hooks/use-linear-status";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 
 // ---------------------------------------------------------------------------
 // Linear OAuth connection card — renders above the generic field form.
-//
-// Backend shape (confirmed against `src/http/trackers/linear.ts`):
-//   { provider, connected, tokenExpiry, scope, webhookUrl }
-// There is no `workspaces` array and NO disconnect endpoint, so we show a
-// "Re-authenticate" fallback and a note about revoking in Linear workspace
-// settings. See plan Phase 4 + risk mitigation note.
+// Backend shape: see src/http/trackers/linear.ts handleLinearTracker.
 // ---------------------------------------------------------------------------
 
 function formatTokenExpiry(expiry: number | null): string | null {
@@ -24,17 +42,20 @@ function formatTokenExpiry(expiry: number | null): string | null {
   return d.toLocaleString();
 }
 
+type CopyKey = "webhook" | "redirect" | null;
+
 export function LinearOAuthSection() {
   const { data, isLoading, isError, error, refetch, isFetching } = useLinearTrackerStatus();
-  const [copied, setCopied] = useState(false);
+  const disconnect = useDisconnectLinear();
+  const [copied, setCopied] = useState<CopyKey>(null);
 
-  async function handleCopyWebhook() {
-    if (!data?.webhookUrl) return;
+  async function handleCopy(key: Exclude<CopyKey, null>, value: string) {
+    if (!value) return;
     try {
       if (typeof navigator !== "undefined" && navigator.clipboard) {
-        await navigator.clipboard.writeText(data.webhookUrl);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
+        await navigator.clipboard.writeText(value);
+        setCopied(key);
+        setTimeout(() => setCopied((prev) => (prev === key ? null : prev)), 1500);
       }
     } catch {
       // Clipboard unavailable — silent.
@@ -42,7 +63,7 @@ export function LinearOAuthSection() {
   }
 
   function handleAuthorize() {
-    window.location.href = buildLinearAuthorizeUrl();
+    window.open(buildLinearAuthorizeUrl(), "_blank", "noopener,noreferrer");
   }
 
   if (isLoading) {
@@ -68,8 +89,10 @@ export function LinearOAuthSection() {
         <Alert>
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
-            Failed to load Linear connection status:{" "}
-            {error instanceof Error ? error.message : "unknown error"}.
+            <p>
+              Failed to load Linear connection status:{" "}
+              {error instanceof Error ? error.message : "unknown error"}.
+            </p>
           </AlertDescription>
         </Alert>
       </section>
@@ -78,7 +101,6 @@ export function LinearOAuthSection() {
 
   if (!data) return null;
 
-  // 503 from server → integration isn't enabled; prompt the user to fill fields first.
   if (data.notConfigured) {
     return (
       <section className="space-y-3">
@@ -88,17 +110,12 @@ export function LinearOAuthSection() {
         <Alert>
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
-            Linear integration isn't enabled on this server yet. Fill in{" "}
-            <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">LINEAR_CLIENT_ID</code>
-            ,{" "}
-            <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
-              LINEAR_CLIENT_SECRET
-            </code>
-            , and{" "}
-            <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">
-              LINEAR_SIGNING_SECRET
-            </code>{" "}
-            below, save, and restart the API to enable OAuth.
+            <p>
+              Linear integration isn't enabled on this server yet. Fill in{" "}
+              <CodeChip>LINEAR_CLIENT_ID</CodeChip>, <CodeChip>LINEAR_CLIENT_SECRET</CodeChip>, and{" "}
+              <CodeChip>LINEAR_SIGNING_SECRET</CodeChip> below, save, and restart the API to enable
+              OAuth.
+            </p>
           </AlertDescription>
         </Alert>
       </section>
@@ -162,6 +179,37 @@ export function LinearOAuthSection() {
           </div>
         </div>
 
+        {/* Redirect URI row */}
+        {data.redirectUri && (
+          <div className="border-t border-border px-4 py-3 space-y-1.5">
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Redirect URI
+            </div>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 font-mono text-xs bg-muted px-2 py-1 rounded truncate">
+                {data.redirectUri}
+              </code>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => handleCopy("redirect", data.redirectUri)}
+                className="shrink-0"
+              >
+                {copied === "redirect" ? (
+                  <Check className="h-3.5 w-3.5 text-emerald-500" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
+                {copied === "redirect" ? "Copied" : "Copy"}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Paste this into your Linear OAuth app's Callback URLs — must match exactly.
+            </p>
+          </div>
+        )}
+
         {/* Webhook URL row */}
         {data.webhookUrl && (
           <div className="border-t border-border px-4 py-3 space-y-1.5">
@@ -176,15 +224,15 @@ export function LinearOAuthSection() {
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={handleCopyWebhook}
+                onClick={() => handleCopy("webhook", data.webhookUrl)}
                 className="shrink-0"
               >
-                {copied ? (
+                {copied === "webhook" ? (
                   <Check className="h-3.5 w-3.5 text-emerald-500" />
                 ) : (
                   <Copy className="h-3.5 w-3.5" />
                 )}
-                {copied ? "Copied" : "Copy"}
+                {copied === "webhook" ? "Copied" : "Copy"}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
@@ -193,11 +241,40 @@ export function LinearOAuthSection() {
           </div>
         )}
 
-        {/* Footer / refresh + disconnect note */}
+        {/* Footer / refresh + disconnect */}
         <div className="border-t border-border px-4 py-3 flex items-center justify-between gap-3">
-          <p className="text-xs italic text-muted-foreground">
-            Disconnect not available — revoke access in your Linear workspace settings.
-          </p>
+          {data.connected ? (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive-outline"
+                  disabled={disconnect.isPending}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {disconnect.isPending ? "Disconnecting…" : "Disconnect"}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Disconnect Linear?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will revoke the OAuth grant with Linear (best effort) and drop stored
+                    credentials. You'll need to reconnect to use Linear again.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => disconnect.mutate()}>
+                    Disconnect
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          ) : (
+            <span className="text-xs text-muted-foreground italic">Not connected.</span>
+          )}
           <Button
             type="button"
             size="sm"
@@ -211,5 +288,13 @@ export function LinearOAuthSection() {
         </div>
       </div>
     </section>
+  );
+}
+
+function CodeChip({ children }: { children: React.ReactNode }) {
+  return (
+    <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded whitespace-nowrap">
+      {children}
+    </code>
   );
 }

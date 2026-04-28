@@ -1,11 +1,15 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getOAuthTokens } from "../../be/db-queries/oauth";
+import { deleteOAuthTokens, getOAuthTokens } from "../../be/db-queries/oauth";
 import { isLinearEnabled } from "../../linear/app";
-import { getLinearAuthorizationUrl, handleLinearCallback } from "../../linear/oauth";
+import {
+  getLinearAuthorizationUrl,
+  handleLinearCallback,
+  revokeLinearToken,
+} from "../../linear/oauth";
 import { handleLinearWebhook } from "../../linear/webhook";
 import { route } from "../route-def";
-import { parseQueryParams } from "../utils";
+import { deriveApiBaseUrl, parseQueryParams } from "../utils";
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -64,6 +68,21 @@ const linearWebhook = route({
     200: { description: "Event accepted" },
     401: { description: "Invalid signature" },
     503: { description: "Linear integration not configured" },
+  },
+});
+
+// Admin: full disconnect — best-effort revoke the OAuth grant with Linear,
+// then drop stored tokens. Linear webhooks are configured globally on the
+// OAuth app (not per-tenant), so no per-tenant webhook delete is needed.
+const linearDisconnect = route({
+  method: "delete",
+  path: "/api/trackers/linear/disconnect",
+  pattern: ["api", "trackers", "linear", "disconnect"],
+  summary: "Fully disconnect Linear: revoke OAuth grant + drop tokens",
+  tags: ["Trackers"],
+  responses: {
+    200: { description: "Disconnected" },
+    503: { description: "Linear not configured" },
   },
 });
 
@@ -146,7 +165,7 @@ export async function handleLinearTracker(
     }
 
     const tokens = getOAuthTokens("linear");
-    const baseUrl = process.env.MCP_BASE_URL || `http://localhost:${process.env.PORT || "3013"}`;
+    const baseUrl = deriveApiBaseUrl(req);
 
     const status = {
       provider: "linear",
@@ -154,6 +173,7 @@ export async function handleLinearTracker(
       tokenExpiry: tokens?.expiresAt ?? null,
       scope: tokens?.scope ?? null,
       webhookUrl: `${baseUrl}/api/trackers/linear/webhook`,
+      redirectUri: `${baseUrl}/api/trackers/linear/callback`,
     };
 
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -180,6 +200,29 @@ export async function handleLinearTracker(
     const result = await handleLinearWebhook(rawBody, headers);
     res.writeHead(result.status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(result.body));
+    return true;
+  }
+
+  // DELETE /api/trackers/linear/disconnect — full cleanup.
+  if (linearDisconnect.match(req.method, pathSegments)) {
+    if (!isLinearEnabled()) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Linear integration not configured" }));
+      return true;
+    }
+
+    const tokens = getOAuthTokens("linear");
+    let revoked = false;
+    if (tokens?.accessToken) {
+      revoked = await revokeLinearToken(tokens.accessToken);
+    }
+
+    deleteOAuthTokens("linear");
+
+    console.log(`[Linear] Disconnected: revoke=${revoked}, tokens cleared`);
+
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ disconnected: true, revoked }));
     return true;
   }
 

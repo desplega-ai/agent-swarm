@@ -12,7 +12,7 @@ export const registerTrackerMapAgentTool = (server: McpServer) => {
       annotations: { destructiveHint: false },
 
       inputSchema: z.object({
-        provider: z.string().describe("Tracker provider (e.g. 'linear')"),
+        provider: z.string().describe("Tracker provider (e.g. 'linear', 'jira')"),
         agentId: z.string().describe("The swarm agent ID"),
         externalUserId: z.string().describe("The external user ID in the tracker"),
         agentName: z.string().describe("Display name for the agent mapping"),

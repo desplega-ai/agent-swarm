@@ -26,7 +26,7 @@ export const registerTrackerStatusTool = (server: McpServer) => {
       }),
     },
     async (_requestInfo, _meta) => {
-      const providers = ["linear"] as const;
+      const providers = ["linear", "jira"] as const;
       const trackers = providers.map((provider) => {
         const app = getOAuthApp(provider);
         const tokens = getOAuthTokens(provider);

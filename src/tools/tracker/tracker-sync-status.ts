@@ -12,7 +12,7 @@ export const registerTrackerSyncStatusTool = (server: McpServer) => {
       annotations: { readOnlyHint: true },
 
       inputSchema: z.object({
-        provider: z.string().optional().describe("Filter by provider (e.g. 'linear')"),
+        provider: z.string().optional().describe("Filter by provider (e.g. 'linear', 'jira')"),
         entityType: z.enum(["task"]).optional().describe("Filter by entity type"),
       }),
       outputSchema: z.object({

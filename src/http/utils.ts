@@ -58,6 +58,33 @@ export function jsonError(res: ServerResponse, error: string, status = 400) {
 }
 
 /**
+ * Derive the API base URL for outbound-facing values (webhook URLs, OAuth
+ * redirect URIs). Returns a URL with no trailing slash.
+ *
+ * Resolution order:
+ *   1. `MCP_BASE_URL` env (canonical)
+ *   2. Inbound request host — `X-Forwarded-Proto`/`X-Forwarded-Host` if behind
+ *      a proxy/tunnel (ngrok), else `Host` header. Lets the URL stay correct
+ *      when MCP_BASE_URL is unset and the API is reached via an arbitrary
+ *      external hostname.
+ *   3. `http://localhost:<PORT>` fallback
+ */
+export function deriveApiBaseUrl(req: IncomingMessage): string {
+  const envBase = process.env.MCP_BASE_URL?.trim();
+  if (envBase) return envBase.replace(/\/+$/, "");
+
+  const fwdProtoRaw = req.headers["x-forwarded-proto"];
+  const fwdHostRaw = req.headers["x-forwarded-host"];
+  const fwdProto = Array.isArray(fwdProtoRaw) ? fwdProtoRaw[0] : fwdProtoRaw;
+  const fwdHost = Array.isArray(fwdHostRaw) ? fwdHostRaw[0] : fwdHostRaw;
+  const proto = fwdProto?.split(",")[0]?.trim() || "http";
+  const host = fwdHost?.split(",")[0]?.trim() || req.headers.host;
+
+  if (host) return `${proto}://${host}`;
+  return `http://localhost:${process.env.PORT || "3013"}`;
+}
+
+/**
  * Match a route pattern against HTTP method and path segments.
  *
  * @param method - HTTP method from request (e.g. "GET", "POST")

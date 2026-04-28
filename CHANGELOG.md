@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.71.2] - 2026-04-28
+
+### Fixed
+- `initJira()` / `initLinear()` now prefer `MCP_BASE_URL` over the localhost default when `JIRA_REDIRECT_URI` / `LINEAR_REDIRECT_URI` are unset. The previous fallback was being persisted into `oauth_apps.redirectUri` and used verbatim by the OAuth authorize flow, so prod was sending users back to `http://localhost:3013/...` after Atlassian/Linear consent — even though the UI displayed the correct request-derived URL. Existing rows are healed automatically by `upsertOAuthApp` on next boot
+
+## [1.71.1] - 2026-04-27
+
+### Added
+- `DELETE /api/trackers/jira/disconnect` and `DELETE /api/trackers/linear/disconnect` — Jira disconnect deletes registered webhooks, OAuth tokens, and metadata; Linear revokes upstream and drops tokens. Both endpoints surface in the Integrations UI as a "Disconnect" button next to the OAuth status
+- `/status` responses for both Jira and Linear now include the computed `redirectUri` so the OAuth cards can render it with a copy button. The `JIRA_REDIRECT_URI` / `LINEAR_REDIRECT_URI` form fields were removed (env vars still work as overrides)
+
+### Changed
+- OAuth flow opens in a new tab via `window.open` so the dashboard context survives the round-trip; status auto-refreshes on focus
+- Webhook/redirect base URL is now derived from the inbound request when `MCP_BASE_URL` is unset; boot warns when `MCP_BASE_URL == APP_URL` (the prod misconfig)
+
+### Fixed
+- Jira/Linear "not configured" alert chips no longer wrap mid-pill on narrow viewports (`whitespace-nowrap` + extracted `CodeChip` helper)
+- shadcn `AlertDescription` rendered each `<code>` chip on its own grid row because of `display: grid; gap-1`. Wrapping inline content in a single `<p>` collapses children into one grid item so chips flow inline as intended
+
+## [1.71.0] - 2026-04-27
+
+### Added
+- **Jira Cloud integration** — full OAuth 3LO authorization code flow against `api.atlassian.com`, cloudId resolution via `/oauth/token/accessible-resources`, and a typed `jiraFetch()` that prepends `/ex/jira/{cloudId}`, refreshes on 401, and respects 429 `Retry-After`. New routes: `GET /authorize`, `GET /callback`, `GET /status`, `POST /webhook/:token`, `POST /api/trackers/jira/webhook-register`, `DELETE /api/trackers/jira/webhook/:id`. Inbound: assignee→bot transitions and @-mention comments create swarm tasks; outbound: lifecycle events (`task.created/completed/failed/cancelled`) post unicode-emoji plaintext comments back to the originating issue. Webhook auth uses URL-path token (timing-safe compare) — Atlassian doesn't HMAC-sign OAuth 3LO dynamic webhooks (Errata I8). Webhook keepalive runs every 12h and refreshes any registration with <7d to expiry. New ADF (Atlassian Document Format) recursive walker for inbound comment/issue body parsing. Migration `043_jira_source.sql` adds `jira` to the `agent_tasks` source CHECK constraint. 57 new unit tests across `jira-metadata`, `jira-webhook`, `jira-sync`, `jira-oauth`, `jira-outbound-sync`, `jira-webhook-lifecycle`. Full integration guide at [`/docs/guides/jira-integration`](/docs/guides/jira-integration). New Integrations UI card with cloudId/siteUrl/scope/expiry/webhook count + copyable redirect URL (#382)
+- New tracker provider `jira` is now recognized by `tracker-status`, `tracker-link-task`, `tracker-map-agent`, and `tracker-sync-status` MCP tools
+
+### Fixed
+- `botAccountId` cache moved to a `globalThis`-keyed slot so all module instances share the same value across cache-busting dynamic imports under `bun:test`'s parallel file runner. Fixes a CI-only test-isolation gap in `jira-sync.test.ts`
+- Two test files using `mock.module` on real modules (`jira-oauth.test.ts` mocking `oauth/wrapper`, `jira-webhook.test.ts` mocking `jira/sync`) switched to `spyOn` against namespace imports — `mock.module` overrides leak across the test process and broke victim files when bun:test's parallel-file order put the mocking file first
+
 ## [1.70.0] - 2026-04-24
 
 ### Added
