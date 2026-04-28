@@ -32,7 +32,7 @@
  *   TS definition — but the API does honor it (per the prompt-caching beta).
  *   We attach it via a typed extension and cast on the way out so the runtime
  *   payload includes it; the type-level `cache_control` annotation is captured
- *   in `ManagedTextBlockWithCache`.
+ *   in `BetaManagedAgentsTextBlock`.
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -98,50 +98,31 @@ const REQUIRED_ENV_VARS = [
 const DEFAULT_CONTEXT_TOTAL_TOKENS = 1_000_000;
 
 /**
- * `BetaManagedAgentsTextBlock` extended with the prompt-cache breakpoint
- * marker. The SDK's text-block type doesn't declare `cache_control`, but the
- * managed-agents API honors it — so we attach it via this extension and cast
- * at the call site to silence the type checker without losing intent.
- */
-type ManagedTextBlockWithCache = BetaManagedAgentsTextBlock & {
-  cache_control?: { type: "ephemeral" };
-};
-
-/**
  * Compose the per-session user-message content blocks. Returns two blocks:
  *
- *   1. A static prefix carrying `cache_control: { type: "ephemeral" }` — the
- *      prompt-cache breakpoint. This block must be byte-identical across two
- *      different `config` inputs that share the same `agentId` (no per-task
- *      taskId, prompt body, or timestamp interpolation here).
- *   2. The per-task body — `User request:\n${config.prompt}` — which sits
- *      AFTER the breakpoint and so is allowed to vary per task without
- *      breaking cache hits on the prefix.
- *
- * The static prefix encodes the same "I am a swarm worker, my agent identity
- * is X, I have a system prompt blob baked in" framing across consecutive runs
- * for the same agent. The plan's design rationale: Anthropic's prompt cache
- * normally segments around the system prompt, but managed-agents doesn't let
- * us override the system prompt per-session — so we collapse system+user into
- * a single user message and place the cache breakpoint manually.
+ *   1. A static prefix — agent identity + composed system prompt. Must be
+ *      byte-identical across two different `config` inputs that share the
+ *      same `agentId` so the managed-agents service can dedupe / cache it
+ *      server-side.
+ *   2. The per-task body — `User request:\n${config.prompt}`.
  *
  * Exported (named) so unit tests can assert the static-prefix invariant.
+ *
+ * NOTE: An earlier revision attached `cache_control: { type: "ephemeral" }`
+ * to block #1 to manually mark a prompt-cache breakpoint, but the
+ * managed-agents `events.send` endpoint rejects unknown fields with
+ * `events.0.content.0.cache_control: Extra inputs are not permitted`.
+ * Caching is handled server-side; we only control the static-prefix shape.
  */
 export function composeManagedUserMessage(
   config: Pick<ProviderSessionConfig, "agentId" | "systemPrompt" | "prompt">,
-): ManagedTextBlockWithCache[] {
-  // Static prefix: agent identity + composed system prompt. NO per-task
-  // values. Two different prompts with the same agentId must produce a
-  // byte-identical first block (asserted by `composeManagedUserMessage
-  // returns identical static prefix across configs with same agentId`
-  // test below).
+): BetaManagedAgentsTextBlock[] {
   const staticPrefix = `[swarm worker] agentId=${config.agentId}\n\n` + `${config.systemPrompt}`;
 
   return [
     {
       type: "text",
       text: staticPrefix,
-      cache_control: { type: "ephemeral" },
     },
     {
       type: "text",
@@ -222,7 +203,7 @@ export interface ManagedAgentsClient {
 class ClaudeManagedSession implements ProviderSession {
   private readonly client: ManagedAgentsClient;
   private readonly _sessionId: string;
-  private readonly userMessageContent: ManagedTextBlockWithCache[] | null;
+  private readonly userMessageContent: BetaManagedAgentsTextBlock[] | null;
   private readonly listeners: Array<(event: ProviderEvent) => void> = [];
   private readonly eventQueue: ProviderEvent[] = [];
   private readonly logFileHandle: ReturnType<ReturnType<typeof Bun.file>["writer"]>;
@@ -241,7 +222,7 @@ class ClaudeManagedSession implements ProviderSession {
     client: ManagedAgentsClient,
     sessionId: string,
     config: ProviderSessionConfig,
-    userMessageContent: ManagedTextBlockWithCache[] | null,
+    userMessageContent: BetaManagedAgentsTextBlock[] | null,
     seenEventIds: Set<string> = new Set(),
   ) {
     this.client = client;
@@ -778,7 +759,7 @@ export class ClaudeManagedAdapter implements ProviderAdapter {
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
     let sessionId: string;
-    let userMessageContent: ManagedTextBlockWithCache[] | null;
+    let userMessageContent: BetaManagedAgentsTextBlock[] | null;
     const seenEventIds = new Set<string>();
 
     if (config.resumeSessionId) {

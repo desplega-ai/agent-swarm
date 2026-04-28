@@ -22,7 +22,7 @@
 
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import Anthropic, { ConflictError } from "@anthropic-ai/sdk";
+import Anthropic, { BadRequestError, ConflictError } from "@anthropic-ai/sdk";
 import type {
   AgentCreateParams,
   BetaManagedAgentsAgent,
@@ -208,12 +208,21 @@ async function uploadSkill(
   slug: string,
   content: string,
   log: (msg: string) => void,
+  existingByTitle?: Map<string, string>,
 ): Promise<string | null> {
   // The SDK's beta.skills.create expects { display_title?, files: Uploadable[] }
-  // and the API requires a SKILL.md at the root of the upload. We name the
-  // single file "SKILL.md" so each plugin/commands/*.md becomes one skill.
+  // and the API requires a SKILL.md at the root of the upload's top-level
+  // folder. We name the single file "<slug>/SKILL.md" so each
+  // plugin/commands/*.md becomes one skill in its own top-level folder.
+  if (existingByTitle?.has(slug)) {
+    const id = existingByTitle.get(slug)!;
+    log(`  · skill "${slug}" already exists — reusing id=${id}`);
+    return id;
+  }
   try {
-    const file = await toFile(Buffer.from(content, "utf8"), "SKILL.md", { type: "text/markdown" });
+    const file = await toFile(Buffer.from(content, "utf8"), `${slug}/SKILL.md`, {
+      type: "text/markdown",
+    });
     const res: SkillCreateResponse = await client.beta.skills.create({
       display_title: slug,
       files: [file],
@@ -222,12 +231,16 @@ async function uploadSkill(
     log(`  + uploaded skill "${slug}" (id=${res.id})`);
     return res.id;
   } catch (err) {
-    if (err instanceof ConflictError) {
-      // 409 = already exists; treat as no-op. The SDK doesn't expose a
-      // "find by display_title" call directly (skill IDs are content-derived),
-      // so we simply skip — the agent definition's skills array can be
-      // refreshed with --force if a new ID is needed.
-      log(`  · skill "${slug}" already exists (409 — skipping)`);
+    // The API returns 400 (not 409) when display_title is reused. Both shapes
+    // are treated as "already exists" — caller pre-fetched the skill list to
+    // recover the id, but we may still race a concurrent upload. Surface the
+    // raw error if we can't recover.
+    const isDisplayTitleConflict =
+      err instanceof BadRequestError &&
+      typeof err.message === "string" &&
+      err.message.includes("display_title");
+    if (err instanceof ConflictError || isDisplayTitleConflict) {
+      log(`  · skill "${slug}" already exists (server-side) — skipping`);
       return null;
     }
     throw err;
@@ -268,6 +281,7 @@ export async function resolveClaudeManagedSetupConfig(
   mcpBaseUrl: string;
   agentModel: string;
   force: boolean;
+  disableMcp: boolean;
 }> {
   const env = deps.env ?? process.env;
   const parsed = parseArgs(args);
@@ -295,6 +309,7 @@ export async function resolveClaudeManagedSetupConfig(
 
   const mcpBaseUrl = validateMcpBaseUrl(env.MCP_BASE_URL);
   const agentModel = env.MANAGED_AGENT_MODEL ?? DEFAULT_AGENT_MODEL;
+  const disableMcp = env.MANAGED_DISABLE_MCP === "1" || env.MANAGED_DISABLE_MCP === "true";
 
   return {
     apiUrl,
@@ -303,6 +318,7 @@ export async function resolveClaudeManagedSetupConfig(
     mcpBaseUrl,
     agentModel,
     force: parsed.force,
+    disableMcp,
   };
 }
 
@@ -326,6 +342,7 @@ export async function runClaudeManagedSetupFlow(
     mcpBaseUrl: string;
     agentModel: string;
     force: boolean;
+    disableMcp?: boolean;
   },
   deps: RunClaudeManagedSetupDeps = {},
 ): Promise<ClaudeManagedSetupResult> {
@@ -372,19 +389,50 @@ export async function runClaudeManagedSetupFlow(
   log(`Uploading skills from ${skillsDir} ...`);
   const skillFiles = await loadSkills(skillsDir);
   log(`  found ${skillFiles.length} skill markdown file(s)`);
-  const skillIds: string[] = [];
-  for (const skill of skillFiles) {
-    const id = await uploadOne(client, skill.slug, skill.content, log);
-    if (id) skillIds.push(id);
+  // Pre-fetch existing custom skills so we can reuse their IDs on rerun. The
+  // API returns 400 (not 409) on display_title collision and skill IDs aren't
+  // surfaced from that error, so the only recovery is to look them up.
+  const existingByTitle = new Map<string, string>();
+  try {
+    for await (const sk of client.beta.skills.list({
+      source: "custom",
+      betas: [SKILLS_BETA_HEADER],
+    })) {
+      if (sk.display_title) existingByTitle.set(sk.display_title, sk.id);
+    }
+  } catch (err) {
+    log(`  · could not list existing skills (${(err as Error).message}); proceeding anyway`);
   }
-  log(`  uploaded ${skillIds.length} new skill(s); ${skillFiles.length - skillIds.length} skipped`);
+  const skillIds: string[] = [];
+  let reused = 0;
+  let created = 0;
+  for (const skill of skillFiles) {
+    const wasExisting = existingByTitle.has(skill.slug);
+    const id = await uploadOne(client, skill.slug, skill.content, log, existingByTitle);
+    if (id) {
+      skillIds.push(id);
+      if (wasExisting) reused++;
+      else created++;
+    }
+  }
+  log(`  reused ${reused} existing skill(s); uploaded ${created} new skill(s)`);
 
   // 3. Create the agent.
-  const mcpServer: BetaManagedAgentsURLMCPServerParams = {
-    name: "agent-swarm",
-    type: "url",
-    url: `${config.mcpBaseUrl.replace(/\/$/, "")}/mcp`,
-  };
+  //
+  // NOTE: Anthropic's managed-agents `mcp_servers` URL params don't accept
+  // inline auth — credentials must live in an Anthropic-side vault keyed by
+  // `mcp_server_url`. Until the setup CLI auto-provisions that vault (see
+  // follow-up ticket — `MANAGED_DISABLE_MCP=1` is the temporary bypass), the
+  // agent must be created WITHOUT mcp_servers / mcp_toolset, otherwise every
+  // session errors out with `mcp_authentication_failed_error`.
+  const mcpDisabled = config.disableMcp;
+  const mcpServer: BetaManagedAgentsURLMCPServerParams | null = mcpDisabled
+    ? null
+    : {
+        name: "agent-swarm",
+        type: "url",
+        url: `${config.mcpBaseUrl.replace(/\/$/, "")}/mcp`,
+      };
   const skillsParam: BetaManagedAgentsCustomSkillParams[] = skillIds.map((id) => ({
     type: "custom",
     skill_id: id,
@@ -394,12 +442,21 @@ export async function runClaudeManagedSetupFlow(
     model: config.agentModel,
     description:
       "Agent Swarm worker. Per-task system prompt is delivered in the user.message; the static system field is intentionally minimal.",
-    system:
-      "You are an agent-swarm worker. Per-task instructions arrive in the next user message. Use the agent-swarm MCP server for swarm operations.",
-    tools: [{ type: "agent_toolset_20260401" }],
+    system: mcpServer
+      ? "You are an agent-swarm worker. Per-task instructions arrive in the next user message. Use the agent-swarm MCP server for swarm operations."
+      : "You are an agent-swarm worker. Per-task instructions arrive in the next user message. (No MCP tools available in this configuration.)",
+    tools: mcpServer
+      ? [
+          { type: "agent_toolset_20260401" },
+          { type: "mcp_toolset", mcp_server_name: mcpServer.name },
+        ]
+      : [{ type: "agent_toolset_20260401" }],
     skills: skillsParam,
-    mcp_servers: [mcpServer],
+    ...(mcpServer ? { mcp_servers: [mcpServer] } : {}),
   };
+  if (mcpDisabled) {
+    log("MCP disabled (MANAGED_DISABLE_MCP=1) — agent will run without swarm tools.");
+  }
 
   log(`Creating agent (model=${config.agentModel}) ...`);
   const agent: BetaManagedAgentsAgent = await client.beta.agents.create(agentParams);

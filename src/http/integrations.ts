@@ -56,9 +56,15 @@ const claudeManagedTestRoute = route({
  */
 function resolveConfigValue(key: string): string | null {
   const configs = getResolvedConfig();
-  const row = configs.find((c) => c.key === key);
-  if (row && typeof row.value === "string" && row.value.length > 0) {
-    return row.value;
+  // The setup CLI persists keys in lowercase (e.g. `managed_agent_id`) while
+  // the docker-entrypoint hydrates env vars in uppercase (`MANAGED_AGENT_ID`).
+  // Look up both variants so this endpoint works against either shape.
+  const variants = [key, key.toLowerCase(), key.toUpperCase()];
+  for (const variant of variants) {
+    const row = configs.find((c) => c.key === variant);
+    if (row && typeof row.value === "string" && row.value.length > 0) {
+      return row.value;
+    }
   }
   // Env fallback — the row may not exist if the operator deployed via env
   // file rather than swarm_config.
@@ -101,10 +107,16 @@ export function createIntegrationsHandler(deps: TestConnectionDeps = {}) {
       try {
         const client = buildClient(apiKey);
         const agent = await client.beta.agents.retrieve(agentId);
+        // `agent.model` is `BetaManagedAgentsModelConfig` ({id, speed}). Flatten
+        // to a string so the UI can render it directly without type guards.
+        const modelId =
+          typeof agent.model === "string"
+            ? agent.model
+            : ((agent.model as { id?: string } | null | undefined)?.id ?? null);
         json(res, {
           ok: true,
           agentName: agent.name ?? null,
-          model: agent.model ?? null,
+          model: modelId,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

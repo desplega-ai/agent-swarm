@@ -210,7 +210,7 @@ describe("ClaudeManagedAdapter (Phase 3) — session lifecycle", () => {
     // Clear any singletons
   });
 
-  test("composeManagedUserMessage returns two blocks; first carries cache_control", () => {
+  test("composeManagedUserMessage returns two text blocks; second carries the per-task body", () => {
     const blocks = composeManagedUserMessage({
       agentId: "agent-uuid",
       systemPrompt: "you are a helper",
@@ -219,13 +219,11 @@ describe("ClaudeManagedAdapter (Phase 3) — session lifecycle", () => {
     expect(blocks).toHaveLength(2);
     const [first, second] = blocks;
     expect(first?.type).toBe("text");
-    expect(first?.cache_control).toEqual({ type: "ephemeral" });
     expect(second?.type).toBe("text");
-    // The per-task body sits AFTER the cache breakpoint and is allowed to
-    // change without invalidating the cache hit on `first`.
+    // The per-task body is the second block; the first block holds the static
+    // identity + system prompt prefix (asserted byte-identical in the next test).
     expect(second?.text).toContain("User request:");
     expect(second?.text).toContain("do thing");
-    expect(second?.cache_control).toBeUndefined();
   });
 
   test("composeManagedUserMessage's static prefix is byte-identical across configs with same agentId", () => {
@@ -239,9 +237,9 @@ describe("ClaudeManagedAdapter (Phase 3) — session lifecycle", () => {
       systemPrompt: "static system",
       prompt: "task two — totally different body",
     });
-    // First (cacheable) block must be byte-identical: same text, same cache_control.
+    // First (cacheable) block must be byte-identical so server-side caching
+    // can hit it across consecutive runs.
     expect(a[0]?.text).toBe(b[0]?.text);
-    expect(a[0]?.cache_control).toEqual(b[0]?.cache_control);
     // Second (per-task) block intentionally differs.
     expect(a[1]?.text).not.toBe(b[1]?.text);
   });
@@ -302,7 +300,8 @@ describe("ClaudeManagedAdapter (Phase 3) — session lifecycle", () => {
     expect(sent0.events[0]?.type).toBe("user.message");
     const sentContent = sent0.events[0]?.content as Array<Record<string, unknown>>;
     expect(sentContent).toHaveLength(2);
-    expect(sentContent[0]?.cache_control).toEqual({ type: "ephemeral" });
+    expect(sentContent[0]?.type).toBe("text");
+    expect(sentContent[1]?.type).toBe("text");
 
     // session_init was emitted with sessionId from sessions.create.
     const sessionInit = emitted.find((e) => e.type === "session_init");
@@ -1232,8 +1231,8 @@ describe("ClaudeManagedAdapter (Phase 6) — full happy-path integration", () =>
     expect(userMsg.type).toBe("user.message");
     const blocks = userMsg.content as Array<Record<string, unknown>>;
     expect(blocks).toHaveLength(2);
-    expect(blocks[0]?.cache_control).toEqual({ type: "ephemeral" });
-    expect(blocks[1]?.cache_control).toBeUndefined();
+    expect(blocks[0]?.type).toBe("text");
+    expect(blocks[1]?.type).toBe("text");
 
     // Every event in the SSE sequence translated into the expected
     // ProviderEvent variants.
