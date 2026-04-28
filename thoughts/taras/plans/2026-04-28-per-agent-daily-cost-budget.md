@@ -8,7 +8,7 @@ autonomy: critical
 related_brainstorm: thoughts/taras/brainstorms/2026-04-28-per-agent-daily-cost-budget.md
 related_research: thoughts/taras/research/2026-04-28-per-agent-daily-cost-budget.md
 last_updated: 2026-04-28
-last_updated_by: claude (phase-running, phase 2)
+last_updated_by: claude (phase-running, phase 3)
 ---
 
 # Per-Agent Daily Cost Budget (V1) Implementation Plan
@@ -282,14 +282,14 @@ Insert `canClaim(agentId)` adjacent to `hasCapacity` checks at the three V1 gate
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Lint passes: `bun run lint`
-- [ ] Type-check passes: `bun run tsc:check`
-- [ ] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
-- [ ] New gate tests pass: `bun test src/tests/budget-claim-gate.test.ts`
-- [ ] Existing claim-flow tests still green: `bun test src/tests/runner-polling-api.test.ts src/tests/db-capacity.test.ts src/tests/trigger-claiming.test.ts src/tests/pool-session-logs.test.ts`
+- [x] Lint passes: `bun run lint`
+- [x] Type-check passes: `bun run tsc:check`
+- [x] DB-boundary check passes: `bash scripts/check-db-boundary.sh`
+- [x] New gate tests pass: `bun test src/tests/budget-claim-gate.test.ts`
+- [x] Existing claim-flow tests still green: `bun test src/tests/runner-polling-api.test.ts src/tests/db-capacity.test.ts src/tests/trigger-claiming.test.ts src/tests/pool-session-logs.test.ts`
 
 #### Automated QA:
-- [ ] curl walkthrough: with `API_KEY=123123` and a seeded DB containing `(scope='agent', scope_id=<id>, daily_budget_usd=0.01)` + a session_cost row pushing the agent over, `curl -H "Authorization: Bearer 123123" -H "X-Agent-ID: <id>" http://localhost:3013/api/poll` returns `{"trigger":{"type":"budget_refused","cause":"agent",...}}`. Documented as a one-liner in `LOCAL_TESTING.md` (or this plan's Manual E2E section).
+- [x] curl walkthrough: with `API_KEY=123123` and a seeded DB containing `(scope='agent', scope_id=<id>, daily_budget_usd=0.01)` + a session_cost row pushing the agent over, `curl -H "Authorization: Bearer 123123" -H "X-Agent-ID: <id>" http://localhost:3013/api/poll` returns `{"trigger":{"type":"budget_refused","cause":"agent",...}}`. Documented as a one-liner in `LOCAL_TESTING.md` (or this plan's Manual E2E section).
 
 #### Manual Verification:
 - [ ] Hit `/api/poll` with the curl above against `bun run start:http` to confirm the envelope shape end-to-end.

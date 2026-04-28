@@ -1178,3 +1178,21 @@ export const BudgetRefusalNotificationSchema = z.object({
   createdAt: z.number(), // epoch ms
 });
 export type BudgetRefusalNotification = z.infer<typeof BudgetRefusalNotificationSchema>;
+
+/**
+ * Phase 3 — `budget_refused` is the new variant of the `/api/poll` trigger
+ * envelope returned when an admission gate (`canClaim`) refuses to let the
+ * agent take a task. Older workers receiving this discriminator fall through
+ * to default polling without back-off (degrades gracefully); Phase 4 teaches
+ * the runner to recognize it.
+ */
+export const BudgetRefusedTriggerSchema = z.object({
+  type: z.literal("budget_refused"),
+  cause: BudgetRefusalCauseSchema,
+  agentSpend: z.number().optional(),
+  agentBudget: z.number().optional(),
+  globalSpend: z.number().optional(),
+  globalBudget: z.number().optional(),
+  resetAt: z.string(), // ISO 8601, next UTC midnight
+});
+export type BudgetRefusedTrigger = z.infer<typeof BudgetRefusedTriggerSchema>;

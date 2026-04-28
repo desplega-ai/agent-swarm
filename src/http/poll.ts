@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { ensure } from "@desplega.ai/business-use";
 import { z } from "zod";
+import { canClaim } from "../be/budget-admission";
 import {
   claimMentions,
   claimOfferedTask,
@@ -21,6 +22,37 @@ import { fetchChannelActivity } from "../slack/channel-activity";
 import { telemetry } from "../telemetry";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
+
+// ─── Budget-refused trigger envelope ────────────────────────────────────────
+
+/**
+ * Build the `budget_refused` trigger envelope from a `canClaim` refusal. Lives
+ * here (not in budget-admission) because it's the API-shape contract — workers
+ * read this on the wire (Phase 4 teaches them how).
+ *
+ * TODO(phase 5): record notification + lead follow-up. Phase 3 just emits the
+ * refusal envelope; Phase 5 wires `recordBudgetRefusalNotification` and the
+ * lead-facing follow-up task at the same call sites.
+ */
+function buildBudgetRefusedTrigger(refusal: {
+  cause: "agent" | "global";
+  agentSpend?: number;
+  agentBudget?: number;
+  globalSpend?: number;
+  globalBudget?: number;
+  resetAt: string;
+}): { type: "budget_refused"; [key: string]: unknown } {
+  const trigger: { type: "budget_refused"; [key: string]: unknown } = {
+    type: "budget_refused",
+    cause: refusal.cause,
+    resetAt: refusal.resetAt,
+  };
+  if (refusal.agentSpend !== undefined) trigger.agentSpend = refusal.agentSpend;
+  if (refusal.agentBudget !== undefined) trigger.agentBudget = refusal.agentBudget;
+  if (refusal.globalSpend !== undefined) trigger.globalSpend = refusal.globalSpend;
+  if (refusal.globalBudget !== undefined) trigger.globalBudget = refusal.globalBudget;
+  return trigger;
+}
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -127,6 +159,14 @@ export async function handlePoll(
         if (hasCapacity(myAgentId)) {
           const pendingTask = getPendingTaskForAgent(myAgentId);
           if (pendingTask) {
+            // Budget admission gate (Phase 3). Runs in the same transaction as
+            // the capacity check so capacity AND budget gates share atomicity.
+            // TODO(phase 5): record notification + lead follow-up here.
+            const admission = canClaim(myAgentId, new Date());
+            if (!admission.allowed) {
+              return { trigger: buildBudgetRefusedTrigger(admission) };
+            }
+
             // Mark task as in_progress immediately to prevent duplicate polling
             startTask(pendingTask.id);
 
@@ -203,6 +243,17 @@ export async function handlePoll(
           // from the start (no reassociation needed).
           if (hasCapacity(myAgentId)) {
             const unassignedIds = getUnassignedTaskIds(5);
+            // Budget admission gate (Phase 3). Pool path is workers-only —
+            // per-agent budgets matter most here, but we still check global.
+            // Only run the gate when there's at least one candidate task; an
+            // empty pool is "no work", not "refused".
+            // TODO(phase 5): record notification + lead follow-up here.
+            if (unassignedIds.length > 0) {
+              const admission = canClaim(myAgentId, new Date());
+              if (!admission.allowed) {
+                return { trigger: buildBudgetRefusedTrigger(admission) };
+              }
+            }
             for (const candidateId of unassignedIds) {
               const claimed = claimTask(candidateId, myAgentId);
               if (claimed) {
