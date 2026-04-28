@@ -73,7 +73,7 @@ async function promptTextInput(label: string, defaultValue: string): Promise<str
   });
 }
 
-async function promptHiddenInput(
+export async function promptHiddenInput(
   label: string,
   _defaultValue: string,
   helpText?: string,

@@ -270,6 +270,22 @@ const COMMAND_HELP: Record<
       `  ${binName} codex-login --api-url https://swarm.example.com --api-key <api-key>`,
     ].join("\n"),
   },
+  "claude-managed-setup": {
+    usage: `${binName} claude-managed-setup [options]`,
+    description:
+      "Bootstrap Anthropic Managed Agents for the swarm: create the cloud environment, upload plugin/commands/*.md skills, create the managed agent, and persist the resulting IDs to swarm_config so deployed workers restore them at boot. Prompts interactively for ANTHROPIC_API_KEY when not set in env. Idempotent — re-run with --force to recreate.",
+    options: [
+      "  --api-url <url>    Swarm API URL (default: MCP_BASE_URL or http://localhost:3013)",
+      "  --api-key <key>    Swarm API key (default: API_KEY or 123123)",
+      "  --force            Recreate Anthropic-side resources even if already configured",
+      "  -h, --help         Show this help",
+    ].join("\n"),
+    examples: [
+      `  ${binName} claude-managed-setup`,
+      `  ${binName} claude-managed-setup --force`,
+      `  ${binName} claude-managed-setup --api-url https://swarm.example.com`,
+    ].join("\n"),
+  },
 };
 
 function printHelp(command?: string) {
@@ -299,11 +315,12 @@ function printHelp(command?: string) {
     ["artifact", "Manage agent artifacts"],
     ["docs", "Open documentation (--open to launch in browser)"],
     ["codex-login", "Authenticate Codex via ChatGPT OAuth"],
+    ["claude-managed-setup", "Bootstrap Anthropic Managed Agents (agent + env + skills)"],
     ["version", "Show version number"],
     ["help", "Show this help message"],
   ];
   for (const entry of commands) {
-    console.log(`  ${(entry[0] ?? "").padEnd(12)} ${entry[1] ?? ""}`);
+    console.log(`  ${(entry[0] ?? "").padEnd(22)} ${entry[1] ?? ""}`);
   }
   console.log(`\nRun '${binName} <command> --help' for details on a specific command.\n`);
 }
@@ -555,6 +572,10 @@ if (args.showHelp || args.command === "help" || args.command === undefined) {
   const { runCodexLogin } = await import("./commands/codex-login");
   const codexLoginArgs = process.argv.slice(process.argv.indexOf("codex-login") + 1);
   await runCodexLogin(codexLoginArgs);
+} else if (args.command === "claude-managed-setup") {
+  const { runClaudeManagedSetup } = await import("./commands/claude-managed-setup");
+  const setupArgs = process.argv.slice(process.argv.indexOf("claude-managed-setup") + 1);
+  await runClaudeManagedSetup(setupArgs);
 } else {
   render(<App args={args} />);
 }

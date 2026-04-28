@@ -10,6 +10,51 @@ if [ "$HARNESS_PROVIDER" = "pi" ]; then
         echo "Error: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or ~/.pi/agent/auth.json required for pi provider"
         exit 1
     fi
+elif [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
+    # Claude Managed Agents — sessions run in Anthropic's cloud sandbox.
+    # No CLI binary needed; the worker process is a thin SSE relay.
+    #
+    # Required env vars (all four):
+    #   ANTHROPIC_API_KEY       — credential for the SDK
+    #   MANAGED_AGENT_ID        — pre-created agent (claude-managed-setup)
+    #   MANAGED_ENVIRONMENT_ID  — pre-created environment (claude-managed-setup)
+    #   MCP_BASE_URL            — public HTTPS URL where Anthropic can reach /mcp
+    #
+    # Restoration order: respect externally-set env vars first; only fall back
+    # to swarm_config when missing. Mirrors the codex_oauth restoration block
+    # above (L13-71) — same fetch endpoint, different keys.
+    if [ -n "$API_KEY" ] && [ -n "$MCP_BASE_URL" ]; then
+        for KEY_TUPLE in "ANTHROPIC_API_KEY:anthropic_api_key" \
+                         "MANAGED_AGENT_ID:managed_agent_id" \
+                         "MANAGED_ENVIRONMENT_ID:managed_environment_id"; do
+            ENV_VAR="${KEY_TUPLE%%:*}"
+            CONFIG_KEY="${KEY_TUPLE##*:}"
+            # Only fill if the env var isn't already set externally.
+            if [ -z "$(eval "echo \$$ENV_VAR")" ]; then
+                VALUE=$(curl -sf -H "Authorization: Bearer ${API_KEY}" \
+                    "${MCP_BASE_URL}/api/config/resolved?includeSecrets=true&key=${CONFIG_KEY}" \
+                    2>/dev/null | jq -r ".configs[] | select(.key == \"${CONFIG_KEY}\") | .value // empty" 2>/dev/null | head -1)
+                if [ -n "$VALUE" ]; then
+                    export "$ENV_VAR=$VALUE"
+                    echo "[entrypoint] Restored claude-managed config from swarm_config: $ENV_VAR"
+                fi
+            fi
+        done
+    fi
+
+    # Validate the four required env vars are present.
+    MISSING=""
+    [ -z "$ANTHROPIC_API_KEY" ] && MISSING="$MISSING ANTHROPIC_API_KEY"
+    [ -z "$MANAGED_AGENT_ID" ] && MISSING="$MISSING MANAGED_AGENT_ID"
+    [ -z "$MANAGED_ENVIRONMENT_ID" ] && MISSING="$MISSING MANAGED_ENVIRONMENT_ID"
+    [ -z "$MCP_BASE_URL" ] && MISSING="$MISSING MCP_BASE_URL"
+    if [ -n "$MISSING" ]; then
+        echo "Error: claude-managed provider requires:$MISSING"
+        echo "Run \`bun run src/cli.tsx claude-managed-setup\` from your laptop to create"
+        echo "the Anthropic-side agent + environment and persist their IDs to swarm_config."
+        echo "MCP_BASE_URL must be a public HTTPS URL (ngrok / Cloudflare Tunnel in dev)."
+        exit 1
+    fi
 elif [ "$HARNESS_PROVIDER" = "codex" ]; then
     WORKER_CODEX_HOME="/home/worker/.codex"
 
@@ -92,6 +137,9 @@ if [ "$HARNESS_PROVIDER" = "codex" ]; then
         exit 1
     fi
     echo "Codex CLI: $(command -v "$CODEX_BIN")"
+elif [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
+    # Cloud sandbox — no local CLI binary, no skills FS, no MCP discovery.
+    echo "Claude Managed Agents: no local CLI required (sessions run in Anthropic cloud)"
 elif [ "$HARNESS_PROVIDER" != "pi" ]; then
     CLAUDE_BIN="${CLAUDE_BINARY:-claude}"
     if ! command -v "$CLAUDE_BIN" > /dev/null 2>&1; then
@@ -340,7 +388,12 @@ if [ -n "$AGENT_FS_API_URL" ] && [ -n "$AGENT_ID" ]; then
 fi
 # ---- End agent-fs registration ----
 
-# Create .mcp.json in /workspace (project-level config)
+# Create .mcp.json in /workspace (project-level config).
+# Skip for claude-managed: managed agents read MCP servers from the Agent
+# definition (set by claude-managed-setup), not from a local filesystem file.
+if [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
+    echo "Skipping local .mcp.json (claude-managed reads MCP from agent definition)"
+else
 echo "Creating MCP config in /workspace..."
 # Build base MCP config with jq
 MCP_JSON=$(jq -n \
@@ -403,6 +456,7 @@ if [ -n "$MCP_SERVERS_RESPONSE" ] && [ "$SERVER_COUNT" -gt 0 ]; then
     echo "$UPDATED_SETTINGS" > "$SETTINGS_FILE"
   fi
 fi
+fi  # /HARNESS_PROVIDER != claude-managed (MCP discovery skip)
 
 # Configure GitHub authentication if token is provided
 echo ""
@@ -755,7 +809,11 @@ echo ""
 
 # --- Skill sync ---
 echo "=== Skill Sync ==="
-if [ -n "$AGENT_ID" ] && [ -n "$API_KEY" ] && [ -n "$MCP_BASE_URL" ]; then
+if [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
+    # Managed agents read skills from the Agent definition (uploaded via API
+    # by claude-managed-setup), NOT from the local filesystem. Skip the sync.
+    echo "[entrypoint] Skipping skill sync (claude-managed reads skills from agent definition)"
+elif [ -n "$AGENT_ID" ] && [ -n "$API_KEY" ] && [ -n "$MCP_BASE_URL" ]; then
     echo "[entrypoint] Syncing skills to filesystem..."
     SKILLS_RESPONSE=$(curl -s -f -H "Authorization: Bearer ${API_KEY}" \
         -H "X-Agent-ID: ${AGENT_ID}" \

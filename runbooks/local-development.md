@@ -20,7 +20,7 @@ Bun auto-loads `.env`. Don't use `dotenv`.
 | `MCP_BASE_URL` | `http://localhost:3013` | Public URL the workers/UI hit |
 | `APP_URL` | `http://localhost:5274` | Dashboard URL |
 | `SLACK_DISABLE` / `GITHUB_DISABLE` / `JIRA_DISABLE` / `LINEAR_DISABLE` | unset | Set `=true` to disable each integration |
-| `HARNESS_PROVIDER` | `claude` | `claude`, `pi`, or `codex` |
+| `HARNESS_PROVIDER` | `claude` | `claude`, `pi`, `codex`, or `claude-managed` |
 | `TEMPLATE_ID` | unset | e.g. `official/coder` |
 | `TEMPLATE_REGISTRY_URL` | `https://templates.agent-swarm.dev` | |
 
@@ -49,6 +49,30 @@ Full guides:
 ## Codex ChatGPT OAuth
 
 Run `bun run src/cli.tsx codex-login` from your **laptop**, not inside the worker container. For a remote swarm, point `--api-url` at the public API (or SSH tunnel), then restart codex workers.
+
+## Claude Managed Agents
+
+`HARNESS_PROVIDER=claude-managed` runs sessions in Anthropic's managed cloud sandbox (no local CLI). One-time bootstrap from your laptop:
+
+```bash
+bun run src/cli.tsx claude-managed-setup
+```
+
+This creates an Anthropic-side environment + agent + skills (uploaded from `plugin/commands/*.md`) and persists the resulting IDs to `swarm_config`. Deployed workers restore these from the API at boot. Re-run with `--force` to recreate.
+
+Required env vars (workers fail-fast at boot if any are missing):
+
+```
+HARNESS_PROVIDER=claude-managed
+ANTHROPIC_API_KEY=sk-ant-...
+MANAGED_AGENT_ID=agent_...                    # from claude-managed-setup
+MANAGED_ENVIRONMENT_ID=env_...                # from claude-managed-setup
+MCP_BASE_URL=https://api.swarm.example.com    # MUST be HTTPS-public — Anthropic's
+                                              # sandbox calls /mcp from the cloud
+MANAGED_AGENT_MODEL=claude-sonnet-4-6         # optional, default in setup CLI
+```
+
+`MCP_BASE_URL` must be HTTPS-public so Anthropic's managed sandbox can reach `/mcp` — same constraint already documented above for Jira webhook setup. Use ngrok / Cloudflare Tunnel in dev. The adapter and the docker-entrypoint both fail-fast if `MCP_BASE_URL` is unset or doesn't start with `https://`.
 
 ## Portless dev
 

@@ -10,7 +10,7 @@ status: in-progress
 research_source: thoughts/d454d1a5-4df9-49bd-8a89-e58d6a657dc3/research/2026-04-09-claude-managed-agents-integration.md
 autonomy: critical
 last_updated: 2026-04-28
-last_updated_by: claude (phase 1)
+last_updated_by: claude (phase 2)
 ---
 
 # Claude Managed Agents Harness Provider Implementation Plan
@@ -261,15 +261,15 @@ Mention that `MCP_BASE_URL` must be HTTPS-public for managed-agents (ngrok / Clo
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run tsc:check` passes (CLI command + adapter type-check against bumped SDK)
-- [ ] `bun run lint:fix` produces no errors
-- [ ] `bun run src/cli.tsx help` lists `claude-managed-setup`
-- [ ] `bun run src/cli.tsx claude-managed-setup --help` prints usage and exits 0 without making API calls
-- [ ] `bash -n docker-entrypoint.sh` passes
-- [ ] `bash scripts/check-db-boundary.sh` passes (the new CLI command lives under `src/commands/` and must not import `src/be/db` — it talks to the API via HTTP like `codex-login` does)
+- [x] `bun run tsc:check` passes (CLI command + adapter type-check against bumped SDK)
+- [x] `bun run lint:fix` produces no errors
+- [x] `bun run src/cli.tsx help` lists `claude-managed-setup`
+- [x] `bun run src/cli.tsx claude-managed-setup --help` prints usage and exits 0 without making API calls
+- [x] `bash -n docker-entrypoint.sh` passes
+- [x] `bash scripts/check-db-boundary.sh` passes (the new CLI command lives under `src/commands/` and must not import `src/be/db` — it talks to the API via HTTP like `codex-login` does)
 
 #### Automated QA:
-- [ ] Mock test (with mocked `fetch`/`Anthropic`): running `claude-managed-setup` against a stubbed API hits `environments.create`, `skills.create` (×N for plugin/commands files), `agents.create`, then `PUT /api/config` for each ID. Idempotent on second run (existing IDs detected via `GET /api/config?key=managed_agent_id`, skipped).
+- [x] Mock test (with mocked `fetch`/`Anthropic`): running `claude-managed-setup` against a stubbed API hits `environments.create`, `skills.create` (×N for plugin/commands files), `agents.create`, then `PUT /api/config` for each ID. Idempotent on second run (existing IDs detected via `GET /api/config?key=managed_agent_id`, skipped).
 - [ ] `MANAGED_AGENT_ID=agent_x MANAGED_ENVIRONMENT_ID=env_x ANTHROPIC_API_KEY=sk-test MCP_BASE_URL=https://example.com HARNESS_PROVIDER=claude-managed bash docker-entrypoint.sh` boots without exit-1 (env vars set externally — entrypoint should respect them and skip the swarm_config fetch).
 - [ ] Boot the docker image with **only** `HARNESS_PROVIDER=claude-managed` and `MCP_BASE_URL` set (no `MANAGED_*` env vars), but with `swarm_config` pre-populated; grep `docker logs` for "Restored claude-managed config from swarm_config" line and confirm worker proceeds.
 
