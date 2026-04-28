@@ -10,7 +10,7 @@ status: in-progress
 research_source: thoughts/d454d1a5-4df9-49bd-8a89-e58d6a657dc3/research/2026-04-09-claude-managed-agents-integration.md
 autonomy: critical
 last_updated: 2026-04-28
-last_updated_by: claude (phase 2)
+last_updated_by: claude (phase 3)
 ---
 
 # Claude Managed Agents Harness Provider Implementation Plan
@@ -365,14 +365,14 @@ The adapter's heart. `createSession` opens a real managed session; `runSession` 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run tsc:check` passes
-- [ ] `bun run lint:fix` produces no errors
-- [ ] `bun test src/tests/claude-managed-adapter.test.ts` passes (all unit tests above)
-- [ ] `bash scripts/check-db-boundary.sh` passes
+- [x] `bun run tsc:check` passes
+- [x] `bun run lint:fix` produces no errors
+- [x] `bun test src/tests/claude-managed-adapter.test.ts` passes (all unit tests above)
+- [x] `bash scripts/check-db-boundary.sh` passes
 
 #### Automated QA:
-- [ ] Unit test assertions cover every `ProviderEvent` mapping listed above.
-- [ ] An end-to-end mock (Anthropic client mocked, runner not involved) exercises full session: create → stream 5 fake events including `status_idle` → `waitForCompletion` resolves with sensible `ProviderResult`.
+- [x] Unit test assertions cover every `ProviderEvent` mapping listed above.
+- [x] An end-to-end mock (Anthropic client mocked, runner not involved) exercises full session: create → stream 5 fake events including `status_idle` → `waitForCompletion` resolves with sensible `ProviderResult`.
 - [ ] **Runner-integration mock**: hook the adapter into a mocked runner harness. Assert that `agent.message` events from the fake SSE stream cause `POST /api/tasks/{id}/progress` calls (verifies the existing runner pipeline picks up `message` ProviderEvents). Same for `session_init` → `PUT /api/tasks/{id}/claude-session` and `result` → `POST /api/session-costs` + `POST /api/tasks/{id}/finish`.
 
 #### Manual Verification:
