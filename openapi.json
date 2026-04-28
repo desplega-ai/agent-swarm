@@ -5849,22 +5849,68 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "claudeSessionId": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "provider": {
-                    "type": "string"
-                  },
-                  "providerMeta": {
+                "anyOf": [
+                  {
                     "type": "object",
-                    "additionalProperties": {}
+                    "properties": {
+                      "claudeSessionId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "devin"
+                        ]
+                      },
+                      "providerMeta": {
+                        "type": "object",
+                        "properties": {
+                          "sessionUrl": {
+                            "type": "string"
+                          },
+                          "maxAcuLimit": {
+                            "type": "number"
+                          },
+                          "acuCostUsd": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "sessionUrl"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "claudeSessionId",
+                      "provider",
+                      "providerMeta"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "claudeSessionId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "claude",
+                          "codex",
+                          "pi"
+                        ]
+                      },
+                      "providerMeta": {
+                        "type": "object",
+                        "properties": {}
+                      }
+                    },
+                    "required": [
+                      "claudeSessionId"
+                    ]
                   }
-                },
-                "required": [
-                  "claudeSessionId"
                 ]
               }
             }
