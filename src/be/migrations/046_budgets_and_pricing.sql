@@ -1,4 +1,4 @@
--- 044_budgets_and_pricing.sql
+-- 046_budgets_and_pricing.sql
 -- Per-agent daily cost budget (V1) — schema + price-book DB-ification.
 --
 -- Tables added:

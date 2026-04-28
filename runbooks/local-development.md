@@ -20,11 +20,13 @@ Bun auto-loads `.env`. Don't use `dotenv`.
 | `MCP_BASE_URL` | `http://localhost:3013` | Public URL the workers/UI hit |
 | `APP_URL` | `http://localhost:5274` | Dashboard URL |
 | `SLACK_DISABLE` / `GITHUB_DISABLE` / `JIRA_DISABLE` / `LINEAR_DISABLE` | unset | Set `=true` to disable each integration |
-| `HARNESS_PROVIDER` | `claude` | `claude`, `pi`, or `codex` |
+| `HARNESS_PROVIDER` | `claude` | `claude`, `pi`, `codex`, or `devin` |
 | `TEMPLATE_ID` | unset | e.g. `official/coder` |
 | `TEMPLATE_REGISTRY_URL` | `https://templates.agent-swarm.dev` | |
 
 `HARNESS_PROVIDER=codex` requires `OPENAI_API_KEY` **or** `~/.codex/auth.json` **or** ChatGPT OAuth via `codex-login`. ChatGPT OAuth is stored server-side as the global `codex_oauth` config entry; codex workers restore it into `~/.codex/auth.json` at boot.
+
+`HARNESS_PROVIDER=devin` requires `DEVIN_API_KEY` (prefix `cog_*`) and `DEVIN_ORG_ID` (prefix `org-*`). Optional: `DEVIN_POLL_INTERVAL_MS` (default 15000), `DEVIN_ACU_COST_USD` (default 2.25), `DEVIN_MAX_ACU_LIMIT` (per-session ACU cap, sent to Devin API and shown in UI budget bar), `DEVIN_API_BASE_URL` (override for testing). Repos are configured via the task's `vcsRepo` field — no env var needed. See `.env.docker-devin.example` for a full template.
 
 `API_KEY` and `SECRETS_ENCRYPTION_KEY` are reserved — they cannot be stored in `swarm_config`.
 

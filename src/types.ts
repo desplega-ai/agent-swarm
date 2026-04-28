@@ -68,6 +68,25 @@ export const AgentTaskSourceSchema = z.enum([
 ]);
 export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 
+export const ProviderNameSchema = z.enum(["claude", "codex", "pi", "devin"]);
+export type ProviderName = z.infer<typeof ProviderNameSchema>;
+
+export type DevinProviderMeta = {
+  sessionUrl: string;
+  maxAcuLimit?: number;
+  acuCostUsd?: number;
+};
+
+// These providers do not have metadata yet.
+type NoProviderMeta = Record<string, never>;
+
+export type ProviderMetaMap = {
+  devin: DevinProviderMeta;
+  claude: NoProviderMeta;
+  codex: NoProviderMeta;
+  pi: NoProviderMeta;
+};
+
 export const AgentTaskSchema = z.object({
   id: z.uuid(),
   agentId: z.uuid().nullable(), // Nullable for unassigned tasks
@@ -169,6 +188,10 @@ export const AgentTaskSchema = z.object({
   // agent-swarm package version at task creation time. Enables benchmarking
   // performance across releases. Nullable for rows created before tracking was added.
   swarmVersion: z.string().optional(),
+
+  // Provider tracking — which harness provider ran this task
+  provider: ProviderNameSchema.optional(),
+  providerMeta: z.record(z.string(), z.unknown()).optional(),
 });
 
 // ============================================================================
@@ -1143,7 +1166,7 @@ export type ContextSnapshot = z.infer<typeof ContextSnapshotSchema>;
 // This is a deliberate divergence from the rest of types.ts (which uses
 // `z.iso.datetime()` strings) so that the price-book "largest
 // effective_from <= now" lookup is a pure integer comparison. Matches the
-// SQL columns in migration 044_budgets_and_pricing.sql verbatim.
+// SQL columns in migration 046_budgets_and_pricing.sql verbatim.
 
 export const BudgetScopeSchema = z.enum(["global", "agent"]);
 export type BudgetScope = z.infer<typeof BudgetScopeSchema>;

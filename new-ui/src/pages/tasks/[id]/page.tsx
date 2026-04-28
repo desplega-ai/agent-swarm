@@ -41,9 +41,16 @@ import {
   useTaskContext,
   useTaskSessionLogs,
 } from "@/api/hooks/use-tasks";
-import type { AgentLog, SessionCost, TaskContextResponse } from "@/api/types";
+import type {
+  AgentLog,
+  DevinProviderMeta,
+  ProviderName,
+  SessionCost,
+  TaskContextResponse,
+} from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
+import { SessionId } from "@/components/shared/session-id";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import {
@@ -63,7 +70,7 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { cn, formatRelativeTime, formatSmartTime } from "@/lib/utils";
+import { cn, formatRelativeTime, formatSmartTime, normalizeNewlines } from "@/lib/utils";
 
 function logStatusColor(status: string | null | undefined): string {
   switch (status) {
@@ -193,9 +200,55 @@ function MetaRow({
   );
 }
 
-/** Normalize single newlines to double for markdown paragraph breaks, preserving existing double newlines and list/heading markers. */
-function normalizeNewlines(text: string): string {
-  return text.replace(/(?<!\n)\n(?!\n|[-*#>|]|\d+\.)/g, "\n\n");
+/** Try to parse structured output JSON ({status, output, summary}). */
+function parseStructuredOutput(raw: string): { output?: string; summary?: string } | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      ("output" in parsed || "summary" in parsed)
+    )
+      return parsed as { output?: string; summary?: string };
+  } catch {
+    // Not JSON — fall through.
+  }
+  return null;
+}
+
+function StructuredOutputContent({ raw, maxH }: { raw: string; maxH: string }) {
+  const structured = parseStructuredOutput(raw);
+  if (!structured) {
+    return (
+      <div className={`text-sm leading-relaxed overflow-auto text-foreground/80 ${maxH}`}>
+        <Streamdown>{normalizeNewlines(raw)}</Streamdown>
+      </div>
+    );
+  }
+  return (
+    <div className={`space-y-3 overflow-auto ${maxH}`}>
+      {structured.summary && (
+        <div>
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+            Summary
+          </span>
+          <div className="mt-1 text-sm leading-relaxed text-foreground/80">
+            <Streamdown>{normalizeNewlines(structured.summary)}</Streamdown>
+          </div>
+        </div>
+      )}
+      {structured.output && (
+        <div>
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+            Output
+          </span>
+          <div className="mt-1 text-sm leading-relaxed text-foreground/80">
+            <Streamdown>{normalizeNewlines(structured.output)}</Streamdown>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function TaskPrompt({ text }: { text: string }) {
@@ -253,10 +306,17 @@ function formatTokens(n: number): string {
 function TaskCostSection({
   costs,
   isLoading,
+  provider,
+  providerMeta,
 }: {
   costs: SessionCost[] | undefined;
   isLoading: boolean;
+  provider?: ProviderName;
+  providerMeta?: DevinProviderMeta | Record<string, never>;
 }) {
+  const isDevin = provider === "devin";
+  const devinMeta = isDevin ? (providerMeta as DevinProviderMeta | undefined) : undefined;
+
   const stats = useMemo(() => {
     if (!costs || costs.length === 0) return null;
     const totalCost = costs.reduce((sum, c) => sum + c.totalCostUsd, 0);
@@ -300,6 +360,9 @@ function TaskCostSection({
 
   if (!stats) return null;
 
+  const acuCostUsd = devinMeta?.acuCostUsd ?? 2.25;
+  const acusConsumed = isDevin ? stats.totalCost / acuCostUsd : 0;
+
   return (
     <>
       <Separator className="my-2" />
@@ -310,28 +373,38 @@ function TaskCostSection({
         <MetaRow icon={DollarSign} label="Cost">
           <span className="text-xs font-semibold">${stats.totalCost.toFixed(4)}</span>
         </MetaRow>
-        <MetaRow icon={Zap} label="Tokens">
-          <span className="text-xs font-mono">
-            {formatTokens(stats.inputTokens)} in / {formatTokens(stats.outputTokens)} out
-          </span>
-        </MetaRow>
-        {(stats.cacheReadTokens > 0 || stats.cacheWriteTokens > 0) && (
-          <MetaRow icon={Zap} label="Cache">
-            <span className="text-xs font-mono">
-              {formatTokens(stats.cacheReadTokens)} read / {formatTokens(stats.cacheWriteTokens)}{" "}
-              write
-            </span>
+        {isDevin ? (
+          <MetaRow icon={Zap} label="ACUs">
+            <span className="text-xs font-mono">{acusConsumed.toFixed(2)}</span>
           </MetaRow>
+        ) : (
+          <>
+            <MetaRow icon={Zap} label="Tokens">
+              <span className="text-xs font-mono">
+                {formatTokens(stats.inputTokens)} in / {formatTokens(stats.outputTokens)} out
+              </span>
+            </MetaRow>
+            {(stats.cacheReadTokens > 0 || stats.cacheWriteTokens > 0) && (
+              <MetaRow icon={Zap} label="Cache">
+                <span className="text-xs font-mono">
+                  {formatTokens(stats.cacheReadTokens)} read /{" "}
+                  {formatTokens(stats.cacheWriteTokens)} write
+                </span>
+              </MetaRow>
+            )}
+          </>
         )}
         <MetaRow icon={Timer} label="Duration">
           <span className="text-xs">{formatDuration(stats.totalDurationMs)}</span>
         </MetaRow>
-        <MetaRow icon={Hash} label="Turns">
-          <span className="text-xs">
-            {stats.totalTurns.toLocaleString()}
-            {stats.sessions > 1 ? ` (${stats.sessions} sessions)` : ""}
-          </span>
-        </MetaRow>
+        {!isDevin && (
+          <MetaRow icon={Hash} label="Turns">
+            <span className="text-xs">
+              {stats.totalTurns.toLocaleString()}
+              {stats.sessions > 1 ? ` (${stats.sessions} sessions)` : ""}
+            </span>
+          </MetaRow>
+        )}
         <MetaRow icon={Cpu} label="Model">
           <span className="text-xs font-mono">{stats.models.join(", ")}</span>
         </MetaRow>
@@ -349,10 +422,52 @@ function contextBarColor(percent: number): string {
 function TaskContextSection({
   context,
   isLoading,
+  provider,
+  providerMeta,
+  costs,
 }: {
   context: TaskContextResponse | undefined;
   isLoading: boolean;
+  provider?: ProviderName;
+  providerMeta?: DevinProviderMeta | Record<string, never>;
+  costs?: SessionCost[];
 }) {
+  const isDevin = provider === "devin";
+  const devinMeta = isDevin ? (providerMeta as DevinProviderMeta | undefined) : undefined;
+
+  if (isDevin) {
+    const maxAcuLimit = devinMeta?.maxAcuLimit;
+    const acuCostUsd = devinMeta?.acuCostUsd ?? 2.25;
+    const totalCost = costs?.reduce((sum, c) => sum + c.totalCostUsd, 0) ?? 0;
+    const acusConsumed = totalCost / acuCostUsd;
+
+    if (!maxAcuLimit) return null;
+
+    const percent = Math.min((acusConsumed / maxAcuLimit) * 100, 100);
+
+    return (
+      <>
+        <Separator className="my-2" />
+        <div className="space-y-1">
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+            ACU Budget
+          </span>
+          <div className="flex items-center gap-2 py-1">
+            <Progress value={percent} className={cn("h-1.5 flex-1", contextBarColor(percent))} />
+            <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+              {percent.toFixed(0)}%
+            </span>
+          </div>
+          <MetaRow icon={Zap} label="Used">
+            <span className="text-xs font-mono">
+              {acusConsumed.toFixed(2)} / {maxAcuLimit} ACUs
+            </span>
+          </MetaRow>
+        </div>
+      </>
+    );
+  }
+
   if (isLoading) {
     return (
       <>
@@ -507,9 +622,11 @@ export default function TaskDetailPage() {
       )}
       {task.claudeSessionId && (
         <MetaRow icon={Terminal} label="Session">
-          <span className="text-xs font-mono truncate" title={task.claudeSessionId}>
-            {task.claudeSessionId.slice(0, 12)}...
-          </span>
+          <SessionId
+            sessionId={task.claudeSessionId}
+            provider={task.provider}
+            providerMeta={task.providerMeta}
+          />
         </MetaRow>
       )}
       {task.credentialKeySuffix && (
@@ -633,9 +750,20 @@ export default function TaskDetailPage() {
         </>
       )}
 
-      <TaskContextSection context={contextData} isLoading={contextLoading} />
+      <TaskContextSection
+        context={contextData}
+        isLoading={contextLoading}
+        provider={task.provider}
+        providerMeta={task.providerMeta}
+        costs={costs}
+      />
 
-      <TaskCostSection costs={costs} isLoading={costsLoading} />
+      <TaskCostSection
+        costs={costs}
+        isLoading={costsLoading}
+        provider={task.provider}
+        providerMeta={task.providerMeta}
+      />
 
       {hasEvents && (
         <>
@@ -676,9 +804,7 @@ export default function TaskDetailPage() {
           bgColor={isCompleted ? "bg-emerald-500/5" : "bg-muted/20"}
           defaultOpen
         >
-          <div className="text-sm leading-relaxed max-h-[60vh] overflow-auto text-foreground/80">
-            <Streamdown>{normalizeNewlines(task.output ?? "")}</Streamdown>
-          </div>
+          <StructuredOutputContent raw={task.output ?? ""} maxH="max-h-[60vh]" />
         </CollapsibleSection>
       )}
 
@@ -743,6 +869,14 @@ export default function TaskDetailPage() {
           {task.source && (
             <Badge variant="outline" size="tag">
               {task.source}
+            </Badge>
+          )}
+          {task.provider && (
+            <Badge
+              variant="outline"
+              className="text-[9px] px-1.5 py-0 h-5 font-medium leading-none items-center uppercase"
+            >
+              {task.provider}
             </Badge>
           )}
           {(() => {
@@ -877,9 +1011,7 @@ export default function TaskDetailPage() {
               borderColor={isCompleted ? "border-emerald-500/30" : "border-border"}
               bgColor={isCompleted ? "bg-emerald-500/5" : "bg-muted/20"}
             >
-              <div className="text-sm leading-relaxed max-h-48 overflow-auto text-foreground/80">
-                <Streamdown>{normalizeNewlines(task.output ?? "")}</Streamdown>
-              </div>
+              <StructuredOutputContent raw={task.output ?? ""} maxH="max-h-48" />
             </CollapsibleSection>
           )}
 

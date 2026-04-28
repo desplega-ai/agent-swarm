@@ -178,3 +178,11 @@ export function formatElapsed(start: string, end?: string | null): string {
   if (seconds > 0) return `${seconds}s`;
   return `${diffMs}ms`;
 }
+
+/**
+ * Normalize single newlines to double for markdown paragraph breaks,
+ * preserving existing double newlines and list/heading markers.
+ */
+export function normalizeNewlines(text: string): string {
+  return text.replace(/(?<!\n)\n(?!\n|[-*#>|]|\d+\.)/g, "\n\n");
+}

@@ -5,6 +5,7 @@ export const CREDENTIAL_POOL_VARS = [
   "OPENROUTER_API_KEY",
   "OPENAI_API_KEY",
   "CODEX_OAUTH",
+  "DEVIN_API_KEY",
 ] as const;
 
 /**
@@ -23,6 +24,7 @@ export const PROVIDER_CREDENTIAL_VARS: Record<string, readonly string[]> = {
   // pi-mono accepts either router or anthropic keys
   pi: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"],
   codex: ["OPENAI_API_KEY", "CODEX_OAUTH"],
+  devin: ["DEVIN_API_KEY"],
 };
 
 /**
@@ -43,6 +45,8 @@ export function deriveProviderFromKeyType(keyType: string): string {
     case "OPENAI_API_KEY":
     case "CODEX_OAUTH":
       return "codex";
+    case "DEVIN_API_KEY":
+      return "devin";
     default:
       return "claude";
   }

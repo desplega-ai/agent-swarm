@@ -5,10 +5,12 @@ export type {
   ProviderResult,
   ProviderSession,
   ProviderSessionConfig,
+  ProviderTraits,
 } from "./types";
 
 import { ClaudeAdapter } from "./claude-adapter";
 import { CodexAdapter } from "./codex-adapter";
+import { DevinAdapter } from "./devin-adapter";
 import { PiMonoAdapter } from "./pi-mono-adapter";
 import type { ProviderAdapter } from "./types";
 
@@ -21,7 +23,11 @@ export function createProviderAdapter(provider: string): ProviderAdapter {
       return new PiMonoAdapter();
     case "codex":
       return new CodexAdapter();
+    case "devin":
+      return new DevinAdapter();
     default:
-      throw new Error(`Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi, codex`);
+      throw new Error(
+        `Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi, codex, devin`,
+      );
   }
 }

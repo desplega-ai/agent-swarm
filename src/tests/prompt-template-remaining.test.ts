@@ -433,6 +433,8 @@ Note: Claims are first-come-first-serve. If claim fails, pick another.`;
       task_id: "task-xyz",
       task_description: "Fix the test suite",
       progress: "Fixed 3 of 5 failing tests",
+      completion_instructions:
+        '\n\nWhen done, use `store-progress` with status: "completed" and include your output.',
     });
 
     expect(result.skipped).toBe(false);
@@ -458,6 +460,8 @@ When done, use \`store-progress\` with status: "completed" and include your outp
       work_on_task_cmd: "/work-on-task",
       task_id: "task-xyz",
       task_description: "Fix the test suite",
+      completion_instructions:
+        '\n\nWhen done, use `store-progress` with status: "completed" and include your output.',
     });
 
     expect(result.skipped).toBe(false);

@@ -19,7 +19,7 @@ import {
   type ProviderSessionConfig,
 } from "../providers/index.ts";
 import { initTelemetry, telemetry } from "../telemetry.ts";
-import type { RepoGuidelines } from "../types.ts";
+import type { ProviderName, RepoGuidelines } from "../types.ts";
 import { computeBudgetBackoffMs } from "../utils/budget-backoff.ts";
 import { getContextWindowSize } from "../utils/context-window.ts";
 import { type CredentialSelection, resolveCredentialPools } from "../utils/credentials.ts";
@@ -30,6 +30,9 @@ import { detectVcsProvider } from "../vcs/index.ts";
 import { interpolate } from "../workflows/template.ts";
 // Side-effect import: registers runner trigger/resumption templates
 import "./templates.ts";
+
+/** Throttle interval for progress updates (3 seconds). */
+const PROGRESS_THROTTLE_MS = 3000;
 
 /** Save PM2 process list for persistence across container restarts */
 async function savePm2State(role: string): Promise<void> {
@@ -529,6 +532,7 @@ export async function ensureTaskFinished(
   taskId: string,
   exitCode: number,
   failureReason?: string,
+  providerOutput?: string,
 ): Promise<void> {
   const headers: Record<string, string> = {
     "X-Agent-ID": config.agentId,
@@ -545,6 +549,9 @@ export async function ensureTaskFinished(
 
   if (status === "failed") {
     body.failureReason = failureReason || `Claude process exited with code ${exitCode}`;
+  } else if (providerOutput) {
+    // Provider already supplied structured output (e.g. Devin) — use directly.
+    body.output = providerOutput;
   } else {
     // Try structured output fallback if the task has an outputSchema
     const adapterType = process.env.HARNESS_PROVIDER || "claude";
@@ -812,21 +819,28 @@ async function resumeTaskViaAPI(config: ApiConfig, taskId: string): Promise<bool
 async function buildResumePrompt(
   task: { id: string; task: string; progress?: string },
   fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
+  options?: { hasMcp?: boolean },
 ): Promise<string> {
+  const hasMcp = options?.hasMcp !== false;
+  const completionInstructions = hasMcp
+    ? '\n\nWhen done, use `store-progress` with status: "completed" and include your output.'
+    : "";
   if (task.progress) {
     const result = await resolveTemplateAsync("task.resumption.with_progress", {
-      work_on_task_cmd: fmt("work-on-task"),
-      task_id: task.id,
+      work_on_task_cmd: hasMcp ? fmt("work-on-task") : "",
+      task_id: hasMcp ? task.id : "",
       task_description: task.task,
       progress: task.progress,
+      completion_instructions: completionInstructions,
     });
     return result.text;
   }
 
   const result = await resolveTemplateAsync("task.resumption.no_progress", {
-    work_on_task_cmd: fmt("work-on-task"),
-    task_id: task.id,
+    work_on_task_cmd: hasMcp ? fmt("work-on-task") : "",
+    task_id: hasMcp ? task.id : "",
     task_description: task.task,
+    completion_instructions: completionInstructions,
   });
   return result.text;
 }
@@ -1034,13 +1048,18 @@ async function saveProviderSessionId(
   apiKey: string,
   taskId: string,
   claudeSessionId: string,
+  provider?: ProviderName,
+  providerMeta?: Record<string, unknown>,
 ): Promise<void> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  const body: Record<string, unknown> = { claudeSessionId };
+  if (provider !== undefined) body.provider = provider;
+  if (providerMeta !== undefined) body.providerMeta = providerMeta;
   await fetch(`${apiUrl}/api/tasks/${taskId}/claude-session`, {
     method: "PUT",
     headers,
-    body: JSON.stringify({ claudeSessionId }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -1385,7 +1404,9 @@ async function buildPromptForTrigger(
   trigger: Trigger,
   defaultPrompt: string,
   fmt: (cmd: string) => string = (cmd) => `/${cmd}`,
+  options?: { hasMcp?: boolean },
 ): Promise<string> {
+  const hasMcp = options?.hasMcp !== false;
   switch (trigger.type) {
     case "task_assigned": {
       // Use the work-on-task command with task ID and description
@@ -1395,10 +1416,13 @@ async function buildPromptForTrigger(
           : null;
       const taskDescSection = taskDesc ? `\n\nTask: "${taskDesc}"` : "";
 
-      // Build output instructions — use outputSchema if present, otherwise generic
+      // Build output instructions — use outputSchema if present, otherwise generic.
+      // Skip store-progress references for providers without MCP (e.g. Devin).
       const taskObj = trigger.task as Record<string, unknown> | undefined;
       let outputInstructions: string;
-      if (taskObj?.outputSchema && typeof taskObj.outputSchema === "object") {
+      if (!hasMcp) {
+        outputInstructions = "";
+      } else if (taskObj?.outputSchema && typeof taskObj.outputSchema === "object") {
         outputInstructions = `\n\n**Required Output Format**: When completing this task, you MUST call store-progress with output that is valid JSON conforming to this schema:\n\`\`\`json\n${JSON.stringify(taskObj.outputSchema, null, 2)}\n\`\`\`\nCall store-progress with status "completed" and your JSON output. If your output doesn't match the schema, the tool call will fail and you should fix and retry.`;
       } else {
         outputInstructions =
@@ -1412,8 +1436,8 @@ async function buildPromptForTrigger(
         : "";
 
       const result = await resolveTemplateAsync("task.trigger.assigned", {
-        work_on_task_cmd: fmt("work-on-task"),
-        task_id: trigger.taskId,
+        work_on_task_cmd: hasMcp ? fmt("work-on-task") : "",
+        task_id: hasMcp ? trigger.taskId : "",
         task_desc_section: taskDescSection + requestedBySection,
         output_instructions: outputInstructions,
       });
@@ -1428,13 +1452,16 @@ async function buildPromptForTrigger(
           : null;
       const taskDescSection = taskDesc ? `\n\nA task has been offered to you:\n"${taskDesc}"` : "";
       const result = await resolveTemplateAsync("task.trigger.offered", {
-        review_offered_task_cmd: fmt("review-offered-task"),
-        task_id: trigger.taskId,
+        review_offered_task_cmd: hasMcp ? fmt("review-offered-task") : "",
+        task_id: hasMcp ? trigger.taskId : "",
         task_desc_section: taskDescSection,
       });
       return result.text;
     }
 
+    // NOTE: unread_mentions, pool_tasks_available, and channel_activity triggers
+    // reference MCP tools (read-messages, get-tasks, task-action, slack-reply, etc.)
+    // and are not currently fired for providers without MCP (e.g. Devin).
     case "unread_mentions": {
       const result = await resolveTemplateAsync("task.trigger.unread_mentions", {
         mention_count: trigger.count || "unread",
@@ -1584,6 +1611,7 @@ async function spawnProviderProcess(
     taskId?: string;
     model?: string;
     cwd?: string;
+    vcsRepo?: string;
   },
   logDir: string,
   isYolo: boolean,
@@ -1625,6 +1653,7 @@ async function spawnProviderProcess(
     apiUrl: opts.apiUrl,
     apiKey: opts.apiKey,
     cwd: opts.cwd || process.cwd(),
+    vcsRepo: opts.vcsRepo,
     logFile: opts.logFile,
     additionalArgs: opts.additionalArgs,
     iteration: opts.iteration,
@@ -1700,7 +1729,6 @@ async function spawnProviderProcess(
 
   // Auto-progress throttle: don't update more than once per 3 seconds
   let lastProgressTime = 0;
-  const PROGRESS_THROTTLE_MS = 3000;
 
   // Context usage throttle: max 1 snapshot per 30 seconds
   let lastContextPostTime = 0;
@@ -1710,9 +1738,14 @@ async function spawnProviderProcess(
     switch (event.type) {
       case "session_init":
         if (realTaskId) {
-          saveProviderSessionId(opts.apiUrl, opts.apiKey, realTaskId, event.sessionId).catch(
-            (err) => console.warn(`[runner] Failed to save session ID: ${err}`),
-          );
+          saveProviderSessionId(
+            opts.apiUrl,
+            opts.apiKey,
+            realTaskId,
+            event.sessionId,
+            event.provider,
+            event.providerMeta,
+          ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
         } else {
           // Pool task: save provider session ID on active session so it can be
           // propagated to the real task when the agent claims one
@@ -1870,6 +1903,19 @@ async function spawnProviderProcess(
       case "raw_stderr":
         prettyPrintStderr(event.content, opts.role);
         break;
+
+      case "progress": {
+        if (effectiveTaskId && opts.apiUrl) {
+          const now = Date.now();
+          if (now - lastProgressTime >= PROGRESS_THROTTLE_MS) {
+            lastProgressTime = now;
+            updateProgressViaAPI(opts.apiUrl, opts.apiKey, effectiveTaskId, event.message).catch(
+              () => {},
+            );
+          }
+        }
+        break;
+      }
     }
   });
 
@@ -2021,13 +2067,26 @@ async function runProviderIteration(
 
   const session = await adapter.createSession(config);
 
+  let lastAiLoopProgressTime = 0;
   session.onEvent((event) => {
     if (event.type === "raw_log") prettyPrintLine(event.content, opts.role);
     if (event.type === "raw_stderr") prettyPrintStderr(event.content, opts.role);
     if (event.type === "session_init" && opts.taskId) {
-      saveProviderSessionId(opts.apiUrl, opts.apiKey, opts.taskId, event.sessionId).catch((err) =>
-        console.warn(`[runner] Failed to save session ID: ${err}`),
-      );
+      saveProviderSessionId(
+        opts.apiUrl,
+        opts.apiKey,
+        opts.taskId,
+        event.sessionId,
+        event.provider,
+        event.providerMeta,
+      ).catch((err) => console.warn(`[runner] Failed to save session ID: ${err}`));
+    }
+    if (event.type === "progress" && opts.taskId) {
+      const now = Date.now();
+      if (now - lastAiLoopProgressTime >= PROGRESS_THROTTLE_MS) {
+        lastAiLoopProgressTime = now;
+        updateProgressViaAPI(opts.apiUrl, opts.apiKey, opts.taskId, event.message).catch(() => {});
+      }
     }
   });
 
@@ -2109,7 +2168,14 @@ async function checkCompletedProcesses(
           ).catch(() => {});
         }
       }
-      await ensureTaskFinished(apiConfig, role, taskId, result.exitCode, failureReason);
+      await ensureTaskFinished(
+        apiConfig,
+        role,
+        taskId,
+        result.exitCode,
+        failureReason,
+        result.output,
+      );
 
       ensure({
         id: "worker_process_finished",
@@ -2307,22 +2373,28 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let currentTaskSlackContext: BasePromptArgs["slackContext"] | undefined;
 
   // Generate base prompt (identity fields injected after profile fetch below)
+  const { traits } = adapter;
   const buildSystemPrompt = async () => {
     return getBasePrompt({
       role,
       agentId,
       swarmUrl,
       capabilities,
+      traits,
       name: agentProfileName,
       description: agentDescription,
-      soulMd: agentSoulMd,
-      identityMd: agentIdentityMd,
-      toolsMd: agentToolsMd,
-      claudeMd: agentClaudeMd,
+      ...(traits.hasLocalEnvironment && {
+        soulMd: agentSoulMd,
+        identityMd: agentIdentityMd,
+        toolsMd: agentToolsMd,
+        claudeMd: agentClaudeMd,
+      }),
       repoContext: currentRepoContext,
       slackContext: currentTaskSlackContext,
-      skillsSummary: agentSkillsSummary,
-      mcpServersSummary: agentMcpServersSummary,
+      ...(traits.hasMcp && {
+        skillsSummary: agentSkillsSummary,
+        mcpServersSummary: agentMcpServersSummary,
+      }),
     });
   };
 
@@ -2773,7 +2845,9 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
 
           // Build prompt with resume context + memory injection
-          let resumePrompt = await buildResumePrompt(task, adapter.formatCommand.bind(adapter));
+          let resumePrompt = await buildResumePrompt(task, adapter.formatCommand.bind(adapter), {
+            hasMcp: adapter.traits.hasMcp,
+          });
 
           // Inject relevant memories for resumed tasks
           const resumeMemoryContext = await fetchRelevantMemories(
@@ -2876,6 +2950,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
                 taskId: task.id,
                 model: (task as { model?: string }).model,
                 cwd: resumeCwd,
+                vcsRepo: task.vcsRepo,
               },
               logDir,
               isYolo,
@@ -3055,6 +3130,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             trigger,
             prompt,
             adapter.formatCommand.bind(adapter),
+            { hasMcp: adapter.traits.hasMcp },
           );
 
           // Enrich prompt with relevant memories from past sessions
@@ -3217,6 +3293,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
                 taskId: trigger.taskId,
                 model: taskModel,
                 cwd: effectiveCwd,
+                vcsRepo: taskVcsRepo,
               },
               logDir,
               isYolo,

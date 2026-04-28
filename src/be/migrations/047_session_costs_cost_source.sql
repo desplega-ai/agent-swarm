@@ -1,4 +1,4 @@
--- 045_session_costs_cost_source.sql
+-- 047_session_costs_cost_source.sql
 -- Phase 6: track WHERE the recorded `totalCostUsd` came from for each session_costs row.
 --
 -- Adds a single column `costSource` to the `session_costs` table:

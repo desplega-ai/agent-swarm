@@ -10,6 +10,17 @@ if [ "$HARNESS_PROVIDER" = "pi" ]; then
         echo "Error: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or ~/.pi/agent/auth.json required for pi provider"
         exit 1
     fi
+elif [ "$HARNESS_PROVIDER" = "devin" ]; then
+    # Devin auth: DEVIN_API_KEY and DEVIN_ORG_ID must exist
+    if [ -z "$DEVIN_API_KEY" ]; then
+        echo "Error: DEVIN_API_KEY is required for Devin provider"
+        exit 1
+    fi
+    if [ -z "$DEVIN_ORG_ID" ]; then
+        echo "Error: DEVIN_ORG_ID is required for Devin provider"
+        exit 1
+    fi
+    echo "Devin API: configured (org: ${DEVIN_ORG_ID})"
 elif [ "$HARNESS_PROVIDER" = "codex" ]; then
     WORKER_CODEX_HOME="/home/worker/.codex"
 
@@ -92,6 +103,8 @@ if [ "$HARNESS_PROVIDER" = "codex" ]; then
         exit 1
     fi
     echo "Codex CLI: $(command -v "$CODEX_BIN")"
+elif [ "$HARNESS_PROVIDER" = "devin" ]; then
+    echo "Devin: cloud API (no local binary required)"
 elif [ "$HARNESS_PROVIDER" != "pi" ]; then
     CLAUDE_BIN="${CLAUDE_BINARY:-claude}"
     if ! command -v "$CLAUDE_BIN" > /dev/null 2>&1; then

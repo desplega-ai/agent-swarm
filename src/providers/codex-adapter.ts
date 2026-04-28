@@ -469,7 +469,7 @@ class CodexSession implements ProviderSession {
     switch (event.type) {
       case "thread.started": {
         this._sessionId = event.thread_id;
-        this.emit({ type: "session_init", sessionId: event.thread_id });
+        this.emit({ type: "session_init", sessionId: event.thread_id, provider: "codex" });
         break;
       }
       case "turn.started": {
@@ -743,6 +743,7 @@ class CodexSession implements ProviderSession {
 
 export class CodexAdapter implements ProviderAdapter {
   readonly name = "codex";
+  readonly traits = { hasMcp: true, hasLocalEnvironment: true };
 
   /**
    * Optional override for the skill resolver's skills directory. When unset,

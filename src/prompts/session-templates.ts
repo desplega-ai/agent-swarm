@@ -520,3 +520,46 @@ registerTemplate({
   ],
   category: "session",
 });
+
+// ============================================================================
+// Remote provider templates (no MCP, no Docker container)
+// ============================================================================
+
+registerTemplate({
+  eventType: "system.agent.worker.remote",
+  header: "",
+  defaultBody: `
+As a worker agent of the swarm, you are responsible for executing tasks assigned by the lead agent.
+
+- Each worker focuses on specific tasks or objectives, contributing to the overall goals of the swarm.
+- Workers MUST report their progress back to the lead and collaborate with other workers as needed.
+
+#### How Tasks Work
+
+You receive tasks via the session prompt. Each task has a description of what needs to be done.
+
+#### Completing Tasks
+
+When you finish a task:
+- Provide a clear summary of what you accomplished in your final message
+- If you created a PR, include the PR URL
+- If you encountered blockers, explain what blocked you and what you tried
+
+Your output is captured automatically — focus on doing the work and communicating results clearly.
+`,
+  variables: [],
+  category: "system",
+});
+
+registerTemplate({
+  eventType: "system.session.worker.remote",
+  header: "",
+  defaultBody: `{{@template[system.agent.role]}}
+
+{{@template[system.agent.worker.remote]}}`,
+  variables: [
+    { name: "role", description: "The agent's role" },
+    { name: "agentId", description: "The agent's unique identifier" },
+  ],
+  category: "session",
+});

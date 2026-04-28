@@ -1,6 +1,6 @@
 # Harness providers runbook
 
-Operational rules for editing or adding harness providers (claude, pi, codex, future).
+Operational rules for editing or adding harness providers (claude, pi, codex, devin, future).
 
 **Canonical conceptual reference:** [docs-site/.../guides/harness-providers.mdx](../docs-site/content/docs/(documentation)/guides/harness-providers.mdx). That guide is the source of truth for how the `ProviderAdapter` interface, the runner's poll→spawn→events→finish flow, system-prompt composition, entrypoint credential restoration, and OAuth flows fit together. Read it before non-trivial work.
 
@@ -20,7 +20,7 @@ Internal refactors that don't change observable behavior don't need a doc update
 
 ## Adding a new provider
 
-1. Read the docs-site guide's "Reference implementations" section to see how `claude`, `pi`, and `codex` are wired.
+1. Read the docs-site guide's "Reference implementations" section to see how `claude`, `pi`, `codex`, and `devin` are wired.
 2. Implement the `ProviderAdapter` in `src/providers/<name>/`.
 3. Wire factory dispatch in `src/commands/runner.ts`.
 4. Branch in `docker-entrypoint.sh` for credential restoration if the provider needs auth files.

@@ -3,7 +3,7 @@ import { unlink } from "node:fs/promises";
 import { closeDb, getDb, initDb } from "../be/db";
 import { CODEX_MODEL_PRICING } from "../providers/codex-models";
 
-const TEST_DB_PATH = "./test-migration-044.sqlite";
+const TEST_DB_PATH = "./test-migration-046.sqlite";
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -52,7 +52,7 @@ interface PricingRow {
   lastUpdatedAt: number;
 }
 
-describe("migration 044 — budgets and pricing", () => {
+describe("migration 046 — budgets and pricing", () => {
   test("budgets table exists with expected columns and PK", () => {
     const db = getDb();
     const cols = db.prepare<TableInfoRow, []>("PRAGMA table_info(budgets)").all();
