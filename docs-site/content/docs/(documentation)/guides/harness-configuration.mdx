@@ -1,6 +1,6 @@
 ---
 title: Harness Configuration
-description: Configure the AI provider (Claude Code, Codex, or pi-mono) that powers your agents
+description: Configure the AI provider (Claude Code, Codex, pi-mono, or Claude Managed Agents) that powers your agents
 ---
 
 Agent Swarm uses a **harness** abstraction to decouple task execution from the underlying AI provider. Each worker runs one harness — the harness spawns sessions, manages credentials, and normalizes events so the rest of the system doesn't care which provider is underneath.
@@ -12,15 +12,19 @@ Agent Swarm uses a **harness** abstraction to decouple task execution from the u
 | **Claude Code** | `claude` (default) | Anthropic's Claude Code CLI. Recommended for most use cases |
 | **Codex** | `codex` | OpenAI Codex CLI with API-key or ChatGPT OAuth authentication |
 | **pi-mono** | `pi` | Open-source coding agent by [@badlogic](https://github.com/badlogic/pi-mono). Supports multiple model backends |
+| **Claude Managed Agents** | `claude-managed` | Anthropic's managed cloud sandbox — sessions execute outside the worker. Requires one-time setup CLI to create the Anthropic-side Agent + Environment |
 
 ## How It Works
 
 The `HARNESS_PROVIDER` environment variable selects which provider adapter is used. The runner creates the adapter at startup:
 
 ```
-HARNESS_PROVIDER=claude  →  ClaudeAdapter  →  spawns `claude` CLI process
-HARNESS_PROVIDER=codex   →  CodexAdapter   →  spawns `codex` CLI process
-HARNESS_PROVIDER=pi      →  PiMonoAdapter  →  creates in-process pi-mono session
+HARNESS_PROVIDER=claude          →  ClaudeAdapter         →  spawns `claude` CLI process
+HARNESS_PROVIDER=codex           →  CodexAdapter          →  spawns `codex` CLI process
+HARNESS_PROVIDER=pi              →  PiMonoAdapter         →  creates in-process pi-mono session
+HARNESS_PROVIDER=claude-managed  →  ClaudeManagedAdapter  →  opens SSE stream against
+                                                            Anthropic's managed sandbox
+                                                            (session executes server-side)
 ```
 
 Both adapters implement the same `ProviderAdapter` interface, producing normalized `ProviderEvent` streams (session init, tool calls, cost data, context usage, etc.) that the runner consumes identically.
@@ -162,18 +166,69 @@ pi-mono resolves models using a `provider/model-id` format. Set the model via `M
 
 ---
 
+## Claude Managed Agents
+
+`claude-managed` runs sessions in Anthropic's managed cloud sandbox. The worker becomes a thin SSE relay that maps Anthropic's `client.beta.sessions.events.stream` output to the swarm's `ProviderEvent` union — no LLM process, no local CLI, no skill filesystem syncing on the worker.
+
+### One-Time Setup
+
+```bash
+bun run src/cli.tsx claude-managed-setup
+```
+
+This bootstrap CLI (run from your laptop, **not** inside a worker container):
+
+1. Creates an Anthropic-side **Environment** (sandbox configuration).
+2. Uploads each `plugin/commands/*.md` skill via `client.beta.skills.create`.
+3. Creates an Anthropic-side **Agent** with those skills attached.
+4. Persists the resulting `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` to `swarm_config` (encrypted at rest); deployed workers restore them at boot.
+
+Re-run with `--force` to recreate the agent + environment from scratch (rare — only needed if Anthropic rotates IDs upstream or you intentionally reset).
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `HARNESS_PROVIDER` | Yes | — | Must be set to `claude-managed` |
+| `ANTHROPIC_API_KEY` | Yes | — | Anthropic API key. The setup CLI and runtime adapter both use this |
+| `MANAGED_AGENT_ID` | Yes | — | Anthropic Agent ID; written by `claude-managed-setup` |
+| `MANAGED_ENVIRONMENT_ID` | Yes | — | Anthropic Environment ID; written by `claude-managed-setup` |
+| `MCP_BASE_URL` | Yes | — | Must be **HTTPS-public** so Anthropic's sandbox can reach `/mcp` |
+| `MANAGED_AGENT_MODEL` | No | `claude-sonnet-4-6` | Default model on `sessions.create`; per-task `task.model` overrides |
+| `MANAGED_GITHUB_VAULT_ID` | No | — | Anthropic vault ID holding a GitHub PAT, for repo-bound tasks (recommended for prod) |
+| `MANAGED_GITHUB_TOKEN` | No | — | Literal GitHub PAT injected as `authorization_token` on `github_repository` resources (dev-only fallback) |
+
+<Callout type="warn">
+  **`MCP_BASE_URL` must be HTTPS and publicly reachable.** Anthropic's managed sandbox calls `/mcp` from the cloud — `localhost`, `host.docker.internal`, or self-signed HTTPS will fail. In development, expose the API server via ngrok / Cloudflare Tunnel; in production, point at your deployed swarm API. The adapter and `docker-entrypoint.sh` both fail-fast at boot if `MCP_BASE_URL` is unset or doesn't start with `https://`. (Same constraint already documented for the Jira webhook setup.)
+</Callout>
+
+### Model Selection
+
+Default: `claude-sonnet-4-6`. Override per-worker via `MANAGED_AGENT_MODEL`, or per-task via the standard `task.model` field. Cost computation lives in [`src/providers/claude-managed-models.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-managed-models.ts) — token rates per [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing) plus Anthropic's $0.08/session-hour runtime fee.
+
+### claude-managed Specifics
+
+- **No skill filesystem on the worker.** Skills are uploaded to Anthropic via `beta.skills.create` during setup and referenced by ID on the Agent.
+- **System prompt rides in the user message** with a `cache_control: { type: "ephemeral" }` breakpoint between the static prefix and the per-task body, so the static prefix is cache-hit across tasks for the same agent.
+- **Repo provisioning** uses `resources: [{ type: "github_repository", url, authorization_token, checkout: { type: "branch", name: "main" } }]` on `sessions.create` when the task carries `vcsRepo`. Anthropic clones into `/workspace/<repo-name>` server-side before the agent runs.
+
+For full provider design rationale (why we don't `agents.create` at runtime, the SDK shape deviations, the prompt-cache breakpoint decision), see [Adding a Harness Provider §12](/docs/guides/harness-providers#claude-managed-agents--pre-existing-agent--environment-pattern).
+
+---
+
 ## Choosing a Provider
 
-| Consideration | Claude Code | Codex | pi-mono |
-|---------------|-------------|-------|---------|
-| **Setup complexity** | Minimal — install CLI + OAuth token | Minimal — CLI plus API key or OAuth bootstrap | Requires API key(s) |
-| **Billing model** | Uses Claude Pro/Max/Team subscription | OpenAI API billing or ChatGPT OAuth | Pay-per-token via API |
-| **Model flexibility** | Claude models only | Codex/OpenAI models | Any provider via OpenRouter |
-| **Session resume** | Built-in `--resume` support | Native CLI session support | Session persistence via SessionManager |
-| **MCP integration** | Native (`.mcp.json` config) | Native (`~/.codex/config.toml`) | HTTP-based tool discovery |
-| **Maturity** | Production-grade, well-tested | Production-grade, well-tested | Community project, actively developed |
+| Consideration | Claude Code | Codex | pi-mono | Claude Managed |
+|---------------|-------------|-------|---------|----------------|
+| **Setup complexity** | Minimal — install CLI + OAuth token | Minimal — CLI plus API key or OAuth bootstrap | Requires API key(s) | One-time `claude-managed-setup` CLI; HTTPS-public `MCP_BASE_URL` |
+| **Billing model** | Uses Claude Pro/Max/Team subscription | OpenAI API billing or ChatGPT OAuth | Pay-per-token via API | Anthropic API tokens + $0.08/session-hour runtime fee |
+| **Model flexibility** | Claude models only | Codex/OpenAI models | Any provider via OpenRouter | Claude models only |
+| **Session resume** | Built-in `--resume` support | Native CLI session support | Session persistence via SessionManager | Native — `events.list` + dedupe against live stream |
+| **MCP integration** | Native (`.mcp.json` config) | Native (`~/.codex/config.toml`) | HTTP-based tool discovery | Server-side on the Anthropic Agent |
+| **Where session runs** | Worker container | Worker container | Worker container | Anthropic's managed cloud sandbox |
+| **Maturity** | Production-grade, well-tested | Production-grade, well-tested | Community project, actively developed | Public beta (2026-04) |
 
-**Recommendation**: Use Claude Code with OAuth for most setups. Use Codex when you specifically want the OpenAI/Codex toolchain or ChatGPT OAuth-backed workers. Consider pi-mono when you need access to non-Claude models through OpenRouter or want a library-based open-source runner.
+**Recommendation**: Use Claude Code with OAuth for most setups. Use Codex when you specifically want the OpenAI/Codex toolchain or ChatGPT OAuth-backed workers. Consider pi-mono when you need access to non-Claude models through OpenRouter or want a library-based open-source runner. Choose `claude-managed` when you want managed sandboxing (faster cold-start, vault-based credential isolation) and don't need a local runtime.
 
 ---
 

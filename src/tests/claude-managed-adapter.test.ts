@@ -927,6 +927,15 @@ describe("ClaudeManagedAdapter (Phase 5) — cancellation + tool-loop detection"
   });
 
   test("cancel poll → adapter aborts, sessions.archive called, errorCategory=cancelled", async () => {
+    // Use a unique taskId so the on-disk tool-loop-detection history at
+    // /tmp/agent-swarm-tool-history/<taskId>.json starts empty. With a fixed
+    // taskId, repeated test runs accumulate enough identical tool_use entries
+    // to trip the loop-detection threshold (15) — that fires
+    // abortController.abort() WITHOUT going through the cancel-poll path, so
+    // sessions.archive never gets called and this test fails for the wrong
+    // reason. Unique-id keeps cancellation observable to ONE source: the poll.
+    const taskId = `cancel-poll-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
     // The fake stream yields tool_use events one at a time, with a small
     // delay between each so the cancel poll has time to fire and abort
     // between events. After a few tool_use events the cancel endpoint
@@ -939,7 +948,7 @@ describe("ClaudeManagedAdapter (Phase 5) — cancellation + tool-loop detection"
         // Second poll: report cancelled.
         if (pollCount >= 2) {
           return new Response(
-            JSON.stringify({ cancelled: [{ id: "task-uuid", failureReason: "user request" }] }),
+            JSON.stringify({ cancelled: [{ id: taskId, failureReason: "user request" }] }),
             { status: 200 },
           );
         }
@@ -989,7 +998,7 @@ describe("ClaudeManagedAdapter (Phase 5) — cancellation + tool-loop detection"
         // Provide the API context so the swarm-event handler attaches.
         apiUrl: "http://test-api",
         apiKey: "test-key",
-        taskId: "task-uuid",
+        taskId,
       }),
     );
 
@@ -1111,4 +1120,183 @@ describe("ClaudeManagedAdapter (Phase 5) — cancellation + tool-loop detection"
     // After the block fires, abort propagates → cancelled result.
     expect(result.isError).toBe(true);
   }, 15_000);
+});
+
+// ---------------------------------------------------------------------------
+// Phase 6 — End-to-end integration test.
+//
+// Exercises createSession → mocked SSE stream with a representative event
+// sequence (status_running, model_request_end, agent.message, agent.tool_use,
+// agent.tool_result, status_idle) → asserts the full ProviderResult including
+// USD cost > 0 and `output` containing the assistant's text. This is the
+// "happy path with everything wired up" guard: if any of the upstream phases
+// regress in isolation the smaller-scoped tests catch it; this one catches
+// integration drift between phases.
+// ---------------------------------------------------------------------------
+
+describe("ClaudeManagedAdapter (Phase 6) — full happy-path integration", () => {
+  const tmpLogDir = `/tmp/claude-managed-adapter-phase6-${Date.now()}`;
+
+  beforeAll(() => {
+    mkdirSync(tmpLogDir, { recursive: true });
+    process.env.ANTHROPIC_API_KEY = "sk-test";
+    process.env.MANAGED_AGENT_ID = "agent_x";
+    process.env.MANAGED_ENVIRONMENT_ID = "env_x";
+  });
+
+  afterAll(() => {
+    rmSync(tmpLogDir, { recursive: true, force: true });
+  });
+
+  test("end-to-end: status_running → model_request_end → message → tool_use → tool_result → status_idle yields populated ProviderResult", async () => {
+    // Use opus-class token volume so the per-Mtok pricing produces a clearly
+    // positive USD value (sub-cent volumes get hidden under floating-point
+    // noise even though they're technically > 0). 1M input tokens against
+    // sonnet-4-6 at $3.00/Mtok = $3.00 — comfortably above zero.
+    const events: Array<Record<string, unknown>> = [
+      {
+        type: "session.status_running",
+        id: "evt-running",
+        processed_at: "2026-04-28T00:00:00Z",
+      },
+      {
+        type: "span.model_request_end",
+        id: "evt-model-end",
+        processed_at: "2026-04-28T00:00:01Z",
+        is_error: false,
+        model_request_start_id: "span-start-1",
+        model_usage: {
+          input_tokens: 1_000_000,
+          output_tokens: 200_000,
+          cache_read_input_tokens: 50_000,
+          cache_creation_input_tokens: 25_000,
+        },
+      },
+      {
+        type: "agent.message",
+        id: "evt-msg",
+        processed_at: "2026-04-28T00:00:02Z",
+        content: [{ type: "text", text: "Read the file and here's what I found." }],
+      },
+      {
+        type: "agent.tool_use",
+        id: "evt-tool-use",
+        processed_at: "2026-04-28T00:00:03Z",
+        name: "read_file",
+        input: { path: "/etc/motd" },
+      },
+      {
+        type: "agent.tool_result",
+        id: "evt-tool-result",
+        processed_at: "2026-04-28T00:00:04Z",
+        tool_use_id: "evt-tool-use",
+        content: [{ type: "text", text: "Welcome to the managed sandbox." }],
+        is_error: false,
+      },
+      {
+        type: "session.status_idle",
+        id: "evt-idle",
+        processed_at: "2026-04-28T00:00:05Z",
+        stop_reason: { type: "end_turn" },
+      },
+    ];
+
+    const spy = makeFakeClient({
+      streamEvents: async function* () {
+        for (const e of events) yield e;
+      },
+    });
+
+    const adapter = new ClaudeManagedAdapter({ client: spy.client });
+    const session = await adapter.createSession(
+      tConfig({
+        model: "claude-sonnet-4-6",
+        logFile: join(tmpLogDir, "e2e.log"),
+      }),
+    );
+
+    const emitted: ProviderEvent[] = [];
+    session.onEvent((e) => emitted.push(e));
+    const result = await session.waitForCompletion();
+
+    // Lifecycle: sessions.create called once with our agent + environment IDs.
+    expect(spy.created).toHaveLength(1);
+    const create0 = spy.created[0]!;
+    expect(create0.agent).toBe("agent_x");
+    expect(create0.environment_id).toBe("env_x");
+
+    // user.message was sent once with the cache-control breakpoint on the
+    // first content block.
+    expect(spy.sent).toHaveLength(1);
+    const userMsg = spy.sent[0]!.events[0]!;
+    expect(userMsg.type).toBe("user.message");
+    const blocks = userMsg.content as Array<Record<string, unknown>>;
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]?.cache_control).toEqual({ type: "ephemeral" });
+    expect(blocks[1]?.cache_control).toBeUndefined();
+
+    // Every event in the SSE sequence translated into the expected
+    // ProviderEvent variants.
+    const sessionInit = emitted.find((e) => e.type === "session_init");
+    expect(sessionInit?.type).toBe("session_init");
+    if (sessionInit?.type === "session_init") {
+      expect(sessionInit.sessionId).toBe("sesn_test_123");
+    }
+
+    const message = emitted.find((e) => e.type === "message");
+    expect(message?.type).toBe("message");
+    if (message?.type === "message") {
+      expect(message.role).toBe("assistant");
+      expect(message.content).toBe("Read the file and here's what I found.");
+    }
+
+    const toolStart = emitted.find((e) => e.type === "tool_start");
+    expect(toolStart?.type).toBe("tool_start");
+    if (toolStart?.type === "tool_start") {
+      expect(toolStart.toolCallId).toBe("evt-tool-use");
+      expect(toolStart.toolName).toBe("read_file");
+      expect((toolStart.args as Record<string, unknown>).path).toBe("/etc/motd");
+    }
+
+    const toolEnd = emitted.find((e) => e.type === "tool_end");
+    expect(toolEnd?.type).toBe("tool_end");
+    if (toolEnd?.type === "tool_end") {
+      expect(toolEnd.toolCallId).toBe("evt-tool-use");
+    }
+
+    const ctxUsage = emitted.find((e) => e.type === "context_usage");
+    expect(ctxUsage?.type).toBe("context_usage");
+    if (ctxUsage?.type === "context_usage") {
+      // 1M input + 200k output = 1.2M used; output = 200k.
+      expect(ctxUsage.contextUsedTokens).toBe(1_200_000);
+      expect(ctxUsage.outputTokens).toBe(200_000);
+    }
+
+    // The terminal `result` ProviderEvent — the contract Phase 4 hardened —
+    // carries populated cost, output, and isError=false.
+    const resultEvent = emitted.findLast((e) => e.type === "result");
+    expect(resultEvent?.type).toBe("result");
+    if (resultEvent?.type === "result") {
+      expect(resultEvent.isError).toBe(false);
+      expect(resultEvent.cost.inputTokens).toBe(1_000_000);
+      expect(resultEvent.cost.outputTokens).toBe(200_000);
+      expect(resultEvent.cost.cacheReadTokens).toBe(50_000);
+      expect(resultEvent.cost.cacheWriteTokens).toBe(25_000);
+      expect(resultEvent.cost.numTurns).toBe(1);
+      expect(resultEvent.cost.model).toBe("claude-sonnet-4-6");
+      // USD cost > 0 — proves the per-Mtok pricing table is wired in.
+      expect(resultEvent.cost.totalCostUsd).toBeGreaterThan(0);
+      expect(Number.isFinite(resultEvent.cost.totalCostUsd)).toBe(true);
+      // Output carries the assistant's text — proves the message → output
+      // pipeline runs end-to-end.
+      expect(resultEvent.output).toBe("Read the file and here's what I found.");
+    }
+
+    // ProviderResult — what the runner consumes.
+    expect(result.isError).toBe(false);
+    expect(result.exitCode).toBe(0);
+    expect(result.sessionId).toBe("sesn_test_123");
+    expect(result.cost?.totalCostUsd).toBeGreaterThan(0);
+    expect(result.output).toBe("Read the file and here's what I found.");
+  });
 });

@@ -14,7 +14,7 @@ A *harness provider* is the runtime that actually drives an LLM: it owns the sub
   For **configuring** an existing provider, see [Harness Configuration](/docs/guides/harness-configuration). This guide is for **implementing a new one**.
 </Callout>
 
-**Supported today:** `claude` (Anthropic Claude Code CLI), `pi` (pi-mono, in-process via `@mariozechner/pi-coding-agent`), `codex` (OpenAI Codex SDK).
+**Supported today:** `claude` (Anthropic Claude Code CLI), `pi` (pi-mono, in-process via `@mariozechner/pi-coding-agent`), `codex` (OpenAI Codex SDK), `claude-managed` (Anthropic Managed Agents — sessions execute in Anthropic's cloud sandbox).
 
 ---
 
@@ -101,16 +101,18 @@ The runner consumes these events (not the provider's native ones) to post progre
 | [`src/providers/claude-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts) | `Bun.spawn` of `claude` CLI with `--output-format stream-json`, JSONL stdout parsing | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` |
 | [`src/providers/pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts) | In-process via `createAgentSession` from `@mariozechner/pi-coding-agent`; no subprocess | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `~/.pi/agent/auth.json` |
 | [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) | Wraps `@openai/codex-sdk` `Codex` / `Thread`; `thread.runStreamed()` yields `ThreadEvent` async iterator | `OPENAI_API_KEY` or ChatGPT OAuth stored in `swarm_config.codex_oauth` (see §6) |
+| [`src/providers/claude-managed-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-managed-adapter.ts) | Anthropic SDK `client.beta.sessions.events.stream` (SSE); session executes in Anthropic's managed cloud sandbox, worker is a thin relay | `ANTHROPIC_API_KEY` plus pre-existing `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` from one-time `claude-managed-setup` CLI (see §13) |
 
-All three are wired together by the factory at [`src/providers/index.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/index.ts):
+All four are wired together by the factory at [`src/providers/index.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/index.ts):
 
 ```ts
 export function createProviderAdapter(provider: string): ProviderAdapter {
   switch (provider) {
-    case "claude": return new ClaudeAdapter();
-    case "pi":     return new PiMonoAdapter();
-    case "codex":  return new CodexAdapter();
-    default: throw new Error(`Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi, codex`);
+    case "claude":         return new ClaudeAdapter();
+    case "pi":             return new PiMonoAdapter();
+    case "codex":          return new CodexAdapter();
+    case "claude-managed": return new ClaudeManagedAdapter();
+    default: throw new Error(`Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi, codex, claude-managed`);
   }
 }
 ```
@@ -686,16 +688,82 @@ Manual verification:
 | Types / enums | `src/types.ts`, `templates/schema.ts` |
 | Prompts (optional) | `src/prompts/<foo>/` |
 | OAuth (optional) | `src/providers/<foo>-oauth/*`, `src/commands/<foo>-login.ts` |
+| Setup CLI (optional, e.g. claude-managed) | `src/commands/<foo>-setup.ts` |
 | CLI wiring | `src/cli.tsx` (`COMMAND_HELP`, command routing) |
 | Docker bootstrap | `docker-entrypoint.sh`, `Dockerfile.worker` |
 | Hooks (optional) | `src/hooks/*`, `src/providers/<foo>-swarm-events.ts` |
 | Skills resolver (if provider lacks native support) | `src/providers/<foo>-skill-resolver.ts` |
+| Models / pricing (optional) | `src/providers/<foo>-models.ts` |
 | Tests | `src/tests/<foo>-*.test.ts` |
+| Integrations UI (optional) | `new-ui/src/lib/integrations-catalog.ts` |
 | Docs | `CLAUDE.md`, `README.md`, this guide, [Harness Configuration](/docs/guides/harness-configuration) |
+
+**claude-managed reference files:** `src/providers/claude-managed-adapter.ts`, `src/providers/claude-managed-swarm-events.ts`, `src/providers/claude-managed-models.ts`, `src/commands/claude-managed-setup.ts`, `new-ui/src/lib/integrations-catalog.ts`.
 
 ---
 
-## 12. Further reading
+## 12. Claude Managed Agents — pre-existing Agent + Environment pattern
+
+`claude-managed` is the first reference adapter where the **session runtime executes outside the worker container**: the worker only opens an SSE stream against `client.beta.sessions.events.stream` and relays normalized events to the runner. This forces a few design decisions that are worth calling out — they apply to any future provider with a similar "managed cloud session" shape (Devin's `/sessions` API is the closest existing analog).
+
+### a. We don't `agents.create` at runtime
+
+Anthropic's beta API has a 1:1 `Agent` ↔ identity model. Calling `client.beta.agents.create(...)` from each worker on each task would (a) leak agents into the customer's account at the rate of one per task, and (b) make skill / tool inventory non-deterministic per session. Instead, we treat the Agent and Environment as **persistent infrastructure**, created once during operator onboarding and persisted by ID. The adapter only ever calls `client.beta.sessions.create({ agent: MANAGED_AGENT_ID, environment_id: MANAGED_ENVIRONMENT_ID, ... })`.
+
+### b. The `claude-managed-setup` CLI
+
+```bash
+bun run src/cli.tsx claude-managed-setup
+```
+
+Implementation: [`src/commands/claude-managed-setup.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/claude-managed-setup.ts). Behavior:
+
+1. Reads `ANTHROPIC_API_KEY` from `.env` / env (or prompts).
+2. Creates the Environment (`client.beta.environments.create`) — the long-lived sandbox configuration (allowed networks, default packages, persistent volumes).
+3. Uploads each `plugin/commands/*.md` skill via `client.beta.skills.create` (one-shot per skill content hash; the CLI dedupes against an existing inventory).
+4. Creates the Agent (`client.beta.agents.create`) and attaches the freshly uploaded skills.
+5. `PUT /api/config` persists `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` into `swarm_config` so deployed workers (and the integrations UI) can restore them at boot.
+6. Re-run with `--force` to recreate (rare — only if upstream rotates IDs).
+
+This is the shape every future "managed cloud session" provider should follow: setup-once → IDs live in `swarm_config` → workers fail-fast at boot if absent.
+
+### c. System prompt in the user message + prompt-cache breakpoint
+
+Managed-agents has no `system` field on `sessions.create`. The closest analog is `client.beta.sessions.events.send({ events: [{ type: "user.message", content: [...] }] })`. We compose the swarm's full assembled `systemPrompt` as the **first** content block and the per-task prompt as the **second**:
+
+```ts
+[
+  { type: "text", text: <full system prompt + agent identity + skills>, cache_control: { type: "ephemeral" } },
+  { type: "text", text: `User request:\n\n${prompt}` },  // no cache_control
+]
+```
+
+The `cache_control: { type: "ephemeral" }` marker on the first block creates a **prompt-cache breakpoint** — Anthropic caches everything up to that boundary across sessions for the same agent, so subsequent tasks for the same agent re-use the static prefix at cache-read pricing. The per-task block sits *after* the breakpoint and is allowed to differ without invalidating the cache.
+
+This is enforced by `composeManagedUserMessage` in `claude-managed-adapter.ts` (asserted byte-identical-prefix in `src/tests/claude-managed-adapter.test.ts`).
+
+### d. `X-Source-Task-Id` is dropped
+
+The MCP integration §5 calls out that every adapter MUST set `X-Source-Task-Id` on the swarm MCP connection. **`claude-managed` cannot.** The MCP servers are configured server-side on the Anthropic-managed Agent (not per-session), and the SDK doesn't expose a per-session HTTP-header override. We instead pass the task ID via `metadata.swarmTaskId` on `sessions.create`, and the swarm MCP tools accept `task_id` as an explicit tool argument when the header is missing. New providers that hit the same constraint should follow this fallback.
+
+### e. Skill upload via `beta.skills.create`
+
+Skills are **not** synced into a filesystem path on the worker (the worker doesn't run the model). They're uploaded once during `claude-managed-setup` via `client.beta.skills.create({ content, name, ... })` and referenced by ID on the Agent. The skill content is the same `plugin/commands/*.md` body that other providers copy into `~/.claude/skills/<name>/SKILL.md` — so the source of truth stays in the repo.
+
+### f. SDK shape deviations to be aware of
+
+The Anthropic Beta SDK has a few non-obvious surface differences from the conventional Anthropic `messages.create` API. The header comments in [`src/providers/claude-managed-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-managed-adapter.ts) (top-of-file block, ~L13–35) document them in detail, but the highlights for anyone reading the code:
+
+- **Resource type is `github_repository`, not `github_repo`.** The SDK type is `BetaGitHubRepositoryResource` and the literal field is `type: "github_repository"`.
+- **`events.send` takes `{ events: [...] }` — an array, not a single event arg.** The naming makes it look like `events.send(event)` would work; it would not.
+- **Session status enum is `'rescheduling' | 'running' | 'idle' | 'terminated'`.** "Archived" is not a status — it's signaled by `archived_at !== null`. `canResume()` therefore rejects on `terminated` *or* non-null `archived_at`.
+- **`cache_control` is a runtime-honored field that's NOT in the TS definition** for `BetaManagedAgentsTextBlock`. We attach it via a typed extension and cast on the way out so the runtime payload includes it.
+- **`events.stream` returns an `AsyncIterable`**, not a Promise of an array — iterate with `for await`.
+- **`events.list` is a `PagePromise` that's also `AsyncIterable`** over historical session events; the resume path uses it to pre-fetch + dedupe against the live stream.
+
+---
+
+## 13. Further reading
 
 - [Harness Configuration](/docs/guides/harness-configuration) — how to **use** the existing providers.
 - [Codex OAuth setup](/docs/guides/provider-auth/codex-oauth) — end-user OAuth flow.

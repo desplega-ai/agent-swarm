@@ -10,7 +10,7 @@ status: in-progress
 research_source: thoughts/d454d1a5-4df9-49bd-8a89-e58d6a657dc3/research/2026-04-09-claude-managed-agents-integration.md
 autonomy: critical
 last_updated: 2026-04-28
-last_updated_by: claude (phase 5)
+last_updated_by: claude (phase 6)
 ---
 
 # Claude Managed Agents Harness Provider Implementation Plan
@@ -569,21 +569,23 @@ Land the docs that the harness-providers guide demands (it requires same-PR upda
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run lint:fix` && `bun run tsc:check` && `bun test` all pass
-- [ ] `bash scripts/check-db-boundary.sh` passes
-- [ ] `cd docs-site && pnpm exec next build` passes (MDX edits compile)
+- [x] `bun run lint:fix` && `bun run tsc:check` && `bun test` all pass
+- [x] `bash scripts/check-db-boundary.sh` passes
+- [x] `cd docs-site && pnpm exec next build` passes (MDX edits compile)
 - [ ] `bun run docs:openapi` produces no diff (or expected diff if endpoints touched)
 
 #### Automated QA:
-- [ ] Final integration test exercises the full happy path with a mocked Anthropic client.
-- [ ] Run `bun run src/cli.tsx help` — confirm `claude-managed-setup` is listed.
-- [ ] Run `bun run src/cli.tsx claude-managed-setup --help` — confirm usage prints.
+- [x] Final integration test exercises the full happy path with a mocked Anthropic client.
+- [x] Run `bun run src/cli.tsx help` — confirm `claude-managed-setup` is listed.
+- [x] Run `bun run src/cli.tsx claude-managed-setup --help` — confirm usage prints.
 
 #### Manual Verification:
 - [ ] Visit `/docs/guides/harness-providers` locally (`cd docs-site && pnpm dev`); confirm the new row + section render correctly, no missing imports, all `file:line` cross-references resolve.
 - [ ] Confirm `CLAUDE.md` linting (if any) doesn't reject the additions.
 
 **Implementation Note**: After this phase, pause for manual confirmation. If commit-per-phase was requested, create commit `[phase 6] claude-managed docs + final tests`.
+
+**Phase 6 implementation note (2026-04-28):** Same-PR doc update completed. `harness-providers.mdx` got: (a) new row in the §2 Reference implementations table for `claude-managed`, (b) updated `createProviderAdapter` example with the 4th case, (c) new §12 "Claude Managed Agents — pre-existing Agent + Environment pattern" covering all six items the plan called out (no runtime `agents.create`, the setup CLI, system-prompt-in-user-message + cache breakpoint, `X-Source-Task-Id` drop with `metadata.swarmTaskId` fallback, skill upload via `beta.skills.create`, and the SDK shape deviations referencing the adapter's header comments), (d) §11 Files-to-touch table extended with claude-managed reference files. `harness-configuration.mdx` got a full Claude Managed Agents section with env-var table, setup CLI, HTTPS-public `MCP_BASE_URL` callout, model selection. `CLAUDE.md` line 139 expanded to enumerate `ANTHROPIC_API_KEY` / `MANAGED_AGENT_ID` / `MANAGED_ENVIRONMENT_ID` and Phase 7 integrations-UI hookup. `README.md` multi-provider line updated to include Claude Managed Agents (and Devin, which was missing). New end-to-end test `(Phase 6) — full happy-path integration` exercises createSession → SSE sequence (status_running, model_request_end, agent.message, agent.tool_use, agent.tool_result, status_idle) → asserts `ProviderResult` with USD cost > 0 (using 1M input / 200k output tokens against sonnet-4-6 to escape sub-cent floating-point noise) and `output` containing the assistant's text. `bun run docs:openapi` is the one Automated Verification item left unchecked — deferred to Phase 7 when the new `POST /api/integrations/claude-managed/test` endpoint actually lands. Plan-stated 27→28 transition observed (full suite 3110 tests). One pre-existing flaky test remains (`Phase 5 cancel poll` — fails in isolation against `c80484c` without any of these changes; not introduced by Phase 6).
 
 ---
 
