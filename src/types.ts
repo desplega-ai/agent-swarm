@@ -1122,3 +1122,59 @@ export const ContextSnapshotSchema = z.object({
 });
 
 export type ContextSnapshot = z.infer<typeof ContextSnapshotSchema>;
+
+// ============================================================================
+// Budgets + Pricing (per-agent daily cost budget — V1)
+// ============================================================================
+//
+// Timestamp convention for these schemas: number = epoch milliseconds (UTC).
+// This is a deliberate divergence from the rest of types.ts (which uses
+// `z.iso.datetime()` strings) so that the price-book "largest
+// effective_from <= now" lookup is a pure integer comparison. Matches the
+// SQL columns in migration 044_budgets_and_pricing.sql verbatim.
+
+export const BudgetScopeSchema = z.enum(["global", "agent"]);
+export type BudgetScope = z.infer<typeof BudgetScopeSchema>;
+
+export const BudgetSchema = z.object({
+  scope: BudgetScopeSchema,
+  scopeId: z.string(), // '' (empty string) for the global row
+  dailyBudgetUsd: z.number().nonnegative(),
+  createdAt: z.number(), // epoch ms
+  lastUpdatedAt: z.number(), // epoch ms
+});
+export type Budget = z.infer<typeof BudgetSchema>;
+
+export const PricingProviderSchema = z.enum(["claude", "codex", "pi"]);
+export type PricingProvider = z.infer<typeof PricingProviderSchema>;
+
+export const PricingTokenClassSchema = z.enum(["input", "cached_input", "output"]);
+export type PricingTokenClass = z.infer<typeof PricingTokenClassSchema>;
+
+export const PricingRowSchema = z.object({
+  provider: PricingProviderSchema,
+  model: z.string(),
+  tokenClass: PricingTokenClassSchema,
+  effectiveFrom: z.number().nonnegative(), // epoch ms; 0 = seed
+  pricePerMillionUsd: z.number().nonnegative(),
+  createdAt: z.number(), // epoch ms
+  lastUpdatedAt: z.number(), // epoch ms
+});
+export type PricingRow = z.infer<typeof PricingRowSchema>;
+
+export const BudgetRefusalCauseSchema = z.enum(["agent", "global"]);
+export type BudgetRefusalCause = z.infer<typeof BudgetRefusalCauseSchema>;
+
+export const BudgetRefusalNotificationSchema = z.object({
+  taskId: z.string(),
+  date: z.string(), // 'YYYY-MM-DD' UTC
+  agentId: z.string(),
+  cause: BudgetRefusalCauseSchema,
+  agentSpendUsd: z.number().nullable().optional(),
+  agentBudgetUsd: z.number().nullable().optional(),
+  globalSpendUsd: z.number().nullable().optional(),
+  globalBudgetUsd: z.number().nullable().optional(),
+  followUpTaskId: z.string().nullable().optional(),
+  createdAt: z.number(), // epoch ms
+});
+export type BudgetRefusalNotification = z.infer<typeof BudgetRefusalNotificationSchema>;
