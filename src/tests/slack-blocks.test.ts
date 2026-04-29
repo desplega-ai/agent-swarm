@@ -88,7 +88,7 @@ describe("getTaskLink", () => {
     try {
       const link = getTaskLink("abcdef12-3456-7890-abcd-ef1234567890");
       expect(link).toContain(
-        "https://agent-swarm.desplega.sh/tasks/abcdef12-3456-7890-abcd-ef1234567890",
+        "https://app.agent-swarm.dev/tasks/abcdef12-3456-7890-abcd-ef1234567890",
       );
       expect(link.startsWith("<")).toBe(true);
       expect(link.endsWith(">")).toBe(true);

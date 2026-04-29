@@ -5,16 +5,7 @@
  * across responses.ts, handlers.ts, thread-buffer.ts).
  */
 
-// Public production dashboard — used as fallback when APP_URL is unset so
-// partial task IDs in Slack messages are ALWAYS clickable. Self-hosted
-// operators should set APP_URL to point at their own dashboard.
-const DEFAULT_APP_URL = "https://agent-swarm.desplega.sh";
-
-function getAppUrl(): string {
-  const raw = process.env.APP_URL?.trim();
-  // Strip a trailing slash so URL composition is consistent.
-  return (raw || DEFAULT_APP_URL).replace(/\/+$/, "");
-}
+import { getAppUrl } from "../utils/constants";
 
 // Slack limits section text to 3000 chars; we use 2900 for safety
 const MAX_SECTION_LENGTH = 2900;

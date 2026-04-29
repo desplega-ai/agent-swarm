@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ExecutorMeta } from "../../types";
+import { getAppUrl } from "../../utils/constants";
 import type { ExecutorResult } from "./base";
 import { BaseExecutor } from "./base";
 
@@ -173,7 +174,7 @@ export class HumanInTheLoopExecutor extends BaseExecutor<
   ): Promise<void> {
     if (!config.notifications?.length) return;
 
-    const approvalUrl = `https://app.agent-swarm.dev/approval-requests/${requestId}`;
+    const approvalUrl = `${getAppUrl()}/approval-requests/${requestId}`;
     const updatedChannels = [...config.notifications] as Array<
       z.infer<typeof NotificationConfigSchema> & { messageTs?: string }
     >;
