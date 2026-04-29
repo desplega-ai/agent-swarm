@@ -20,14 +20,21 @@ RUN bun build ./src/http.ts --compile --outfile ./agent-swarm-api
 # Stage 2: Minimal runtime image
 FROM debian:bookworm-slim
 
-# Install minimal dependencies (for bun:sqlite and networking)
+# Install minimal dependencies (for bun:sqlite and networking).
+# python3 is required by the script-workflow executor's `python` runtime.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     wget \
     curl \
     jq \
+    python3 \
     fuse3 libfuse2 \
     && rm -rf /var/lib/apt/lists/*
+
+# Copy the bun CLI from the builder image so the script-workflow executor's
+# `ts` runtime (`bun -e <script>`) works at runtime. The compiled API binary
+# does not include the bun CLI itself.
+COPY --from=builder /usr/local/bin/bun /usr/local/bin/bun
 
 WORKDIR /app
 
