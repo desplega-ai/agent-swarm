@@ -120,7 +120,7 @@ export class ValidateExecutor extends BaseExecutor<
       });
 
       const { object } = await generateObject({
-        model: openrouter("google/gemini-2.0-flash-001"),
+        model: openrouter("google/gemini-3-flash-preview"),
         schema: jsonSchema({
           type: "object",
           properties: {

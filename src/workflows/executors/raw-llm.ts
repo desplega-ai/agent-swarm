@@ -33,7 +33,7 @@ export class RawLlmExecutor extends BaseExecutor<
     _meta: ExecutorMeta,
   ): Promise<ExecutorResult<z.infer<typeof RawLlmOutputSchema>>> {
     const prompt = this.deps.interpolate(config.prompt, context as Record<string, unknown>);
-    const modelName = config.model ?? "google/gemini-2.0-flash-001";
+    const modelName = config.model ?? "google/gemini-3-flash-preview";
 
     try {
       const { createOpenAI } = await import("@ai-sdk/openai");
