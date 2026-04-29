@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.72.0] - 2026-04-28
+
+### Added
+- **Claude Managed Agents harness provider** (`HARNESS_PROVIDER=claude-managed`). Sessions execute in Anthropic's managed cloud sandbox; the worker becomes a thin SSE relay that maps `client.beta.sessions.events.stream` events to the swarm's `ProviderEvent` union — no LLM process, no local CLI, no skill filesystem on the worker. New one-time `claude-managed-setup` CLI creates an Anthropic-side Environment, uploads `plugin/commands/*.md` skills via `client.beta.skills.create`, creates an Agent referencing those skills, and persists `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` to `swarm_config` (encrypted). New env vars: `MANAGED_AGENT_ID`, `MANAGED_ENVIRONMENT_ID`, `MANAGED_AGENT_MODEL` (default `claude-sonnet-4-6`), `MANAGED_GITHUB_VAULT_ID`, `MANAGED_GITHUB_TOKEN`. `MCP_BASE_URL` must be HTTPS-public (Anthropic's sandbox calls `/mcp` from the cloud) — adapter and entrypoint fail-fast otherwise. Cost computation accounts for token rates **plus** Anthropic's $0.08/session-hour runtime fee. New-UI Integrations dashboard surfaces the same config (Phase 7). Provider design rationale + SDK quirks documented in [`/docs/guides/harness-providers#claude-managed-agents`](/docs/guides/harness-providers) (#384)
+- **Devin harness provider** (`HARNESS_PROVIDER=devin`). New env vars: `DEVIN_API_KEY` (cog_*), `DEVIN_ORG_ID` (org_*), `DEVIN_POLL_INTERVAL_MS` (default 15s), `DEVIN_ACU_COST_USD` (default $2.25), `DEVIN_API_BASE_URL`, `DEVIN_MAX_ACU_LIMIT`. Standalone `.env.docker-devin.example` template added (#378)
+- **Per-agent + global daily cost budgets** with refusal-at-claim. New tables `agent_budgets`, `swarm_budgets`, and `agent_pricing` (migrations 046 + 047). New routes `GET /api/budgets`, `PUT /api/budgets/{agentId}`, `GET /api/pricing` plus session-cost recompute on Codex sessions. Workers honor budgets in `poll-task` / `task-action` claim gates — refused claims emit a Slack notification via `budget-refusal-notify`. Backoff timing for refused-budget retries lives in `src/utils/budget-backoff.ts` (#385)
+- **Budgets + spend dashboard at `/budgets`** in the new-UI (DES-278). New router page, sidebar entry, `useBudgets` hook, and `useIntegrationsMeta` API client wiring. Surfaces global + per-agent budgets, current spend, and refusal events (#386)
+- New CLI command `claude-managed-setup` (run from your laptop) — bootstraps the Anthropic-side Agent + Environment and persists IDs to `swarm_config`. `--force` recreates from scratch
+- New CLI command `codex-login` — interactive ChatGPT OAuth bootstrap for Codex workers (refactored out of the in-tree Codex setup)
+
+### Changed
+- `package.json` version bump to `1.72.0`; regenerated `openapi.json` and `docs-site/content/docs/api-reference/**`
+- `runner.ts` claim path now consults the budget-admission gate before promoting `pending` → `in_progress`; refusal records a session-cost row with `cost_source = "refusal"`
+- README "Multi-provider" line now lists Claude Code, Codex, pi-mono, **Devin**, and **Claude Managed Agents**
+
 ## [1.71.2] - 2026-04-28
 
 ### Fixed

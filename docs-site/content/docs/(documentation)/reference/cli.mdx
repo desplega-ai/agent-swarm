@@ -112,6 +112,38 @@ agent-swarm lead
 agent-swarm lead --yolo
 ```
 
+### codex-login
+
+Authenticate Codex via ChatGPT OAuth (browser or manual paste). Prompts interactively for the target API URL and a best-effort masked API key, then stores credentials in the swarm API config store for deployed workers. Run from your laptop, **not** inside a worker container.
+
+```bash
+bunx @desplega.ai/agent-swarm codex-login
+bunx @desplega.ai/agent-swarm codex-login --api-url https://swarm.example.com
+```
+
+| Option | Description |
+|--------|-------------|
+| `--api-url <url>` | Swarm API URL (default: `MCP_BASE_URL` or `http://localhost:3013`) |
+| `--api-key <key>` | Swarm API key (default: `API_KEY` or `123123`) |
+
+See [Provider Auth: Codex OAuth](/docs/guides/provider-auth/codex-oauth) for the full ChatGPT OAuth flow.
+
+### claude-managed-setup
+
+Bootstrap [Anthropic Managed Agents](/docs/guides/harness-configuration#claude-managed-agents) for the swarm: create the cloud Environment, upload `plugin/commands/*.md` skills, create the managed Agent, and persist the resulting `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` to `swarm_config` so deployed workers can restore them at boot. Prompts interactively for `ANTHROPIC_API_KEY` when not set in env. Idempotent — re-run with `--force` to recreate. Run from your laptop, **not** inside a worker container.
+
+```bash
+bunx @desplega.ai/agent-swarm claude-managed-setup
+bunx @desplega.ai/agent-swarm claude-managed-setup --force
+bunx @desplega.ai/agent-swarm claude-managed-setup --api-url https://swarm.example.com
+```
+
+| Option | Description |
+|--------|-------------|
+| `--api-url <url>` | Swarm API URL (default: `MCP_BASE_URL` or `http://localhost:3013`) |
+| `--api-key <key>` | Swarm API key (default: `API_KEY` or `123123`) |
+| `--force` | Recreate Anthropic-side resources even if already configured |
+
 ### docs
 
 Show the documentation URL. All pages are also available in markdown format by appending `.md` to the URL.

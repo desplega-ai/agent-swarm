@@ -49,7 +49,7 @@ Losing the key while keeping the database means losing every encrypted secret wi
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code), `codex`, or `pi` (pi-mono). See [Harness Configuration](/docs/guides/harness-configuration) |
+| `HARNESS_PROVIDER` | No | `claude` | AI provider: `claude` (Claude Code), `codex`, `pi` (pi-mono), `devin` (Devin), or `claude-managed` (Anthropic Managed Agents). See [Harness Configuration](/docs/guides/harness-configuration) |
 
 ### Credentials
 
@@ -84,6 +84,34 @@ Which credentials you need depends on your selected harness provider:
 | `MCP_BASE_URL` | Yes | `http://host.docker.internal:3013` | Swarm API URL reachable by the worker |
 
 Codex can also authenticate through `~/.codex/auth.json`, including ChatGPT OAuth restored from the swarm config store. See [Provider Auth: Codex OAuth](/docs/guides/provider-auth/codex-oauth).
+
+**Devin** (`HARNESS_PROVIDER=devin`):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DEVIN_API_KEY` | Yes | — | Devin API key (prefix: `cog_*`) |
+| `DEVIN_ORG_ID` | Yes | — | Devin organization ID (prefix: `org-*`) |
+| `DEVIN_POLL_INTERVAL_MS` | No | `15000` | Polling interval for Devin session events (ms) |
+| `DEVIN_ACU_COST_USD` | No | `2.25` | USD per ACU for cost tracking |
+| `DEVIN_API_BASE_URL` | No | `https://api.devin.ai` | Devin API base URL (override for testing) |
+| `DEVIN_MAX_ACU_LIMIT` | No | — | Per-session ACU cap (sent to Devin API + UI budget bar) |
+| `MAX_SKILL_CHARS` | No | `100000` | Max chars for inlined `SKILL.md` content |
+
+Starter env file: `.env.docker-devin.example` at the repo root.
+
+**Claude Managed Agents** (`HARNESS_PROVIDER=claude-managed`):
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `ANTHROPIC_API_KEY` | Yes | — | Anthropic API key (used by both the setup CLI and the runtime adapter) |
+| `MANAGED_AGENT_ID` | Yes | — | Anthropic Agent ID. Written by `claude-managed-setup` |
+| `MANAGED_ENVIRONMENT_ID` | Yes | — | Anthropic Environment ID. Written by `claude-managed-setup` |
+| `MCP_BASE_URL` | Yes | — | **Must be HTTPS-public** so Anthropic's sandbox can reach `/mcp`. Worker fails fast at boot otherwise |
+| `MANAGED_AGENT_MODEL` | No | `claude-sonnet-4-6` | Default model on `sessions.create`; per-task `task.model` overrides |
+| `MANAGED_GITHUB_VAULT_ID` | No | — | Anthropic vault ID holding a GitHub PAT, for repo-bound tasks (recommended for prod) |
+| `MANAGED_GITHUB_TOKEN` | No | — | Literal GitHub PAT injected as `authorization_token` on `github_repository` resources (dev-only fallback) |
+
+Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your laptop to bootstrap the Anthropic-side Agent + Environment and persist IDs into `swarm_config`. See [Harness Configuration § Claude Managed Agents](/docs/guides/harness-configuration#claude-managed-agents).
 
 ### General Worker Settings
 
