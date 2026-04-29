@@ -1,12 +1,4 @@
-import {
-  AlertCircle,
-  Check,
-  Copy,
-  ExternalLink,
-  Link as LinkIcon,
-  RefreshCw,
-  Trash2,
-} from "lucide-react";
+import { AlertCircle, Check, Copy, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import {
   buildJiraAuthorizeUrl,
@@ -40,7 +32,7 @@ function formatTokenExpiry(expiry: string | null): string | null {
   return d.toLocaleString();
 }
 
-type CopyKey = "webhook" | "redirect" | null;
+type CopyKey = "webhook" | "redirect" | "site" | "authorize" | null;
 
 export function JiraOAuthSection() {
   const { data, isLoading, isError, error, refetch, isFetching } = useJiraTrackerStatus();
@@ -58,10 +50,6 @@ export function JiraOAuthSection() {
     } catch {
       // Clipboard unavailable — silent.
     }
-  }
-
-  function handleAuthorize() {
-    window.open(buildJiraAuthorizeUrl(), "_blank", "noopener,noreferrer");
   }
 
   if (isLoading) {
@@ -147,16 +135,25 @@ export function JiraOAuthSection() {
               {data.connected ? (
                 <div className="text-xs text-muted-foreground space-y-0.5">
                   {data.siteUrl && (
-                    <div>
-                      Site:{" "}
-                      <a
-                        href={data.siteUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-mono underline hover:text-foreground"
-                      >
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span>Site:</span>
+                      <code className="font-mono bg-muted px-1.5 py-0.5 rounded">
                         {data.siteUrl}
-                      </a>
+                      </code>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-5 w-5"
+                        onClick={() => handleCopy("site", data.siteUrl ?? "")}
+                        aria-label="Copy site URL"
+                      >
+                        {copied === "site" ? (
+                          <Check className="h-3 w-3 text-emerald-500" />
+                        ) : (
+                          <Copy className="h-3 w-3" />
+                        )}
+                      </Button>
                     </div>
                   )}
                   {data.cloudId && (
@@ -176,26 +173,42 @@ export function JiraOAuthSection() {
                 </div>
               ) : (
                 <div className="text-xs text-muted-foreground">
-                  Click Connect to authorize a Jira Cloud workspace via OAuth 3LO.
+                  Copy the Authorization URL below and open it in a browser to authorize a Jira
+                  Cloud workspace via OAuth 3LO.
                 </div>
               )}
             </div>
           </div>
+        </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            {data.connected ? (
-              <Button type="button" size="sm" variant="outline" onClick={handleAuthorize}>
-                <RefreshCw className="h-3.5 w-3.5" />
-                Re-authenticate
-              </Button>
-            ) : (
-              <Button type="button" size="sm" onClick={handleAuthorize}>
-                <LinkIcon className="h-3.5 w-3.5" />
-                Connect to Jira
-                <ExternalLink className="h-3.5 w-3.5" />
-              </Button>
-            )}
+        {/* Authorization URL row — copy instead of auto-redirect. */}
+        <div className="border-t border-border px-4 py-3 space-y-1.5">
+          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            {data.connected ? "Re-authentication URL" : "Authorization URL"}
           </div>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 font-mono text-xs bg-muted px-2 py-1 rounded truncate">
+              {buildJiraAuthorizeUrl()}
+            </code>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => handleCopy("authorize", buildJiraAuthorizeUrl())}
+              className="shrink-0"
+            >
+              {copied === "authorize" ? (
+                <Check className="h-3.5 w-3.5 text-emerald-500" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+              {copied === "authorize" ? "Copied" : "Copy"}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Open this URL in a browser to {data.connected ? "re-authenticate" : "authorize"} the
+            swarm with Jira via OAuth 3LO.
+          </p>
         </div>
 
         {/* Redirect URI row */}
