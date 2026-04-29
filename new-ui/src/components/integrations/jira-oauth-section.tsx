@@ -1,4 +1,4 @@
-import { AlertCircle, Check, Copy, RefreshCw, Trash2 } from "lucide-react";
+import { AlertCircle, Check, Copy, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import {
   buildJiraAuthorizeUrl,
@@ -203,6 +203,16 @@ export function JiraOAuthSection() {
                 <Copy className="h-3.5 w-3.5" />
               )}
               {copied === "authorize" ? "Copied" : "Copy"}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => window.open(buildJiraAuthorizeUrl(), "_blank", "noopener,noreferrer")}
+              className="shrink-0"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              Open
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">

@@ -136,6 +136,11 @@ function getWebhookUrl(req: IncomingMessage): string {
 }
 
 function getRedirectUri(req: IncomingMessage): string {
+  // Mirror src/jira/app.ts: prefer the explicit JIRA_REDIRECT_URI override,
+  // otherwise derive from the API base URL. Keeps the UI display consistent
+  // with the URI persisted into oauth_apps and used in the actual OAuth flow.
+  const override = process.env.JIRA_REDIRECT_URI?.trim();
+  if (override) return override;
   return `${deriveApiBaseUrl(req)}/api/trackers/jira/callback`;
 }
 

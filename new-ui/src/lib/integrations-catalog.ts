@@ -396,6 +396,16 @@ export const INTEGRATIONS: IntegrationDef[] = [
           "High-entropy token embedded in the registered webhook URL (Atlassian doesn't HMAC-sign 3LO webhooks). Generate with `openssl rand -hex 32`.",
         affectsRestart: true,
       },
+      {
+        key: "JIRA_REDIRECT_URI",
+        label: "Custom redirect URI",
+        type: "text",
+        advanced: true,
+        placeholder: "https://api.example.com/api/trackers/jira/callback",
+        helpText:
+          "Optional. Override the OAuth callback URL Atlassian redirects to after authorization. Leave blank to derive it from MCP_BASE_URL. Must match exactly what's registered in your Atlassian app.",
+        affectsRestart: true,
+      },
     ],
   },
 
