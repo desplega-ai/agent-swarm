@@ -616,14 +616,14 @@ describe("buildTreeBlocks", () => {
 
     // Root line
     expect(lines[0]).toContain("⏳ *Lead*");
-    // Worker1 line with ├ prefix
-    expect(lines[1]).toMatch(/^├ ⏳ \*Worker1\*/);
-    // Worker1 progress indented under continuation
-    expect(lines[2]).toMatch(/^│ {3}Fetching data\.\.\.$/);
-    // Worker2 line with └ prefix (last child)
-    expect(lines[3]).toMatch(/^└ ⏳ \*Worker2\*/);
+    // Worker1 line with ↳ prefix
+    expect(lines[1]).toMatch(/^↳ ⏳ \*Worker1\*/);
+    // Worker1 progress indented under continuation (3 spaces, aligned under ↳ )
+    expect(lines[2]).toMatch(/^ {3}Fetching data\.\.\.$/);
+    // Worker2 line with ↳ prefix
+    expect(lines[3]).toMatch(/^↳ ⏳ \*Worker2\*/);
     // Worker2 progress indented
-    expect(lines[4]).toMatch(/^ {4}Compiling\.\.\.$/);
+    expect(lines[4]).toMatch(/^ {3}Compiling\.\.\.$/);
   });
 
   test("max children collapse (9+ children -> 8 shown + 'and 1 more...')", () => {
@@ -654,8 +654,8 @@ describe("buildTreeBlocks", () => {
     expect(text).toContain("*Worker8*");
     expect(text).not.toContain("*Worker9*");
     expect(text).toContain("and 1 more...");
-    // The "and N more..." line uses └ prefix
-    expect(lines[lines.length - 1]).toContain("└ _and 1 more..._");
+    // The "and N more..." line uses ↳ prefix
+    expect(lines[lines.length - 1]).toContain("↳ _and 1 more..._");
   });
 
   test("max children collapse with many hidden", () => {
@@ -837,7 +837,7 @@ describe("buildTreeBlocks", () => {
     expect(blocks.length).toBe(1);
   });
 
-  test("tree connectors: ├ for non-last, └ for last child", () => {
+  test("tree indent: all children use ↳ prefix", () => {
     const root: TreeNode = {
       taskId: makeTaskId("nnnn0001"),
       agentName: "Lead",
@@ -867,10 +867,10 @@ describe("buildTreeBlocks", () => {
     const blocks = buildTreeBlocks([root]);
     const lines = blocks[0].text.text.split("\n");
 
-    // First two children use ├, last uses └
-    expect(lines[1]).toMatch(/^├ /);
-    expect(lines[2]).toMatch(/^├ /);
-    expect(lines[3]).toMatch(/^└ /);
+    // All children use ↳ (no branching distinction in proportional fonts)
+    expect(lines[1]).toMatch(/^↳ /);
+    expect(lines[2]).toMatch(/^↳ /);
+    expect(lines[3]).toMatch(/^↳ /);
   });
 
   test("completed root with output (no slackReplySent, no children)", () => {

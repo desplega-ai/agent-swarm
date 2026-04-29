@@ -349,12 +349,10 @@ function renderTree(root: TreeNode): string {
   const visibleChildren = root.children.slice(0, MAX_VISIBLE_CHILDREN);
   const hiddenCount = root.children.length - visibleChildren.length;
 
-  for (let i = 0; i < visibleChildren.length; i++) {
-    const child = visibleChildren[i] as TreeNode;
-    const isLast = i === visibleChildren.length - 1 && hiddenCount === 0;
-    const prefix = isLast ? "└ " : "├ ";
-    const continuationPrefix = isLast ? "    " : "│   ";
+  const prefix = "↳ ";
+  const continuationPrefix = "   ";
 
+  for (const child of visibleChildren) {
     lines.push(`${prefix}${renderNodeLine(child)}`);
 
     for (const detail of renderChildDetail(child, continuationPrefix)) {
@@ -363,7 +361,7 @@ function renderTree(root: TreeNode): string {
   }
 
   if (hiddenCount > 0) {
-    lines.push(`└ _and ${hiddenCount} more..._`);
+    lines.push(`↳ _and ${hiddenCount} more..._`);
   }
 
   return lines.join("\n");
