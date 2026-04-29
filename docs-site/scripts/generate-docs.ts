@@ -108,16 +108,48 @@ ${tagList}
 
 writeFileSync(resolve(outputDir, "index.mdx"), indexMdx);
 
+// --- Tag descriptions for SEO (used in frontmatter) ---
+
+const tagDescriptions: Record<string, string> = {
+  "API Keys": "Manage API keys for authenticating requests to the Agent Swarm API",
+  "Active Sessions": "Monitor and control active agent sessions running in the swarm",
+  "Agents": "CRUD operations for agent profiles — create, configure, update, and manage swarm agents",
+  "ApprovalRequests": "Human-in-the-loop approval requests — review and respond to agent-escalated decisions",
+  "Budgets": "Configure per-agent and global daily cost budgets to control AI agent spend",
+  "Config": "Read and write swarm configuration values — global, agent-scoped, and repo-scoped settings",
+  "Debug": "Debug utilities for inspecting swarm state and diagnosing agent issues",
+  "Ecosystem": "Query registered community and official agent integrations in the swarm ecosystem",
+  "Events": "Stream and query swarm lifecycle events — task transitions, agent state changes, and audit log",
+  "Heartbeat": "Health check endpoint — verify the Agent Swarm API is running and reachable",
+  "Integrations": "Configure third-party integrations — Slack, GitHub, GitLab, Linear, Jira, Sentry, and more",
+  "MCP OAuth": "OAuth flows for MCP client authorization — register and manage OAuth connections",
+  "MCP Servers": "Register and manage MCP tool servers available to swarm agents",
+  "Memory": "Search, retrieve, and manage persistent agent memories across sessions",
+  "Poll": "Long-poll endpoints for real-time task and message notifications without WebSockets",
+  "Pricing": "Retrieve model pricing data used for cost tracking and budget enforcement across agents",
+  "PromptTemplates": "Store and retrieve reusable prompt templates for consistent agent instructions",
+  "Repos": "Register code repositories and configure VCS integration for automated task triggers",
+  "Schedules": "Create and manage scheduled tasks — run agents on cron expressions or one-time delays",
+  "Session Data": "Access session-level data including token counts, costs, and context window metrics",
+  "Skills": "Install, publish, and manage skills — reusable agent behaviors and tool sets",
+  "Stats": "Aggregate statistics for swarm activity — task counts, agent utilization, and cost summaries",
+  "Tasks": "Core task API — create, assign, update, and monitor tasks across the swarm",
+  "Trackers": "Integrate with Linear and Jira ticket trackers — sync issues to swarm tasks bidirectionally",
+  "Webhooks": "Register and manage webhooks for real-time swarm event delivery to external systems",
+  "Workflows": "Define and execute DAG-based multi-step workflows with branching, triggers, and agent task nodes",
+};
+
 // --- Generate per-tag pages ---
 
 for (const tag of sortedTags) {
   const slug = slugify(tag);
   const ops = tagGroups.get(tag)!;
   const opsJson = JSON.stringify(ops.map((o) => ({ path: o.path, method: o.method })));
+  const description = tagDescriptions[tag] ?? `${tag} API endpoints`;
 
   const tagMdx = `---
 title: "${tag}"
-description: "${tag} API endpoints"
+description: "${description}"
 full: true
 ---
 
@@ -125,6 +157,7 @@ full: true
 
 <APIPage document={"../openapi.json"} operations={${opsJson}} />
 `;
+
 
   writeFileSync(resolve(outputDir, `${slug}.mdx`), tagMdx);
 }
