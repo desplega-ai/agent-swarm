@@ -59,6 +59,22 @@ interface BlogPost {
 
 const posts: BlogPost[] = [
   {
+    slug: "deep-dive-anthropic-cache-ttl-polling-optimization",
+    title:
+      "Why Our Agents Sleep for 4 Minutes 30 Seconds (And Yours Should Too)",
+    description:
+      "Your agent's sleep(300) is silently bleeding money. Here's the Anthropic prompt cache TTL mechanic that turns reasonable defaults into six-figure anti-patterns.",
+    date: "April 29, 2026",
+    readTime: "13 min read",
+    tags: [
+      "Anthropic prompt cache",
+      "AI agent polling",
+      "LLM cost optimization",
+      "cache TTL",
+      "agent scheduling",
+    ],
+  },
+  {
     slug: "deep-dive-stateless-workers-db-ban",
     title:
       "Our AI Worker Containers Have Zero Local Database — And a 30-Line Bash Script That Makes It Impossible to Add One",
