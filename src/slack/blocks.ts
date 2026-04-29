@@ -5,7 +5,16 @@
  * across responses.ts, handlers.ts, thread-buffer.ts).
  */
 
-const appUrl = process.env.APP_URL || "";
+// Public production dashboard — used as fallback when APP_URL is unset so
+// partial task IDs in Slack messages are ALWAYS clickable. Self-hosted
+// operators should set APP_URL to point at their own dashboard.
+const DEFAULT_APP_URL = "https://agent-swarm.desplega.sh";
+
+function getAppUrl(): string {
+  const raw = process.env.APP_URL?.trim();
+  // Strip a trailing slash so URL composition is consistent.
+  return (raw || DEFAULT_APP_URL).replace(/\/+$/, "");
+}
 
 // Slack limits section text to 3000 chars; we use 2900 for safety
 const MAX_SECTION_LENGTH = 2900;
@@ -16,24 +25,21 @@ type SlackBlock = any;
 // --- Shared utilities ---
 
 /**
- * Get a Slack-formatted link to the task in the dashboard, or just the short ID.
+ * Get a Slack-formatted clickable link to the task in the dashboard.
+ * Always returns Slack mrkdwn link syntax (`<url|label>`) so partial task
+ * IDs are clickable in every message — falls back to the public dashboard
+ * when APP_URL is not configured.
  */
 export function getTaskLink(taskId: string): string {
   const shortId = taskId.slice(0, 8);
-  if (appUrl) {
-    return `<${appUrl}?tab=tasks&task=${taskId}&expand=true|\`${shortId}\`>`;
-  }
-  return `\`${shortId}\``;
+  return `<${getTaskUrl(taskId)}|\`${shortId}\`>`;
 }
 
 /**
  * Get a raw dashboard URL for a task (for link buttons).
  */
 export function getTaskUrl(taskId: string): string {
-  if (appUrl) {
-    return `${appUrl}?tab=tasks&task=${taskId}&expand=true`;
-  }
-  return "";
+  return `${getAppUrl()}/tasks/${taskId}`;
 }
 
 /**
@@ -214,9 +220,9 @@ export function buildProgressBlocks(opts: {
   taskId: string;
   progress: string;
 }): SlackBlock[] {
-  const shortId = opts.taskId.slice(0, 8);
+  const taskLink = getTaskLink(opts.taskId);
   return [
-    sectionBlock(`*${opts.agentName}* (\`${shortId}\`): ${opts.progress}`),
+    sectionBlock(`*${opts.agentName}* (${taskLink}): ${opts.progress}`),
     cancelActionBlock(opts.taskId),
   ];
 }
