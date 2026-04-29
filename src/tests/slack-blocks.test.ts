@@ -44,22 +44,65 @@ describe("markdownToSlack", () => {
 });
 
 describe("getTaskLink", () => {
-  test("returns short ID when no APP_URL", () => {
-    // APP_URL is not set in test env
-    const link = getTaskLink("abcdef12-3456-7890-abcd-ef1234567890");
-    expect(link).toContain("abcdef12");
+  test("always returns a Slack hyperlink with clickable short ID", () => {
+    const taskId = "abcdef12-3456-7890-abcd-ef1234567890";
+    const link = getTaskLink(taskId);
+    // Slack mrkdwn link syntax: <url|label>
+    expect(link).toMatch(
+      /^<https?:\/\/.+\/tasks\/abcdef12-3456-7890-abcd-ef1234567890\|`abcdef12`>$/,
+    );
+    expect(link).toContain("|`abcdef12`>");
+    expect(link).toContain(taskId);
+  });
+
+  test("uses APP_URL when set", () => {
+    const original = process.env.APP_URL;
+    process.env.APP_URL = "https://my-custom-dashboard.example.com";
+    try {
+      const link = getTaskLink("abcdef12-3456-7890-abcd-ef1234567890");
+      expect(link).toContain(
+        "https://my-custom-dashboard.example.com/tasks/abcdef12-3456-7890-abcd-ef1234567890",
+      );
+    } finally {
+      if (original === undefined) delete process.env.APP_URL;
+      else process.env.APP_URL = original;
+    }
+  });
+
+  test("strips trailing slash from APP_URL", () => {
+    const original = process.env.APP_URL;
+    process.env.APP_URL = "https://dashboard.example.com/";
+    try {
+      const link = getTaskLink("abcdef12-3456-7890-abcd-ef1234567890");
+      expect(link).toContain("https://dashboard.example.com/tasks/");
+      expect(link).not.toContain("//tasks/");
+    } finally {
+      if (original === undefined) delete process.env.APP_URL;
+      else process.env.APP_URL = original;
+    }
+  });
+
+  test("falls back to public dashboard when APP_URL is unset", () => {
+    const original = process.env.APP_URL;
+    delete process.env.APP_URL;
+    try {
+      const link = getTaskLink("abcdef12-3456-7890-abcd-ef1234567890");
+      expect(link).toContain(
+        "https://app.agent-swarm.dev/tasks/abcdef12-3456-7890-abcd-ef1234567890",
+      );
+      expect(link.startsWith("<")).toBe(true);
+      expect(link.endsWith(">")).toBe(true);
+    } finally {
+      if (original !== undefined) process.env.APP_URL = original;
+    }
   });
 });
 
 describe("getTaskUrl", () => {
-  test("returns URL with task ID or empty string", () => {
+  test("always returns a non-empty URL containing the task ID", () => {
     const url = getTaskUrl("some-id");
-    // When APP_URL is set, URL contains the task ID; when not set, returns ""
-    if (url) {
-      expect(url).toContain("some-id");
-    } else {
-      expect(url).toBe("");
-    }
+    expect(url).toContain("/tasks/some-id");
+    expect(url).toMatch(/^https?:\/\//);
   });
 });
 
@@ -91,6 +134,17 @@ describe("buildCompletedBlocks", () => {
     });
 
     expect(blocks[0].text.text).toContain("45s");
+  });
+
+  test("partial task ID is rendered as a clickable Slack hyperlink", () => {
+    const blocks = buildCompletedBlocks({
+      agentName: "Alpha",
+      taskId: "abcdef12-3456-7890-abcd-ef1234567890",
+      body: "Done",
+    });
+    expect(blocks[0].text.text).toMatch(
+      /<https?:\/\/[^|>]+\/tasks\/abcdef12-3456-7890-abcd-ef1234567890\|`abcdef12`>/,
+    );
   });
 
   test("splits long body into multiple sections", () => {
@@ -148,7 +202,7 @@ describe("buildProgressBlocks", () => {
     });
 
     expect(blocks.length).toBe(2);
-    // Single line: *Gamma* (`aabbccdd`): Analyzing codebase...
+    // Single line: *Gamma* (<URL|`aabbccdd`>): Analyzing codebase...
     // (no ⏳ prefix — progress strings now carry their own emoji)
     expect(blocks[0].type).toBe("section");
     expect(blocks[0].text.text).not.toContain("⏳");
@@ -160,6 +214,19 @@ describe("buildProgressBlocks", () => {
     expect(blocks[1].elements[0].action_id).toBe("cancel_task");
     expect(blocks[1].elements[0].style).toBe("danger");
     expect(blocks[1].elements[0].confirm).toBeDefined();
+  });
+
+  test("partial task ID is rendered as a clickable Slack hyperlink", () => {
+    const taskId = "aabbccdd-1234-5678-9012-abcdefabcdef";
+    const blocks = buildProgressBlocks({
+      agentName: "Gamma",
+      taskId,
+      progress: "Working...",
+    });
+    // Slack mrkdwn link syntax: <url|`shortId`>
+    expect(blocks[0].text.text).toMatch(
+      /<https?:\/\/[^|>]+\/tasks\/aabbccdd-1234-5678-9012-abcdefabcdef\|`aabbccdd`>/,
+    );
   });
 });
 
