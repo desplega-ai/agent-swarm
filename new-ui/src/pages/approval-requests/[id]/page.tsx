@@ -1,6 +1,7 @@
 import { ArrowLeft, CheckCircle2, Clock, XCircle } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { Streamdown } from "streamdown";
 import { useApprovalRequest, useRespondToApprovalRequest } from "@/api/hooks/use-approval-requests";
 import type { ApprovalQuestion } from "@/api/types";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -11,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { formatSmartTime } from "@/lib/utils";
+import { formatSmartTime, normalizeNewlines } from "@/lib/utils";
 
 function QuestionField({
   question,
@@ -220,20 +221,24 @@ export default function ApprovalRequestDetailPage() {
 
       <Separator />
 
-      <div className="space-y-4 max-w-2xl">
+      <div className="space-y-4">
         {request.questions.map((question, idx) => (
           <Card key={question.id}>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <span className="text-muted-foreground">{idx + 1}.</span>
-                {question.label}
-                {question.required && <span className="text-red-400 text-xs">*</span>}
-                <Badge variant="outline" size="tag" className="ml-auto">
+              <CardTitle className="text-sm flex items-start gap-2">
+                <span className="text-muted-foreground shrink-0">{idx + 1}.</span>
+                <span className="flex-1 min-w-0">
+                  <Streamdown>{normalizeNewlines(question.label)}</Streamdown>
+                </span>
+                {question.required && <span className="text-red-400 text-xs shrink-0">*</span>}
+                <Badge variant="outline" size="tag" className="ml-auto shrink-0">
                   {question.type}
                 </Badge>
               </CardTitle>
               {question.description && (
-                <p className="text-xs text-muted-foreground">{question.description}</p>
+                <div className="text-muted-foreground prose-chat">
+                  <Streamdown>{normalizeNewlines(question.description)}</Streamdown>
+                </div>
               )}
             </CardHeader>
             <CardContent>
@@ -260,7 +265,7 @@ export default function ApprovalRequestDetailPage() {
       </div>
 
       {isPending && (
-        <div className="max-w-2xl space-y-2">
+        <div className="space-y-2">
           {error && <p className="text-sm text-red-400">{error}</p>}
           <Button onClick={handleSubmit} disabled={respondMutation.isPending}>
             {respondMutation.isPending ? "Submitting..." : "Submit Response"}
