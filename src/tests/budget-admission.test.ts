@@ -81,6 +81,9 @@ function insertBudget(scope: "global" | "agent", scopeId: string, dailyBudgetUsd
     .run(scope, scopeId, dailyBudgetUsd, Date.now(), Date.now());
 }
 
+// Pinned to the same UTC day as `NOW` so spend rows fall inside the queried day window regardless of when CI runs.
+const DEFAULT_SPEND_CREATED_AT = "2026-04-28T12:00:00.000Z";
+
 function insertSpendForAgent(
   agentId: string,
   totalCostUsd: number,
@@ -95,12 +98,8 @@ function insertSpendForAgent(
     numTurns: 1,
     model: "test-model",
   });
-  if (opts.createdAt) {
-    // Override the auto-generated createdAt to backdate / forward-date.
-    getDb()
-      .prepare("UPDATE session_costs SET createdAt = ? WHERE id = ?")
-      .run(opts.createdAt, cost.id);
-  }
+  const createdAt = opts.createdAt ?? DEFAULT_SPEND_CREATED_AT;
+  getDb().prepare("UPDATE session_costs SET createdAt = ? WHERE id = ?").run(createdAt, cost.id);
   return cost.id;
 }
 
