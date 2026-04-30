@@ -27,7 +27,7 @@ import {
   User,
   Zap,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
@@ -49,6 +49,7 @@ import type {
   TaskContextResponse,
 } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
+import { CollapsibleDescription } from "@/components/shared/collapsible-description";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { SessionId } from "@/components/shared/session-id";
 import { SessionLogViewer } from "@/components/shared/session-log-viewer";
@@ -247,40 +248,6 @@ function StructuredOutputContent({ raw, maxH }: { raw: string; maxH: string }) {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function TaskPrompt({ text }: { text: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const isLong = text.length > 120 || text.includes("\n");
-
-  if (!isLong) {
-    return (
-      <div className="text-sm leading-relaxed">
-        <Streamdown>{normalizeNewlines(text)}</Streamdown>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-1">
-      {expanded ? (
-        <div className="text-sm leading-relaxed max-h-[60vh] overflow-y-auto">
-          <Streamdown>{normalizeNewlines(text)}</Streamdown>
-        </div>
-      ) : (
-        <p className="text-sm leading-relaxed line-clamp-1 text-foreground">
-          {text.split("\n")[0]}
-        </p>
-      )}
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-      >
-        {expanded ? "Show less" : "Show more"}
-      </button>
     </div>
   );
 }
@@ -896,7 +863,7 @@ export default function TaskDetailPage() {
             ) : null;
           })()}
         </div>
-        <TaskPrompt text={task.task} />
+        <CollapsibleDescription text={task.task} />
         <div className="flex items-center gap-2">
           {(canCancel || canPause || canResume) && (
             <div className="flex items-center gap-1.5 shrink-0">

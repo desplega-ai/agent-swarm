@@ -308,21 +308,152 @@ function generateService(index: number): ServiceSeed {
   };
 }
 
-function generateMemory(): {
+type MemorySource = "manual" | "task_completion" | "session_summary" | "file_index";
+
+const FILE_INDEX_PATHS = [
+  "src/auth/middleware.ts",
+  "src/auth/session.ts",
+  "src/be/db.ts",
+  "src/be/migrations/runner.ts",
+  "src/be/memory/providers/sqlite-store.ts",
+  "src/http/memory.ts",
+  "src/http/route-def.ts",
+  "src/providers/claude.ts",
+  "src/providers/codex.ts",
+  "src/utils/secret-scrubber.ts",
+  "new-ui/src/api/client.ts",
+  "new-ui/src/pages/memory/page.tsx",
+  "runbooks/local-development.md",
+  "CLAUDE.md",
+  "openapi.json",
+];
+
+const FILE_INDEX_SNIPPETS: Record<string, { content: string; tags: string[] }> = {
+  "src/auth/middleware.ts": {
+    content:
+      "Express middleware enforcing API-key bearer auth on all `/api/*` routes. Reads `Authorization` header, validates against the configured `API_KEY` env var, populates `req.agentId` from `X-Agent-ID`. Public routes opt out via `route({ auth: { apiKey: false } })`.",
+    tags: ["auth", "middleware"],
+  },
+  "src/be/memory/providers/sqlite-store.ts": {
+    content:
+      "SqliteMemoryStore — implements MemoryStore over `bun:sqlite`. KNN search via `sqlite-vec` (cosine distance), brute-force fallback. `isLead: true` bypasses agent-scope filtering for admin/debug paths.",
+    tags: ["memory", "sqlite", "vec"],
+  },
+  "src/http/memory.ts": {
+    content:
+      "Memory HTTP routes: POST /api/memory/index, /search, /list, /re-embed, DELETE /api/memory/:id. The /list endpoint supports cross-agent filters (agentId, scope, source, sourcePath substring) for the debug UI.",
+    tags: ["memory", "http"],
+  },
+  "runbooks/local-development.md": {
+    content:
+      "Local dev setup: Bun + SQLite + portless. Default API_KEY=123123, MCP_BASE_URL=http://localhost:3013. `bun run start:http` for API, `pnpm dev` in new-ui for dashboard on :5274.",
+    tags: ["docs", "local-dev"],
+  },
+  "CLAUDE.md": {
+    content:
+      "Project rules and architecture invariants. API server is sole owner of SQLite. Workers talk to API over HTTP with API_KEY + X-Agent-ID. Enforced by scripts/check-db-boundary.sh.",
+    tags: ["docs", "architecture"],
+  },
+};
+
+const TASK_COMPLETION_NOTES = [
+  {
+    name: "auth-middleware-rewrite",
+    content:
+      "Completed rewrite of auth middleware to address legal/compliance requirements around session-token storage. Tokens now persisted in `auth_sessions` with httpOnly cookies; old localStorage path removed.",
+    tags: ["auth", "compliance", "completed"],
+  },
+  {
+    name: "memory-debug-page",
+    content:
+      "Shipped /memory debug page in new-ui. POST /api/memory/list endpoint supports cross-agent search; UI offers query, file-path, scope, source filters with a side-sheet detail view.",
+    tags: ["memory", "ui", "completed"],
+  },
+  {
+    name: "secret-scrubber-cache",
+    content:
+      "Added LRU cache to scrubSecrets — 5-minute TTL, keyed by hash. Reduced p99 scrub latency on session_logs egress from 14ms → 0.3ms.",
+    tags: ["security", "perf", "completed"],
+  },
+];
+
+const SESSION_SUMMARIES = [
+  {
+    name: "session-pairing-on-flake",
+    content:
+      "Pairing session: chased intermittent test failure in `task-reactions.test.ts`. Root cause: shared mock state across describe blocks. Fixed by moving `vi.clearAllMocks()` into a beforeEach.",
+    tags: ["session", "testing"],
+  },
+  {
+    name: "session-perf-investigation",
+    content:
+      "Investigated DB writes spiking under heavy task creation. Identified missing index on `agent_tasks(agentId, status)`; added migration 047. Throughput +3x on burst load.",
+    tags: ["session", "perf", "db"],
+  },
+  {
+    name: "session-oauth-debug",
+    content:
+      "Debugged Linear OAuth refresh failures surfacing as 401s. Token-bucket misconfigured the refresh keepalive cadence; bumped from 30m → 5m and added Slack alert on consecutive failures.",
+    tags: ["session", "oauth", "linear"],
+  },
+];
+
+const MANUAL_NOTES = [
+  {
+    name: "deploy-window",
+    content:
+      "Reminder: prod deploys are paused Friday 17:00 → Monday 09:00 unless explicitly approved by oncall.",
+    tags: ["ops", "deploy"],
+  },
+  {
+    name: "embedding-provider",
+    content:
+      "Memory embeddings use OpenAI `text-embedding-3-small` at 512 dims. Re-embed via POST /api/memory/re-embed if model is rotated.",
+    tags: ["memory", "embeddings"],
+  },
+  {
+    name: "oncall-runbook",
+    content:
+      "Oncall escalation: page #swarm-ops first. If API is hard-down, the docker-compose lead+worker pair can be relaunched via `docker compose -f docker-compose.local.yml up --build`.",
+    tags: ["ops", "oncall"],
+  },
+];
+
+function generateMemory(index: number): {
   name: string;
   content: string;
-  source: "manual" | "task_completion" | "session_summary" | "file_index";
+  source: MemorySource;
+  sourcePath: string | null;
+  tags: string[];
 } {
-  return {
-    name: faker.helpers.slugify(faker.hacker.phrase()).toLowerCase(),
-    content: faker.lorem.paragraph(),
-    source: faker.helpers.arrayElement([
-      "manual",
-      "task_completion",
-      "session_summary",
-      "file_index",
-    ]),
-  };
+  // Round-robin across sources so every demo seed shows all four flavors
+  const sources: MemorySource[] = ["file_index", "task_completion", "session_summary", "manual"];
+  const source = sources[index % sources.length]!;
+
+  if (source === "file_index") {
+    const path = FILE_INDEX_PATHS[index % FILE_INDEX_PATHS.length]!;
+    const curated = FILE_INDEX_SNIPPETS[path];
+    return {
+      name: path.split("/").pop()!.replace(/\.[^.]+$/, ""),
+      content: curated?.content ?? `Indexed snippet from ${path}: ${faker.lorem.paragraph()}`,
+      source,
+      sourcePath: path,
+      tags: curated?.tags ?? ["file-index"],
+    };
+  }
+
+  if (source === "task_completion") {
+    const note = TASK_COMPLETION_NOTES[index % TASK_COMPLETION_NOTES.length]!;
+    return { ...note, source, sourcePath: null };
+  }
+
+  if (source === "session_summary") {
+    const note = SESSION_SUMMARIES[index % SESSION_SUMMARIES.length]!;
+    return { ...note, source, sourcePath: null };
+  }
+
+  const note = MANUAL_NOTES[index % MANUAL_NOTES.length]!;
+  return { ...note, source, sourcePath: null };
 }
 
 const TASK_STATUSES: Array<{
@@ -661,8 +792,8 @@ function seedMemories(
   const count = config.memories.count;
 
   const stmt = db.prepare(`
-    INSERT OR IGNORE INTO agent_memory (id, agentId, scope, name, content, source, tags, createdAt, accessedAt, expiresAt, accessCount, embeddingModel)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)
+    INSERT OR IGNORE INTO agent_memory (id, agentId, scope, name, content, source, sourcePath, tags, createdAt, accessedAt, expiresAt, accessCount, embeddingModel)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)
   `);
 
   const ttlDefaults: Record<string, number | null> = {
@@ -673,9 +804,12 @@ function seedMemories(
   };
 
   for (let i = 0; i < count; i++) {
-    const mem = generateMemory();
+    const mem = generateMemory(i);
+    // file_index memories default to swarm scope (shared codebase knowledge);
+    // others mix scopes so the UI shows both kinds.
+    const scope =
+      mem.source === "file_index" ? "swarm" : faker.helpers.arrayElement(["swarm", "agent"]);
     const agent = pick(agents);
-    const scope = faker.helpers.arrayElement(["swarm", "agent"]);
     const createdAt = daysAgo(faker.number.int({ min: 0, max: 14 }));
     const ttlDays = ttlDefaults[mem.source];
     const expiresAt =
@@ -689,14 +823,17 @@ function seedMemories(
       mem.name,
       mem.content,
       mem.source,
-      "[]",
+      mem.sourcePath,
+      JSON.stringify(mem.tags),
       createdAt,
       daysAgo(faker.number.int({ min: 0, max: 3 })),
       expiresAt,
     );
   }
 
-  console.log(`  ✓ Seeded ${count} memories`);
+  console.log(
+    `  ✓ Seeded ${count} memories (run POST /api/memory/re-embed to populate embeddings for semantic search)`,
+  );
 }
 
 function seedServices(

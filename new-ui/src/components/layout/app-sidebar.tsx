@@ -1,6 +1,7 @@
 import {
   BarChart3,
   BookOpen,
+  Brain,
   Bug,
   Cable,
   ClipboardCheck,
@@ -47,6 +48,7 @@ const navGroups = [
     items: [
       { title: "Skills", path: "/skills", icon: BookOpen },
       { title: "MCP Servers", path: "/mcp-servers", icon: Cable },
+      { title: "Memory", path: "/memory", icon: Brain },
     ],
   },
   {
