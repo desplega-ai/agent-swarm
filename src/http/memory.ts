@@ -69,6 +69,52 @@ const reEmbedMemory = route({
   },
 });
 
+const listMemory = route({
+  method: "post",
+  path: "/api/memory/list",
+  pattern: ["api", "memory", "list"],
+  summary: "List or semantically search memories across all agents (debug/admin)",
+  tags: ["Memory"],
+  auth: { apiKey: true },
+  body: z.object({
+    query: z
+      .string()
+      .optional()
+      .describe(
+        "Natural-language query. If present, runs semantic search; otherwise lists by recency.",
+      ),
+    agentId: z.string().uuid().optional().describe("Filter to a single agent. Omit for all."),
+    scope: z.enum(["agent", "swarm", "all"]).default("all"),
+    source: AgentMemorySourceSchema.optional(),
+    sourcePath: z
+      .string()
+      .optional()
+      .describe(
+        "Substring match against sourcePath (case-insensitive). Useful for file_index memories.",
+      ),
+    limit: z.number().int().min(1).max(100).default(20),
+    offset: z.number().int().min(0).default(0),
+  }),
+  responses: {
+    200: { description: "Memory list / search results" },
+    400: { description: "Validation error" },
+  },
+});
+
+const deleteMemoryById = route({
+  method: "delete",
+  path: "/api/memory/{id}",
+  pattern: ["api", "memory", null],
+  summary: "Delete a single memory by ID (debug/admin)",
+  tags: ["Memory"],
+  auth: { apiKey: true },
+  params: z.object({ id: z.string().uuid() }),
+  responses: {
+    200: { description: "Memory deleted" },
+    404: { description: "Memory not found" },
+  },
+});
+
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
 export async function handleMemory(
@@ -179,6 +225,132 @@ export async function handleMemory(
       console.error("[memory-search] Error:", (err as Error).message);
       json(res, { results: [] });
     }
+    return true;
+  }
+
+  if (listMemory.match(req.method, pathSegments)) {
+    const parsed = await listMemory.parse(req, res, pathSegments, new URLSearchParams());
+    if (!parsed) return true;
+
+    const { query, agentId, scope, source, sourcePath, limit, offset } = parsed.body;
+    const store = getMemoryStore();
+    const pathNeedle = sourcePath?.trim().toLowerCase();
+    const matchesPath = (p: string | null) =>
+      !pathNeedle || (p?.toLowerCase().includes(pathNeedle) ?? false);
+
+    try {
+      if (query && query.trim().length > 0) {
+        const provider = getEmbeddingProvider();
+        const queryEmbedding = await provider.embed(query.trim());
+
+        if (!queryEmbedding) {
+          json(res, { results: [], total: 0, mode: "semantic" });
+          return true;
+        }
+
+        const candidateLimit = Math.min(limit, 100) * CANDIDATE_SET_MULTIPLIER;
+        let candidates = store.search(queryEmbedding, agentId ?? "", {
+          scope,
+          limit: candidateLimit,
+          isLead: true,
+          source,
+        });
+        if (agentId) {
+          candidates = candidates.filter((c) => c.agentId === agentId);
+        }
+        if (pathNeedle) {
+          candidates = candidates.filter((c) => matchesPath(c.sourcePath));
+        }
+        const ranked = rerank(candidates, { limit: Math.min(limit, 100) });
+
+        json(res, {
+          results: ranked.map((r) => ({
+            id: r.id,
+            name: r.name,
+            content: r.content,
+            agentId: r.agentId,
+            scope: r.scope,
+            source: r.source,
+            similarity: r.similarity,
+            createdAt: r.createdAt,
+            accessedAt: r.accessedAt,
+            accessCount: r.accessCount ?? 0,
+            expiresAt: r.expiresAt ?? null,
+            embeddingModel: r.embeddingModel ?? null,
+            sourceTaskId: r.sourceTaskId,
+            sourcePath: r.sourcePath,
+            chunkIndex: r.chunkIndex,
+            totalChunks: r.totalChunks,
+            tags: r.tags,
+          })),
+          total: ranked.length,
+          mode: "semantic",
+        });
+        return true;
+      }
+
+      // When filtering by sourcePath, over-fetch then post-filter so the visible
+      // page isn't gutted by the in-memory filter.
+      const fetchLimit = pathNeedle
+        ? Math.min(500, Math.max(limit * 10, 100))
+        : Math.min(limit, 100);
+      let rows = store.list(agentId ?? "", {
+        scope,
+        limit: fetchLimit,
+        offset,
+        isLead: true,
+      });
+      if (agentId) {
+        rows = rows.filter((r) => r.agentId === agentId);
+      }
+      if (source) {
+        rows = rows.filter((r) => r.source === source);
+      }
+      if (pathNeedle) {
+        rows = rows.filter((r) => matchesPath(r.sourcePath));
+      }
+      rows = rows.slice(0, Math.min(limit, 100));
+
+      json(res, {
+        results: rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          content: r.content,
+          agentId: r.agentId,
+          scope: r.scope,
+          source: r.source,
+          createdAt: r.createdAt,
+          accessedAt: r.accessedAt,
+          accessCount: r.accessCount ?? 0,
+          expiresAt: r.expiresAt ?? null,
+          embeddingModel: r.embeddingModel ?? null,
+          sourceTaskId: r.sourceTaskId,
+          sourcePath: r.sourcePath,
+          chunkIndex: r.chunkIndex,
+          totalChunks: r.totalChunks,
+          tags: r.tags,
+        })),
+        total: rows.length,
+        mode: "list",
+      });
+    } catch (err) {
+      console.error("[memory-list] Error:", (err as Error).message);
+      jsonError(res, "Memory list failed", 500);
+    }
+    return true;
+  }
+
+  if (deleteMemoryById.match(req.method, pathSegments)) {
+    const parsed = await deleteMemoryById.parse(req, res, pathSegments, new URLSearchParams());
+    if (!parsed) return true;
+
+    const store = getMemoryStore();
+    const deleted = store.delete(parsed.params.id);
+    if (!deleted) {
+      jsonError(res, "Memory not found", 404);
+      return true;
+    }
+    json(res, { deleted: true });
     return true;
   }
 
