@@ -10,6 +10,7 @@ import { ensureToken } from "../oauth/ensure-token";
 import { resolveTemplate } from "../prompts/resolver";
 import { linearContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { buildSkipMessage, type LinearGateInput, shouldCreateTaskFromLinearEvent } from "./gate";
 // Side-effect import: registers all Linear event templates in the in-memory registry
 import "./templates";
 
@@ -229,6 +230,104 @@ export function mapLinearStatusToSwarm(linearStateName: string): string | null {
 }
 
 /**
+ * Try to read state.type and label names directly from the webhook payload.
+ *
+ * Returns null if neither field is present so the caller can fetch via
+ * GraphQL. As of the Linear AgentSessionEvent webhook schema (April 2026),
+ * `agentSession.issue` only includes `id`, `identifier`, `title`, `url`,
+ * `description`, `team`, and `teamId` — but we still try inline extraction
+ * to keep tests hermetic and to be forward-compatible if Linear ever extends
+ * the payload.
+ */
+function extractInlineGateInput(issue: Record<string, unknown>): LinearGateInput | null {
+  const stateRaw = issue.state as Record<string, unknown> | undefined;
+  const stateType =
+    stateRaw && typeof stateRaw.type === "string" ? (stateRaw.type as string) : null;
+
+  const labelsRaw = issue.labels;
+  let labelNames: string[] | null = null;
+  if (Array.isArray(labelsRaw)) {
+    labelNames = labelsRaw
+      .map((l) =>
+        l && typeof l === "object" ? String((l as Record<string, unknown>).name ?? "") : "",
+      )
+      .filter((n) => n.length > 0);
+  } else if (
+    labelsRaw &&
+    typeof labelsRaw === "object" &&
+    Array.isArray((labelsRaw as { nodes?: unknown }).nodes)
+  ) {
+    labelNames = ((labelsRaw as { nodes: unknown[] }).nodes ?? [])
+      .map((l) =>
+        l && typeof l === "object" ? String((l as Record<string, unknown>).name ?? "") : "",
+      )
+      .filter((n) => n.length > 0);
+  }
+
+  if (stateType === null && labelNames === null) return null;
+  return { stateType, labelNames: labelNames ?? [] };
+}
+
+const ISSUE_GATE_QUERY = `
+  query AgentSwarmIssueGate($id: String!) {
+    issue(id: $id) {
+      state { type }
+      labels { nodes { name } }
+    }
+  }
+`;
+
+/**
+ * Fetch the workflow-state type and label names for an issue via GraphQL.
+ * Used as a fallback when the AgentSessionEvent payload doesn't include them
+ * inline (today, it never does).
+ *
+ * Exported for testing — not part of the public API.
+ */
+export async function _fetchIssueGatingInfo(issueId: string): Promise<LinearGateInput> {
+  await ensureToken("linear");
+  const tokens = getOAuthTokens("linear");
+  if (!tokens) {
+    console.log(
+      `[Linear Sync] No OAuth tokens; cannot fetch issue ${issueId} gating info — defaulting to allow.`,
+    );
+    return { stateType: null, labelNames: [] };
+  }
+  const res = await fetch("https://api.linear.app/graphql", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${tokens.accessToken}`,
+    },
+    body: JSON.stringify({ query: ISSUE_GATE_QUERY, variables: { id: issueId } }),
+  });
+  if (!res.ok) {
+    console.error(
+      `[Linear Sync] Failed to fetch issue ${issueId} gating info: ${res.status} ${res.statusText}`,
+    );
+    return { stateType: null, labelNames: [] };
+  }
+  const json = (await res.json()) as {
+    data?: {
+      issue?: {
+        state?: { type?: string };
+        labels?: { nodes?: Array<{ name?: string }> };
+      };
+    };
+    errors?: unknown[];
+  };
+  if (json.errors) {
+    console.error("[Linear Sync] GraphQL errors fetching issue gating info:", json.errors);
+    return { stateType: null, labelNames: [] };
+  }
+  const stateType = json.data?.issue?.state?.type ?? null;
+  const labelNames = (json.data?.issue?.labels?.nodes ?? [])
+    .map((n) => n?.name ?? "")
+    .filter((n) => n.length > 0);
+  return { stateType, labelNames };
+}
+
+/**
  * Find the lead agent to receive Linear tasks.
  * Returns null if no lead is available (task will go to pool).
  */
@@ -318,6 +417,27 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
     console.log(
       `[Linear Sync] Issue ${issueIdentifier} was tracked as ${existingTask?.status ?? "unknown"} task ${existing.swarmId}, creating follow-up`,
     );
+  }
+
+  // State gate: only trigger task creation when the issue is in a "ready"
+  // workflow state (Todo / In Progress / etc). Backlog and Triage issues are
+  // skipped unless the swarm-ready label is attached.
+  const inlineGate = extractInlineGateInput(issue);
+  const gateInput = inlineGate ?? (await _fetchIssueGatingInfo(issueId));
+  const decision = shouldCreateTaskFromLinearEvent(gateInput);
+  if (!decision.create) {
+    console.log(
+      `[Linear Sync] Issue ${issueIdentifier} skipped — workflow state "${decision.reason}" is gated (labels: [${gateInput.labelNames.join(", ")}])`,
+    );
+    if (sessionId) {
+      const skipMsg = buildSkipMessage(decision.reason);
+      // Use response so the AgentSession auto-completes — leaves a visible
+      // comment on the issue without orphaning the session in pending state.
+      endAgentSession(sessionId, skipMsg, "response").catch((err) => {
+        console.error("[Linear Sync] Failed to post skip response on AgentSession:", err);
+      });
+    }
+    return;
   }
 
   const lead = findLeadAgent();
