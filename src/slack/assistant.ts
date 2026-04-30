@@ -8,6 +8,7 @@ import {
 import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
+import { wasEventSeen } from "./event-dedup";
 import { bufferThreadMessage } from "./thread-buffer";
 // Side-effect import: registers all Slack event templates in the in-memory registry
 import "./templates";
@@ -40,7 +41,15 @@ export function createAssistant(): Assistant {
       await saveThreadContext();
     },
 
-    userMessage: async ({ message, say, setStatus, setTitle, getThreadContext }) => {
+    userMessage: async ({ message, body, say, setStatus, setTitle, getThreadContext }) => {
+      // Slack retries deliveries on 3s timeout / 5xx. Drop duplicates before
+      // any task-creation work runs (DES-293).
+      const eventId = body?.event_id;
+      if (wasEventSeen(eventId)) {
+        console.log(`[Slack] dropping Slack retry: event_id=${eventId}`);
+        return;
+      }
+
       // Wrap setStatus/setTitle to swallow all errors gracefully.
       // These calls can fail for various reasons (no_permission when the thread
       // wasn't started by the assistant, network errors, etc.), so we log and continue.
