@@ -1372,6 +1372,32 @@ class ApiClient {
       throw new Error(err.error || `Failed to delete pricing row: ${res.status}`);
     }
   }
+
+  async listMemory(
+    input: import("./types").MemoryListRequest,
+  ): Promise<import("./types").MemoryListResponse> {
+    const url = `${this.getBaseUrl()}/api/memory/list`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to list memory" }));
+      throw new Error(err.error || `Failed to list memory: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async deleteMemory(id: string): Promise<{ deleted: boolean }> {
+    const url = `${this.getBaseUrl()}/api/memory/${id}`;
+    const res = await fetch(url, { method: "DELETE", headers: this.getHeaders() });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "Failed to delete memory" }));
+      throw new Error(err.error || `Failed to delete memory: ${res.status}`);
+    }
+    return res.json();
+  }
 }
 
 export interface ExecutorTypeInfo {
