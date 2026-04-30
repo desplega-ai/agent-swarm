@@ -14,6 +14,7 @@ import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { workflowEventBus } from "../workflows/event-bus";
 import { buildTreeBlocks, type TreeNode } from "./blocks";
+import { wasEventSeen } from "./eventDedup";
 import type { SlackFile } from "./files";
 import { extractTaskFromMessage, hasOtherUserMention, routeMessage } from "./router";
 // Side-effect import: registers all Slack event templates in the in-memory registry
@@ -341,7 +342,15 @@ function checkRateLimit(userId: string): boolean {
 
 export function registerMessageHandler(app: App): void {
   // Handle all message events
-  app.event("message", async ({ event, client, say }) => {
+  app.event("message", async ({ event, body, client, say }) => {
+    // Slack retries deliveries on 3s timeout / 5xx. Drop the duplicates
+    // before any task-creation work runs (DES-293).
+    const eventId = body?.event_id;
+    if (wasEventSeen(eventId)) {
+      console.log(`[Slack] dropping Slack retry: event_id=${eventId}`);
+      return;
+    }
+
     const msg = event as MessageEvent;
 
     // Ignore message_changed events
