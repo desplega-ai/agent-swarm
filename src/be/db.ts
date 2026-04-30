@@ -1196,8 +1196,8 @@ export function getAllTasks(filters?: TaskFilters): AgentTask[] {
   }
 
   if (filters?.search) {
-    conditions.push("task LIKE ?");
-    params.push(`%${filters.search}%`);
+    conditions.push("(task LIKE ? OR id LIKE ?)");
+    params.push(`%${filters.search}%`, `%${filters.search}%`);
   }
 
   // New filters
@@ -1274,8 +1274,8 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
   }
 
   if (filters?.search) {
-    conditions.push("task LIKE ?");
-    params.push(`%${filters.search}%`);
+    conditions.push("(task LIKE ? OR id LIKE ?)");
+    params.push(`%${filters.search}%`, `%${filters.search}%`);
   }
 
   if (filters?.unassigned) {
