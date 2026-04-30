@@ -14,7 +14,7 @@ import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { workflowEventBus } from "../workflows/event-bus";
 import { buildTreeBlocks, type TreeNode } from "./blocks";
-import { wasEventSeen } from "./eventDedup";
+import { wasEventSeen } from "./event-dedup";
 import type { SlackFile } from "./files";
 import { extractTaskFromMessage, hasOtherUserMention, routeMessage } from "./router";
 // Side-effect import: registers all Slack event templates in the in-memory registry

@@ -8,7 +8,7 @@ import {
 import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
-import { wasEventSeen } from "./eventDedup";
+import { wasEventSeen } from "./event-dedup";
 import { bufferThreadMessage } from "./thread-buffer";
 // Side-effect import: registers all Slack event templates in the in-memory registry
 import "./templates";

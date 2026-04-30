@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { _createTestCache, _resetForTests, wasEventSeen } from "./eventDedup";
+import { _createTestCache, _resetForTests, wasEventSeen } from "./event-dedup";
 
 describe("wasEventSeen (production cache)", () => {
   beforeEach(() => {
