@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { closeDb, createTaskExtended, getTaskById, initDb } from "../be/db";
 import { createTrackerSync, getTrackerSyncByExternalId } from "../be/db-queries/tracker";
+import { SWARM_READY_LABEL, shouldCreateTaskFromLinearEvent } from "../linear/gate";
 import {
   handleAgentSessionEvent,
   handleIssueDelete,
@@ -503,5 +504,197 @@ describe("handleIssueDelete", () => {
     // Should still be completed, not cancelled
     const updated = getTaskById(task.id);
     expect(updated!.status).toBe("completed");
+  });
+});
+
+// ─── shouldCreateTaskFromLinearEvent (gate) ──────────────────────────────────
+
+describe("shouldCreateTaskFromLinearEvent", () => {
+  test("creates task for unstarted (Todo) state", () => {
+    const decision = shouldCreateTaskFromLinearEvent({
+      stateType: "unstarted",
+      labelNames: [],
+    });
+    expect(decision).toEqual({ create: true, reason: "ready" });
+  });
+
+  test("creates task for started (In Progress) state", () => {
+    const decision = shouldCreateTaskFromLinearEvent({
+      stateType: "started",
+      labelNames: ["bug"],
+    });
+    expect(decision.create).toBe(true);
+  });
+
+  test("skips task for backlog state", () => {
+    const decision = shouldCreateTaskFromLinearEvent({
+      stateType: "backlog",
+      labelNames: [],
+    });
+    expect(decision).toEqual({ create: false, reason: "backlog" });
+  });
+
+  test("skips task for triage state", () => {
+    const decision = shouldCreateTaskFromLinearEvent({
+      stateType: "triage",
+      labelNames: ["needs-review"],
+    });
+    expect(decision).toEqual({ create: false, reason: "triage" });
+  });
+
+  test("swarm-ready label overrides backlog gate", () => {
+    const decision = shouldCreateTaskFromLinearEvent({
+      stateType: "backlog",
+      labelNames: [SWARM_READY_LABEL],
+    });
+    expect(decision).toEqual({ create: true, reason: "label-override" });
+  });
+
+  test("swarm-ready label overrides triage gate", () => {
+    const decision = shouldCreateTaskFromLinearEvent({
+      stateType: "triage",
+      labelNames: ["bug", SWARM_READY_LABEL, "p0"],
+    });
+    expect(decision).toEqual({ create: true, reason: "label-override" });
+  });
+
+  test("label match is case-insensitive", () => {
+    const decision = shouldCreateTaskFromLinearEvent({
+      stateType: "backlog",
+      labelNames: ["Swarm-Ready"],
+    });
+    expect(decision.create).toBe(true);
+  });
+
+  test("state matching is case-insensitive (defensive)", () => {
+    // Linear's enum is lowercase but be defensive in case payload casing varies.
+    const decision = shouldCreateTaskFromLinearEvent({
+      stateType: "Backlog",
+      labelNames: [],
+    });
+    expect(decision).toEqual({ create: false, reason: "backlog" });
+  });
+
+  test("unknown state types fall through to allow", () => {
+    // E.g. completed, canceled — these aren't gated; they trigger as today.
+    expect(shouldCreateTaskFromLinearEvent({ stateType: "completed", labelNames: [] }).create).toBe(
+      true,
+    );
+    expect(shouldCreateTaskFromLinearEvent({ stateType: "canceled", labelNames: [] }).create).toBe(
+      true,
+    );
+  });
+
+  test("null state type allows task creation (fail-open)", () => {
+    // If we couldn't resolve the state for any reason, default to today's
+    // behavior rather than silently swallowing assignments.
+    const decision = shouldCreateTaskFromLinearEvent({
+      stateType: null,
+      labelNames: [],
+    });
+    expect(decision.create).toBe(true);
+  });
+});
+
+// ─── handleAgentSessionEvent — state-gate skip path ──────────────────────────
+
+describe("handleAgentSessionEvent — state gate", () => {
+  test("skips task creation when issue.state.type is backlog", async () => {
+    const event = {
+      type: "AgentSession",
+      action: "create",
+      agentSession: {
+        id: "session-gate-backlog-001",
+        url: "https://linear.app/team/issue/ENG-500/agent",
+        issue: {
+          id: "issue-gate-backlog-001",
+          identifier: "ENG-500",
+          title: "Backlog ticket",
+          url: "https://linear.app/team/issue/ENG-500",
+          // Inline state/labels so the test doesn't need to mock GraphQL.
+          state: { type: "backlog" },
+          labels: [],
+        },
+      },
+    };
+
+    await handleAgentSessionEvent(event);
+
+    // No tracker_sync should have been created.
+    const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-backlog-001");
+    expect(sync).toBeNull();
+  });
+
+  test("skips task creation when issue.state.type is triage", async () => {
+    const event = {
+      type: "AgentSession",
+      action: "create",
+      agentSession: {
+        id: "session-gate-triage-001",
+        issue: {
+          id: "issue-gate-triage-001",
+          identifier: "ENG-501",
+          title: "Triage ticket",
+          url: "https://linear.app/team/issue/ENG-501",
+          state: { type: "triage" },
+          labels: { nodes: [] },
+        },
+      },
+    };
+
+    await handleAgentSessionEvent(event);
+
+    const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-triage-001");
+    expect(sync).toBeNull();
+  });
+
+  test("creates task when issue is in backlog but has swarm-ready label", async () => {
+    const event = {
+      type: "AgentSession",
+      action: "create",
+      agentSession: {
+        id: "session-gate-override-001",
+        issue: {
+          id: "issue-gate-override-001",
+          identifier: "ENG-502",
+          title: "Pre-staged backlog ticket",
+          url: "https://linear.app/team/issue/ENG-502",
+          state: { type: "backlog" },
+          labels: { nodes: [{ name: "bug" }, { name: SWARM_READY_LABEL }] },
+        },
+      },
+    };
+
+    await handleAgentSessionEvent(event);
+
+    const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-override-001");
+    expect(sync).not.toBeNull();
+    expect(sync!.externalIdentifier).toBe("ENG-502");
+    const task = getTaskById(sync!.swarmId);
+    expect(task).not.toBeNull();
+    expect(task!.source).toBe("linear");
+  });
+
+  test("creates task when issue is in unstarted (Todo) state", async () => {
+    const event = {
+      type: "AgentSession",
+      action: "create",
+      agentSession: {
+        id: "session-gate-todo-001",
+        issue: {
+          id: "issue-gate-todo-001",
+          identifier: "ENG-503",
+          title: "Ready ticket",
+          url: "https://linear.app/team/issue/ENG-503",
+          state: { type: "unstarted" },
+          labels: [],
+        },
+      },
+    };
+
+    await handleAgentSessionEvent(event);
+
+    const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-todo-001");
+    expect(sync).not.toBeNull();
   });
 });
