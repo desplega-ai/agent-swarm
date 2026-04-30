@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.73.4] - 2026-04-30
+
+### Fixed
+- **Worker auto-clone leaves repos owned by `root:root`, breaking subsequent runner sessions with `fatal: detected dubious ownership`.** `docker-entrypoint.sh` runs as root until the final `gosu worker` exec, so the auto-clone block was cloning repos as root and the worker user couldn't run `git` against them on later boots. The auto-clone loop now invokes `gh repo clone` / `git pull` via `gosu worker bash -c …` so `.git` ends up owned by `worker:worker`. The `2>/dev/null` mask on `git pull` (which had been hiding this exact failure on subsequent boots) is also removed
+- **Defense-in-depth: `git config --system --add safe.directory '*'` early in entrypoint** so any other root-vs-worker uid mismatch on `/workspace` (Archil/FUSE mounts, host-mounted volumes, manually-created paths) no longer trips the "dubious ownership" check
+
 ## [1.73.1] - 2026-04-30
 
 ### Fixed

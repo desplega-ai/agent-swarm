@@ -169,6 +169,13 @@ elif [ "$HARNESS_PROVIDER" != "pi" ]; then
     echo "Claude CLI: $(command -v "$CLAUDE_BIN")"
 fi
 
+# ---- Git safe.directory backstop ----
+# Avoid "dubious ownership" when /workspace dirs are owned by a different uid
+# (Archil/FUSE mounts, root-owned auto-clone, host-mounted volumes, etc.).
+# --system writes to /etc/gitconfig and applies to ALL users, so the worker
+# user inherits this after the gosu drop below.
+git config --system --add safe.directory '*' 2>/dev/null || true
+
 # ---- Archil disk mounts ----
 # Skipped when ARCHIL_MOUNT_TOKEN is not set (local dev / environments without Archil)
 if [ -n "$ARCHIL_MOUNT_TOKEN" ]; then
@@ -542,16 +549,21 @@ if [ -n "$AGENT_ID" ]; then
                 REPO_BRANCH=$(echo "$repo" | jq -r '.defaultBranch // "main"')
                 REPO_DIR=$(echo "$repo" | jq -r '.clonePath')
 
-                # Ensure parent directory exists
+                # Ensure parent directory exists and is owned by worker so the
+                # gosu-dropped clone/pull below can write into it. Lenient chown
+                # mirrors the pattern used for /workspace/personal subdirs above.
                 mkdir -p "$(dirname "$REPO_DIR")"
+                chown worker:worker "$(dirname "$REPO_DIR")" 2>/dev/null || true
 
+                # Run clone/pull as the worker user so .git ends up worker-owned
+                # — otherwise the runner (post-gosu) hits "dubious ownership".
+                # gosu inherits env, so GH_TOKEN/GITHUB_TOKEN propagate to gh.
                 if [ -d "${REPO_DIR}/.git" ]; then
                     echo "  Pulling ${REPO_NAME} (${REPO_BRANCH}) at ${REPO_DIR}..."
-                    cd "$REPO_DIR" && git pull origin "$REPO_BRANCH" --ff-only 2>/dev/null || echo "  Warning: Could not pull ${REPO_NAME}"
-                    cd /workspace
+                    gosu worker bash -c "cd '$REPO_DIR' && git pull origin '$REPO_BRANCH' --ff-only" || echo "  Warning: Could not pull ${REPO_NAME}"
                 else
                     echo "  Cloning ${REPO_NAME} to ${REPO_DIR} (branch: ${REPO_BRANCH})..."
-                    gh repo clone "$REPO_URL" "$REPO_DIR" -- --branch "$REPO_BRANCH" --single-branch 2>/dev/null || echo "  Warning: Could not clone ${REPO_NAME}"
+                    gosu worker bash -c "gh repo clone '$REPO_URL' '$REPO_DIR' -- --branch '$REPO_BRANCH' --single-branch" || echo "  Warning: Could not clone ${REPO_NAME}"
                 fi
             done
         else
