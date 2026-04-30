@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.73.1] - 2026-04-30
+
+### Fixed
+- **Slack tree connectors render misaligned in Slack's proportional sans-serif font.** Box-drawing characters (`├ └ │`) shift unpredictably across glyph widths, so progress blocks looked broken under nested children. Switched to a single `↳` indent with 3-space continuation, which renders cleanly regardless of font (#392)
+
+## [1.73.0] - 2026-04-29
+
+### Added
+- **API runtime image now ships `bun` + `python3`** so the script-workflow executor can run `ts` and `python` script nodes inside the API container. The compiled API binary doesn't include the `bun` CLI itself; the `bun` static binary is now copied from the `oven/bun:latest` builder stage (already cached in the build image) instead of re-fetched. `python3` installed via `apt-get --no-install-recommends` with apt lists cleaned. Image stays lean — only adds `python3` + the bun static binary. Repro that motivated the fix: workflow `script-backends-test` failed on `ts`/`python` nodes with `Executable not found in $PATH: "bun" / "python3"` (#391)
+- **`DEFAULT_APP_URL` shared constant** at `src/utils/constants.ts` (`https://app.agent-swarm.dev`) — used as the dashboard fallback for Slack task links, workflow HITL approval URLs, and any other call sites that previously hard-coded a local default. `getTaskLink()` now always returns Slack mrkdwn link syntax (no more plain-text task IDs) by falling back to `DEFAULT_APP_URL` when `APP_URL` is unset; URL pattern updated to `/tasks/:id` to match the new-UI dashboard route. `buildProgressBlocks` now routes through `getTaskLink()` so progress headers also link out (#390, DES-283)
+
+### Changed
+- Default models updated in workflow executors (`raw-llm.ts`, `validate.ts`); regenerated `openapi.json` and `docs-site/content/docs/api-reference/**`
+- Jira `initJira()` / Linear `initLinear()` now overwrite stale `oauth_apps.redirectUri` values on boot (`upsertOAuthApp` heals existing rows when `JIRA_REDIRECT_URI` / `LINEAR_REDIRECT_URI` change, including the `MCP_BASE_URL`-preferred fallback)
+
 ## [1.72.0] - 2026-04-28
 
 ### Added
