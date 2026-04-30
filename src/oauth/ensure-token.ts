@@ -26,11 +26,35 @@ function getOAuthConfig(provider: string): OAuthProviderConfig | null {
  * If the token is expiring soon, attempt to refresh it.
  * Call this before any API interaction with an OAuth-protected service.
  *
+ * Reactive variant — never throws. Refresh failures are logged so a single
+ * dead-token incident doesn't tear down an unrelated request path. Use
+ * {@link ensureTokenOrThrow} from keepalive contexts where you want a dead
+ * refresh token to surface as an alert.
+ *
  * @param bufferMs - How far ahead to check for expiry. Default 5 min (reactive use).
  *                   Keepalive callers should pass a larger value (e.g. 13h) to force
  *                   a proactive refresh well before the token actually expires.
  */
 export async function ensureToken(provider: string, bufferMs?: number): Promise<void> {
+  try {
+    await ensureTokenOrThrow(provider, bufferMs);
+  } catch (err) {
+    console.error(
+      `[OAuth] Failed to refresh ${provider} token:`,
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
+
+/**
+ * Strict variant of {@link ensureToken}: throws on refresh failure of a
+ * configured provider so callers (keepalive, alerting) can react.
+ *
+ * Stays silent (no throw) when the provider isn't configured or no refresh
+ * token is stored — those are "not connected" states, not failures, and
+ * shouldn't page anyone.
+ */
+export async function ensureTokenOrThrow(provider: string, bufferMs?: number): Promise<void> {
   if (!isTokenExpiringSoon(provider, bufferMs)) return;
 
   const config = getOAuthConfig(provider);
@@ -42,13 +66,6 @@ export async function ensureToken(provider: string, bufferMs?: number): Promise<
     return;
   }
 
-  try {
-    await refreshAccessToken(config, tokens.refreshToken);
-    console.log(`[OAuth] ${provider} token refreshed successfully`);
-  } catch (err) {
-    console.error(
-      `[OAuth] Failed to refresh ${provider} token:`,
-      err instanceof Error ? err.message : err,
-    );
-  }
+  await refreshAccessToken(config, tokens.refreshToken);
+  console.log(`[OAuth] ${provider} token refreshed successfully`);
 }
