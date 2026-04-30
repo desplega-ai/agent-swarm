@@ -10,9 +10,10 @@
  * envelope (`body.event_id` in Bolt). It is unique per delivery; retries of
  * the same logical event reuse the same id.
  *
- * This module exposes a single in-memory check-and-insert that returns `true`
- * the first time we see an event_id and `false` on subsequent retries within
- * the TTL window (default 5 min). Slack's max retry window is 1h with 3
+ * This module exposes a single in-memory check-and-insert that returns `false`
+ * the first time we see an event_id (caller should proceed) and `true` on
+ * subsequent retries within the TTL window — i.e. it answers "was this event
+ * already seen?" (default TTL 5 min). Slack's max retry window is 1h with 3
  * retries, but the second retry typically lands within 60s, so 5 min is a
  * safe-but-tight bound.
  *
