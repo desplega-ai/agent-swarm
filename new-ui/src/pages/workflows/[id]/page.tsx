@@ -1,10 +1,15 @@
 import type { ColDef, RowClickedEvent } from "ag-grid-community";
 import {
   ArrowLeft,
+  Check,
   ChevronDown,
   ChevronRight,
+  Copy,
+  Eye,
+  EyeOff,
   FolderGit2,
   GitBranch,
+  Maximize2,
   Play,
   Trash2,
   User,
@@ -29,6 +34,7 @@ import type {
   WorkflowVersion,
 } from "@/api/types";
 import { AgentLink } from "@/components/shared/agent-link";
+import { CollapsibleDescription } from "@/components/shared/collapsible-description";
 import { CollapsibleSection } from "@/components/shared/collapsible-section";
 import { DataGrid } from "@/components/shared/data-grid";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -44,13 +50,23 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { JsonTree } from "@/components/workflows/json-tree";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
-import { formatElapsed, formatSmartTime } from "@/lib/utils";
+import { getConfig } from "@/lib/config";
+import { cn, formatElapsed, formatSmartTime } from "@/lib/utils";
 
 export default function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -68,6 +84,7 @@ export default function WorkflowDetailPage() {
   );
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [graphMaximized, setGraphMaximized] = useState(false);
 
   const selectedNode = useMemo(() => {
     if (!selectedNodeId || !workflow) return null;
@@ -182,7 +199,10 @@ export default function WorkflowDetailPage() {
         </div>
 
         {workflow.description && (
-          <p className="text-sm text-muted-foreground">{workflow.description}</p>
+          <CollapsibleDescription
+            text={workflow.description}
+            textClassName="text-muted-foreground"
+          />
         )}
 
         {/* Created by + Workspace info */}
@@ -225,6 +245,7 @@ export default function WorkflowDetailPage() {
         <TabsContent value="definition" className="flex flex-col flex-1 min-h-0 gap-4">
           {/* Workflow metadata */}
           <WorkflowMeta
+            workflowId={workflow.id}
             triggers={workflow.triggers}
             cooldown={workflow.cooldown}
             input={workflow.input}
@@ -234,13 +255,24 @@ export default function WorkflowDetailPage() {
           {/* Split view: graph + inspector */}
           <div className="flex flex-col md:flex-row flex-1 min-h-0 gap-4">
             {/* Graph panel */}
-            <div className="flex-[3] min-h-[300px] md:min-h-0">
+            <div className="relative flex-[3] min-h-[300px] md:min-h-0">
               <WorkflowGraph
                 definition={workflow.definition}
                 onNodeClick={handleNodeClick}
                 selectedNodeId={selectedNodeId}
                 className="h-full min-h-[300px]"
               />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                onClick={() => setGraphMaximized(true)}
+                aria-label="Expand graph"
+                title="Expand graph"
+                className="absolute top-2 right-2 h-7 w-7 bg-background/80 backdrop-blur-sm shadow-sm"
+              >
+                <Maximize2 className="h-3.5 w-3.5" />
+              </Button>
             </div>
 
             {/* Node inspector panel */}
@@ -305,6 +337,23 @@ export default function WorkflowDetailPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Maximized graph dialog */}
+      <Dialog open={graphMaximized} onOpenChange={setGraphMaximized}>
+        <DialogContent className="max-w-[95vw] w-[95vw] sm:max-w-[95vw] h-[95vh] p-0 gap-0 flex flex-col">
+          <DialogHeader className="shrink-0 px-4 py-3 border-b">
+            <DialogTitle className="text-sm font-semibold">{workflow.name}</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 p-4">
+            <WorkflowGraph
+              definition={workflow.definition}
+              onNodeClick={handleNodeClick}
+              selectedNodeId={selectedNodeId}
+              className="h-full border-0"
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -731,11 +780,13 @@ function InspectorSection({ label, children }: { label: string; children: React.
 // --- Workflow Metadata ---
 
 function WorkflowMeta({
+  workflowId,
   triggers,
   cooldown,
   input,
   triggerSchema,
 }: {
+  workflowId: string;
   triggers: TriggerConfig[];
   cooldown?: CooldownConfig;
   input?: Record<string, string>;
@@ -755,15 +806,16 @@ function WorkflowMeta({
         {triggers.length > 0 && (
           <MetaBlock label="Triggers">
             <div className="flex flex-wrap gap-1.5">
-              {triggers.map((t, i) => (
-                <Badge key={i} variant="outline" size="tag" className="font-mono">
-                  {t.type}
-                  {t.type === "webhook" && t.hmacSecret
-                    ? ` (hmac: ${maskSecret(t.hmacSecret)})`
-                    : ""}
-                  {t.type === "schedule" && t.scheduleId ? ` ${t.scheduleId}` : ""}
-                </Badge>
-              ))}
+              {triggers.map((t, i) =>
+                t.type === "webhook" ? (
+                  <WebhookTriggerBadge key={i} workflowId={workflowId} trigger={t} />
+                ) : (
+                  <Badge key={i} variant="outline" size="tag" className="font-mono">
+                    {t.type}
+                    {t.type === "schedule" && t.scheduleId ? ` ${t.scheduleId}` : ""}
+                  </Badge>
+                ),
+              )}
             </div>
           </MetaBlock>
         )}
@@ -882,4 +934,160 @@ function formatCooldown(c: CooldownConfig): string {
   if (c.minutes) parts.push(`${c.minutes}m`);
   if (c.seconds) parts.push(`${c.seconds}s`);
   return parts.length > 0 ? parts.join(" ") : "none";
+}
+
+// --- Webhook Trigger Badge + Modal ---
+
+function WebhookTriggerBadge({
+  workflowId,
+  trigger,
+}: {
+  workflowId: string;
+  trigger: TriggerConfig;
+}) {
+  const [open, setOpen] = useState(false);
+  const apiUrl = getConfig().apiUrl.replace(/\/$/, "");
+  const webhookUrl = `${apiUrl}/api/webhooks/${workflowId}`;
+  const hmacHeader = trigger.hmacHeader ?? "X-Hub-Signature-256";
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/40 rounded-sm"
+      >
+        <Badge
+          variant="outline"
+          size="tag"
+          className="font-mono hover:border-primary/50 hover:text-foreground transition-colors"
+        >
+          webhook
+          {trigger.hmacSecret ? ` (hmac: ${maskSecret(trigger.hmacSecret)})` : ""}
+        </Badge>
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Webhook trigger</DialogTitle>
+            <DialogDescription>
+              Send a <code className="font-mono text-foreground">POST</code> request to this URL to
+              trigger the workflow. The request body is forwarded as{" "}
+              <code className="font-mono text-foreground">triggerData</code>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <CopyableField label="Webhook URL" value={webhookUrl} />
+            <CopyableField label="Method" value="POST" mono />
+            {trigger.hmacSecret ? (
+              <>
+                <CopyableField label="HMAC header" value={hmacHeader} />
+                <SecretField label="HMAC secret" value={trigger.hmacSecret} />
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Sign the raw request body with HMAC-SHA256 using the secret, then send the digest
+                  as <code className="font-mono">{hmacHeader}: sha256=&lt;hex&gt;</code>.
+                </p>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                No HMAC secret is configured for this trigger.
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function CopyableField({
+  label,
+  value,
+  mono = true,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore — clipboard not available
+    }
+  };
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs text-muted-foreground uppercase tracking-wide">{label}</Label>
+      <div className="flex items-center gap-2">
+        <Input
+          readOnly
+          value={value}
+          className={cn("h-9", mono && "font-mono text-xs")}
+          onFocus={(e) => e.currentTarget.select()}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          onClick={handleCopy}
+          aria-label={`Copy ${label}`}
+          className="shrink-0"
+        >
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function SecretField({ label, value }: { label: string; value: string }) {
+  const [revealed, setRevealed] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore
+    }
+  };
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs text-muted-foreground uppercase tracking-wide">{label}</Label>
+      <div className="flex items-center gap-2">
+        <Input
+          readOnly
+          type={revealed ? "text" : "password"}
+          value={value}
+          className="h-9 font-mono text-xs"
+          onFocus={(e) => e.currentTarget.select()}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          onClick={() => setRevealed((v) => !v)}
+          aria-label={revealed ? "Hide secret" : "Reveal secret"}
+          className="shrink-0"
+        >
+          {revealed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          onClick={handleCopy}
+          aria-label={`Copy ${label}`}
+          className="shrink-0"
+        >
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        </Button>
+      </div>
+    </div>
+  );
 }

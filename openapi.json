@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.73.2",
+    "version": "1.73.3",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -2910,6 +2910,112 @@
         "responses": {
           "202": {
             "description": "Re-embedding started"
+          }
+        }
+      }
+    },
+    "/api/memory/list": {
+      "post": {
+        "summary": "List or semantically search memories across all agents (debug/admin)",
+        "tags": [
+          "Memory"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Natural-language query. If present, runs semantic search; otherwise lists by recency."
+                  },
+                  "agentId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Filter to a single agent. Omit for all."
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "agent",
+                      "swarm",
+                      "all"
+                    ],
+                    "default": "all"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "manual",
+                      "file_index",
+                      "session_summary",
+                      "task_completion"
+                    ]
+                  },
+                  "sourcePath": {
+                    "type": "string",
+                    "description": "Substring match against sourcePath (case-insensitive). Useful for file_index memories."
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 20
+                  },
+                  "offset": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Memory list / search results"
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/memory/{id}": {
+      "delete": {
+        "summary": "Delete a single memory by ID (debug/admin)",
+        "tags": [
+          "Memory"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Memory deleted"
+          },
+          "404": {
+            "description": "Memory not found"
           }
         }
       }
