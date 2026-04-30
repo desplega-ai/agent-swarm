@@ -1,26 +1,36 @@
-import { ensureToken } from "./ensure-token";
+import { ensureTokenOrThrow } from "./ensure-token";
 
 const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
 const THIRTEEN_HOURS_MS = 13 * 60 * 60 * 1000;
 const SLACK_ALERTS_CHANNEL = process.env.SLACK_ALERTS_CHANNEL || "C08JCRURPBV";
+
+const KEEPALIVE_PROVIDERS = ["linear", "jira"] as const;
 
 let keepaliveInterval: ReturnType<typeof setInterval> | null = null;
 
 /**
  * Proactively refresh OAuth tokens on a schedule to prevent expiry.
  * If refresh fails, posts a Slack notification so someone can re-auth manually.
+ *
+ * Why both Linear and Jira: Atlassian rotates refresh tokens and expires them
+ * after 90 days of inactivity, so a swarm that doesn't touch Jira for a long
+ * stretch will silently lose the ability to refresh. Touching the token every
+ * 12h keeps the refresh token alive and surfaces a dead one as an alert
+ * instead of a runtime 401.
  */
 async function runKeepalive(): Promise<void> {
-  console.log("[OAuth Keepalive] Running scheduled token refresh for linear...");
-  try {
-    await ensureToken("linear", THIRTEEN_HOURS_MS);
-    console.log("[OAuth Keepalive] linear token check completed successfully");
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`[OAuth Keepalive] Failed to refresh linear token: ${message}`);
-    await notifySlack(
-      `⚠️ *OAuth Keepalive Failed*\nProvider: \`linear\`\nError: ${message}\n\nManual re-authorization may be required.`,
-    );
+  for (const provider of KEEPALIVE_PROVIDERS) {
+    console.log(`[OAuth Keepalive] Running scheduled token refresh for ${provider}...`);
+    try {
+      await ensureTokenOrThrow(provider, THIRTEEN_HOURS_MS);
+      console.log(`[OAuth Keepalive] ${provider} token check completed successfully`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[OAuth Keepalive] Failed to refresh ${provider} token: ${message}`);
+      await notifySlack(
+        `⚠️ *OAuth Keepalive Failed*\nProvider: \`${provider}\`\nError: ${message}\n\nManual re-authorization may be required.`,
+      );
+    }
   }
 }
 

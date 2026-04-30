@@ -7,7 +7,7 @@ import {
   storeOAuthTokens,
   upsertOAuthApp,
 } from "../be/db-queries/oauth";
-import { ensureToken } from "../oauth/ensure-token";
+import { ensureToken, ensureTokenOrThrow } from "../oauth/ensure-token";
 
 const TEST_DB_PATH = "./test-ensure-token.sqlite";
 
@@ -200,5 +200,37 @@ describe("ensureToken", () => {
 
     // No fetch — can't refresh without a refresh token
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("ensureTokenOrThrow", () => {
+  test("throws when refresh fails for a configured provider (so keepalive can alert)", async () => {
+    storeOAuthTokens("test-provider", {
+      accessToken: "old-token",
+      refreshToken: "refresh-token",
+      expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
+    });
+
+    globalThis.fetch = mock(() =>
+      Promise.resolve(
+        new Response('{"error":"invalid_grant"}', {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(ensureTokenOrThrow("test-provider")).rejects.toThrow(/Token refresh failed/);
+  });
+
+  test("stays silent (no throw) when no refresh token is stored", async () => {
+    deleteOAuthTokens("test-provider");
+
+    // "Not connected" should not page anyone
+    await expect(ensureTokenOrThrow("test-provider")).resolves.toBeUndefined();
+  });
+
+  test("stays silent (no throw) when provider is not configured", async () => {
+    await expect(ensureTokenOrThrow("nonexistent-provider")).resolves.toBeUndefined();
   });
 });
