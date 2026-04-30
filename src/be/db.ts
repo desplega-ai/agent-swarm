@@ -1571,6 +1571,15 @@ export function findCompletedTaskInThread(
 
 export function completeTask(id: string, output?: string): AgentTask | null {
   const oldTask = getTaskById(id);
+  if (!oldTask) return null;
+
+  // Idempotency guard: don't re-complete a task already in a terminal state.
+  // Mirrors cancelTask. Prevents duplicate task.completed events, duplicate
+  // log entries, and duplicate follow-up tasks when multiple sessions race.
+  if (["completed", "failed", "cancelled"].includes(oldTask.status)) {
+    return null;
+  }
+
   const finishedAt = new Date().toISOString();
   let row = taskQueries.updateStatus().get("completed", finishedAt, id);
   if (!row) return null;
@@ -1607,6 +1616,15 @@ export function completeTask(id: string, output?: string): AgentTask | null {
 
 export function failTask(id: string, reason: string): AgentTask | null {
   const oldTask = getTaskById(id);
+  if (!oldTask) return null;
+
+  // Idempotency guard: don't re-fail a task already in a terminal state.
+  // Mirrors cancelTask / completeTask. Prevents duplicate task.failed events
+  // and duplicate follow-up tasks when multiple sessions race.
+  if (["completed", "failed", "cancelled"].includes(oldTask.status)) {
+    return null;
+  }
+
   const finishedAt = new Date().toISOString();
   const row = taskQueries.setFailure().get(reason, finishedAt, id);
   if (row && oldTask) {
