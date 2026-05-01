@@ -1,15 +1,17 @@
 /**
  * Opencode provider adapter.
  *
- * Sub-4 added the OpencodeAdapter skeleton; this sub-5 implementation adds the
- * full session lifecycle: spawn an in-process opencode server, subscribe to the
- * SSE event stream, map events to ProviderEvent, accumulate cost, and persist
- * every event as a raw_log row.
+ * Sub-4 added the OpencodeAdapter skeleton; sub-5 added the full session
+ * lifecycle (SSE events, cost accumulation, raw_log persistence); sub-6 (DES-300)
+ * adds per-task isolation: agent file, OPENCODE_CONFIG, OPENCODE_DATA_HOME.
  */
 
-import type { AssistantMessage, Event as OpencodeEvent } from "@opencode-ai/sdk";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import type { AssistantMessage, Config, Event as OpencodeEvent } from "@opencode-ai/sdk";
 import { createOpencode } from "@opencode-ai/sdk";
 import { validateOpencodeCredentials } from "../utils/credentials";
+import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import type {
   CostData,
@@ -51,18 +53,29 @@ class OpencodeSession implements ProviderSession {
   private agentId: string;
   private taskId: string;
 
+  // Per-task isolation paths (for cleanup)
+  private agentFilePath: string;
+  private configFilePath: string;
+  private dataHomePath: string;
+
   constructor(
     sessionId: string,
     server: { url: string; close(): void },
     model: string,
     agentId: string,
     taskId: string,
+    agentFilePath: string,
+    configFilePath: string,
+    dataHomePath: string,
   ) {
     this._sessionId = sessionId;
     this.server = server;
     this.model = model;
     this.agentId = agentId;
     this.taskId = taskId;
+    this.agentFilePath = agentFilePath;
+    this.configFilePath = configFilePath;
+    this.dataHomePath = dataHomePath;
     this.completionPromise = new Promise<ProviderResult>((resolve, reject) => {
       this.completionResolve = resolve;
       this.completionReject = reject;
@@ -91,6 +104,25 @@ class OpencodeSession implements ProviderSession {
   private emitDirect(event: ProviderEvent): void {
     for (const l of this.listeners) {
       l(event);
+    }
+  }
+
+  /** Best-effort cleanup of per-task isolation files and directories. */
+  private async cleanupFiles(): Promise<void> {
+    try {
+      await Bun.$`rm -f ${this.agentFilePath}`.quiet().nothrow();
+    } catch {
+      // best-effort
+    }
+    try {
+      await Bun.$`rm -f ${this.configFilePath}`.quiet().nothrow();
+    } catch {
+      // best-effort
+    }
+    try {
+      await Bun.$`rm -rf ${this.dataHomePath}`.quiet().nothrow();
+    } catch {
+      // best-effort
     }
   }
 
@@ -204,6 +236,7 @@ class OpencodeSession implements ProviderSession {
     if (this.aborted) return;
     this.aborted = true;
     this.server.close();
+    await this.cleanupFiles();
     this.completionResolve({
       exitCode: 1,
       sessionId: this._sessionId,
@@ -226,8 +259,80 @@ export class OpencodeAdapter implements ProviderAdapter {
   }
 
   async createSession(config: ProviderSessionConfig): Promise<ProviderSession> {
-    // Spin up an in-process opencode server + client
-    const { client, server } = await createOpencode({ hostname: "127.0.0.1", port: 0 });
+    const taskId = config.taskId;
+    const agentName = `swarm-${taskId}`;
+    const agentFilePath = join(config.cwd, ".opencode", "agents", `${agentName}.md`);
+    const configFilePath = `/tmp/opencode-${taskId}.json`;
+    const dataHomePath = `/tmp/opencode-data-${taskId}`;
+
+    // Write per-task agent file (best-effort; contains the system prompt)
+    try {
+      mkdirSync(join(config.cwd, ".opencode", "agents"), { recursive: true });
+      await Bun.write(agentFilePath, config.systemPrompt ?? "");
+    } catch {
+      // best-effort
+    }
+
+    // Build MCP config: swarm endpoint + installed MCP servers
+    const installedMcp =
+      (await fetchInstalledMcpServers(config.apiUrl, config.apiKey, config.agentId, "opencode")) ??
+      {};
+    const mcpConfig: Config["mcp"] = {
+      swarm: {
+        type: "remote",
+        url: `${config.apiUrl}/mcp`,
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          "X-Agent-ID": config.agentId,
+        },
+      },
+      ...installedMcp,
+    };
+
+    // Build per-task opencode config
+    const opencodeConfig: Config = {
+      $schema: "https://opencode.ai/config.json",
+      model: config.model,
+      mcp: mcpConfig,
+      permission: {
+        edit: "allow",
+        bash: "allow",
+        webfetch: "allow",
+        doom_loop: "allow",
+        external_directory: "allow",
+      },
+    };
+
+    // Write per-task config file
+    try {
+      await Bun.write(configFilePath, JSON.stringify(opencodeConfig, null, 2));
+    } catch {
+      // best-effort
+    }
+
+    // Set per-task data home before spawning the opencode process
+    process.env.OPENCODE_DATA_HOME = dataHomePath;
+
+    // Set OPENCODE_CONFIG scoped to the spawn call (save + restore)
+    const prevOpencodeConfig = process.env.OPENCODE_CONFIG;
+    process.env.OPENCODE_CONFIG = configFilePath;
+
+    let client: Awaited<ReturnType<typeof createOpencode>>["client"];
+    let server: Awaited<ReturnType<typeof createOpencode>>["server"];
+    try {
+      ({ client, server } = await createOpencode({
+        hostname: "127.0.0.1",
+        port: 0,
+        config: opencodeConfig,
+      }));
+    } finally {
+      // Restore OPENCODE_CONFIG after the process has been spawned
+      if (prevOpencodeConfig === undefined) {
+        delete process.env.OPENCODE_CONFIG;
+      } else {
+        process.env.OPENCODE_CONFIG = prevOpencodeConfig;
+      }
+    }
 
     // Create the opencode session (project directory = config.cwd)
     const createResult = await client.session.create({ query: { directory: config.cwd } });
@@ -244,12 +349,12 @@ export class OpencodeAdapter implements ProviderAdapter {
       config.model,
       config.agentId,
       config.taskId,
+      agentFilePath,
+      configFilePath,
+      dataHomePath,
     );
 
-    // Emit session_init immediately
-    session.onEvent; // ensure listeners are set up before emitting
-    // Listeners are attached externally after createSession returns, so we
-    // queue the init event to emit after the current microtask queue drains.
+    // Emit session_init immediately after listeners are attached
     Promise.resolve().then(() => {
       for (const l of (session as unknown as { listeners: Array<(e: ProviderEvent) => void> })
         .listeners) {
@@ -278,13 +383,14 @@ export class OpencodeAdapter implements ProviderAdapter {
         });
       });
 
-    // Fire-and-forget: send the prompt to kick off the session
+    // Fire-and-forget: send the prompt using the per-task agent
     client.session
       .prompt({
         path: { id: sessionId },
         query: { directory: config.cwd },
         body: {
-          parts: [{ type: "text", text: `${config.systemPrompt}\n\n${config.prompt}` }],
+          agent: agentName,
+          parts: [{ type: "text", text: config.prompt }],
         },
       })
       .catch((err: unknown) => {
