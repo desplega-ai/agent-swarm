@@ -4,6 +4,8 @@
  * Sub-4 added the OpencodeAdapter skeleton; sub-5 added the full session
  * lifecycle (SSE events, cost accumulation, raw_log persistence); sub-6 (DES-300)
  * adds per-task isolation: agent file, OPENCODE_CONFIG, OPENCODE_DATA_HOME.
+ * Sub-7 (DES-301) wires the agent-swarm opencode plugin for cancellation,
+ * heartbeat, identity sync, system.transform, compacting, and idle hooks.
  */
 
 import { mkdirSync } from "node:fs";
@@ -289,8 +291,11 @@ export class OpencodeAdapter implements ProviderAdapter {
       ...installedMcp,
     };
 
-    // Build per-task opencode config
-    const opencodeConfig: Config = {
+    // Resolve the agent-swarm plugin path (absolute, works in dev and Docker)
+    const pluginPath = join(import.meta.dir, "../../plugin/opencode-plugins/agent-swarm.ts");
+
+    // Build per-task opencode config (plugin field carries the swarm plugin)
+    const opencodeConfig: Config & { plugin?: string[] } = {
       $schema: "https://opencode.ai/config.json",
       model: config.model,
       mcp: mcpConfig,
@@ -301,6 +306,7 @@ export class OpencodeAdapter implements ProviderAdapter {
         doom_loop: "allow",
         external_directory: "allow",
       },
+      plugin: [pluginPath],
     };
 
     // Write per-task config file
@@ -312,6 +318,20 @@ export class OpencodeAdapter implements ProviderAdapter {
 
     // Set per-task data home before spawning the opencode process
     process.env.OPENCODE_DATA_HOME = dataHomePath;
+
+    // Set SWARM_* env vars so the plugin can read them (inherited by child process)
+    const swarmEnvSnapshot = {
+      SWARM_API_URL: process.env.SWARM_API_URL,
+      SWARM_API_KEY: process.env.SWARM_API_KEY,
+      SWARM_AGENT_ID: process.env.SWARM_AGENT_ID,
+      SWARM_TASK_ID: process.env.SWARM_TASK_ID,
+      SWARM_IS_LEAD: process.env.SWARM_IS_LEAD,
+    };
+    process.env.SWARM_API_URL = config.apiUrl;
+    process.env.SWARM_API_KEY = config.apiKey;
+    process.env.SWARM_AGENT_ID = config.agentId;
+    process.env.SWARM_TASK_ID = config.taskId;
+    process.env.SWARM_IS_LEAD = config.role === "lead" ? "true" : "false";
 
     // Set OPENCODE_CONFIG scoped to the spawn call (save + restore)
     const prevOpencodeConfig = process.env.OPENCODE_CONFIG;
@@ -331,6 +351,14 @@ export class OpencodeAdapter implements ProviderAdapter {
         delete process.env.OPENCODE_CONFIG;
       } else {
         process.env.OPENCODE_CONFIG = prevOpencodeConfig;
+      }
+      // Restore SWARM_* env vars
+      for (const [key, val] of Object.entries(swarmEnvSnapshot)) {
+        if (val === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = val;
+        }
       }
     }
 
