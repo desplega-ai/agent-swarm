@@ -74,7 +74,14 @@ export type AgentTaskSource = z.infer<typeof AgentTaskSourceSchema>;
 // String identifiers accepted by `HARNESS_PROVIDER` and the
 // `createProviderAdapter` factory in `src/providers/index.ts`. Keep this in
 // sync with the factory's switch and the unknown-provider error message.
-export const ProviderNameSchema = z.enum(["claude", "codex", "pi", "devin", "claude-managed"]);
+export const ProviderNameSchema = z.enum([
+  "claude",
+  "codex",
+  "pi",
+  "devin",
+  "claude-managed",
+  "opencode",
+]);
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
 export type DevinProviderMeta = {
@@ -92,6 +99,7 @@ export type ProviderMetaMap = {
   codex: NoProviderMeta;
   pi: NoProviderMeta;
   "claude-managed": NoProviderMeta;
+  opencode: NoProviderMeta;
 };
 
 export const AgentTaskSchema = z.object({

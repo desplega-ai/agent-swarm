@@ -18,7 +18,7 @@ export interface CostData {
    * (when DB pricing rows exist for all three token classes); Claude / pi
    * always trust the harness-reported `totalCostUsd` as-is.
    */
-  provider?: "claude" | "codex" | "pi";
+  provider?: "claude" | "codex" | "pi" | "opencode";
 }
 
 import type { ProviderName } from "../types";
