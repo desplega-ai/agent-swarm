@@ -1,12 +1,13 @@
 /**
- * Unit tests for OpencodeSession lifecycle (DES-299).
+ * Unit tests for OpencodeSession lifecycle (DES-299, DES-300).
  *
  * Mocks `@opencode-ai/sdk` so we can drive canned SSE event sequences
- * and verify the SSE→ProviderEvent mapping, cost aggregation, and raw_log
- * persistence — all without starting a real opencode server.
+ * and verify the SSE→ProviderEvent mapping, cost aggregation, raw_log
+ * persistence, and per-task isolation (agent file, config, data home).
  */
 
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { join } from "node:path";
 import type { Event as OpencodeEvent } from "@opencode-ai/sdk";
 import type { ProviderEvent, ProviderResult, ProviderSessionConfig } from "../providers/types";
 
@@ -36,6 +37,12 @@ function makeStream(events: OpencodeEvent[]): AsyncGenerator<OpencodeEvent> {
   return gen();
 }
 
+/** Last args captured by the fakeClient.session.prompt mock. */
+let lastPromptArgs: unknown;
+
+/** Last config passed to createOpencode mock. */
+let lastCreateOpencodeConfig: unknown;
+
 /** Collect all ProviderEvents emitted by a session. */
 async function driveSession(
   events: OpencodeEvent[],
@@ -50,7 +57,10 @@ async function driveSession(
   const fakeClient = {
     session: {
       create: async () => ({ data: { id: fakeSessionId }, error: undefined }),
-      prompt: async () => ({ data: {}, error: undefined }),
+      prompt: async (args: unknown) => {
+        lastPromptArgs = args;
+        return { data: {}, error: undefined };
+      },
     },
     event: {
       subscribe: async () => ({ stream: fakeStream }),
@@ -61,7 +71,10 @@ async function driveSession(
 
   // Install mock BEFORE importing the adapter (Bun hoists mock.module)
   mock.module("@opencode-ai/sdk", () => ({
-    createOpencode: async () => ({ client: fakeClient, server: fakeServer }),
+    createOpencode: async (opts: unknown) => {
+      lastCreateOpencodeConfig = opts;
+      return { client: fakeClient, server: fakeServer };
+    },
   }));
 
   // Dynamic import ensures the mock is applied
@@ -301,5 +314,109 @@ describe("OpencodeSession — raw_log persistence", () => {
         expect(() => JSON.parse(rl.content)).not.toThrow();
       }
     }
+  });
+});
+
+// ── DES-300: per-task isolation ────────────────────────────────────────────────
+
+describe("OpencodeAdapter — per-task isolation (DES-300)", () => {
+  beforeEach(() => {
+    lastPromptArgs = undefined;
+    lastCreateOpencodeConfig = undefined;
+    mock.restore();
+  });
+
+  afterEach(() => {
+    // Clean up any written files from tests
+    Bun.$`rm -rf /tmp/opencode-task-1.json /tmp/opencode-data-task-1`.quiet().nothrow();
+    Bun.$`rm -rf /tmp/test/.opencode`.quiet().nothrow();
+  });
+
+  test("session.prompt receives agent=swarm-<taskId>", async () => {
+    const events: OpencodeEvent[] = [
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ];
+    const cfg = testConfig({ taskId: "task-1" });
+    await driveSession(events, cfg);
+
+    expect(lastPromptArgs).toBeDefined();
+    const args = lastPromptArgs as { body?: { agent?: string } };
+    expect(args.body?.agent).toBe("swarm-task-1");
+  });
+
+  test("createOpencode receives config with model, mcp.swarm, and permission", async () => {
+    const events: OpencodeEvent[] = [
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ];
+    const cfg = testConfig({
+      taskId: "task-1",
+      model: "claude-sonnet-4-6",
+      apiUrl: "http://localhost:9999",
+      apiKey: "mykey",
+      agentId: "agent-42",
+    });
+    await driveSession(events, cfg);
+
+    expect(lastCreateOpencodeConfig).toBeDefined();
+    const opts = lastCreateOpencodeConfig as {
+      config?: {
+        model?: string;
+        mcp?: Record<string, unknown>;
+        permission?: Record<string, string>;
+      };
+    };
+    expect(opts.config?.model).toBe("claude-sonnet-4-6");
+    expect(opts.config?.mcp?.swarm).toBeDefined();
+    const swarm = opts.config?.mcp?.swarm as {
+      type: string;
+      url: string;
+      headers?: Record<string, string>;
+    };
+    expect(swarm.type).toBe("remote");
+    expect(swarm.url).toContain("http://localhost:9999");
+    expect(swarm.headers?.Authorization).toContain("mykey");
+    expect(opts.config?.permission?.edit).toBe("allow");
+  });
+
+  test("per-task agent file is written with system prompt", async () => {
+    const events: OpencodeEvent[] = [
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ];
+    const cwd = `/tmp/opencode-test-agent-${Date.now()}`;
+    await Bun.$`mkdir -p ${cwd}`.quiet();
+    const cfg = testConfig({ taskId: "task-agent-file", systemPrompt: "be a coder", cwd });
+    await driveSession(events, cfg);
+
+    const agentFile = Bun.file(join(cwd, ".opencode", "agents", "swarm-task-agent-file.md"));
+    const exists = await agentFile.exists();
+    expect(exists).toBe(true);
+    if (exists) {
+      const content = await agentFile.text();
+      expect(content).toContain("be a coder");
+    }
+    // Cleanup
+    await Bun.$`rm -rf ${cwd}`.quiet().nothrow();
+  });
+
+  test("per-task config file is written as valid JSON", async () => {
+    const events: OpencodeEvent[] = [
+      { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+    ];
+    const cfg = testConfig({ taskId: "task-cfg-json" });
+    await driveSession(events, cfg);
+
+    const configFile = Bun.file("/tmp/opencode-task-cfg-json.json");
+    const exists = await configFile.exists();
+    expect(exists).toBe(true);
+    if (exists) {
+      const text = await configFile.text();
+      expect(() => JSON.parse(text)).not.toThrow();
+      const parsed = JSON.parse(text) as { mcp?: unknown; permission?: unknown };
+      expect(parsed.mcp).toBeDefined();
+      expect(parsed.permission).toBeDefined();
+    }
+    // Cleanup
+    await Bun.$`rm -f /tmp/opencode-task-cfg-json.json`.quiet().nothrow();
+    await Bun.$`rm -rf /tmp/opencode-data-task-cfg-json`.quiet().nothrow();
   });
 });
