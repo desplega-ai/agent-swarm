@@ -6884,7 +6884,8 @@
                           "claude",
                           "codex",
                           "pi",
-                          "claude-managed"
+                          "claude-managed",
+                          "opencode"
                         ]
                       },
                       "providerMeta": {

@@ -1,0 +1,27 @@
+---
+title: Receipts
+description: Shareable, copy-pasteable workflow recipes any swarm operator can drop into their deployment
+---
+
+**Receipts** are workflow recipes — battle-tested swarm configurations that any operator can drop into their own deployment with minimal adaptation. Each receipt ships with:
+
+- A description of the pattern and when to use it
+- A "Copy for your swarm" prompt you can paste into your lead agent's session to auto-configure the workflow
+- A downloadable workflow JSON definition with placeholders for your agent IDs, org IDs, and Slack channels
+
+Receipts are intentionally generic. They define the **shape** of a workflow; you bring the **work**.
+
+## Available receipts
+
+### Workflows
+
+- [Ralph Loop](/docs/receipts/workflows/ralph-loop) — A reusable iterative agent loop that pairs a worker with an analyst. Persistent scratch space in `agent-fs`, max-iteration safety cap, automatic Slack notifications on success/failure.
+
+## How to use a receipt
+
+Two paths, depending on how hands-on you want to be:
+
+1. **Paste the prompt.** Each receipt page has a "Copy for your swarm" block at the top. Paste it into a Claude session connected to your swarm's lead agent — the lead will fetch the JSON, adapt the IDs to your deployment, and create the workflow via the `create-workflow` MCP tool.
+2. **Manual install.** Download the workflow JSON, replace the `<your-...>` placeholders with values from your swarm, and call `create-workflow` yourself with the resulting object.
+
+See [Workflows](/docs/concepts/workflows) for the underlying concepts and [create-workflow](/docs/api-reference/workflows#create-workflow) in the API reference.

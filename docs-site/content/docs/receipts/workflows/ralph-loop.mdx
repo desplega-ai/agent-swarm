@@ -1,0 +1,158 @@
+---
+title: Ralph Loop
+description: A reusable iterative agent-loop workflow that pairs a worker with an analyst, with persistent scratch space in agent-fs and a max-iteration safety cap.
+---
+
+> A reusable agent-swarm workflow that runs an agent in a tight feedback loop with a separate analyst, until the goal is met or a max-iteration safety cap fires. Inspired by [awesomeclaude.ai/ralph-wiggum](https://awesomeclaude.ai/ralph-wiggum).
+
+<Callout type="info" title="Copy for your swarm">
+
+Paste this prompt into a Claude session connected to your deployed swarm's **lead agent** to auto-configure the Ralph loop workflow:
+
+```text
+Hey, please configure the Ralph loop workflow in this swarm. Read the spec at
+https://docs.agent-swarm.dev/docs/receipts/workflows/ralph-loop, download the
+JSON workflow definition from
+https://docs.agent-swarm.dev/receipts/workflows/ralph-loop.json, and create
+the workflow in our swarm via the create-workflow MCP tool.
+
+Adapt the placeholders before creating it:
+- <your-coder-agent-id>     → an agentId in this swarm that should run the iterator/analyst tasks
+- <your-org-id>             → the agent-fs org/drive ID this swarm uses for shared state
+- <your-slack-channel-id>   → the Slack channel that should receive success / max-reached / validation notifications
+
+Then trigger it once with a small `goal` and `maxIterations: 3` to confirm it runs end-to-end.
+```
+
+</Callout>
+
+<Callout type="info" title="Download">
+
+[**`ralph-loop.json`** — sanitized workflow definition](/receipts/workflows/ralph-loop.json) (placeholders for agent IDs, org IDs, and Slack channels)
+
+</Callout>
+
+## TL;DR
+
+The Ralph loop is a 9-node workflow that gives any agent two superpowers:
+
+1. **Persistent scratch space** — every iteration writes to `agent-fs` under `ralph/YYYY-MM-DD/<slug>/` so context survives across iterations.
+2. **A second pair of eyes** — after every iteration a separate analyst (different prompt, different lens) independently decides `done | continue | unsure` by reading the artifacts, not by trusting the iterator.
+
+It's generic. The only required trigger params are `goal` (a free-form string) and `maxIterations` (an int). Anything else you put on the trigger is forwarded to every node as `triggerExtras`, so the same workflow handles "increment a counter to 5" and "drain 10 Linear sub-issues into stacked PRs" without code changes.
+
+---
+
+## The pattern
+
+```
+trigger ─▶ validate ─▶ init ─▶ bump ─▶ work ─▶ max-check ─▶ analysis ─▶ route
+                                  ▲                                       │
+                                  └────────── continue ───────────────────┘
+                                                  │
+                                                  ├── done   ──▶ 🟢 success
+                                                  └── max     ──▶ 🔴 max-reached
+```
+
+Each node has one job:
+
+| Node | Type | Model | Job |
+|---|---|---|---|
+| `validate-trigger` | script (bash) | — | Reject if `goal` or `maxIterations` missing/invalid. |
+| `init` | agent-task | haiku | Create `ralph/YYYY-MM-DD/<slug>/` in agent-fs, write `meta.json` with the trigger. |
+| `bump-iteration` | agent-task | haiku | Find the highest existing `iteration-NNN.md`, write `iteration-(N+1).md` template. Returns the next iteration number. |
+| `ralph-iteration` | agent-task | sonnet | **The work.** Do exactly ONE step toward the goal. Write artifacts to `basePath/`. Fill in the iteration log (Plan / Work log / Output / Self-assessment). |
+| `max-check` | script (bash) | — | If `iteration >= maxIterations`, route to `max-reached`; else continue. |
+| `analysis` | agent-task | haiku | Independently read `meta.json` + the iteration log + artifacts. Decide `done \| continue \| unsure`. Write `analysis-NNN.md` with reasoning. |
+| `route` | property-match | — | If `analysis.decision == "done"`, exit success. Otherwise loop back to `bump-iteration`. |
+| `success` | notify | — | 🟢 Slack message with the workdir path. |
+| `max-reached` | notify | — | 🔴 Slack message with the workdir path so a human can inspect. |
+
+## Why two agents (iterator + analyst)?
+
+The iterator is biased — it just did the work and wants to be done. The analyst is fresh — it reads the artifacts cold. Splitting the role catches three failure modes that single-agent loops hit constantly:
+
+- **Premature "done"** — iterator says `believeComplete=true`, analyst sees the artifact's actually wrong.
+- **Stuck "continue"** — iterator can't make progress, analyst notices the work product is fine and the iterator is just confused about its own state.
+- **Drift** — iterator slowly stops checking its own artifacts (it just remembers what it wrote), analyst forces a re-read every iteration.
+
+The analyst is haiku — cheap. The iterator is sonnet — capable. Cost per iteration ends up dominated by the actual work, not the verification loop.
+
+## State persistence — `agent-fs`
+
+Every iteration's artifacts live in `agent-fs` (the swarm's persistent shared filesystem) under `ralph/YYYY-MM-DD/<slug>/`. Typical layout after a 5-iteration run:
+
+```
+ralph/2026-04-30/counter-test/
+├── meta.json
+├── counter.txt              ← iterator's working artifact
+├── iteration-001.md
+├── iteration-002.md
+├── iteration-003.md
+├── iteration-004.md
+├── iteration-005.md
+├── analysis-001.md
+├── analysis-002.md
+├── analysis-003.md
+├── analysis-004.md
+└── analysis-005.md
+```
+
+The iteration log is a four-section markdown file: **Plan**, **Work log**, **Output**, **Self-assessment**. `meta.json` carries the original trigger so any iteration can reach back to read goal-specific extras.
+
+<Callout type="warn" title="The agent-fs --org gotcha">
+
+`agent-fs` has two drives — personal (per-agent) and shared (per-org). Without `--org <orgId>`, every command defaults to the **personal** drive. If the iterator writes to one drive and the analyst reads the other, the analyst sees an empty workdir and falsely concludes "files missing". Every `agent-fs ls/cat/write` call in the workflow's prompts must pass `--org <your-org-id>`. (We hit this once on a counter test; the analyst said "file missing" through 4 iterations even though the file was right there.)
+
+</Callout>
+
+## Trigger contract
+
+```jsonc
+{
+  "goal": "Build a counter that reaches 5",   // required, string
+  "maxIterations": 10,                         // required, positive int
+  "slug": "counter-test",                      // optional, kebab-case workdir slug
+  // ...any other fields are forwarded as `triggerExtras` and visible to every node
+  "targetCounter": 5
+}
+```
+
+## Cost characteristics
+
+From a real production run (10 iterations, complex implementation work — drained 10 Linear sub-issues as stacked PRs):
+
+| node | model | execs | cost | avg time |
+|---|---|---|---|---|
+| `ralph-iteration` (work) | sonnet | 14 | $15.94 | 6.8 min |
+| `analysis` | haiku | 13 | $1.71 | 1.5 min |
+| `bump-iteration` | haiku | 14 | $1.43 | 1.2 min |
+| `init` | haiku | 1 | $0.15 | 1.7 min |
+| **total** | | **42** | **$19.22** | **~1.5h wall-clock** |
+
+(`14 > 10` execs on iteration & bump nodes = ~4 transient retries — the runtime auto-recovered without human intervention.)
+
+The verification cost (analysis + bump + init = $3.29) is ~17% of total. The work itself (sonnet) is the expensive part. Cache hits dominate — 47.2M cache reads vs 2.97M fresh inputs.
+
+## Adapting the loop — concrete example
+
+We used this same workflow shape (with the iteration prompt swapped out) to drive a "Linear sub-issue drain" — given a parent Linear issue with N sub-issues, ship each as a PR in a stacked chain.
+
+The `ralph-iteration` prompt became:
+
+1. Pick the next un-shipped sub-issue from the `triggerExtras.subIssues` array.
+2. Implement its spec on a fresh branch off the previous PR's branch.
+3. Run quality gates, commit, push, `gh pr create --base <previousBranch>`.
+4. Move the Linear sub-issue to `In Review`.
+
+The analyst prompt verified via `gh pr view` and Linear API that each step actually happened. After 10 iterations: 10 PRs landed, all open, all sub-issues moved. Same workflow, different prompt.
+
+The shape stays. The work changes.
+
+## Workflow JSON
+
+The full workflow definition is available as a downloadable static asset:
+
+- [`ralph-loop.json`](/receipts/workflows/ralph-loop.json) — sanitized, with `<your-coder-agent-id>`, `<your-org-id>`, and `<your-slack-channel-id>` placeholders.
+
+To install it manually, replace the placeholders with values from your swarm and pass the resulting object as the `definition` field of [`mcp__agent-swarm__create-workflow`](/docs/api-reference/workflows). Or use the "Copy for your swarm" prompt at the top of this page and let your lead agent do it for you.
