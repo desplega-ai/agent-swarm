@@ -10,6 +10,13 @@ if [ "$HARNESS_PROVIDER" = "pi" ]; then
         echo "Error: ANTHROPIC_API_KEY, OPENROUTER_API_KEY, or ~/.pi/agent/auth.json required for pi provider"
         exit 1
     fi
+elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
+    # opencode auth: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or auth.json must exist
+    OPENCODE_AUTH_FILE="${HOME}/.local/share/opencode/auth.json"
+    if [ -z "$OPENROUTER_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENAI_API_KEY" ] && [ ! -f "$OPENCODE_AUTH_FILE" ]; then
+        echo "Error: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or ~/.local/share/opencode/auth.json required for opencode provider"
+        exit 1
+    fi
 elif [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
     # Claude Managed Agents — sessions run in Anthropic's cloud sandbox.
     # No CLI binary needed; the worker process is a thin SSE relay.
@@ -154,6 +161,14 @@ elif [ "$HARNESS_PROVIDER" = "claude-managed" ]; then
     echo "Claude Managed Agents: no local CLI required (sessions run in Anthropic cloud)"
 elif [ "$HARNESS_PROVIDER" = "devin" ]; then
     echo "Devin: cloud API (no local binary required)"
+elif [ "$HARNESS_PROVIDER" = "opencode" ]; then
+    OPENCODE_BIN="${OPENCODE_BINARY:-opencode}"
+    if ! command -v "$OPENCODE_BIN" > /dev/null 2>&1; then
+        echo "FATAL: opencode CLI not found: '$OPENCODE_BIN'"
+        echo "  PATH=$PATH"
+        exit 1
+    fi
+    echo "opencode CLI: $(command -v "$OPENCODE_BIN")"
 elif [ "$HARNESS_PROVIDER" != "pi" ]; then
     CLAUDE_BIN="${CLAUDE_BINARY:-claude}"
     if ! command -v "$CLAUDE_BIN" > /dev/null 2>&1; then

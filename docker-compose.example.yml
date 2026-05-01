@@ -525,6 +525,55 @@ services:
   #
   #   restart: unless-stopped
 
+  # Example: opencode worker (uses HARNESS_PROVIDER=opencode instead of Claude)
+  # Uncomment to add an opencode-powered worker to the swarm.
+  # Requires at least one of: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY.
+  # The opencode CLI is bundled in the worker image; set OPENCODE_VERSION ARG at
+  # build time to pin a specific release.
+  #
+  # worker-opencode:
+  #   image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
+  #   platform: linux/amd64
+  #   pull_policy: always
+  #   stop_grace_period: 60s
+  #
+  #   depends_on:
+  #     api:
+  #       condition: service_healthy
+  #
+  #   environment:
+  #     - HARNESS_PROVIDER=opencode
+  #     # Model passed to opencode — use any model supported by your provider.
+  #     # - MODEL_OVERRIDE=anthropic/claude-sonnet-4-5
+  #     # At least one credential is required:
+  #     - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+  #     # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+  #     # - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+  #     - API_KEY=${API_KEY}
+  #     # Replace with a valid UUID — IMPORTANT: keep stable across restarts for task resume
+  #     - AGENT_ID=e4c5d6f7-8901-23gb-cdef-456789012cde
+  #     - AGENT_ROLE=worker
+  #
+  #     - MCP_BASE_URL=http://api:3013
+  #
+  #     - YOLO=true
+  #     - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+  #     - GITHUB_EMAIL=${GITHUB_EMAIL:-}
+  #     - GITHUB_NAME=${GITHUB_NAME:-}
+  #     - SWARM_URL=${SWARM_URL:-localhost}
+  #
+  #   ports:
+  #     - "${OPENCODE_WORKER_PORT:-3025}:3000"
+  #
+  #   volumes:
+  #     - swarm_logs:/logs
+  #     - swarm_shared:/workspace/shared
+  #     - swarm_opencode_worker:/workspace/personal
+  #     # Persist opencode session/auth files across restarts
+  #     - swarm_opencode_agent:/home/worker/.local/share/opencode
+  #
+  #   restart: unless-stopped
+
 secrets:
   # Base64-encoded 32-byte AES-256-GCM key for swarm_config at-rest encryption.
   # Create with: `openssl rand -base64 32 > ./encryption_key` then chmod 600.
@@ -551,3 +600,6 @@ volumes:
   # Uncomment if using the codex-worker service above
   # swarm_codex_worker:
   # swarm_codex_agent:
+  # Uncomment if using the worker-opencode service above
+  # swarm_opencode_worker:
+  # swarm_opencode_agent:
