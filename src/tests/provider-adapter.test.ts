@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createProviderAdapter } from "../providers";
 import { ClaudeAdapter } from "../providers/claude-adapter";
+import { OpencodeAdapter } from "../providers/opencode-adapter";
 import { PiMonoAdapter } from "../providers/pi-mono-adapter";
 import type { CostData, ProviderEvent } from "../providers/types";
 
@@ -17,9 +18,15 @@ describe("createProviderAdapter", () => {
     expect(adapter.name).toBe("pi");
   });
 
+  test("returns OpencodeAdapter for 'opencode'", () => {
+    const adapter = createProviderAdapter("opencode");
+    expect(adapter).toBeInstanceOf(OpencodeAdapter);
+    expect(adapter.name).toBe("opencode");
+  });
+
   test("throws for unknown provider", () => {
     expect(() => createProviderAdapter("unknown")).toThrow(
-      'Unknown HARNESS_PROVIDER: "unknown". Supported: claude, pi, codex, devin, claude-managed',
+      'Unknown HARNESS_PROVIDER: "unknown". Supported: claude, pi, codex, devin, claude-managed, opencode',
     );
   });
 

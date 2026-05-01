@@ -12,6 +12,7 @@ import { ClaudeAdapter } from "./claude-adapter";
 import { ClaudeManagedAdapter } from "./claude-managed-adapter";
 import { CodexAdapter } from "./codex-adapter";
 import { DevinAdapter } from "./devin-adapter";
+import { OpencodeAdapter } from "./opencode-adapter";
 import { PiMonoAdapter } from "./pi-mono-adapter";
 import type { ProviderAdapter } from "./types";
 
@@ -28,9 +29,11 @@ export function createProviderAdapter(provider: string): ProviderAdapter {
       return new ClaudeManagedAdapter();
     case "devin":
       return new DevinAdapter();
+    case "opencode":
+      return new OpencodeAdapter();
     default:
       throw new Error(
-        `Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi, codex, devin, claude-managed`,
+        `Unknown HARNESS_PROVIDER: "${provider}". Supported: claude, pi, codex, devin, claude-managed, opencode`,
       );
   }
 }
