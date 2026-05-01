@@ -1,6 +1,6 @@
 ---
 title: Harness Configuration
-description: Configure the AI provider (Claude Code, Codex, pi-mono, Devin, Claude Managed Agents, or opencode) that powers your agents
+description: Configure the AI provider (Claude Code, Codex, opencode, pi-mono, Devin, or Claude Managed Agents) that powers your agents
 ---
 
 Agent Swarm uses a **harness** abstraction to decouple task execution from the underlying AI provider. Each worker runs one harness — the harness spawns sessions, manages credentials, and normalizes events so the rest of the system doesn't care which provider is underneath.
@@ -11,10 +11,10 @@ Agent Swarm uses a **harness** abstraction to decouple task execution from the u
 |----------|-------------------|-------------|
 | **Claude Code** | `claude` (default) | Anthropic's Claude Code CLI. Recommended for most use cases |
 | **Codex** | `codex` | OpenAI Codex CLI with API-key or ChatGPT OAuth authentication |
+| **opencode** | `opencode` | OpenCode coding agent powered by OpenRouter. Uses Qwen Coder Flash by default; supports any OpenRouter, Anthropic, or OpenAI model |
 | **pi-mono** | `pi` | Open-source coding agent by [@badlogic](https://github.com/badlogic/pi-mono). Supports multiple model backends |
 | **Devin** | `devin` | Cognition's Devin via the `/sessions` API — session executes in Devin's managed cloud, ACU-based cost tracking |
 | **Claude Managed Agents** | `claude-managed` | Anthropic's managed cloud sandbox — sessions execute outside the worker. Requires one-time setup CLI to create the Anthropic-side Agent + Environment |
-| **opencode** | `opencode` | [opencode](https://opencode.ai) via the in-process `@opencode-ai/sdk` server. Accepts OpenRouter, Anthropic, or OpenAI API keys (or `~/.local/share/opencode/auth.json`). Experimental — currently being rolled out across DES-295 → DES-299 |
 
 ## How It Works
 
@@ -23,15 +23,13 @@ The `HARNESS_PROVIDER` environment variable selects which provider adapter is us
 ```
 HARNESS_PROVIDER=claude          →  ClaudeAdapter         →  spawns `claude` CLI process
 HARNESS_PROVIDER=codex           →  CodexAdapter          →  spawns `codex` CLI process
+HARNESS_PROVIDER=opencode        →  OpencodeAdapter       →  spawns `opencode` CLI process
 HARNESS_PROVIDER=pi              →  PiMonoAdapter         →  creates in-process pi-mono session
 HARNESS_PROVIDER=devin           →  DevinAdapter          →  POSTs /sessions, polls events
                                                             (session executes in Devin cloud)
 HARNESS_PROVIDER=claude-managed  →  ClaudeManagedAdapter  →  opens SSE stream against
                                                             Anthropic's managed sandbox
                                                             (session executes server-side)
-HARNESS_PROVIDER=opencode        →  OpencodeAdapter       →  starts in-process opencode
-                                                            server, subscribes to SSE,
-                                                            accumulates per-message cost
 ```
 
 Both adapters implement the same `ProviderAdapter` interface, producing normalized `ProviderEvent` streams (session init, tool calls, cost data, context usage, etc.) that the runner consumes identically.
@@ -122,6 +120,59 @@ For ChatGPT OAuth setup, see [Provider Auth: Codex OAuth](/docs/guides/provider-
 ### Model Selection
 
 The default model baked into the worker image is `gpt-5.4`. You can override it with `MODEL_OVERRIDE` if needed.
+
+---
+
+## Opencode
+
+[opencode](https://opencode.ai) is a terminal-based AI coding agent that ships its own session loop and MCP client. The swarm spawns the `opencode` CLI as a subprocess and attaches the agent-swarm plugin for heartbeat, cancellation, identity sync, and compaction hooks.
+
+### When to Use opencode
+
+- You want access to OpenRouter's full model catalog (100+ models) without writing provider glue.
+- You prefer a lightweight, quickly-iterating open-source CLI over the heavier Claude Code toolchain.
+- You need cost-effective throughput — the default `openrouter/qwen/qwen3-coder-flash` model is fast and inexpensive.
+
+### Authentication Methods
+
+opencode checks credentials in this priority order:
+
+| Method | Env Var | Notes |
+|--------|---------|-------|
+| **OpenRouter API key** (recommended) | `OPENROUTER_API_KEY` | Access 100+ models via [openrouter.ai](https://openrouter.ai) |
+| **Anthropic API key** | `ANTHROPIC_API_KEY` | Direct Anthropic API billing |
+| **OpenAI API key** | `OPENAI_API_KEY` | Direct OpenAI API billing |
+| **Auth file** | `~/.local/share/opencode/auth.json` | Native opencode CLI auth file |
+
+At least one credential source is required. The Docker entrypoint validates this on startup.
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `HARNESS_PROVIDER` | Yes | — | Must be set to `opencode` |
+| `OPENROUTER_API_KEY` | One of* | — | OpenRouter API key (primary — gives access to all OpenRouter models) |
+| `ANTHROPIC_API_KEY` | One of* | — | Anthropic API key for Claude models |
+| `OPENAI_API_KEY` | One of* | — | OpenAI API key for GPT models |
+| `OPENCODE_BINARY` | No | `opencode` | Path to the opencode CLI binary (if not in `$PATH`) |
+
+\* At least one credential source is required (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `~/.local/share/opencode/auth.json`).
+
+### Model Selection
+
+The default model is `openrouter/qwen/qwen3-coder-flash`. Set `MODEL_OVERRIDE` to use a different model:
+
+| Format | Example | Notes |
+|--------|---------|-------|
+| OpenRouter | `openrouter/qwen/qwen3-coder-flash` | Default. See [OpenRouter model catalog](https://openrouter.ai/models) |
+| Anthropic | `anthropic/claude-sonnet-4-6` | Requires `ANTHROPIC_API_KEY` |
+| OpenAI | `openai/gpt-4o` | Requires `OPENAI_API_KEY` |
+
+### opencode Specifics
+
+- **Agent-swarm plugin**: the `plugin/opencode-plugins/agent-swarm.ts` plugin is automatically injected at session creation. It handles heartbeat, task cancellation, identity sync, system-prompt transformation, compaction, and idle hooks — no manual configuration needed.
+- **Per-task isolation**: each session gets its own agent file (`.opencode/agents/swarm-<taskId>.md`), config file (`/tmp/opencode-<taskId>.json`), and data directory (`/tmp/opencode-data-<taskId>`) to prevent cross-task state bleed.
+- **MCP tool discovery**: the swarm MCP endpoint is wired in automatically via the per-task config; installed MCP servers are also discovered and merged in.
 
 ---
 
@@ -225,17 +276,17 @@ For full provider design rationale (why we don't `agents.create` at runtime, the
 
 ## Choosing a Provider
 
-| Consideration | Claude Code | Codex | pi-mono | Claude Managed |
-|---------------|-------------|-------|---------|----------------|
-| **Setup complexity** | Minimal — install CLI + OAuth token | Minimal — CLI plus API key or OAuth bootstrap | Requires API key(s) | One-time `claude-managed-setup` CLI; HTTPS-public `MCP_BASE_URL` |
-| **Billing model** | Uses Claude Pro/Max/Team subscription | OpenAI API billing or ChatGPT OAuth | Pay-per-token via API | Anthropic API tokens + $0.08/session-hour runtime fee |
-| **Model flexibility** | Claude models only | Codex/OpenAI models | Any provider via OpenRouter | Claude models only |
-| **Session resume** | Built-in `--resume` support | Native CLI session support | Session persistence via SessionManager | Native — `events.list` + dedupe against live stream |
-| **MCP integration** | Native (`.mcp.json` config) | Native (`~/.codex/config.toml`) | HTTP-based tool discovery | Server-side on the Anthropic Agent |
-| **Where session runs** | Worker container | Worker container | Worker container | Anthropic's managed cloud sandbox |
-| **Maturity** | Production-grade, well-tested | Production-grade, well-tested | Community project, actively developed | Public beta (2026-04) |
+| Consideration | Claude Code | Codex | opencode | pi-mono | Claude Managed |
+|---------------|-------------|-------|----------|---------|----------------|
+| **Setup complexity** | Minimal — install CLI + OAuth token | Minimal — CLI plus API key or OAuth bootstrap | Minimal — CLI plus OpenRouter key | Requires API key(s) | One-time `claude-managed-setup` CLI; HTTPS-public `MCP_BASE_URL` |
+| **Billing model** | Uses Claude Pro/Max/Team subscription | OpenAI API billing or ChatGPT OAuth | Pay-per-token via OpenRouter/Anthropic/OpenAI | Pay-per-token via API | Anthropic API tokens + $0.08/session-hour runtime fee |
+| **Model flexibility** | Claude models only | Codex/OpenAI models | 100+ models via OpenRouter | Any provider via OpenRouter | Claude models only |
+| **Session resume** | Built-in `--resume` support | Native CLI session support | Stateless — new session per task | Session persistence via SessionManager | Native — `events.list` + dedupe against live stream |
+| **MCP integration** | Native (`.mcp.json` config) | Native (`~/.codex/config.toml`) | Auto-wired per-task via config file | HTTP-based tool discovery | Server-side on the Anthropic Agent |
+| **Where session runs** | Worker container | Worker container | Worker container | Worker container | Anthropic's managed cloud sandbox |
+| **Maturity** | Production-grade, well-tested | Production-grade, well-tested | Early support (2026-05) | Community project, actively developed | Public beta (2026-04) |
 
-**Recommendation**: Use Claude Code with OAuth for most setups. Use Codex when you specifically want the OpenAI/Codex toolchain or ChatGPT OAuth-backed workers. Consider pi-mono when you need access to non-Claude models through OpenRouter or want a library-based open-source runner. Choose `claude-managed` when you want managed sandboxing (faster cold-start, vault-based credential isolation) and don't need a local runtime.
+**Recommendation**: Use Claude Code with OAuth for most setups. Use Codex when you specifically want the OpenAI/Codex toolchain or ChatGPT OAuth-backed workers. Use opencode when you want a lightweight open-source runner with access to the full OpenRouter model catalog at low cost. Consider pi-mono when you need a library-based open-source runner. Choose `claude-managed` when you want managed sandboxing (faster cold-start, vault-based credential isolation) and don't need a local runtime.
 
 ---
 
@@ -265,6 +316,19 @@ This is useful when running multiple concurrent workers that would otherwise hit
 # .env.docker
 HARNESS_PROVIDER=claude              # Optional — claude is the default
 CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-...
+API_KEY=your-api-key
+MCP_BASE_URL=http://host.docker.internal:3013
+AGENT_ID=your-worker-uuid
+GITHUB_TOKEN=ghp_...
+```
+
+### opencode Worker
+
+```bash
+# .env.docker
+HARNESS_PROVIDER=opencode
+OPENROUTER_API_KEY=sk-or-...         # Or ANTHROPIC_API_KEY / OPENAI_API_KEY
+MODEL_OVERRIDE=openrouter/qwen/qwen3-coder-flash  # Default; see https://openrouter.ai/models
 API_KEY=your-api-key
 MCP_BASE_URL=http://host.docker.internal:3013
 AGENT_ID=your-worker-uuid
