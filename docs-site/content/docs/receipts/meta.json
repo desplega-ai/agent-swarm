@@ -1,0 +1,6 @@
+{
+  "title": "Receipts",
+  "description": "Shareable, copy-pasteable workflow recipes any swarm operator can drop into their deployment",
+  "root": true,
+  "pages": ["index", "workflows"]
+}
