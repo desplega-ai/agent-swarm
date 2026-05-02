@@ -7,6 +7,7 @@ import {
   SessionErrorTracker,
   trackErrorFromJson,
 } from "../utils/error-tracker";
+import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import type {
   CostData,
@@ -39,70 +40,6 @@ async function cleanupTaskFile(pid: number): Promise<void> {
     await unlink(getTaskFilePath(pid));
   } catch {
     // File might already be deleted or never created
-  }
-}
-
-/** Fetch installed MCP servers from the API and return them as .mcp.json-compatible entries */
-async function fetchInstalledMcpServers(
-  apiUrl: string,
-  apiKey: string,
-  agentId: string,
-): Promise<Record<string, Record<string, unknown>> | null> {
-  try {
-    const res = await fetch(`${apiUrl}/api/agents/${agentId}/mcp-servers?resolveSecrets=true`, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "X-Agent-ID": agentId,
-      },
-    });
-    if (!res.ok) return null;
-
-    const data = (await res.json()) as {
-      servers: Array<{
-        name: string;
-        transport: string;
-        isActive: boolean;
-        isEnabled: boolean;
-        command?: string;
-        args?: string;
-        url?: string;
-        headers?: string;
-        resolvedEnv?: Record<string, string>;
-        resolvedHeaders?: Record<string, string>;
-      }>;
-    };
-
-    const entries: Record<string, Record<string, unknown>> = {};
-    for (const srv of data.servers.filter((s) => s.isActive && s.isEnabled)) {
-      if (srv.transport === "stdio" && srv.command) {
-        let args: string[] = [];
-        try {
-          args = srv.args ? JSON.parse(srv.args) : [];
-        } catch {
-          // invalid JSON — use empty args
-        }
-        entries[srv.name] = {
-          command: srv.command,
-          args,
-          env: srv.resolvedEnv || {},
-        };
-      } else if ((srv.transport === "http" || srv.transport === "sse") && srv.url) {
-        let parsedHeaders: Record<string, string> = {};
-        try {
-          parsedHeaders = srv.headers ? JSON.parse(srv.headers) : {};
-        } catch {
-          // invalid JSON — use empty headers
-        }
-        entries[srv.name] = {
-          type: srv.transport,
-          url: srv.url,
-          headers: { ...parsedHeaders, ...(srv.resolvedHeaders || {}) },
-        };
-      }
-    }
-    return Object.keys(entries).length > 0 ? entries : null;
-  } catch {
-    return null;
   }
 }
 
@@ -592,7 +529,7 @@ export class ClaudeAdapter implements ProviderAdapter {
     // Fetch installed MCP servers from API for this agent
     const installedServers =
       config.apiUrl && config.apiKey && config.agentId
-        ? await fetchInstalledMcpServers(config.apiUrl, config.apiKey, config.agentId)
+        ? await fetchInstalledMcpServers(config.apiUrl, config.apiKey, config.agentId, "claude")
         : null;
     if (installedServers) {
       console.log(

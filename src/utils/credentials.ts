@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+
 /** Env vars that may contain comma-separated credential pools */
 export const CREDENTIAL_POOL_VARS = [
   "CLAUDE_CODE_OAUTH_TOKEN",
@@ -25,6 +27,7 @@ export const PROVIDER_CREDENTIAL_VARS: Record<string, readonly string[]> = {
   pi: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"],
   codex: ["OPENAI_API_KEY", "CODEX_OAUTH"],
   devin: ["DEVIN_API_KEY"],
+  opencode: ["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"],
 };
 
 /**
@@ -128,6 +131,24 @@ export function validateClaudeCredentials(
   if (env.CLAUDE_CODE_OAUTH_TOKEN) return "oauth";
   if (env.ANTHROPIC_API_KEY) return "api_key";
   throw new Error("No Claude credentials found. Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY.");
+}
+
+/**
+ * Validate that at least one opencode credential is available.
+ * Priority: OPENROUTER_API_KEY → ANTHROPIC_API_KEY → OPENAI_API_KEY → ~/.local/share/opencode/auth.json.
+ * Returns the credential type found, or throws if none are available.
+ */
+export function validateOpencodeCredentials(
+  env: Record<string, string | undefined>,
+): "openrouter_api_key" | "anthropic_api_key" | "openai_api_key" | "auth_file" {
+  if (env.OPENROUTER_API_KEY) return "openrouter_api_key";
+  if (env.ANTHROPIC_API_KEY) return "anthropic_api_key";
+  if (env.OPENAI_API_KEY) return "openai_api_key";
+  const authFile = `${process.env.HOME ?? "/root"}/.local/share/opencode/auth.json`;
+  if (existsSync(authFile)) return "auth_file";
+  throw new Error(
+    "No opencode credentials found. Set OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, or provide ~/.local/share/opencode/auth.json.",
+  );
 }
 
 /**

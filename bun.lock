@@ -17,6 +17,7 @@
         "@mariozechner/pi-coding-agent": "^0.67.2",
         "@modelcontextprotocol/sdk": "^1.25.1",
         "@openai/codex-sdk": "^0.118.0",
+        "@opencode-ai/sdk": "^1.14.30",
         "@openfort/openfort-node": "^0.9.1",
         "@slack/bolt": "^4.6.0",
         "@types/react": "^19.2.7",
@@ -228,6 +229,8 @@
     "@openai/codex-win32-arm64": ["@openai/codex@0.118.0-win32-arm64", "", { "os": "win32", "cpu": "arm64" }, "sha512-AU7GPVFqd0Ml3P2OXfy6K6TONcxfCZLUh1zjYkkoPGWJ4A3BVMkOmMP9CAdSiQsnU/RQfdV/9IGqo1xwUQDdjA=="],
 
     "@openai/codex-win32-x64": ["@openai/codex@0.118.0-win32-x64", "", { "os": "win32", "cpu": "x64" }, "sha512-9vKW1ANQxIUsLpiY0VsOM+1avZjqxDZgqgxKABJHWRlLMuaSykwXexf8Hqq+BnYFfmn0d6MjxTuE1UtVvg9caw=="],
+
+    "@opencode-ai/sdk": ["@opencode-ai/sdk@1.14.30", "", { "dependencies": { "cross-spawn": "7.0.6" } }, "sha512-OgPEDvALekHZIjByo/okJ699aLPn+XtsVxgZxUqE8TlzAG7TtskMGFl0fro8O0T2p+nkOT/LstnKGbECvc0+YA=="],
 
     "@openfort/openfort-node": ["@openfort/openfort-node@0.9.1", "", { "dependencies": { "@openfort/shield-js": "^0.1.33", "@types/node": "*", "@types/node-fetch": "^2.5.7", "axios": "^1.7.0", "axios-retry": "^4.5.0", "bs58": "^6.0.0", "jose": "^5.2.0", "node-fetch": "^2.6.0", "viem": "^2.21.0", "zod": "^3.25.76" } }, "sha512-Wm/HBCPy2sjmXUrnbgOY9d8xfRNTFcMuw0lo8GiNApw6fSOtKiyOCdBR9Gt4WlQzhmheus8d7HdAJTsqZWUAYg=="],
 
